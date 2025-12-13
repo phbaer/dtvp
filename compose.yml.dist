@@ -1,0 +1,17 @@
+services:
+  app:
+    image: git.baer.one/phbaer/dtvp:latest
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DTVP_API_KEYdt api key>=<
+      - DTVP_API_URL=http://localhost:8081
+      - DTVP_OIDC_AUTHORITY=https://<idp>
+      - DTVP_OIDC_CLIENT_ID=<idp client id>
+      - DTVP_OIDC_CLIENT_SECRET=<idp client secret>
+      - DTVP_SESSION_SECRET_KEY=<session secret>
+      - DTVP_CONTEXT_PATH=/
+    restart: always

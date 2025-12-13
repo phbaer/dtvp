@@ -1,0 +1,135 @@
+name: Build and Publish Docker Images
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  test-backend:
+    if: github.event.action != 'closed'
+    runs-on: node
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Prepare .env
+        run: cp .env.test .env
+      - name: Run tests with coverage
+        run: uv run pytest
+      - name: Upload Python Coverage Report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: python-coverage-report
+          path: htmlcov/
+          retention-days: 30
+
+  test-frontend:
+    if: github.event.action != 'closed'
+    runs-on: node
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Prepare .env
+        run: cp .env.test .env
+      - name: Run unit tests with coverage
+        working-directory: frontend
+        run: npm run test:unit -- --run --coverage
+      - name: Upload Vitest Coverage Report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: vitest-coverage-report
+          path: frontend/coverage/
+          retention-days: 30
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run UI tests
+        working-directory: frontend
+        run: npm run test:ui -- --reporter=line
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 30
+
+  build-push-images:
+    if: github.event.action != 'closed'
+    needs: [test-backend, test-frontend]
+    runs-on: node
+    strategy:
+      matrix:
+        variant: [alpine, debian]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Docker Cli
+        run: |-
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          chmod a+r /etc/apt/keyrings/docker.gpg
+          echo \
+            "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+            "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > /etc/apt/sources.list.d/docker.list
+          apt-get -qq update
+          DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y docker-ce-cli docker-buildx-plugin docker-compose-plugin
+
+      - name: Registry Login
+        uses: docker/login-action@v3
+        with:
+          registry: https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
+          username: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}
+          password: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, matrix.variant) || '' }}
+            ${{ github.event_name == 'push' && matrix.variant == 'alpine' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-{3}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number, matrix.variant) || '' }}
+          context: .
+          build-args: |
+            DISTRO_VARIANT=${{ matrix.variant == 'debian' && 'slim' || 'alpine' }}
+          secrets: |
+            GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+
+  delete-pr-images:
+    if: github.event.action == 'closed'
+    runs-on: node
+    strategy:
+      matrix:
+        variant: [alpine, debian]
+    steps:
+      - name: Delete PR Image Tag
+        run: |-
+          VERSION="pr-${{ github.event.pull_request.number }}-${{ matrix.variant }}"
+          echo "Deleting version $VERSION for dtvp"
+          curl -X DELETE \
+            -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
+            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/packages/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/container/dtvp/$VERSION"

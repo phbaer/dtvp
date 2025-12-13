@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+compose.yml
+.env
+
+# Virtual environments
+.venv
+frontend/playwright-report
+frontend/test-results
+frontend/coverage
+.coverage
+.python-version

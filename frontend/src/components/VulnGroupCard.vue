@@ -1,0 +1,544 @@
+```
+<script setup lang="ts">
+import { ref, computed, watch, shallowRef } from 'vue'
+import { updateAssessment } from '../lib/api'
+import type { GroupedVuln, AssessmentPayload } from '../types'
+import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide-vue-next'
+import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
+
+const props = defineProps<{
+  group: GroupedVuln
+}>()
+
+const emit = defineEmits(['update', 'update:assessment'])
+
+const ANALYSIS_STATES = [
+    { value: 'NOT_SET', label: 'Not Set' },
+    { value: 'NOT_AFFECTED', label: 'Not Affected' },
+    { value: 'EXPLOITABLE', label: 'Exploitable' },
+    { value: 'IN_TRIAGE', label: 'In Triage' },
+    { value: 'FALSE_POSITIVE', label: 'False Positive' },
+    { value: 'RESOLVED', label: 'Resolved' },
+]
+
+const expanded = ref(false)
+const state = ref('NOT_SET')
+const details = ref('')
+const comment = ref('')
+const suppressed = ref(false)
+const updating = ref(false)
+const pendingScore = ref<number | null>(null)
+const pendingVector = ref<string>('')
+const showCalculatorModal = ref(false)
+
+// Multi-version Calculator State
+// We use shallowRef for the instance to avoid deep reactivity overhead on complex objects
+const activeVersion = ref<'4.0' | '3.1' | '3.0' | '2.0'>('3.1')
+const activeInstance = shallowRef<any>(new Cvss3P1())
+
+// Initialize calculator state from pendingVector
+watch([showCalculatorModal, pendingVector], () => {
+    if (showCalculatorModal.value) {
+        let v = pendingVector.value?.trim() || ''
+        try {
+            if (v.startsWith('CVSS:4.0')) {
+                activeVersion.value = '4.0'
+                activeInstance.value = new Cvss4P0(v)
+            } else if (v.startsWith('CVSS:3.')) {
+                // User requested to treat all CVSS 3.x as 3.1
+                activeVersion.value = '3.1'
+                // Replace prefix if it's 3.0 to avoid library validation errors if needed,
+                // or just pass to v3.1 calculator
+                if (v.startsWith('CVSS:3.0')) {
+                   v = v.replace('CVSS:3.0', 'CVSS:3.1')
+                }
+                activeInstance.value = new Cvss3P1(v)
+            } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) { // Naive v2 check
+                activeVersion.value = '2.0'
+                activeInstance.value = new Cvss2(v)
+            } else {
+                // Default to 3.1 if empty or unknown
+                activeVersion.value = '3.1'
+                activeInstance.value = new Cvss3P1()
+            }
+        } catch {
+             // Fallback if parsing fails
+             activeVersion.value = '3.1'
+             activeInstance.value = new Cvss3P1()
+        }
+    }
+})
+
+// Switch version handler
+const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
+    activeVersion.value = ver
+    // Reset instance to clean vector for that version
+    switch(ver) {
+        case '4.0': activeInstance.value = new Cvss4P0(); break;
+        case '3.1': activeInstance.value = new Cvss3P1(); break;
+        case '3.0': activeInstance.value = new Cvss3P1(); break; // Treat 3.0 tab as 3.1 for metrics
+        case '2.0': activeInstance.value = new Cvss2(); break;
+    }
+    // Update vector immediately
+    pendingVector.value = activeInstance.value.toString()
+}
+
+// Update vector when selections change
+const updateCalcVector = (componentShortName: string, value: string) => {
+    try {
+        activeInstance.value.applyComponentString(componentShortName, value)
+        // Force update of string - we need to trigger reactivity manually for the string update
+        pendingVector.value = activeInstance.value.toString()
+        // Force shallowRef update to trigger UI re-renders if needed (though we bind to properties)
+        activeInstance.value = activeInstance.value 
+    } catch (e) {
+        console.error(e)
+    }
+}
+
+// Grouped components for UI
+const calculatorGroups = computed(() => {
+    const instance = activeInstance.value
+    if (!instance) return []
+
+    // Map<ComponentCategory, VectorComponent[]>
+    // We convert this to a simple array of objects for v-for
+    const groups: { category: string, components: any[] }[] = []
+    
+    try {
+        const map = instance.getRegisteredComponents()
+        for (const [cat, list] of map.entries()) {
+            groups.push({
+                category: cat.name,
+                components: list
+            })
+        }
+    } catch (e) {
+        console.error("Error getting components", e)
+    }
+    
+    return groups
+})
+
+// Helper to get all instances
+const allInstances = computed(() => {
+    return props.group.affected_versions?.flatMap(v => v.components) || []
+})
+
+// Pre-fill form from first instance when expanded or group changes
+watch(() => props.group, (newGroup) => {
+    // Reset pending values
+    // Use rescored value if present, otherwise fallback to original score, or null
+    pendingScore.value = newGroup.rescored_cvss ?? newGroup.cvss_score ?? newGroup.cvss ?? null
+    pendingVector.value = newGroup.rescored_vector || newGroup.cvss_vector || ''
+    
+    const firstVersion = newGroup.affected_versions?.[0]
+    if (firstVersion && firstVersion.components?.length > 0) {
+        const first = firstVersion.components[0]
+        if (first) {
+            state.value = first.analysis_state || 'NOT_SET'
+            details.value = first.analysis_details || ''
+            suppressed.value = first.is_suppressed || false
+        }
+    }
+}, { immediate: true })
+
+// Auto-calculate score when vector changes
+watch(pendingVector, (newVector) => {
+    if (newVector && newVector.trim().length > 5) {
+        try {
+            let v = newVector.trim()
+            let score: number | null = null
+            
+            if (v.startsWith('CVSS:4.0')) {
+                const cvss = new Cvss4P0(v)
+                score = cvss.calculateScores().overall || null
+            } else if (v.startsWith('CVSS:3.')) {
+                if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
+                const cvss = new Cvss3P1(v)
+                const s = cvss.calculateScores(false)
+                score = s.overall || s.base || null
+            } else {
+                // Try CVSS v2
+                const cvss = new Cvss2(v)
+                const s = cvss.calculateScores()
+                score = s.overall || s.base || null
+            }
+
+            if (score !== null && !isNaN(score)) {
+                pendingScore.value = parseFloat(score.toFixed(1))
+            }
+        } catch (e) {
+            // Invalid vector, ignore
+        }
+    }
+})
+
+// Reset to original vector from CVE
+const resetVector = () => {
+    if (props.group.cvss_vector) {
+        pendingVector.value = props.group.cvss_vector
+    } else {
+        alert('No original vector available for this vulnerability.')
+    }
+}
+
+const handleUpdate = async () => {
+    const instances = allInstances.value
+    if (!confirm(`Apply this assessment to all ${instances.length} instances?`)) return
+    
+    updating.value = true
+    try {
+        // Start with current details, but remove any existing system tags to avoid duplication
+        let cleanDetails = (details.value || '')
+            .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
+            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+            .trim()
+        
+        let finalDetails = cleanDetails
+        
+        // Add vector tag first if it exists
+        if (pendingVector.value) {
+            finalDetails = `[Rescored Vector: ${pendingVector.value}]\n${finalDetails}`.trim()
+        }
+
+        // Add score tag at the very top (primary indicator)
+        if (pendingScore.value !== null && pendingScore.value !== undefined) {
+             finalDetails = `[Rescored: ${pendingScore.value}]\n${finalDetails}`.trim()
+        }
+        
+        // Ensure some spacing between tags and User details if any
+        if (cleanDetails && (pendingScore.value || pendingVector.value)) {
+             // If we have tags and original details, make sure there is a double newline
+             const tags = []
+             if (pendingScore.value) tags.push(`[Rescored: ${pendingScore.value}]`)
+             if (pendingVector.value) tags.push(`[Rescored Vector: ${pendingVector.value}]`)
+             finalDetails = tags.join('\n') + '\n\n' + cleanDetails
+        }
+
+        const payload: AssessmentPayload = {
+            instances: instances,
+            state: state.value,
+            details: finalDetails,
+            comment: comment.value,
+            suppressed: suppressed.value
+        }
+        console.log('Updating assessment with details:', finalDetails)
+        const results = await updateAssessment(payload)
+        
+        const errors = results.filter((r: any) => r.status === 'error')
+        if (errors.length > 0) {
+            console.error('Update completed with errors:', errors)
+            alert(`Assessment updated with ${errors.length} errors. Check console for details.`)
+        } else {
+            alert('Assessment updated successfully')
+            // Emit the updated assessment so the parent can update the state in memory
+            emit('update:assessment', {
+                rescored_cvss: pendingScore.value,
+                rescored_vector: pendingVector.value,
+                analysis_state: state.value,
+                analysis_details: finalDetails,
+                is_suppressed: suppressed.value
+            })
+        }
+        
+        expanded.value = false
+    } catch (err) {
+        alert('Failed to update assessment')
+        console.error(err)
+    } finally {
+        updating.value = false
+    }
+}
+
+// ... (keep existing computed properties: displayState, severityColor, stateColor)
+const displayState = computed(() => {
+    const uniqueStates = Array.from(new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET')))
+    return uniqueStates.length === 1 ? uniqueStates[0] : 'MIXED'
+})
+
+const severityColor = computed(() => {
+    switch (props.group.severity) {
+        case 'CRITICAL': return 'bg-red-900 text-red-200'
+        case 'HIGH': return 'bg-orange-900 text-orange-200'
+        default: return 'bg-blue-900 text-blue-200'
+    }
+})
+
+const stateColor = computed(() => {
+    switch (displayState.value) {
+        case 'NOT_AFFECTED': return 'text-green-400'
+        case 'EXPLOITABLE': return 'text-red-400'
+        default: return 'text-gray-300'
+    }
+})
+</script>
+
+<template>
+  <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+    <!-- Header -->
+    <div 
+        class="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-750 transition-colors"
+        @click="expanded = !expanded"
+    >
+        <div>
+            <div class="flex items-center gap-3 mb-1">
+                <span class="font-mono text-lg font-bold text-yellow-400">{{ group.id }}</span>
+                <span :class="['px-2 py-0.5 rounded text-xs font-bold', severityColor]">
+                    {{ group.severity || 'UNKNOWN' }}
+                </span>
+                <span class="text-sm text-gray-400 flex items-center gap-2">
+                    <span v-if="group.rescored_cvss" class="text-yellow-400 font-bold" title="Rescored Value">
+                        CVSS: {{ group.rescored_cvss }}
+                    </span>
+                    <span v-else>
+                        CVSS: {{ group.cvss || group.cvss_score || 'N/A' }}
+                    </span>
+                    <span v-if="group.rescored_cvss" class="text-gray-600 line-through text-xs" title="Original Score">
+                        {{ group.cvss || group.cvss_score }}
+                    </span>
+                </span>
+            </div>
+            <div class="text-sm text-gray-300 line-clamp-1">{{ group.title || 'No title' }}</div>
+            
+            <!-- Vector Display in Header if expanded or explicitly shown -->
+            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-1 font-mono text-xs text-gray-500">
+                {{ group.rescored_vector || group.cvss_vector }}
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-6">
+            <div class="text-right">
+                <div class="text-xs text-gray-500 uppercase">Analysis</div>
+                <div :class="['font-semibold', stateColor]">
+                    {{ displayState }}
+                </div>
+            </div>
+            
+            <div class="text-right">
+                    <div class="text-xs text-gray-500 uppercase">Affected</div>
+                    <div class="font-bold">{{ group.affected_versions?.length || 0 }} Versions</div>
+            </div>
+
+            <component :is="expanded ? ChevronUp : ChevronDown" class="text-gray-400" />
+        </div>
+    </div>
+
+    <!-- Expanded Details -->
+    <div v-if="expanded" class="p-4 border-t border-gray-700 bg-gray-850">
+        <div class="grid md:grid-cols-2 gap-8">
+            <div>
+                    <h4 class="font-semibold mb-2 text-gray-300">Description</h4>
+                    <p class="text-sm text-gray-400 mb-4">{{ group.description || 'No description available.' }}</p>
+                    
+                    <div class="mt-4">
+                         <h4 class="font-semibold mb-2 text-gray-300">Analysis Details & Comments</h4>
+                         <div v-for="v in group.affected_versions" :key="v.project_uuid" class="mb-4">
+                            <h5 class="text-sm font-bold text-gray-400 mb-2">{{ v.project_version }}</h5>
+                         
+                            <div v-for="(inst, i) in v.components" :key="i" class="mb-2 bg-gray-900 p-3 rounded border border-gray-700 ml-2">
+                                <div class="flex justify-between text-xs text-gray-500 mb-1">
+                                    <span>{{ inst.component_name }} {{ inst.component_version }}</span>
+                                    <span>{{ inst.analysis_state }}</span>
+                                </div>
+                                <div v-if="inst.analysis_details" class="text-sm text-gray-300 mb-1 p-2 bg-gray-800 rounded whitespace-pre-wrap">
+                                    {{ inst.analysis_details }}
+                                </div>
+                                <div v-if="inst.analysis_comments && inst.analysis_comments.length > 0" class="space-y-1">
+                                    <div v-for="(c, ci) in inst.analysis_comments" :key="ci" class="text-xs text-gray-400 italic pl-2 border-l-2 border-gray-600">
+                                        {{ c.comment }} <span class="text-gray-600">- {{ new Date(c.timestamp).toLocaleDateString() }}</span>
+                                    </div>
+                                </div>
+                             </div>
+                         </div>
+                    </div>
+            </div>
+            
+            <div class="bg-gray-900 p-4 rounded border border-gray-700 h-fit">
+                <h4 class="font-bold flex items-center gap-2 mb-4">
+                    <Shield :size="16" class="text-blue-400"/>
+                    Bulk Assessment
+                </h4>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
+                        <select 
+                            v-model="state" 
+                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
+                        >
+                            <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value">{{ s.label }}</option>
+                        </select>
+                    </div>
+
+                    <!-- Calculator Section -->
+                    <div class="p-3 border border-gray-700 rounded bg-gray-800">
+                        <h5 class="text-xs font-bold text-gray-300 mb-2 flex items-center gap-2">
+                            <Calculator :size="12" />
+                            CVSS Calculator
+                        </h5>
+                        
+                        <div class="mb-2">
+                            <label class="block text-xs font-semibold text-gray-500 mb-1 flex justify-between">
+                                <span>Vector String</span>
+                                <button @click="showCalculatorModal = true" class="text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer">
+                                    <ExternalLink :size="10" /> Visual Calculator
+                                </button>
+                            </label>
+                            <input 
+                                v-model="pendingVector"
+                                type="text" 
+                                placeholder="CVSS:4.0/AV:N/..."
+                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono"
+                            />
+                        </div>
+                        
+                        <div class="flex items-center justify-between">
+                            <label class="block text-xs font-semibold text-gray-500">Score</label>
+                            <div class="flex gap-2">
+                                <input 
+                                    v-model="pendingScore"
+                                    type="number" 
+                                    step="0.1" 
+                                    min="0" 
+                                    max="10" 
+                                    class="w-16 p-1.5 text-right rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-sm font-bold text-yellow-400"
+                                />
+                            </div>
+                        </div>
+                        <div class="text-[10px] text-gray-600 mt-1 italic">
+                            Modifying vector auto-calculates score.
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
+                        <textarea 
+                            v-model="details"
+                            placeholder="Technical details..."
+                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
+                        />
+                    </div>
+                    
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Comment</label>
+                        <textarea 
+                            v-model="comment"
+                            placeholder="Add a comment for audit trail..."
+                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
+                        />
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <input 
+                            type="checkbox" 
+                            :id="`suppress-${group.id}`"
+                            v-model="suppressed"
+                            class="w-4 h-4 rounded"
+                        />
+                        <label :for="`suppress-${group.id}`" class="text-sm">Suppress this vulnerability</label>
+                    </div>
+                    
+                    <button 
+                        @click="handleUpdate"
+                        :disabled="updating"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                        {{ updating ? 'Updating...' : 'Apply to All' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Grouped Calculator Modal -->
+    <div v-if="showCalculatorModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+        <div class="bg-gray-800 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg border border-gray-700 shadow-2xl">
+            <!-- Modal Header -->
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                <h3 class="font-bold text-lg text-gray-300">CVSS v{{ activeVersion }} Calculator</h3>
+                <div class="flex items-center gap-3">
+                    <button 
+                        @click="resetVector"
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-300 transition-colors"
+                        title="Reset to original CVE vector"
+                    >
+                        Reset to Original
+                    </button>
+                    <button @click="showCalculatorModal = false" class="text-gray-400 hover:text-white text-xl font-bold cursor-pointer">✕</button>
+                </div>
+            </div>
+            
+            <!-- Version Tabs -->
+            <div class="flex border-b border-gray-700 bg-gray-850">
+                <button 
+                    v-for="v in ['4.0', '3.1', '2.0']" 
+                    :key="v"
+                    @click="switchVersion(v as any)"
+                    :class="[
+                        'px-4 py-2 text-sm font-bold border-r border-gray-700 transition-colors',
+                        activeVersion === v ? 'bg-gray-700 text-white' : 'bg-gray-850 text-gray-400 hover:bg-gray-800'
+                    ]"
+                >
+                    CVSS v{{ v }}
+                </button>
+            </div>
+
+            <!-- Content -->
+            <div class="flex-1 overflow-y-auto p-4 bg-gray-800">
+                <div v-if="calculatorGroups.length > 0" class="space-y-6">
+                    <div v-for="group in calculatorGroups" :key="group.category" class="bg-gray-850 rounded p-4 border border-gray-700">
+                        <h4 class="font-bold text-blue-400 border-b border-gray-700 pb-2 mb-3 tracking-wide uppercase text-xs">
+                            {{ group.category }} Metrics
+                        </h4>
+                        
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div v-for="comp in group.components" :key="comp.shortName" class="border-b border-gray-700 pb-2 border-opacity-50 last:border-0">
+                                <label :for="`metric-${comp.shortName}`" class="block text-sm font-bold text-gray-300 mb-1" :title="comp.description">
+                                    {{ comp.name }} ({{ comp.shortName }})
+                                </label>
+                                <select 
+                                    :id="`metric-${comp.shortName}`"
+                                    :value="activeInstance.getComponent(comp).shortName" 
+                                    @change="updateCalcVector(comp.shortName, ($event.target as HTMLSelectElement).value)"
+                                    class="w-full p-2 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500"
+                                >
+                                    <option v-for="val in comp.values" :key="val.shortName" :value="val.shortName" :title="val.description">
+                                        {{ val.name }} ({{ val.shortName }})
+                                    </option>
+                                </select>
+                                <div class="text-[10px] text-gray-500 mt-1 line-clamp-1">
+                                    {{ comp.description }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="text-center text-gray-500 p-8">
+                    Loading components...
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 border-t border-gray-700 bg-gray-850">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="text-xs text-gray-500 font-mono mb-1">Current Vector</div>
+                        <div class="text-sm font-mono font-bold text-white break-all">{{ pendingVector }}</div>
+                    </div>
+                    <div class="text-right ml-4">
+                         <div class="text-xs text-gray-500 uppercase">Score</div>
+                         <div class="text-2xl font-bold text-yellow-400">{{ pendingScore }}</div>
+                    </div>
+                </div>
+                <button 
+                    @click="showCalculatorModal = false"
+                    class="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded transition-colors"
+                >
+                    Done
+                </button>
+            </div>
+        </div>
+    </div>
+  </div>
+</template>

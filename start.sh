@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+# Default DTVP_CONTEXT_PATH to / if not set
+DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH:-/}
+
+# Ensure DTVP_CONTEXT_PATH starts with / and remove trailing slash if present (unless it is just /)
+if [ "$DTVP_CONTEXT_PATH" != "/" ]; then
+    DTVP_CONTEXT_PATH="/$(echo "$DTVP_CONTEXT_PATH" | sed 's|^/||' | sed 's|/$||')"
+fi
+
+# Default DTVP_API_URL to http://localhost:8000 if not set
+DTVP_API_URL=${DTVP_API_URL:-http://localhost:8000}
+
+echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_API_URL=${DTVP_API_URL}"
+
+# Replace placeholders in index.html
+# We use a temp file to avoid issues with sed in-place
+if [ -f "/app/frontend/dist/index.html" ]; then
+    sed -e "s|\${DTVP_CONTEXT_PATH}|${DTVP_CONTEXT_PATH}|g" \
+        -e "s|\${DTVP_API_URL}|${DTVP_API_URL}|g" \
+        /app/frontend/dist/index.html > /app/frontend/dist/index.html.tmp && \
+    mv /app/frontend/dist/index.html.tmp /app/frontend/dist/index.html
+else
+    echo "Warning: /app/frontend/dist/index.html not found, skipping frontend configuration"
+fi
+
+# Run the application
+exec /app/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
