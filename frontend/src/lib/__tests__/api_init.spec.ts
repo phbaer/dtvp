@@ -19,26 +19,35 @@ describe('api.ts initialization', () => {
         vi.unstubAllGlobals()
     })
 
-    it('uses default baseURL when no config provided', async () => {
+    it('uses default baseURL (window.location.origin) when no config provided', async () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => def
         }))
+        // Emulate window.location.origin
+        const originalLocation = window.location;
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: { origin: 'http://test-origin.com' },
+        });
 
         await import('../api') // Triggers module execution
         const axios = (await import('axios')).default
 
-        // Defaults: API_URL='http://localhost:8000', CONTEXT_PATH='/'
+        // Defaults: FRONTEND_URL=window.location.origin, CONTEXT_PATH='/'
         // CONTEXT_PATH='/' replaced to ''
-        // API_BASE = http://localhost:8000 + '' + '/api'
+        // API_BASE = http://test-origin.com + '' + '/api'
         expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
-            baseURL: 'http://localhost:8000/api'
+            baseURL: 'http://test-origin.com/api'
         }))
+
+        // Restore
+        Object.defineProperty(window, 'location', { value: originalLocation });
     })
 
-    it('respects custom API_URL', async () => {
+    it('respects custom FRONTEND_URL', async () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => {
-                if (key === 'DTVP_API_URL') return 'https://custom-api.com'
+                if (key === 'DTVP_FRONTEND_URL') return 'https://custom-domain.com'
                 return def
             }
         }))
@@ -47,7 +56,7 @@ describe('api.ts initialization', () => {
         const axios = (await import('axios')).default
 
         expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
-            baseURL: 'https://custom-api.com/api'
+            baseURL: 'https://custom-domain.com/api'
         }))
     })
 
@@ -55,6 +64,8 @@ describe('api.ts initialization', () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => {
                 if (key === 'DTVP_CONTEXT_PATH') return '/my-app'
+                // Default FRONTEND_URL fallback
+                if (key === 'DTVP_FRONTEND_URL') return 'http://localhost:8000'
                 return def
             }
         }))
@@ -73,6 +84,7 @@ describe('api.ts initialization', () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => {
                 if (key === 'DTVP_CONTEXT_PATH') return 'my-app' // Missing slash
+                if (key === 'DTVP_FRONTEND_URL') return 'http://localhost:8000'
                 return def
             }
         }))

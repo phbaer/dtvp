@@ -143,7 +143,7 @@ class DTClient:
 
 
 class DTSettings(BaseSettings):
-    DTVP_API_URL: str = Field(alias="DTVP_API_URL", default="http://localhost:8081")
+    DTVP_DT_API_URL: str = Field(alias="DTVP_DT_API_URL", default="http://localhost:8081")
     DTVP_API_KEY: str = Field(alias="DTVP_API_KEY", default="change_me")
 
     # Support aliases from docker-compose.yml
@@ -156,7 +156,7 @@ class DTSettings(BaseSettings):
 
     @property
     def api_url(self) -> str:
-        return self.DTVP_API_URL or self.DEPENDENCY_TRACK_URL or "http://localhost:8081"
+        return self.DTVP_DT_API_URL or self.DEPENDENCY_TRACK_URL or "http://localhost:8081"
 
     @property
     def api_key(self) -> str:

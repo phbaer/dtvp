@@ -9,16 +9,16 @@ if [ "$DTVP_CONTEXT_PATH" != "/" ]; then
     DTVP_CONTEXT_PATH="/$(echo "$DTVP_CONTEXT_PATH" | sed 's|^/||' | sed 's|/$||')"
 fi
 
-# Default DTVP_API_URL to http://localhost:8000 if not set
-DTVP_API_URL=${DTVP_API_URL:-http://localhost:8000}
+# Default DTVP_FRONTEND_URL to http://localhost:8000 if not set
+DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL:-http://localhost:8000}
 
-echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_API_URL=${DTVP_API_URL}"
+echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}"
 
 # Replace placeholders in index.html
 # We use a temp file to avoid issues with sed in-place
 if [ -f "/app/frontend/dist/index.html" ]; then
     sed -e "s|\${DTVP_CONTEXT_PATH}|${DTVP_CONTEXT_PATH}|g" \
-        -e "s|\${DTVP_API_URL}|${DTVP_API_URL}|g" \
+        -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
         /app/frontend/dist/index.html > /app/frontend/dist/index.html.tmp && \
     mv /app/frontend/dist/index.html.tmp /app/frontend/dist/index.html
 else

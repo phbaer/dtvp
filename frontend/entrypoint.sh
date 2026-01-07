@@ -11,14 +11,14 @@ fi
 
 echo "Starting frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}"
 
-# Default DTVP_API_URL to http://localhost:8000 if not set
-DTVP_API_URL=${DTVP_API_URL:-http://localhost:8000}
-echo "Using DTVP_API_URL=${DTVP_API_URL}"
+# Default DTVP_FRONTEND_URL to http://localhost:8000 if not set
+DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL:-http://localhost:8000}
+echo "Using DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}"
 
 # Replace placeholders in index.html
 # We use a temp file to avoid issues with sed in-place on some busybox versions
 sed -e "s|\${DTVP_CONTEXT_PATH}|${DTVP_CONTEXT_PATH}|g" \
-    -e "s|\${DTVP_API_URL}|${DTVP_API_URL}|g" \
+    -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
     /usr/share/nginx/html/index.html > /usr/share/nginx/html/index.html.tmp && mv /usr/share/nginx/html/index.html.tmp /usr/share/nginx/html/index.html
 
 # Generate nginx.conf
