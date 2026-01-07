@@ -139,6 +139,7 @@ describe('VulnGroupCard', () => {
     it('handles assessment update errors', async () => {
         // Mock API failure
         vi.mocked(updateAssessment).mockResolvedValueOnce([{ status: 'error', message: 'Failed' }])
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
 
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
@@ -149,6 +150,7 @@ describe('VulnGroupCard', () => {
         await applyBtn?.trigger('click')
 
         expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('errors'))
+        consoleSpy.mockRestore()
     })
 
     it('resets vector to original', async () => {

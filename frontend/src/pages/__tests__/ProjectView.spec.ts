@@ -54,6 +54,7 @@ describe('ProjectView.vue', () => {
     })
 
     it('handles error state', async () => {
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
         vi.mocked(getGroupedVulns).mockRejectedValue(new Error('Failed'))
 
         const wrapper = mount(ProjectView, {
@@ -68,6 +69,7 @@ describe('ProjectView.vue', () => {
         await flushPromises()
 
         expect(wrapper.text()).toContain('Failed to load vulnerabilities')
+        consoleSpy.mockRestore()
     })
 
     it('handles empty state', async () => {
@@ -127,7 +129,7 @@ describe('ProjectView.vue', () => {
         expect(mockGroup.affected_versions?.[0]?.components?.[0]?.analysis_state).toBe('EXPLOITABLE')
     })
 
-    it('does not fetch if name is missing', async () => {
+    it('does not fetch if route param name is undefined', async () => {
         vi.mocked(useRoute).mockReturnValue({
             params: {}
         } as any)
