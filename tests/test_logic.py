@@ -50,7 +50,6 @@ def test_group_vulnerabilities_basic():
     # Execute
     grouped = group_vulnerabilities(input_data)
 
-
     # Verify
     assert len(grouped) == 2
 
@@ -60,16 +59,12 @@ def test_group_vulnerabilities_basic():
     assert g1["severity"] == "HIGH"
 
     # Check details of versions
-    v1 = next(
-        v for v in g1["affected_versions"] if v["project_version"] == "1.0"
-    )
+    v1 = next(v for v in g1["affected_versions"] if v["project_version"] == "1.0")
     # Check components in v1
     assert len(v1["components"]) == 1
     assert v1["components"][0]["analysis_state"] == "NOT_SET"
 
-    v2 = next(
-        v for v in g1["affected_versions"] if v["project_version"] == "2.0"
-    )
+    v2 = next(v for v in g1["affected_versions"] if v["project_version"] == "2.0")
     assert len(v2["components"]) == 1
     assert v2["components"][0]["analysis_state"] == "EXPLOITABLE"
 
@@ -95,7 +90,7 @@ def test_group_vulnerabilities_rescored():
                 "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
                 "analysis": {
                     "state": "NOT_SET",
-                    "analysisDetails": "[Rescored: 5.5]\n[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]\nSome details"
+                    "analysisDetails": "[Rescored: 5.5]\n[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]\nSome details",
                 },
             }
         ],
@@ -167,7 +162,7 @@ def test_group_vulnerabilities_invalid_rescored_score():
                 "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
                 "analysis": {
                     "state": "NOT_SET",
-                    "analysisDetails": "[Rescored: NotANumber]\nSome details"
+                    "analysisDetails": "[Rescored: 1.2.3]\nSome details",
                 },
             }
         ],
