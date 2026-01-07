@@ -161,15 +161,25 @@ async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client)
 
 
 def test_spa_routing(client):
-    # Mocking static file existence is hard because Starlette checks filesystem
-    # But we can test the catch-all route if we use a path that doesn't match other routes
-    # and see if it tries to return index.html
+    # Check if SPA route matches expected catch-all pattern
+    # The route path depends on context_path, so finding it by name or analyzing paths is needed.
+    # main.py defines it as f"{context_path}/{{path:path}}"
     
-    # Needs frontend/dist to exist? 
-    # The routes are only added if frontend/dist exists.
-    # This test expects frontend/dist to exist.
-    # We created it in the environment before running tests.
-    
+    spa_route_exists = False
+    for route in app.routes:
+        if hasattr(route, "path") and "{path:path}" in route.path:
+            spa_route_exists = True
+            break
+            
+    if not spa_route_exists:
+        pytest.skip("SPA routing not enabled (frontend/dist missing)")
+        
+    # Ensure dummy asset exists for test
+    import os
+    os.makedirs("frontend/dist/assets", exist_ok=True)
+    with open("frontend/dist/assets/test.css", "w") as f:
+        f.write("body {}")
+
     # 1. Catch-all route should return index.html for unknown paths
     response = client.get("/projects") # Client-side route
     assert response.status_code == 200

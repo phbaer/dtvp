@@ -21,7 +21,7 @@ describe('api.ts initialization', () => {
 
     it('uses default baseURL (window.location.origin) when no config provided', async () => {
         vi.doMock('../env', () => ({
-            getRuntimeConfig: (key: string, def: string) => def
+            getRuntimeConfig: (_key: string, def: string) => def
         }))
         // Emulate window.location.origin
         const originalLocation = window.location;

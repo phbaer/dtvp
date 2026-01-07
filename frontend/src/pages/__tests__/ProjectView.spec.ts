@@ -124,7 +124,7 @@ describe('ProjectView.vue', () => {
         await wrapper.findComponent({ name: 'VulnGroupCard' }).vm.$emit('update:assessment', updateData)
 
         expect(mockGroup.rescored_cvss).toBe(5.0)
-        expect(mockGroup.affected_versions[0].components[0].analysis_state).toBe('EXPLOITABLE')
+        expect(mockGroup.affected_versions?.[0]?.components?.[0]?.analysis_state).toBe('EXPLOITABLE')
     })
 
     it('does not fetch if name is missing', async () => {
@@ -132,7 +132,7 @@ describe('ProjectView.vue', () => {
             params: {}
         } as any)
 
-        const wrapper = mount(ProjectView, {
+        mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
                 mocks: {
