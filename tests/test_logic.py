@@ -133,3 +133,47 @@ def test_group_vulnerabilities_missing_data():
     assert g["severity"] is None
     assert g["cvss_score"] is None
     assert g["cvss_vector"] is None
+
+
+def test_group_vulnerabilities_missing_id():
+    # Test with entirely missing vulnId and name
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    # No vulnId or name
+                    "uuid": "vuuid1",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 0
+
+
+def test_group_vulnerabilities_invalid_rescored_score():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-1",
+                    "uuid": "vuuid1",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "[Rescored: NotANumber]\nSome details"
+                },
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 1
+    g = grouped[0]
+    assert g["rescored_cvss"] is None

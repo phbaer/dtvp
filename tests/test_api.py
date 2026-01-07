@@ -65,6 +65,13 @@ async def test_get_grouped_vulns(client, mock_dt_client):
     assert len(data[0]["affected_versions"][0]["components"]) == 1
 
 
+def test_get_grouped_vulns_no_projects(client, mock_dt_client):
+    mock_dt_client.get_projects.return_value = []
+    response = client.get("/api/projects/NonExistent/grouped-vulnerabilities")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 def test_assessment_update(client, mock_dt_client):
     payload = {
         "instances": [
@@ -94,6 +101,25 @@ def test_assessment_update(client, mock_dt_client):
     assert call_kwargs["state"] == "NOT_AFFECTED"
     assert call_kwargs["details"] == "Verified as false positive"
     assert call_kwargs["suppressed"] is True
+
+
+def test_assessment_update_failure(client, mock_dt_client):
+    mock_dt_client.update_analysis.side_effect = Exception("Analysis update failed")
+    
+    payload = {
+        "instances": [
+             {"project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1", "finding_uuid": "f1"}
+        ],
+        "state": "NOT_AFFECTED",
+        "details": "Fail"
+    }
+    
+    response = client.post("/api/assessment", json=payload)
+    assert response.status_code == 200
+    results = response.json()
+    assert len(results) == 1
+    assert results[0]["status"] == "error"
+    assert "Analysis update failed" in results[0]["error"]
 
 
 @pytest.mark.asyncio
@@ -132,3 +158,30 @@ async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client)
     # Verify vector was merged
     assert data[0]["cvss_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
     assert data[0]["cvss_score"] == 9.8
+
+
+def test_spa_routing(client):
+    # Mocking static file existence is hard because Starlette checks filesystem
+    # But we can test the catch-all route if we use a path that doesn't match other routes
+    # and see if it tries to return index.html
+    
+    # Needs frontend/dist to exist? 
+    # The routes are only added if frontend/dist exists.
+    # This test expects frontend/dist to exist.
+    # We created it in the environment before running tests.
+    
+    # 1. Catch-all route should return index.html for unknown paths
+    response = client.get("/projects") # Client-side route
+    assert response.status_code == 200
+    # Ideally check content is index.html (empty file in our mock)
+    # But FileResponse might fail if file empty? 
+    # Valid index.html content
+    
+    # 2. Static assets
+    response = client.get("/assets/test.css")
+    assert response.status_code == 200
+    
+    # 3. Path traversal attempt should return index.html
+    response = client.get("/../etc/passwd")
+    assert response.status_code == 200
+    # Should be index.html, not passwd

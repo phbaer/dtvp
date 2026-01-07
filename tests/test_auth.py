@@ -24,6 +24,11 @@ async def test_get_oidc_config(respx_mock):
     config = await get_oidc_config()
     assert config["authorization_endpoint"] == "https://auth.example.com/login"
 
+    # Test cache
+    config2 = await get_oidc_config()
+    assert config2 is config
+
+
 def test_login_redirect(client):
     with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
         mock_config.return_value = {
@@ -50,6 +55,20 @@ async def test_callback_success(client, respx_mock):
         assert response.status_code == 307 # Redirect to dashboard
         assert response.cookies.get("session_token") is not None
 
+
+@pytest.mark.asyncio
+async def test_callback_failure(client, respx_mock):
+    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+        mock_config.return_value = {
+            "token_endpoint": "https://auth.example.com/token"
+        }
+        
+        # Mock token response failure
+        respx_mock.post("https://auth.example.com/token").respond(status_code=400)
+        
+        response = client.get("/auth/callback?code=bad-code", follow_redirects=False)
+        assert response.status_code == 400
+
 def test_me_endpoint(client):
     # Success case
     token = jwt.encode({"sub": "testuser"}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256")
@@ -64,3 +83,25 @@ def test_me_endpoint(client):
     client.cookies.clear() # Clear persisted cookies
     response = client.get("/auth/me")
     assert response.status_code == 401
+
+    # Invalid token case
+    client.cookies.set("session_token", "invalid.token.here")
+    response = client.get("/auth/me")
+    assert response.status_code == 401
+
+
+def test_redirect_uri_calculation():
+    from auth import AuthSettings
+    # Test fallback calculation
+    settings = AuthSettings(
+        DTVP_OIDC_REDIRECT_URI=None,
+        DTVP_FRONTEND_URL="http://base.url",
+        DTVP_CONTEXT_PATH="ctx"
+    )
+    assert settings.redirect_uri == "http://base.url/ctx/auth/callback"
+
+    # Test explicit set
+    settings = AuthSettings(
+        DTVP_OIDC_REDIRECT_URI="http://custom/callback"
+    )
+    assert settings.redirect_uri == "http://custom/callback"

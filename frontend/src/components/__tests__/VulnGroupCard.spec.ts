@@ -269,4 +269,223 @@ describe('VulnGroupCard', () => {
         // Should not call API
         expect(updateAssessment).not.toHaveBeenCalled()
     })
+
+    it('handles CVSS 3.0 vector parsing', async () => {
+        const v30Group = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: v30Group }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        // Should switch to 3.1 internally because 3.0 is treated as 3.1
+        expect((wrapper.vm as any).activeVersion).toBe('3.1')
+    })
+
+    it('submits assessment with comment and suppression', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Set comment
+        await wrapper.findAll('textarea')[1].setValue('Audit comment') // Second textarea is comment
+
+        // Set suppression
+        await wrapper.find('input[type="checkbox"]').setValue(true)
+
+        // Submit
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
+        await applyBtn?.trigger('click')
+
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            comment: 'Audit comment',
+            suppressed: true
+        }))
+    })
+
+    it('renders analysis comments', async () => {
+        const groupWithComments = {
+            ...mockGroup,
+            affected_versions: [{
+                ...mockGroup.affected_versions[0],
+                components: [{
+                    ...mockGroup.affected_versions[0].components[0],
+                    analysis_comments: [
+                        { comment: 'Previous comment', timestamp: '2023-01-01' }
+                    ]
+                }]
+            }]
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithComments }
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        expect(wrapper.text()).toContain('Previous comment')
+    })
+
+    it('handles updateAssessment exception', async () => {
+        // Mock rejection
+        vi.mocked(updateAssessment).mockRejectedValueOnce(new Error('Network error'))
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
+
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
+        await applyBtn?.trigger('click')
+
+        expect(global.alert).toHaveBeenCalledWith('Failed to update assessment')
+        consoleSpy.mockRestore()
+    })
+
+    it('computes correct state colors', () => {
+        const makeWrapper = (state: string) => mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    affected_versions: [{
+                        ...mockGroup.affected_versions[0],
+                        components: [{ ...mockComponents[0], analysis_state: state }]
+                    }]
+                }
+            }
+        })
+
+        // EXPLOITABLE -> Red
+        const wrapperExploitable = makeWrapper('EXPLOITABLE')
+        expect(wrapperExploitable.find('.text-right .font-semibold').classes()).toContain('text-red-400')
+
+        // NOT_AFFECTED -> Green
+        const wrapperNotAffected = makeWrapper('NOT_AFFECTED')
+        expect(wrapperNotAffected.find('.text-right .font-semibold').classes()).toContain('text-green-400')
+
+        // MIXED/Other -> Gray
+        const wrapperOther = makeWrapper('NOT_SET')
+        expect(wrapperOther.find('.text-right .font-semibold').classes()).toContain('text-gray-300')
+    })
+
+    it('closes modal via X button', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+
+        expect(wrapper.text()).toContain('CVSS v3.1 Calculator')
+
+        // Find the X button (text-gray-400 hover:text-white text-xl)
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === '✕')
+        await closeBtn?.trigger('click')
+
+        expect(wrapper.text()).not.toContain('CVSS v3.1 Calculator')
+    })
+
+    it('renders metrics and allows updates in calculator', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.text()).toContain('Attack Vector')
+
+        const avSelect = wrapper.find('#metric-AV')
+        if (avSelect.exists()) {
+            await avSelect.setValue('P')
+            expect(wrapper.text()).toContain('AV:P')
+        }
+    })
+
+    it('switches calculator versions via tabs', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        const tabs = wrapper.findAll('button').filter(b => b.text().includes('CVSS v'))
+
+        // Click 4.0
+        const tab4 = tabs.find(b => b.text().includes('4.0'))
+        await tab4?.trigger('click')
+        expect((wrapper.vm as any).activeVersion).toBe('4.0')
+
+        // Click 2.0
+        const tab2 = tabs.find(b => b.text().includes('2.0'))
+        await tab2?.trigger('click')
+        expect((wrapper.vm as any).activeVersion).toBe('2.0')
+    })
+
+    it('auto-calculates score from vector input', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+
+        const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
+
+        // CVSS 2.0
+        await input.setValue('AV:N/AC:L/Au:N/C:P/I:P/A:P')
+        expect((wrapper.vm as any).pendingScore).toBe(7.5)
+
+        // CVSS 4.0
+        await input.setValue('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N')
+        expect((wrapper.vm as any).pendingScore).toBeGreaterThan(0)
+    })
+
+    it('includes rescored vector in assessment', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        const avSelect = wrapper.find('#metric-AV')
+        if (avSelect.exists()) {
+            await avSelect.setValue('P')
+        }
+
+        const doneBtn = wrapper.findAll('button').find(b => b.text() === 'Done')
+        await doneBtn?.trigger('click')
+
+        // Submit
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
+        await applyBtn?.trigger('click')
+
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            details: expect.stringContaining('[Rescored Vector: CVSS:')
+        }))
+    })
+
+    it('updates pending score manually', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+
+        await wrapper.vm.$nextTick()
+
+        const scoreInput = wrapper.find('input[type="number"]')
+        await scoreInput.setValue(5.5)
+
+        expect((wrapper.vm as any).pendingScore).toBe(5.5)
+    })
+
+    it('activates 3.1 tab', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('button.text-blue-400').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        // Switch to 4.0 first
+        const tabs = wrapper.findAll('button').filter(b => b.text().includes('CVSS v'))
+        await tabs.find(b => b.text().includes('4.0'))?.trigger('click')
+
+        // Back to 3.1
+        await tabs.find(b => b.text().includes('3.1'))?.trigger('click')
+        expect((wrapper.vm as any).activeVersion).toBe('3.1')
+    })
 })
