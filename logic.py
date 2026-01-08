@@ -1,4 +1,10 @@
 from typing import List, Dict, Any
+import re
+
+# Pre-compile regex patterns
+RE_SCORE = re.compile(r"\[Rescored:\s*([\d\.]+)\]")
+RE_VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
+
 
 def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -25,7 +31,6 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
     """
 
     groups = {}  # Key: vuln_id -> Group Data
-    import re
 
     for entry in versions_data:
         version_info = entry["version"]
@@ -45,7 +50,10 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
                     "title": vuln.get("title"),
                     "description": vuln.get("description"),
                     "severity": vuln.get("severity"),
-                    "cvss_score": vuln.get("cvssV3") or vuln.get("cvssV3BaseScore") or vuln.get("cvssV2") or vuln.get("cvssV2BaseScore"),
+                    "cvss_score": vuln.get("cvssV3")
+                    or vuln.get("cvssV3BaseScore")
+                    or vuln.get("cvssV2")
+                    or vuln.get("cvssV2BaseScore"),
                     "cvss_vector": vuln.get("cvssV3Vector") or vuln.get("cvssV2Vector"),
                     "rescored_cvss": None,
                     "rescored_vector": None,
@@ -55,33 +63,28 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
             # Prepare component info
             analysis = finding.get("analysis", {})
             details = analysis.get("analysisDetails")
-            if details:
-                print(f"DEBUG: Found analysis details for {vuln_id}: {details[:50]}...")
-            else:
-                print(f"DEBUG: No analysis details for {vuln_id}. Keys in analysis: {list(analysis.keys())}")
-            
-            
+
             # Parse rescored value if present
             rescored_score = None
             rescored_vector = None
             if details:
                 # Parse Score
-                match_score = re.search(r"\[Rescored:\s*([\d\.]+)\]", details)
+                match_score = RE_SCORE.search(details)
                 if match_score:
                     try:
                         rescored_score = float(match_score.group(1))
                     except ValueError:
                         pass
-                
+
                 # Parse Vector
-                match_vector = re.search(r"\[Rescored Vector:\s*([^\]]+)\]", details)
+                match_vector = RE_VECTOR.search(details)
                 if match_vector:
                     rescored_vector = match_vector.group(1).strip()
-            
+
             # If we found a rescored value, update the group level if not set
             if rescored_score is not None:
                 groups[vuln_id]["rescored_cvss"] = rescored_score
-            
+
             if rescored_vector is not None:
                 groups[vuln_id]["rescored_vector"] = rescored_vector
 
@@ -97,10 +100,12 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
                 "component_uuid": finding.get("component", {}).get("uuid"),
                 "vulnerability_uuid": vuln.get("uuid"),
                 "finding_uuid": finding.get("uuid"),
-                "analysis_state": analysis.get("state") or analysis.get("analysisState"),
+                "analysis_state": analysis.get("state")
+                or analysis.get("analysisState"),
                 "analysis_details": details,
                 "analysis_comments": analysis.get("analysisComments", []),
-                "is_suppressed": analysis.get("isSuppressed", False) or analysis.get("suppressed", False),
+                "is_suppressed": analysis.get("isSuppressed", False)
+                or analysis.get("suppressed", False),
             }
 
             if proj_uuid not in groups[vuln_id]["affected_versions"]:

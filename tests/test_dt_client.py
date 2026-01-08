@@ -1,5 +1,6 @@
 import pytest
 from dt_client import DTClient, DTSettings, get_client
+from unittest.mock import patch
 
 
 @pytest.fixture
@@ -115,15 +116,11 @@ async def test_get_project_vulnerabilities(dt_client, respx_mock):
     assert vulns[0]["cvssV3Vector"] is not None
 
 
-import pytest
-from unittest.mock import patch
-
-
 @pytest.mark.asyncio
 async def test_get_project_versions():
-    client = DTClient("http://url", "key")
-    res = await client.get_project_versions("uuid")
-    assert res is None
+    async with DTClient("http://url", "key") as client:
+        res = await client.get_project_versions("uuid")
+        assert res is None
 
 
 def test_settings_properties():
@@ -131,7 +128,7 @@ def test_settings_properties():
     s = DTSettings(
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL="http://fallback",
-        DTVP_API_KEY="",
+        DTVP_DT_API_KEY="",
         DEPENDENCY_TRACK_API_KEY="key",
     )
 
@@ -141,14 +138,15 @@ def test_settings_properties():
     s2 = DTSettings(
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL=None,
-        DTVP_API_KEY="",
+        DTVP_DT_API_KEY="",
         DEPENDENCY_TRACK_API_KEY=None,
     )
     assert s2.api_url == "http://localhost:8081"
     assert s2.api_key == "change_me"
 
 
-def test_get_client():
+@pytest.mark.asyncio
+async def test_get_client():
     with patch("dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         # If accessing the property returns a mock, that's fine, we just set the string conversion or use it as is?
@@ -157,6 +155,7 @@ def test_get_client():
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
 
-        c = get_client()
-        assert c.base_url == "http://mock"
-        assert c.headers["X-Api-Key"] == "mock_key"
+        async for c in get_client():
+            assert c.base_url == "http://mock"
+            assert c.headers["X-Api-Key"] == "mock_key"
+            break

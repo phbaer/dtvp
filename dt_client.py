@@ -1,5 +1,6 @@
 import httpx
-from typing import List, Dict, Any, Optional
+import asyncio
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,32 +13,38 @@ class DTClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        # Create a persistent client with increased timeout and connection limits
+        self.client = httpx.AsyncClient(
+            headers=self.headers,
+            timeout=60.0,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+        )
+
+    async def close(self):
+        await self.client.aclose()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
 
     async def get_projects(self, name: str) -> List[Dict[str, Any]]:
         """
         Search for projects by name.
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/api/v1/project",
-                params={"name": name, "excludeInactive": "true"},
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self.client.get(
+            f"{self.base_url}/api/v1/project",
+            params={"name": name, "excludeInactive": "true"},
+        )
+        response.raise_for_status()
+        return response.json()
 
     async def get_project_versions(self, project_uuid: str) -> List[Dict[str, Any]]:
         """
         Get all versions for a project.
-        Note: The project_uuid passed here might be one version,
-        we usually want to find the parent or all with same name.
-        Actually, in DT, versions are just projects with the same name/classifier but different version string.
-        Typically we search by name to get all versions.
         """
-        # If we have a name, we can just search by name to get all versions
-        # But this function takes a UUID.
-        # For simplicity in this vertical slice, we'll assume the caller uses get_projects(name)
-        # to get all versions directly if the name is exact.
+        # Placeholder as per original code
         pass
 
     async def get_vulnerabilities(self, project_uuid: str) -> List[Dict[str, Any]]:
@@ -45,45 +52,55 @@ class DTClient:
         Get all vulnerabilities for a specific project version.
         Enriches findings with analysis data from the analysis endpoint.
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/api/v1/finding/project/{project_uuid}",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            findings = response.json()
+        response = await self.client.get(
+            f"{self.base_url}/api/v1/finding/project/{project_uuid}",
+        )
+        response.raise_for_status()
+        findings = response.json()
 
-            # Enrich each finding with analysis data from the analysis endpoint
-            for finding in findings:
-                component_uuid = finding.get("component", {}).get("uuid")
-                vulnerability_uuid = finding.get("vulnerability", {}).get("uuid")
+        # Gather analysis tasks to run in parallel
+        # Use a list of tuples (finding, task) to map results back
+        analysis_tasks = []
+        findings_to_enrich = []
 
-                if component_uuid and vulnerability_uuid:
-                    try:
-                        analysis = await self.get_analysis(
-                            project_uuid, component_uuid, vulnerability_uuid
-                        )
-                        # Merge analysis data into finding
-                        if analysis:
-                            finding["analysis"] = analysis
-                    except Exception:
-                        # If analysis doesn't exist or fails, continue with existing data
-                        pass
+        for finding in findings:
+            component_uuid = finding.get("component", {}).get("uuid")
+            vulnerability_uuid = finding.get("vulnerability", {}).get("uuid")
 
-            return findings
+            if component_uuid and vulnerability_uuid:
+                findings_to_enrich.append(finding)
+                analysis_tasks.append(
+                    self.get_analysis(project_uuid, component_uuid, vulnerability_uuid)
+                )
 
-    async def get_project_vulnerabilities(self, project_uuid: str) -> List[Dict[str, Any]]:
+        if analysis_tasks:
+            # Execute all analysis requests in parallel
+            # httpx limits will handle connection pooling/queuing
+            results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+
+            # Merge results
+            for finding, analysis_result in zip(findings_to_enrich, results):
+                if isinstance(analysis_result, Exception):
+                    # Log or ignore error? Original code passed on exception
+                    continue
+
+                if analysis_result:
+                    finding["analysis"] = analysis_result
+
+        return findings
+
+    async def get_project_vulnerabilities(
+        self, project_uuid: str
+    ) -> List[Dict[str, Any]]:
         """
         Get all vulnerabilities for a specific project version with full details (including vectors).
         Uses /api/v1/vulnerability/project/{project_uuid}
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/api/v1/vulnerability/project/{project_uuid}",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
+        response = await self.client.get(
+            f"{self.base_url}/api/v1/vulnerability/project/{project_uuid}",
+        )
+        response.raise_for_status()
+        return response.json()
 
     async def get_analysis(
         self,
@@ -94,20 +111,18 @@ class DTClient:
         """
         Get analysis for a specific finding.
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/api/v1/analysis",
-                params={
-                    "project": project_uuid,
-                    "component": component_uuid,
-                    "vulnerability": vulnerability_uuid,
-                },
-                headers=self.headers,
-            )
-            if response.status_code == 404:
-                return None
-            response.raise_for_status()
-            return response.json()
+        response = await self.client.get(
+            f"{self.base_url}/api/v1/analysis",
+            params={
+                "project": project_uuid,
+                "component": component_uuid,
+                "vulnerability": vulnerability_uuid,
+            },
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
 
     async def update_analysis(
         self,
@@ -133,18 +148,18 @@ class DTClient:
         if comment:
             payload["comment"] = comment
 
-        async with httpx.AsyncClient() as client:
-            response = await client.put(
-                f"{self.base_url}/api/v1/analysis", json=payload, headers=self.headers
-            )
-            # 404 is sometimes returned if analysis doesn't exist yet? No, PUT creates/updates.
-            response.raise_for_status()
-            return response.json()
+        response = await self.client.put(
+            f"{self.base_url}/api/v1/analysis", json=payload
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 class DTSettings(BaseSettings):
-    DTVP_DT_API_URL: str = Field(alias="DTVP_DT_API_URL", default="http://localhost:8081")
-    DTVP_API_KEY: str = Field(alias="DTVP_API_KEY", default="change_me")
+    DTVP_DT_API_URL: str = Field(
+        alias="DTVP_DT_API_URL", default="http://localhost:8081"
+    )
+    DTVP_DT_API_KEY: str = Field(alias="DTVP_DT_API_KEY", default="change_me")
 
     # Support aliases from docker-compose.yml
     DEPENDENCY_TRACK_URL: Optional[str] = Field(default=None)
@@ -156,13 +171,16 @@ class DTSettings(BaseSettings):
 
     @property
     def api_url(self) -> str:
-        return self.DTVP_DT_API_URL or self.DEPENDENCY_TRACK_URL or "http://localhost:8081"
+        return (
+            self.DTVP_DT_API_URL or self.DEPENDENCY_TRACK_URL or "http://localhost:8081"
+        )
 
     @property
     def api_key(self) -> str:
-        return self.DTVP_API_KEY or self.DEPENDENCY_TRACK_API_KEY or "change_me"
+        return self.DTVP_DT_API_KEY or self.DEPENDENCY_TRACK_API_KEY or "change_me"
 
 
-def get_client() -> DTClient:
+async def get_client() -> AsyncGenerator[DTClient, None]:
     settings = DTSettings()
-    return DTClient(settings.api_url, settings.api_key)
+    async with DTClient(settings.api_url, settings.api_key) as client:
+        yield client
