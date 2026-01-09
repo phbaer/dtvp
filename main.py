@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, APIRouter
+from fastapi import FastAPI, Depends, APIRouter, UploadFile, File
 from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,10 +9,11 @@ import os
 import asyncio
 import uuid
 from datetime import datetime
+import shutil
 
 from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
-from logic import group_vulnerabilities
+from logic import group_vulnerabilities, get_team_mapping_path
 
 from version import VERSION, BUILD_COMMIT
 
@@ -270,6 +271,36 @@ def get_open_api_endpoint():
         description=app.description,
         routes=app.routes,
     )
+
+
+@api_router.post("/settings/mapping")
+async def upload_team_mapping(
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user),
+):
+    target_path = get_team_mapping_path()
+    # Ensure directory exists
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    # Write file
+    try:
+        with open(target_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Validate JSON (optional but good)
+        with open(target_path, "r") as f:
+            import json
+
+            json.load(f)
+
+        return {
+            "status": "success",
+            "message": f"Team mapping updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 app.include_router(api_router, prefix=context_path)

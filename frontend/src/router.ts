@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Login from './pages/Login.vue'
 import Dashboard from './pages/Dashboard.vue'
 import ProjectView from './pages/ProjectView.vue'
+import Settings from './pages/Settings.vue'
 
 import { login, checkSession } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
@@ -9,6 +10,7 @@ import { getRuntimeConfig } from './lib/env'
 const routes = [
     { path: '/login', component: Login },
     { path: '/', component: Dashboard },
+    { path: '/settings', component: Settings },
     { path: '/project/:name', component: ProjectView },
 ]
 

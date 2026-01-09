@@ -9,7 +9,14 @@ RE_VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
 RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
 
 
-def load_team_mapping(path: str = "team_mapping.json") -> Dict[str, str]:
+def get_team_mapping_path() -> str:
+    return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
+
+
+def load_team_mapping(path: str = None) -> Dict[str, str]:
+    if path is None:
+        path = get_team_mapping_path()
+
     if not os.path.exists(path):
         return {}
     try:
