@@ -16,12 +16,16 @@ from logic import group_vulnerabilities
 
 from version import VERSION, BUILD_COMMIT
 
-app = FastAPI(title="DTVP", version=VERSION)
+from contextlib import asynccontextmanager
 
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     print(f"Starting DTVP version {VERSION} (build {BUILD_COMMIT})")
+    yield
+
+
+app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
 
 
 # CORS for frontend dev
