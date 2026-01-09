@@ -1,30 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import axios from 'axios'
 import { getProjects, getGroupedVulns, updateAssessment, login, checkSession } from '../api'
 
+const mocks = vi.hoisted(() => ({
+    get: vi.fn(),
+    post: vi.fn(),
+}))
+
 vi.mock('axios', () => {
-    const mockGet = vi.fn()
-    const mockPost = vi.fn()
     return {
         default: {
             create: vi.fn(() => ({
-                get: mockGet,
-                post: mockPost,
+                get: mocks.get,
+                post: mocks.post,
                 interceptors: {
                     request: { use: vi.fn(), eject: vi.fn() },
                     response: { use: vi.fn(), eject: vi.fn() }
                 }
             })),
-            get: vi.fn()
-        },
-        _mockGet: mockGet,
-        _mockPost: mockPost
+            get: mocks.get
+        }
     }
 })
-
-// @ts-ignore
-import * as axiosPkg from 'axios'
-const { _mockGet, _mockPost } = axiosPkg as any
 
 describe('api.ts', () => {
     beforeEach(() => {
@@ -34,11 +30,11 @@ describe('api.ts', () => {
 
     it('getProjects calls /projects', async () => {
         const mockData = [{ name: 'P1' }]
-        _mockGet.mockResolvedValue({ data: mockData })
+        mocks.get.mockResolvedValue({ data: mockData })
 
         const result = await getProjects('query')
 
-        expect(_mockGet).toHaveBeenCalledWith('/projects', { params: { name: 'query' } })
+        expect(mocks.get).toHaveBeenCalledWith('/projects', { params: { name: 'query' } })
         expect(result).toEqual(mockData)
     })
 
@@ -47,14 +43,13 @@ describe('api.ts', () => {
         const mockTaskRunning = { status: 'running', progress: 50, message: 'Loading...' }
         const mockTaskCompleted = { status: 'completed', result: [{ id: '1' }] }
 
-        _mockPost.mockResolvedValue({ data: mockTaskStart })
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
 
         // Mock sequential GET calls: first running, then completed
-        _mockGet
+        mocks.get
             .mockResolvedValueOnce({ data: mockTaskRunning })
             .mockResolvedValueOnce({ data: mockTaskCompleted })
 
-        // Use vi.useFakeTimers to fast-forward polling intervals
         vi.useFakeTimers()
 
         const promise = getGroupedVulns('Test')
@@ -65,8 +60,8 @@ describe('api.ts', () => {
 
         const result = await promise
 
-        expect(_mockPost).toHaveBeenCalledWith('/tasks/group-vulns', null, { params: { name: 'Test' } })
-        expect(_mockGet).toHaveBeenCalledWith('/tasks/task-123')
+        expect(mocks.post).toHaveBeenCalledWith('/tasks/group-vulns', null, { params: { name: 'Test' } })
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task-123')
         expect(result).toEqual(mockTaskCompleted.result)
 
         vi.useRealTimers()
@@ -77,8 +72,8 @@ describe('api.ts', () => {
         const mockTaskRunning = { status: 'running', progress: 50, message: 'Step 1' }
         const mockTaskCompleted = { status: 'completed', result: [] }
 
-        _mockPost.mockResolvedValue({ data: mockTaskStart })
-        _mockGet
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get
             .mockResolvedValueOnce({ data: mockTaskRunning })
             .mockResolvedValueOnce({ data: mockTaskCompleted })
 
@@ -98,8 +93,8 @@ describe('api.ts', () => {
         const mockTaskStart = { task_id: 'task-err' }
         const mockTaskFailed = { status: 'failed', message: 'Task Failed', progress: 0 }
 
-        _mockPost.mockResolvedValue({ data: mockTaskStart })
-        _mockGet.mockResolvedValueOnce({ data: mockTaskFailed })
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get.mockResolvedValueOnce({ data: mockTaskFailed })
 
         vi.useFakeTimers()
         const promise = getGroupedVulns('Test')
@@ -114,8 +109,8 @@ describe('api.ts', () => {
 
     it('getGroupedVulns throws error on polling network error', async () => {
         const mockTaskStart = { task_id: 'task-net-err' }
-        _mockPost.mockResolvedValue({ data: mockTaskStart })
-        _mockGet.mockRejectedValue(new Error('Network Error'))
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get.mockRejectedValue(new Error('Network Error'))
 
         vi.useFakeTimers()
         const promise = getGroupedVulns('Test')
@@ -130,11 +125,11 @@ describe('api.ts', () => {
 
     it('updateAssessment calls /assessment', async () => {
         const payload: any = { status: 'ok' }
-        _mockPost.mockResolvedValue({ data: { result: 'ok' } })
+        mocks.post.mockResolvedValue({ data: { result: 'ok' } })
 
         const result = await updateAssessment(payload)
 
-        expect(_mockPost).toHaveBeenCalledWith('/assessment', payload)
+        expect(mocks.post).toHaveBeenCalledWith('/assessment', payload)
         expect(result).toEqual({ result: 'ok' })
     })
 
@@ -149,17 +144,15 @@ describe('api.ts', () => {
     })
 
     it('checkSession returns true on success', async () => {
-        // @ts-ignore
-        axios.get.mockResolvedValue({ status: 200 })
+        mocks.get.mockResolvedValue({ status: 200 })
 
         const result = await checkSession()
         expect(result).toBe(true)
-        expect(axios.get).toHaveBeenCalled()
+        expect(mocks.get).toHaveBeenCalled()
     })
 
     it('checkSession returns false on failure', async () => {
-        // @ts-ignore
-        axios.get.mockRejectedValue(new Error('401'))
+        mocks.get.mockRejectedValue(new Error('401'))
 
         const result = await checkSession()
         expect(result).toBe(false)
