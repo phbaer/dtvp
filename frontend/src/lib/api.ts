@@ -21,6 +21,11 @@ export const getProjects = async (name: string): Promise<Project[]> => {
     return res.data;
 };
 
+export const getVersion = async (): Promise<{ version: string, build: string }> => {
+    const res = await api.get('/version');
+    return res.data;
+};
+
 export interface TaskResponse {
     task_id: string;
     status: 'pending' | 'running' | 'completed' | 'failed';

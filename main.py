@@ -14,7 +14,15 @@ from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
 from logic import group_vulnerabilities
 
-app = FastAPI(title="DTVP", version="0.1.0")
+from version import VERSION, BUILD_COMMIT
+
+app = FastAPI(title="DTVP", version=VERSION)
+
+
+@app.on_event("startup")
+async def startup_event():
+    print(f"Starting DTVP version {VERSION} (build {BUILD_COMMIT})")
+
 
 # CORS for frontend dev
 app.add_middleware(
@@ -35,6 +43,11 @@ app.include_router(auth_router, prefix=context_path)
 
 # API Router
 api_router = APIRouter(prefix="/api", tags=["api"])
+
+
+@api_router.get("/version")
+def get_version():
+    return {"version": VERSION, "build": BUILD_COMMIT}
 
 
 # Models
