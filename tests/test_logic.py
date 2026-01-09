@@ -50,7 +50,6 @@ def test_group_vulnerabilities_basic():
     # Execute
     grouped = group_vulnerabilities(input_data)
 
-
     # Verify
     assert len(grouped) == 2
 
@@ -60,16 +59,12 @@ def test_group_vulnerabilities_basic():
     assert g1["severity"] == "HIGH"
 
     # Check details of versions
-    v1 = next(
-        v for v in g1["affected_versions"] if v["project_version"] == "1.0"
-    )
+    v1 = next(v for v in g1["affected_versions"] if v["project_version"] == "1.0")
     # Check components in v1
     assert len(v1["components"]) == 1
     assert v1["components"][0]["analysis_state"] == "NOT_SET"
 
-    v2 = next(
-        v for v in g1["affected_versions"] if v["project_version"] == "2.0"
-    )
+    v2 = next(v for v in g1["affected_versions"] if v["project_version"] == "2.0")
     assert len(v2["components"]) == 1
     assert v2["components"][0]["analysis_state"] == "EXPLOITABLE"
 
@@ -95,7 +90,7 @@ def test_group_vulnerabilities_rescored():
                 "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
                 "analysis": {
                     "state": "NOT_SET",
-                    "analysisDetails": "[Rescored: 5.5]\n[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]\nSome details"
+                    "analysisDetails": "[Rescored: 5.5]\n[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]\nSome details",
                 },
             }
         ],
@@ -133,3 +128,85 @@ def test_group_vulnerabilities_missing_data():
     assert g["severity"] is None
     assert g["cvss_score"] is None
     assert g["cvss_vector"] is None
+
+
+def test_group_vulnerabilities_missing_id():
+    # Test with entirely missing vulnId and name
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    # No vulnId or name
+                    "uuid": "vuuid1",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 0
+
+
+def test_group_vulnerabilities_invalid_rescored_score():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-1",
+                    "uuid": "vuuid1",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "[Rescored: 1.2.3]\nSome details",
+                },
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 1
+    g = grouped[0]
+    assert g["rescored_cvss"] is None
+
+
+def test_group_vulnerabilities_loose_vector():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-1",
+                    "uuid": "vuuid1",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "Some invalid details\nCVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L\nEnd",
+                },
+            },
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-2",
+                    "uuid": "vuuid2",
+                },
+                "component": {"name": "libB", "version": "1.0", "uuid": "comp2"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "Legacy vector: AV:N/AC:L/Au:N/C:P/I:P/A:P",
+                },
+            },
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+
+    g1 = next(g for g in grouped if g["id"] == "CVE-1")
+    assert g1["rescored_vector"] == "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+
+    g2 = next(g for g in grouped if g["id"] == "CVE-2")
+    assert g2["rescored_vector"] == "AV:N/AC:L/Au:N/C:P/I:P/A:P"

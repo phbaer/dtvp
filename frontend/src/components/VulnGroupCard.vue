@@ -76,8 +76,7 @@ const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
     switch(ver) {
         case '4.0': activeInstance.value = new Cvss4P0(); break;
         case '3.1': activeInstance.value = new Cvss3P1(); break;
-        case '3.0': activeInstance.value = new Cvss3P1(); break; // Treat 3.0 tab as 3.1 for metrics
-        case '2.0': activeInstance.value = new Cvss2(); break;
+        case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
     }
     // Update vector immediately
     pendingVector.value = activeInstance.value.toString()
@@ -223,7 +222,7 @@ const handleUpdate = async () => {
             comment: comment.value,
             suppressed: suppressed.value
         }
-        console.log('Updating assessment with details:', finalDetails)
+
         const results = await updateAssessment(payload)
         
         const errors = results.filter((r: any) => r.status === 'error')
@@ -302,7 +301,7 @@ const stateColor = computed(() => {
             <div class="text-sm text-gray-300 line-clamp-1">{{ group.title || 'No title' }}</div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-1 font-mono text-xs text-gray-500">
+            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-1 font-mono text-xs text-gray-500 break-all">
                 {{ group.rescored_vector || group.cvss_vector }}
             </div>
         </div>
@@ -341,7 +340,7 @@ const stateColor = computed(() => {
                                     <span>{{ inst.component_name }} {{ inst.component_version }}</span>
                                     <span>{{ inst.analysis_state }}</span>
                                 </div>
-                                <div v-if="inst.analysis_details" class="text-sm text-gray-300 mb-1 p-2 bg-gray-800 rounded whitespace-pre-wrap">
+                                <div v-if="inst.analysis_details" class="text-sm text-gray-300 mb-1 p-2 bg-gray-800 rounded whitespace-pre-wrap break-all">
                                     {{ inst.analysis_details }}
                                 </div>
                                 <div v-if="inst.analysis_comments && inst.analysis_comments.length > 0" class="space-y-1">

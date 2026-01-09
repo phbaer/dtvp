@@ -20,35 +20,47 @@ test.describe('Vulnerability View and Rescoring', () => {
             });
         });
 
-        // Mock Grouped Vulnerabilities
-        await page.route('**/api/projects/TestProject/grouped-vulnerabilities', async (route) => {
+        // Mock Task Start
+        await page.route('**/api/tasks/group-vulns*', async (route) => {
             await route.fulfill({
                 status: 200,
-                body: JSON.stringify([
-                    {
-                        id: 'CVE-2023-1234',
-                        title: 'Test Vulnerability',
-                        description: 'A bad vulnerability description.',
-                        severity: 'HIGH',
-                        cvss: 9.8,
-                        cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
-                        affected_versions: [
-                            {
-                                project_name: 'TestProject',
-                                project_version: '1.0',
-                                project_uuid: 'p1',
-                                components: [
-                                    {
-                                        component_name: 'lib-a',
-                                        component_version: '1.0',
-                                        analysis_state: 'NOT_SET',
-                                        analysis_details: '',
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]),
+                body: JSON.stringify({ task_id: 'task-123' }),
+            });
+        });
+
+        // Mock Task Status Polling
+        await page.route('**/api/tasks/task-123', async (route) => {
+            await route.fulfill({
+                status: 200,
+                body: JSON.stringify({
+                    status: 'completed',
+                    progress: 100,
+                    result: [
+                        {
+                            id: 'CVE-2023-1234',
+                            title: 'Test Vulnerability',
+                            description: 'A bad vulnerability description.',
+                            severity: 'HIGH',
+                            cvss: 9.8,
+                            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                            affected_versions: [
+                                {
+                                    project_name: 'TestProject',
+                                    project_version: '1.0',
+                                    project_uuid: 'p1',
+                                    components: [
+                                        {
+                                            component_name: 'lib-a',
+                                            component_version: '1.0',
+                                            analysis_state: 'NOT_SET',
+                                            analysis_details: '',
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }),
             });
         });
     });

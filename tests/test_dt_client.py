@@ -1,36 +1,41 @@
 import pytest
-import respx
-from dt_client import DTClient
+from dt_client import DTClient, DTSettings, get_client
+from unittest.mock import patch
+
 
 @pytest.fixture
 def dt_client():
     return DTClient("http://dt.example.com", "api-key")
 
+
 @pytest.mark.asyncio
 async def test_get_projects(dt_client, respx_mock):
-    respx_mock.get("http://dt.example.com/api/v1/project").respond(json=[
-        {"name": "Proj1", "uuid": "u1"},
-        {"name": "Proj2", "uuid": "u2"}
-    ])
-    
+    respx_mock.get("http://dt.example.com/api/v1/project").respond(
+        json=[{"name": "Proj1", "uuid": "u1"}, {"name": "Proj2", "uuid": "u2"}]
+    )
+
     projects = await dt_client.get_projects(name="Proj")
     assert len(projects) == 2
     assert projects[0]["name"] == "Proj1"
 
+
 @pytest.mark.asyncio
 async def test_get_vulnerabilities(dt_client, respx_mock):
-    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(json=[
-        {"vulnerability": {"vulnId": "CVE-1"}}
-    ])
-    
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
+        json=[{"vulnerability": {"vulnId": "CVE-1"}}]
+    )
+
     vulns = await dt_client.get_vulnerabilities("u1")
     assert len(vulns) == 1
     assert vulns[0]["vulnerability"]["vulnId"] == "CVE-1"
 
+
 @pytest.mark.asyncio
 async def test_update_analysis(dt_client, respx_mock):
-    respx_mock.put("http://dt.example.com/api/v1/analysis").respond(json={"status": "updated"})
-    
+    respx_mock.put("http://dt.example.com/api/v1/analysis").respond(
+        json={"status": "updated"}
+    )
+
     res = await dt_client.update_analysis(
         project_uuid="p1",
         component_uuid="c1",
@@ -38,62 +43,119 @@ async def test_update_analysis(dt_client, respx_mock):
         state="NOT_AFFECTED",
         details="Clean",
         comment="False positive",
-        suppressed=True
+        suppressed=True,
     )
     assert res["status"] == "updated"
+
 
 @pytest.mark.asyncio
 async def test_get_analysis_404(dt_client, respx_mock):
     respx_mock.get("http://dt.example.com/api/v1/analysis").respond(status_code=404)
-    
+
     res = await dt_client.get_analysis("p1", "c1", "v1")
     assert res is None
+
 
 @pytest.mark.asyncio
 async def test_get_vulnerabilities_with_enrichment(dt_client, respx_mock):
     # Mock findings response
-    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(json=[
-        {
-            "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
-            "component": {"uuid": "c1"}
-        }
-    ])
-    
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
+        json=[
+            {
+                "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+                "component": {"uuid": "c1"},
+            }
+        ]
+    )
+
     # Mock analysis response
-    respx_mock.get("http://dt.example.com/api/v1/analysis").respond(json={
-        "state": "NOT_AFFECTED",
-        "analysisDetails": "Test details"
-    })
-    
+    respx_mock.get("http://dt.example.com/api/v1/analysis").respond(
+        json={"state": "NOT_AFFECTED", "analysisDetails": "Test details"}
+    )
+
     vulns = await dt_client.get_vulnerabilities("u1")
     assert len(vulns) == 1
     assert vulns[0]["analysis"]["state"] == "NOT_AFFECTED"
 
+
 @pytest.mark.asyncio
 async def test_get_vulnerabilities_enrichment_failure(dt_client, respx_mock):
     # Mock findings response
-    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(json=[
-        {
-            "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
-            "component": {"uuid": "c1"}
-        }
-    ])
-    
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
+        json=[
+            {
+                "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+                "component": {"uuid": "c1"},
+            }
+        ]
+    )
+
     # Mock analysis failure
     respx_mock.get("http://dt.example.com/api/v1/analysis").respond(status_code=500)
-    
+
     # Should not raise, just continue without enrichment
     vulns = await dt_client.get_vulnerabilities("u1")
     assert len(vulns) == 1
     # Analysis should not be added
     assert "analysis" not in vulns[0] or vulns[0].get("analysis") is None
 
+
 @pytest.mark.asyncio
 async def test_get_project_vulnerabilities(dt_client, respx_mock):
-    respx_mock.get("http://dt.example.com/api/v1/vulnerability/project/u1").respond(json=[
-        {"vulnId": "CVE-1", "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}
-    ])
-    
+    respx_mock.get("http://dt.example.com/api/v1/vulnerability/project/u1").respond(
+        json=[
+            {
+                "vulnId": "CVE-1",
+                "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            }
+        ]
+    )
+
     vulns = await dt_client.get_project_vulnerabilities("u1")
     assert len(vulns) == 1
     assert vulns[0]["cvssV3Vector"] is not None
+
+
+@pytest.mark.asyncio
+async def test_get_project_versions():
+    async with DTClient("http://url", "key") as client:
+        res = await client.get_project_versions("uuid")
+        assert res is None
+
+
+def test_settings_properties():
+    # Test fallbacks
+    s = DTSettings(
+        DTVP_DT_API_URL="",
+        DEPENDENCY_TRACK_URL="http://fallback",
+        DTVP_DT_API_KEY="",
+        DEPENDENCY_TRACK_API_KEY="key",
+    )
+
+    assert s.api_url == "http://fallback"
+    assert s.api_key == "key"
+
+    s2 = DTSettings(
+        DTVP_DT_API_URL="",
+        DEPENDENCY_TRACK_URL=None,
+        DTVP_DT_API_KEY="",
+        DEPENDENCY_TRACK_API_KEY=None,
+    )
+    assert s2.api_url == "http://localhost:8081"
+    assert s2.api_key == "change_me"
+
+
+@pytest.mark.asyncio
+async def test_get_client():
+    with patch("dt_client.DTSettings") as mock_settings_cls:
+        mock_instance = mock_settings_cls.return_value
+        # If accessing the property returns a mock, that's fine, we just set the string conversion or use it as is?
+        # But DTClient constructor expects string for rstrip.
+        # So we must make sure api_url returns a string.
+        mock_instance.api_url = "http://mock"
+        mock_instance.api_key = "mock_key"
+
+        async for c in get_client():
+            assert c.base_url == "http://mock"
+            assert c.headers["X-Api-Key"] == "mock_key"
+            break
