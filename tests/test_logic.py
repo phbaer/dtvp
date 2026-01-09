@@ -210,3 +210,190 @@ def test_group_vulnerabilities_loose_vector():
 
     g2 = next(g for g in grouped if g["id"] == "CVE-2")
     assert g2["rescored_vector"] == "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+
+
+# Tagging Tests
+
+
+def test_group_vulnerabilities_tagging():
+    # Setup data
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-TAG",
+                    "uuid": "vuuid1",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+    }
+
+    # BOM where libA is a child of parentA
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "comp1", "name": "libA"},
+            {"bom-ref": "ref2", "uuid": "comp2", "name": "parentA"},
+        ],
+        "dependencies": [
+            {
+                "ref": "ref2",
+                "dependsOn": ["ref1"],
+            },  # parentA depends on libA (actually dependsOn is typically children, wait.
+            # In CycloneDX 'dependsOn' lists the dependencies OF the ref.
+            # So if A depends on B, ref=A, dependsOn=[B].
+            # My logic in logic.py:
+            # for dep in bom["dependencies"]:
+            #     parent_ref = dep.get("ref")
+            #     for child_ref in dep.get("dependsOn", []):
+            #         parent_map[child_ref] = parent_ref
+            # This logic assumes 'ref' is the parent (dependant) and 'dependsOn' are children (dependencies).
+            # If Project depends on ParentA, and ParentA depends on LibA.
+            # Hierarchy: Project -> ParentA -> LibA.
+            # BOM:
+            # {ref: Project, dependsOn: [ParentA]}
+            # {ref: ParentA, dependsOn: [LibA]}
+            # My logic builds: ParentA -> Project, LibA -> ParentA.
+            # Yes, parent_map[child] = parent.
+            # So if I want to tag LibA with ParentA's team.
+            # LibA is the child. ParentA is the parent.
+            # So dependencies needs: ref="ref2" (parentA), dependsOn=["ref1" (libA)]
+        ],
+    }
+
+    project_boms = {"uuid1": bom}
+
+    # Mock load_team_mapping
+    import logic
+
+    original_load = logic.load_team_mapping
+    try:
+        logic.load_team_mapping = lambda path=None: {
+            "parentA": "TeamA",
+            "libA": "TeamB",
+        }
+
+        grouped = group_vulnerabilities([v1_data], project_boms)
+
+        assert len(grouped) == 1
+        g = grouped[0]
+        # Should have both TeamB (direct match) and TeamA (parent match)
+        assert "TeamA" in g["tags"]
+        assert "TeamB" in g["tags"]
+        assert len(g["tags"]) == 2
+
+    finally:
+        logic.load_team_mapping = original_load
+
+
+def test_get_team_mapping_path_default():
+    import logic
+    import os
+
+    original_env = os.environ.get("TEAM_MAPPING_PATH")
+    if "TEAM_MAPPING_PATH" in os.environ:
+        del os.environ["TEAM_MAPPING_PATH"]
+
+    try:
+        assert logic.get_team_mapping_path() == "data/team_mapping.json"
+    finally:
+        if original_env:
+            os.environ["TEAM_MAPPING_PATH"] = original_env
+
+
+def test_get_team_mapping_path_env():
+    import logic
+    import os
+
+    original_env = os.environ.get("TEAM_MAPPING_PATH")
+    os.environ["TEAM_MAPPING_PATH"] = "/tmp/test.json"
+
+    try:
+        assert logic.get_team_mapping_path() == "/tmp/test.json"
+    finally:
+        if original_env:
+            os.environ["TEAM_MAPPING_PATH"] = original_env
+        else:
+            del os.environ["TEAM_MAPPING_PATH"]
+
+
+def test_load_team_mapping_file_not_found():
+    import logic
+
+    mapping = logic.load_team_mapping("/non/existent/path.json")
+    assert mapping == {}
+
+
+def test_load_team_mapping_invalid_json(tmp_path):
+    import logic
+
+    p = tmp_path / "invalid.json"
+    p.write_text("invalid json")
+
+    mapping = logic.load_team_mapping(str(p))
+    assert mapping == {}
+
+
+def test_load_team_mapping_valid(tmp_path):
+    import logic
+    import json
+
+    p = tmp_path / "valid.json"
+    data = {"comp": "team"}
+    p.write_text(json.dumps(data))
+
+    mapping = logic.load_team_mapping(str(p))
+    assert mapping == data
+
+
+def test_tagging_no_bom():
+    import logic
+
+    comp_uuid = "uuid1"
+    comp_name = "libA"
+    bom = {}
+    mapping = {"libA": "TeamA"}
+
+    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    assert tags == ["TeamA"]
+
+
+def test_tagging_bom_ref_mismatch():
+    import logic
+
+    comp_uuid = "uuid1"
+    comp_name = "libA"
+    bom = {"components": [{"bom-ref": "ref1", "uuid": "uuid2", "name": "libB"}]}
+    mapping = {"libA": "TeamA"}
+
+    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    assert tags == ["TeamA"]  # matched by name directly
+
+
+def test_tagging_bom_hierarchy():
+    import logic
+
+    # Hierarchy: custom-app (TeamX) -> lib-core (TeamCore) -> lib-utils
+    # We are looking at lib-utils. It should inherit TeamCore and TeamX.
+
+    comp_name = "lib-utils"
+    comp_uuid = "uuid3"
+
+    bom = {
+        "components": [
+            {"bom-ref": "app", "uuid": "uuid1", "name": "custom-app"},
+            {"bom-ref": "core", "uuid": "uuid2", "name": "lib-core"},
+            {"bom-ref": "utils", "uuid": "uuid3", "name": "lib-utils"},
+        ],
+        "dependencies": [
+            {"ref": "app", "dependsOn": ["core"]},
+            {"ref": "core", "dependsOn": ["utils"]},
+        ],
+    }
+
+    mapping = {"custom-app": "TeamX", "lib-core": "TeamCore"}
+
+    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    assert set(tags) == {"TeamX", "TeamCore"}

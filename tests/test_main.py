@@ -2,6 +2,13 @@ import pytest
 import os
 import importlib
 from fastapi.testclient import TestClient
+from main import app, get_current_user
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[get_current_user] = lambda: "testuser"
+    yield
 
 
 def test_openapi_endpoint(client):
@@ -81,3 +88,42 @@ def test_spa_traversal_logic():
     with open("frontend/dist/index.html", "rb") as f:
         idx = f.read()
     assert resp.content == idx
+
+
+def test_upload_mapping(client):
+    from unittest.mock import patch, mock_open
+
+    mapping_content = b'{"comp": "team"}'
+    files = {"file": ("mapping.json", mapping_content, "application/json")}
+
+    # We mock get_team_mapping_path to avoid overwriting real data/temp files
+    with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+        with patch(
+            "builtins.open", mock_open(read_data='{"test": "data"}')
+        ) as mocked_file:
+            response = client.post("/api/settings/mapping", files=files)
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "success"
+
+            # Verify file write
+            mocked_file.assert_called_with(
+                "/tmp/test_mapping.json", "r"
+            )  # It opens for read at end too
+
+
+def test_upload_mapping_failure(client):
+    from unittest.mock import patch
+
+    mapping_content = b"invalid"
+    files = {"file": ("mapping.json", mapping_content, "application/json")}
+
+    # Mock open to raise exception on write or processing
+    with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+        with patch("builtins.open", side_effect=Exception("Disk full")):
+            response = client.post("/api/settings/mapping", files=files)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "error"
+            assert "Disk full" in data["message"]

@@ -46,6 +46,8 @@ async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
     ]
     # Mock project_vulnerabilities
     mock_dt_client.get_project_vulnerabilities.return_value = []
+    # Mock get_bom
+    mock_dt_client.get_bom.return_value = {}
 
     # Patch DTClient in main to return our mock when instantiated
     with patch("main.DTClient", return_value=mock_dt_client):
@@ -165,6 +167,8 @@ async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client)
             "cvssV3BaseScore": 9.8,
         }
     ]
+    # Mock get_bom
+    mock_dt_client.get_bom.return_value = {}
 
     with patch("main.DTClient", return_value=mock_dt_client):
         # Start Task
