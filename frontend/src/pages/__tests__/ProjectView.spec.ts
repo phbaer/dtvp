@@ -44,11 +44,11 @@ describe('ProjectView.vue', () => {
             }
         })
 
-        expect(wrapper.text()).toContain('Loading vulnerabilities')
+        expect(wrapper.text()).toContain('Starting search')
 
         await flushPromises()
 
-        expect(getGroupedVulns).toHaveBeenCalledWith('TestProject')
+        expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', expect.any(Function))
         // Child component should be rendered
         expect(wrapper.findAll('.vuln-group-card')).toHaveLength(1)
     })

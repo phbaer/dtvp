@@ -29,6 +29,7 @@ const { _mockGet, _mockPost } = axiosPkg as any
 describe('api.ts', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.useRealTimers()
     })
 
     it('getProjects calls /projects', async () => {
@@ -41,14 +42,90 @@ describe('api.ts', () => {
         expect(result).toEqual(mockData)
     })
 
-    it('getGroupedVulns calls /projects/:name/grouped-vulnerabilities', async () => {
-        const mockData = [{ id: '1' }]
-        _mockGet.mockResolvedValue({ data: mockData })
+    it('getGroupedVulns starts task and polls for result', async () => {
+        const mockTaskStart = { task_id: 'task-123' }
+        const mockTaskRunning = { status: 'running', progress: 50, message: 'Loading...' }
+        const mockTaskCompleted = { status: 'completed', result: [{ id: '1' }] }
 
-        const result = await getGroupedVulns('Test')
+        _mockPost.mockResolvedValue({ data: mockTaskStart })
 
-        expect(_mockGet).toHaveBeenCalledWith('/projects/Test/grouped-vulnerabilities')
-        expect(result).toEqual(mockData)
+        // Mock sequential GET calls: first running, then completed
+        _mockGet
+            .mockResolvedValueOnce({ data: mockTaskRunning })
+            .mockResolvedValueOnce({ data: mockTaskCompleted })
+
+        // Use vi.useFakeTimers to fast-forward polling intervals
+        vi.useFakeTimers()
+
+        const promise = getGroupedVulns('Test')
+
+        // Fast-forward time to trigger interval
+        await vi.advanceTimersByTimeAsync(1100)
+        await vi.advanceTimersByTimeAsync(1100)
+
+        const result = await promise
+
+        expect(_mockPost).toHaveBeenCalledWith('/tasks/group-vulns', null, { params: { name: 'Test' } })
+        expect(_mockGet).toHaveBeenCalledWith('/tasks/task-123')
+        expect(result).toEqual(mockTaskCompleted.result)
+
+        vi.useRealTimers()
+    })
+
+    it('getGroupedVulns reports progress', async () => {
+        const mockTaskStart = { task_id: 'task-123' }
+        const mockTaskRunning = { status: 'running', progress: 50, message: 'Step 1' }
+        const mockTaskCompleted = { status: 'completed', result: [] }
+
+        _mockPost.mockResolvedValue({ data: mockTaskStart })
+        _mockGet
+            .mockResolvedValueOnce({ data: mockTaskRunning })
+            .mockResolvedValueOnce({ data: mockTaskCompleted })
+
+        vi.useFakeTimers()
+        const onProgress = vi.fn()
+        const promise = getGroupedVulns('Test', onProgress)
+
+        await vi.advanceTimersByTimeAsync(1100)
+        await vi.advanceTimersByTimeAsync(1100)
+
+        await promise
+        expect(onProgress).toHaveBeenCalledWith('Step 1', 50)
+        vi.useRealTimers()
+    })
+
+    it('getGroupedVulns throws error on task failure', async () => {
+        const mockTaskStart = { task_id: 'task-err' }
+        const mockTaskFailed = { status: 'failed', message: 'Task Failed', progress: 0 }
+
+        _mockPost.mockResolvedValue({ data: mockTaskStart })
+        _mockGet.mockResolvedValueOnce({ data: mockTaskFailed })
+
+        vi.useFakeTimers()
+        const promise = getGroupedVulns('Test')
+
+        const assertion = expect(promise).rejects.toThrow('Task Failed')
+
+        await vi.advanceTimersByTimeAsync(1100)
+
+        await assertion
+        vi.useRealTimers()
+    })
+
+    it('getGroupedVulns throws error on polling network error', async () => {
+        const mockTaskStart = { task_id: 'task-net-err' }
+        _mockPost.mockResolvedValue({ data: mockTaskStart })
+        _mockGet.mockRejectedValue(new Error('Network Error'))
+
+        vi.useFakeTimers()
+        const promise = getGroupedVulns('Test')
+
+        const assertion = expect(promise).rejects.toThrow('Network Error')
+
+        await vi.advanceTimersByTimeAsync(1100)
+
+        await assertion
+        vi.useRealTimers()
     })
 
     it('updateAssessment calls /assessment', async () => {
