@@ -1,0 +1,16 @@
+{
+    "configurations": [
+        {
+            "name": "Python Debugger: FastAPI",
+            "type": "debugpy",
+            "python": ".venv/bin/python",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "main:app",
+                "--reload"
+            ],
+            "jinja": true
+        }
+    ]
+}
