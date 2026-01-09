@@ -79,13 +79,21 @@ def get_tags_for_component(
 
             # Self check (if not checked by name already, but name check covers it)
             # Traverse ancestors
+            traversal_path = [component_name]
+
             while current_ref in parent_map:
                 current_ref = parent_map[current_ref]
                 parent_comp = comp_map.get(current_ref)
                 if parent_comp:
                     p_name = parent_comp.get("name")
+                    traversal_path.append(p_name)
                     if p_name and p_name in mapping:
                         found_tags.add(mapping[p_name])
+
+            if len(traversal_path) > 1:
+                print(
+                    f"INFO: [Tagging] Checked hierarchy for {component_name}: {' -> '.join(traversal_path)}"
+                )
 
     if not found_tags and "*" in mapping:
         found_tags.add(mapping["*"])

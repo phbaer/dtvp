@@ -1,10 +1,22 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const message = ref('')
 const error = ref('')
+const currentMapping = ref<Record<string, string> | null>(null)
+
+const loadMapping = async () => {
+    try {
+        const res = await fetch('/api/settings/mapping')
+        if (res.ok) {
+            currentMapping.value = await res.json()
+        }
+    } catch (e) {
+        console.error("Failed to load mapping", e)
+    }
+}
 
 const handleFileUpload = async () => {
     if (!fileInput.value?.files?.length) return
@@ -34,12 +46,17 @@ const handleFileUpload = async () => {
         message.value = 'Mapping file uploaded successfully!'
         // Reset input
         if (fileInput.value) fileInput.value.value = ''
+        await loadMapping()
     } catch (err: any) {
         error.value = err.message
     } finally {
         uploading.value = false
     }
 }
+
+onMounted(() => {
+    loadMapping()
+})
 </script>
 
 <template>
@@ -51,6 +68,14 @@ const handleFileUpload = async () => {
 
     <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
         <h3 class="text-xl font-bold mb-4 text-gray-200">Team Mapping Configuration</h3>
+        
+        <div v-if="currentMapping" class="mb-6">
+             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Current Configuration</h4>
+             <div class="bg-gray-900 p-4 rounded border border-gray-700 overflow-x-auto max-h-64">
+                 <pre class="text-xs text-blue-300 font-mono">{{ JSON.stringify(currentMapping, null, 2) }}</pre>
+             </div>
+        </div>
+
         <p class="text-gray-400 mb-6 text-sm">
             Upload a JSON file containing the mapping between components and teams. 
             The file should be a JSON object where keys are component names and values are team names.

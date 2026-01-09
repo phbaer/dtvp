@@ -13,7 +13,8 @@ import shutil
 
 from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
-from logic import group_vulnerabilities, get_team_mapping_path
+from logic import group_vulnerabilities, get_team_mapping_path, load_team_mapping
+
 
 from version import VERSION, BUILD_COMMIT
 
@@ -271,6 +272,11 @@ def get_open_api_endpoint():
         description=app.description,
         routes=app.routes,
     )
+
+
+@api_router.get("/settings/mapping")
+async def get_team_mapping(user: str = Depends(get_current_user)):
+    return load_team_mapping()
 
 
 @api_router.post("/settings/mapping")

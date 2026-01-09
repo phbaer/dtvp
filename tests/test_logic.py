@@ -421,3 +421,31 @@ def test_tagging_catch_all_ignored_if_match():
 
     tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
     assert tags == ["TeamA"]  # Should NOT include CatchAllTeam
+
+
+def test_tagging_deep_hierarchy_multiple_matches():
+    import logic
+
+    # Hierarchy: Top (TeamA) -> Mid (NoTeam) -> Low (TeamB) -> VulnComp (TeamC)
+
+    comp_uuid = "v-uuid"
+    comp_name = "VulnComp"
+
+    bom = {
+        "components": [
+            {"bom-ref": "top", "uuid": "u1", "name": "Top"},
+            {"bom-ref": "mid", "uuid": "u2", "name": "Mid"},
+            {"bom-ref": "low", "uuid": "u3", "name": "Low"},
+            {"bom-ref": "vuln", "uuid": "v-uuid", "name": "VulnComp"},
+        ],
+        "dependencies": [
+            {"ref": "top", "dependsOn": ["mid"]},
+            {"ref": "mid", "dependsOn": ["low"]},
+            {"ref": "low", "dependsOn": ["vuln"]},
+        ],
+    }
+
+    mapping = {"Top": "TeamA", "Low": "TeamB", "VulnComp": "TeamC"}
+
+    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    assert set(tags) == {"TeamA", "TeamB", "TeamC"}

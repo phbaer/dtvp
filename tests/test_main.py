@@ -127,3 +127,12 @@ def test_upload_mapping_failure(client):
             data = response.json()
             assert data["status"] == "error"
             assert "Disk full" in data["message"]
+
+
+def test_get_team_mapping(client):
+    from unittest.mock import patch
+
+    with patch("main.load_team_mapping", return_value={"test": "team"}):
+        response = client.get("/api/settings/mapping")
+        assert response.status_code == 200
+        assert response.json() == {"test": "team"}
