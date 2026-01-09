@@ -108,6 +108,7 @@ class DTClient:
         """
         response = await self.client.get(
             f"{self.base_url}/api/v1/bom/cyclonedx/project/{project_uuid}",
+            headers={"accept": "application/vnd.cyclonedx+json"},
         )
         response.raise_for_status()
         return response.json()
