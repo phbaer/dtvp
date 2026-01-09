@@ -26,9 +26,9 @@ def load_team_mapping(path: str = None) -> Dict[str, str]:
         return {}
 
 
-def build_parent_map(bom: Dict[str, Any]) -> Dict[str, str]:
+def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:
     """
-    Builds a map of child_ref -> parent_ref from BOM.
+    Builds a map of child_ref -> list of parent_refs from BOM.
     """
     parent_map = {}
     if not bom or "dependencies" not in bom:
@@ -37,7 +37,9 @@ def build_parent_map(bom: Dict[str, Any]) -> Dict[str, str]:
     for dep in bom["dependencies"]:
         parent_ref = dep.get("ref")
         for child_ref in dep.get("dependsOn", []):
-            parent_map[child_ref] = parent_ref
+            if child_ref not in parent_map:
+                parent_map[child_ref] = []
+            parent_map[child_ref].append(parent_ref)
 
     return parent_map
 
@@ -75,24 +77,49 @@ def get_tags_for_component(
 
         if target_ref:
             parent_map = build_parent_map(bom)
-            current_ref = target_ref
 
-            # Self check (if not checked by name already, but name check covers it)
-            # Traverse ancestors
-            traversal_path = [component_name]
+            # BFS/Queue for traversal to support multiple parents
+            # Queue stores (current_ref, path_list)
+            # Use current_comp.get("name") if available, otherwise just use component_name
+            start_name = component_name
+            target_comp = comp_map.get(target_ref)
+            if target_comp:
+                start_name = target_comp.get("name") or component_name
 
-            while current_ref in parent_map:
-                current_ref = parent_map[current_ref]
-                parent_comp = comp_map.get(current_ref)
-                if parent_comp:
-                    p_name = parent_comp.get("name")
-                    traversal_path.append(p_name)
-                    if p_name and p_name in mapping:
-                        found_tags.add(mapping[p_name])
+            queue = [(target_ref, [start_name])]
+            visited = set([target_ref])
 
-            if len(traversal_path) > 1:
+            while queue:
+                current_ref, current_path = queue.pop(0)  # BFS
+
+                # Check current node (if not the starting node, or if we want to double check)
+                current_comp = comp_map.get(current_ref)
+                if current_comp:
+                    curr_name = current_comp.get("name")
+                    if curr_name and curr_name in mapping:
+                        found_tags.add(mapping[curr_name])
+
+                # Get parents
+                parents = parent_map.get(current_ref, [])
+                # parent_map[current_ref] is now a LIST
+
+                # Careful: logic.py lines 86-87 assumed parent_map keys were current_ref.
+                # My build_parent_map changed, keys are child_ref, values are list of parent_ref.
+                # So parent_map.get(current_ref) gives parents of current_ref.
+
+                for p_ref in parents:
+                    if p_ref not in visited:
+                        visited.add(p_ref)
+                        p_comp = comp_map.get(p_ref)
+                        p_name = p_comp.get("name") if p_comp else p_ref
+
+                        new_path = current_path + [str(p_name)]
+                        queue.append((p_ref, new_path))
+
+            # Just log that we did traversal
+            if len(visited) > 1:
                 print(
-                    f"INFO: [Tagging] Checked hierarchy for {component_name}: {' -> '.join(traversal_path)}"
+                    f"INFO: [Tagging] Traversed {len(visited)} ancestors for {component_name} in BOM."
                 )
 
     if not found_tags and "*" in mapping:
