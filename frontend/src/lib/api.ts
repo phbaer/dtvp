@@ -21,9 +21,52 @@ export const getProjects = async (name: string): Promise<Project[]> => {
     return res.data;
 };
 
-export const getGroupedVulns = async (name: string): Promise<GroupedVuln[]> => {
-    const res = await api.get(`/projects/${name}/grouped-vulnerabilities`);
+export interface TaskResponse {
+    task_id: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    message: string;
+    progress: number;
+    result?: GroupedVuln[];
+}
+
+export const startGroupVulnTask = async (name: string): Promise<{ task_id: string }> => {
+    const res = await api.post('/tasks/group-vulns', null, { params: { name } });
     return res.data;
+};
+
+export const getTaskStatus = async (taskId: string): Promise<TaskResponse> => {
+    const res = await api.get(`/tasks/${taskId}`);
+    return res.data;
+};
+
+// Start a task and poll until completion
+export const getGroupedVulns = async (name: string, onProgress?: (msg: string, progress: number) => void): Promise<GroupedVuln[]> => {
+    // 1. Start Task
+    const { task_id } = await startGroupVulnTask(name);
+
+    // 2. Poll
+    return new Promise((resolve, reject) => {
+        const interval = setInterval(async () => {
+            try {
+                const status = await getTaskStatus(task_id);
+                if (onProgress) {
+                    onProgress(status.message, status.progress);
+                }
+
+                if (status.status === 'completed') {
+                    clearInterval(interval);
+                    resolve(status.result || []);
+                } else if (status.status === 'failed') {
+                    clearInterval(interval);
+                    reject(new Error(status.message));
+                }
+                // Continue polling if pending or running
+            } catch (e) {
+                clearInterval(interval);
+                reject(e);
+            }
+        }, 1000);
+    });
 };
 
 export const updateAssessment = async (payload: AssessmentPayload) => {

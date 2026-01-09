@@ -9,18 +9,26 @@ const route = useRoute()
 const groups = ref<GroupedVuln[]>([])
 const loading = ref(true)
 const error = ref('')
+const loadingMessage = ref('Initializing...')
+const loadingProgress = ref(0)
 
 const fetchVulns = async () => {
     const name = route.params.name as string
     if (!name) return
     
     loading.value = true
+    error.value = ''
+    loadingMessage.value = 'Starting search...'
+    loadingProgress.value = 0
+
     try {
-        const data = await getGroupedVulns(name)
+        const data = await getGroupedVulns(name, (msg, progress) => {
+            loadingMessage.value = msg
+            loadingProgress.value = progress
+        })
         groups.value = data
-        error.value = ''
-    } catch (err) {
-        error.value = 'Failed to load vulnerabilities'
+    } catch (err: any) {
+        error.value = 'Failed to load vulnerabilities: ' + (err.message || err)
         console.error(err)
     } finally {
         loading.value = false
@@ -58,7 +66,13 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
         <h2 class="text-2xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name }}</span></h2>
     </div>
     
-    <div v-if="loading" class="text-center py-10">Loading vulnerabilities for {{ $route.params.name }}...</div>
+    <div v-if="loading" class="text-center py-10">
+        <div class="mb-2 text-xl font-semibold">{{ loadingMessage }}</div>
+        <div class="w-full max-w-md mx-auto bg-gray-700 rounded-full h-4 relative overflow-hidden">
+             <div class="bg-blue-500 h-4 transition-all duration-300" :style="{ width: loadingProgress + '%' }"></div>
+        </div>
+        <div class="mt-2 text-sm text-gray-400">{{ loadingProgress }}%</div>
+    </div>
     <div v-else-if="error" class="text-red-500 text-center py-10">{{ error }}</div>
     
     <div v-else class="space-y-4">
