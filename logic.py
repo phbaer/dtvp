@@ -4,6 +4,7 @@ import re
 # Pre-compile regex patterns
 RE_SCORE = re.compile(r"\[Rescored:\s*([\d\.]+)\]")
 RE_VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
+RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
 
 
 def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -80,6 +81,11 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
                 match_vector = RE_VECTOR.search(details)
                 if match_vector:
                     rescored_vector = match_vector.group(1).strip()
+                else:
+                    # Fallback: Search for any CVSS vector string in the details
+                    match_any_vector = RE_ANY_VECTOR.search(details)
+                    if match_any_vector:
+                        rescored_vector = match_any_vector.group(1).strip()
 
             # If we found a rescored value, update the group level if not set
             if rescored_score is not None:
