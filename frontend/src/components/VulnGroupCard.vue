@@ -296,8 +296,8 @@ const stateColor = computed(() => {
                     {{ group.severity || 'UNKNOWN' }}
                 </span>
                 <span class="text-sm text-gray-400 flex items-center gap-2">
-                    <span v-if="group.rescored_cvss" class="text-yellow-400 font-bold" title="Rescored Value">
-                        CVSS: {{ group.rescored_cvss }}
+                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)] animate-pulse" title="Rescored Value">
+                        RESC: {{ group.rescored_cvss }}
                     </span>
                     <span v-else>
                         CVSS: {{ group.cvss || group.cvss_score || 'N/A' }}
@@ -352,7 +352,7 @@ const stateColor = computed(() => {
                                 <div v-if="inst.analysis_details" class="text-sm text-gray-300 mb-1 p-2 bg-gray-800 rounded whitespace-pre-wrap break-all">
                                     {{ inst.analysis_details }}
                                 </div>
-                                <div v-if="inst.analysis_comments && inst.analysis_comments.length > 0" class="space-y-1">
+                                <div v-if="inst.analysis_comments && inst.analysis_comments.length > 0" class="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
                                     <div v-for="(c, ci) in inst.analysis_comments" :key="ci" class="text-xs text-gray-400 italic pl-2 border-l-2 border-gray-600">
                                         {{ c.comment }} <span class="text-gray-600">- {{ new Date(c.timestamp).toLocaleDateString() }}</span>
                                     </div>

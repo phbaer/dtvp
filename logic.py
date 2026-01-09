@@ -70,7 +70,15 @@ def get_tags_for_component(
             c_uuid = comp.get("uuid")
             c_name = comp.get("name")
 
+            # Fallback for matching:
+            # 1. Matches passed component_uuid (if provided and present in BOM)
+            # 2. Matches component_name (less reliable but often sufficient)
+
+            # NOTE: DT exports might put the UUID in bom-ref or not have it at all.
+            # We check if ref == component_uuid as a direct correlation often seen.
             if c_uuid == component_uuid:
+                target_ref = ref
+            elif ref == component_uuid:
                 target_ref = ref
             elif not target_ref and c_name == component_name:
                 target_ref = ref
