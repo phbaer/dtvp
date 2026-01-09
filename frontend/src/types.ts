@@ -43,6 +43,7 @@ export interface GroupedVuln {
     cvss_vector?: string;
     rescored_cvss?: number | null;
     rescored_vector?: string | null;
+    tags?: string[];
     affected_versions: AffectedVersion[];
 }
 

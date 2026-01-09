@@ -102,6 +102,16 @@ class DTClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_bom(self, project_uuid: str) -> Dict[str, Any]:
+        """
+        Get project BOM in CycloneDX JSON format.
+        """
+        response = await self.client.get(
+            f"{self.base_url}/api/v1/bom/cyclonedx/project/{project_uuid}",
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_analysis(
         self,
         project_uuid: str,

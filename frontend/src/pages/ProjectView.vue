@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { getGroupedVulns } from '../lib/api'
 import type { GroupedVuln } from '../types'
@@ -56,14 +56,34 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
     })
 }
 
+const tagFilter = ref('')
+
+const filteredGroups = computed(() => {
+    if (!tagFilter.value) return groups.value
+    const term = tagFilter.value.toLowerCase()
+    return groups.value.filter(g => 
+        g.tags?.some(t => t.toLowerCase().includes(term))
+    )
+})
+
 watch(() => route.params.name, fetchVulns, { immediate: true })
 </script>
 
 <template>
   <div>
-    <div class="mb-6 flex items-center gap-4">
-        <router-link to="/" class="text-blue-400 hover:underline">&larr; Back to Dashboard</router-link>
-        <h2 class="text-2xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name }}</span></h2>
+    <div class="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+            <router-link to="/" class="text-blue-400 hover:underline">&larr; Back to Dashboard</router-link>
+            <h2 class="text-2xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name }}</span></h2>
+        </div>
+        <div>
+            <input 
+                v-model="tagFilter" 
+                type="text" 
+                placeholder="Filter by Team Tag..." 
+                class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
+            />
+        </div>
     </div>
     
     <div v-if="loading" class="text-center py-10">
@@ -77,12 +97,12 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
     
     <div v-else class="space-y-4">
         <VulnGroupCard 
-            v-for="group in groups" 
+            v-for="group in filteredGroups" 
             :key="group.id" 
             :group="group" 
             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)" 
         />
-        <div v-if="groups.length === 0" class="text-gray-500 text-center">No vulnerabilities found.</div>
+        <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center">No vulnerabilities found matching criteria.</div>
     </div>
   </div>
 </template>

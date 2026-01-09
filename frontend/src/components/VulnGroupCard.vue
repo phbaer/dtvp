@@ -283,6 +283,15 @@ const stateColor = computed(() => {
         <div>
             <div class="flex items-center gap-3 mb-1">
                 <span class="font-mono text-lg font-bold text-yellow-400">{{ group.id }}</span>
+                <div v-if="group.tags && group.tags.length > 0" class="flex gap-2">
+                    <span 
+                        v-for="tag in group.tags" 
+                        :key="tag" 
+                        class="px-2 py-0.5 rounded text-xs font-medium bg-blue-900 text-blue-200 border border-blue-700"
+                    >
+                        {{ tag }}
+                    </span>
+                </div>
                 <span :class="['px-2 py-0.5 rounded text-xs font-bold', severityColor]">
                     {{ group.severity || 'UNKNOWN' }}
                 </span>

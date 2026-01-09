@@ -1,5 +1,7 @@
 from typing import List, Dict, Any
 import re
+import json
+import os
 
 # Pre-compile regex patterns
 RE_SCORE = re.compile(r"\[Rescored:\s*([\d\.]+)\]")
@@ -7,35 +9,103 @@ RE_VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
 RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
 
 
-def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def load_team_mapping(path: str = "team_mapping.json") -> Dict[str, str]:
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def build_parent_map(bom: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Builds a map of child_ref -> parent_ref from BOM.
+    """
+    parent_map = {}
+    if not bom or "dependencies" not in bom:
+        return {}
+
+    for dep in bom["dependencies"]:
+        parent_ref = dep.get("ref")
+        for child_ref in dep.get("dependsOn", []):
+            parent_map[child_ref] = parent_ref
+
+    return parent_map
+
+
+def get_tags_for_component(
+    component_uuid: str,
+    component_name: str,
+    bom: Dict[str, Any],
+    mapping: Dict[str, str],
+) -> List[str]:
+    found_tags = set()
+
+    # Check direct match first (always valid)
+    if component_name in mapping:
+        found_tags.add(mapping[component_name])
+
+    if not bom:
+        return list(found_tags)
+
+    # Map refs
+    comp_map = {}  # ref -> comp
+    target_ref = None
+
+    for comp in bom.get("components", []):
+        ref = comp.get("bom-ref")
+        if not ref:
+            continue
+        comp_map[ref] = comp
+
+        c_uuid = comp.get("uuid")
+        c_name = comp.get("name")
+
+        if c_uuid == component_uuid:
+            target_ref = ref
+        elif not target_ref and c_name == component_name:
+            target_ref = ref
+
+    if not target_ref:
+        return list(found_tags)
+
+    parent_map = build_parent_map(bom)
+    current_ref = target_ref
+
+    # Self check (if not checked by name already, but name check covers it)
+    # Traverse ancestors
+    while current_ref in parent_map:
+        current_ref = parent_map[current_ref]
+        parent_comp = comp_map.get(current_ref)
+        if parent_comp:
+            p_name = parent_comp.get("name")
+            if p_name and p_name in mapping:
+                found_tags.add(mapping[p_name])
+
+    return list(found_tags)
+
+
+def group_vulnerabilities(
+    versions_data: List[Dict[str, Any]], project_boms: Dict[str, Any] = None
+) -> List[Dict[str, Any]]:
     """
     Groups vulnerabilities across multiple project versions.
-
-    versions_data structure:
-    [
-        {
-            "version": { ... project version data ... },
-            "vulnerabilities": [ ... list of findings ... ]
-        },
-        ...
-    ]
-
-    Returns a list of grouped vulnerabilities.
-    Each group contains:
-    - id: Common Vulnerability ID (e.g. CVE-2023-1234)
-    - severity: Max severity in group? Or just the string if same.
-    - description: Description from one of them.
-    - affected_versions: List of objects {
-          project_name, project_version, project_uuid,
-          components: [ { component_name, component_version, component_uuid, finding_uuid, analysis_state, ... } ]
-      }
+    Optionally tags them based on BOM hierarchy and team mapping.
     """
+    if project_boms is None:
+        project_boms = {}
+
+    mapping = load_team_mapping()
 
     groups = {}  # Key: vuln_id -> Group Data
 
     for entry in versions_data:
         version_info = entry["version"]
         vulns = entry["vulnerabilities"]
+        proj_uuid = version_info.get("uuid")
+        bom = project_boms.get(proj_uuid)
 
         for finding in vulns:
             # Finding structure depends on DT API.
@@ -58,10 +128,19 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
                     "cvss_vector": vuln.get("cvssV3Vector") or vuln.get("cvssV2Vector"),
                     "rescored_cvss": None,
                     "rescored_vector": None,
-                    "affected_versions": {},  # Intermediate dict: project_uuid -> version_data
+                    "affected_versions": {},
+                    "tags": set(),
                 }
 
             # Prepare component info
+            component = finding.get("component", {})
+            comp_uuid = component.get("uuid")
+            comp_name = component.get("name")
+
+            # Calculate Tags
+            tags = get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+            groups[vuln_id]["tags"].update(tags)
+
             analysis = finding.get("analysis", {})
             details = analysis.get("analysisDetails")
 
@@ -94,16 +173,13 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
             if rescored_vector is not None:
                 groups[vuln_id]["rescored_vector"] = rescored_vector
 
-            # Add to version group
-            proj_uuid = version_info.get("uuid")
-
             component_info = {
                 "project_uuid": proj_uuid,
                 "project_name": version_info.get("name"),
                 "project_version": version_info.get("version"),
-                "component_name": finding.get("component", {}).get("name"),
-                "component_version": finding.get("component", {}).get("version"),
-                "component_uuid": finding.get("component", {}).get("uuid"),
+                "component_name": comp_name,
+                "component_version": component.get("version"),
+                "component_uuid": comp_uuid,
                 "vulnerability_uuid": vuln.get("uuid"),
                 "finding_uuid": finding.get("uuid"),
                 "analysis_state": analysis.get("state")
@@ -130,6 +206,8 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
     result = []
     for g in groups.values():
         g["affected_versions"] = list(g["affected_versions"].values())
+        g["tags"] = list(g["tags"])  # Convert set to list
+        g["tags"].sort()
         result.append(g)
 
     return result

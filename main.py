@@ -119,6 +119,11 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
             # Fetch findings and full details
             findings = await client.get_vulnerabilities(v["uuid"])
             full_vulns = await client.get_project_vulnerabilities(v["uuid"])
+            try:
+                bom = await client.get_bom(v["uuid"])
+            except Exception:
+                # Fallback if fetching BOM fails (e.g. not available or permission issue)
+                bom = None
 
             # Map vulnId -> vuln_obj for quick lookup
             vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
@@ -138,10 +143,18 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
                         if key in full_vuln and key not in vuln_summary:
                             vuln_summary[key] = full_vuln[key]
 
-            combined_data.append({"version": v, "vulnerabilities": findings})
+            combined_data.append(
+                {"version": v, "vulnerabilities": findings, "bom": bom}
+            )
 
         tasks[task_id]["message"] = "Grouping vulnerabilities..."
-        result = group_vulnerabilities(combined_data)
+
+        # Extract boms map for grouping
+        project_boms = {
+            entry["version"]["uuid"]: entry.get("bom") for entry in combined_data
+        }
+
+        result = group_vulnerabilities(combined_data, project_boms)
 
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["progress"] = 100
