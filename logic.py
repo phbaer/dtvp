@@ -54,42 +54,41 @@ def get_tags_for_component(
     if component_name in mapping:
         found_tags.add(mapping[component_name])
 
-    if not bom:
-        return list(found_tags)
+    if bom:
+        # Map refs
+        comp_map = {}  # ref -> comp
+        target_ref = None
 
-    # Map refs
-    comp_map = {}  # ref -> comp
-    target_ref = None
+        for comp in bom.get("components", []):
+            ref = comp.get("bom-ref")
+            if not ref:
+                continue
+            comp_map[ref] = comp
 
-    for comp in bom.get("components", []):
-        ref = comp.get("bom-ref")
-        if not ref:
-            continue
-        comp_map[ref] = comp
+            c_uuid = comp.get("uuid")
+            c_name = comp.get("name")
 
-        c_uuid = comp.get("uuid")
-        c_name = comp.get("name")
+            if c_uuid == component_uuid:
+                target_ref = ref
+            elif not target_ref and c_name == component_name:
+                target_ref = ref
 
-        if c_uuid == component_uuid:
-            target_ref = ref
-        elif not target_ref and c_name == component_name:
-            target_ref = ref
+        if target_ref:
+            parent_map = build_parent_map(bom)
+            current_ref = target_ref
 
-    if not target_ref:
-        return list(found_tags)
+            # Self check (if not checked by name already, but name check covers it)
+            # Traverse ancestors
+            while current_ref in parent_map:
+                current_ref = parent_map[current_ref]
+                parent_comp = comp_map.get(current_ref)
+                if parent_comp:
+                    p_name = parent_comp.get("name")
+                    if p_name and p_name in mapping:
+                        found_tags.add(mapping[p_name])
 
-    parent_map = build_parent_map(bom)
-    current_ref = target_ref
-
-    # Self check (if not checked by name already, but name check covers it)
-    # Traverse ancestors
-    while current_ref in parent_map:
-        current_ref = parent_map[current_ref]
-        parent_comp = comp_map.get(current_ref)
-        if parent_comp:
-            p_name = parent_comp.get("name")
-            if p_name and p_name in mapping:
-                found_tags.add(mapping[p_name])
+    if not found_tags and "*" in mapping:
+        found_tags.add(mapping["*"])
 
     return list(found_tags)
 

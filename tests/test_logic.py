@@ -397,3 +397,27 @@ def test_tagging_bom_hierarchy():
 
     tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
     assert set(tags) == {"TeamX", "TeamCore"}
+
+
+def test_tagging_catch_all():
+    import logic
+
+    comp_uuid = "uuid1"
+    comp_name = "unknown-lib"
+    bom = {}
+    mapping = {"existing-lib": "TeamA", "*": "CatchAllTeam"}
+
+    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    assert tags == ["CatchAllTeam"]
+
+
+def test_tagging_catch_all_ignored_if_match():
+    import logic
+
+    comp_uuid = "uuid1"
+    comp_name = "existing-lib"
+    bom = {}
+    mapping = {"existing-lib": "TeamA", "*": "CatchAllTeam"}
+
+    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    assert tags == ["TeamA"]  # Should NOT include CatchAllTeam
