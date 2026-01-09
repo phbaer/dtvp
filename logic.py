@@ -145,6 +145,14 @@ def group_vulnerabilities(
 
             # Calculate Tags
             tags = get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+            if tags:
+                print(
+                    f"INFO: [Tagging] Vuln {vuln_id} (Component: {comp_name}) -> Tags: {tags}"
+                )
+            else:
+                print(
+                    f"INFO: [Tagging] Vuln {vuln_id} (Component: {comp_name}) -> No tags found"
+                )
             groups[vuln_id]["tags"].update(tags)
 
             analysis = finding.get("analysis", {})
