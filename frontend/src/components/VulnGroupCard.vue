@@ -258,9 +258,12 @@ const displayState = computed(() => {
 
 const severityColor = computed(() => {
     switch (props.group.severity) {
-        case 'CRITICAL': return 'bg-red-900 text-red-200'
-        case 'HIGH': return 'bg-orange-900 text-orange-200'
-        default: return 'bg-blue-900 text-blue-200'
+        case 'CRITICAL': return 'bg-red-600 text-white shadow-sm ring-1 ring-red-400'
+        case 'HIGH': return 'bg-orange-600 text-white shadow-sm ring-1 ring-orange-400'
+        case 'MEDIUM': return 'bg-yellow-600 text-white shadow-sm ring-1 ring-yellow-400'
+        case 'LOW': return 'bg-green-600 text-white shadow-sm ring-1 ring-green-400'
+        case 'INFO': return 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-400'
+        default: return 'bg-gray-600 text-white shadow-sm ring-1 ring-gray-400'
     }
 })
 
@@ -296,7 +299,7 @@ const stateColor = computed(() => {
                     {{ group.severity || 'UNKNOWN' }}
                 </span>
                 <span class="text-sm text-gray-400 flex items-center gap-2">
-                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)] animate-pulse" title="Rescored Value">
+                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]" title="Rescored Value">
                         RESC: {{ group.rescored_cvss }}
                     </span>
                     <span v-else>
