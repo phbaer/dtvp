@@ -356,7 +356,7 @@ def test_tagging_no_bom():
     bom = {}
     mapping = {"libA": "TeamA"}
 
-    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
     assert tags == ["TeamA"]
 
 
@@ -368,7 +368,7 @@ def test_tagging_bom_ref_mismatch():
     bom = {"components": [{"bom-ref": "ref1", "uuid": "uuid2", "name": "libB"}]}
     mapping = {"libA": "TeamA"}
 
-    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
     assert tags == ["TeamA"]  # matched by name directly
 
 
@@ -395,7 +395,7 @@ def test_tagging_bom_hierarchy():
 
     mapping = {"custom-app": "TeamX", "lib-core": "TeamCore"}
 
-    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
     assert set(tags) == {"TeamX", "TeamCore"}
 
 
@@ -407,7 +407,7 @@ def test_tagging_catch_all():
     bom = {}
     mapping = {"existing-lib": "TeamA", "*": "CatchAllTeam"}
 
-    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
     assert tags == ["CatchAllTeam"]
 
 
@@ -419,7 +419,7 @@ def test_tagging_catch_all_ignored_if_match():
     bom = {}
     mapping = {"existing-lib": "TeamA", "*": "CatchAllTeam"}
 
-    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
     assert tags == ["TeamA"]  # Should NOT include CatchAllTeam
 
 
@@ -447,5 +447,5 @@ def test_tagging_deep_hierarchy_multiple_matches():
 
     mapping = {"Top": "TeamA", "Low": "TeamB", "VulnComp": "TeamC"}
 
-    tags = logic.get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
     assert set(tags) == {"TeamA", "TeamB", "TeamC"}

@@ -23,6 +23,7 @@ export interface Instance {
         user?: string;
     }>;
     is_suppressed: boolean;
+    usage_paths?: string[];
 }
 
 

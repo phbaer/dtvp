@@ -5,6 +5,7 @@ import { updateAssessment } from '../lib/api'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
+import DependencyPathList from './DependencyPathList.vue'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -274,6 +275,28 @@ const stateColor = computed(() => {
         default: return 'text-gray-300'
     }
 })
+
+const getGroupedInstances = (components: any[]) => {
+    if (!components) return []
+    const map = new Map<string, any>()
+    
+    components.forEach(comp => {
+        const key = comp.component_uuid || `${comp.component_name}:${comp.component_version}`
+        if (!map.has(key)) {
+            map.set(key, { ...comp, usage_paths: new Set(comp.usage_paths || []) })
+        } else {
+            const entry = map.get(key)
+            if (comp.usage_paths) {
+                comp.usage_paths.forEach((p: string) => entry.usage_paths.add(p))
+            }
+        }
+    })
+    
+    return Array.from(map.values()).map(c => ({
+        ...c,
+        usage_paths: Array.from(c.usage_paths)
+    }))
+}
 </script>
 
 <template>
@@ -335,7 +358,7 @@ const stateColor = computed(() => {
         </div>
     </div>
 
-    <!-- Expanded Details -->
+            <!-- Expanded Details -->
     <div v-if="expanded" class="p-4 border-t border-gray-700 bg-gray-850">
         <div class="grid md:grid-cols-2 gap-8">
             <div>
@@ -347,7 +370,7 @@ const stateColor = computed(() => {
                          <div v-for="v in group.affected_versions" :key="v.project_uuid" class="mb-4">
                             <h5 class="text-sm font-bold text-gray-400 mb-2">{{ v.project_version }}</h5>
                          
-                            <div v-for="(inst, i) in v.components" :key="i" class="mb-2 bg-gray-900 p-3 rounded border border-gray-700 ml-2">
+                            <div v-for="(inst, i) in getGroupedInstances(v.components)" :key="i" class="mb-2 bg-gray-900 p-3 rounded border border-gray-700 ml-2">
                                 <div class="flex justify-between text-xs text-gray-500 mb-1">
                                     <span>{{ inst.component_name }} {{ inst.component_version }}</span>
                                     <span>{{ inst.analysis_state }}</span>
@@ -359,6 +382,14 @@ const stateColor = computed(() => {
                                     <div v-for="(c, ci) in inst.analysis_comments" :key="ci" class="text-xs text-gray-400 italic pl-2 border-l-2 border-gray-600">
                                         {{ c.comment }} <span class="text-gray-600">- {{ new Date(c.timestamp).toLocaleDateString() }}</span>
                                     </div>
+                                </div>
+                                
+                                <!-- Usage Graph Section (grouped) -->
+                                <div v-if="inst.usage_paths && inst.usage_paths.length" class="overflow-x-auto custom-scrollbar mt-3">
+                                    <div class="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-2">
+                                        Dependency Chains
+                                    </div>
+                                    <DependencyPathList :paths="inst.usage_paths" :project-name="v.project_name"  class="overflow-x-auto custom-scrollbar"/>
                                 </div>
                              </div>
                          </div>

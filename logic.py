@@ -44,15 +44,20 @@ def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:
     return parent_map
 
 
-def get_tags_for_component(
+def get_component_analysis(
     component_uuid: str,
     component_name: str,
     bom: Dict[str, Any],
     mapping: Dict[str, str],
-) -> List[str]:
+) -> tuple[List[str], List[str]]:
+    """
+    Analyzes component to find tags and usage paths.
+    Returns (list_of_tags, list_of_paths).
+    """
     found_tags = set()
+    found_paths = set()
 
-    # Check direct match first (always valid)
+    # Check direct match first
     if component_name in mapping:
         found_tags.add(mapping[component_name])
 
@@ -71,11 +76,6 @@ def get_tags_for_component(
             c_name = comp.get("name")
 
             # Fallback for matching:
-            # 1. Matches passed component_uuid (if provided and present in BOM)
-            # 2. Matches component_name (less reliable but often sufficient)
-
-            # NOTE: DT exports might put the UUID in bom-ref or not have it at all.
-            # We check if ref == component_uuid as a direct correlation often seen.
             if c_uuid == component_uuid:
                 target_ref = ref
             elif ref == component_uuid:
@@ -95,12 +95,16 @@ def get_tags_for_component(
                 start_name = target_comp.get("name") or component_name
 
             queue = [(target_ref, [start_name])]
-            visited = set([target_ref])
+
+            # Using a set to prevent infinite cycles in the queue if the graph has cycles
+            # (current_ref, tuple(current_path))
+            visited_states = set()
+            visited_states.add((target_ref, tuple([start_name])))
 
             while queue:
-                current_ref, current_path = queue.pop(0)  # BFS
+                current_ref, current_path = queue.pop(0)
 
-                # Check current node (if not the starting node, or if we want to double check)
+                # Check current node for Tags
                 current_comp = comp_map.get(current_ref)
                 if current_comp:
                     curr_name = current_comp.get("name")
@@ -109,31 +113,41 @@ def get_tags_for_component(
 
                 # Get parents
                 parents = parent_map.get(current_ref, [])
-                # parent_map[current_ref] is now a LIST
 
-                # Careful: logic.py lines 86-87 assumed parent_map keys were current_ref.
-                # My build_parent_map changed, keys are child_ref, values are list of parent_ref.
-                # So parent_map.get(current_ref) gives parents of current_ref.
+                if not parents:
+                    # Loop reached a root node (no further parents).
+                    path_str = " -> ".join(current_path)
+                    found_paths.add(path_str)
+                    continue
 
                 for p_ref in parents:
-                    if p_ref not in visited:
-                        visited.add(p_ref)
-                        p_comp = comp_map.get(p_ref)
-                        p_name = p_comp.get("name") if p_comp else p_ref
+                    p_comp = comp_map.get(p_ref)
+                    p_name = p_comp.get("name") if p_comp else p_ref
 
-                        new_path = current_path + [str(p_name)]
-                        queue.append((p_ref, new_path))
+                    if p_name in current_path:
+                        continue
 
-            # Just log that we did traversal
-            if len(visited) > 1:
-                print(
-                    f"INFO: [Tagging] Traversed {len(visited)} ancestors for {component_name} in BOM."
-                )
+                    new_path = current_path + [str(p_name)]
+
+                    # Avoid redundant processing
+                    state = (p_ref, tuple(new_path))
+                    if state in visited_states:
+                        continue
+                    visited_states.add(state)
+
+                    queue.append((p_ref, new_path))
+
+            # If after traversal we found nothing (disconnected node?), default to self
+            if not found_paths:
+                found_paths.add(start_name)
+
+    if not found_paths:
+        found_paths.add(component_name)
 
     if not found_tags and "*" in mapping:
         found_tags.add(mapping["*"])
 
-    return list(found_tags)
+    return list(found_tags), sorted(list(found_paths))
 
 
 def group_vulnerabilities(
@@ -186,20 +200,18 @@ def group_vulnerabilities(
             comp_uuid = component.get("uuid")
             comp_name = component.get("name")
 
-            # Calculate Tags
-            tags = get_tags_for_component(comp_uuid, comp_name, bom, mapping)
+            # Calculate Tags and Usage Paths
+            tags, paths = get_component_analysis(comp_uuid, comp_name, bom, mapping)
+
             if tags:
                 print(
-                    f"INFO: [Tagging] Vuln {vuln_id} (Component: {comp_name}) -> Tags: {tags}"
+                    f"INFO: [Analysis] Vuln {vuln_id} (Component: {comp_name}) -> Tags: {tags}"
                 )
-            else:
-                print(
-                    f"INFO: [Tagging] Vuln {vuln_id} (Component: {comp_name}) -> No tags found"
-                )
+
             groups[vuln_id]["tags"].update(tags)
 
             analysis = finding.get("analysis", {})
-            details = analysis.get("analysisDetails")
+            details = analysis.get("analysisDetails") or ""
 
             # Parse rescored value if present
             rescored_score = None
@@ -245,6 +257,7 @@ def group_vulnerabilities(
                 "analysis_comments": analysis.get("analysisComments", []),
                 "is_suppressed": analysis.get("isSuppressed", False)
                 or analysis.get("suppressed", False),
+                "usage_paths": paths,
             }
 
             if proj_uuid not in groups[vuln_id]["affected_versions"]:
