@@ -297,30 +297,44 @@ const getGroupedInstances = (components: any[]) => {
         usage_paths: Array.from(c.usage_paths)
     }))
 }
+const affectedComponentNames = computed(() => {
+    const names = new Set(allInstances.value.map(c => `${c.component_name} ${c.component_version}`))
+    return Array.from(names).join(', ')
+})
 </script>
 
 <template>
   <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
     <!-- Header -->
     <div 
-        class="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-750 transition-colors"
+        class="p-4 flex items-start justify-between cursor-pointer hover:bg-gray-750 transition-colors"
         @click="expanded = !expanded"
     >
         <div>
-            <div class="flex items-center gap-3 mb-1">
+            <div class="flex items-center gap-4 mb-1">
                 <span class="font-mono text-lg font-bold text-yellow-400">{{ group.id }}</span>
-                <div v-if="group.tags && group.tags.length > 0" class="flex gap-2">
-                    <span 
-                        v-for="tag in group.tags" 
-                        :key="tag" 
-                        class="px-2 py-0.5 rounded text-xs font-medium bg-blue-900 text-blue-200 border border-blue-700"
-                    >
-                        {{ tag }}
-                    </span>
+                
+                <div v-if="group.tags && group.tags.length > 0" class="flex items-center gap-4">
+                     <div class="h-5 w-0.5 bg-gray-500 shrink-0 rounded-full"></div>
+                     <div class="flex gap-2">
+                        <span 
+                            v-for="tag in group.tags" 
+                            :key="tag" 
+                            class="px-2 py-0.5 rounded text-xs font-medium bg-blue-900 text-blue-200 border border-blue-700"
+                        >
+                            {{ tag }}
+                        </span>
+                     </div>
                 </div>
+
+                <div class="h-5 w-0.5 bg-gray-500 shrink-0 rounded-full"></div>
+
                 <span :class="['px-2 py-0.5 rounded text-xs font-bold', severityColor]">
                     {{ group.severity || 'UNKNOWN' }}
                 </span>
+
+                <div class="h-5 w-0.5 bg-gray-500 shrink-0 rounded-full"></div>
+
                 <span class="text-sm text-gray-400 flex items-center gap-2">
                     <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]" title="Rescored Value">
                         RESC: {{ group.rescored_cvss }}
@@ -333,7 +347,9 @@ const getGroupedInstances = (components: any[]) => {
                     </span>
                 </span>
             </div>
-            <div class="text-sm text-gray-300 line-clamp-1">{{ group.title || 'No title' }}</div>
+            <div class="text-sm text-gray-300 line-clamp-1 font-mono">
+                {{ affectedComponentNames }}
+            </div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
             <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-1 font-mono text-xs text-gray-500 break-all">
@@ -341,7 +357,7 @@ const getGroupedInstances = (components: any[]) => {
             </div>
         </div>
         
-        <div class="flex items-center gap-6">
+        <div class="flex items-start gap-6">
             <div class="text-right">
                 <div class="text-xs text-gray-500 uppercase">Analysis</div>
                 <div :class="['font-semibold', stateColor]">

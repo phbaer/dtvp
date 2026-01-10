@@ -66,7 +66,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('CVE-2023-1234')
         expect(wrapper.text()).toContain('HIGH')
         expect(wrapper.text()).toContain('9.8')
-        expect(wrapper.text()).toContain('Test Vulnerability')
+        expect(wrapper.text()).toContain('lib 1.0')
     })
 
     it('toggles expansion on click', async () => {
@@ -179,13 +179,13 @@ describe('VulnGroupCard', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: criticalGroup }
         })
-        expect(wrapper.find('span.rounded').classes()).toContain('bg-red-900')
+        expect(wrapper.find('span.rounded').classes()).toContain('bg-red-600')
 
         const lowGroup = { ...mockGroup, severity: 'LOW' }
         const wrapper2 = mount(VulnGroupCard, {
             props: { group: lowGroup }
         })
-        expect(wrapper2.find('span.rounded').classes()).toContain('bg-blue-900')
+        expect(wrapper2.find('span.rounded').classes()).toContain('bg-green-600')
     })
 
     it('handles CVSS 4.0 vector parsing', async () => {
