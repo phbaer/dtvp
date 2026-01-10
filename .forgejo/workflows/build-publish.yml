@@ -77,7 +77,7 @@ jobs:
     runs-on: node
     strategy:
       matrix:
-        variant: [alpine, debian]
+        variant: [alpine, trixie-slim]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1,10 +1,9 @@
 # Build arguments for Python version
 ARG PYTHON_VERSION=3.14
 ARG DISTRO_VARIANT=alpine
-ARG NODE_VERSION=22
 
 # Stage 1: Build the frontend
-FROM node:${NODE_VERSION}-slim AS frontend-build
+FROM node:lts-${DISTRO_VARIANT} AS frontend-build
 
 WORKDIR /app/frontend
 
