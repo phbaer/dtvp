@@ -307,70 +307,81 @@ const affectedComponentNames = computed(() => {
   <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
     <!-- Header -->
     <div 
-        class="p-4 flex items-start justify-between cursor-pointer hover:bg-gray-750 transition-colors"
+        class="p-4 flex items-start justify-between cursor-pointer hover:bg-gray-750 transition-colors gap-8"
         @click="expanded = !expanded"
     >
         <div>
-            <div class="flex items-center gap-4 mb-1">
-                <span class="font-mono text-lg font-bold text-yellow-400">{{ group.id }}</span>
+            <div class="flex items-center gap-4 mb-2">
+                <!-- ID Column -->
+                <div class="w-40 shrink-0 font-mono text-lg font-bold text-yellow-400">
+                    {{ group.id }}
+                </div>
                 
-                <div v-if="group.tags && group.tags.length > 0" class="flex items-center gap-4">
-                     <div class="h-5 w-0.5 bg-gray-500 shrink-0 rounded-full"></div>
-                     <div class="flex gap-2">
+                <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
+
+                <!-- Severity Column -->
+                <div class="w-24 shrink-0 flex justify-center">
+                    <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', severityColor]">
+                        {{ group.severity || 'UNKNOWN' }}
+                    </span>
+                </div>
+
+                <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
+
+                <!-- Score Column -->
+                <div class="w-28 shrink-0 text-sm text-gray-300 flex items-center gap-2">
+                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.2)]" title="Rescored Value">
+                        {{ group.rescored_cvss }}
+                    </span>
+                    <span v-else class="font-bold">
+                        {{ group.cvss || group.cvss_score || 'N/A' }}
+                    </span>
+                    <span v-if="group.rescored_cvss" class="text-gray-600 line-through text-[10px]" title="Original Score">
+                        {{ group.cvss || group.cvss_score }}
+                    </span>
+                    <span class="text-[10px] text-gray-500 font-medium uppercase">CVSS</span>
+                </div>
+
+                <div v-if="group.tags && group.tags.length > 0" class="flex items-center gap-4 flex-1 min-w-0">
+                     <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
+                     <div class="flex gap-1.5 overflow-hidden">
                         <span 
                             v-for="tag in group.tags" 
                             :key="tag" 
-                            class="px-2 py-0.5 rounded text-xs font-medium bg-blue-900 text-blue-200 border border-blue-700"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap"
                         >
                             {{ tag }}
                         </span>
                      </div>
                 </div>
-
-                <div class="h-5 w-0.5 bg-gray-500 shrink-0 rounded-full"></div>
-
-                <span :class="['px-2 py-0.5 rounded text-xs font-bold', severityColor]">
-                    {{ group.severity || 'UNKNOWN' }}
-                </span>
-
-                <div class="h-5 w-0.5 bg-gray-500 shrink-0 rounded-full"></div>
-
-                <span class="text-sm text-gray-400 flex items-center gap-2">
-                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]" title="Rescored Value">
-                        RESC: {{ group.rescored_cvss }}
-                    </span>
-                    <span v-else>
-                        CVSS: {{ group.cvss || group.cvss_score || 'N/A' }}
-                    </span>
-                    <span v-if="group.rescored_cvss" class="text-gray-600 line-through text-xs" title="Original Score">
-                        {{ group.cvss || group.cvss_score }}
-                    </span>
-                </span>
             </div>
-            <div class="text-sm text-gray-300 line-clamp-1 font-mono">
+            
+            <div class="text-sm text-gray-400 line-clamp-1 font-mono pl-0.5">
                 {{ affectedComponentNames }}
             </div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-1 font-mono text-xs text-gray-500 break-all">
-                {{ group.rescored_vector || group.cvss_vector }}
+            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50">
+                <span class="text-gray-600 mr-2 uppercase font-bold">Vector:</span>{{ group.rescored_vector || group.cvss_vector }}
             </div>
         </div>
         
-        <div class="flex items-start gap-6">
-            <div class="text-right">
-                <div class="text-xs text-gray-500 uppercase">Analysis</div>
-                <div :class="['font-semibold', stateColor]">
+        <div class="flex items-start gap-8 shrink-0">
+            <div class="w-32 text-right">
+                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
+                <div :class="['font-bold text-sm truncate analysis-state-value', stateColor]">
                     {{ displayState }}
                 </div>
             </div>
             
-            <div class="text-right">
-                    <div class="text-xs text-gray-500 uppercase">Affected</div>
-                    <div class="font-bold">{{ group.affected_versions?.length || 0 }} Versions</div>
+            <div class="w-24 text-right">
+                    <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
+                    <div class="font-bold text-sm text-gray-300">{{ group.affected_versions?.length || 0 }} Versions</div>
             </div>
 
-            <component :is="expanded ? ChevronUp : ChevronDown" class="text-gray-400" />
+            <div class="pt-1">
+                <component :is="expanded ? ChevronUp : ChevronDown" class="text-gray-500" :size="20" />
+            </div>
         </div>
     </div>
 

@@ -60,9 +60,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="max-w-2xl mx-auto py-8">
-    <div class="mb-6 flex items-center gap-4">
-        <router-link to="/" class="text-blue-400 hover:underline">&larr; Back to Dashboard</router-link>
+  <div class="mx-auto">
+    <div class="mb-8 flex flex-col gap-2">
+        <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+            &larr; Back to Dashboard
+        </router-link>
         <h2 class="text-3xl font-bold">Settings</h2>
     </div>
 
