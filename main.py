@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, APIRouter, UploadFile, File
 from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import os
@@ -333,7 +333,7 @@ if os.path.isdir("frontend/dist"):
     async def serve_spa(path: str):
         # Prevent path traversal
         if ".." in path:
-            return FileResponse("frontend/dist/index.html")
+            return serve_index()
 
         # Check if specific file exists
         file_path = os.path.join("frontend/dist", path)
@@ -341,7 +341,34 @@ if os.path.isdir("frontend/dist"):
             return FileResponse(file_path)
 
         # Default to index.html for SPA routing
-        return FileResponse("frontend/dist/index.html")
+        return serve_index()
+
+    def serve_index():
+        try:
+            with open("frontend/dist/index.html", "r") as f:
+                content = f.read()
+
+            # Replace environment placeholders
+            frontend_url = auth_settings.FRONTEND_URL or ""
+            # Fallback for local dev if not set
+            if not frontend_url:
+                # We can't easily know the external URL here, but UI handles defaults.
+                pass
+
+            content = content.replace("${DTVP_CONTEXT_PATH}", context_path or "/")
+            content = content.replace("${DTVP_FRONTEND_URL}", frontend_url)
+
+            # If we have a context path, we need to adjust absolute paths in index.html
+            # so they point to the correct sub-path (e.g. /dtvp/assets/...)
+            if context_path:
+                content = content.replace('src="/', f'src="{context_path}/')
+                content = content.replace('href="/', f'href="{context_path}/')
+
+            return HTMLResponse(content)
+        except Exception as e:
+            return HTMLResponse(
+                f"Frontend not found or error loading: {str(e)}", status_code=404
+            )
 
 
 if __name__ == "__main__":
