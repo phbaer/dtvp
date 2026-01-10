@@ -449,3 +449,93 @@ def test_tagging_deep_hierarchy_multiple_matches():
 
     tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
     assert set(tags) == {"TeamA", "TeamB", "TeamC"}
+
+
+def test_build_parent_map_edge_cases():
+    import logic
+
+    assert logic.build_parent_map({}) == {}
+    assert logic.build_parent_map({"dependencies": []}) == {}
+
+
+def test_get_component_analysis_edge_cases():
+    import logic
+
+    # No ref in component (line 72)
+    bom = {"components": [{"uuid": "uuid1", "name": "libA"}]}
+    tags, paths = logic.get_component_analysis("uuid1", "libA", bom, {})
+    assert paths == ["libA"]
+
+    # Match by ref (line 82)
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "uuid2", "name": "libA"},
+            {"bom-ref": "parent", "uuid": "uuidP", "name": "parent"},
+        ],
+        "dependencies": [{"ref": "parent", "dependsOn": ["ref1"]}],
+    }
+    # Match uuid2 by calling with comp_uuid="ref1"
+    tags, paths = logic.get_component_analysis("ref1", "libA", bom, {"parent": "TeamP"})
+    assert "TeamP" in tags
+
+    # Match by name fallback (line 84)
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "uuid2", "name": "libA"},
+            {"bom-ref": "parent", "uuid": "uuidP", "name": "parent"},
+        ],
+        "dependencies": [{"ref": "parent", "dependsOn": ["ref1"]}],
+    }
+    # Call with non-matching uuid but matching name
+    tags, paths = logic.get_component_analysis(
+        "uuid-other", "libA", bom, {"parent": "TeamP"}
+    )
+    assert "TeamP" in tags
+
+
+def test_get_component_analysis_cycle():
+    import logic
+
+    # Cycle: A -> B -> A
+    bom = {
+        "components": [
+            {"bom-ref": "refA", "uuid": "uA", "name": "A"},
+            {"bom-ref": "refB", "uuid": "uB", "name": "B"},
+        ],
+        "dependencies": [
+            {"ref": "refA", "dependsOn": ["refB"]},
+            {"ref": "refB", "dependsOn": ["refA"]},
+        ],
+    }
+    tags, paths = logic.get_component_analysis("uA", "A", bom, {})
+    # Should not crash. In a pure cycle it might fallback to just the component name.
+    assert "A" in paths
+
+
+def test_get_component_analysis_disconnected():
+    import logic
+
+    # Bom exists but no parents for target
+    bom = {
+        "components": [{"bom-ref": "refA", "uuid": "uA", "name": "A"}],
+        "dependencies": [],
+    }
+    tags, paths = logic.get_component_analysis("uA", "A", bom, {})
+    assert paths == ["A"]
+
+def test_get_component_analysis_redundant_parents():
+    import logic
+
+    # BOM with child listed twice for same parent
+    bom = {
+        "components": [
+            {"bom-ref": "parent", "uuid": "u1", "name": "Parent"},
+            {"bom-ref": "child", "uuid": "u2", "name": "Child"},
+        ],
+        "dependencies": [
+            {"ref": "parent", "dependsOn": ["child", "child"]},
+        ],
+    }
+    tags, paths = logic.get_component_analysis("u2", "Child", bom, {})
+    # Should only have one path and not crash from redundant processing
+    assert paths == ["Child -> Parent"]

@@ -198,3 +198,14 @@ async def test_get_bom_error():
     async with DTClient(settings.api_url, settings.api_key) as client:
         with pytest.raises(httpx.HTTPStatusError):
             await client.get_bom("uuid-error")
+
+
+@pytest.mark.asyncio
+async def test_get_bom_success(respx_mock):
+    dt_client = DTClient("http://dt.example.com", "api-key")
+    respx_mock.get("http://dt.example.com/api/v1/bom/cyclonedx/project/u1").respond(
+        json={"bomFormat": "CycloneDX"}
+    )
+
+    bom = await dt_client.get_bom("u1")
+    assert bom["bomFormat"] == "CycloneDX"

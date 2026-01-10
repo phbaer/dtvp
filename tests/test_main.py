@@ -13,12 +13,15 @@ def override_auth():
 
 def test_openapi_endpoint(client):
     response = client.get("/api/openapi.json")
-    if response.status_code == 404:
-        # Maybe context path is set?
-        # Try finding the route
-        pass
     assert response.status_code == 200
     assert "openapi" in response.json()
+
+
+def test_get_version(client):
+    response = client.get("/api/version")
+    assert response.status_code == 200
+    assert "version" in response.json()
+    assert "build" in response.json()
 
 
 def test_main_context_path_reload():
@@ -58,6 +61,30 @@ def test_main_context_path_reload():
     importlib.reload(main)
 
 
+def test_process_grouped_vulns_task_bom_failure():
+    import main
+    from unittest.mock import AsyncMock
+
+    client = AsyncMock()
+    client.get_projects.return_value = [
+        {"name": "Test", "version": "1.0", "uuid": "u1"}
+    ]
+    client.get_vulnerabilities.return_value = []
+    client.get_project_vulnerabilities.return_value = []
+    # Force get_bom to fail
+    client.get_bom.side_effect = Exception("Forbidden")
+
+    task_id = "test-task"
+    main.tasks[task_id] = {"status": "pending"}
+
+    import asyncio
+
+    asyncio.run(main.process_grouped_vulns_task(task_id, "Test", client))
+
+    assert main.tasks[task_id]["status"] == "completed"
+    assert main.tasks[task_id]["result"] == []
+
+
 def test_spa_traversal_logic():
     import main
 
@@ -84,10 +111,41 @@ def test_spa_traversal_logic():
     # The check in main.py is simply 'if ".." in path:'
     resp = client.get("/suspicious..check")
     assert resp.status_code == 200
-    # Should serve index.html
-    with open("frontend/dist/index.html", "rb") as f:
-        idx = f.read()
-    assert resp.content == idx
+    # Should serve modified index.html
+    # We expect some replacements
+    assert b"window.__env__ =" in resp.content
+
+
+def test_serve_index_with_context():
+    import main
+    from unittest.mock import patch
+
+    if not os.path.exists("frontend/dist/index.html"):
+        pytest.skip("frontend/dist/index.html not found")
+
+    with patch("main.context_path", "/myctx"):
+        client = TestClient(main.app)
+        resp = client.get("/myctx/some-page")
+        assert resp.status_code == 200
+        # Check if absolute paths were replaced
+        assert b'src="/myctx/' in resp.content or b'href="/myctx/' in resp.content
+
+
+def test_serve_index_not_found():
+    import main
+    from unittest.mock import patch
+
+    # Mock open to fail inside serve_index
+    with patch("builtins.open", side_effect=FileNotFoundError("No index")):
+        client = TestClient(main.app)
+        # We need a path that triggers serve_spa -> serve_index
+        # But wait, serve_spa is only defined if dist exists.
+        # If it's already defined, we trigger it.
+        resp = client.get("/any-path-to-trigger-spa")
+        if resp.status_code != 404:  # If the route doesn't exist at all skip
+            # It might return 200 if frontend/dist existed when app started
+            assert b"Frontend not found" in resp.content
+            assert resp.status_code == 404
 
 
 def test_upload_mapping(client):
@@ -136,3 +194,17 @@ def test_get_team_mapping(client):
         response = client.get("/api/settings/mapping")
         assert response.status_code == 200
         assert response.json() == {"test": "team"}
+
+def test_serve_index_no_frontend_url():
+    import main
+    from unittest.mock import patch
+
+    if not os.path.exists("frontend/dist/index.html"):
+        pytest.skip("frontend/dist/index.html not found")
+
+    # Patch FRONTEND_URL to trigger line 356
+    with patch("main.auth_settings.FRONTEND_URL", None):
+        client = TestClient(main.app)
+        resp = client.get("/any-path")
+        assert resp.status_code == 200
+        assert b"window.__env__ =" in resp.content
