@@ -26,12 +26,12 @@ describe('DependencyPathList', () => {
 
         const segments = wrapper.findAll('.relative.flex.items-center')
         // First item should be clip-start
-        expect(segments[0]?.classes()).toContain('clip-start')
-        expect(segments[0]?.classes()).not.toContain('clip-middle')
+        expect(segments[0]!.classes()).toContain('clip-start')
+        expect(segments[0]!.classes()).not.toContain('clip-middle')
 
-        // Others should be clip-middle
-        expect(segments[1]?.classes()).toContain('clip-middle')
-        expect(segments[2]?.classes()).toContain('clip-middle')
+        // Last item (if length > 1) should be clip-middle and shifted
+        expect(segments[1]!.classes()).toContain('clip-middle')
+        expect(segments[1]!.classes()).toContain('-ml-3')
     })
 
 

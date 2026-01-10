@@ -136,7 +136,7 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         }
         const wrapper = mount(VulnGroupCard, { props: { group: taggedGroup } })
 
-        const tags = wrapper.findAll('.bg-blue-900')
+        const tags = wrapper.findAll('.bg-blue-900\\/40')
         expect(tags.length).toBe(2)
         if (tags.length >= 2) {
             expect(tags[0]!.text()).toBe('Tag1')
