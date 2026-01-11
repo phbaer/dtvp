@@ -1,18 +1,20 @@
-from fastapi import FastAPI, Depends, APIRouter
+from fastapi import FastAPI, Depends, APIRouter, UploadFile, File
 from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import os
 import asyncio
 import uuid
 from datetime import datetime
+import shutil
 
 from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
-from logic import group_vulnerabilities
+from logic import group_vulnerabilities, get_team_mapping_path, load_team_mapping
+
 
 from version import VERSION, BUILD_COMMIT
 
@@ -119,6 +121,11 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
             # Fetch findings and full details
             findings = await client.get_vulnerabilities(v["uuid"])
             full_vulns = await client.get_project_vulnerabilities(v["uuid"])
+            try:
+                bom = await client.get_bom(v["uuid"])
+            except Exception:
+                # Fallback if fetching BOM fails (e.g. not available or permission issue)
+                bom = None
 
             # Map vulnId -> vuln_obj for quick lookup
             vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
@@ -138,10 +145,18 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
                         if key in full_vuln and key not in vuln_summary:
                             vuln_summary[key] = full_vuln[key]
 
-            combined_data.append({"version": v, "vulnerabilities": findings})
+            combined_data.append(
+                {"version": v, "vulnerabilities": findings, "bom": bom}
+            )
 
         tasks[task_id]["message"] = "Grouping vulnerabilities..."
-        result = group_vulnerabilities(combined_data)
+
+        # Extract boms map for grouping
+        project_boms = {
+            entry["version"]["uuid"]: entry.get("bom") for entry in combined_data
+        }
+
+        result = group_vulnerabilities(combined_data, project_boms)
 
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["progress"] = 100
@@ -259,6 +274,41 @@ def get_open_api_endpoint():
     )
 
 
+@api_router.get("/settings/mapping")
+async def get_team_mapping(user: str = Depends(get_current_user)):
+    return load_team_mapping()
+
+
+@api_router.post("/settings/mapping")
+async def upload_team_mapping(
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user),
+):
+    target_path = get_team_mapping_path()
+    # Ensure directory exists
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    # Write file
+    try:
+        with open(target_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Validate JSON (optional but good)
+        with open(target_path, "r") as f:
+            import json
+
+            json.load(f)
+
+        return {
+            "status": "success",
+            "message": f"Team mapping updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 app.include_router(api_router, prefix=context_path)
 
 # Serve Frontend if it exists (for production)
@@ -283,7 +333,7 @@ if os.path.isdir("frontend/dist"):
     async def serve_spa(path: str):
         # Prevent path traversal
         if ".." in path:
-            return FileResponse("frontend/dist/index.html")
+            return serve_index()
 
         # Check if specific file exists
         file_path = os.path.join("frontend/dist", path)
@@ -291,7 +341,34 @@ if os.path.isdir("frontend/dist"):
             return FileResponse(file_path)
 
         # Default to index.html for SPA routing
-        return FileResponse("frontend/dist/index.html")
+        return serve_index()
+
+    def serve_index():
+        try:
+            with open("frontend/dist/index.html", "r") as f:
+                content = f.read()
+
+            # Replace environment placeholders
+            frontend_url = auth_settings.FRONTEND_URL or ""
+            # Fallback for local dev if not set
+            if not frontend_url:
+                # We can't easily know the external URL here, but UI handles defaults.
+                pass
+
+            content = content.replace("${DTVP_CONTEXT_PATH}", context_path or "/")
+            content = content.replace("${DTVP_FRONTEND_URL}", frontend_url)
+
+            # If we have a context path, we need to adjust absolute paths in index.html
+            # so they point to the correct sub-path (e.g. /dtvp/assets/...)
+            if context_path:
+                content = content.replace('src="/', f'src="{context_path}/')
+                content = content.replace('href="/', f'href="{context_path}/')
+
+            return HTMLResponse(content)
+        except Exception as e:
+            return HTMLResponse(
+                f"Frontend not found or error loading: {str(e)}", status_code=404
+            )
 
 
 if __name__ == "__main__":

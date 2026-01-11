@@ -22,7 +22,7 @@ jobs:
       - name: Create dummy frontend assets
         run: |
           mkdir -p frontend/dist
-          echo "<!doctype html><html><body>SPA</body></html>" > frontend/dist/index.html
+          cp tests/assets/index.html frontend/dist/index.html
       - name: Run tests with coverage
         run: uv run pytest
       - name: Upload Python Coverage Report
@@ -38,10 +38,6 @@ jobs:
     runs-on: node
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
@@ -77,7 +73,7 @@ jobs:
     runs-on: node
     strategy:
       matrix:
-        variant: [alpine, debian]
+        variant: [alpine, trixie-slim]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

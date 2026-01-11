@@ -23,6 +23,7 @@ export interface Instance {
         user?: string;
     }>;
     is_suppressed: boolean;
+    usage_paths?: string[];
 }
 
 
@@ -43,6 +44,7 @@ export interface GroupedVuln {
     cvss_vector?: string;
     rescored_cvss?: number | null;
     rescored_vector?: string | null;
+    tags?: string[];
     affected_versions: AffectedVersion[];
 }
 

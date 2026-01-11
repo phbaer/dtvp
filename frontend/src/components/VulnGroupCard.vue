@@ -5,6 +5,7 @@ import { updateAssessment } from '../lib/api'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
+import DependencyPathList from './DependencyPathList.vue'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -258,9 +259,12 @@ const displayState = computed(() => {
 
 const severityColor = computed(() => {
     switch (props.group.severity) {
-        case 'CRITICAL': return 'bg-red-900 text-red-200'
-        case 'HIGH': return 'bg-orange-900 text-orange-200'
-        default: return 'bg-blue-900 text-blue-200'
+        case 'CRITICAL': return 'bg-red-600 text-white shadow-sm ring-1 ring-red-400'
+        case 'HIGH': return 'bg-orange-600 text-white shadow-sm ring-1 ring-orange-400'
+        case 'MEDIUM': return 'bg-yellow-600 text-white shadow-sm ring-1 ring-yellow-400'
+        case 'LOW': return 'bg-green-600 text-white shadow-sm ring-1 ring-green-400'
+        case 'INFO': return 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-400'
+        default: return 'bg-gray-600 text-white shadow-sm ring-1 ring-gray-400'
     }
 })
 
@@ -271,59 +275,117 @@ const stateColor = computed(() => {
         default: return 'text-gray-300'
     }
 })
+
+const getGroupedInstances = (components: any[]) => {
+    if (!components) return []
+    const map = new Map<string, any>()
+    
+    components.forEach(comp => {
+        const key = comp.component_uuid || `${comp.component_name}:${comp.component_version}`
+        if (!map.has(key)) {
+            map.set(key, { ...comp, usage_paths: new Set(comp.usage_paths || []) })
+        } else {
+            const entry = map.get(key)
+            if (comp.usage_paths) {
+                comp.usage_paths.forEach((p: string) => entry.usage_paths.add(p))
+            }
+        }
+    })
+    
+    return Array.from(map.values()).map(c => ({
+        ...c,
+        usage_paths: Array.from(c.usage_paths)
+    }))
+}
+const affectedComponentNames = computed(() => {
+    const names = new Set(allInstances.value.map(c => `${c.component_name} ${c.component_version}`))
+    return Array.from(names).join(', ')
+})
 </script>
 
 <template>
   <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
     <!-- Header -->
     <div 
-        class="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-750 transition-colors"
+        class="p-4 flex items-start justify-between cursor-pointer hover:bg-gray-750 transition-colors gap-8"
         @click="expanded = !expanded"
     >
         <div>
-            <div class="flex items-center gap-3 mb-1">
-                <span class="font-mono text-lg font-bold text-yellow-400">{{ group.id }}</span>
-                <span :class="['px-2 py-0.5 rounded text-xs font-bold', severityColor]">
-                    {{ group.severity || 'UNKNOWN' }}
-                </span>
-                <span class="text-sm text-gray-400 flex items-center gap-2">
-                    <span v-if="group.rescored_cvss" class="text-yellow-400 font-bold" title="Rescored Value">
-                        CVSS: {{ group.rescored_cvss }}
+            <div class="flex items-center gap-4 mb-2">
+                <!-- ID Column -->
+                <div class="w-40 shrink-0 font-mono text-lg font-bold text-yellow-400">
+                    {{ group.id }}
+                </div>
+                
+                <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
+
+                <!-- Severity Column -->
+                <div class="w-24 shrink-0 flex justify-center">
+                    <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', severityColor]">
+                        {{ group.severity || 'UNKNOWN' }}
                     </span>
-                    <span v-else>
-                        CVSS: {{ group.cvss || group.cvss_score || 'N/A' }}
+                </div>
+
+                <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
+
+                <!-- Score Column -->
+                <div class="w-28 shrink-0 text-sm text-gray-300 flex items-center gap-2">
+                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.2)]" title="Rescored Value">
+                        {{ group.rescored_cvss }}
                     </span>
-                    <span v-if="group.rescored_cvss" class="text-gray-600 line-through text-xs" title="Original Score">
+                    <span v-else class="font-bold">
+                        {{ group.cvss || group.cvss_score || 'N/A' }}
+                    </span>
+                    <span v-if="group.rescored_cvss" class="text-gray-600 line-through text-[10px]" title="Original Score">
                         {{ group.cvss || group.cvss_score }}
                     </span>
-                </span>
+                    <span class="text-[10px] text-gray-500 font-medium uppercase">CVSS</span>
+                </div>
+
+                <div v-if="group.tags && group.tags.length > 0" class="flex items-center gap-4 flex-1 min-w-0">
+                     <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
+                     <div class="flex gap-1.5 overflow-hidden">
+                        <span 
+                            v-for="tag in group.tags" 
+                            :key="tag" 
+                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap"
+                        >
+                            {{ tag }}
+                        </span>
+                     </div>
+                </div>
             </div>
-            <div class="text-sm text-gray-300 line-clamp-1">{{ group.title || 'No title' }}</div>
+            
+            <div class="text-sm text-gray-400 line-clamp-1 font-mono pl-0.5">
+                {{ affectedComponentNames }}
+            </div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-1 font-mono text-xs text-gray-500 break-all">
-                {{ group.rescored_vector || group.cvss_vector }}
+            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50">
+                <span class="text-gray-600 mr-2 uppercase font-bold">Vector:</span>{{ group.rescored_vector || group.cvss_vector }}
             </div>
         </div>
         
-        <div class="flex items-center gap-6">
-            <div class="text-right">
-                <div class="text-xs text-gray-500 uppercase">Analysis</div>
-                <div :class="['font-semibold', stateColor]">
+        <div class="flex items-start gap-8 shrink-0">
+            <div class="w-32 text-right">
+                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
+                <div :class="['font-bold text-sm truncate analysis-state-value', stateColor]">
                     {{ displayState }}
                 </div>
             </div>
             
-            <div class="text-right">
-                    <div class="text-xs text-gray-500 uppercase">Affected</div>
-                    <div class="font-bold">{{ group.affected_versions?.length || 0 }} Versions</div>
+            <div class="w-24 text-right">
+                    <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
+                    <div class="font-bold text-sm text-gray-300">{{ group.affected_versions?.length || 0 }} Versions</div>
             </div>
 
-            <component :is="expanded ? ChevronUp : ChevronDown" class="text-gray-400" />
+            <div class="pt-1">
+                <component :is="expanded ? ChevronUp : ChevronDown" class="text-gray-500" :size="20" />
+            </div>
         </div>
     </div>
 
-    <!-- Expanded Details -->
+            <!-- Expanded Details -->
     <div v-if="expanded" class="p-4 border-t border-gray-700 bg-gray-850">
         <div class="grid md:grid-cols-2 gap-8">
             <div>
@@ -335,7 +397,7 @@ const stateColor = computed(() => {
                          <div v-for="v in group.affected_versions" :key="v.project_uuid" class="mb-4">
                             <h5 class="text-sm font-bold text-gray-400 mb-2">{{ v.project_version }}</h5>
                          
-                            <div v-for="(inst, i) in v.components" :key="i" class="mb-2 bg-gray-900 p-3 rounded border border-gray-700 ml-2">
+                            <div v-for="(inst, i) in getGroupedInstances(v.components)" :key="i" class="mb-2 bg-gray-900 p-3 rounded border border-gray-700 ml-2">
                                 <div class="flex justify-between text-xs text-gray-500 mb-1">
                                     <span>{{ inst.component_name }} {{ inst.component_version }}</span>
                                     <span>{{ inst.analysis_state }}</span>
@@ -343,10 +405,18 @@ const stateColor = computed(() => {
                                 <div v-if="inst.analysis_details" class="text-sm text-gray-300 mb-1 p-2 bg-gray-800 rounded whitespace-pre-wrap break-all">
                                     {{ inst.analysis_details }}
                                 </div>
-                                <div v-if="inst.analysis_comments && inst.analysis_comments.length > 0" class="space-y-1">
+                                <div v-if="inst.analysis_comments && inst.analysis_comments.length > 0" class="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
                                     <div v-for="(c, ci) in inst.analysis_comments" :key="ci" class="text-xs text-gray-400 italic pl-2 border-l-2 border-gray-600">
                                         {{ c.comment }} <span class="text-gray-600">- {{ new Date(c.timestamp).toLocaleDateString() }}</span>
                                     </div>
+                                </div>
+                                
+                                <!-- Usage Graph Section (grouped) -->
+                                <div v-if="inst.usage_paths && inst.usage_paths.length" class="overflow-x-auto custom-scrollbar mt-3">
+                                    <div class="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-2">
+                                        Dependency Chains
+                                    </div>
+                                    <DependencyPathList :paths="inst.usage_paths" :project-name="v.project_name"  class="overflow-x-auto custom-scrollbar"/>
                                 </div>
                              </div>
                          </div>

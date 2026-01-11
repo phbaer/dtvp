@@ -29,8 +29,8 @@ const uniqueProjects = computed(() => {
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto">
-    <h2 class="text-2xl font-bold mb-6">Find a Project</h2>
+  <div class="mx-auto">
+    <h2 class="text-3xl font-bold mb-6">Find a Project</h2>
     
     <form @submit.prevent="handleSearch" class="flex gap-2 mb-8">
       <input 

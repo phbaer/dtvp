@@ -1,6 +1,8 @@
 import pytest
 from dt_client import DTClient, DTSettings, get_client
 from unittest.mock import patch
+import respx
+import httpx
 
 
 @pytest.fixture
@@ -159,3 +161,51 @@ async def test_get_client():
             assert c.base_url == "http://mock"
             assert c.headers["X-Api-Key"] == "mock_key"
             break
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_get_bom_error():
+    settings = DTSettings(
+        api_url="http://dependency-track",
+        api_key="test_key",
+    )
+    # DTSettings determines URL.
+    # If using DTSettings constructor, we set api_url explicitly.
+    # However, DTClient logic might modify it or environment variables might interfere?
+    # Wait, the failure says <Request('GET', 'http://localhost:8081/api/v1/bom/cyclonedx/project/uuid-error')>
+    # This means api_url in settings was ignored or defaulted?
+    # Ah, in test_settings_properties we saw fallbacks.
+    # With `DTSettings(api_url="...")` passed to DTClient constructor, it checks arguments.
+    # `def __init__(self, base_url: str, ...)`
+    # The fixture failure implies base_url was 'http://localhost:8081'.
+    # In my test:
+    # settings = DTSettings(api_url=..., api_key=...)
+    # But DTSettings is a Pydantic model. fields are DTVP_DT_API_URL etc.
+    # 'api_url' is a computed property! I cannot pass it to constructor unless it's an alias?
+    # No, I should pass DTVP_DT_API_URL="http://dependency-track"
+
+    settings = DTSettings(
+        DTVP_DT_API_URL="http://dependency-track",
+        DTVP_DT_API_KEY="test_key",
+    )
+
+    # We also mocked respx specific URL.
+    respx.get("http://dependency-track/api/v1/bom/cyclonedx/project/uuid-error").mock(
+        return_value=httpx.Response(404)
+    )
+
+    async with DTClient(settings.api_url, settings.api_key) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.get_bom("uuid-error")
+
+
+@pytest.mark.asyncio
+async def test_get_bom_success(respx_mock):
+    dt_client = DTClient("http://dt.example.com", "api-key")
+    respx_mock.get("http://dt.example.com/api/v1/bom/cyclonedx/project/u1").respond(
+        json={"bomFormat": "CycloneDX"}
+    )
+
+    bom = await dt_client.get_bom("u1")
+    assert bom["bomFormat"] == "CycloneDX"

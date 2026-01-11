@@ -129,4 +129,18 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         // The catch block sets activeVersion='3.1'.
         expect((wrapper.vm as any).activeVersion).toBe('3.1')
     })
+    it('renders tags when present', async () => {
+        const taggedGroup = {
+            ...mockGroup,
+            tags: ['Tag1', 'Tag2']
+        }
+        const wrapper = mount(VulnGroupCard, { props: { group: taggedGroup } })
+
+        const tags = wrapper.findAll('.bg-blue-900\\/40')
+        expect(tags.length).toBe(2)
+        if (tags.length >= 2) {
+            expect(tags[0]!.text()).toBe('Tag1')
+            expect(tags[1]!.text()).toBe('Tag2')
+        }
+    })
 })

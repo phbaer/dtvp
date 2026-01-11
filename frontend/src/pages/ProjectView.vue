@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { getGroupedVulns } from '../lib/api'
 import type { GroupedVuln } from '../types'
@@ -56,14 +56,130 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
     })
 }
 
+const tagFilter = ref('')
+const sortBy = ref('severity')
+const sortOrder = ref<'asc' | 'desc'>('asc')
+
+const SEVERITY_ORDER: Record<string, number> = {
+    'CRITICAL': 0,
+    'HIGH': 1,
+    'MEDIUM': 2,
+    'LOW': 3,
+    'INFO': 4,
+    'UNKNOWN': 5
+}
+
+const ANALYSIS_STATE_ORDER: Record<string, number> = {
+    'EXPLOITABLE': 0,
+    'IN_TRIAGE': 1,
+    'NOT_SET': 2,
+    'RESOLVED': 3,
+    'FALSE_POSITIVE': 4,
+    'NOT_AFFECTED': 5,
+    'MIXED': 6
+}
+
+const getDisplayState = (group: GroupedVuln) => {
+    const allInstances = group.affected_versions?.flatMap(v => v.components) || []
+    const uniqueStates = Array.from(new Set(allInstances.map(i => i.analysis_state || 'NOT_SET')))
+    return uniqueStates.length === 1 ? uniqueStates[0] : 'MIXED'
+}
+
+const filteredGroups = computed(() => {
+    let result = [...groups.value]
+    
+    if (tagFilter.value) {
+        const term = tagFilter.value.toLowerCase()
+        result = result.filter(g => 
+            g.tags?.some(t => t.toLowerCase().includes(term))
+        )
+    }
+
+    result.sort((a, b) => {
+        let comparison = 0
+        
+        switch (sortBy.value) {
+            case 'analysis': {
+                const stateA = getDisplayState(a) || 'NOT_SET'
+                const stateB = getDisplayState(b) || 'NOT_SET'
+                comparison = (ANALYSIS_STATE_ORDER[stateA] ?? 99) - (ANALYSIS_STATE_ORDER[stateB] ?? 99)
+                break
+            }
+            case 'tags': {
+                const tagA = (a.tags && a.tags.length > 0) ? (a.tags[0] || '') : ''
+                const tagB = (b.tags && b.tags.length > 0) ? (b.tags[0] || '') : ''
+                comparison = tagA.localeCompare(tagB)
+                break
+            }
+            case 'severity': {
+                const sevA = a.severity || 'UNKNOWN'
+                const sevB = b.severity || 'UNKNOWN'
+                comparison = (SEVERITY_ORDER[sevA] ?? 5) - (SEVERITY_ORDER[sevB] ?? 5)
+                break
+            }
+            case 'score': {
+                const scoreA = a.rescored_cvss ?? a.cvss_score ?? a.cvss ?? 0
+                const scoreB = b.rescored_cvss ?? b.cvss_score ?? b.cvss ?? 0
+                comparison = scoreA - scoreB
+                break
+            }
+            case 'id': {
+                comparison = a.id.localeCompare(b.id)
+                break
+            }
+        }
+        
+        return sortOrder.value === 'asc' ? comparison : -comparison
+    })
+    
+    return result
+})
+
 watch(() => route.params.name, fetchVulns, { immediate: true })
 </script>
 
 <template>
-  <div>
-    <div class="mb-6 flex items-center gap-4">
-        <router-link to="/" class="text-blue-400 hover:underline">&larr; Back to Dashboard</router-link>
-        <h2 class="text-2xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name }}</span></h2>
+  <div class="mx-auto">
+    <div class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div class="flex flex-col gap-2">
+            <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+                &larr; Back to Dashboard
+            </router-link>
+            <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name }}</span></h2>
+        </div>
+        <div class="flex flex-col md:flex-row gap-4 items-end">
+            <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-bold text-gray-500 uppercase">Sort By</label>
+                <div class="flex gap-2">
+                    <select 
+                        v-model="sortBy"
+                        class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    >
+                        <option value="severity">Criticality</option>
+                        <option value="score">Score</option>
+                        <option value="analysis">Analysis</option>
+                        <option value="tags">Tags</option>
+                        <option value="id">CVE ID</option>
+                    </select>
+                    <button 
+                        @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'"
+                        class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm hover:bg-gray-700 transition-colors"
+                        :title="sortOrder === 'asc' ? 'Ascending' : 'Descending'"
+                    >
+                        {{ sortOrder === 'asc' ? '↑' : '↓' }}
+                    </button>
+                </div>
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-bold text-gray-500 uppercase">Filter</label>
+                <input 
+                    v-model="tagFilter" 
+                    type="text" 
+                    placeholder="Filter by Team Tag..." 
+                    class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
+                />
+            </div>
+        </div>
     </div>
     
     <div v-if="loading" class="text-center py-10">
@@ -77,12 +193,12 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
     
     <div v-else class="space-y-4">
         <VulnGroupCard 
-            v-for="group in groups" 
+            v-for="group in filteredGroups" 
             :key="group.id" 
             :group="group" 
             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)" 
         />
-        <div v-if="groups.length === 0" class="text-gray-500 text-center">No vulnerabilities found.</div>
+        <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center">No vulnerabilities found matching criteria.</div>
     </div>
   </div>
 </template>

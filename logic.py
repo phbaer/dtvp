@@ -1,5 +1,7 @@
 from typing import List, Dict, Any
 import re
+import json
+import os
 
 # Pre-compile regex patterns
 RE_SCORE = re.compile(r"\[Rescored:\s*([\d\.]+)\]")
@@ -7,35 +9,166 @@ RE_VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
 RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
 
 
-def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def get_team_mapping_path() -> str:
+    return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
+
+
+def load_team_mapping(path: str = None) -> Dict[str, str]:
+    if path is None:
+        path = get_team_mapping_path()
+
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:
+    """
+    Builds a map of child_ref -> list of parent_refs from BOM.
+    """
+    parent_map = {}
+    if not bom or "dependencies" not in bom:
+        return {}
+
+    for dep in bom["dependencies"]:
+        parent_ref = dep.get("ref")
+        for child_ref in dep.get("dependsOn", []):
+            if child_ref not in parent_map:
+                parent_map[child_ref] = []
+            parent_map[child_ref].append(parent_ref)
+
+    return parent_map
+
+
+def get_component_analysis(
+    component_uuid: str,
+    component_name: str,
+    bom: Dict[str, Any],
+    mapping: Dict[str, str],
+) -> tuple[List[str], List[str]]:
+    """
+    Analyzes component to find tags and usage paths.
+    Returns (list_of_tags, list_of_paths).
+    """
+    found_tags = set()
+    found_paths = set()
+
+    # Check direct match first
+    if component_name in mapping:
+        found_tags.add(mapping[component_name])
+
+    if bom:
+        # Map refs
+        comp_map = {}  # ref -> comp
+        target_ref = None
+
+        for comp in bom.get("components", []):
+            ref = comp.get("bom-ref")
+            if not ref:
+                continue
+            comp_map[ref] = comp
+
+            c_uuid = comp.get("uuid")
+            c_name = comp.get("name")
+
+            # Fallback for matching:
+            if c_uuid == component_uuid:
+                target_ref = ref
+            elif ref == component_uuid:
+                target_ref = ref
+            elif not target_ref and c_name == component_name:
+                target_ref = ref
+
+        if target_ref:
+            parent_map = build_parent_map(bom)
+
+            # BFS/Queue for traversal to support multiple parents
+            # Queue stores (current_ref, path_list)
+            # Use current_comp.get("name") if available, otherwise just use component_name
+            start_name = component_name
+            target_comp = comp_map.get(target_ref)
+            if target_comp:
+                start_name = target_comp.get("name") or component_name
+
+            queue = [(target_ref, [start_name])]
+
+            # Using a set to prevent infinite cycles in the queue if the graph has cycles
+            # (current_ref, tuple(current_path))
+            visited_states = set()
+            visited_states.add((target_ref, tuple([start_name])))
+
+            while queue:
+                current_ref, current_path = queue.pop(0)
+
+                # Check current node for Tags
+                current_comp = comp_map.get(current_ref)
+                if current_comp:
+                    curr_name = current_comp.get("name")
+                    if curr_name and curr_name in mapping:
+                        found_tags.add(mapping[curr_name])
+
+                # Get parents
+                parents = parent_map.get(current_ref, [])
+
+                if not parents:
+                    # Loop reached a root node (no further parents).
+                    path_str = " -> ".join(current_path)
+                    found_paths.add(path_str)
+                    continue
+
+                for p_ref in parents:
+                    p_comp = comp_map.get(p_ref)
+                    p_name = p_comp.get("name") if p_comp else p_ref
+
+                    if p_name in current_path:
+                        continue
+
+                    new_path = current_path + [str(p_name)]
+
+                    # Avoid redundant processing
+                    state = (p_ref, tuple(new_path))
+                    if state in visited_states:
+                        continue
+                    visited_states.add(state)
+
+                    queue.append((p_ref, new_path))
+
+            # If after traversal we found nothing (disconnected node?), default to self
+            if not found_paths:
+                found_paths.add(start_name)
+
+    if not found_paths:
+        found_paths.add(component_name)
+
+    if not found_tags and "*" in mapping:
+        found_tags.add(mapping["*"])
+
+    return list(found_tags), sorted(list(found_paths))
+
+
+def group_vulnerabilities(
+    versions_data: List[Dict[str, Any]], project_boms: Dict[str, Any] = None
+) -> List[Dict[str, Any]]:
     """
     Groups vulnerabilities across multiple project versions.
-
-    versions_data structure:
-    [
-        {
-            "version": { ... project version data ... },
-            "vulnerabilities": [ ... list of findings ... ]
-        },
-        ...
-    ]
-
-    Returns a list of grouped vulnerabilities.
-    Each group contains:
-    - id: Common Vulnerability ID (e.g. CVE-2023-1234)
-    - severity: Max severity in group? Or just the string if same.
-    - description: Description from one of them.
-    - affected_versions: List of objects {
-          project_name, project_version, project_uuid,
-          components: [ { component_name, component_version, component_uuid, finding_uuid, analysis_state, ... } ]
-      }
+    Optionally tags them based on BOM hierarchy and team mapping.
     """
+    if project_boms is None:
+        project_boms = {}
+
+    mapping = load_team_mapping()
 
     groups = {}  # Key: vuln_id -> Group Data
 
     for entry in versions_data:
         version_info = entry["version"]
         vulns = entry["vulnerabilities"]
+        proj_uuid = version_info.get("uuid")
+        bom = project_boms.get(proj_uuid)
 
         for finding in vulns:
             # Finding structure depends on DT API.
@@ -58,12 +191,27 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
                     "cvss_vector": vuln.get("cvssV3Vector") or vuln.get("cvssV2Vector"),
                     "rescored_cvss": None,
                     "rescored_vector": None,
-                    "affected_versions": {},  # Intermediate dict: project_uuid -> version_data
+                    "affected_versions": {},
+                    "tags": set(),
                 }
 
             # Prepare component info
+            component = finding.get("component", {})
+            comp_uuid = component.get("uuid")
+            comp_name = component.get("name")
+
+            # Calculate Tags and Usage Paths
+            tags, paths = get_component_analysis(comp_uuid, comp_name, bom, mapping)
+
+            if tags:
+                print(
+                    f"INFO: [Analysis] Vuln {vuln_id} (Component: {comp_name}) -> Tags: {tags}"
+                )
+
+            groups[vuln_id]["tags"].update(tags)
+
             analysis = finding.get("analysis", {})
-            details = analysis.get("analysisDetails")
+            details = analysis.get("analysisDetails") or ""
 
             # Parse rescored value if present
             rescored_score = None
@@ -94,16 +242,13 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
             if rescored_vector is not None:
                 groups[vuln_id]["rescored_vector"] = rescored_vector
 
-            # Add to version group
-            proj_uuid = version_info.get("uuid")
-
             component_info = {
                 "project_uuid": proj_uuid,
                 "project_name": version_info.get("name"),
                 "project_version": version_info.get("version"),
-                "component_name": finding.get("component", {}).get("name"),
-                "component_version": finding.get("component", {}).get("version"),
-                "component_uuid": finding.get("component", {}).get("uuid"),
+                "component_name": comp_name,
+                "component_version": component.get("version"),
+                "component_uuid": comp_uuid,
                 "vulnerability_uuid": vuln.get("uuid"),
                 "finding_uuid": finding.get("uuid"),
                 "analysis_state": analysis.get("state")
@@ -112,6 +257,7 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
                 "analysis_comments": analysis.get("analysisComments", []),
                 "is_suppressed": analysis.get("isSuppressed", False)
                 or analysis.get("suppressed", False),
+                "usage_paths": paths,
             }
 
             if proj_uuid not in groups[vuln_id]["affected_versions"]:
@@ -130,6 +276,8 @@ def group_vulnerabilities(versions_data: List[Dict[str, Any]]) -> List[Dict[str,
     result = []
     for g in groups.values():
         g["affected_versions"] = list(g["affected_versions"].values())
+        g["tags"] = list(g["tags"])  # Convert set to list
+        g["tags"].sort()
         result.append(g)
 
     return result

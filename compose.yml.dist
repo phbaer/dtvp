@@ -14,4 +14,6 @@ services:
       - DTVP_OIDC_CLIENT_SECRET=<idp client secret>
       - DTVP_SESSION_SECRET_KEY=<session secret>
       - DTVP_CONTEXT_PATH=/
+    volumes:
+      - ./data:/app/data
     restart: always
