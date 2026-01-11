@@ -22,7 +22,7 @@ jobs:
       - name: Create dummy frontend assets
         run: |
           mkdir -p frontend/dist
-          echo "<!doctype html><html><body>SPA</body></html>" > frontend/dist/index.html
+          cp tests/assets/index.html frontend/dist/index.html
       - name: Run tests with coverage
         run: uv run pytest
       - name: Upload Python Coverage Report
