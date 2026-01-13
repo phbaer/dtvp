@@ -13,7 +13,12 @@ import shutil
 
 from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
-from logic import group_vulnerabilities, get_team_mapping_path, load_team_mapping
+from logic import (
+    group_vulnerabilities,
+    get_team_mapping_path,
+    load_team_mapping,
+    BOMAnalysisCache,
+)
 
 
 from version import VERSION, BUILD_COMMIT
@@ -105,9 +110,12 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
             f"Found {len(versions)} versions. Fetching vulnerabilities..."
         )
 
+        # Pre-load mapping once
+        team_mapping = load_team_mapping()
+
         # 2. Sequential fetching with progress update to avoid overloading backend
-        # We can do chunks or one by one
         combined_data = []
+        bom_cache_map = {}  # uuid -> BOMAnalysisCache
         total_versions = len(versions)
 
         for i, v in enumerate(versions):
@@ -121,11 +129,16 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
             # Fetch findings and full details
             findings = await client.get_vulnerabilities(v["uuid"])
             full_vulns = await client.get_project_vulnerabilities(v["uuid"])
+
+            # Fetch and PROCESS BOM immediately to save memory
             try:
                 bom = await client.get_bom(v["uuid"])
+                # Create cache immediately and discard raw BOM
+                bom_cache_map[v["uuid"]] = BOMAnalysisCache(bom, team_mapping)
+                del bom  # Hint for GC
             except Exception:
-                # Fallback if fetching BOM fails (e.g. not available or permission issue)
-                bom = None
+                # Fallback
+                bom_cache_map[v["uuid"]] = BOMAnalysisCache({}, team_mapping)
 
             # Map vulnId -> vuln_obj for quick lookup
             vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
@@ -145,18 +158,16 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
                         if key in full_vuln and key not in vuln_summary:
                             vuln_summary[key] = full_vuln[key]
 
-            combined_data.append(
-                {"version": v, "vulnerabilities": findings, "bom": bom}
-            )
+            # Store only what is needed: version info and findings
+            # NO BOM here
+            combined_data.append({"version": v, "vulnerabilities": findings})
 
         tasks[task_id]["message"] = "Grouping vulnerabilities..."
 
-        # Extract boms map for grouping
-        project_boms = {
-            entry["version"]["uuid"]: entry.get("bom") for entry in combined_data
-        }
-
-        result = group_vulnerabilities(combined_data, project_boms)
+        # Pass the pre-processed BOM cache map
+        result = group_vulnerabilities(
+            combined_data, project_boms={}, processed_boms=bom_cache_map
+        )
 
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["progress"] = 100
@@ -168,12 +179,6 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
         print(f"Task {task_id} failed: {e}")
     finally:
         # Close the client since we created it or it was passed
-        # Note: client from Depends(get_client) is an async generator context.
-        # But here we are passing the yielded client.
-        # The generator context manager in the endpoint waits for the endpoint function to return?
-        # NO. Fastapi dependencies are closed after the request is finished.
-        # Since we are running in background, the client might be closed!
-        # WE MUST CREATE A NEW CLIENT IN THE BACKGROUND TASK.
         pass
 
 

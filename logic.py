@@ -191,21 +191,28 @@ def get_component_analysis(
 
 
 def group_vulnerabilities(
-    versions_data: List[Dict[str, Any]], project_boms: Dict[str, Any] = None
+    versions_data: List[Dict[str, Any]],
+    project_boms: Dict[str, Any] = None,
+    processed_boms: Dict[str, "BOMAnalysisCache"] = None,
 ) -> List[Dict[str, Any]]:
     """
     Groups vulnerabilities across multiple project versions.
     Optionally tags them based on BOM hierarchy and team mapping.
+    processed_boms: Optional dict of project_uuid -> BOMAnalysisCache.
+                    If provided, raw 'project_boms' are ignored for that uuid.
     """
     if project_boms is None:
         project_boms = {}
+    if processed_boms is None:
+        processed_boms = {}
 
     mapping = load_team_mapping()
 
     # Pre-process BOMs
-    bom_processors = {}
+    bom_processors = processed_boms.copy()
     for proj_uuid, bom in project_boms.items():
-        bom_processors[proj_uuid] = BOMAnalysisCache(bom, mapping)
+        if proj_uuid not in bom_processors:
+            bom_processors[proj_uuid] = BOMAnalysisCache(bom, mapping)
 
     groups = {}  # Key: vuln_id -> Group Data
 
@@ -217,7 +224,8 @@ def group_vulnerabilities(
         # Get processor for this project version, or create an empty one/default if missing
         processor = bom_processors.get(proj_uuid)
         if not processor:
-            processor = BOMAnalysisCache(project_boms.get(proj_uuid, {}), mapping)
+            # Just in case it wasn't in processed_boms AND wasn't in project_boms
+            processor = BOMAnalysisCache({}, mapping)
             bom_processors[proj_uuid] = processor
 
         for finding in vulns:
