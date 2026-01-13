@@ -523,6 +523,7 @@ def test_get_component_analysis_disconnected():
     tags, paths = logic.get_component_analysis("uA", "A", bom, {})
     assert paths == ["A"]
 
+
 def test_get_component_analysis_redundant_parents():
     import logic
 
@@ -539,3 +540,36 @@ def test_get_component_analysis_redundant_parents():
     tags, paths = logic.get_component_analysis("u2", "Child", bom, {})
     # Should only have one path and not crash from redundant processing
     assert paths == ["Child -> Parent"]
+
+
+def test_group_vulnerabilities_cache_hit():
+    import logic
+
+    # Test to ensure that multiple vulnerabilities for the same component use the cache
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            },
+            {
+                "vulnerability": {"vulnId": "CVE-2", "uuid": "v2"},
+                # Same component
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            },
+        ],
+    }
+
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "comp1", "name": "libA"},
+        ],
+        "dependencies": [],
+    }
+    project_boms = {"uuid1": bom}
+
+    grouped = logic.group_vulnerabilities([v1_data], project_boms)
+    assert len(grouped) == 2

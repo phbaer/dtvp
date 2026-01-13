@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Set
 import re
 import json
 import os
@@ -44,6 +44,137 @@ def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:
     return parent_map
 
 
+class BOMAnalysisCache:
+    """
+    Caches analysis data for a specific BOM to avoid re-parsing for every vulnerability.
+    """
+
+    def __init__(self, bom: Dict[str, Any], mapping: Dict[str, str]):
+        self.bom = bom
+        self.mapping = mapping
+        self.parent_map = build_parent_map(bom)
+        self.comp_map = {}  # ref -> comp
+
+        # Caches
+        self.uuid_to_ref = {}
+        self.name_to_ref_candidates = {}  # name -> list of refs (in case of dupes, though rare)
+        self.analysis_cache = {}  # (component_uuid, component_name) -> (tags, paths)
+
+        self._preprocess_components()
+
+    def _preprocess_components(self):
+        if not self.bom:
+            return
+
+        for comp in self.bom.get("components", []):
+            ref = comp.get("bom-ref")
+            if not ref:
+                continue
+
+            self.comp_map[ref] = comp
+
+            c_uuid = comp.get("uuid")
+            c_name = comp.get("name")
+
+            if c_uuid:
+                self.uuid_to_ref[c_uuid] = ref
+
+            if c_name:
+                if c_name not in self.name_to_ref_candidates:
+                    self.name_to_ref_candidates[c_name] = []
+                self.name_to_ref_candidates[c_name].append(ref)
+
+    def get_target_ref(self, component_uuid: str, component_name: str) -> str:
+        # 1. Match by UUID
+        if component_uuid and component_uuid in self.uuid_to_ref:
+            return self.uuid_to_ref[component_uuid]
+
+        # 2. Match by Ref (if UUID provided is actually a Ref)
+        if component_uuid and component_uuid in self.comp_map:
+            return component_uuid
+
+        # 3. Match by Name
+        if component_name and component_name in self.name_to_ref_candidates:
+            # Return first match. Logic could be improved if name collisions matter.
+            return self.name_to_ref_candidates[component_name][0]
+
+        return None
+
+    def get_analysis(
+        self, component_uuid: str, component_name: str
+    ) -> Tuple[List[str], List[str]]:
+        cache_key = (component_uuid, component_name)
+        if cache_key in self.analysis_cache:
+            return self.analysis_cache[cache_key]
+
+        found_tags = set()
+        found_paths = set()
+
+        # Check direct match first
+        if component_name in self.mapping:
+            found_tags.add(self.mapping[component_name])
+
+        target_ref = self.get_target_ref(component_uuid, component_name)
+
+        if target_ref:
+            # BFS/Queue for traversal
+            start_name = component_name
+            target_comp = self.comp_map.get(target_ref)
+            if target_comp:
+                start_name = target_comp.get("name") or component_name
+
+            queue = [(target_ref, [start_name])]
+            visited_states = set()
+            visited_states.add((target_ref, tuple([start_name])))
+
+            while queue:
+                current_ref, current_path = queue.pop(0)
+
+                # Check current node for Tags
+                current_comp = self.comp_map.get(current_ref)
+                if current_comp:
+                    curr_name = current_comp.get("name")
+                    if curr_name and curr_name in self.mapping:
+                        found_tags.add(self.mapping[curr_name])
+
+                # Get parents
+                parents = self.parent_map.get(current_ref, [])
+
+                if not parents:
+                    # Root node
+                    path_str = " -> ".join(current_path)
+                    found_paths.add(path_str)
+                    continue
+
+                for p_ref in parents:
+                    p_comp = self.comp_map.get(p_ref)
+                    p_name = p_comp.get("name") if p_comp else p_ref
+
+                    if p_name in current_path:
+                        continue
+
+                    new_path = current_path + [str(p_name)]
+                    state = (p_ref, tuple(new_path))
+
+                    if state in visited_states:
+                        continue
+                    visited_states.add(state)
+                    queue.append((p_ref, new_path))
+
+            if not found_paths:
+                found_paths.add(start_name)
+
+        if not found_paths:
+            found_paths.add(component_name)
+
+        if not found_tags and "*" in self.mapping:
+            found_tags.add(self.mapping["*"])
+
+        result = (list(found_tags), sorted(list(found_paths)))
+        self.analysis_cache[cache_key] = result
+        return result
+
+
 def get_component_analysis(
     component_uuid: str,
     component_name: str,
@@ -53,101 +184,10 @@ def get_component_analysis(
     """
     Analyzes component to find tags and usage paths.
     Returns (list_of_tags, list_of_paths).
+    Legacy wrapper around BOMAnalysisCache.
     """
-    found_tags = set()
-    found_paths = set()
-
-    # Check direct match first
-    if component_name in mapping:
-        found_tags.add(mapping[component_name])
-
-    if bom:
-        # Map refs
-        comp_map = {}  # ref -> comp
-        target_ref = None
-
-        for comp in bom.get("components", []):
-            ref = comp.get("bom-ref")
-            if not ref:
-                continue
-            comp_map[ref] = comp
-
-            c_uuid = comp.get("uuid")
-            c_name = comp.get("name")
-
-            # Fallback for matching:
-            if c_uuid == component_uuid:
-                target_ref = ref
-            elif ref == component_uuid:
-                target_ref = ref
-            elif not target_ref and c_name == component_name:
-                target_ref = ref
-
-        if target_ref:
-            parent_map = build_parent_map(bom)
-
-            # BFS/Queue for traversal to support multiple parents
-            # Queue stores (current_ref, path_list)
-            # Use current_comp.get("name") if available, otherwise just use component_name
-            start_name = component_name
-            target_comp = comp_map.get(target_ref)
-            if target_comp:
-                start_name = target_comp.get("name") or component_name
-
-            queue = [(target_ref, [start_name])]
-
-            # Using a set to prevent infinite cycles in the queue if the graph has cycles
-            # (current_ref, tuple(current_path))
-            visited_states = set()
-            visited_states.add((target_ref, tuple([start_name])))
-
-            while queue:
-                current_ref, current_path = queue.pop(0)
-
-                # Check current node for Tags
-                current_comp = comp_map.get(current_ref)
-                if current_comp:
-                    curr_name = current_comp.get("name")
-                    if curr_name and curr_name in mapping:
-                        found_tags.add(mapping[curr_name])
-
-                # Get parents
-                parents = parent_map.get(current_ref, [])
-
-                if not parents:
-                    # Loop reached a root node (no further parents).
-                    path_str = " -> ".join(current_path)
-                    found_paths.add(path_str)
-                    continue
-
-                for p_ref in parents:
-                    p_comp = comp_map.get(p_ref)
-                    p_name = p_comp.get("name") if p_comp else p_ref
-
-                    if p_name in current_path:
-                        continue
-
-                    new_path = current_path + [str(p_name)]
-
-                    # Avoid redundant processing
-                    state = (p_ref, tuple(new_path))
-                    if state in visited_states:
-                        continue
-                    visited_states.add(state)
-
-                    queue.append((p_ref, new_path))
-
-            # If after traversal we found nothing (disconnected node?), default to self
-            if not found_paths:
-                found_paths.add(start_name)
-
-    if not found_paths:
-        found_paths.add(component_name)
-
-    if not found_tags and "*" in mapping:
-        found_tags.add(mapping["*"])
-
-    return list(found_tags), sorted(list(found_paths))
+    cache = BOMAnalysisCache(bom, mapping)
+    return cache.get_analysis(component_uuid, component_name)
 
 
 def group_vulnerabilities(
@@ -162,13 +202,23 @@ def group_vulnerabilities(
 
     mapping = load_team_mapping()
 
+    # Pre-process BOMs
+    bom_processors = {}
+    for proj_uuid, bom in project_boms.items():
+        bom_processors[proj_uuid] = BOMAnalysisCache(bom, mapping)
+
     groups = {}  # Key: vuln_id -> Group Data
 
     for entry in versions_data:
         version_info = entry["version"]
         vulns = entry["vulnerabilities"]
         proj_uuid = version_info.get("uuid")
-        bom = project_boms.get(proj_uuid)
+
+        # Get processor for this project version, or create an empty one/default if missing
+        processor = bom_processors.get(proj_uuid)
+        if not processor:
+            processor = BOMAnalysisCache(project_boms.get(proj_uuid, {}), mapping)
+            bom_processors[proj_uuid] = processor
 
         for finding in vulns:
             # Finding structure depends on DT API.
@@ -200,13 +250,12 @@ def group_vulnerabilities(
             comp_uuid = component.get("uuid")
             comp_name = component.get("name")
 
-            # Calculate Tags and Usage Paths
-            tags, paths = get_component_analysis(comp_uuid, comp_name, bom, mapping)
+            # Calculate Tags and Usage Paths using processor
+            tags, paths = processor.get_analysis(comp_uuid, comp_name)
 
             if tags:
-                print(
-                    f"INFO: [Analysis] Vuln {vuln_id} (Component: {comp_name}) -> Tags: {tags}"
-                )
+                # Logging could be verbose, consider removing or making conditional
+                pass
 
             groups[vuln_id]["tags"].update(tags)
 
