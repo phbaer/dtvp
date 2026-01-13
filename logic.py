@@ -100,15 +100,8 @@ class BOMAnalysisCache:
 
         return None
 
-    def get_analysis(
-        self, component_uuid: str, component_name: str
-    ) -> Tuple[List[str], List[str]]:
-        cache_key = (component_uuid, component_name)
-        if cache_key in self.analysis_cache:
-            return self.analysis_cache[cache_key]
-
+    def get_tags_only(self, component_uuid: str, component_name: str) -> List[str]:
         found_tags = set()
-        found_paths = set()
 
         # Check direct match first
         if component_name in self.mapping:
@@ -117,18 +110,15 @@ class BOMAnalysisCache:
         target_ref = self.get_target_ref(component_uuid, component_name)
 
         if target_ref:
-            # BFS/Queue for traversal
-            start_name = component_name
-            target_comp = self.comp_map.get(target_ref)
-            if target_comp:
-                start_name = target_comp.get("name") or component_name
+            # We still need to traverse parents to find tags inherited from parents
+            # But we don't need to build full paths, just find tags.
+            # BFS is still needed but we can simplify state.
 
-            queue = [(target_ref, [start_name])]
-            visited_states = set()
-            visited_states.add((target_ref, tuple([start_name])))
+            queue = [target_ref]
+            visited = {target_ref}
 
             while queue:
-                current_ref, current_path = queue.pop(0)
+                current_ref = queue.pop(0)
 
                 # Check current node for Tags
                 current_comp = self.comp_map.get(current_ref)
@@ -136,6 +126,61 @@ class BOMAnalysisCache:
                     curr_name = current_comp.get("name")
                     if curr_name and curr_name in self.mapping:
                         found_tags.add(self.mapping[curr_name])
+
+                # Get parents
+                parents = self.parent_map.get(current_ref, [])
+                for p_ref in parents:
+                    if p_ref not in visited:
+                        visited.add(p_ref)
+                        queue.append(p_ref)
+
+        if not found_tags and "*" in self.mapping:
+            found_tags.add(self.mapping["*"])
+
+        return list(found_tags)
+
+    def get_dependency_paths(
+        self,
+        component_uuid: str,
+        component_name: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Returns paginated dependency paths.
+        Returns {
+            "paths": List[str],
+            "total": int,
+            "limit": int,
+            "offset": int
+        }
+        """
+        # Note: This recalculates paths. Caching might be useful if called often for same comp.
+
+        found_paths = set()
+        target_ref = self.get_target_ref(component_uuid, component_name)
+
+        start_name = component_name
+        if target_ref:
+            target_comp = self.comp_map.get(target_ref)
+            if target_comp:
+                start_name = target_comp.get("name") or component_name
+
+        if target_ref:
+            # BFS/Queue for traversal
+            queue = [(target_ref, [start_name])]
+            visited_states = set()
+            visited_states.add((target_ref, tuple([start_name])))
+
+            # Safety break to avoid infinite loops or massive memory
+            # The user asked for pagination. If we have 1000s paths, generating all might be slow.
+            # But since we need "total" for pagination, we likely need to generate most of them
+            # or use a smart counting algorithm.
+            # For now, let's generate all (assuming it's reasonable for a single component)
+            # and then slice.
+
+            while queue:
+                current_ref, current_path = queue.pop(0)
 
                 # Get parents
                 parents = self.parent_map.get(current_ref, [])
@@ -163,16 +208,34 @@ class BOMAnalysisCache:
 
             if not found_paths:
                 found_paths.add(start_name)
-
-        if not found_paths:
+        else:
             found_paths.add(component_name)
 
-        if not found_tags and "*" in self.mapping:
-            found_tags.add(self.mapping["*"])
+        # Convert to sorted list
+        all_paths = sorted(list(found_paths))
+        total = len(all_paths)
 
-        result = (list(found_tags), sorted(list(found_paths)))
-        self.analysis_cache[cache_key] = result
-        return result
+        # Paginate
+        paginated_paths = all_paths[offset : offset + limit]
+
+        return {
+            "paths": paginated_paths,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def get_analysis(
+        self, component_uuid: str, component_name: str
+    ) -> Tuple[List[str], List[str]]:
+        # Legacy compatibility if needed, or removing if I updated all callers.
+        # I updated group_vulnerabilities, but let's keep it for safety or other callers?
+        # logic.py:get_component_analysis calls it.
+        tags = self.get_tags_only(component_uuid, component_name)
+        paths_data = self.get_dependency_paths(
+            component_uuid, component_name, limit=1000
+        )
+        return (tags, paths_data["paths"])
 
 
 def get_component_analysis(
@@ -258,8 +321,9 @@ def group_vulnerabilities(
             comp_uuid = component.get("uuid")
             comp_name = component.get("name")
 
-            # Calculate Tags and Usage Paths using processor
-            tags, paths = processor.get_analysis(comp_uuid, comp_name)
+            # Calculate Tags only - Skip paths for performance
+            # paths calculation is moved to on-demand API
+            tags = processor.get_tags_only(comp_uuid, comp_name)
 
             if tags:
                 # Logging could be verbose, consider removing or making conditional
@@ -314,7 +378,7 @@ def group_vulnerabilities(
                 "analysis_comments": analysis.get("analysisComments", []),
                 "is_suppressed": analysis.get("isSuppressed", False)
                 or analysis.get("suppressed", False),
-                "usage_paths": paths,
+                "usage_paths": [],  # Empty by default, fetched on demand
             }
 
             if proj_uuid not in groups[vuln_id]["affected_versions"]:

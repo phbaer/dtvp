@@ -5,7 +5,7 @@ import { updateAssessment } from '../lib/api'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
-import DependencyPathList from './DependencyPathList.vue'
+import DependencyChainViewer from './DependencyChainViewer.vue'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -412,11 +412,12 @@ const affectedComponentNames = computed(() => {
                                 </div>
                                 
                                 <!-- Usage Graph Section (grouped) -->
-                                <div v-if="inst.usage_paths && inst.usage_paths.length" class="overflow-x-auto custom-scrollbar mt-3">
-                                    <div class="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-2">
-                                        Dependency Chains
-                                    </div>
-                                    <DependencyPathList :paths="inst.usage_paths" :project-name="v.project_name"  class="overflow-x-auto custom-scrollbar"/>
+                                <div class="mt-3 border-t border-gray-800 pt-2">
+                                     <DependencyChainViewer 
+                                        :project-uuid="v.project_uuid"
+                                        :component-uuid="inst.component_uuid"
+                                        :project-name="v.project_name"
+                                    />
                                 </div>
                              </div>
                          </div>

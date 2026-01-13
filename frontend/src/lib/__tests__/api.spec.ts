@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getProjects, getGroupedVulns, updateAssessment, login, checkSession, getVersion } from '../api'
+import { getProjects, getGroupedVulns, updateAssessment, login, checkSession, getVersion, getDependencyChains } from '../api'
 
 const mocks = vi.hoisted(() => ({
     get: vi.fn(),
@@ -166,5 +166,22 @@ describe('api.ts', () => {
 
         const result = await checkSession()
         expect(result).toBe(false)
+    })
+
+    it('getDependencyChains calls correct endpoint', async () => {
+        const mockResponse = {
+            paths: ['A->B'],
+            total: 1,
+            limit: 10,
+            offset: 0
+        }
+        mocks.get.mockResolvedValue({ data: mockResponse })
+
+        const result = await getDependencyChains('p1', 'c1', 10, 0)
+
+        expect(mocks.get).toHaveBeenCalledWith('/project/p1/component/c1/dependency-chains', {
+            params: { limit: 10, offset: 0 }
+        })
+        expect(result).toEqual(mockResponse)
     })
 })

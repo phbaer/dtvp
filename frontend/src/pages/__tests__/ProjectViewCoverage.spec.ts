@@ -191,4 +191,25 @@ describe('ProjectView Coverage Extras', () => {
         await flushPromises()
         expect(wrapper.text()).toContain('Failed to load vulnerabilities: String error')
     })
+
+    it('paginates visible groups', async () => {
+        const mockGroups = Array.from({ length: 25 }, (_, i) => ({ id: `${i}`, tags: [] }))
+        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                stubs: { RouterLink: true },
+                mocks: { $route: { params: { name: 'Test' } } }
+            }
+        })
+        await flushPromises()
+
+        expect(wrapper.findAllComponents({ name: 'VulnGroupCard' }).length).toBe(20)
+        expect(wrapper.text()).toContain('Load More')
+
+        await wrapper.find('button.bg-gray-700').trigger('click')
+
+        expect(wrapper.findAllComponents({ name: 'VulnGroupCard' }).length).toBe(25)
+        expect(wrapper.text()).not.toContain('Load More')
+    })
 })
