@@ -167,6 +167,7 @@ class DTClient:
         state: str,
         details: str,
         comment: Optional[str] = None,
+        justification: Optional[str] = None,
         suppressed: bool = False,
     ):
         """
@@ -180,6 +181,8 @@ class DTClient:
             "isSuppressed": suppressed,
             "analysisDetails": details,
         }
+        if justification:
+            payload["analysisJustification"] = justification
         if comment:
             payload["comment"] = comment
 

@@ -184,4 +184,19 @@ describe('api.ts', () => {
         })
         expect(result).toEqual(mockResponse)
     })
+
+    it('getGroupedVulns handles missing result in completed task', async () => {
+        const mockTaskStart = { task_id: 'task-123' }
+        const mockTaskCompleted = { status: 'completed' } // No result field
+
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get.mockResolvedValueOnce({ data: mockTaskCompleted })
+
+        vi.useFakeTimers()
+        const promise = getGroupedVulns('Test')
+        await vi.advanceTimersByTimeAsync(1100)
+        const result = await promise
+        expect(result).toEqual([])
+        vi.useRealTimers()
+    })
 })

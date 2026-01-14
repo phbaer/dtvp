@@ -67,6 +67,7 @@ class AssessmentRequest(BaseModel):
     state: str
     details: str
     comment: Optional[str] = None
+    justification: Optional[str] = None
     suppressed: bool = False
 
 
@@ -257,6 +258,7 @@ async def update_assessment(
                 state=req.state,
                 details=req.details,
                 comment=f"{req.comment} -- {user}" if req.comment else None,
+                justification=req.justification,
                 suppressed=req.suppressed,
             )
             results.append({"status": "success", "uuid": instance["finding_uuid"]})

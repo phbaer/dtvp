@@ -22,9 +22,23 @@ const ANALYSIS_STATES = [
     { value: 'RESOLVED', label: 'Resolved' },
 ]
 
+const JUSTIFICATION_OPTIONS = [
+    { value: 'NOT_SET', label: 'Not Set' },
+    { value: 'CODE_NOT_PRESENT', label: 'Code Not Present' },
+    { value: 'CODE_NOT_REACHABLE', label: 'Code Not Reachable' },
+    { value: 'REQUIRES_CONFIGURATION', label: 'Requires Configuration' },
+    { value: 'REQUIRES_DEPENDENCY', label: 'Requires Dependency' },
+    { value: 'REQUIRES_ENVIRONMENT', label: 'Requires Environment' },
+    { value: 'PROTECTED_BY_COMPILER', label: 'Protected by Compiler' },
+    { value: 'PROTECTED_AT_RUNTIME', label: 'Protected at Runtime' },
+    { value: 'PROTECTED_AT_PERIMETER', label: 'Protected at Perimeter' },
+    { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control' },
+]
+
 const expanded = ref(false)
 const state = ref('NOT_SET')
 const details = ref('')
+const justification = ref('NOT_SET')
 const comment = ref('')
 const suppressed = ref(false)
 const updating = ref(false)
@@ -148,6 +162,7 @@ watch(() => props.group, (newGroup) => {
         if (first) {
             state.value = first.analysis_state || 'NOT_SET'
             details.value = first.analysis_details || ''
+            justification.value = first.justification || 'NOT_SET'
             suppressed.value = first.is_suppressed || false
         }
     }
@@ -232,6 +247,7 @@ const handleUpdate = async () => {
             state: state.value,
             details: finalDetails,
             comment: comment.value,
+            justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
             suppressed: suppressed.value
         }
 
@@ -484,6 +500,16 @@ const rescoredVectorSegments = computed(() => {
                             class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
                         >
                             <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value">{{ s.label }}</option>
+                        </select>
+                    </div>
+
+                    <div v-if="state === 'NOT_AFFECTED'">
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
+                        <select 
+                            v-model="justification" 
+                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
+                        >
+                            <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
                         </select>
                     </div>
 

@@ -24,6 +24,7 @@ export interface Instance {
     }>;
     is_suppressed: boolean;
     usage_paths?: string[];
+    justification?: string;
 }
 
 
@@ -53,5 +54,6 @@ export interface AssessmentPayload {
     state: string;
     details: string;
     comment?: string;
+    justification?: string;
     suppressed: boolean;
 }

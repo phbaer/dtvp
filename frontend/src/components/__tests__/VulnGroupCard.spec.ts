@@ -122,6 +122,7 @@ describe('VulnGroupCard', () => {
             state: 'NOT_AFFECTED',
             details: `[Rescored: 9.8]\n\nFalse positive`,
             comment: '',
+            justification: 'NOT_SET',
             suppressed: false
         })
 
@@ -617,5 +618,37 @@ describe('VulnGroupCard', () => {
 
         // Final check on pendingScore
         expect((wrapper.vm as any).pendingScore).toBe(0.0)
+    })
+
+    it('shows justification dropdown when NOT_AFFECTED is selected', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const stateSelect = wrapper.find('select') // First select is Analysis State
+        await stateSelect.setValue('NOT_AFFECTED')
+
+        expect(wrapper.text()).toContain('Justification')
+        const selects = wrapper.findAll('select')
+        expect(selects.length).toBe(2)
+
+        if (selects.length > 1) {
+            await selects[1]?.setValue('CODE_NOT_PRESENT')
+        }
+
+        // Mock API call to verify payload
+        const api = await import('../../lib/api')
+        const spy = vi.spyOn(api, 'updateAssessment').mockResolvedValue([])
+
+        // Confirm bulk update
+        window.confirm = vi.fn(() => true)
+        window.alert = vi.fn()
+
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
+        await applyBtn?.trigger('click')
+
+        expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+            state: 'NOT_AFFECTED',
+            justification: 'CODE_NOT_PRESENT'
+        }))
     })
 })

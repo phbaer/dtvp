@@ -88,6 +88,29 @@ async def test_update_analysis(dt_client, respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_update_analysis_justification(dt_client, respx_mock):
+    respx_mock.put("http://dt.example.com/api/v1/analysis").respond(
+        json={"status": "updated"}
+    )
+
+    res = await dt_client.update_analysis(
+        project_uuid="p1",
+        component_uuid="c1",
+        vulnerability_uuid="v1",
+        state="NOT_AFFECTED",
+        details="Clean",
+        justification="CODE_NOT_PRESENT",
+    )
+    assert res["status"] == "updated"
+    # Verify exact payload if possible, but respx_mock's put check is enough or we can add it
+    request = respx_mock.calls.last.request
+    import json
+
+    payload = json.loads(request.content)
+    assert payload["analysisJustification"] == "CODE_NOT_PRESENT"
+
+
+@pytest.mark.asyncio
 async def test_get_analysis_404(dt_client, respx_mock):
     respx_mock.get("http://dt.example.com/api/v1/analysis").respond(status_code=404)
 

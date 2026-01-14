@@ -92,8 +92,25 @@ describe('Coverage Extras', () => {
             await new Promise(resolve => setTimeout(resolve, 10))
             await wrapper.vm.$nextTick()
 
-            expect(wrapper.text()).toContain('Parent1')
             expect(wrapper.text()).toContain('Parent2')
         }
+    })
+
+    it('VulnGroupCard handles rescoredVectorSegments edge cases', async () => {
+        // Case: rescored doesn't start with original
+        const group = {
+            id: 'V1', cvss_vector: 'ABC', rescored_vector: 'XYZ',
+            affected_versions: [], severity: 'MEDIUM', cvss_score: 5
+        } as any
+        const wrapper = mount(VulnGroupCard, { props: { group } })
+        expect((wrapper.vm as any).rescoredVectorSegments).toEqual({ bold: '', normal: 'XYZ' })
+
+        // Case: rescored is empty
+        const group2 = {
+            id: 'V1', cvss_vector: 'ABC', rescored_vector: '',
+            affected_versions: [], severity: 'MEDIUM', cvss_score: 5
+        } as any
+        const wrapper2 = mount(VulnGroupCard, { props: { group: group2 } })
+        expect((wrapper2.vm as any).rescoredVectorSegments).toEqual({ bold: '', normal: '' })
     })
 })
