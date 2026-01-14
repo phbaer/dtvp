@@ -278,20 +278,13 @@ const severityColor = computed(() => {
     }
 })
 
-const stateColor = computed(() => {
-    switch (displayState.value) {
-        case 'NOT_AFFECTED': return 'text-green-400'
-        case 'EXPLOITABLE': return 'text-red-400'
-        default: return 'text-gray-300'
-    }
-})
 
 const cardStyle = computed(() => {
     switch (displayState.value) {
         case 'NOT_SET': 
-            return 'bg-red-900/10 border-red-800/40 hover:bg-red-900/15'
+            return 'bg-red-500/10 border-red-500/40 hover:bg-red-500/15'
         case 'MIXED':
-            return 'bg-yellow-900/10 border-yellow-800/40 hover:bg-yellow-900/15'
+            return 'bg-yellow-500/10 border-yellow-500/40 hover:bg-yellow-500/15'
         default:
             return 'bg-gray-800 border-gray-700 hover:bg-gray-750'
     }
@@ -351,6 +344,9 @@ const rescoredVectorSegments = computed(() => {
                 <!-- ID Column -->
                 <div class="w-40 shrink-0 font-mono text-lg font-bold text-yellow-400">
                     {{ group.id }}
+                    <div v-if="group.aliases && group.aliases.length > 0" class="text-[10px] text-gray-500 font-medium mt-0.5 truncate uppercase">
+                        {{ group.aliases.join(', ') }}
+                    </div>
                 </div>
                 
                 <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
@@ -422,12 +418,7 @@ const rescoredVectorSegments = computed(() => {
         </div>
         
         <div class="flex items-start gap-8 shrink-0">
-            <div class="w-32 text-right">
-                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
-                <div :class="['font-bold text-sm truncate analysis-state-value', stateColor]">
-                    {{ displayState }}
-                </div>
-            </div>
+
             
             <div class="w-24 text-right">
                     <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>

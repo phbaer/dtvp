@@ -40,62 +40,16 @@ describe('DependencyChainViewer', () => {
         expect(wrapper.text()).toContain('Hide Dependency Chains')
         expect(wrapper.text()).toContain('Loading dependency chains...')
 
-        resolvePromise!({
-            paths: ['A->B', 'C->D'],
-            total: 2,
-            limit: 10,
-            offset: 0
-        })
+        resolvePromise!(['A->B', 'C->D'])
         await flushPromises()
 
         expect(wrapper.text()).not.toContain('Loading dependency chains...')
-        expect(getDependencyChains).toHaveBeenCalledWith('p1', 'c1', 10, 0)
+        expect(getDependencyChains).toHaveBeenCalledWith('p1', 'c1')
         expect(wrapper.find('[data-testid="path-list"]').text()).toContain('2 paths')
         expect(wrapper.text()).toContain('(2)')
     })
 
-    it('handles pagination (load more)', async () => {
-        // First page - instant load
-        vi.mocked(getDependencyChains).mockResolvedValueOnce({
-            paths: ['A->B'],
-            total: 2,
-            limit: 1,
-            offset: 0
-        })
 
-        const wrapper = mount(DependencyChainViewer, { props: defaultProps })
-
-        // Open
-        await wrapper.find('button').trigger('click')
-        await flushPromises()
-
-        expect(wrapper.text()).toContain('Load More (1 remaining)')
-
-        // Second page - delayed load
-        let resolvePromise: (value: any) => void
-        const promise = new Promise(resolve => { resolvePromise = resolve })
-        vi.mocked(getDependencyChains).mockReturnValueOnce(promise as any)
-
-        // Click Load More
-        const loadMoreBtn = wrapper.findAll('button').find(b => b.text().includes('Load More'))
-        await loadMoreBtn?.trigger('click')
-
-        expect(wrapper.text()).toContain('Loading more...')
-
-        resolvePromise!({
-            paths: ['C->D'],
-            total: 2,
-            limit: 1,
-            offset: 1
-        })
-        await flushPromises()
-
-        // Should append paths
-        expect(getDependencyChains).toHaveBeenCalledTimes(2)
-        expect(getDependencyChains).toHaveBeenLastCalledWith('p1', 'c1', 10, 1) // offset updated
-        expect(wrapper.find('[data-testid="path-list"]').text()).toContain('2 paths')
-        expect(wrapper.text()).not.toContain('Load More')
-    })
 
     it('handles API errors', async () => {
         vi.mocked(getDependencyChains).mockRejectedValue(new Error('API Error'))
@@ -118,12 +72,7 @@ describe('DependencyChainViewer', () => {
     })
 
     it('shows empty state', async () => {
-        vi.mocked(getDependencyChains).mockResolvedValue({
-            paths: [],
-            total: 0,
-            limit: 10,
-            offset: 0
-        })
+        vi.mocked(getDependencyChains).mockResolvedValue([])
 
         const wrapper = mount(DependencyChainViewer, { props: defaultProps })
         await wrapper.find('button').trigger('click')
@@ -133,12 +82,7 @@ describe('DependencyChainViewer', () => {
     })
 
     it('does not reload if already loaded when toggling', async () => {
-        vi.mocked(getDependencyChains).mockResolvedValue({
-            paths: ['A'],
-            total: 1,
-            limit: 10,
-            offset: 0
-        })
+        vi.mocked(getDependencyChains).mockResolvedValue(['A'])
         const wrapper = mount(DependencyChainViewer, { props: defaultProps })
 
         // Open

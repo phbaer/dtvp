@@ -17,9 +17,6 @@ describe('Dashboard.vue', () => {
             global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
         })
         expect(wrapper.text()).toContain('Find a Project')
-        const loadAll = wrapper.find('a[href="/project/_all_"]')
-        expect(loadAll.exists()).toBe(true)
-        expect(loadAll.text()).toContain('Load All Vulnerabilities')
     })
 
     it('fetches projects on search', async () => {

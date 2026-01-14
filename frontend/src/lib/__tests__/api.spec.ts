@@ -169,19 +169,12 @@ describe('api.ts', () => {
     })
 
     it('getDependencyChains calls correct endpoint', async () => {
-        const mockResponse = {
-            paths: ['A->B'],
-            total: 1,
-            limit: 10,
-            offset: 0
-        }
+        const mockResponse = ['A->B']
         mocks.get.mockResolvedValue({ data: mockResponse })
 
-        const result = await getDependencyChains('p1', 'c1', 10, 0)
+        const result = await getDependencyChains('p1', 'c1')
 
-        expect(mocks.get).toHaveBeenCalledWith('/project/p1/component/c1/dependency-chains', {
-            params: { limit: 10, offset: 0 }
-        })
+        expect(mocks.get).toHaveBeenCalledWith('/project/p1/component/c1/dependency-chains')
         expect(result).toEqual(mockResponse)
     })
 

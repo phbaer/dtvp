@@ -205,6 +205,26 @@ describe('VulnGroupCard', () => {
             props: { group: lowGroup }
         })
         expect(wrapper2.find('span.rounded').classes()).toContain('bg-green-600')
+
+        // Test card style branches (brighter colors)
+        const unassessedWrapper = mount(VulnGroupCard, { props: { group: { ...mockGroup, severity: 'CRITICAL' } } })
+        expect(unassessedWrapper.find('.border.rounded-lg').classes()).toContain('bg-red-500/10')
+
+        const mixedGroup = {
+            ...mockGroup,
+            affected_versions: [
+                { components: [{ analysis_state: 'EXPLOITABLE' }] },
+                { components: [{ analysis_state: 'NOT_SET' }] }
+            ]
+        }
+        const mixedWrapper = mount(VulnGroupCard, { props: { group: mixedGroup as any } })
+        expect(mixedWrapper.find('.border.rounded-lg').classes()).toContain('bg-yellow-500/10')
+    })
+
+    it('renders vulnerability aliases', () => {
+        const aliasGroup = { ...mockGroup, aliases: ['CVE-2023-1234', 'GHSA-abcd-efgh'] }
+        const wrapper = mount(VulnGroupCard, { props: { group: aliasGroup } })
+        expect(wrapper.text()).toContain('CVE-2023-1234, GHSA-abcd-efgh')
     })
 
     it('handles CVSS 4.0 vector parsing', async () => {
@@ -366,36 +386,7 @@ describe('VulnGroupCard', () => {
         consoleSpy.mockRestore()
     })
 
-    it('computes correct state colors', () => {
-        const makeWrapper = (state: string) => mount(VulnGroupCard, {
-            props: {
-                group: {
-                    ...mockGroup,
-                    affected_versions: [{
-                        ...mockGroup.affected_versions[0],
-                        components: [{
-                            ...mockComponents[0],
-                            analysis_state: state,
-                            // Ensure required fields are present if spreading overrides them
-                        }]
-                    }]
-                } as any
-            }
-        })
-        // ...
 
-        // EXPLOITABLE -> Red
-        const wrapperExploitable = makeWrapper('EXPLOITABLE')
-        expect(wrapperExploitable.find('.analysis-state-value').classes()).toContain('text-red-400')
-
-        // NOT_AFFECTED -> Green
-        const wrapperNotAffected = makeWrapper('NOT_AFFECTED')
-        expect(wrapperNotAffected.find('.analysis-state-value').classes()).toContain('text-green-400')
-
-        // MIXED/Other -> Gray
-        const wrapperOther = makeWrapper('NOT_SET')
-        expect(wrapperOther.find('.analysis-state-value').classes()).toContain('text-gray-300')
-    })
 
     it('closes modal via X button', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })

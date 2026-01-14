@@ -17,12 +17,10 @@ vi.mock('lucide-vue-next', () => ({
 // Mock API
 vi.mock('../../lib/api', () => ({
     updateAssessment: vi.fn(),
-    getDependencyChains: vi.fn().mockResolvedValue({
-        paths: ['Comp -> Parent1 -> Project', 'Comp -> Parent2 -> Project'],
-        total: 2,
-        limit: 10,
-        offset: 0
-    })
+    getDependencyChains: vi.fn().mockResolvedValue([
+        'Comp -> Parent1 -> Project',
+        'Comp -> Parent2 -> Project'
+    ])
 }))
 
 describe('Coverage Extras', () => {
@@ -30,7 +28,7 @@ describe('Coverage Extras', () => {
         const wrapper = mount(DependencyPathList, {
             props: { paths: ['OnlyComponent'], projectName: 'Proj' }
         })
-        expect(wrapper.findAll('.relative.flex.items-center').length).toBe(0)
+        expect(wrapper.findAll('.clip-start').length + wrapper.findAll('.clip-middle').length).toBe(0)
     })
 
     it('VulnGroupCard severity colors (INFO and default)', async () => {
