@@ -525,4 +525,97 @@ describe('VulnGroupCard', () => {
         await tabs.find(b => b.text().includes('3.1'))?.trigger('click')
         expect((wrapper.vm as any).activeVersion).toBe('3.1')
     })
+
+    it('renders both original and rescored vectors when present with bolding', async () => {
+        const rescoredGroup = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L',
+            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/MC:N/MI:N/MA:N'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: rescoredGroup as any }
+        })
+
+        // Expand to see vectors
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        expect(wrapper.text()).toContain('Rescored Vector:')
+        expect(wrapper.text()).toContain('Original Vector:')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/MC:N/MI:N/MA:N')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+
+        // Check for bolded segment in rescored vector
+        const boldSegment = wrapper.find('.rescored-bold-segment')
+        expect(boldSegment.text()).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+
+        // The normal segment should be the rest
+        expect(wrapper.find('.text-purple-300 .tracing-tight').text()).toContain('/MC:N/MI:N/MA:N')
+
+        // Check for line-through 
+        expect(wrapper.find('.line-through').text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+    })
+
+    it('shows original vector reference in assessment form', async () => {
+        const rescoredGroup = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: rescoredGroup as any }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Initial pendingVector matches original, so reference should NOT be visible yet
+        expect(wrapper.text()).not.toContain('Original:')
+
+        // Change vector
+        const input = wrapper.find('input[type="text"]')
+        await input.setValue('CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+
+        expect(wrapper.text()).toContain('Original:')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+    })
+
+    it('shows original vector reference in calculator modal', async () => {
+        const rescoredGroup = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: rescoredGroup as any }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Open modal
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        // Change metric to make vector different
+        const avSelect = wrapper.find('#metric-AV')
+        await avSelect.setValue('P')
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.text()).toContain('Original Vector:')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+    })
+
+    it('calculates score correctly when environmental metrics negate impact', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
+
+        // Full impact base, but negated by environmental modified impact
+        const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N'
+        await input.setValue(vector)
+
+        // Wait for watch to trigger
+        await wrapper.vm.$nextTick()
+
+        // Final check on pendingScore
+        expect((wrapper.vm as any).pendingScore).toBe(0.0)
+    })
 })

@@ -162,17 +162,18 @@ watch(pendingVector, (newVector) => {
             
             if (v.startsWith('CVSS:4.0')) {
                 const cvss = new Cvss4P0(v)
-                score = cvss.calculateScores().overall || null
+                const s = cvss.calculateScores()
+                score = s.overall ?? null
             } else if (v.startsWith('CVSS:3.')) {
                 if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
                 const cvss = new Cvss3P1(v)
                 const s = cvss.calculateScores(false)
-                score = s.overall || s.base || null
+                score = s.overall ?? s.base ?? null
             } else {
                 // Try CVSS v2
                 const cvss = new Cvss2(v)
                 const s = cvss.calculateScores()
-                score = s.overall || s.base || null
+                score = s.overall ?? s.base ?? null
             }
 
             if (score !== null && !isNaN(score)) {
@@ -308,6 +309,20 @@ const affectedComponentNames = computed(() => {
     const names = new Set(allInstances.value.map(c => `${c.component_name} ${c.component_version}`))
     return Array.from(names).join(', ')
 })
+
+const rescoredVectorSegments = computed(() => {
+    const rescored = props.group.rescored_vector
+    const original = props.group.cvss_vector
+    
+    if (!rescored || !original || !rescored.startsWith(original)) {
+        return { bold: '', normal: rescored || '' }
+    }
+    
+    return {
+        bold: original,
+        normal: rescored.slice(original.length)
+    }
+})
 </script>
 
 <template>
@@ -383,8 +398,17 @@ const affectedComponentNames = computed(() => {
             </div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50">
-                <span class="text-gray-600 mr-2 uppercase font-bold">Vector:</span>{{ group.rescored_vector || group.cvss_vector }}
+            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
+                <div v-if="group.rescored_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
+                    <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored Vector:</span>
+                    <span class="tracing-tight">
+                        <span class="font-bold rescored-bold-segment">{{ rescoredVectorSegments.bold }}</span>{{ rescoredVectorSegments.normal }}
+                    </span>
+                </div>
+                <div class="font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50 flex items-center gap-2">
+                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ group.rescored_vector ? 'Original Vector:' : 'Vector:' }}</span>
+                    <span :class="{ 'line-through opacity-50': group.rescored_vector }">{{ group.cvss_vector || 'N/A' }}</span>
+                </div>
             </div>
         </div>
         
@@ -483,6 +507,10 @@ const affectedComponentNames = computed(() => {
                                 placeholder="CVSS:4.0/AV:N/..."
                                 class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono"
                             />
+                            <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 text-[9px] text-gray-500/60 flex gap-1.5 truncate">
+                                <span class="uppercase font-bold shrink-0">Original:</span>
+                                <span class="truncate italic">{{ group.cvss_vector }}</span>
+                            </div>
                         </div>
                         
                         <div class="flex items-center justify-between">
@@ -616,7 +644,11 @@ const affectedComponentNames = computed(() => {
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="text-xs text-gray-500 font-mono mb-1">Current Vector</div>
-                        <div class="text-sm font-mono font-bold text-white break-all">{{ pendingVector }}</div>
+                        <div class="text-sm font-mono font-bold text-white break-all mb-2">{{ pendingVector }}</div>
+                        <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="text-[10px] text-gray-500/60 font-mono flex gap-2">
+                             <span class="uppercase font-bold shrink-0">Original Vector:</span>
+                             <span class="break-all italic">{{ group.cvss_vector }}</span>
+                        </div>
                     </div>
                     <div class="text-right ml-4">
                          <div class="text-xs text-gray-500 uppercase">Score</div>
