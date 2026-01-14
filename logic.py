@@ -44,6 +44,25 @@ def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:
     return parent_map
 
 
+class DisjointSet:
+    def __init__(self):
+        self.parent = {}
+
+    def find(self, item):
+        if item not in self.parent:
+            self.parent[item] = item
+            return item
+        if self.parent[item] != item:
+            self.parent[item] = self.find(self.parent[item])
+        return self.parent[item]
+
+    def union(self, item1, item2):
+        root1 = self.find(item1)
+        root2 = self.find(item2)
+        if root1 != root2:
+            self.parent[root1] = root2
+
+
 class BOMAnalysisCache:
     """
     Caches analysis data for a specific BOM to avoid re-parsing for every vulnerability.
@@ -277,7 +296,53 @@ def group_vulnerabilities(
         if proj_uuid not in bom_processors:
             bom_processors[proj_uuid] = BOMAnalysisCache(bom, mapping)
 
-    groups = {}  # Key: vuln_id -> Group Data
+    groups = {}  # Key: canonical_id -> Group Data
+
+    # Pass 1: Build Alias Network
+    ds = DisjointSet()
+
+    # We need to collect all IDs mentioned to ensure they are in the DS
+    # and to potentially map aliases found in one finding to another finding that uses that alias as its primary ID.
+
+    for entry in versions_data:
+        for finding in entry["vulnerabilities"]:
+            vuln = finding.get("vulnerability", {})
+            vid = vuln.get("vulnId") or vuln.get("name")
+            if not vid:
+                continue
+
+            ds.find(vid)  # Register
+
+            aliases = vuln.get("aliases", [])
+            for alias_obj in aliases:
+                for key, alias_id in alias_obj.items():
+                    if alias_id and isinstance(alias_id, str):
+                        ds.union(vid, alias_id)
+
+    # Pass 2: Determine Canonical ID for each set
+    # We want a deterministic canonical ID. Preference: CVE > GHSA > Others > lexicographical
+    # roots = set(ds.find(x) for x in ds.parent.keys()) # Unused, removing.
+    root_to_canonical = {}
+
+    # We need to group all known IDs by their root
+    groups_by_root = {}
+    for item in ds.parent.keys():
+        r = ds.find(item)
+        if r not in groups_by_root:
+            groups_by_root[r] = []
+        groups_by_root[r].append(item)
+
+    for r, members in groups_by_root.items():
+        # Sort members by priority
+        def sort_key(x):
+            if x.startswith("CVE-"):
+                return (0, x)
+            if x.startswith("GHSA-"):
+                return (1, x)
+            return (2, x)
+
+        sorted_members = sorted(members, key=sort_key)
+        root_to_canonical[r] = sorted_members[0]
 
     for entry in versions_data:
         version_info = entry["version"]
@@ -294,14 +359,18 @@ def group_vulnerabilities(
         for finding in vulns:
             # Finding structure depends on DT API.
             vuln = finding.get("vulnerability", {})
-            vuln_id = vuln.get("vulnId") or vuln.get("name")  # Fallback
+            raw_id = vuln.get("vulnId") or vuln.get("name")  # Fallback
 
-            if not vuln_id:
+            if not raw_id:
                 continue
 
-            if vuln_id not in groups:
-                groups[vuln_id] = {
-                    "id": vuln_id,
+            # map to canonical
+            root = ds.find(raw_id)
+            canonical_id = root_to_canonical.get(root, raw_id)
+
+            if canonical_id not in groups:
+                groups[canonical_id] = {
+                    "id": canonical_id,
                     "title": vuln.get("title"),
                     "description": vuln.get("description"),
                     "severity": vuln.get("severity"),
@@ -314,22 +383,23 @@ def group_vulnerabilities(
                     "rescored_vector": None,
                     "affected_versions": {},
                     "tags": set(),
+                    "aliases": set(groups_by_root.get(root, [])) - {canonical_id},
                 }
+            else:
+                pass
 
             # Prepare component info
             component = finding.get("component", {})
             comp_uuid = component.get("uuid")
             comp_name = component.get("name")
+            comp_ver = component.get("version")
 
-            # Calculate Tags only - Skip paths for performance
-            # paths calculation is moved to on-demand API
-            tags = processor.get_tags_only(comp_uuid, comp_name)
+            # Calculate Tags only
+            tags = []
+            if processor:
+                tags = processor.get_tags_only(comp_uuid, comp_name)
 
-            if tags:
-                # Logging could be verbose, consider removing or making conditional
-                pass
-
-            groups[vuln_id]["tags"].update(tags)
+            groups[canonical_id]["tags"].update(tags)
 
             analysis = finding.get("analysis", {})
             details = analysis.get("analysisDetails") or ""
@@ -357,18 +427,21 @@ def group_vulnerabilities(
                         rescored_vector = match_any_vector.group(1).strip()
 
             # If we found a rescored value, update the group level if not set
-            if rescored_score is not None:
-                groups[vuln_id]["rescored_cvss"] = rescored_score
+            if rescored_score is not None and not groups[canonical_id]["rescored_cvss"]:
+                groups[canonical_id]["rescored_cvss"] = rescored_score
 
-            if rescored_vector is not None:
-                groups[vuln_id]["rescored_vector"] = rescored_vector
+            if (
+                rescored_vector is not None
+                and not groups[canonical_id]["rescored_vector"]
+            ):
+                groups[canonical_id]["rescored_vector"] = rescored_vector
 
             component_info = {
                 "project_uuid": proj_uuid,
                 "project_name": version_info.get("name"),
                 "project_version": version_info.get("version"),
                 "component_name": comp_name,
-                "component_version": component.get("version"),
+                "component_version": comp_ver,
                 "component_uuid": comp_uuid,
                 "vulnerability_uuid": vuln.get("uuid"),
                 "finding_uuid": finding.get("uuid"),
@@ -378,27 +451,26 @@ def group_vulnerabilities(
                 "analysis_comments": analysis.get("analysisComments", []),
                 "is_suppressed": analysis.get("isSuppressed", False)
                 or analysis.get("suppressed", False),
-                "usage_paths": [],  # Empty by default, fetched on demand
+                "usage_paths": [],
             }
 
-            if proj_uuid not in groups[vuln_id]["affected_versions"]:
-                groups[vuln_id]["affected_versions"][proj_uuid] = {
+            aff_vers_map = groups[canonical_id]["affected_versions"]
+            if proj_uuid not in aff_vers_map:
+                aff_vers_map[proj_uuid] = {
                     "project_name": version_info.get("name"),
                     "project_version": version_info.get("version"),
                     "project_uuid": proj_uuid,
                     "components": [],
                 }
 
-            groups[vuln_id]["affected_versions"][proj_uuid]["components"].append(
-                component_info
-            )
+            aff_vers_map[proj_uuid]["components"].append(component_info)
 
     # Convert groups to list and flatten affected_versions
     result = []
     for g in groups.values():
         g["affected_versions"] = list(g["affected_versions"].values())
-        g["tags"] = list(g["tags"])  # Convert set to list
-        g["tags"].sort()
+        g["tags"] = sorted(list(g["tags"]))
+        g["aliases"] = sorted(list(g.get("aliases", [])))
         result.append(g)
 
     return result
