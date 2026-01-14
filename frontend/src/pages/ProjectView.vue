@@ -12,8 +12,6 @@ const loading = ref(true)
 const error = ref('')
 const loadingMessage = ref('Initializing...')
 const loadingProgress = ref(0)
-const displayedLimit = ref(20)
-const PAGE_SIZE = 20
 
 const fetchVulns = async () => {
     let name = route.params.name as string
@@ -40,7 +38,6 @@ const fetchVulns = async () => {
             }
             return g
         })
-        displayedLimit.value = PAGE_SIZE // Reset on new fetch
     } catch (err: any) {
         error.value = 'Failed to load vulnerabilities: ' + (err.message || err)
         console.error(err)
@@ -173,22 +170,6 @@ const filteredGroups = computed(() => {
     return result
 })
 
-const visibleGroups = computed(() => {
-    return filteredGroups.value.slice(0, displayedLimit.value)
-})
-
-const hasMore = computed(() => {
-    return displayedLimit.value < filteredGroups.value.length
-})
-
-const loadMore = () => {
-    displayedLimit.value += PAGE_SIZE
-}
-
-// Reset limit when filter or sort changes to avoid confusion
-watch([tagFilter, idFilter, sortBy, sortOrder], () => {
-    displayedLimit.value = PAGE_SIZE
-})
 
 watch(() => route.params.name, fetchVulns, { immediate: true })
 </script>
@@ -270,23 +251,13 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
     
     <div v-else class="space-y-4">
         <VulnGroupCard 
-            v-for="group in visibleGroups" 
+            v-for="group in filteredGroups" 
             :key="group.id" 
             :group="group" 
             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)" 
         />
         
         <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center">No vulnerabilities found matching criteria.</div>
-        
-        <div v-if="hasMore" class="text-center py-4">
-            <button 
-                @click="loadMore" 
-                class="bg-gray-700 hover:bg-gray-600 px-6 py-2 rounded text-sm font-semibold transition-colors"
-            >
-                Load More
-            </button>
-             <div class="mt-2 text-xs text-gray-500">Showing {{ visibleGroups.length }} of {{ filteredGroups.length }}</div>
-        </div>
     </div>
   </div>
 </template>

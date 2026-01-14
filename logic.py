@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 import re
 import json
 import os
@@ -162,17 +162,9 @@ class BOMAnalysisCache:
         self,
         component_uuid: str,
         component_name: str,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> List[str]:
         """
-        Returns paginated dependency paths.
-        Returns {
-            "paths": List[str],
-            "total": int,
-            "limit": int,
-            "offset": int
-        }
+        Returns all dependency paths.
         """
         # Note: This recalculates paths. Caching might be useful if called often for same comp.
 
@@ -231,45 +223,7 @@ class BOMAnalysisCache:
             found_paths.add(component_name)
 
         # Convert to sorted list
-        all_paths = sorted(list(found_paths))
-        total = len(all_paths)
-
-        # Paginate
-        paginated_paths = all_paths[offset : offset + limit]
-
-        return {
-            "paths": paginated_paths,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        }
-
-    def get_analysis(
-        self, component_uuid: str, component_name: str
-    ) -> Tuple[List[str], List[str]]:
-        # Legacy compatibility if needed, or removing if I updated all callers.
-        # I updated group_vulnerabilities, but let's keep it for safety or other callers?
-        # logic.py:get_component_analysis calls it.
-        tags = self.get_tags_only(component_uuid, component_name)
-        paths_data = self.get_dependency_paths(
-            component_uuid, component_name, limit=1000
-        )
-        return (tags, paths_data["paths"])
-
-
-def get_component_analysis(
-    component_uuid: str,
-    component_name: str,
-    bom: Dict[str, Any],
-    mapping: Dict[str, str],
-) -> tuple[List[str], List[str]]:
-    """
-    Analyzes component to find tags and usage paths.
-    Returns (list_of_tags, list_of_paths).
-    Legacy wrapper around BOMAnalysisCache.
-    """
-    cache = BOMAnalysisCache(bom, mapping)
-    return cache.get_analysis(component_uuid, component_name)
+        return sorted(list(found_paths))
 
 
 def group_vulnerabilities(

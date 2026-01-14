@@ -79,22 +79,12 @@ export const updateAssessment = async (payload: AssessmentPayload) => {
     return res.data;
 };
 
-export interface DependencyChainResponse {
-    paths: string[];
-    total: number;
-    limit: number;
-    offset: number;
-}
 
 export const getDependencyChains = async (
     project_uuid: string,
     component_uuid: string,
-    limit: number = 10,
-    offset: number = 0
-): Promise<DependencyChainResponse> => {
-    const res = await api.get(`/project/${project_uuid}/component/${component_uuid}/dependency-chains`, {
-        params: { limit, offset }
-    });
+): Promise<string[]> => {
+    const res = await api.get(`/project/${project_uuid}/component/${component_uuid}/dependency-chains`);
     return res.data;
 };
 

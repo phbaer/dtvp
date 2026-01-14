@@ -13,14 +13,11 @@ const paths = ref<string[]>([])
 const loading = ref(false)
 const error = ref('')
 const total = ref(0)
-const offset = ref(0)
-const limit = 10
 const loaded = ref(false)
 const expanded = ref(false)
 
 const loadChains = async (reset = false) => {
     if (reset) {
-        offset.value = 0
         paths.value = []
         loaded.value = false
     }
@@ -28,14 +25,9 @@ const loadChains = async (reset = false) => {
     loading.value = true
     error.value = ''
     try {
-        const res = await getDependencyChains(props.projectUuid, props.componentUuid, limit, offset.value)
-        if (reset) {
-             paths.value = res.paths
-        } else {
-             paths.value = [...paths.value, ...res.paths]
-        }
-        total.value = res.total
-        offset.value += res.paths.length
+        const res = await getDependencyChains(props.projectUuid, props.componentUuid)
+        paths.value = res
+        total.value = res.length
         loaded.value = true
     } catch (e: any) {
         error.value = e.message || 'Failed to load chains'
@@ -51,9 +43,7 @@ const toggle = () => {
     }
 }
 
-const loadMore = () => {
-    loadChains()
-}
+
 
 </script>
 
@@ -75,16 +65,6 @@ const loadMore = () => {
                 <div v-if="paths.length === 0" class="text-xs text-gray-500 italic">No dependency chains found.</div>
                 
                 <DependencyPathList :paths="paths" :project-name="projectName" />
-                
-                <div v-if="loading" class="text-xs text-gray-500 italic mt-2">Loading more...</div>
-                
-                <button 
-                    v-if="paths.length < total && !loading" 
-                    @click="loadMore"
-                    class="mt-2 text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-gray-300 transition-colors"
-                >
-                    Load More ({{ total - paths.length }} remaining)
-                </button>
             </div>
         </div>
     </div>

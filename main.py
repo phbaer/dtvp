@@ -278,20 +278,16 @@ async def update_assessment(
 async def get_dependency_chains(
     project_uuid: str,
     component_uuid: str,
-    limit: int = 10,
-    offset: int = 0,
     client: DTClient = Depends(get_client),
 ):
     bom = await client.get_bom(project_uuid)
     if not bom:
-        return {"paths": [], "total": 0, "limit": limit, "offset": offset}
+        return []
 
     team_mapping = load_team_mapping()
     processor = BOMAnalysisCache(bom, team_mapping)
     # component_name is not strictly needed for lookup if uuid works, but we can pass empty string
-    return processor.get_dependency_paths(
-        component_uuid, component_name="", limit=limit, offset=offset
-    )
+    return processor.get_dependency_paths(component_uuid, component_name="")
 
 
 @api_router.get("/openapi.json")
