@@ -286,6 +286,18 @@ const stateColor = computed(() => {
     }
 })
 
+const cardStyle = computed(() => {
+    switch (displayState.value) {
+        case 'NOT_SET': 
+            return 'bg-red-900/10 border-red-800/40 hover:bg-red-900/15'
+        case 'MIXED':
+            return 'bg-yellow-900/10 border-yellow-800/40 hover:bg-yellow-900/15'
+        default:
+            return 'bg-gray-800 border-gray-700 hover:bg-gray-750'
+    }
+})
+
+
 const getGroupedInstances = (components: any[]) => {
     if (!components) return []
     const map = new Map<string, any>()
@@ -328,10 +340,10 @@ const rescoredVectorSegments = computed(() => {
 </script>
 
 <template>
-  <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+  <div :class="['border rounded-lg overflow-hidden transition-colors', cardStyle]">
     <!-- Header -->
     <div 
-        class="p-4 flex items-start justify-between cursor-pointer hover:bg-gray-750 transition-colors gap-8"
+        class="p-4 flex items-start justify-between cursor-pointer transition-colors gap-8"
         @click="expanded = !expanded"
     >
         <div>
@@ -352,18 +364,13 @@ const rescoredVectorSegments = computed(() => {
 
                 <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
 
-                <!-- Status Column -->
-                <div class="w-24 shrink-0 flex justify-center">
-                    <span v-if="displayState === 'NOT_SET'" class="px-2 py-0.5 text-[10px] font-bold rounded bg-red-900 text-red-100 border border-red-700 animate-pulse uppercase tracking-wider">
-                        Unassessed
-                    </span>
-                    <span v-else-if="displayState === 'MIXED'" class="px-2 py-0.5 text-[10px] font-bold rounded bg-yellow-900 text-yellow-100 border border-yellow-700 uppercase tracking-wider">
-                        Mixed
-                    </span>
-                    <span v-else class="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-900/50 text-blue-200 border border-blue-800 uppercase tracking-wider">
+                <!-- Status Column (Only for specific assessed states) -->
+                <div v-if="displayState !== 'NOT_SET' && displayState !== 'MIXED'" class="w-24 shrink-0 flex justify-center">
+                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-900/50 text-blue-200 border border-blue-800 uppercase tracking-wider">
                         {{ ANALYSIS_STATES.find(s => s.value === displayState)?.label || displayState }}
                     </span>
                 </div>
+                <div v-else class="w-24 shrink-0"></div> <!-- Spacer to keep alignment -->
 
                 <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
 
