@@ -279,6 +279,15 @@ const severityColor = computed(() => {
 })
 
 
+const stateColor = computed(() => {
+    switch (displayState.value) {
+        case 'NOT_AFFECTED': return 'text-green-400'
+        case 'EXPLOITABLE': return 'text-red-400'
+        default: return 'text-gray-300'
+    }
+})
+
+
 const cardStyle = computed(() => {
     switch (displayState.value) {
         case 'NOT_SET': 
@@ -360,16 +369,6 @@ const rescoredVectorSegments = computed(() => {
 
                 <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
 
-                <!-- Status Column (Only for specific assessed states) -->
-                <div v-if="displayState !== 'NOT_SET' && displayState !== 'MIXED'" class="w-24 shrink-0 flex justify-center">
-                    <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-900/50 text-blue-200 border border-blue-800 uppercase tracking-wider">
-                        {{ ANALYSIS_STATES.find(s => s.value === displayState)?.label || displayState }}
-                    </span>
-                </div>
-                <div v-else class="w-24 shrink-0"></div> <!-- Spacer to keep alignment -->
-
-                <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
-
                 <!-- Score Column -->
                 <div class="w-28 shrink-0 text-sm text-gray-300 flex items-center gap-2">
                     <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.2)]" title="Rescored Value">
@@ -418,6 +417,12 @@ const rescoredVectorSegments = computed(() => {
         </div>
         
         <div class="flex items-start gap-8 shrink-0">
+            <div class="w-32 text-right">
+                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
+                <div :class="['font-bold text-sm truncate analysis-state-value', stateColor]">
+                    {{ displayState }}
+                </div>
+            </div>
 
             
             <div class="w-24 text-right">

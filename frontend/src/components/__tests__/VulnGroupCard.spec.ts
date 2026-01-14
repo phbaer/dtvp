@@ -386,7 +386,34 @@ describe('VulnGroupCard', () => {
         consoleSpy.mockRestore()
     })
 
+    it('computes correct state colors', () => {
+        const makeWrapper = (state: string) => mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    affected_versions: [{
+                        ...mockGroup.affected_versions[0],
+                        components: [{
+                            ...mockComponents[0],
+                            analysis_state: state
+                        }]
+                    }]
+                } as any
+            }
+        })
 
+        // EXPLOITABLE -> Red
+        const wrapperExploitable = makeWrapper('EXPLOITABLE')
+        expect(wrapperExploitable.find('.analysis-state-value').classes()).toContain('text-red-400')
+
+        // NOT_AFFECTED -> Green
+        const wrapperNotAffected = makeWrapper('NOT_AFFECTED')
+        expect(wrapperNotAffected.find('.analysis-state-value').classes()).toContain('text-green-400')
+
+        // MIXED/Other -> Gray
+        const wrapperOther = makeWrapper('NOT_SET')
+        expect(wrapperOther.find('.analysis-state-value').classes()).toContain('text-gray-300')
+    })
 
     it('closes modal via X button', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
