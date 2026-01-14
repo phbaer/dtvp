@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, shallowRef } from 'vue'
 import { updateAssessment } from '../lib/api'
+import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
@@ -153,8 +154,16 @@ const displayState = computed(() => {
 watch(() => props.group, (newGroup) => {
     // Reset pending values
     // Use rescored value if present, otherwise fallback to original score, or null
-    pendingScore.value = newGroup.rescored_cvss ?? newGroup.cvss_score ?? newGroup.cvss ?? null
     pendingVector.value = newGroup.rescored_vector || newGroup.cvss_vector || ''
+    
+    // Determine score: explicit rescored > calculated from rescored vector > original score
+    if (newGroup.rescored_cvss !== null && newGroup.rescored_cvss !== undefined) {
+        pendingScore.value = newGroup.rescored_cvss
+    } else if (newGroup.rescored_vector) {
+        pendingScore.value = calculateScoreFromVector(newGroup.rescored_vector)
+    } else {
+        pendingScore.value = newGroup.cvss_score ?? newGroup.cvss ?? null
+    }
     
     const firstVersion = newGroup.affected_versions?.[0]
     if (firstVersion && firstVersion.components?.length > 0) {
@@ -170,33 +179,9 @@ watch(() => props.group, (newGroup) => {
 
 // Auto-calculate score when vector changes
 watch(pendingVector, (newVector) => {
-    if (newVector && newVector.trim().length > 5) {
-        try {
-            let v = newVector.trim()
-            let score: number | null = null
-            
-            if (v.startsWith('CVSS:4.0')) {
-                const cvss = new Cvss4P0(v)
-                const s = cvss.calculateScores()
-                score = s.overall ?? null
-            } else if (v.startsWith('CVSS:3.')) {
-                if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
-                const cvss = new Cvss3P1(v)
-                const s = cvss.calculateScores(false)
-                score = s.overall ?? s.base ?? null
-            } else {
-                // Try CVSS v2
-                const cvss = new Cvss2(v)
-                const s = cvss.calculateScores()
-                score = s.overall ?? s.base ?? null
-            }
-
-            if (score !== null && !isNaN(score)) {
-                pendingScore.value = parseFloat(score.toFixed(1))
-            }
-        } catch (e) {
-            // Invalid vector, ignore
-        }
+    const score = calculateScoreFromVector(newVector)
+    if (score !== null) {
+        pendingScore.value = score
     }
 })
 
