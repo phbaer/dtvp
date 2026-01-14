@@ -22,6 +22,22 @@ async def test_get_projects(dt_client, respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_get_projects_paginated(dt_client, respx_mock):
+    # Page 1
+    respx_mock.get("http://dt.example.com/api/v1/project").mock(
+        side_effect=[
+            httpx.Response(200, json=[{"name": "P1", "uuid": "u1"}] * 100),
+            httpx.Response(200, json=[{"name": "P2", "uuid": "u2"}] * 50),
+        ]
+    )
+
+    projects = await dt_client.get_projects(name="P")
+    assert len(projects) == 150
+    assert projects[0]["name"] == "P1"
+    assert projects[149]["name"] == "P2"
+
+
+@pytest.mark.asyncio
 async def test_get_vulnerabilities(dt_client, respx_mock):
     respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
         json=[{"vulnerability": {"vulnId": "CVE-1"}}]

@@ -32,13 +32,37 @@ class DTClient:
     async def get_projects(self, name: str) -> List[Dict[str, Any]]:
         """
         Search for projects by name.
+        Handles pagination to retrieve ALL matching projects.
         """
-        response = await self.client.get(
-            f"{self.base_url}/api/v1/project",
-            params={"name": name, "excludeInactive": "true"},
-        )
-        response.raise_for_status()
-        return response.json()
+        all_projects = []
+        page_number = 1
+        page_size = 100
+
+        while True:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/project",
+                params={
+                    "name": name,
+                    "excludeInactive": "true",
+                    "pageSize": page_size,
+                    "pageNumber": page_number,
+                },
+            )
+            response.raise_for_status()
+            projects = response.json()
+
+            if not projects:
+                break
+
+            all_projects.extend(projects)
+
+            # If we got fewer than page_size, we reached the end
+            if len(projects) < page_size:
+                break
+
+            page_number += 1
+
+        return all_projects
 
     async def get_project_versions(self, project_uuid: str) -> List[Dict[str, Any]]:
         """
