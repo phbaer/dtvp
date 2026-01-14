@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple
 import re
 import json
 import os
@@ -447,6 +447,9 @@ def group_vulnerabilities(
                 "finding_uuid": finding.get("uuid"),
                 "analysis_state": analysis.get("state")
                 or analysis.get("analysisState"),
+                "justification": analysis.get("justification")
+                or analysis.get("analysisJustification")
+                or "NOT_SET",
                 "analysis_details": details,
                 "analysis_comments": analysis.get("analysisComments", []),
                 "is_suppressed": analysis.get("isSuppressed", False)

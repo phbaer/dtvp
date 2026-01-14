@@ -250,7 +250,8 @@ const handleUpdate = async () => {
                 rescored_vector: pendingVector.value,
                 analysis_state: state.value,
                 analysis_details: finalDetails,
-                is_suppressed: suppressed.value
+                is_suppressed: suppressed.value,
+                justification: state.value === 'NOT_AFFECTED' ? justification.value : 'NOT_SET'
             })
         }
         

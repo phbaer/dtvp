@@ -54,7 +54,8 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
     rescored_vector: string,
     analysis_state: string,
     analysis_details: string,
-    is_suppressed: boolean
+    is_suppressed: boolean,
+    justification: string
 }) => {
     // Update the group's rescored values
     group.rescored_cvss = data.rescored_cvss
@@ -66,6 +67,7 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
             instance.analysis_state = data.analysis_state
             instance.analysis_details = data.analysis_details
             instance.is_suppressed = data.is_suppressed
+            instance.justification = data.justification
         })
     })
 }
