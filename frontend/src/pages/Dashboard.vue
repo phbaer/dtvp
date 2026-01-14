@@ -47,6 +47,12 @@ const uniqueProjects = computed(() => {
           <Search :size="20" />
           Search
       </button>
+      <router-link 
+          to="/project/_all_"
+          class="bg-gray-700 hover:bg-gray-600 px-6 py-3 rounded font-semibold flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+      >
+          Load All Vulnerabilities
+      </router-link>
     </form>
 
     <div class="grid gap-4">

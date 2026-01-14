@@ -15,16 +15,19 @@ const displayedLimit = ref(20)
 const PAGE_SIZE = 20
 
 const fetchVulns = async () => {
-    const name = route.params.name as string
+    let name = route.params.name as string
     if (!name) return
     
+    const isAllProjects = name === '_all_'
+    const apiName = isAllProjects ? '' : name
+
     loading.value = true
     error.value = ''
-    loadingMessage.value = 'Starting search...'
+    loadingMessage.value = isAllProjects ? 'Starting global search...' : 'Starting search...'
     loadingProgress.value = 0
 
     try {
-        const data = await getGroupedVulns(name, (msg, progress) => {
+        const data = await getGroupedVulns(apiName, (msg, progress) => {
             loadingMessage.value = msg
             loadingProgress.value = progress
         })
@@ -179,7 +182,7 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
             <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
                 &larr; Back to Dashboard
             </router-link>
-            <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name }}</span></h2>
+            <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}</span></h2>
         </div>
         <div class="flex flex-col md:flex-row gap-4 items-end">
             <div class="flex flex-col gap-1">

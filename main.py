@@ -98,7 +98,11 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
 
         # 1. Get all projects matching name to find versions
         projects = await client.get_projects(name)
-        versions = [p for p in projects if p.get("name") == name]
+        if name:
+            versions = [p for p in projects if p.get("name") == name]
+        else:
+            # If name is empty, we want ALL projects/versions
+            versions = projects
 
         if not versions:
             tasks[task_id]["status"] = "completed"
