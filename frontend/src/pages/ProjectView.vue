@@ -63,6 +63,7 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
 }
 
 const tagFilter = ref('')
+const idFilter = ref('')
 const hideAssessed = ref(false)
 const hideMixed = ref(false)
 const sortBy = ref('severity')
@@ -100,6 +101,13 @@ const filteredGroups = computed(() => {
         const term = tagFilter.value.toLowerCase()
         result = result.filter(g => 
             g.tags?.some(t => t.toLowerCase().includes(term))
+        )
+    }
+
+    if (idFilter.value) {
+        const term = idFilter.value.toLowerCase()
+        result = result.filter(g => 
+            g.id.toLowerCase().includes(term)
         )
     }
 
@@ -168,7 +176,7 @@ const loadMore = () => {
 }
 
 // Reset limit when filter or sort changes to avoid confusion
-watch([tagFilter, sortBy, sortOrder], () => {
+watch([tagFilter, idFilter, sortBy, sortOrder], () => {
     displayedLimit.value = PAGE_SIZE
 })
 
@@ -209,12 +217,20 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
             </div>
             <div class="flex flex-col gap-1">
                 <label class="text-[10px] font-bold text-gray-500 uppercase">Filter</label>
-                <input 
-                    v-model="tagFilter" 
-                    type="text" 
-                    placeholder="Filter by Team Tag..." 
-                    class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
-                />
+                <div class="flex flex-col md:flex-row gap-2">
+                    <input 
+                        v-model="idFilter" 
+                        type="text" 
+                        placeholder="Filter by ID (CVE...)" 
+                        class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
+                    />
+                    <input 
+                        v-model="tagFilter" 
+                        type="text" 
+                        placeholder="Filter by Team Tag..." 
+                        class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
+                    />
+                </div>
                 <div class="flex gap-4 mt-2">
                     <label class="inline-flex items-center cursor-pointer">
                         <input type="checkbox" v-model="hideAssessed" class="sr-only peer">

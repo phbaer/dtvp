@@ -135,4 +135,34 @@ describe('ProjectView Filters', () => {
             throw new Error('Hide Mixed checkbox not found')
         }
     })
+
+    it('filters vulnerabilities by ID', async () => {
+        (getGroupedVulns as any).mockResolvedValue(mockData)
+
+        router.push('/projects/p1/TestProject')
+        await router.isReady()
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                plugins: [router]
+            }
+        })
+
+        await flushPromises()
+
+        const idInput = wrapper.find('input[placeholder*="Filter by ID"]')
+        expect(idInput.exists()).toBe(true)
+
+        await idInput.setValue('V1')
+
+        const cards = wrapper.findAll('.vuln-card')
+        expect(cards.length).toBe(1)
+        expect(cards[0]?.text()).toBe('V1')
+
+        await idInput.setValue('v') // Case insensitive check
+        expect(wrapper.findAll('.vuln-card').length).toBe(3)
+
+        await idInput.setValue('X') // No match
+        expect(wrapper.findAll('.vuln-card').length).toBe(0)
+    })
 })

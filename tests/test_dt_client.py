@@ -38,6 +38,27 @@ async def test_get_projects_paginated(dt_client, respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_get_projects_empty(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/project").respond(json=[])
+    projects = await dt_client.get_projects(name="NonExistent")
+    assert projects == []
+
+
+@pytest.mark.asyncio
+async def test_get_projects_boundary(dt_client, respx_mock):
+    # Exactly one page (100 items), then empty
+    respx_mock.get("http://dt.example.com/api/v1/project").mock(
+        side_effect=[
+            httpx.Response(200, json=[{"name": "P1", "uuid": "u1"}] * 100),
+            httpx.Response(200, json=[]),
+        ]
+    )
+
+    projects = await dt_client.get_projects(name="P")
+    assert len(projects) == 100
+
+
+@pytest.mark.asyncio
 async def test_get_vulnerabilities(dt_client, respx_mock):
     respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
         json=[{"vulnerability": {"vulnId": "CVE-1"}}]
