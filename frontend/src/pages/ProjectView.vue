@@ -60,6 +60,8 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
 }
 
 const tagFilter = ref('')
+const hideAssessed = ref(false)
+const hideMixed = ref(false)
 const sortBy = ref('severity')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 
@@ -96,6 +98,18 @@ const filteredGroups = computed(() => {
         result = result.filter(g => 
             g.tags?.some(t => t.toLowerCase().includes(term))
         )
+    }
+
+    if (hideAssessed.value) {
+        result = result.filter(g => {
+            const state = getDisplayState(g)
+            // Keep if NOT_SET or MIXED
+            return state === 'NOT_SET' || state === 'MIXED'
+        })
+    }
+
+    if (hideMixed.value) {
+        result = result.filter(g => getDisplayState(g) !== 'MIXED')
     }
 
     result.sort((a, b) => {
@@ -198,6 +212,18 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
                     placeholder="Filter by Team Tag..." 
                     class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
                 />
+                <div class="flex gap-4 mt-2">
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="hideAssessed" class="sr-only peer">
+                        <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        <span class="ms-2 text-xs font-medium text-gray-300">Hide Assessed</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="hideMixed" class="sr-only peer">
+                        <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                        <span class="ms-2 text-xs font-medium text-gray-300">Hide Mixed</span>
+                    </label>
+                </div>
             </div>
         </div>
     </div>

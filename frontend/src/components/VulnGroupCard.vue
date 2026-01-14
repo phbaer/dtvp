@@ -96,6 +96,8 @@ const updateCalcVector = (componentShortName: string, value: string) => {
     }
 }
 
+
+
 // Grouped components for UI
 const calculatorGroups = computed(() => {
     const instance = activeInstance.value
@@ -123,6 +125,14 @@ const calculatorGroups = computed(() => {
 // Helper to get all instances
 const allInstances = computed(() => {
     return props.group.affected_versions?.flatMap(v => v.components) || []
+})
+
+const displayState = computed(() => {
+    const states = new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET'))
+    if (states.size === 0) return 'NOT_SET'
+    if (states.size > 1) return 'MIXED'
+    const state = Array.from(states)[0]
+    return state === 'NOT_SET' ? 'NOT_SET' : state
 })
 
 // Pre-fill form from first instance when expanded or group changes
@@ -252,10 +262,7 @@ const handleUpdate = async () => {
 }
 
 // ... (keep existing computed properties: displayState, severityColor, stateColor)
-const displayState = computed(() => {
-    const uniqueStates = Array.from(new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET')))
-    return uniqueStates.length === 1 ? uniqueStates[0] : 'MIXED'
-})
+// ... (keep existing computed properties: severityColor, stateColor)
 
 const severityColor = computed(() => {
     switch (props.group.severity) {
@@ -323,6 +330,21 @@ const affectedComponentNames = computed(() => {
                 <div class="w-24 shrink-0 flex justify-center">
                     <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', severityColor]">
                         {{ group.severity || 'UNKNOWN' }}
+                    </span>
+                </div>
+
+                <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
+
+                <!-- Status Column -->
+                <div class="w-24 shrink-0 flex justify-center">
+                    <span v-if="displayState === 'NOT_SET'" class="px-2 py-0.5 text-[10px] font-bold rounded bg-red-900 text-red-100 border border-red-700 animate-pulse uppercase tracking-wider">
+                        Unassessed
+                    </span>
+                    <span v-else-if="displayState === 'MIXED'" class="px-2 py-0.5 text-[10px] font-bold rounded bg-yellow-900 text-yellow-100 border border-yellow-700 uppercase tracking-wider">
+                        Mixed
+                    </span>
+                    <span v-else class="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-900/50 text-blue-200 border border-blue-800 uppercase tracking-wider">
+                        {{ ANALYSIS_STATES.find(s => s.value === displayState)?.label || displayState }}
                     </span>
                 </div>
 

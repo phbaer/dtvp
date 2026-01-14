@@ -22,6 +22,14 @@ vi.mock('lucide-vue-next', () => ({
     ExternalLink: { template: '<span class="icon-link" />' }
 }))
 
+// Mock DependencyChainViewer to avoid async setup in child component
+vi.mock('../DependencyChainViewer.vue', () => ({
+    default: {
+        template: '<div data-testid="dep-chain-viewer"></div>',
+        props: ['projectUuid', 'componentUuid', 'projectName']
+    }
+}))
+
 import { updateAssessment } from '../../lib/api'
 
 describe('VulnGroupCard', () => {
