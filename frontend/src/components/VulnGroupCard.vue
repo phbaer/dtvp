@@ -446,7 +446,7 @@ const rescoredVectorSegments = computed(() => {
                     <div class="mt-4">
                          <h4 class="font-semibold mb-2 text-gray-300">Analysis Details & Comments</h4>
                          <div v-for="v in group.affected_versions" :key="v.project_uuid" class="mb-4">
-                            <h5 class="text-sm font-bold text-gray-400 mb-2">{{ v.project_version }}</h5>
+                            <h5 class="text-sm font-bold text-gray-400 mb-2">{{ v.project_name }} {{ v.project_version }}</h5>
                          
                             <div v-for="(inst, i) in getGroupedInstances(v.components)" :key="i" class="mb-2 bg-gray-900 p-3 rounded border border-gray-700 ml-2">
                                 <div class="flex justify-between text-xs text-gray-500 mb-1">
