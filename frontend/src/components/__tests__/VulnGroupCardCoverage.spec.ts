@@ -143,4 +143,22 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
             expect(tags[1]!.text()).toBe('Tag2')
         }
     })
+
+    it('merges duplicate components and specific usage paths', async () => {
+        const group = {
+            id: 'V1',
+            affected_versions: [{
+                project_uuid: 'p1', project_name: 'P1',
+                components: [
+                    { component_uuid: 'c1', component_name: 'C1', component_version: '1.0', usage_paths: ['PathA'], analysis_state: 'S1' },
+                    { component_uuid: 'c1', component_name: 'C1', component_version: '1.0', usage_paths: ['PathB'], analysis_state: 'S1' }
+                ]
+            }]
+        }
+        const wrapper = mount(VulnGroupCard, { props: { group: group as any } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const instanceBlocks = wrapper.findAll('.mb-2.bg-gray-900')
+        expect(instanceBlocks.length).toBe(1)
+    })
 })

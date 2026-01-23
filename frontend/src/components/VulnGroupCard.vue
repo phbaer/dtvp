@@ -2,10 +2,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, shallowRef } from 'vue'
 import { updateAssessment } from '../lib/api'
+import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
-import DependencyPathList from './DependencyPathList.vue'
+import DependencyChainViewer from './DependencyChainViewer.vue'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -22,9 +23,23 @@ const ANALYSIS_STATES = [
     { value: 'RESOLVED', label: 'Resolved' },
 ]
 
+const JUSTIFICATION_OPTIONS = [
+    { value: 'NOT_SET', label: 'Not Set' },
+    { value: 'CODE_NOT_PRESENT', label: 'Code Not Present' },
+    { value: 'CODE_NOT_REACHABLE', label: 'Code Not Reachable' },
+    { value: 'REQUIRES_CONFIGURATION', label: 'Requires Configuration' },
+    { value: 'REQUIRES_DEPENDENCY', label: 'Requires Dependency' },
+    { value: 'REQUIRES_ENVIRONMENT', label: 'Requires Environment' },
+    { value: 'PROTECTED_BY_COMPILER', label: 'Protected by Compiler' },
+    { value: 'PROTECTED_AT_RUNTIME', label: 'Protected at Runtime' },
+    { value: 'PROTECTED_AT_PERIMETER', label: 'Protected at Perimeter' },
+    { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control' },
+]
+
 const expanded = ref(false)
 const state = ref('NOT_SET')
 const details = ref('')
+const justification = ref('NOT_SET')
 const comment = ref('')
 const suppressed = ref(false)
 const updating = ref(false)
@@ -96,6 +111,8 @@ const updateCalcVector = (componentShortName: string, value: string) => {
     }
 }
 
+
+
 // Grouped components for UI
 const calculatorGroups = computed(() => {
     const instance = activeInstance.value
@@ -125,12 +142,28 @@ const allInstances = computed(() => {
     return props.group.affected_versions?.flatMap(v => v.components) || []
 })
 
+const displayState = computed(() => {
+    const states = new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET'))
+    if (states.size === 0) return 'NOT_SET'
+    if (states.size > 1) return 'MIXED'
+    const state = Array.from(states)[0]
+    return state === 'NOT_SET' ? 'NOT_SET' : state
+})
+
 // Pre-fill form from first instance when expanded or group changes
 watch(() => props.group, (newGroup) => {
     // Reset pending values
     // Use rescored value if present, otherwise fallback to original score, or null
-    pendingScore.value = newGroup.rescored_cvss ?? newGroup.cvss_score ?? newGroup.cvss ?? null
     pendingVector.value = newGroup.rescored_vector || newGroup.cvss_vector || ''
+    
+    // Determine score: explicit rescored > calculated from rescored vector > original score
+    if (newGroup.rescored_cvss !== null && newGroup.rescored_cvss !== undefined) {
+        pendingScore.value = newGroup.rescored_cvss
+    } else if (newGroup.rescored_vector) {
+        pendingScore.value = calculateScoreFromVector(newGroup.rescored_vector)
+    } else {
+        pendingScore.value = newGroup.cvss_score ?? newGroup.cvss ?? null
+    }
     
     const firstVersion = newGroup.affected_versions?.[0]
     if (firstVersion && firstVersion.components?.length > 0) {
@@ -138,6 +171,7 @@ watch(() => props.group, (newGroup) => {
         if (first) {
             state.value = first.analysis_state || 'NOT_SET'
             details.value = first.analysis_details || ''
+            justification.value = first.justification || 'NOT_SET'
             suppressed.value = first.is_suppressed || false
         }
     }
@@ -145,32 +179,9 @@ watch(() => props.group, (newGroup) => {
 
 // Auto-calculate score when vector changes
 watch(pendingVector, (newVector) => {
-    if (newVector && newVector.trim().length > 5) {
-        try {
-            let v = newVector.trim()
-            let score: number | null = null
-            
-            if (v.startsWith('CVSS:4.0')) {
-                const cvss = new Cvss4P0(v)
-                score = cvss.calculateScores().overall || null
-            } else if (v.startsWith('CVSS:3.')) {
-                if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
-                const cvss = new Cvss3P1(v)
-                const s = cvss.calculateScores(false)
-                score = s.overall || s.base || null
-            } else {
-                // Try CVSS v2
-                const cvss = new Cvss2(v)
-                const s = cvss.calculateScores()
-                score = s.overall || s.base || null
-            }
-
-            if (score !== null && !isNaN(score)) {
-                pendingScore.value = parseFloat(score.toFixed(1))
-            }
-        } catch (e) {
-            // Invalid vector, ignore
-        }
+    const score = calculateScoreFromVector(newVector)
+    if (score !== null) {
+        pendingScore.value = score
     }
 })
 
@@ -221,6 +232,7 @@ const handleUpdate = async () => {
             state: state.value,
             details: finalDetails,
             comment: comment.value,
+            justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
             suppressed: suppressed.value
         }
 
@@ -238,7 +250,8 @@ const handleUpdate = async () => {
                 rescored_vector: pendingVector.value,
                 analysis_state: state.value,
                 analysis_details: finalDetails,
-                is_suppressed: suppressed.value
+                is_suppressed: suppressed.value,
+                justification: state.value === 'NOT_AFFECTED' ? justification.value : 'NOT_SET'
             })
         }
         
@@ -252,10 +265,7 @@ const handleUpdate = async () => {
 }
 
 // ... (keep existing computed properties: displayState, severityColor, stateColor)
-const displayState = computed(() => {
-    const uniqueStates = Array.from(new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET')))
-    return uniqueStates.length === 1 ? uniqueStates[0] : 'MIXED'
-})
+// ... (keep existing computed properties: severityColor, stateColor)
 
 const severityColor = computed(() => {
     switch (props.group.severity) {
@@ -268,6 +278,7 @@ const severityColor = computed(() => {
     }
 })
 
+
 const stateColor = computed(() => {
     switch (displayState.value) {
         case 'NOT_AFFECTED': return 'text-green-400'
@@ -275,6 +286,19 @@ const stateColor = computed(() => {
         default: return 'text-gray-300'
     }
 })
+
+
+const cardStyle = computed(() => {
+    switch (displayState.value) {
+        case 'NOT_SET': 
+            return 'bg-red-500/10 border-red-500/40 hover:bg-red-500/15'
+        case 'MIXED':
+            return 'bg-yellow-500/10 border-yellow-500/40 hover:bg-yellow-500/15'
+        default:
+            return 'bg-gray-800 border-gray-700 hover:bg-gray-750'
+    }
+})
+
 
 const getGroupedInstances = (components: any[]) => {
     if (!components) return []
@@ -301,13 +325,27 @@ const affectedComponentNames = computed(() => {
     const names = new Set(allInstances.value.map(c => `${c.component_name} ${c.component_version}`))
     return Array.from(names).join(', ')
 })
+
+const rescoredVectorSegments = computed(() => {
+    const rescored = props.group.rescored_vector
+    const original = props.group.cvss_vector
+    
+    if (!rescored || !original || !rescored.startsWith(original)) {
+        return { bold: '', normal: rescored || '' }
+    }
+    
+    return {
+        bold: original,
+        normal: rescored.slice(original.length)
+    }
+})
 </script>
 
 <template>
-  <div class="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+  <div :class="['border rounded-lg overflow-hidden transition-colors', cardStyle]">
     <!-- Header -->
     <div 
-        class="p-4 flex items-start justify-between cursor-pointer hover:bg-gray-750 transition-colors gap-8"
+        class="p-4 flex items-start justify-between cursor-pointer transition-colors gap-8"
         @click="expanded = !expanded"
     >
         <div>
@@ -315,6 +353,9 @@ const affectedComponentNames = computed(() => {
                 <!-- ID Column -->
                 <div class="w-40 shrink-0 font-mono text-lg font-bold text-yellow-400">
                     {{ group.id }}
+                    <div v-if="group.aliases && group.aliases.length > 0" class="text-[10px] text-gray-500 font-medium mt-0.5 truncate uppercase">
+                        {{ group.aliases.join(', ') }}
+                    </div>
                 </div>
                 
                 <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
@@ -361,8 +402,17 @@ const affectedComponentNames = computed(() => {
             </div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50">
-                <span class="text-gray-600 mr-2 uppercase font-bold">Vector:</span>{{ group.rescored_vector || group.cvss_vector }}
+            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
+                <div v-if="group.rescored_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
+                    <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored Vector:</span>
+                    <span class="tracing-tight">
+                        <span class="font-bold rescored-bold-segment">{{ rescoredVectorSegments.bold }}</span>{{ rescoredVectorSegments.normal }}
+                    </span>
+                </div>
+                <div class="font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50 flex items-center gap-2">
+                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ group.rescored_vector ? 'Original Vector:' : 'Vector:' }}</span>
+                    <span :class="{ 'line-through opacity-50': group.rescored_vector }">{{ group.cvss_vector || 'N/A' }}</span>
+                </div>
             </div>
         </div>
         
@@ -373,6 +423,7 @@ const affectedComponentNames = computed(() => {
                     {{ displayState }}
                 </div>
             </div>
+
             
             <div class="w-24 text-right">
                     <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
@@ -395,7 +446,7 @@ const affectedComponentNames = computed(() => {
                     <div class="mt-4">
                          <h4 class="font-semibold mb-2 text-gray-300">Analysis Details & Comments</h4>
                          <div v-for="v in group.affected_versions" :key="v.project_uuid" class="mb-4">
-                            <h5 class="text-sm font-bold text-gray-400 mb-2">{{ v.project_version }}</h5>
+                            <h5 class="text-sm font-bold text-gray-400 mb-2">{{ v.project_name }} {{ v.project_version }}</h5>
                          
                             <div v-for="(inst, i) in getGroupedInstances(v.components)" :key="i" class="mb-2 bg-gray-900 p-3 rounded border border-gray-700 ml-2">
                                 <div class="flex justify-between text-xs text-gray-500 mb-1">
@@ -412,11 +463,12 @@ const affectedComponentNames = computed(() => {
                                 </div>
                                 
                                 <!-- Usage Graph Section (grouped) -->
-                                <div v-if="inst.usage_paths && inst.usage_paths.length" class="overflow-x-auto custom-scrollbar mt-3">
-                                    <div class="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-2">
-                                        Dependency Chains
-                                    </div>
-                                    <DependencyPathList :paths="inst.usage_paths" :project-name="v.project_name"  class="overflow-x-auto custom-scrollbar"/>
+                                <div class="mt-3 border-t border-gray-800 pt-2">
+                                     <DependencyChainViewer 
+                                        :project-uuid="v.project_uuid"
+                                        :component-uuid="inst.component_uuid"
+                                        :project-name="v.project_name"
+                                    />
                                 </div>
                              </div>
                          </div>
@@ -440,6 +492,16 @@ const affectedComponentNames = computed(() => {
                         </select>
                     </div>
 
+                    <div v-if="state === 'NOT_AFFECTED'">
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
+                        <select 
+                            v-model="justification" 
+                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
+                        >
+                            <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                        </select>
+                    </div>
+
                     <!-- Calculator Section -->
                     <div class="p-3 border border-gray-700 rounded bg-gray-800">
                         <h5 class="text-xs font-bold text-gray-300 mb-2 flex items-center gap-2">
@@ -460,6 +522,10 @@ const affectedComponentNames = computed(() => {
                                 placeholder="CVSS:4.0/AV:N/..."
                                 class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono"
                             />
+                            <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 text-[9px] text-gray-500/60 flex gap-1.5 truncate">
+                                <span class="uppercase font-bold shrink-0">Original:</span>
+                                <span class="truncate italic">{{ group.cvss_vector }}</span>
+                            </div>
                         </div>
                         
                         <div class="flex items-center justify-between">
@@ -593,7 +659,11 @@ const affectedComponentNames = computed(() => {
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="text-xs text-gray-500 font-mono mb-1">Current Vector</div>
-                        <div class="text-sm font-mono font-bold text-white break-all">{{ pendingVector }}</div>
+                        <div class="text-sm font-mono font-bold text-white break-all mb-2">{{ pendingVector }}</div>
+                        <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="text-[10px] text-gray-500/60 font-mono flex gap-2">
+                             <span class="uppercase font-bold shrink-0">Original Vector:</span>
+                             <span class="break-all italic">{{ group.cvss_vector }}</span>
+                        </div>
                     </div>
                     <div class="text-right ml-4">
                          <div class="text-xs text-gray-500 uppercase">Score</div>

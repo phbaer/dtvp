@@ -4,7 +4,13 @@ import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock API
 vi.mock('../../lib/api', () => ({
-    updateAssessment: vi.fn(() => Promise.resolve([]))
+    updateAssessment: vi.fn(() => Promise.resolve([])),
+    getDependencyChains: vi.fn().mockResolvedValue({
+        paths: [],
+        total: 0,
+        limit: 10,
+        offset: 0
+    })
 }))
 
 // Mock Icons
@@ -14,6 +20,14 @@ vi.mock('lucide-vue-next', () => ({
     Shield: { template: '<span class="icon-shield" />' },
     Calculator: { template: '<span class="icon-calc" />' },
     ExternalLink: { template: '<span class="icon-link" />' }
+}))
+
+// Mock DependencyChainViewer to avoid async setup in child component
+vi.mock('../DependencyChainViewer.vue', () => ({
+    default: {
+        template: '<div data-testid="dep-chain-viewer"></div>',
+        props: ['projectUuid', 'componentUuid', 'projectName']
+    }
 }))
 
 import { updateAssessment } from '../../lib/api'
@@ -108,6 +122,7 @@ describe('VulnGroupCard', () => {
             state: 'NOT_AFFECTED',
             details: `[Rescored: 9.8]\n\nFalse positive`,
             comment: '',
+            justification: 'NOT_SET',
             suppressed: false
         })
 
@@ -124,7 +139,9 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         // Click visual calculator
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
         expect(wrapper.text()).toContain('CVSS v3.1 Calculator')
         expect(wrapper.text()).toContain('Done')
@@ -164,7 +181,9 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
 
         // Reset
         const resetBtn = wrapper.findAll('button').find(b => b.text().includes('Reset to Original'))
@@ -186,6 +205,26 @@ describe('VulnGroupCard', () => {
             props: { group: lowGroup }
         })
         expect(wrapper2.find('span.rounded').classes()).toContain('bg-green-600')
+
+        // Test card style branches (brighter colors)
+        const unassessedWrapper = mount(VulnGroupCard, { props: { group: { ...mockGroup, severity: 'CRITICAL' } } })
+        expect(unassessedWrapper.find('.border.rounded-lg').classes()).toContain('bg-red-500/10')
+
+        const mixedGroup = {
+            ...mockGroup,
+            affected_versions: [
+                { components: [{ analysis_state: 'EXPLOITABLE' }] },
+                { components: [{ analysis_state: 'NOT_SET' }] }
+            ]
+        }
+        const mixedWrapper = mount(VulnGroupCard, { props: { group: mixedGroup as any } })
+        expect(mixedWrapper.find('.border.rounded-lg').classes()).toContain('bg-yellow-500/10')
+    })
+
+    it('renders vulnerability aliases', () => {
+        const aliasGroup = { ...mockGroup, aliases: ['CVE-2023-1234', 'GHSA-abcd-efgh'] }
+        const wrapper = mount(VulnGroupCard, { props: { group: aliasGroup } })
+        expect(wrapper.text()).toContain('CVE-2023-1234, GHSA-abcd-efgh')
     })
 
     it('handles CVSS 4.0 vector parsing', async () => {
@@ -198,7 +237,9 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).activeVersion).toBe('4.0')
     })
@@ -213,7 +254,9 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).activeVersion).toBe('2.0')
     })
@@ -228,7 +271,9 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).activeVersion).toBe('3.1')
     })
@@ -240,7 +285,9 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
 
         // Try to reset
@@ -271,7 +318,9 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).activeVersion).toBe('3.1')
     })
@@ -346,14 +395,12 @@ describe('VulnGroupCard', () => {
                         ...mockGroup.affected_versions[0],
                         components: [{
                             ...mockComponents[0],
-                            analysis_state: state,
-                            // Ensure required fields are present if spreading overrides them
+                            analysis_state: state
                         }]
                     }]
                 } as any
             }
         })
-        // ...
 
         // EXPLOITABLE -> Red
         const wrapperExploitable = makeWrapper('EXPLOITABLE')
@@ -371,7 +418,9 @@ describe('VulnGroupCard', () => {
     it('closes modal via X button', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
 
         expect(wrapper.text()).toContain('CVSS v3.1 Calculator')
 
@@ -385,7 +434,9 @@ describe('VulnGroupCard', () => {
     it('renders metrics and allows updates in calculator', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
 
         await wrapper.vm.$nextTick()
 
@@ -401,7 +452,9 @@ describe('VulnGroupCard', () => {
     it('switches calculator versions via tabs', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
 
         const tabs = wrapper.findAll('button').filter(b => b.text().includes('CVSS v'))
@@ -420,7 +473,9 @@ describe('VulnGroupCard', () => {
     it('auto-calculates score from vector input', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
 
         const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
 
@@ -436,7 +491,9 @@ describe('VulnGroupCard', () => {
     it('includes rescored vector in assessment', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
 
         const avSelect = wrapper.find('#metric-AV')
@@ -459,7 +516,9 @@ describe('VulnGroupCard', () => {
     it('updates pending score manually', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
 
         await wrapper.vm.$nextTick()
 
@@ -472,7 +531,9 @@ describe('VulnGroupCard', () => {
     it('activates 3.1 tab', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
         await wrapper.find('.cursor-pointer').trigger('click')
-        await wrapper.find('button.text-blue-400').trigger('click')
+        // Helper to find calculator button
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
 
         // Switch to 4.0 first
@@ -482,5 +543,130 @@ describe('VulnGroupCard', () => {
         // Back to 3.1
         await tabs.find(b => b.text().includes('3.1'))?.trigger('click')
         expect((wrapper.vm as any).activeVersion).toBe('3.1')
+    })
+
+    it('renders both original and rescored vectors when present with bolding', async () => {
+        const rescoredGroup = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L',
+            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/MC:N/MI:N/MA:N'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: rescoredGroup as any }
+        })
+
+        // Expand to see vectors
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        expect(wrapper.text()).toContain('Rescored Vector:')
+        expect(wrapper.text()).toContain('Original Vector:')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/MC:N/MI:N/MA:N')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+
+        // Check for bolded segment in rescored vector
+        const boldSegment = wrapper.find('.rescored-bold-segment')
+        expect(boldSegment.text()).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+
+        // The normal segment should be the rest
+        expect(wrapper.find('.text-purple-300 .tracing-tight').text()).toContain('/MC:N/MI:N/MA:N')
+
+        // Check for line-through 
+        expect(wrapper.find('.line-through').text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+    })
+
+    it('shows original vector reference in assessment form', async () => {
+        const rescoredGroup = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: rescoredGroup as any }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Initial pendingVector matches original, so reference should NOT be visible yet
+        expect(wrapper.text()).not.toContain('Original:')
+
+        // Change vector
+        const input = wrapper.find('input[type="text"]')
+        await input.setValue('CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+
+        expect(wrapper.text()).toContain('Original:')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+    })
+
+    it('shows original vector reference in calculator modal', async () => {
+        const rescoredGroup = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: rescoredGroup as any }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Open modal
+        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await findCalcBtn()?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        // Change metric to make vector different
+        const avSelect = wrapper.find('#metric-AV')
+        await avSelect.setValue('P')
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.text()).toContain('Original Vector:')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
+    })
+
+    it('calculates score correctly when environmental metrics negate impact', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
+
+        // Full impact base, but negated by environmental modified impact
+        const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N'
+        await input.setValue(vector)
+
+        // Wait for watch to trigger
+        await wrapper.vm.$nextTick()
+
+        // Final check on pendingScore
+        expect((wrapper.vm as any).pendingScore).toBe(0.0)
+    })
+
+    it('shows justification dropdown when NOT_AFFECTED is selected', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const stateSelect = wrapper.find('select') // First select is Analysis State
+        await stateSelect.setValue('NOT_AFFECTED')
+
+        expect(wrapper.text()).toContain('Justification')
+        const selects = wrapper.findAll('select')
+        expect(selects.length).toBe(2)
+
+        if (selects.length > 1) {
+            await selects[1]?.setValue('CODE_NOT_PRESENT')
+        }
+
+        // Mock API call to verify payload
+        const api = await import('../../lib/api')
+        const spy = vi.spyOn(api, 'updateAssessment').mockResolvedValue([])
+
+        // Confirm bulk update
+        window.confirm = vi.fn(() => true)
+        window.alert = vi.fn()
+
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
+        await applyBtn?.trigger('click')
+
+        expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+            state: 'NOT_AFFECTED',
+            justification: 'CODE_NOT_PRESENT'
+        }))
     })
 })

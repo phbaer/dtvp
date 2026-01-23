@@ -2,6 +2,7 @@
 import { ref, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { getGroupedVulns } from '../lib/api'
+import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln } from '../types'
 import VulnGroupCard from '../components/VulnGroupCard.vue'
 
@@ -13,20 +14,30 @@ const loadingMessage = ref('Initializing...')
 const loadingProgress = ref(0)
 
 const fetchVulns = async () => {
-    const name = route.params.name as string
+    let name = route.params.name as string
     if (!name) return
     
+    const isAllProjects = name === '_all_'
+    const apiName = isAllProjects ? '' : name
+
     loading.value = true
     error.value = ''
-    loadingMessage.value = 'Starting search...'
+    loadingMessage.value = isAllProjects ? 'Starting global search...' : 'Starting search...'
     loadingProgress.value = 0
 
     try {
-        const data = await getGroupedVulns(name, (msg, progress) => {
+        const data = await getGroupedVulns(apiName, (msg, progress) => {
             loadingMessage.value = msg
             loadingProgress.value = progress
         })
-        groups.value = data
+        
+        // Ensure rescored_cvss is populated if rescored_vector exists
+        groups.value = data.map(g => {
+            if (!g.rescored_cvss && g.rescored_vector) {
+                g.rescored_cvss = calculateScoreFromVector(g.rescored_vector)
+            }
+            return g
+        })
     } catch (err: any) {
         error.value = 'Failed to load vulnerabilities: ' + (err.message || err)
         console.error(err)
@@ -40,7 +51,8 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
     rescored_vector: string,
     analysis_state: string,
     analysis_details: string,
-    is_suppressed: boolean
+    is_suppressed: boolean,
+    justification: string
 }) => {
     // Update the group's rescored values
     group.rescored_cvss = data.rescored_cvss
@@ -52,11 +64,15 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
             instance.analysis_state = data.analysis_state
             instance.analysis_details = data.analysis_details
             instance.is_suppressed = data.is_suppressed
+            instance.justification = data.justification
         })
     })
 }
 
 const tagFilter = ref('')
+const idFilter = ref('')
+const hideAssessed = ref(false)
+const hideMixed = ref(false)
 const sortBy = ref('severity')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 
@@ -93,6 +109,25 @@ const filteredGroups = computed(() => {
         result = result.filter(g => 
             g.tags?.some(t => t.toLowerCase().includes(term))
         )
+    }
+
+    if (idFilter.value) {
+        const term = idFilter.value.toLowerCase()
+        result = result.filter(g => 
+            g.id.toLowerCase().includes(term)
+        )
+    }
+
+    if (hideAssessed.value) {
+        result = result.filter(g => {
+            const state = getDisplayState(g)
+            // Keep if NOT_SET or MIXED
+            return state === 'NOT_SET' || state === 'MIXED'
+        })
+    }
+
+    if (hideMixed.value) {
+        result = result.filter(g => getDisplayState(g) !== 'MIXED')
     }
 
     result.sort((a, b) => {
@@ -135,6 +170,7 @@ const filteredGroups = computed(() => {
     return result
 })
 
+
 watch(() => route.params.name, fetchVulns, { immediate: true })
 </script>
 
@@ -145,39 +181,61 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
             <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
                 &larr; Back to Dashboard
             </router-link>
-            <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name }}</span></h2>
+            <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}</span></h2>
         </div>
-        <div class="flex flex-col md:flex-row gap-4 items-end">
-            <div class="flex flex-col gap-1">
-                <label class="text-[10px] font-bold text-gray-500 uppercase">Sort By</label>
-                <div class="flex gap-2">
-                    <select 
-                        v-model="sortBy"
-                        class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                    >
-                        <option value="severity">Criticality</option>
-                        <option value="score">Score</option>
-                        <option value="analysis">Analysis</option>
-                        <option value="tags">Tags</option>
-                        <option value="id">CVE ID</option>
-                    </select>
-                    <button 
-                        @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'"
-                        class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm hover:bg-gray-700 transition-colors"
-                        :title="sortOrder === 'asc' ? 'Ascending' : 'Descending'"
-                    >
-                        {{ sortOrder === 'asc' ? '↑' : '↓' }}
-                    </button>
+        <div class="flex flex-col gap-4">
+            <div class="flex flex-col md:flex-row gap-4 md:items-end lg:items-end">
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] font-bold text-gray-500 uppercase">Sort By</label>
+                    <div class="flex gap-2">
+                        <select 
+                            v-model="sortBy"
+                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="severity">Criticality</option>
+                            <option value="score">Score</option>
+                            <option value="analysis">Analysis</option>
+                            <option value="tags">Tags</option>
+                            <option value="id">CVE ID</option>
+                        </select>
+                        <button 
+                            @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'"
+                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm hover:bg-gray-700 transition-colors"
+                            :title="sortOrder === 'asc' ? 'Ascending' : 'Descending'"
+                        >
+                            {{ sortOrder === 'asc' ? '↑' : '↓' }}
+                        </button>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] font-bold text-gray-500 uppercase">Filter</label>
+                    <div class="flex flex-col md:flex-row gap-2">
+                        <input 
+                            v-model="idFilter" 
+                            type="text" 
+                            placeholder="Filter by ID (CVE...)" 
+                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
+                        />
+                        <input 
+                            v-model="tagFilter" 
+                            type="text" 
+                            placeholder="Filter by Team Tag..." 
+                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
+                        />
+                    </div>
                 </div>
             </div>
-            <div class="flex flex-col gap-1">
-                <label class="text-[10px] font-bold text-gray-500 uppercase">Filter</label>
-                <input 
-                    v-model="tagFilter" 
-                    type="text" 
-                    placeholder="Filter by Team Tag..." 
-                    class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-64"
-                />
+            <div class="flex gap-4 self-end">
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="hideAssessed" class="sr-only peer">
+                    <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                    <span class="ms-2 text-xs font-medium text-gray-300">Hide Assessed</span>
+                </label>
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="hideMixed" class="sr-only peer">
+                    <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                    <span class="ms-2 text-xs font-medium text-gray-300">Hide Mixed</span>
+                </label>
             </div>
         </div>
     </div>
@@ -198,6 +256,7 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
             :group="group" 
             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)" 
         />
+        
         <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center">No vulnerabilities found matching criteria.</div>
     </div>
   </div>

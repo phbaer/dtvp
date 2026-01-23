@@ -85,6 +85,38 @@ def test_process_grouped_vulns_task_bom_failure():
     assert main.tasks[task_id]["result"] == []
 
 
+def test_process_grouped_vulns_task_all_projects():
+    import main
+    from unittest.mock import AsyncMock
+
+    client = AsyncMock()
+    # Mock multiple different projects
+    client.get_projects.return_value = [
+        {"name": "ProjA", "version": "1.0", "uuid": "u1"},
+        {"name": "ProjB", "version": "2.0", "uuid": "u2"},
+    ]
+    client.get_vulnerabilities.return_value = []
+    client.get_project_vulnerabilities.return_value = []
+    client.get_bom.return_value = {"components": []}
+
+    task_id = "test-all-task"
+    main.tasks[task_id] = {"status": "pending"}
+
+    import asyncio
+
+    # Call with empty name (All projects request)
+    asyncio.run(main.process_grouped_vulns_task(task_id, "", client))
+
+    assert main.tasks[task_id]["status"] == "completed"
+    # Verify that BOTH projects were processed (they would be in combined_data)
+    # Since vulnerabilities were empty, result is empty list, but we can verify the mock calls if we wanted.
+    # Actually, let's verify get_vulnerabilities was called for BOTH uuids.
+    assert client.get_vulnerabilities.call_count == 2
+    calls = [c.args[0] for c in client.get_vulnerabilities.call_args_list]
+    assert "u1" in calls
+    assert "u2" in calls
+
+
 def test_spa_traversal_logic():
     import main
 
@@ -194,6 +226,7 @@ def test_get_team_mapping(client):
         response = client.get("/api/settings/mapping")
         assert response.status_code == 200
         assert response.json() == {"test": "team"}
+
 
 def test_serve_index_no_frontend_url():
     import main

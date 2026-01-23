@@ -22,6 +22,43 @@ async def test_get_projects(dt_client, respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_get_projects_paginated(dt_client, respx_mock):
+    # Page 1
+    respx_mock.get("http://dt.example.com/api/v1/project").mock(
+        side_effect=[
+            httpx.Response(200, json=[{"name": "P1", "uuid": "u1"}] * 100),
+            httpx.Response(200, json=[{"name": "P2", "uuid": "u2"}] * 50),
+        ]
+    )
+
+    projects = await dt_client.get_projects(name="P")
+    assert len(projects) == 150
+    assert projects[0]["name"] == "P1"
+    assert projects[149]["name"] == "P2"
+
+
+@pytest.mark.asyncio
+async def test_get_projects_empty(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/project").respond(json=[])
+    projects = await dt_client.get_projects(name="NonExistent")
+    assert projects == []
+
+
+@pytest.mark.asyncio
+async def test_get_projects_boundary(dt_client, respx_mock):
+    # Exactly one page (100 items), then empty
+    respx_mock.get("http://dt.example.com/api/v1/project").mock(
+        side_effect=[
+            httpx.Response(200, json=[{"name": "P1", "uuid": "u1"}] * 100),
+            httpx.Response(200, json=[]),
+        ]
+    )
+
+    projects = await dt_client.get_projects(name="P")
+    assert len(projects) == 100
+
+
+@pytest.mark.asyncio
 async def test_get_vulnerabilities(dt_client, respx_mock):
     respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
         json=[{"vulnerability": {"vulnId": "CVE-1"}}]
@@ -48,6 +85,29 @@ async def test_update_analysis(dt_client, respx_mock):
         suppressed=True,
     )
     assert res["status"] == "updated"
+
+
+@pytest.mark.asyncio
+async def test_update_analysis_justification(dt_client, respx_mock):
+    respx_mock.put("http://dt.example.com/api/v1/analysis").respond(
+        json={"status": "updated"}
+    )
+
+    res = await dt_client.update_analysis(
+        project_uuid="p1",
+        component_uuid="c1",
+        vulnerability_uuid="v1",
+        state="NOT_AFFECTED",
+        details="Clean",
+        justification="CODE_NOT_PRESENT",
+    )
+    assert res["status"] == "updated"
+    # Verify exact payload if possible, but respx_mock's put check is enough or we can add it
+    request = respx_mock.calls.last.request
+    import json
+
+    payload = json.loads(request.content)
+    assert payload["analysisJustification"] == "CODE_NOT_PRESENT"
 
 
 @pytest.mark.asyncio

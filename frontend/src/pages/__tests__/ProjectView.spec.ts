@@ -146,4 +146,26 @@ describe('ProjectView.vue', () => {
         await flushPromises()
         expect(getGroupedVulns).not.toHaveBeenCalled()
     })
+
+    it('handles _all_ project name context', async () => {
+        vi.mocked(useRoute).mockReturnValue({
+            params: { name: '_all_' }
+        } as any)
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                stubs: { RouterLink: true },
+                mocks: {
+                    $route: { params: { name: '_all_' } }
+                }
+            }
+        })
+
+        expect(wrapper.text()).toContain('Starting global search')
+        expect(wrapper.get('h2').text()).toContain('Vulnerabilities for All Projects')
+
+        await flushPromises()
+
+        expect(getGroupedVulns).toHaveBeenCalledWith('', expect.any(Function))
+    })
 })

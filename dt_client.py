@@ -32,13 +32,37 @@ class DTClient:
     async def get_projects(self, name: str) -> List[Dict[str, Any]]:
         """
         Search for projects by name.
+        Handles pagination to retrieve ALL matching projects.
         """
-        response = await self.client.get(
-            f"{self.base_url}/api/v1/project",
-            params={"name": name, "excludeInactive": "true"},
-        )
-        response.raise_for_status()
-        return response.json()
+        all_projects = []
+        page_number = 1
+        page_size = 100
+
+        while True:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/project",
+                params={
+                    "name": name,
+                    "excludeInactive": "true",
+                    "pageSize": page_size,
+                    "pageNumber": page_number,
+                },
+            )
+            response.raise_for_status()
+            projects = response.json()
+
+            if not projects:
+                break
+
+            all_projects.extend(projects)
+
+            # If we got fewer than page_size, we reached the end
+            if len(projects) < page_size:
+                break
+
+            page_number += 1
+
+        return all_projects
 
     async def get_project_versions(self, project_uuid: str) -> List[Dict[str, Any]]:
         """
@@ -54,6 +78,7 @@ class DTClient:
         """
         response = await self.client.get(
             f"{self.base_url}/api/v1/finding/project/{project_uuid}",
+            params={"suppressed": "true"},
         )
         response.raise_for_status()
         findings = response.json()
@@ -74,9 +99,15 @@ class DTClient:
                 )
 
         if analysis_tasks:
-            # Execute all analysis requests in parallel
-            # httpx limits will handle connection pooling/queuing
-            results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+            # Execute analysis requests in batches to avoid overloading the client/connection pool
+            # The client has a limit of 100 connections, so we batch safely below that.
+            batch_size = 50
+            results = []
+
+            for i in range(0, len(analysis_tasks), batch_size):
+                batch = analysis_tasks[i : i + batch_size]
+                batch_results = await asyncio.gather(*batch, return_exceptions=True)
+                results.extend(batch_results)
 
             # Merge results
             for finding, analysis_result in zip(findings_to_enrich, results):
@@ -143,6 +174,7 @@ class DTClient:
         state: str,
         details: str,
         comment: Optional[str] = None,
+        justification: Optional[str] = None,
         suppressed: bool = False,
     ):
         """
@@ -156,6 +188,8 @@ class DTClient:
             "isSuppressed": suppressed,
             "analysisDetails": details,
         }
+        if justification:
+            payload["analysisJustification"] = justification
         if comment:
             payload["comment"] = comment
 

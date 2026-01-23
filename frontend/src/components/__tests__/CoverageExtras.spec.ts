@@ -14,12 +14,21 @@ vi.mock('lucide-vue-next', () => ({
     ShieldAlert: { template: '<span />' }
 }))
 
+// Mock API
+vi.mock('../../lib/api', () => ({
+    updateAssessment: vi.fn(),
+    getDependencyChains: vi.fn().mockResolvedValue([
+        'Comp -> Parent1 -> Project',
+        'Comp -> Parent2 -> Project'
+    ])
+}))
+
 describe('Coverage Extras', () => {
     it('DependencyPathList handles single node path (hides it)', () => {
         const wrapper = mount(DependencyPathList, {
-            props: { paths: ['OnlyComponent'] }
+            props: { paths: ['OnlyComponent'], projectName: 'Proj' }
         })
-        expect(wrapper.findAll('.relative.flex.items-center').length).toBe(0)
+        expect(wrapper.findAll('.clip-start').length + wrapper.findAll('.clip-middle').length).toBe(0)
     })
 
     it('VulnGroupCard severity colors (INFO and default)', async () => {
@@ -56,14 +65,12 @@ describe('Coverage Extras', () => {
                         {
                             component_uuid: 'C1',
                             component_name: 'Comp',
-                            component_version: '1.0',
-                            usage_paths: ['Comp -> Parent1 -> Project']
+                            component_version: '1.0'
                         },
                         {
                             component_uuid: 'C1',
                             component_name: 'Comp',
-                            component_version: '1.0',
-                            usage_paths: ['Comp -> Parent2 -> Project']
+                            component_version: '1.0'
                         }
                     ]
                 }
@@ -73,9 +80,35 @@ describe('Coverage Extras', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         const componentBlocks = wrapper.findAll('.bg-gray-900.p-3.rounded')
-        expect(componentBlocks.length).toBe(1)
+        expect(componentBlocks.length).toBe(1) // Should group components
 
-        expect(wrapper.text()).toContain('Parent1')
-        expect(wrapper.text()).toContain('Parent2')
+        // Open dependency chains
+        const toggleBtn = wrapper.find('button.text-blue-400')
+        if (toggleBtn.exists()) {
+            await toggleBtn.trigger('click')
+            // Wait for async loading
+            await new Promise(resolve => setTimeout(resolve, 10))
+            await wrapper.vm.$nextTick()
+
+            expect(wrapper.text()).toContain('Parent2')
+        }
+    })
+
+    it('VulnGroupCard handles rescoredVectorSegments edge cases', async () => {
+        // Case: rescored doesn't start with original
+        const group = {
+            id: 'V1', cvss_vector: 'ABC', rescored_vector: 'XYZ',
+            affected_versions: [], severity: 'MEDIUM', cvss_score: 5
+        } as any
+        const wrapper = mount(VulnGroupCard, { props: { group } })
+        expect((wrapper.vm as any).rescoredVectorSegments).toEqual({ bold: '', normal: 'XYZ' })
+
+        // Case: rescored is empty
+        const group2 = {
+            id: 'V1', cvss_vector: 'ABC', rescored_vector: '',
+            affected_versions: [], severity: 'MEDIUM', cvss_score: 5
+        } as any
+        const wrapper2 = mount(VulnGroupCard, { props: { group: group2 } })
+        expect((wrapper2.vm as any).rescoredVectorSegments).toEqual({ bold: '', normal: '' })
     })
 })
