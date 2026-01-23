@@ -78,7 +78,13 @@ describe('VulnGroupCard Branch Coverage', () => {
             props: {
                 group: {
                     ...baseGroup,
-                    affected_versions: [{ components: [{ analysis_details: 'Existing details' }] }]
+                    affected_versions: [{
+                        project_uuid: 'p1', project_name: 'P1',
+                        components: [{
+                            component_uuid: 'c1', component_name: 'C1', component_version: '1.0',
+                            analysis_details: 'Existing details'
+                        }]
+                    }]
                 } as any
             }
         })
@@ -112,6 +118,9 @@ describe('VulnGroupCard Branch Coverage', () => {
             expect(call.details).toContain('Existing details')
         }
 
+        // ... (rest of the test logic remains same, but I need to include it in replacement chunks if I replace the whole test block. 
+        // Or I can just replace the setup part.
+
         // 1. Only Score
         vi.mocked(updateAssessment).mockClear()
         await submitAndCheck(5.5, '', '[Rescored: 5.5]')
@@ -122,7 +131,7 @@ describe('VulnGroupCard Branch Coverage', () => {
         vi.mocked(updateAssessment).mockClear()
         await submitAndCheck(null, 'CVSS:3.1/...', '[Rescored Vector: CVSS:3.1/...]')
         const call2 = vi.mocked(updateAssessment).mock.calls[0]![0]
-        expect(call2.details).not.toContain('[Rescored: ') // Should not have empty rescored tag
+        expect(call2.details).not.toContain('[Rescored: ')
 
         // 3. Both
         vi.mocked(updateAssessment).mockClear()
@@ -132,7 +141,7 @@ describe('VulnGroupCard Branch Coverage', () => {
 
         // 4. Neither (Clean update)
         vi.mocked(updateAssessment).mockClear()
-        await submitAndCheck(null, '', 'Existing details') // Should just be existing details, no tags
+        await submitAndCheck(null, '', 'Existing details')
         const call4 = vi.mocked(updateAssessment).mock.calls[0]![0]
         expect(call4.details).not.toContain('[Rescored:')
     })
@@ -141,8 +150,14 @@ describe('VulnGroupCard Branch Coverage', () => {
         const group = {
             ...baseGroup,
             affected_versions: [
-                { components: [{ analysis_state: 'EXPLOITABLE' }] },
-                { components: [{ analysis_state: 'NOT_AFFECTED' }] }
+                {
+                    project_uuid: 'p1', project_name: 'P1',
+                    components: [{ component_uuid: 'c1', component_name: 'C1', component_version: '1.0', analysis_state: 'EXPLOITABLE' }]
+                },
+                {
+                    project_uuid: 'p2', project_name: 'P2',
+                    components: [{ component_uuid: 'c2', component_name: 'C2', component_version: '1.0', analysis_state: 'NOT_AFFECTED' }]
+                }
             ]
         }
         const wrapper = mount(VulnGroupCard, { props: { group: group as any } })

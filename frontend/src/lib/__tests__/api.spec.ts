@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getProjects, getGroupedVulns, updateAssessment, login, checkSession, getVersion } from '../api'
+import { getProjects, getGroupedVulns, updateAssessment, login, checkSession, getVersion, getDependencyChains } from '../api'
 
 const mocks = vi.hoisted(() => ({
     get: vi.fn(),
@@ -166,5 +166,30 @@ describe('api.ts', () => {
 
         const result = await checkSession()
         expect(result).toBe(false)
+    })
+
+    it('getDependencyChains calls correct endpoint', async () => {
+        const mockResponse = ['A->B']
+        mocks.get.mockResolvedValue({ data: mockResponse })
+
+        const result = await getDependencyChains('p1', 'c1')
+
+        expect(mocks.get).toHaveBeenCalledWith('/project/p1/component/c1/dependency-chains')
+        expect(result).toEqual(mockResponse)
+    })
+
+    it('getGroupedVulns handles missing result in completed task', async () => {
+        const mockTaskStart = { task_id: 'task-123' }
+        const mockTaskCompleted = { status: 'completed' } // No result field
+
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get.mockResolvedValueOnce({ data: mockTaskCompleted })
+
+        vi.useFakeTimers()
+        const promise = getGroupedVulns('Test')
+        await vi.advanceTimersByTimeAsync(1100)
+        const result = await promise
+        expect(result).toEqual([])
+        vi.useRealTimers()
     })
 })

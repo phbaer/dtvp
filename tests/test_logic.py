@@ -1,4 +1,6 @@
-from logic import group_vulnerabilities
+import logic
+import os
+from logic import group_vulnerabilities, BOMAnalysisCache
 
 
 def test_group_vulnerabilities_basic():
@@ -266,7 +268,6 @@ def test_group_vulnerabilities_tagging():
     project_boms = {"uuid1": bom}
 
     # Mock load_team_mapping
-    import logic
 
     original_load = logic.load_team_mapping
     try:
@@ -289,7 +290,6 @@ def test_group_vulnerabilities_tagging():
 
 
 def test_get_team_mapping_path_default():
-    import logic
     import os
 
     original_env = os.environ.get("TEAM_MAPPING_PATH")
@@ -304,7 +304,6 @@ def test_get_team_mapping_path_default():
 
 
 def test_get_team_mapping_path_env():
-    import logic
     import os
 
     original_env = os.environ.get("TEAM_MAPPING_PATH")
@@ -320,15 +319,11 @@ def test_get_team_mapping_path_env():
 
 
 def test_load_team_mapping_file_not_found():
-    import logic
-
     mapping = logic.load_team_mapping("/non/existent/path.json")
     assert mapping == {}
 
 
 def test_load_team_mapping_invalid_json(tmp_path):
-    import logic
-
     p = tmp_path / "invalid.json"
     p.write_text("invalid json")
 
@@ -337,7 +332,6 @@ def test_load_team_mapping_invalid_json(tmp_path):
 
 
 def test_load_team_mapping_valid(tmp_path):
-    import logic
     import json
 
     p = tmp_path / "valid.json"
@@ -349,32 +343,28 @@ def test_load_team_mapping_valid(tmp_path):
 
 
 def test_tagging_no_bom():
-    import logic
-
     comp_uuid = "uuid1"
     comp_name = "libA"
     bom = {}
     mapping = {"libA": "TeamA"}
 
-    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only(comp_uuid, comp_name)
     assert tags == ["TeamA"]
 
 
 def test_tagging_bom_ref_mismatch():
-    import logic
-
     comp_uuid = "uuid1"
     comp_name = "libA"
     bom = {"components": [{"bom-ref": "ref1", "uuid": "uuid2", "name": "libB"}]}
     mapping = {"libA": "TeamA"}
 
-    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only(comp_uuid, comp_name)
     assert tags == ["TeamA"]  # matched by name directly
 
 
 def test_tagging_bom_hierarchy():
-    import logic
-
     # Hierarchy: custom-app (TeamX) -> lib-core (TeamCore) -> lib-utils
     # We are looking at lib-utils. It should inherit TeamCore and TeamX.
 
@@ -395,37 +385,34 @@ def test_tagging_bom_hierarchy():
 
     mapping = {"custom-app": "TeamX", "lib-core": "TeamCore"}
 
-    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only(comp_uuid, comp_name)
     assert set(tags) == {"TeamX", "TeamCore"}
 
 
 def test_tagging_catch_all():
-    import logic
-
     comp_uuid = "uuid1"
     comp_name = "unknown-lib"
     bom = {}
     mapping = {"existing-lib": "TeamA", "*": "CatchAllTeam"}
 
-    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only(comp_uuid, comp_name)
     assert tags == ["CatchAllTeam"]
 
 
 def test_tagging_catch_all_ignored_if_match():
-    import logic
-
     comp_uuid = "uuid1"
     comp_name = "existing-lib"
     bom = {}
     mapping = {"existing-lib": "TeamA", "*": "CatchAllTeam"}
 
-    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only(comp_uuid, comp_name)
     assert tags == ["TeamA"]  # Should NOT include CatchAllTeam
 
 
 def test_tagging_deep_hierarchy_multiple_matches():
-    import logic
-
     # Hierarchy: Top (TeamA) -> Mid (NoTeam) -> Low (TeamB) -> VulnComp (TeamC)
 
     comp_uuid = "v-uuid"
@@ -447,23 +434,21 @@ def test_tagging_deep_hierarchy_multiple_matches():
 
     mapping = {"Top": "TeamA", "Low": "TeamB", "VulnComp": "TeamC"}
 
-    tags, _ = logic.get_component_analysis(comp_uuid, comp_name, bom, mapping)
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only(comp_uuid, comp_name)
     assert set(tags) == {"TeamA", "TeamB", "TeamC"}
 
 
 def test_build_parent_map_edge_cases():
-    import logic
-
     assert logic.build_parent_map({}) == {}
     assert logic.build_parent_map({"dependencies": []}) == {}
 
 
 def test_get_component_analysis_edge_cases():
-    import logic
-
     # No ref in component (line 72)
     bom = {"components": [{"uuid": "uuid1", "name": "libA"}]}
-    tags, paths = logic.get_component_analysis("uuid1", "libA", bom, {})
+    cache = BOMAnalysisCache(bom, {})
+    paths = cache.get_dependency_paths("uuid1", "libA")
     assert paths == ["libA"]
 
     # Match by ref (line 82)
@@ -475,7 +460,8 @@ def test_get_component_analysis_edge_cases():
         "dependencies": [{"ref": "parent", "dependsOn": ["ref1"]}],
     }
     # Match uuid2 by calling with comp_uuid="ref1"
-    tags, paths = logic.get_component_analysis("ref1", "libA", bom, {"parent": "TeamP"})
+    cache = BOMAnalysisCache(bom, {"parent": "TeamP"})
+    tags = cache.get_tags_only("ref1", "libA")
     assert "TeamP" in tags
 
     # Match by name fallback (line 84)
@@ -487,15 +473,12 @@ def test_get_component_analysis_edge_cases():
         "dependencies": [{"ref": "parent", "dependsOn": ["ref1"]}],
     }
     # Call with non-matching uuid but matching name
-    tags, paths = logic.get_component_analysis(
-        "uuid-other", "libA", bom, {"parent": "TeamP"}
-    )
+    cache = BOMAnalysisCache(bom, {"parent": "TeamP"})
+    tags = cache.get_tags_only("uuid-other", "libA")
     assert "TeamP" in tags
 
 
 def test_get_component_analysis_cycle():
-    import logic
-
     # Cycle: A -> B -> A
     bom = {
         "components": [
@@ -507,25 +490,24 @@ def test_get_component_analysis_cycle():
             {"ref": "refB", "dependsOn": ["refA"]},
         ],
     }
-    tags, paths = logic.get_component_analysis("uA", "A", bom, {})
-    # Should not crash. In a pure cycle it might fallback to just the component name.
+    cache = BOMAnalysisCache(bom, {})
+    paths = cache.get_dependency_paths("uA", "A")
+    # Should not crash. In a cycle it should handle visited refs.
     assert "A" in paths
 
 
 def test_get_component_analysis_disconnected():
-    import logic
-
     # Bom exists but no parents for target
     bom = {
         "components": [{"bom-ref": "refA", "uuid": "uA", "name": "A"}],
         "dependencies": [],
     }
-    tags, paths = logic.get_component_analysis("uA", "A", bom, {})
+    cache = BOMAnalysisCache(bom, {})
+    paths = cache.get_dependency_paths("uA", "A")
     assert paths == ["A"]
 
-def test_get_component_analysis_redundant_parents():
-    import logic
 
+def test_get_component_analysis_redundant_parents():
     # BOM with child listed twice for same parent
     bom = {
         "components": [
@@ -536,6 +518,40 @@ def test_get_component_analysis_redundant_parents():
             {"ref": "parent", "dependsOn": ["child", "child"]},
         ],
     }
-    tags, paths = logic.get_component_analysis("u2", "Child", bom, {})
+    cache = BOMAnalysisCache(bom, {})
+    paths = cache.get_dependency_paths("u2", "Child")
     # Should only have one path and not crash from redundant processing
     assert paths == ["Child -> Parent"]
+
+
+def test_group_vulnerabilities_cache_hit():
+    import logic
+
+    # Test to ensure that multiple vulnerabilities for the same component use the cache
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            },
+            {
+                "vulnerability": {"vulnId": "CVE-2", "uuid": "v2"},
+                # Same component
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            },
+        ],
+    }
+
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "comp1", "name": "libA"},
+        ],
+        "dependencies": [],
+    }
+    project_boms = {"uuid1": bom}
+
+    grouped = logic.group_vulnerabilities([v1_data], project_boms)
+    assert len(grouped) == 2

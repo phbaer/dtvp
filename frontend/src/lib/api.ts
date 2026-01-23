@@ -79,6 +79,15 @@ export const updateAssessment = async (payload: AssessmentPayload) => {
     return res.data;
 };
 
+
+export const getDependencyChains = async (
+    project_uuid: string,
+    component_uuid: string,
+): Promise<string[]> => {
+    const res = await api.get(`/project/${project_uuid}/component/${component_uuid}/dependency-chains`);
+    return res.data;
+};
+
 export const login = () => {
     window.location.href = AUTH_BASE + '/login';
 };

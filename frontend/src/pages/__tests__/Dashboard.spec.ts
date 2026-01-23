@@ -14,7 +14,7 @@ describe('Dashboard.vue', () => {
 
     it('renders correctly', () => {
         const wrapper = mount(Dashboard, {
-            global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } }
+            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
         })
         expect(wrapper.text()).toContain('Find a Project')
     })
@@ -27,7 +27,7 @@ describe('Dashboard.vue', () => {
         vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
 
         const wrapper = mount(Dashboard, {
-            global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } }
+            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
         })
 
         // Set query
@@ -46,7 +46,7 @@ describe('Dashboard.vue', () => {
         vi.mocked(getProjects).mockResolvedValue([])
 
         const wrapper = mount(Dashboard, {
-            global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } }
+            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
         })
 
         await wrapper.find('input').setValue('NonExistent')

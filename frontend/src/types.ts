@@ -24,6 +24,7 @@ export interface Instance {
     }>;
     is_suppressed: boolean;
     usage_paths?: string[];
+    justification?: string;
 }
 
 
@@ -45,6 +46,7 @@ export interface GroupedVuln {
     rescored_cvss?: number | null;
     rescored_vector?: string | null;
     tags?: string[];
+    aliases?: string[];
     affected_versions: AffectedVersion[];
 }
 
@@ -53,5 +55,6 @@ export interface AssessmentPayload {
     state: string;
     details: string;
     comment?: string;
+    justification?: string;
     suppressed: boolean;
 }

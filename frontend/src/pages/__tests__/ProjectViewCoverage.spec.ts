@@ -191,4 +191,45 @@ describe('ProjectView Coverage Extras', () => {
         await flushPromises()
         expect(wrapper.text()).toContain('Failed to load vulnerabilities: String error')
     })
+
+
+    it('toggles sort order and handles sorting fallbacks', async () => {
+        const mockGroups = [
+            { id: '1', severity: 'CRITICAL', rescored_cvss: 10, tags: ['A'] },
+            { id: '2', severity: 'LOW', cvss_score: 1, tags: [] },
+            { id: '3', severity: 'UNKNOWN', cvss: null, tags: null }
+        ]
+        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                stubs: { RouterLink: true },
+                mocks: { $route: { params: { name: 'Test' } } }
+            }
+        })
+        await flushPromises()
+
+        // Toggle sort order (hits branch 210)
+        const sortBtn = wrapper.find('button.bg-gray-800')
+        expect((wrapper.vm as any).sortOrder).toBe('asc')
+        await sortBtn.trigger('click')
+        expect((wrapper.vm as any).sortOrder).toBe('desc')
+        await sortBtn.trigger('click')
+        expect((wrapper.vm as any).sortOrder).toBe('asc')
+
+        // Change sort by to hit branches
+        const select = wrapper.find('select')
+
+        // Severity (hits branch 145 default 5)
+        await select.setValue('severity')
+        expect((wrapper.vm as any).sortBy).toBe('severity')
+
+        // Score (hits fallbacks in 149-150)
+        await select.setValue('score')
+        expect((wrapper.vm as any).sortBy).toBe('score')
+
+        // Tags (hits branch 137/138 fallbacks)
+        await select.setValue('tags')
+        expect((wrapper.vm as any).sortBy).toBe('tags')
+    })
 })
