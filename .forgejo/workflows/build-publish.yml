@@ -16,7 +16,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
       - name: Install dependencies
-        run: uv sync --frozen
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: uv sync --frozen
       - name: Prepare .env
         run: cp .env.test .env
       - name: Create dummy frontend assets
@@ -39,8 +43,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cd frontend && npm ci
       - name: Prepare .env
         run: cp .env.test .env
       - name: Run unit tests with coverage
@@ -54,11 +61,17 @@ jobs:
           path: frontend/coverage/
           retention-days: 30
       - name: Install Playwright browsers
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cd frontend && npx playwright install --with-deps chromium
       - name: Run UI tests
-        working-directory: frontend
-        run: npm run test:ui -- --reporter=line
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cd frontend && npm run test:ui -- --reporter=line
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v3
         if: always()
@@ -86,7 +99,7 @@ jobs:
           echo \
             "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
             "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > /etc/apt/sources.list.d/docker.list
-          apt-get -qq update
+          for i in {1..3}; do apt-get -qq update && break || sleep 5; done
           DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y docker-ce-cli docker-buildx-plugin docker-compose-plugin
 
       - name: Registry Login
