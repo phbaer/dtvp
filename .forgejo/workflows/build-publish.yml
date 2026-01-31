@@ -84,13 +84,9 @@ jobs:
     if: github.event.action != 'closed'
     needs: [test-backend, test-frontend]
     runs-on: node
-    strategy:
-      matrix:
-        variant: [alpine, trixie-slim]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Install Docker Cli
         run: |-
           install -m 0755 -d /etc/apt/keyrings
@@ -101,47 +97,38 @@ jobs:
             "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" > /etc/apt/sources.list.d/docker.list
           for i in {1..3}; do apt-get -qq update && break || sleep 5; done
           DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y docker-ce-cli docker-buildx-plugin docker-compose-plugin
-
       - name: Registry Login
         uses: docker/login-action@v3
         with:
           registry: https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
           username: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}
           password: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           platforms: linux/amd64
-
-      - name: Build and Push
+      - name: Build and Push 
         uses: docker/build-push-action@v6
         with:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, matrix.variant) || '' }}
-            ${{ github.event_name == 'push' && matrix.variant == 'alpine' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
-            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-{3}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number, matrix.variant) || '' }}
+            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
           context: .
-          build-args: |
-            DISTRO_VARIANT=${{ matrix.variant == 'debian' && 'slim' || 'alpine' }}
           secrets: |
             GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
 
   delete-pr-images:
     if: github.event.action == 'closed'
     runs-on: node
-    strategy:
-      matrix:
-        variant: [alpine, debian]
     steps:
       - name: Delete PR Image Tag
         run: |-
-          VERSION="pr-${{ github.event.pull_request.number }}-${{ matrix.variant }}"
+          VERSION="pr-${{ github.event.pull_request.number }}-alpine"
           echo "Deleting version $VERSION for dtvp"
           curl -X DELETE \
             -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
