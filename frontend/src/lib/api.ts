@@ -88,6 +88,11 @@ export const getDependencyChains = async (
     return res.data;
 };
 
+export const getAssessmentDetails = async (instances: any[]) => {
+    const res = await api.post('/assessments/details', { instances });
+    return res.data;
+};
+
 export const login = () => {
     window.location.href = AUTH_BASE + '/login';
 };
