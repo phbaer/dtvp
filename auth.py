@@ -123,7 +123,12 @@ async def callback(code: str, response: Response):
         # Determine user info (simplified)
         try:
             claims = jwt.get_unverified_claims(id_token)
-            username = claims.get("preferred_username") or claims.get("email") or "user"
+            username = (
+                claims.get("sub")
+                or claims.get("preferred_username")
+                or claims.get("email")
+                or "user"
+            )
         except Exception:
             username = "user"
 
