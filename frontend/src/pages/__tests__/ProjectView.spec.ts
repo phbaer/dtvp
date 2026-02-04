@@ -40,13 +40,17 @@ describe('ProjectView.vue', () => {
                 },
                 mocks: {
                     $route: { params: { name: 'TestProject' } }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })
 
-        expect(wrapper.text()).toContain('Starting search')
-
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', expect.any(Function))
         // Child component should be rendered

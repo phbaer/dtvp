@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { getVersion } from './lib/api'
+import { ref, onMounted, provide } from 'vue'
+import { getVersion, getUserInfo } from './lib/api'
 
 const version = ref('')
 const build = ref('')
+const user = ref({ username: '', role: '' })
+
+provide('user', user)
 
 onMounted(async () => {
     try {
@@ -12,6 +15,16 @@ onMounted(async () => {
         build.value = v.build
     } catch (e) {
         console.error('Failed to fetch version', e)
+    }
+
+    try {
+        const u = await getUserInfo()
+        user.value = { 
+            username: u.username, 
+            role: u.role || 'REVIEWER' // default fallback if logic.py logic fails or older backend
+        }
+    } catch (e) {
+        // Not logged in or error
     }
 })
 </script>

@@ -76,7 +76,10 @@ describe('ProjectView Filters', () => {
 
         const wrapper = mount(ProjectView, {
             global: {
-                plugins: [router]
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
@@ -121,7 +124,10 @@ describe('ProjectView Filters', () => {
 
         const wrapper = mount(ProjectView, {
             global: {
-                plugins: [router]
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
@@ -138,7 +144,7 @@ describe('ProjectView Filters', () => {
             await hideMixedBox.setValue(false)
         }
 
-        const hideMixedBoxReloaded = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Mixed'))
+
 
         if (hideMixedBox) {
             await hideMixedBox.setValue(true)
@@ -163,7 +169,10 @@ describe('ProjectView Filters', () => {
 
         const wrapper = mount(ProjectView, {
             global: {
-                plugins: [router]
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 

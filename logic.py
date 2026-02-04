@@ -26,6 +26,39 @@ def load_team_mapping(path: str = None) -> Dict[str, str]:
         return {}
 
 
+def get_user_roles_path() -> str:
+    return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
+
+
+def load_user_roles(path: str = None) -> Dict[str, str]:
+    if path is None:
+        path = get_user_roles_path()
+
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def get_user_role(username: str, roles_map: Dict[str, str] = None) -> str:
+    """
+    Returns 'REVIEWER' or 'ANALYST'.
+    If roles_map is empty (no config file), everyone is REVIEWER.
+    If roles_map matches username, return that.
+    Otherwise (config exists but user not in it), return 'ANALYST'.
+    """
+    if roles_map is None:
+        roles_map = load_user_roles()
+
+    if not roles_map:
+        return "REVIEWER"
+
+    return roles_map.get(username, "ANALYST")
+
+
 def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:
     """
     Builds a map of child_ref -> list of parent_refs from BOM.

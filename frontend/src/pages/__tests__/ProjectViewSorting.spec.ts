@@ -59,11 +59,17 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } }
+                mocks: { $route: { params: { name: 'TestProject' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         const cards = wrapper.findAll('.vuln-group-card')
         expect(cards[0]!.attributes('data-id')).toBe('CVE-2023-0002') // CRITICAL
@@ -77,11 +83,17 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } }
+                mocks: { $route: { params: { name: 'TestProject' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         // Change sortBy to score
         const select = wrapper.find('select')
@@ -108,11 +120,17 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } }
+                mocks: { $route: { params: { name: 'TestProject' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         const select = wrapper.find('select')
         await select.setValue('id')
@@ -129,11 +147,17 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } }
+                mocks: { $route: { params: { name: 'TestProject' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         const select = wrapper.find('select')
         await select.setValue('analysis')

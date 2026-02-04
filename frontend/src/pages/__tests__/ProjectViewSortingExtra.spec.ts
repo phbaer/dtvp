@@ -32,6 +32,9 @@ describe('ProjectView Sorting Extra', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                },
                 stubs: {
                     LoadingProgress: true,
                     VulnGroupCard: {
@@ -43,6 +46,8 @@ describe('ProjectView Sorting Extra', () => {
         })
 
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
         await wrapper.vm.$nextTick()
 
         // Set sortBy to tags

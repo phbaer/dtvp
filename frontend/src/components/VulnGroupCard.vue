@@ -1,6 +1,6 @@
 ```
 <script setup lang="ts">
-import { ref, computed, watch, shallowRef } from 'vue'
+import { ref, computed, watch, shallowRef, inject } from 'vue'
 import { updateAssessment } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln, AssessmentPayload } from '../types'
@@ -8,9 +8,12 @@ import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import DependencyChainViewer from './DependencyChainViewer.vue'
 
+
 const props = defineProps<{
   group: GroupedVuln
 }>()
+
+const user = inject<any>('user')
 
 const emit = defineEmits(['update', 'update:assessment'])
 
@@ -148,7 +151,34 @@ const displayState = computed(() => {
     if (states.size > 1) return 'MIXED'
     const state = Array.from(states)[0]
     return state === 'NOT_SET' ? 'NOT_SET' : state
+    return state === 'NOT_SET' ? 'NOT_SET' : state
 })
+
+const isPendingReview = computed(() => {
+    return allInstances.value.some(i => (i.analysis_details || '').includes('[Status: Pending Review]'))
+})
+
+const canApprove = computed(() => {
+    return user?.value?.role === 'REVIEWER' && isPendingReview.value
+})
+
+const approveAssessment = async (e: Event) => {
+    e.stopPropagation() // Prevent card expansion
+    if (!confirm('Approve this assessment? This will remove the pending status.')) return
+
+    // Get current details from first instance (assuming grouped logic holds)
+    const first = allInstances.value[0]
+    if (!first) return
+
+    state.value = first.analysis_state || 'NOT_SET'
+    details.value = (first.analysis_details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+    justification.value = first.justification || 'NOT_SET'
+    suppressed.value = first.is_suppressed || false
+    
+    // We update using the existing handleUpdate but need to make sure state is set correctly first
+    // Since details.value is reactive, handleUpdate will pick it up
+    await handleUpdate()
+}
 
 // Pre-fill form from first instance when expanded or group changes
 watch(() => props.group, (newGroup) => {
@@ -428,6 +458,20 @@ const rescoredVectorSegments = computed(() => {
             <div class="w-24 text-right">
                     <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
                     <div class="font-bold text-sm text-gray-300">{{ group.affected_versions?.length || 0 }} Versions</div>
+                    
+                    <div v-if="isPendingReview" class="mt-1 flex justify-end">
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide">
+                            Pending Review
+                        </span>
+                    </div>
+                
+                    <button 
+                        v-if="canApprove"
+                        @click="approveAssessment"
+                        class="mt-1 px-2 py-0.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded font-bold transition-colors w-full z-10 relative"
+                    >
+                        Approve
+                    </button>
             </div>
 
             <div class="pt-1">
