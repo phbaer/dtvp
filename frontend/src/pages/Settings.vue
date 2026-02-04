@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, inject } from 'vue'
+import { ref, onMounted, inject, watch } from 'vue'
 import { getRoles, uploadRoles } from '../lib/api'
 
 const user = inject<any>('user')
@@ -11,6 +11,8 @@ const uploading = ref(false)
 const message = ref('')
 const error = ref('')
 const currentMapping = ref<Record<string, string> | null>(null)
+const mappingJson = ref('')
+const savingMapping = ref(false)
 
 // Roles state
 const rolesFileInput = ref<HTMLInputElement | null>(null)
@@ -18,12 +20,15 @@ const uploadingRoles = ref(false)
 const rolesMessage = ref('')
 const rolesError = ref('')
 const currentRoles = ref<Record<string, string> | null>(null)
+const rolesJson = ref('')
+const savingRoles = ref(false)
 
 const loadMapping = async () => {
     try {
         const res = await fetch('/api/settings/mapping')
         if (res.ok) {
             currentMapping.value = await res.json()
+            mappingJson.value = JSON.stringify(currentMapping.value, null, 2)
         }
     } catch (e) {
         console.error("Failed to load mapping", e)
@@ -34,6 +39,7 @@ const loadRoles = async () => {
     if (user?.value?.role !== 'REVIEWER') return
     try {
         currentRoles.value = await getRoles()
+        rolesJson.value = JSON.stringify(currentRoles.value, null, 2)
     } catch (e) {
         console.error("Failed to load roles", e)
     }
@@ -75,6 +81,42 @@ const handleFileUpload = async () => {
     }
 }
 
+const saveMapping = async () => {
+    savingMapping.value = true
+    message.value = ''
+    error.value = ''
+
+    try {
+        let parsed = {}
+        try {
+            parsed = JSON.parse(mappingJson.value)
+        } catch (e) {
+            throw new Error("Invalid JSON format")
+        }
+
+        const res = await fetch('/api/settings/mapping', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(parsed)
+        })
+
+        if (!res.ok) {
+            const data = await res.json()
+            throw new Error(data.message || 'Save failed')
+        }
+
+        const data = await res.json()
+        message.value = data.message || 'Mapping saved successfully!'
+        await loadMapping()
+    } catch (err: any) {
+        error.value = err.message
+    } finally {
+        savingMapping.value = false
+    }
+}
+
 const handleRolesUpload = async () => {
     if (!rolesFileInput.value?.files?.length) return
 
@@ -101,9 +143,52 @@ const handleRolesUpload = async () => {
     }
 }
 
+const saveRoles = async () => {
+    savingRoles.value = true
+    rolesMessage.value = ''
+    rolesError.value = ''
+
+    try {
+        let parsed = {}
+        try {
+            parsed = JSON.parse(rolesJson.value)
+        } catch (e) {
+            throw new Error("Invalid JSON format")
+        }
+
+        const res = await fetch('/api/settings/roles', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(parsed)
+        })
+
+        if (!res.ok) {
+            const data = await res.json()
+            throw new Error(data.message || 'Save failed')
+        }
+
+        const data = await res.json()
+        rolesMessage.value = data.message || 'Roles saved successfully!'
+        await loadRoles()
+    } catch (err: any) {
+        rolesError.value = err.message
+    } finally {
+        savingRoles.value = false
+    }
+}
+
 onMounted(() => {
     loadMapping()
     if (user?.value?.role === 'REVIEWER') {
+        loadRoles()
+    }
+})
+
+// Reload roles if user role changes or tab becomes active
+watch(() => activeTab.value, (newTab) => {
+    if (newTab === 'roles' && user?.value?.role === 'REVIEWER') {
         loadRoles()
     }
 })
@@ -138,29 +223,32 @@ onMounted(() => {
     <div v-if="activeTab === 'mapping'" class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
         <h3 class="text-xl font-bold mb-4 text-gray-200">Team Mapping Configuration</h3>
         
-        <div v-if="currentMapping" class="mb-6">
-             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Current Configuration</h4>
-             <div class="bg-gray-900 p-4 rounded border border-gray-700 overflow-x-auto max-h-64">
-                 <pre class="text-xs text-blue-300 font-mono">{{ JSON.stringify(currentMapping, null, 2) }}</pre>
+        <div class="mb-6">
+             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Editor</h4>
+             <p class="text-gray-400 mb-2 text-xs">
+                Edit the JSON below directly or upload a file.
+            </p>
+             <div class="relative">
+                <textarea 
+                    v-model="mappingJson"
+                    class="w-full h-64 bg-gray-900 p-4 rounded border border-gray-700 font-mono text-blue-300 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    spellcheck="false"
+                ></textarea>
+                <div class="absolute bottom-4 right-4 flex gap-2">
+                    <button 
+                        @click="saveMapping"
+                        :disabled="savingMapping"
+                        class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-4 rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                    >
+                        {{ savingMapping ? 'Saving...' : 'Save Changes' }}
+                    </button>
+                </div>
              </div>
         </div>
 
-        <p class="text-gray-400 mb-6 text-sm">
-            Upload a JSON file containing the mapping between components and teams. 
-            The file should be a JSON object where keys are component names and values are team names.
-        </p>
-
-        <div class="mb-6 bg-gray-900 p-4 rounded border border-gray-700">
-            <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Example Format</h4>
-            <pre class="text-xs text-green-400 font-mono overflow-x-auto">{
-  "openssl": "Infra Team",
-  "spring-web": "Backend Team"
-}</pre>
-        </div>
-        
-        <div class="space-y-4">
+        <div class="space-y-4 pt-6 border-t border-gray-700">
             <div>
-                <label class="block text-sm font-semibold text-gray-300 mb-2">Upload Mapping File (JSON)</label>
+                <label class="block text-sm font-semibold text-gray-300 mb-2">Or Upload Mapping File (JSON)</label>
                 <input 
                     ref="fileInput"
                     type="file" 
@@ -197,33 +285,32 @@ onMounted(() => {
     <div v-if="activeTab === 'roles' && user?.role === 'REVIEWER'" class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
         <h3 class="text-xl font-bold mb-4 text-gray-200">User Roles Configuration</h3>
         
-        <div v-if="currentRoles" class="mb-6">
-             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Current Roles</h4>
-             <div class="bg-gray-900 p-4 rounded border border-gray-700 overflow-x-auto max-h-64">
-                 <pre class="text-xs text-blue-300 font-mono">{{ JSON.stringify(currentRoles, null, 2) }}</pre>
+        <div class="mb-6">
+             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Editor</h4>
+             <p class="text-gray-400 mb-2 text-xs">
+                Edit the JSON below directly or upload a file. Allowed roles: <code>REVIEWER</code>, <code>ANALYST</code>.
+            </p>
+             <div class="relative">
+                <textarea 
+                    v-model="rolesJson"
+                    class="w-full h-64 bg-gray-900 p-4 rounded border border-gray-700 font-mono text-blue-300 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    spellcheck="false"
+                ></textarea>
+                <div class="absolute bottom-4 right-4 flex gap-2">
+                    <button 
+                        @click="saveRoles"
+                        :disabled="savingRoles"
+                        class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-4 rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                    >
+                        {{ savingRoles ? 'Saving...' : 'Save Changes' }}
+                    </button>
+                </div>
              </div>
         </div>
-        <div v-else class="mb-6 text-gray-400 text-sm italic">
-            No roles configured (All users are Reviewers).
-        </div>
-
-        <p class="text-gray-400 mb-6 text-sm">
-            Upload a JSON file containing the mapping between usernames and roles. 
-            Allowed roles: <code>REVIEWER</code>, <code>ANALYST</code>.
-            Users not in the list will default to <code>ANALYST</code> if the file exists.
-        </p>
-
-        <div class="mb-6 bg-gray-900 p-4 rounded border border-gray-700">
-            <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Example Format</h4>
-            <pre class="text-xs text-green-400 font-mono overflow-x-auto">{
-  "alice": "REVIEWER",
-  "bob": "ANALYST"
-}</pre>
-        </div>
         
-        <div class="space-y-4">
+        <div class="space-y-4 pt-6 border-t border-gray-700">
             <div>
-                <label class="block text-sm font-semibold text-gray-300 mb-2">Upload Roles File (JSON)</label>
+                <label class="block text-sm font-semibold text-gray-300 mb-2">Or Upload Roles File (JSON)</label>
                 <input 
                     ref="rolesFileInput"
                     type="file" 
