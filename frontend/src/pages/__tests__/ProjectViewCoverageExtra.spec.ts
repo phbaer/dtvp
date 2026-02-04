@@ -64,7 +64,10 @@ describe('ProjectView Coverage Extra Detailed', () => {
         mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: '_all_' } } }
+                mocks: { $route: { params: { name: '_all_' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
@@ -105,10 +108,16 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('analysis')
 
@@ -130,10 +139,16 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('tags')
 
@@ -155,10 +170,16 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('score')
 
@@ -181,10 +202,16 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('severity')
 
@@ -206,10 +233,16 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('score')
 
@@ -230,10 +263,16 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
         await wrapper.find('select').setValue('analysis')
         const sorted = (wrapper.vm as any).filteredGroups
         expect(sorted[1].id).toBe('V1') // Unknown (99) comes last
@@ -251,10 +290,16 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
         await wrapper.find('select').setValue('tags')
         const sorted = (wrapper.vm as any).filteredGroups
         expect(sorted.length).toBe(4)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, inject } from 'vue'
 import { useRoute } from 'vue-router'
 import { getGroupedVulns } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
@@ -7,6 +7,7 @@ import type { GroupedVuln } from '../types'
 import VulnGroupCard from '../components/VulnGroupCard.vue'
 
 const route = useRoute()
+const user = inject<any>('user')
 const groups = ref<GroupedVuln[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -73,6 +74,7 @@ const tagFilter = ref('')
 const idFilter = ref('')
 const hideAssessed = ref(true)
 const hideMixed = ref(true)
+const showNeedsApproval = ref(false)
 const sortBy = ref('severity')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 
@@ -128,6 +130,14 @@ const filteredGroups = computed(() => {
 
     if (hideMixed.value) {
         result = result.filter(g => getDisplayState(g) !== 'MIXED')
+    }
+
+    if (showNeedsApproval.value) {
+        result = result.filter(g => {
+            return g.affected_versions.some(v => 
+                v.components.some(c => (c.analysis_details || '').includes('[Status: Pending Review]'))
+            )
+        })
     }
 
     result.sort((a, b) => {
@@ -235,6 +245,13 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
                     <input type="checkbox" v-model="hideMixed" class="sr-only peer">
                     <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
                     <span class="ms-2 text-xs font-medium text-gray-300">Hide Mixed</span>
+                </label>
+            </div>
+            <div class="flex gap-4 self-end">
+                 <label v-if="user?.role === 'REVIEWER'" class="inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="showNeedsApproval" class="sr-only peer">
+                    <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-yellow-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-600"></div>
+                    <span class="ms-2 text-xs font-medium text-yellow-300">Needs Approval</span>
                 </label>
             </div>
         </div>

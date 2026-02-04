@@ -35,6 +35,9 @@ describe('ProjectView Coverage Extras', () => {
                 },
                 mocks: {
                     $route: { params: { name: 'Test' } }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })
@@ -69,6 +72,9 @@ describe('ProjectView Coverage Extras', () => {
                 stubs: { RouterLink: true },
                 mocks: {
                     $route: { params: { name: 'Test' } }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })
@@ -110,7 +116,10 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
@@ -155,7 +164,10 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
@@ -183,7 +195,10 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
@@ -195,7 +210,10 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
@@ -214,7 +232,10 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } }
+                mocks: { $route: { params: { name: 'Test' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
