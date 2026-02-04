@@ -1,0 +1,66 @@
+
+> frontend@1.0.0 test:unit
+> vitest --run --coverage
+
+
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90m/var/home/phbaer/src/dtvp/frontend[39m
+      [2mCoverage enabled with [22m[33mv8[39m
+
+ [32m✓[39m src/components/__tests__/DependencyPathList.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 117[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/DependencyChainViewer.spec.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 136[2mms[22m[39m
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error
+[22m[39mError: Network error
+    at [90m/var/home/phbaer/src/dtvp/frontend/[39msrc/pages/__tests__/ProjectViewCoverage.spec.ts:172:54
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:145:11
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:915:26
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1209:10[90m)[39m
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:37
+    at Traces.$ [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/traces.U4xDYhzZ.js:115:27[90m)[39m
+    at trace [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/test.B8ej_ZHS.js:239:21[90m)[39m
+    at runTest [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:12[90m)[39m
+
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error string
+[22m[39mString error
+
+ [32m✓[39m src/pages/__tests__/ProjectView.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 171[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/CoverageExtras.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 148[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/Dashboard.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 113[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectViewSorting.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 236[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectViewCoverage.spec.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 251[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardBranches.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 232[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardCoverage.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 283[2mms[22m[39m
+[90mstderr[2m | src/pages/__tests__/ProjectViewSortingExtra.spec.ts[2m > [22m[2mProjectView Sorting Extra[2m > [22m[2msorts by tags
+[22m[39m[Vue Router warn]: No match found for location with path "/"
+
+ [32m✓[39m src/pages/__tests__/ProjectViewSortingExtra.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 125[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCard.spec.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 712[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/api_init.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/api.spec.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/env.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/Login.spec.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/SeverityColorTest.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 33[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m16 passed[39m[22m[90m (16)[39m
+[2m      Tests [22m [1m[32m89 passed[39m[22m[90m (89)[39m
+[2m   Start at [22m 21:44:59
+[2m   Duration [22m 2.90s[2m (transform 3.40s, setup 0ms, import 7.36s, tests 2.64s, environment 11.59s)[22m
+
+[34m % [39m[2mCoverage report from [22m[33mv8[39m
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   99.35 |    91.33 |     100 |     100 |                   
+ components        |   98.92 |    94.23 |     100 |     100 |                   
+  ...ainViewer.vue |     100 |    96.96 |     100 |     100 | 71                
+  ...yPathList.vue |     100 |       75 |     100 |     100 | 39-65             
+  ...GroupCard.vue |   98.68 |    95.26 |     100 |     100 | ...45,389,408,525 
+ lib               |     100 |    94.44 |     100 |     100 |                   
+  api.ts           |     100 |    92.85 |     100 |     100 | 63                
+  env.ts           |     100 |      100 |     100 |     100 |                   
+ pages             |     100 |    83.49 |     100 |     100 |                   
+  Dashboard.vue    |     100 |      100 |     100 |     100 |                   
+  Login.vue        |     100 |      100 |     100 |     100 |                   
+  ProjectView.vue  |     100 |    79.51 |     100 |     100 | ...13,120-125,185 
+-------------------|---------|----------|---------|---------|-------------------

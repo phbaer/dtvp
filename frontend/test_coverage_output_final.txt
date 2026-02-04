@@ -1,0 +1,91 @@
+
+> frontend@1.0.0 test:unit
+> vitest --run --coverage
+
+
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90m/var/home/phbaer/src/dtvp/frontend[39m
+      [2mCoverage enabled with [22m[33mv8[39m
+
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error
+[22m[39mError: Network error
+    at [90m/var/home/phbaer/src/dtvp/frontend/[39msrc/pages/__tests__/ProjectViewCoverage.spec.ts:172:54
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:145:11
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:915:26
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1209:10[90m)[39m
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:37
+    at Traces.$ [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/traces.U4xDYhzZ.js:115:27[90m)[39m
+    at trace [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/test.B8ej_ZHS.js:239:21[90m)[39m
+    at runTest [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:12[90m)[39m
+
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error string
+[22m[39mString error
+
+ [32m✓[39m src/pages/__tests__/ProjectViewSorting.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 206[2mms[22m[39m
+ [31m❯[39m src/components/__tests__/DependencyChainViewer.spec.ts [2m([22m[2m7 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 154[2mms[22m[39m
+     [32m✓[39m renders initial closed state[32m 36[2mms[22m[39m
+[31m     [31m×[31m loads chains when toggled open[39m[32m 51[2mms[22m[39m
+[31m     [31m×[31m handles pagination (load more)[39m[32m 25[2mms[22m[39m
+     [32m✓[39m handles API errors[32m 15[2mms[22m[39m
+     [32m✓[39m handles API errors with default message[32m 6[2mms[22m[39m
+     [32m✓[39m shows empty state[32m 6[2mms[22m[39m
+     [32m✓[39m does not reload if already loaded when toggling[32m 11[2mms[22m[39m
+[90mstderr[2m | src/pages/__tests__/ProjectViewSortingExtra.spec.ts[2m > [22m[2mProjectView Sorting Extra[2m > [22m[2msorts by tags
+[22m[39m[Vue Router warn]: No match found for location with path "/"
+
+ [32m✓[39m src/components/__tests__/DependencyPathList.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 87[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectViewCoverage.spec.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 283[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/CoverageExtras.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 146[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectViewSortingExtra.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 143[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectView.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 206[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardBranches.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 281[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardCoverage.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 278[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/Dashboard.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 117[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCard.spec.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 826[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/api.spec.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/env.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/api_init.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/Login.spec.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/SeverityColorTest.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 43[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/DependencyChainViewer.spec.ts[2m > [22mDependencyChainViewer[2m > [22mloads chains when toggled open
+[31m[1mAssertionError[22m: expected 'Hide Dependency Chains(2)2 paths' to contain 'Loading dependency chains...'[39m
+
+Expected: [32m"[7mLoading d[27mependency [7mc[27mhains[7m...[27m"[39m
+Received: [31m"[7mHide D[27mependency [7mC[27mhains[7m(2)2 paths[27m"[39m
+
+[36m [2m❯[22m src/components/__tests__/DependencyChainViewer.spec.ts:[2m44:32[22m[39m
+    [90m 42| [39m        [35mawait[39m wrapper[33m.[39m[34mfind[39m([32m'button'[39m)[33m.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m 43| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39m[34mtoContain[39m([32m'Hide Dependency Chains'[39m)
+    [90m 44| [39m        expect(wrapper.text()).toContain('Loading dependency chains...…
+    [90m   | [39m                               [31m^[39m
+    [90m 45| [39m
+    [90m 46| [39m        [35mawait[39m [34mflushPromises[39m()
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/DependencyChainViewer.spec.ts[2m > [22mDependencyChainViewer[2m > [22mhandles pagination (load more)
+[31m[1mAssertionError[22m: expected 'Hide Dependency Chains(2)2 paths' to contain 'Loading more...'[39m
+
+Expected: [32m"Loading more..."[39m
+Received: [31m"Hide Dependency Chains(2)2 paths"[39m
+
+[36m [2m❯[22m src/components/__tests__/DependencyChainViewer.spec.ts:[2m83:32[22m[39m
+    [90m 81| [39m        [35mawait[39m loadMoreBtn[33m?.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m 82| [39m
+    [90m 83| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39m[34mtoContain[39m([32m'Loading more...'[39m)
+    [90m   | [39m                               [31m^[39m
+    [90m 84| [39m        [35mawait[39m [34mflushPromises[39m()
+    [90m 85| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m15 passed[39m[22m[90m (16)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m86 passed[39m[22m[90m (88)[39m
+[2m   Start at [22m 21:42:11
+[2m   Duration [22m 3.08s[2m (transform 3.05s, setup 0ms, import 7.07s, tests 2.85s, environment 12.61s)[22m
+

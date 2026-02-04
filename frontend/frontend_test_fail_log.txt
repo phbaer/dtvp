@@ -1,0 +1,302 @@
+
+> frontend@1.0.0 test:unit
+> vitest
+
+
+[1m[44m DEV [49m[22m [34mv4.0.16 [39m[90m/var/home/phbaer/src/dtvp/frontend[39m
+
+ [32m✓[39m src/pages/__tests__/ProjectViewSorting.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 146[2mms[22m[39m
+ [31m❯[39m src/pages/__tests__/ProjectViewFiltering.spec.ts [2m([22m[2m3 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 168[2mms[22m[39m
+     [32m✓[39m filters out assessed vulnerabilities when hideAssessed is checked[32m 100[2mms[22m[39m
+[31m     [31m×[31m filters out mixed vulnerabilities when hideMixed is checked[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m combines filters correctly[39m[32m 26[2mms[22m[39m
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error
+[22m[39mError: Network error
+    at [90m/var/home/phbaer/src/dtvp/frontend/[39msrc/pages/__tests__/ProjectViewCoverage.spec.ts:172:54
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:145:11
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:915:26
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1209:10[90m)[39m
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:37
+    at Traces.$ [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/traces.U4xDYhzZ.js:115:27[90m)[39m
+    at trace [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/test.B8ej_ZHS.js:239:21[90m)[39m
+    at runTest [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:12[90m)[39m
+
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error string
+[22m[39mString error
+
+ [32m✓[39m src/pages/__tests__/ProjectViewCoverage.spec.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 239[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardCoverage.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 229[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardBranches.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 198[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCard.spec.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 920[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectView.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 157[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/CoverageExtras.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 154[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/DependencyChainViewer.spec.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 128[2mms[22m[39m
+[90mstderr[2m | src/pages/__tests__/ProjectViewSortingExtra.spec.ts[2m > [22m[2mProjectView Sorting Extra[2m > [22m[2msorts by tags
+[22m[39m[Vue Router warn]: No match found for location with path "/"
+
+ [32m✓[39m src/pages/__tests__/ProjectViewSortingExtra.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 131[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/Dashboard.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 99[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/DependencyPathList.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 77[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/api_init.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/Login.spec.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 51[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/SeverityColorTest.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 52[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/env.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m src/lib/__tests__/api.spec.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mfilters out mixed vulnerabilities when hideMixed is checked
+[31m[1mAssertionError[22m: expected 4 to be 5 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 5[39m
+[31m+ 4[39m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m115:54[22m[39m
+    [90m113| [39m        [90m// G6 -> SHOW[39m
+    [90m114| [39m
+    [90m115| [39m        [34mexpect[39m(wrapper[33m.[39m[34mfindAll[39m([32m'.vuln-card'[39m)[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m5[39m)
+    [90m   | [39m                                                     [31m^[39m
+    [90m116| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39mnot[33m.[39m[34mtoContain[39m([32m'G2-Mixed'[39m)
+    [90m117| [39m    })
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mcombines filters correctly
+[31m[1mAssertionError[22m: expected [ 'G1-Unassessed' ] to deeply equal [ 'G1-Unassessed', 'G5-Empty' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "G1-Unassessed",[22m
+[32m-   "G5-Empty",[39m
+[2m  ][22m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m138:66[22m[39m
+    [90m136| [39m        [90m// Result -> Only NOT_SET (G1, G5)[39m
+    [90m137| [39m
+    [90m138| [39m        expect(wrapper.findAll('.vuln-card').map(c => c.text())).toEqu…
+    [90m   | [39m                                                                 [31m^[39m
+    [90m139| [39m            [32m'G1-Unassessed'[39m[33m,[39m
+    [90m140| [39m            [32m'G5-Empty'[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m16 passed[39m[22m[90m (17)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m90 passed[39m[22m[90m (92)[39m
+[2m   Start at [22m 05:55:18
+[2m   Duration [22m 4.51s[2m (transform 2.79s, setup 0ms, import 7.42s, tests 2.80s, environment 12.44s)[22m
+
+[1m[41m FAIL [49m[22m [31mTests failed. Watching for file changes...[39m
+       [2mpress [22m[1mh[22m[2m to show help[22m[2m, [22m[2mpress [22m[1mq[22m[2m to quit[22m
+c[3J[1m[44m RERUN [49m[22m [34m[2msrc/components/VulnGroupCard.vue [22m[39m
+
+ [31m❯[39m src/pages/__tests__/ProjectViewFiltering.spec.ts [2m([22m[2m3 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[33m 729[2mms[22m[39m
+     [33m[2m✓[22m[39m filters out assessed vulnerabilities when hideAssessed is checked [33m 455[2mms[22m[39m
+[31m     [31m×[31m filters out mixed vulnerabilities when hideMixed is checked[39m[32m 181[2mms[22m[39m
+[31m     [31m×[31m combines filters correctly[39m[32m 88[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardCoverage.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 686[2mms[22m[39m
+     [33m[2m✓[22m[39m handles exception in calculatorGroups computed via console.error [33m 347[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectView.spec.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 485[2mms[22m[39m
+     [33m[2m✓[22m[39m fetches vulnerabilities on mount [33m 333[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCardBranches.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 482[2mms[22m[39m
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error
+[22m[39mError: Network error
+    at [90m/var/home/phbaer/src/dtvp/frontend/[39msrc/pages/__tests__/ProjectViewCoverage.spec.ts:172:54
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:145:11
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:915:26
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1243:20
+    at new Promise (<anonymous>)
+    at runWithTimeout [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1209:10[90m)[39m
+    at [90mfile:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:37
+    at Traces.$ [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/traces.U4xDYhzZ.js:115:27[90m)[39m
+    at trace [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4mvitest[24m/dist/chunks/test.B8ej_ZHS.js:239:21[90m)[39m
+    at runTest [90m(file:///var/home/phbaer/src/dtvp/frontend/[39mnode_modules/[4m@vitest/runner[24m/dist/index.js:1653:12[90m)[39m
+
+[90mstderr[2m | src/pages/__tests__/ProjectViewCoverage.spec.ts[2m > [22m[2mProjectView Coverage Extras[2m > [22m[2mhandles fetch error string
+[22m[39mString error
+
+ [32m✓[39m src/pages/__tests__/ProjectViewCoverage.spec.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 642[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/VulnGroupCard.spec.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 2975[2mms[22m[39m
+     [33m[2m✓[22m[39m switches calculator versions via tabs [33m 334[2mms[22m[39m
+     [33m[2m✓[22m[39m auto-calculates score from vector input [33m 386[2mms[22m[39m
+[90mstderr[2m | src/pages/__tests__/ProjectViewSortingExtra.spec.ts[2m > [22m[2mProjectView Sorting Extra[2m > [22m[2msorts by tags
+[22m[39m[Vue Router warn]: No match found for location with path "/"
+
+ [32m✓[39m src/pages/__tests__/ProjectViewSorting.spec.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 380[2mms[22m[39m
+ [32m✓[39m src/pages/__tests__/ProjectViewSortingExtra.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 153[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/SeverityColorTest.spec.ts [2m([22m[2m1 test[22m[2m)[22m[32m 61[2mms[22m[39m
+ [32m✓[39m src/components/__tests__/CoverageExtras.spec.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 158[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mfilters out mixed vulnerabilities when hideMixed is checked
+[31m[1mAssertionError[22m: expected 4 to be 5 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 5[39m
+[31m+ 4[39m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m115:54[22m[39m
+    [90m113| [39m        [90m// G6 -> SHOW[39m
+    [90m114| [39m
+    [90m115| [39m        [34mexpect[39m(wrapper[33m.[39m[34mfindAll[39m([32m'.vuln-card'[39m)[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m5[39m)
+    [90m   | [39m                                                     [31m^[39m
+    [90m116| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39mnot[33m.[39m[34mtoContain[39m([32m'G2-Mixed'[39m)
+    [90m117| [39m    })
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mcombines filters correctly
+[31m[1mAssertionError[22m: expected [ 'G1-Unassessed' ] to deeply equal [ 'G1-Unassessed', 'G5-Empty' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "G1-Unassessed",[22m
+[32m-   "G5-Empty",[39m
+[2m  ][22m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m138:66[22m[39m
+    [90m136| [39m        [90m// Result -> Only NOT_SET (G1, G5)[39m
+    [90m137| [39m
+    [90m138| [39m        expect(wrapper.findAll('.vuln-card').map(c => c.text())).toEqu…
+    [90m   | [39m                                                                 [31m^[39m
+    [90m139| [39m            [32m'G1-Unassessed'[39m[33m,[39m
+    [90m140| [39m            [32m'G5-Empty'[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m9 passed[39m[22m[90m (10)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m55 passed[39m[22m[90m (57)[39m
+[2m   Start at [22m 05:56:33
+[2m   Duration [22m 11.71s
+
+[1m[41m FAIL [49m[22m [31mTests failed. Watching for file changes...[39m
+       [2mpress [22m[1mh[22m[2m to show help[22m[2m, [22m[2mpress [22m[1mq[22m[2m to quit[22m
+c[3J[1m[44m RERUN [49m[22m [34m[2msrc/pages/__tests__/ProjectViewFiltering.spec.ts [22m[34mx2 [34m[39m
+
+ [31m❯[39m src/pages/__tests__/ProjectViewFiltering.spec.ts [2m([22m[2m3 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 163[2mms[22m[39m
+     [32m✓[39m filters out assessed vulnerabilities when hideAssessed is checked[32m 118[2mms[22m[39m
+[31m     [31m×[31m filters out mixed vulnerabilities when hideMixed is checked[39m[32m 26[2mms[22m[39m
+[31m     [31m×[31m combines filters correctly[39m[32m 17[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mfilters out mixed vulnerabilities when hideMixed is checked
+[31m[1mAssertionError[22m: expected 4 to be 5 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 5[39m
+[31m+ 4[39m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m114:54[22m[39m
+    [90m112| [39m        [90m// G6 -> SHOW[39m
+    [90m113| [39m
+    [90m114| [39m        [34mexpect[39m(wrapper[33m.[39m[34mfindAll[39m([32m'.vuln-card'[39m)[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m5[39m)
+    [90m   | [39m                                                     [31m^[39m
+    [90m115| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39mnot[33m.[39m[34mtoContain[39m([32m'G2-Mixed'[39m)
+    [90m116| [39m    })
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mcombines filters correctly
+[31m[1mAssertionError[22m: expected [ 'G1-Unassessed' ] to deeply equal [ 'G1-Unassessed', 'G5-Empty' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "G1-Unassessed",[22m
+[32m-   "G5-Empty",[39m
+[2m  ][22m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m137:66[22m[39m
+    [90m135| [39m        [90m// Result -> Only NOT_SET (G1, G5)[39m
+    [90m136| [39m
+    [90m137| [39m        expect(wrapper.findAll('.vuln-card').map(c => c.text())).toEqu…
+    [90m   | [39m                                                                 [31m^[39m
+    [90m138| [39m            [32m'G1-Unassessed'[39m[33m,[39m
+    [90m139| [39m            [32m'G5-Empty'[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 05:56:45
+[2m   Duration [22m 324ms
+
+[1m[41m FAIL [49m[22m [31mTests failed. Watching for file changes...[39m
+       [2mpress [22m[1mh[22m[2m to show help[22m[2m, [22m[2mpress [22m[1mq[22m[2m to quit[22m
+c[3J[1m[44m RERUN [49m[22m [34m[2msrc/pages/__tests__/ProjectViewFiltering.spec.ts [22m[34mx3 [34m[39m
+
+ [31m❯[39m src/pages/__tests__/ProjectViewFiltering.spec.ts [2m([22m[2m3 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 188[2mms[22m[39m
+     [32m✓[39m filters out assessed vulnerabilities when hideAssessed is checked[32m 121[2mms[22m[39m
+[31m     [31m×[31m filters out mixed vulnerabilities when hideMixed is checked[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m combines filters correctly[39m[32m 23[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mfilters out mixed vulnerabilities when hideMixed is checked
+[31m[1mAssertionError[22m: expected 4 to be 5 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 5[39m
+[31m+ 4[39m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m113:54[22m[39m
+    [90m111| [39m        [90m// G6 -> SHOW[39m
+    [90m112| [39m
+    [90m113| [39m        [34mexpect[39m(wrapper[33m.[39m[34mfindAll[39m([32m'.vuln-card'[39m)[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m5[39m)
+    [90m   | [39m                                                     [31m^[39m
+    [90m114| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39mnot[33m.[39m[34mtoContain[39m([32m'G2-Mixed'[39m)
+    [90m115| [39m    })
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/pages/__tests__/ProjectViewFiltering.spec.ts[2m > [22mProjectView Filtering[2m > [22mcombines filters correctly
+[31m[1mAssertionError[22m: expected [ 'G1-Unassessed' ] to deeply equal [ 'G1-Unassessed', 'G5-Empty' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "G1-Unassessed",[22m
+[32m-   "G5-Empty",[39m
+[2m  ][22m
+
+[36m [2m❯[22m src/pages/__tests__/ProjectViewFiltering.spec.ts:[2m136:66[22m[39m
+    [90m134| [39m        [90m// Result -> Only NOT_SET (G1, G5)[39m
+    [90m135| [39m
+    [90m136| [39m        expect(wrapper.findAll('.vuln-card').map(c => c.text())).toEqu…
+    [90m   | [39m                                                                 [31m^[39m
+    [90m137| [39m            [32m'G1-Unassessed'[39m[33m,[39m
+    [90m138| [39m            [32m'G5-Empty'[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 05:56:59
+[2m   Duration [22m 345ms
+
+[1m[41m FAIL [49m[22m [31mTests failed. Watching for file changes...[39m
+       [2mpress [22m[1mh[22m[2m to show help[22m[2m, [22m[2mpress [22m[1mq[22m[2m to quit[22m
+[31mCancelling test run. Press CTRL+c again to exit forcefully.
+[39m
