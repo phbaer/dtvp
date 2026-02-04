@@ -1,0 +1,194 @@
+
+[1m[46m RUN [49m[22m [36mv4.0.16 [39m[90m/var/home/phbaer/src/dtvp/frontend[39m
+
+ [31m❯[39m src/components/__tests__/VulnGroupCard.spec.ts [2m([22m[2m24 tests[22m[2m | [22m[31m8 failed[39m[2m)[22m[32m 184[2mms[22m[39m
+     [32m✓[39m renders vulnerability details[32m 17[2mms[22m[39m
+     [32m✓[39m toggles expansion on click[32m 21[2mms[22m[39m
+     [32m✓[39m submits assessment update[32m 14[2mms[22m[39m
+[31m     [31m×[31m opens and closes visual calculator[39m[32m 14[2mms[22m[39m
+     [32m✓[39m handles assessment update errors[32m 7[2mms[22m[39m
+     [32m✓[39m resets vector to original[32m 6[2mms[22m[39m
+     [32m✓[39m covers color branches[32m 4[2mms[22m[39m
+[31m     [31m×[31m handles CVSS 4.0 vector parsing[39m[32m 6[2mms[22m[39m
+[31m     [31m×[31m handles CVSS 2.0 vector parsing[39m[32m 5[2mms[22m[39m
+     [32m✓[39m handles invalid CVSS vector gracefully[32m 4[2mms[22m[39m
+[31m     [31m×[31m handles missing cvss_vector in reset[39m[32m 5[2mms[22m[39m
+     [32m✓[39m handles user canceling confirmation[32m 4[2mms[22m[39m
+     [32m✓[39m handles CVSS 3.0 vector parsing[32m 4[2mms[22m[39m
+     [32m✓[39m submits assessment with comment and suppression[32m 7[2mms[22m[39m
+     [32m✓[39m renders analysis comments[32m 12[2mms[22m[39m
+     [32m✓[39m handles updateAssessment exception[32m 10[2mms[22m[39m
+     [32m✓[39m computes correct state colors[32m 3[2mms[22m[39m
+[31m     [31m×[31m closes modal via X button[39m[32m 4[2mms[22m[39m
+[31m     [31m×[31m renders metrics and allows updates in calculator[39m[32m 4[2mms[22m[39m
+[31m     [31m×[31m switches calculator versions via tabs[39m[32m 4[2mms[22m[39m
+     [32m✓[39m auto-calculates score from vector input[32m 10[2mms[22m[39m
+[31m     [31m×[31m includes rescored vector in assessment[39m[32m 7[2mms[22m[39m
+     [32m✓[39m updates pending score manually[32m 6[2mms[22m[39m
+     [32m✓[39m activates 3.1 tab[32m 4[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 8 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mopens and closes visual calculator
+[31m[1mAssertionError[22m: expected 'CVE-2023-1234HIGH9.8CVSSlib 1.0Analys…' to contain 'CVSS v3.1 Calculator'[39m
+
+Expected: [32m"CV[7mSS v3.1 Calculator[27m"[39m
+Received: [31m"CV[7mE-2023-1234HIGH9.8CVSSlib 1.0AnalysisNOT_SETAffected1 VersionsDescriptionA bad vulnerabilityAnalysis Details & Comments1.0lib 1.0NOT_SETHide Dependency ChainsNo dependency chains found. Bulk Assessment Analysis StateNot SetNot AffectedExploitableIn TriageFalse PositiveResolved CVSS Calculator Vector String Visual Calculator Score Modifying vector auto-calculates score. Analysis DetailsCommentSuppress this vulnerabilityApply to All[27m"[39m
+
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m135:32[22m[39m
+    [90m133| [39m        [35mawait[39m wrapper[33m.[39m[34mfind[39m([32m'button.text-blue-400'[39m)[33m.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m134| [39m        [35mawait[39m wrapper[33m.[39mvm[33m.[39m[34m$nextTick[39m()
+    [90m135| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39m[34mtoContain[39m([32m'CVSS v3.1 Calculator'[39m)
+    [90m   | [39m                               [31m^[39m
+    [90m136| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39m[34mtoContain[39m([32m'Done'[39m)
+    [90m137| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mhandles CVSS 4.0 vector parsing
+[31m[1mAssertionError[22m: expected '3.1' to be '4.0' // Object.is equality[39m
+
+Expected: [32m"4.0"[39m
+Received: [31m"3.1"[39m
+
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m209:51[22m[39m
+    [90m207| [39m        [35mawait[39m wrapper[33m.[39m[34mfind[39m([32m'button.text-blue-400'[39m)[33m.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m208| [39m        [35mawait[39m wrapper[33m.[39mvm[33m.[39m[34m$nextTick[39m()
+    [90m209| [39m        [34mexpect[39m((wrapper[33m.[39mvm [35mas[39m any)[33m.[39mactiveVersion)[33m.[39m[34mtoBe[39m([32m'4.0'[39m)
+    [90m   | [39m                                                  [31m^[39m
+    [90m210| [39m    })
+    [90m211| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mhandles CVSS 2.0 vector parsing
+[31m[1mAssertionError[22m: expected '3.1' to be '2.0' // Object.is equality[39m
+
+Expected: [32m"2.0"[39m
+Received: [31m"3.1"[39m
+
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m224:51[22m[39m
+    [90m222| [39m        [35mawait[39m wrapper[33m.[39m[34mfind[39m([32m'button.text-blue-400'[39m)[33m.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m223| [39m        [35mawait[39m wrapper[33m.[39mvm[33m.[39m[34m$nextTick[39m()
+    [90m224| [39m        [34mexpect[39m((wrapper[33m.[39mvm [35mas[39m any)[33m.[39mactiveVersion)[33m.[39m[34mtoBe[39m([32m'2.0'[39m)
+    [90m   | [39m                                                  [31m^[39m
+    [90m225| [39m    })
+    [90m226| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mhandles missing cvss_vector in reset
+[31m[1mAssertionError[22m: expected "vi.fn()" to be called with arguments: [ Array(1) ][90m
+
+Number of calls: [1m0[22m
+[31m[39m
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m256:30[22m[39m
+    [90m254| [39m        [35mawait[39m resetBtn[33m?.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m255| [39m
+    [90m256| [39m        expect(global.alert).toHaveBeenCalledWith('No original vector …
+    [90m   | [39m                             [31m^[39m
+    [90m257| [39m    })
+    [90m258| [39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mcloses modal via X button
+[31m[1mAssertionError[22m: expected 'CVE-2023-1234HIGH9.8CVSSlib 1.0Analys…' to contain 'CVSS v3.1 Calculator'[39m
+
+Expected: [32m"CV[7mSS v3.1 Calculator[27m"[39m
+Received: [31m"CV[7mE-2023-1234HIGH9.8CVSSlib 1.0AnalysisNOT_SETAffected1 VersionsDescriptionA bad vulnerabilityAnalysis Details & Comments1.0lib 1.0NOT_SETHide Dependency ChainsNo dependency chains found. Bulk Assessment Analysis StateNot SetNot AffectedExploitableIn TriageFalse PositiveResolved CVSS Calculator Vector String Visual Calculator Score Modifying vector auto-calculates score. Analysis DetailsCommentSuppress this vulnerabilityApply to All[27m"[39m
+
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m382:32[22m[39m
+    [90m380| [39m        [35mawait[39m wrapper[33m.[39m[34mfind[39m([32m'button.text-blue-400'[39m)[33m.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m381| [39m
+    [90m382| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39m[34mtoContain[39m([32m'CVSS v3.1 Calculator'[39m)
+    [90m   | [39m                               [31m^[39m
+    [90m383| [39m
+    [90m384| [39m        [90m// Find the X button (text-gray-400 hover:text-white text-xl)[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mrenders metrics and allows updates in calculator
+[31m[1mAssertionError[22m: expected 'CVE-2023-1234HIGH9.8CVSSlib 1.0Analys…' to contain 'Attack Vector'[39m
+
+Expected: [32m"Attack Vector"[39m
+Received: [31m"CVE-2023-1234HIGH9.8CVSSlib 1.0AnalysisNOT_SETAffected1 VersionsDescriptionA bad vulnerabilityAnalysis Details & Comments1.0lib 1.0NOT_SETHide Dependency ChainsNo dependency chains found. Bulk Assessment Analysis StateNot SetNot AffectedExploitableIn TriageFalse PositiveResolved CVSS Calculator Vector String Visual Calculator Score Modifying vector auto-calculates score. Analysis DetailsCommentSuppress this vulnerabilityApply to All"[39m
+
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m398:32[22m[39m
+    [90m396| [39m        [35mawait[39m wrapper[33m.[39mvm[33m.[39m[34m$nextTick[39m()
+    [90m397| [39m
+    [90m398| [39m        [34mexpect[39m(wrapper[33m.[39m[34mtext[39m())[33m.[39m[34mtoContain[39m([32m'Attack Vector'[39m)
+    [90m   | [39m                               [31m^[39m
+    [90m399| [39m
+    [90m400| [39m        [35mconst[39m avSelect [33m=[39m wrapper[33m.[39m[34mfind[39m([32m'#metric-AV'[39m)
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mswitches calculator versions via tabs
+[31m[1mAssertionError[22m: expected '3.1' to be '4.0' // Object.is equality[39m
+
+Expected: [32m"4.0"[39m
+Received: [31m"3.1"[39m
+
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m418:51[22m[39m
+    [90m416| [39m        [35mconst[39m tab4 [33m=[39m tabs[33m.[39m[34mfind[39m(b [33m=>[39m b[33m.[39m[34mtext[39m()[33m.[39m[34mincludes[39m([32m'4.0'[39m))
+    [90m417| [39m        [35mawait[39m tab4[33m?.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m418| [39m        [34mexpect[39m((wrapper[33m.[39mvm [35mas[39m any)[33m.[39mactiveVersion)[33m.[39m[34mtoBe[39m([32m'4.0'[39m)
+    [90m   | [39m                                                  [31m^[39m
+    [90m419| [39m
+    [90m420| [39m        [90m// Click 2.0[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m src/components/__tests__/VulnGroupCard.spec.ts[2m > [22mVulnGroupCard[2m > [22mincludes rescored vector in assessment
+[31m[1mAssertionError[22m: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ][90m
+
+Received: 
+
+[1m  1st vi.fn() call:
+
+[22m[2m  [[22m
+[32m-   ObjectContaining {[90m
+[32m-     "details": StringContaining "[Rescored Vector: CVSS:",[90m
+[31m+   {[90m
+[31m+     "comment": "",[90m
+[31m+     "details": "[Rescored: 9.8]",[90m
+[31m+     "instances": [[90m
+[31m+       {[90m
+[31m+         "analysis_comments": [],[90m
+[31m+         "analysis_state": "NOT_SET",[90m
+[31m+         "component_name": "lib",[90m
+[31m+         "component_uuid": "c1",[90m
+[31m+         "component_version": "1.0",[90m
+[31m+         "finding_uuid": "f1",[90m
+[31m+         "is_suppressed": false,[90m
+[31m+         "project_name": "App1",[90m
+[31m+         "project_uuid": "p1",[90m
+[31m+         "project_version": "1.0",[90m
+[31m+         "vulnerability_uuid": "v1",[90m
+[31m+       },[90m
+[31m+     ],[90m
+[31m+     "state": "NOT_SET",[90m
+[31m+     "suppressed": false,[90m
+[2m    },[22m
+[2m  ][22m
+[31m[90m
+
+Number of calls: [1m1[22m
+[31m[39m
+[36m [2m❯[22m src/components/__tests__/VulnGroupCard.spec.ts:[2m460:34[22m[39m
+    [90m458| [39m        [35mawait[39m applyBtn[33m?.[39m[34mtrigger[39m([32m'click'[39m)
+    [90m459| [39m
+    [90m460| [39m        expect(updateAssessment).toHaveBeenCalledWith(expect.objectCon…
+    [90m   | [39m                                 [31m^[39m
+    [90m461| [39m            details[33m:[39m expect[33m.[39m[34mstringContaining[39m([32m'[Rescored Vector: CVSS:'[39m)
+    [90m462| [39m        }))
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/8]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m8 failed[39m[22m[2m | [22m[1m[32m16 passed[39m[22m[90m (24)[39m
+[2m   Start at [22m 21:33:38
+[2m   Duration [22m 1.08s[2m (transform 355ms, setup 0ms, import 452ms, tests 184ms, environment 314ms)[22m
+
