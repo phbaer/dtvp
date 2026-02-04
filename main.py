@@ -259,7 +259,8 @@ async def update_assessment(
 
             # Check Role Logic
             role = get_user_role(user)
-            final_details = req.details
+            action_label = "Reviewed by" if role == "REVIEWER" else "Assessed by"
+            final_details = f"{req.details}\n\n[{action_label}: {user}]"
 
             # Analyst Logic: Append Pending Review if not present
             if role == "ANALYST":
