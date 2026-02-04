@@ -464,3 +464,29 @@ def group_vulnerabilities(
         result.append(g)
 
     return result
+
+
+def get_user_roles_path() -> str:
+    return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
+
+
+def load_user_roles(path: str = None) -> Dict[str, str]:
+    if path is None:
+        path = get_user_roles_path()
+
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def get_user_role(user: str) -> str:
+    path = get_user_roles_path()
+    if not os.path.exists(path):
+        return "REVIEWER"
+
+    roles = load_user_roles(path) or {}
+    return roles.get(user, "ANALYST")
