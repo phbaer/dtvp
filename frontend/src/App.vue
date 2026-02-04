@@ -43,7 +43,12 @@ onMounted(async () => {
                         <router-link to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
                     </nav>
                 </div>
-                <div class="text-sm text-gray-400 hidden sm:block">Dependency Track Vulnerability Processor</div>
+                <div class="text-sm text-gray-400 hidden sm:block flex flex-col items-end">
+                    <div v-if="user.username" class="text-blue-300 font-medium">
+                        {{ user.username }} <span class="text-gray-500 text-xs">({{ user.role }})</span>
+                    </div>
+                    <div v-else>Dependency Track Vulnerability Processor</div>
+                </div>
             </div>
         </header>
         <main class="p-6 sm:p-8 max-w-7xl mx-auto w-full flex-grow">

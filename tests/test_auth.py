@@ -173,3 +173,38 @@ async def test_callback_context_path_slashes(client, respx_mock):
             response = client.get("/auth/callback?code=code", follow_redirects=False)
             assert response.status_code == 307
             assert "/mycontext" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_callback_claim_priority(client, respx_mock):
+    # Mock config and token response
+    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+        mock_config.return_value = {"token_endpoint": "https://auth.example.com/token"}
+
+        # Mock token response with all claims
+        respx_mock.post("https://auth.example.com/token").respond(
+            json={
+                "id_token": jwt.encode(
+                    {
+                        "sub": "sub_user",
+                        "preferred_username": "pref_user",
+                        "email": "email@example.com",
+                    },
+                    "secret",
+                    algorithm="HS256",
+                )
+            }
+        )
+
+        response = client.get(
+            "/auth/callback?code=fairly-safe-code", follow_redirects=False
+        )
+        assert response.status_code == 307
+
+        cookie = response.cookies.get("session_token")
+        assert cookie is not None
+
+        payload = jwt.decode(
+            cookie, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"]
+        )
+        assert payload["sub"] == "sub_user"
