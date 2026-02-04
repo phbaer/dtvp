@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import re
 import json
 import os
@@ -30,12 +30,12 @@ def get_user_roles_path() -> str:
     return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
 
 
-def load_user_roles(path: str = None) -> Dict[str, str]:
+def load_user_roles(path: str = None) -> Optional[Dict[str, str]]:
     if path is None:
         path = get_user_roles_path()
 
     if not os.path.exists(path):
-        return {}
+        return None
     try:
         with open(path, "r") as f:
             return json.load(f)
@@ -46,14 +46,14 @@ def load_user_roles(path: str = None) -> Dict[str, str]:
 def get_user_role(username: str, roles_map: Dict[str, str] = None) -> str:
     """
     Returns 'REVIEWER' or 'ANALYST'.
-    If roles_map is empty (no config file), everyone is REVIEWER.
+    If roles_map is None (no config file), everyone is REVIEWER.
     If roles_map matches username, return that.
     Otherwise (config exists but user not in it), return 'ANALYST'.
     """
     if roles_map is None:
         roles_map = load_user_roles()
 
-    if not roles_map:
+    if roles_map is None:
         return "REVIEWER"
 
     return roles_map.get(username, "ANALYST")

@@ -355,6 +355,28 @@ async def upload_team_mapping(
         return {"status": "error", "message": str(e)}
 
 
+@api_router.put("/settings/mapping")
+async def update_team_mapping(
+    mapping: dict,
+    user: str = Depends(get_current_user),
+):
+    target_path = get_team_mapping_path()
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    try:
+        with open(target_path, "w") as f:
+            json.dump(mapping, f, indent=2)
+
+        return {
+            "status": "success",
+            "message": f"Team mapping updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @api_router.get("/settings/roles")
 async def get_roles(user: str = Depends(get_current_user)):
     # Only reviewers can see roles?
@@ -388,6 +410,32 @@ async def upload_roles(
 
         with open(target_path, "wb") as f:
             f.write(content)
+
+        return {
+            "status": "success",
+            "message": f"User roles updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@api_router.put("/settings/roles")
+async def update_roles(
+    roles: dict,
+    user: str = Depends(get_current_user),
+):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(status_code=403, detail="Only reviewers can modify roles")
+
+    target_path = get_user_roles_path()
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    try:
+        with open(target_path, "w") as f:
+            json.dump(roles, f, indent=2)
 
         return {
             "status": "success",
