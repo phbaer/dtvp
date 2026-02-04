@@ -71,8 +71,8 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
 
 const tagFilter = ref('')
 const idFilter = ref('')
-const hideAssessed = ref(false)
-const hideMixed = ref(false)
+const hideAssessed = ref(true)
+const hideMixed = ref(true)
 const sortBy = ref('severity')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 

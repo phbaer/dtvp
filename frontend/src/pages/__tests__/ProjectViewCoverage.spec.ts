@@ -75,6 +75,11 @@ describe('ProjectView Coverage Extras', () => {
 
         await flushPromises()
 
+            // Reset filters to ensure items are visible
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
+
         // Trigger update
         const updateData = {
             rescored_cvss: 1.0,
@@ -109,6 +114,11 @@ describe('ProjectView Coverage Extras', () => {
             }
         })
         await flushPromises()
+
+            // Reset filters to ensure items are visible
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
 
         // Set filter
         const input = wrapper.find('input[placeholder="Filter by Team Tag..."]')
