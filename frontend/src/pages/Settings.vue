@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, watch } from 'vue'
-import { getRoles, uploadRoles } from '../lib/api'
+import { getRoles, uploadRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping } from '../lib/api'
 
 const user = inject<any>('user')
 const activeTab = ref('mapping')
@@ -25,11 +25,8 @@ const savingRoles = ref(false)
 
 const loadMapping = async () => {
     try {
-        const res = await fetch('/api/settings/mapping')
-        if (res.ok) {
-            currentMapping.value = await res.json()
-            mappingJson.value = JSON.stringify(currentMapping.value, null, 2)
-        }
+        currentMapping.value = await getTeamMapping()
+        mappingJson.value = JSON.stringify(currentMapping.value, null, 2)
     } catch (e) {
         console.error("Failed to load mapping", e)
     }
@@ -51,29 +48,20 @@ const handleFileUpload = async () => {
     const file = fileInput.value.files[0]
     if (!file) return
 
-    const formData = new FormData()
-    formData.append('file', file)
-
     uploading.value = true
     message.value = ''
     error.value = ''
 
     try {
-        const res = await fetch('/api/settings/mapping', {
-            method: 'POST',
-            body: formData
-        })
-
-        if (!res.ok) {
-            const data = await res.json()
-            throw new Error(data.message || 'Upload failed')
+        const res = await uploadTeamMapping(file)
+        if (res.status === 'success') {
+             message.value = 'Mapping file uploaded successfully!'
+             // Reset input
+             if (fileInput.value) fileInput.value.value = ''
+             await loadMapping()
+        } else {
+             throw new Error(res.message)
         }
-
-        await res.json()
-        message.value = 'Mapping file uploaded successfully!'
-        // Reset input
-        if (fileInput.value) fileInput.value.value = ''
-        await loadMapping()
     } catch (err: any) {
         error.value = err.message
     } finally {
@@ -94,22 +82,14 @@ const saveMapping = async () => {
             throw new Error("Invalid JSON format")
         }
 
-        const res = await fetch('/api/settings/mapping', {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(parsed)
-        })
-
-        if (!res.ok) {
-            const data = await res.json()
-            throw new Error(data.message || 'Save failed')
+        const res = await updateTeamMapping(parsed)
+        
+        if (res.status === 'success') {
+            message.value = res.message || 'Mapping saved successfully!'
+            await loadMapping()
+        } else {
+             throw new Error(res.message)
         }
-
-        const data = await res.json()
-        message.value = data.message || 'Mapping saved successfully!'
-        await loadMapping()
     } catch (err: any) {
         error.value = err.message
     } finally {
