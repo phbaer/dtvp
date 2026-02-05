@@ -5,6 +5,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import httpx
 from jose import jwt
+from logic import get_user_role
 
 
 class AuthSettings(BaseSettings):
@@ -14,7 +15,9 @@ class AuthSettings(BaseSettings):
     OIDC_REDIRECT_URI: Optional[str] = Field(
         alias="DTVP_OIDC_REDIRECT_URI", default=None
     )
-    SESSION_SECRET_KEY: str = Field(alias="DTVP_SESSION_SECRET_KEY", default="change_me")
+    SESSION_SECRET_KEY: str = Field(
+        alias="DTVP_SESSION_SECRET_KEY", default="change_me"
+    )
     FRONTEND_URL: str = Field(
         alias="DTVP_FRONTEND_URL", default="http://localhost:8000"
     )
@@ -120,7 +123,12 @@ async def callback(code: str, response: Response):
         # Determine user info (simplified)
         try:
             claims = jwt.get_unverified_claims(id_token)
-            username = claims.get("preferred_username") or claims.get("email") or "user"
+            username = (
+                claims.get("sub")
+                or claims.get("preferred_username")
+                or claims.get("email")
+                or "user"
+            )
         except Exception:
             username = "user"
 
@@ -156,4 +164,5 @@ def get_current_user(request: Request):
 
 @router.get("/me")
 def get_user_info(user: str = Depends(get_current_user)):
-    return {"username": user}
+    role = get_user_role(user)
+    return {"username": user, "role": role}

@@ -100,3 +100,37 @@ export const checkSession = async () => {
         return false;
     }
 };
+
+export const getUserInfo = async (): Promise<{ username: string; role?: string }> => {
+    const res = await axios.get(AUTH_BASE + '/me', { withCredentials: true });
+    return res.data;
+};
+
+export const getRoles = async (): Promise<Record<string, string>> => {
+    const res = await api.get('/settings/roles');
+    return res.data;
+};
+
+export const uploadRoles = async (file: File): Promise<{ status: string; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post('/settings/roles', formData);
+    return res.data;
+};
+
+export const getTeamMapping = async (): Promise<Record<string, string>> => {
+    const res = await api.get('/settings/mapping');
+    return res.data;
+};
+
+export const uploadTeamMapping = async (file: File): Promise<{ status: string; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post('/settings/mapping', formData);
+    return res.data;
+};
+
+export const updateTeamMapping = async (mapping: Record<string, string>): Promise<{ status: string; message: string }> => {
+    const res = await api.put('/settings/mapping', mapping);
+    return res.data;
+};
