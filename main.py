@@ -10,6 +10,8 @@ import asyncio
 import uuid
 from datetime import datetime
 import shutil
+import json
+from fastapi import HTTPException
 
 from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
@@ -17,6 +19,9 @@ from logic import (
     group_vulnerabilities,
     get_team_mapping_path,
     load_team_mapping,
+    get_user_roles_path,
+    load_user_roles,
+    get_user_role,
     BOMAnalysisCache,
 )
 
@@ -251,12 +256,26 @@ async def update_assessment(
             print(
                 f"  Updating instance: {instance.get('finding_uuid')} (Vulnerability: {instance.get('vulnerability_uuid')})"
             )
+
+            # Check Role Logic
+            role = get_user_role(user)
+            action_label = "Reviewed by" if role == "REVIEWER" else "Assessed by"
+            final_details = f"{req.details}\n\n[{action_label}: {user}]"
+
+            # Analyst Logic: Append Pending Review if not present
+            if role == "ANALYST":
+                if "[Status: Pending Review]" not in final_details:
+                    final_details += "\n\n[Status: Pending Review]"
+
+            # Reviewer Logic: If they are submitting, they implicitly approve, so no flag added.
+            # If they are explicitly removing the flag, it's just a normal update with new text.
+
             await client.update_analysis(
                 project_uuid=instance["project_uuid"],
                 component_uuid=instance["component_uuid"],
                 vulnerability_uuid=instance["vulnerability_uuid"],
                 state=req.state,
-                details=req.details,
+                details=final_details,
                 comment=f"{req.comment} -- {user}" if req.comment else None,
                 justification=req.justification,
                 suppressed=req.suppressed,
@@ -331,6 +350,96 @@ async def upload_team_mapping(
         return {
             "status": "success",
             "message": f"Team mapping updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@api_router.put("/settings/mapping")
+async def update_team_mapping(
+    mapping: dict,
+    user: str = Depends(get_current_user),
+):
+    target_path = get_team_mapping_path()
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    try:
+        with open(target_path, "w") as f:
+            json.dump(mapping, f, indent=2)
+
+        return {
+            "status": "success",
+            "message": f"Team mapping updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@api_router.get("/settings/roles")
+async def get_roles(user: str = Depends(get_current_user)):
+    # Only reviewers can see roles?
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(status_code=403, detail="Only reviewers can view roles")
+    return load_user_roles()
+
+
+@api_router.post("/settings/roles")
+async def upload_roles(
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user),
+):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(status_code=403, detail="Only reviewers can modify roles")
+
+    target_path = get_user_roles_path()
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    try:
+        content = await file.read()
+        # Validate format
+        try:
+            json.loads(content)
+        except json.JSONDecodeError:
+            return {"status": "error", "message": "Invalid JSON"}
+
+        with open(target_path, "wb") as f:
+            f.write(content)
+
+        return {
+            "status": "success",
+            "message": f"User roles updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@api_router.put("/settings/roles")
+async def update_roles(
+    roles: dict,
+    user: str = Depends(get_current_user),
+):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(status_code=403, detail="Only reviewers can modify roles")
+
+    target_path = get_user_roles_path()
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    try:
+        with open(target_path, "w") as f:
+            json.dump(roles, f, indent=2)
+
+        return {
+            "status": "success",
+            "message": f"User roles updated at {target_path}",
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}

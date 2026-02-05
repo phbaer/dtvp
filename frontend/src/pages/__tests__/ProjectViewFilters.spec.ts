@@ -76,18 +76,30 @@ describe('ProjectView Filters', () => {
 
         const wrapper = mount(ProjectView, {
             global: {
-                plugins: [router]
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
         await flushPromises() // Wait for fetch
 
-        // Initial state: all visible
-        expect(wrapper.findAll('.vuln-card').length).toBe(3)
-
-        // Toggle Hide Assessed (find the checkbox responsible for v-model="hideAssessed")
+        // Default state: Assessed and Mixed are hidden.
+        // We want to test that enabling the filter works, so we first disable them to show everything.
         const checkboxes = wrapper.findAll('input[type="checkbox"]')
         const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
+        const hideMixedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Mixed'))
+
+        if (hideAssessedBox && hideMixedBox) {
+            await hideAssessedBox.setValue(false)
+            await hideMixedBox.setValue(false)
+        }
+
+        // Initial state (after manual reset): all visible
+        expect(wrapper.findAll('.vuln-card').length).toBe(3)
+
+        // Toggle Hide Assessed
 
         if (hideAssessedBox) {
             await hideAssessedBox.setValue(true)
@@ -112,14 +124,27 @@ describe('ProjectView Filters', () => {
 
         const wrapper = mount(ProjectView, {
             global: {
-                plugins: [router]
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
         await flushPromises()
 
+        // Default state: Assessed and Mixed are hidden.
+        // We want to test that enabling the filter works, so we first disable them to show everything.
         const checkboxes = wrapper.findAll('input[type="checkbox"]')
+        const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
         const hideMixedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Mixed'))
+
+        if (hideAssessedBox && hideMixedBox) {
+            await hideAssessedBox.setValue(false)
+            await hideMixedBox.setValue(false)
+        }
+
+
 
         if (hideMixedBox) {
             await hideMixedBox.setValue(true)
@@ -144,11 +169,25 @@ describe('ProjectView Filters', () => {
 
         const wrapper = mount(ProjectView, {
             global: {
-                plugins: [router]
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
         await flushPromises()
+
+        // Default state: Assessed and Mixed are hidden.
+        // We want to test ID filtering on the full set, so we disable the state filters.
+        const checkboxes = wrapper.findAll('input[type="checkbox"]')
+        const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
+        const hideMixedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Mixed'))
+
+        if (hideAssessedBox && hideMixedBox) {
+            await hideAssessedBox.setValue(false)
+            await hideMixedBox.setValue(false)
+        }
 
         const idInput = wrapper.find('input[placeholder*="Filter by ID"]')
         expect(idInput.exists()).toBe(true)

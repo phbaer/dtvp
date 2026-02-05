@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { getVersion } from './lib/api'
+import { ref, onMounted, provide } from 'vue'
+import { getVersion, getUserInfo } from './lib/api'
 
 const version = ref('')
 const build = ref('')
+const user = ref({ username: '', role: '' })
+
+provide('user', user)
 
 onMounted(async () => {
     try {
@@ -12,6 +15,16 @@ onMounted(async () => {
         build.value = v.build
     } catch (e) {
         console.error('Failed to fetch version', e)
+    }
+
+    try {
+        const u = await getUserInfo()
+        user.value = { 
+            username: u.username, 
+            role: u.role || 'REVIEWER' // default fallback if logic.py logic fails or older backend
+        }
+    } catch (e) {
+        // Not logged in or error
     }
 })
 </script>
@@ -30,7 +43,12 @@ onMounted(async () => {
                         <router-link to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
                     </nav>
                 </div>
-                <div class="text-sm text-gray-400 hidden sm:block">Dependency Track Vulnerability Processor</div>
+                <div class="text-sm text-gray-400 hidden sm:block flex flex-col items-end">
+                    <div v-if="user.username" class="text-blue-300 font-medium">
+                        {{ user.username }} <span class="text-gray-500 text-xs">({{ user.role }})</span>
+                    </div>
+                    <div v-else>Dependency Track Vulnerability Processor</div>
+                </div>
             </div>
         </header>
         <main class="p-6 sm:p-8 max-w-7xl mx-auto w-full flex-grow">
