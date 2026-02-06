@@ -3,7 +3,7 @@
 import { ref, computed, watch, shallowRef, inject } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
-import type { GroupedVuln, AssessmentPayload, Instance } from '../types'
+import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import DependencyChainViewer from './DependencyChainViewer.vue'

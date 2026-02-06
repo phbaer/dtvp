@@ -5,7 +5,7 @@ import sys
 import json
 
 DT_API_URL = os.environ.get("DT_API_URL", "http://dtrack-apiserver:8080")
-NEW_ADMIN_PASS = os.environ.get("NEW_ADMIN_PASS", "admin12345")
+NEW_ADMIN_PASS = os.environ.get("NEW_ADMIN_PASS", "admin")
 
 
 def wait_for_api():
@@ -24,12 +24,10 @@ def wait_for_api():
 def login(username, password):
     url = f"{DT_API_URL}/api/v1/user/login"
     data = {"username": username, "password": password}
-    r = requests.post(
-        url, data=data
-    )  # default login is form-encoded or json? DT supports form-encoded usually.
-    # Actually DT 4.x login endpoint expects x-www-form-urlencoded
+    r = requests.post(url, data=data)
     if r.status_code == 200:
-        return r.text  # Returns token as string
+        return r.text
+    print(f"Login failed for user '{username}': {r.status_code} {r.text}")
     return None
 
 
@@ -57,8 +55,16 @@ def main():
     wait_for_api()
 
     # Initial Login
+    # Initial Login with Retry
     print("Attempting initial login...")
-    token = login("admin", "admin")
+    token = None
+    retries = 10
+    for i in range(retries):
+        token = login("admin", "admin")
+        if token:
+            break
+        print(f"Waiting for admin user to be ready... ({i + 1}/{retries})")
+        time.sleep(3)
 
     if token:
         print("Initial login successful. Changing password...")
