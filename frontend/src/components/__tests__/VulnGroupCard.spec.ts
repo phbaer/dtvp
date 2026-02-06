@@ -10,7 +10,8 @@ vi.mock('../../lib/api', () => ({
         total: 0,
         limit: 10,
         offset: 0
-    })
+    }),
+    getAssessmentDetails: vi.fn(() => Promise.resolve([]))
 }))
 
 // Mock Icons
@@ -19,7 +20,9 @@ vi.mock('lucide-vue-next', () => ({
     ChevronUp: { template: '<span class="icon-up" />' },
     Shield: { template: '<span class="icon-shield" />' },
     Calculator: { template: '<span class="icon-calc" />' },
-    ExternalLink: { template: '<span class="icon-link" />' }
+    ExternalLink: { template: '<span class="icon-link" />' },
+    RefreshCw: { template: '<span class="icon-refresh" />' },
+    AlertTriangle: { template: '<span class="icon-alert" />' }
 }))
 
 // Mock DependencyChainViewer to avoid async setup in child component
@@ -123,7 +126,9 @@ describe('VulnGroupCard', () => {
             details: `[Rescored: 9.8]\n\nFalse positive`,
             comment: '',
             justification: 'NOT_SET',
-            suppressed: false
+            suppressed: false,
+            force: false,
+            original_analysis: {}
         })
 
         // Should emit update:assessment
