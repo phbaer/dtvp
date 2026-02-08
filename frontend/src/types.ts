@@ -57,4 +57,6 @@ export interface AssessmentPayload {
     comment?: string;
     justification?: string;
     suppressed: boolean;
+    original_analysis?: Record<string, any>;
+    force?: boolean;
 }

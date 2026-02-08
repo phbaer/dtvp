@@ -4,7 +4,9 @@ import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock api
 vi.mock('../../lib/api', () => ({
-    updateAssessment: vi.fn()
+    updateAssessment: vi.fn(),
+    getAssessmentDetails: vi.fn(() => Promise.resolve([])),
+    getDependencyChains: vi.fn().mockResolvedValue([])
 }))
 
 // Mock Icons
@@ -13,7 +15,9 @@ vi.mock('lucide-vue-next', () => ({
     ChevronUp: { template: '<span />' },
     Shield: { template: '<span />' },
     Calculator: { template: '<span />' },
-    ExternalLink: { template: '<span />' }
+    ExternalLink: { template: '<span />' },
+    RefreshCw: { template: '<span />' },
+    AlertTriangle: { template: '<span />' }
 }))
 
 // To act as global check for our mock conditions

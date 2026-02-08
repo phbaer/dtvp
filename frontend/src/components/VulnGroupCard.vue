@@ -1,10 +1,10 @@
 ```
 <script setup lang="ts">
 import { ref, computed, watch, shallowRef, inject } from 'vue'
-import { updateAssessment } from '../lib/api'
+import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln, AssessmentPayload } from '../types'
-import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import DependencyChainViewer from './DependencyChainViewer.vue'
 
@@ -46,9 +46,13 @@ const justification = ref('NOT_SET')
 const comment = ref('')
 const suppressed = ref(false)
 const updating = ref(false)
+const loadingDetails = ref(false)
 const pendingScore = ref<number | null>(null)
 const pendingVector = ref<string>('')
 const showCalculatorModal = ref(false)
+const showConflictModal = ref(false)
+const conflictData = ref<any>(null)
+const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Analysis Object
 
 // Multi-version Calculator State
 // We use shallowRef for the instance to avoid deep reactivity overhead on complex objects
@@ -151,7 +155,6 @@ const displayState = computed(() => {
     if (states.size > 1) return 'MIXED'
     const state = Array.from(states)[0]
     return state === 'NOT_SET' ? 'NOT_SET' : state
-    return state === 'NOT_SET' ? 'NOT_SET' : state
 })
 
 const isPendingReview = computed(() => {
@@ -181,31 +184,33 @@ const approveAssessment = async (e: Event) => {
 }
 
 // Pre-fill form from first instance when expanded or group changes
-watch(() => props.group, (newGroup) => {
+const updateFormFromGroup = () => {
     // Reset pending values
     // Use rescored value if present, otherwise fallback to original score, or null
-    pendingVector.value = newGroup.rescored_vector || newGroup.cvss_vector || ''
+    pendingScore.value = props.group.rescored_cvss ?? props.group.cvss_score ?? props.group.cvss ?? null
+    pendingVector.value = props.group.rescored_vector || props.group.cvss_vector || ''
     
-    // Determine score: explicit rescored > calculated from rescored vector > original score
-    if (newGroup.rescored_cvss !== null && newGroup.rescored_cvss !== undefined) {
-        pendingScore.value = newGroup.rescored_cvss
-    } else if (newGroup.rescored_vector) {
-        pendingScore.value = calculateScoreFromVector(newGroup.rescored_vector)
-    } else {
-        pendingScore.value = newGroup.cvss_score ?? newGroup.cvss ?? null
-    }
-    
-    const firstVersion = newGroup.affected_versions?.[0]
+    const firstVersion = props.group.affected_versions?.[0]
     if (firstVersion && firstVersion.components?.length > 0) {
         const first = firstVersion.components[0]
         if (first) {
             state.value = first.analysis_state || 'NOT_SET'
             details.value = first.analysis_details || ''
             justification.value = first.justification || 'NOT_SET'
+            comment.value = first.analysis_comments?.[0]?.comment || ''
             suppressed.value = first.is_suppressed || false
         }
     }
-}, { immediate: true })
+}
+
+watch(() => props.group, updateFormFromGroup, { immediate: true })
+
+// Fetch on Open
+watch(expanded, (isOpen) => {
+    if (isOpen) {
+        refreshDetails()
+    }
+})
 
 // Auto-calculate score when vector changes
 watch(pendingVector, (newVector) => {
@@ -224,9 +229,67 @@ const resetVector = () => {
     }
 }
 
-const handleUpdate = async () => {
+// Refresh details from backend
+const refreshDetails = async () => {
+    loadingDetails.value = true
+    try {
+        const instances = allInstances.value
+        // Only fetch if we have instances
+        if (instances.length === 0) return
+
+        const detailsList = await getAssessmentDetails(instances)
+        
+        // Update local state and originalAnalysis map
+        const newOriginals: Record<string, any> = {}
+        
+        detailsList.forEach((item: any) => {
+             if (item.error) {
+                 console.error(`Error fetching details for ${item.finding_uuid}:`, item.error)
+                 return
+             }
+             
+             if (item.analysis) {
+                 // Store original for conflict checking
+                 if (item.finding_uuid) {
+                     newOriginals[item.finding_uuid] = item.analysis
+                 }
+                 
+                 // Update the reactive object in the group
+                 // We need to find the matching component in props.group.affected_versions
+                 // This is a bit expensive but necessary
+                 props.group.affected_versions.forEach(v => {
+                     v.components.forEach(c => {
+                         if (c.finding_uuid === item.finding_uuid) {
+                             c.analysis_state = item.analysis.analysisState
+                             c.analysis_details = item.analysis.analysisDetails
+                             c.is_suppressed = item.analysis.isSuppressed
+                             // Comments are not strictly updated here unless returned by backend in full structure?
+                             // getAssessmentDetails returns whatever get_analysis returns.
+                             // DT /api/v1/analysis returns comments too? Yes.
+                             if (item.analysis.analysisComments) {
+                                  c.analysis_comments = item.analysis.analysisComments
+                             }
+                         }
+                     })
+                 })
+             }
+        })
+        
+        originalAnalysis.value = newOriginals
+        
+        // Refresh local form state from the first instance's new data
+        updateFormFromGroup()
+        
+    } catch (e) {
+        console.error("Failed to refresh details", e)
+    } finally {
+        loadingDetails.value = false
+    }
+}
+
+const handleUpdate = async (force: boolean = false) => {
     const instances = allInstances.value
-    if (!confirm(`Apply this assessment to all ${instances.length} instances?`)) return
+    if (!force && !confirm(`Apply this assessment to all ${instances.length} instances?`)) return
     
     updating.value = true
     try {
@@ -263,17 +326,24 @@ const handleUpdate = async () => {
             details: finalDetails,
             comment: comment.value,
             justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
-            suppressed: suppressed.value
+            suppressed: suppressed.value,
+            original_analysis: originalAnalysis.value,
+            force: force
         }
 
         const results = await updateAssessment(payload)
+        
+        // Check if results array contains errors?
+        // Wait, if API returns 409, axios throws?
+        // If my api.ts returns res.data, axios might throw on non-2xx.
+        // I need to wrap in try/catch and check error response.
         
         const errors = results.filter((r: any) => r.status === 'error')
         if (errors.length > 0) {
             console.error('Update completed with errors:', errors)
             alert(`Assessment updated with ${errors.length} errors. Check console for details.`)
         } else {
-            alert('Assessment updated successfully')
+            if (!force) alert('Assessment updated successfully')
             // Emit the updated assessment so the parent can update the state in memory
             emit('update:assessment', {
                 rescored_cvss: pendingScore.value,
@@ -283,15 +353,28 @@ const handleUpdate = async () => {
                 is_suppressed: suppressed.value,
                 justification: state.value === 'NOT_AFFECTED' ? justification.value : 'NOT_SET'
             })
+            // If forced, we should close modal
+            showConflictModal.value = false
         }
         
         expanded.value = false
-    } catch (err) {
-        alert('Failed to update assessment')
-        console.error(err)
+    } catch (err: any) {
+        if (err.response && err.response.status === 409) {
+            conflictData.value = err.response.data.conflicts
+            showConflictModal.value = true
+        } else {
+            alert('Failed to update assessment')
+            console.error(err)
+        }
     } finally {
         updating.value = false
     }
+}
+
+const handleUseServerState = () => {
+    // Refresh details to get latest server state (which we technically have in conflictData but refresh is safer/simpler)
+    refreshDetails()
+    showConflictModal.value = false
 }
 
 // ... (keep existing computed properties: displayState, severityColor, stateColor)
@@ -474,7 +557,14 @@ const rescoredVectorSegments = computed(() => {
                     </button>
             </div>
 
-            <div class="pt-1">
+            <div class="pt-1 flex items-center gap-2">
+                 <button 
+                    @click.stop="refreshDetails" 
+                    class="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"
+                    title="Refresh Analysis Details"
+                >
+                    <RefreshCw :size="16" :class="{ 'animate-spin': loadingDetails }" />
+                </button>
                 <component :is="expanded ? ChevronUp : ChevronDown" class="text-gray-500" :size="20" />
             </div>
         </div>
@@ -619,7 +709,7 @@ const rescoredVectorSegments = computed(() => {
                     </div>
                     
                     <button 
-                        @click="handleUpdate"
+                        @click="() => handleUpdate(false)"
                         :disabled="updating"
                         class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
                     >
@@ -724,4 +814,75 @@ const rescoredVectorSegments = computed(() => {
         </div>
     </div>
   </div>
+    <!-- Conflict Resolution Modal -->
+    <div v-if="showConflictModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+        <div class="bg-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col rounded-lg border border-red-500 shadow-2xl">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
+                <h3 class="font-bold text-lg text-red-400 flex items-center gap-2">
+                    <AlertTriangle :size="20" />
+                    Conflict Detected
+                </h3>
+                <button @click="showConflictModal = false" class="text-gray-400 hover:text-white text-xl font-bold">✕</button>
+            </div>
+            
+            <div class="p-4 bg-red-900/20 border-b border-red-900/50 text-red-200 text-sm">
+                The analysis data on the server has changed since you started editing. 
+                Please review the differences below and choose how to proceed.
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 bg-gray-800 space-y-4">
+                <div v-for="conflict in conflictData" :key="conflict.finding_uuid" class="bg-gray-900 border border-gray-700 rounded p-4">
+                    <div class="font-bold text-gray-300 mb-2 border-b border-gray-700 pb-1">
+                        {{ conflict.project_name }} {{ conflict.project_version }} - {{ conflict.component_name }}
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- Server State -->
+                        <div class="space-y-2">
+                             <h4 class="text-xs font-bold uppercase text-gray-500">Server State (New)</h4>
+                             <div class="text-sm">
+                                <span class="text-gray-400">State:</span> <span class="font-mono text-blue-300">{{ conflict.current.analysisState }}</span>
+                             </div>
+                             <div class="text-sm">
+                                <span class="text-gray-400">Suppressed:</span> <span class="font-mono text-blue-300">{{ conflict.current.isSuppressed }}</span>
+                             </div>
+                             <div class="text-sm bg-gray-800 p-2 rounded border border-gray-700 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-xs">
+                                {{ conflict.current.analysisDetails || '(No details)' }}
+                             </div>
+                        </div>
+                        
+                         <!-- Your State -->
+                        <div class="space-y-2">
+                             <h4 class="text-xs font-bold uppercase text-gray-500">Your Changes</h4>
+                             <div class="text-sm">
+                                <span class="text-gray-400">State:</span> <span class="font-mono text-green-300">{{ conflict.your_change.analysisState }}</span>
+                             </div>
+                             <div class="text-sm">
+                                <span class="text-gray-400">Suppressed:</span> <span class="font-mono text-green-300">{{ conflict.your_change.isSuppressed }}</span>
+                             </div>
+                             <div class="text-sm bg-gray-800 p-2 rounded border border-gray-700 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-xs">
+                                {{ conflict.your_change.analysisDetails || '(No details)' }}
+                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-4 border-t border-gray-700 bg-gray-850 flex justify-end gap-4">
+                <button 
+                    @click="handleUseServerState"
+                    class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-bold transition-colors"
+                >
+                    Discard My Changes (Use Server)
+                </button>
+                <button 
+                    @click="() => handleUpdate(true)"
+                    :disabled="updating"
+                    class="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-bold transition-colors disabled:opacity-50"
+                >
+                    Force Overwrite
+                </button>
+            </div>
+        </div>
+    </div>
 </template>

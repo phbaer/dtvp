@@ -2,9 +2,9 @@ from fastapi import FastAPI, Depends, APIRouter, UploadFile, File
 from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 import asyncio
 import uuid
@@ -74,6 +74,12 @@ class AssessmentRequest(BaseModel):
     comment: Optional[str] = None
     justification: Optional[str] = None
     suppressed: bool = False
+    original_analysis: Optional[Dict[str, Dict[str, Any]]] = None
+    force: bool = False
+
+
+class AssessmentDetailsRequest(BaseModel):
+    instances: List[dict]
 
 
 @api_router.get("/projects")
@@ -239,6 +245,44 @@ async def get_task_status(task_id: str, user: str = Depends(get_current_user)):
 # But for the "fix", we should probably encourage using the new one.
 
 
+@api_router.post("/assessments/details")
+async def get_assessment_details(
+    req: AssessmentDetailsRequest,
+    client: DTClient = Depends(get_client),
+    user: str = Depends(get_current_user),
+):
+    tasks = []
+    for instance in req.instances:
+        tasks.append(
+            client.get_analysis(
+                project_uuid=instance["project_uuid"],
+                component_uuid=instance["component_uuid"],
+                vulnerability_uuid=instance["vulnerability_uuid"],
+            )
+        )
+
+    fn_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = []
+    for i, res in enumerate(fn_results):
+        inst = req.instances[i]
+        result_item = {
+            "finding_uuid": inst.get("finding_uuid"),
+            "project_uuid": inst.get("project_uuid"),
+            "component_uuid": inst.get("component_uuid"),
+            "vulnerability_uuid": inst.get("vulnerability_uuid"),
+            "analysis": None,
+            "error": None,
+        }
+        if isinstance(res, Exception):
+            result_item["error"] = str(res)
+        else:
+            result_item["analysis"] = res
+        results.append(result_item)
+
+    return results
+
+
 @api_router.post("/assessment")
 async def update_assessment(
     req: AssessmentRequest,
@@ -246,7 +290,78 @@ async def update_assessment(
     user: str = Depends(get_current_user),
 ):
     print(f"Update assessment request from {user} for {len(req.instances)} instances")
-    print(f"State: {req.state}, Suppressed: {req.suppressed}")
+    print(
+        f"State: {req.state}, Suppressed: {req.suppressed}, Force: {req.force}, Original Analysis Provided: {bool(req.original_analysis)}"
+    )
+
+    # Conflict Check (Optimistic Locking)
+    if not req.force and req.original_analysis:
+        print("Checking for conflicts...")
+        # Fetch current state
+        tasks = []
+        for instance in req.instances:
+            tasks.append(
+                client.get_analysis(
+                    project_uuid=instance["project_uuid"],
+                    component_uuid=instance["component_uuid"],
+                    vulnerability_uuid=instance["vulnerability_uuid"],
+                )
+            )
+        current_analyses = await asyncio.gather(*tasks, return_exceptions=True)
+
+        conflicts = []
+        for i, current in enumerate(current_analyses):
+            instance = req.instances[i]
+            finding_uuid = instance.get("finding_uuid")
+            original = req.original_analysis.get(finding_uuid)
+
+            if isinstance(current, Exception) or not current:
+                continue
+
+            # Compare relevant fields if original exists
+            if original:
+                # Keys in DT response: analysisState, analysisDetails, isSuppressed
+                curr_state = current.get("analysisState")
+                curr_details = current.get("analysisDetails")
+                curr_suppressed = current.get("isSuppressed")
+
+                orig_state = original.get("analysisState")
+                orig_details = original.get("analysisDetails")
+                orig_suppressed = original.get("isSuppressed")
+
+                has_conflict = False
+                if (curr_state or "") != (orig_state or ""):
+                    has_conflict = True
+                if (curr_details or "") != (orig_details or ""):
+                    has_conflict = True
+                if bool(curr_suppressed) != bool(orig_suppressed):
+                    has_conflict = True
+
+                if has_conflict:
+                    print(f"Conflict found for {finding_uuid}")
+                    conflicts.append(
+                        {
+                            "finding_uuid": finding_uuid,
+                            "project_name": instance.get("project_name"),
+                            "project_version": instance.get("project_version"),
+                            "component_name": instance.get("component_name"),
+                            "component_version": instance.get("component_version"),
+                            "current": current,
+                            "original": original,
+                            "your_change": {
+                                "analysisState": req.state,
+                                "analysisDetails": req.details,
+                                "isSuppressed": req.suppressed,
+                            },
+                        }
+                    )
+
+        if conflicts:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "conflict", "conflicts": conflicts},
+            )
+
     print(f"Details: {req.details[:100]}...")
 
     # Iterate and update
@@ -357,7 +472,7 @@ async def upload_team_mapping(
 
 @api_router.put("/settings/mapping")
 async def update_team_mapping(
-    mapping: dict,
+    mapping: Dict[str, str],
     user: str = Depends(get_current_user),
 ):
     target_path = get_team_mapping_path()
@@ -421,7 +536,7 @@ async def upload_roles(
 
 @api_router.put("/settings/roles")
 async def update_roles(
-    roles: dict,
+    roles: Dict[str, str],
     user: str = Depends(get_current_user),
 ):
     role = get_user_role(user)
