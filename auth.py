@@ -164,5 +164,4 @@ def get_current_user(request: Request):
 
 @router.get("/me")
 def get_user_info(user: str = Depends(get_current_user)):
-    role = get_user_role(user)
-    return {"username": user, "role": role}
+    return {"username": user, "role": get_user_role(user)}

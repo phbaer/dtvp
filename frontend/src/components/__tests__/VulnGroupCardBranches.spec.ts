@@ -5,7 +5,9 @@ import VulnGroupCard from '../VulnGroupCard.vue'
 import { updateAssessment } from '../../lib/api'
 
 vi.mock('../../lib/api', () => ({
-    updateAssessment: vi.fn(() => Promise.resolve([]))
+    updateAssessment: vi.fn(() => Promise.resolve([])),
+    getAssessmentDetails: vi.fn(() => Promise.resolve([])),
+    getDependencyChains: vi.fn().mockResolvedValue([])
 }))
 
 vi.mock('lucide-vue-next', () => ({
@@ -13,7 +15,9 @@ vi.mock('lucide-vue-next', () => ({
     ChevronUp: { template: '<span />' },
     Shield: { template: '<span />' },
     Calculator: { template: '<span />' },
-    ExternalLink: { template: '<span />' }
+    ExternalLink: { template: '<span />' },
+    RefreshCw: { template: '<span />' },
+    AlertTriangle: { template: '<span />' }
 }))
 
 describe('VulnGroupCard Branch Coverage', () => {
@@ -93,20 +97,41 @@ describe('VulnGroupCard Branch Coverage', () => {
 
         // Helper to submit and check details
         const submitAndCheck = async (score: number | null, vector: string, expectedStart: string) => {
-            // Access internals to set state directly for speed, or set via UI
-            (wrapper.vm as any).pendingScore = score;
-            (wrapper.vm as any).pendingVector = vector;
+            // Ensure expanded first - if no expanded details div, click header
+            if (wrapper.findAll('.p-4.border-t.border-gray-700').length === 0) {
+                await wrapper.find('.cursor-pointer').trigger('click')
+                await wrapper.vm.$nextTick()
+            }
+
+            // Find inputs
+            const vectorInput = wrapper.find('input[placeholder^="CVSS"]')
+            if (vectorInput.exists()) {
+                await vectorInput.setValue(vector)
+            } else {
+                (wrapper.vm as any).pendingVector = vector
+            }
+
+            const scoreInput = wrapper.find('input[type="number"]')
+            if (score !== null && scoreInput.exists()) {
+                await scoreInput.setValue(score)
+            } else if (score !== null) {
+                (wrapper.vm as any).pendingScore = score
+            } else {
+                (wrapper.vm as any).pendingScore = null
+            }
 
             await wrapper.vm.$nextTick()
 
-            // Find valid button - re-expand if needed (update collapses card)
-            let btn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-            if (!btn) {
-                await wrapper.find('.cursor-pointer').trigger('click')
-                btn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-            }
+            // Find valid button
+            const btn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
             if (!btn) throw new Error('Apply button not found')
             await btn.trigger('click')
+
+            // Wait for any promises
+            await wrapper.vm.$nextTick()
+
+            // Wait for any promises
+            await wrapper.vm.$nextTick()
 
             // Check if mock was called
             const calls = vi.mocked(updateAssessment).mock.calls

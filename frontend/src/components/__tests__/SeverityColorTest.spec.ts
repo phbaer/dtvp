@@ -10,7 +10,14 @@ vi.mock('lucide-vue-next', () => ({
     Calculator: { template: '<span />' },
     ExternalLink: { template: '<span />' },
     Box: { template: '<span />' },
-    ShieldAlert: { template: '<span />' }
+    ShieldAlert: { template: '<span />' },
+    RefreshCw: { template: '<span />' },
+    AlertTriangle: { template: '<span />' }
+}))
+
+vi.mock('../../lib/api', () => ({
+    updateAssessment: vi.fn(),
+    getAssessmentDetails: vi.fn(() => Promise.resolve([]))
 }))
 
 describe('VulnGroupCard Severity Colors', () => {
