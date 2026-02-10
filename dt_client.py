@@ -1,6 +1,7 @@
 import httpx
 import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
+from contextlib import asynccontextmanager
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -72,13 +73,6 @@ class DTClient:
             page_number += 1
 
         return all_projects
-
-    async def get_project_versions(self, project_uuid: str) -> List[Dict[str, Any]]:
-        """
-        Get all versions for a project.
-        """
-        # Placeholder as per original code
-        pass
 
     async def get_vulnerabilities(self, project_uuid: str) -> List[Dict[str, Any]]:
         """
@@ -232,6 +226,7 @@ class DTSettings(BaseSettings):
         return None  # No global fallback anymore
 
 
+@asynccontextmanager
 async def get_client(
     api_url: Optional[str] = None,
     api_key: Optional[str] = None,

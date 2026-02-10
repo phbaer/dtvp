@@ -231,11 +231,7 @@ def get_user_info(
     user: str = Depends(get_current_user),
     roles: list[str] = Depends(get_current_user_roles),
 ):
-    # Frontend expects "role" string for backwards compat, or we update frontend.
-    # Plan says: Update frontend to support new role structure.
-    # But for now, let's also return `roles` list.
-    # And maybe `role` is the "highest" role?
-    # Logic in frontend was: user.role === 'REVIEWER'
+    # Frontend expects "role" string for backwards compat.
 
     primary_role = "ANALYST"
     if "ADMIN" in roles:

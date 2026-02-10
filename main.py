@@ -97,8 +97,7 @@ async def get_user_client(
     async with get_client(
         api_url=api_url, api_key=api_key, bearer_token=bearer_token
     ) as client:
-        async for c in client:
-            yield c
+        yield client
 
 
 @api_router.get("/projects")
@@ -375,8 +374,6 @@ async def update_assessment(
     for instance in req.instances:
         try:
             # Check Role Logic
-            # Check Role Logic
-            # role = get_user_role(user) -> now depends on session roles
             # The requirement: "A reviewer must be in the 'Reviewers' team".
             # If they are, auth.py puts "REVIEWER" in their roles.
 

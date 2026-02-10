@@ -18,44 +18,6 @@ def test_get_version(client):
     assert "build" in response.json()
 
 
-@pytest.mark.skip(reason="Reload causes issues with other tests")
-def test_main_context_path_reload():
-    # Test line 28: context_path = "/" + context_path
-    from unittest.mock import patch
-
-    # We need to simulate DTVP_CONTEXT_PATH="myctx" (no slash)
-    # Since main imports auth_settings, we need to patch that or env before reload
-
-    with patch.dict(os.environ, {"DTVP_CONTEXT_PATH": "myctx"}):
-        # We must also reload auth to pick up new env vars into AuthSettings if it's instantiated at module level
-        import auth
-
-        importlib.reload(auth)
-
-        import main
-
-        importlib.reload(main)
-
-        # Check routes for /myctx prefix
-        found = False
-        for route in main.app.routes:
-            if route.path.startswith("/myctx/api"):
-                found = True
-                break
-        assert found
-
-        # Also check redirect_to_context_path (lines 161-163)
-        # app.get(context_path) -> redirect to context_path/
-        client = TestClient(main.app)
-        resp = client.get("/myctx", follow_redirects=False)
-        assert resp.status_code == 307
-        assert resp.headers["location"] == "/myctx/"
-
-    # Restore main to default for safety
-    importlib.reload(auth)
-    importlib.reload(main)
-
-
 def test_process_grouped_vulns_task_bom_failure():
     import main
     from unittest.mock import AsyncMock

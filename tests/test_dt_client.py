@@ -178,13 +178,6 @@ async def test_get_project_vulnerabilities(dt_client, respx_mock):
     assert vulns[0]["cvssV3Vector"] is not None
 
 
-@pytest.mark.asyncio
-async def test_get_project_versions():
-    async with DTClient("http://url", "key") as client:
-        res = await client.get_project_versions("uuid")
-        assert res is None
-
-
 def test_settings_properties():
     # Test fallbacks
     s = DTSettings(
@@ -218,10 +211,9 @@ async def test_get_client():
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
 
-        async for c in get_client():
+        async with get_client() as c:
             assert c.base_url == "http://mock"
             assert c.headers["X-Api-Key"] == "mock_key"
-            break
 
 
 @respx.mock
