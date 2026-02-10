@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock
-from main import app, get_client, get_current_user
+from unittest.mock import AsyncMock
+from main import app
 from dt_client import DTClient
 
 
@@ -29,7 +29,18 @@ def mock_dt_client():
 @pytest.fixture
 def client(mock_dt_client):
     # Override dependencies
-    app.dependency_overrides[get_client] = lambda: mock_dt_client
+    from main import get_user_client, get_current_user_token_payload
+
+    async def override_get_user_client(token_payload: dict = None):
+        yield mock_dt_client
+
+    def override_get_token_payload():
+        return {"sub": "testuser", "dt_url": "http://mock", "dt_key": "mock"}
+
+    app.dependency_overrides[get_user_client] = override_get_user_client
+    app.dependency_overrides[get_current_user_token_payload] = (
+        override_get_token_payload
+    )
 
     with TestClient(app) as test_client:
         yield test_client

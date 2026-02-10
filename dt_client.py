@@ -6,13 +6,22 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DTClient:
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: Optional[str] = None,
+        bearer_token: Optional[str] = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.headers = {
-            "X-Api-Key": api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if api_key:
+            self.headers["X-Api-Key"] = api_key
+        if bearer_token:
+            self.headers["Authorization"] = f"Bearer {bearer_token}"
+
         # Create a persistent client with increased timeout and connection limits
         self.client = httpx.AsyncClient(
             headers=self.headers,
@@ -204,11 +213,10 @@ class DTSettings(BaseSettings):
     DTVP_DT_API_URL: str = Field(
         alias="DTVP_DT_API_URL", default="http://localhost:8081"
     )
-    DTVP_DT_API_KEY: str = Field(alias="DTVP_DT_API_KEY", default="change_me")
-
+    # Global API Key (optional fallback)
     # Support aliases from docker-compose.yml
     DEPENDENCY_TRACK_URL: Optional[str] = Field(default=None)
-    DEPENDENCY_TRACK_API_KEY: Optional[str] = Field(default=None)
+    # DEPENDENCY_TRACK_API_KEY: Optional[str] = Field(default=None) # Deprecated
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -221,11 +229,28 @@ class DTSettings(BaseSettings):
         )
 
     @property
-    def api_key(self) -> str:
-        return self.DTVP_DT_API_KEY or self.DEPENDENCY_TRACK_API_KEY or "change_me"
+    def api_key(self) -> Optional[str]:
+        return None  # No global fallback anymore
 
 
-async def get_client() -> AsyncGenerator[DTClient, None]:
+async def get_client(
+    api_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    bearer_token: Optional[str] = None,
+) -> AsyncGenerator[DTClient, None]:
+    """
+    Get a DTClient instance.
+    If api_url and api_key/bearer_token are provided, use them.
+    Otherwise, fall back to global settings (mostly for backward compat or tasks).
+    """
     settings = DTSettings()
-    async with DTClient(settings.api_url, settings.api_key) as client:
+
+    final_url = api_url or settings.api_url
+    final_key = api_key or settings.api_key
+
+    # We prefer bearer_token if provided (user context), otherwise final_key
+
+    async with DTClient(
+        final_url, api_key=final_key, bearer_token=bearer_token
+    ) as client:
         yield client

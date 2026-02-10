@@ -195,16 +195,17 @@ def test_settings_properties():
     )
 
     assert s.api_url == "http://fallback"
-    assert s.api_key == "key"
+    assert s.api_url == "http://fallback"
+    assert s.api_key is None
 
     s2 = DTSettings(
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL=None,
-        DTVP_DT_API_KEY="",
-        DEPENDENCY_TRACK_API_KEY=None,
+        # DTVP_DT_API_KEY="", # Removed field
+        # DEPENDENCY_TRACK_API_KEY=None, # Removed field
     )
     assert s2.api_url == "http://localhost:8081"
-    assert s2.api_key == "change_me"
+    assert s2.api_key is None
 
 
 @pytest.mark.asyncio
@@ -247,7 +248,6 @@ async def test_get_bom_error():
 
     settings = DTSettings(
         DTVP_DT_API_URL="http://dependency-track",
-        DTVP_DT_API_KEY="test_key",
     )
 
     # We also mocked respx specific URL.

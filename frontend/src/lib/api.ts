@@ -93,8 +93,27 @@ export const getAssessmentDetails = async (instances: any[]) => {
     return res.data;
 };
 
+
+export interface AuthConfig {
+    default_url: string;
+}
+
+export const getAuthConfig = async (): Promise<AuthConfig> => {
+    const res = await axios.get(AUTH_BASE + '/config');
+    return res.data;
+};
+
 export const login = () => {
     window.location.href = AUTH_BASE + '/login';
+};
+
+export const logout = async () => {
+    try {
+        await axios.post(AUTH_BASE + '/logout');
+    } catch (e) {
+        console.error("Logout failed", e);
+    }
+    window.location.href = '/login';
 };
 
 export const checkSession = async () => {

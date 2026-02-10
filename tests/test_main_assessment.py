@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
-from main import app, get_current_user, get_client
+from main import app, get_current_user, get_user_client
 
 
 # Override dependencies
@@ -15,7 +15,10 @@ def mock_client():
 
 @pytest.fixture
 def override_deps(mock_client):
-    app.dependency_overrides[get_client] = lambda: mock_client
+    async def mock_get_user_client():
+        yield mock_client
+
+    app.dependency_overrides[get_user_client] = mock_get_user_client
     app.dependency_overrides[get_current_user] = lambda: "testuser"
     yield
     app.dependency_overrides = {}

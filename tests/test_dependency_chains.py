@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from main import app, get_client
+from main import app, get_user_client
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -8,8 +8,9 @@ client = TestClient(app)
 
 @pytest.fixture
 def mock_dt_client():
-    with patch("main.get_client") as mock:
-        yield mock
+    # We now override get_user_client instead of get_client
+    # because endpoints use get_user_client
+    pass
 
 
 @pytest.fixture
@@ -18,11 +19,16 @@ def mock_bom_analysis_cache():
         yield mock
 
 
-def test_get_dependency_chains_success(mock_dt_client, mock_bom_analysis_cache):
+def test_get_dependency_chains_success(mock_bom_analysis_cache):
     # Setup mock
     mock_client_instance = AsyncMock()
-    # Mock dependency injection
-    app.dependency_overrides[get_client] = lambda: mock_client_instance
+
+    # Mock dependency injection for get_user_client
+    # It must yield the client
+    async def mock_get_user_client():
+        yield mock_client_instance
+
+    app.dependency_overrides[get_user_client] = mock_get_user_client
     app.dependency_overrides["get_current_user"] = lambda: "test_user"
 
     # Mock BOM response
@@ -47,10 +53,17 @@ def test_get_dependency_chains_success(mock_dt_client, mock_bom_analysis_cache):
     mock_client_instance.get_bom.assert_called_with("proj1")
     mock_processor.get_dependency_paths.assert_called_with("comp1", component_name="")
 
+    # Cleanup
+    app.dependency_overrides = {}
 
-def test_get_dependency_chains_no_bom(mock_dt_client):
+
+def test_get_dependency_chains_no_bom():
     mock_client_instance = AsyncMock()
-    app.dependency_overrides[get_client] = lambda: mock_client_instance
+
+    async def mock_get_user_client():
+        yield mock_client_instance
+
+    app.dependency_overrides[get_user_client] = mock_get_user_client
     app.dependency_overrides["get_current_user"] = lambda: "test_user"
 
     mock_client_instance.get_bom.return_value = None

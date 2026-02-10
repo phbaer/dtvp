@@ -6,7 +6,7 @@ import { login } from '../lib/api'
   <div class="flex flex-col items-center justify-center min-h-screen bg-gray-950 text-white">
     <div class="p-8 bg-gray-800 rounded-lg shadow-lg border border-gray-700 text-center max-w-md w-full">
       <h1 class="text-3xl font-bold mb-2 text-blue-500">DTVP</h1>
-      <p className="text-gray-400 mb-8">Sign in to assess vulnerabilities</p>
+      <p class="text-gray-400 mb-8">Sign in to assess vulnerabilities</p>
       
       <button 
           @click="login"

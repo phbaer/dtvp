@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, AsyncGenerator
 import os
 import asyncio
 import uuid
@@ -13,8 +13,13 @@ import shutil
 import json
 from fastapi import HTTPException
 
-from auth import router as auth_router, get_current_user, auth_settings
-from dt_client import get_client, DTClient, DTSettings
+from auth import (
+    router as auth_router,
+    get_current_user,
+    get_current_user_token_payload,
+    auth_settings,
+)
+from dt_client import get_client, DTClient
 from logic import (
     group_vulnerabilities,
     get_team_mapping_path,
@@ -82,10 +87,30 @@ class AssessmentDetailsRequest(BaseModel):
     instances: List[dict]
 
 
+# Dependency to get a client configured with the current user's API Key
+async def get_user_client(
+    token_payload: dict = Depends(get_current_user_token_payload),
+) -> AsyncGenerator[DTClient, None]:
+    api_url = token_payload.get("dt_url")
+    # Support both key and token, prioritizing token if OIDC
+    api_key = token_payload.get("dt_key")
+    bearer_token = token_payload.get("dt_token")
+
+    # If using OIDC, api_url might be missing from session if we rely on global default?
+    # In auth.py, we put dt_settings.api_url into payload only if we want to bind session to it?
+    # Actually, let's check auth.py - yes, I put default_url there.
+
+    async with get_client(
+        api_url=api_url, api_key=api_key, bearer_token=bearer_token
+    ) as client:
+        async for c in client:
+            yield c
+
+
 @api_router.get("/projects")
 async def search_projects(
     name: str,
-    client: DTClient = Depends(get_client),
+    client: DTClient = Depends(get_user_client),
     user: str = Depends(get_current_user),
 ):
     return await client.get_projects(name)
@@ -204,6 +229,7 @@ async def start_group_vulns_task(
     # We DO NOT use Dependency Injection for the client here because it's tied to request scope.
     # We must instantiate a new client for the background task.
     user: str = Depends(get_current_user),
+    token_payload: dict = Depends(get_current_user_token_payload),
 ):
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
@@ -215,14 +241,15 @@ async def start_group_vulns_task(
         "result": None,
     }
 
-    # Instantiate a fresh client for the background task
-    # We need to manually handle its lifecycle or let the task handle it
-    # But get_client is an async generator now.
-    # Let's import get_client and use it properly in the task wrapper.
+    # Extract creds to pass to background task
+    api_url = token_payload.get("dt_url")
+    api_key = token_payload.get("dt_key")
+
     async def task_wrapper():
         # Manually invoke the client context
-        settings = DTSettings()
-        async with DTClient(settings.api_url, settings.api_key) as client:
+        # settings = DTSettings() <- No longer use default settings here
+        # We must use the user's credentials
+        async with DTClient(api_url, api_key) as client:
             await process_grouped_vulns_task(task_id, name, client)
 
     asyncio.create_task(task_wrapper())
@@ -248,7 +275,7 @@ async def get_task_status(task_id: str, user: str = Depends(get_current_user)):
 @api_router.post("/assessments/details")
 async def get_assessment_details(
     req: AssessmentDetailsRequest,
-    client: DTClient = Depends(get_client),
+    client: DTClient = Depends(get_user_client),
     user: str = Depends(get_current_user),
 ):
     tasks = []
@@ -286,7 +313,7 @@ async def get_assessment_details(
 @api_router.post("/assessment")
 async def update_assessment(
     req: AssessmentRequest,
-    client: DTClient = Depends(get_client),
+    client: DTClient = Depends(get_user_client),
     user: str = Depends(get_current_user),
 ):
     print(f"Update assessment request from {user} for {len(req.instances)} instances")
@@ -412,7 +439,7 @@ async def update_assessment(
 async def get_dependency_chains(
     project_uuid: str,
     component_uuid: str,
-    client: DTClient = Depends(get_client),
+    client: DTClient = Depends(get_user_client),
 ):
     bom = await client.get_bom(project_uuid)
     if not bom:

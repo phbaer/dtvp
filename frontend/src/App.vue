@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, provide } from 'vue'
-import { getVersion, getUserInfo } from './lib/api'
+import { getVersion, getUserInfo, logout } from './lib/api'
 
 const version = ref('')
 const build = ref('')
 const user = ref({ username: '', role: '' })
 
 provide('user', user)
+
+const handleLogout = async () => {
+    await logout()
+}
 
 onMounted(async () => {
     try {
@@ -43,11 +47,19 @@ onMounted(async () => {
                         <router-link to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
                     </nav>
                 </div>
-                <div class="text-sm text-gray-400 hidden sm:block flex flex-col items-end">
-                    <div v-if="user.username" class="text-blue-300 font-medium">
-                        {{ user.username }} <span class="text-gray-500 text-xs">({{ user.role }})</span>
+                <div class="flex items-center gap-4">
+                    <div class="text-sm text-gray-400 hidden sm:block flex flex-col items-end">
+                        <div v-if="user.username" class="text-blue-300 font-medium">
+                            {{ user.username }} <span class="text-gray-500 text-xs">({{ user.role }})</span>
+                        </div>
+                        <div v-else>DTVP</div>
                     </div>
-                    <div v-else>Dependency Track Vulnerability Processor</div>
+                    <button 
+                        @click="handleLogout" 
+                        class="text-sm border border-gray-600 rounded px-3 py-1 hover:bg-gray-700 hover:text-white transition-colors text-gray-400"
+                    >
+                        Logout
+                    </button>
                 </div>
             </div>
         </header>
