@@ -1,5 +1,5 @@
 import pytest
-from main import app, get_current_user
+from main import app, get_current_user, get_current_user_roles
 from unittest.mock import patch, mock_open
 
 
@@ -7,6 +7,8 @@ from unittest.mock import patch, mock_open
 @pytest.fixture(autouse=True)
 def override_auth():
     app.dependency_overrides[get_current_user] = lambda: "testuser"
+    # Default roles to ADMIN so mapping updates succeed
+    app.dependency_overrides[get_current_user_roles] = lambda: ["ADMIN"]
     yield
     app.dependency_overrides = {}
 
@@ -45,29 +47,11 @@ def test_update_team_mapping_failure(client):
             assert "Write error" in data["message"]
 
 
-def test_update_roles_reviewer(client):
-    new_roles = {"alice": "REVIEWER", "bob": "ANALYST"}
+def test_update_team_mapping_forbidden_non_admin(client):
+    # Override roles to just ANALYST/REVIEWER (no ADMIN)
+    app.dependency_overrides[get_current_user_roles] = lambda: ["REVIEWER"]
+    new_mapping = {"comp": "team"}
 
-    # Mock user role to be REVIEWER
-    with patch("main.get_user_role", return_value="REVIEWER"):
-        with patch(
-            "main.get_user_roles_path", return_value="/tmp/test_roles_update.json"
-        ):
-            with patch("builtins.open", mock_open()) as mocked_file:
-                response = client.put("/api/settings/roles", json=new_roles)
-
-                assert response.status_code == 200
-                assert response.json()["status"] == "success"
-
-                mocked_file.assert_called_with("/tmp/test_roles_update.json", "w")
-
-
-def test_update_roles_analyst_forbidden(client):
-    new_roles = {"alice": "REVIEWER"}
-
-    # Mock user role to be ANALYST (default for 'testuser' if not mapped, but we force it)
-    with patch("main.get_user_role", return_value="ANALYST"):
-        response = client.put("/api/settings/roles", json=new_roles)
-
-        assert response.status_code == 403
-        assert "Only reviewers" in response.json()["detail"]
+    response = client.put("/api/settings/mapping", json=new_mapping)
+    assert response.status_code == 403
+    assert "Only administrators" in response.json()["detail"]

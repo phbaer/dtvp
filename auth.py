@@ -4,7 +4,6 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import httpx
 from jose import jwt
-from logic import get_user_role
 from dt_client import DTSettings
 
 
@@ -22,6 +21,10 @@ class AuthSettings(BaseSettings):
         alias="DTVP_FRONTEND_URL", default="http://localhost:8000"
     )
     CONTEXT_PATH: str = Field(alias="DTVP_CONTEXT_PATH", default="/")
+
+    # Role Configuration
+    REVIEWER_TEAM: str = Field(alias="DTVP_REVIEWER_TEAM", default="Reviewers")
+    ADMIN_TEAM: str = Field(alias="DTVP_ADMIN_TEAM", default="Administrators")
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -132,10 +135,6 @@ async def callback(code: str, response: Response):
     id_token = tokens.get("id_token")
     access_token = tokens.get("access_token")
 
-    # We should validate the token properly (verify sig, exp, etc.) using keys from jwks_uri
-    # For now, we decode unverified claims to get 'sub'
-    # TODO: Implement proper validation or use a library that does it against JWKS
-
     try:
         claims = jwt.get_unverified_claims(id_token)
     except Exception:
@@ -148,10 +147,35 @@ async def callback(code: str, response: Response):
         or "user"
     )
 
+    # Fetch User Teams to determine roles
+    roles = ["ANALYST"]  # Default role
+
+    from dt_client import DTClient
+
+    # We need to call DT to get teams.
+    # We use the access_token we just got.
+    try:
+        async with DTClient(
+            dt_settings.api_url, bearer_token=access_token
+        ) as dt_client:
+            teams = await dt_client.get_self_teams()
+
+            team_names = [t.get("name") for t in teams]
+
+            if auth_settings.REVIEWER_TEAM in team_names:
+                roles.append("REVIEWER")
+            if auth_settings.ADMIN_TEAM in team_names:
+                roles.append("ADMIN")
+
+    except Exception as e:
+        print(f"Failed to fetch teams for {username}: {e}")
+        # Proceed with default role
+
     session_payload = {
         "sub": username,
         "dt_token": access_token,
         "dt_url": dt_settings.api_url,
+        "roles": roles,
     }
 
     session_token = jwt.encode(
@@ -196,9 +220,34 @@ def get_current_user(payload: dict = Depends(get_current_user_token_payload)) ->
     return payload.get("sub", "user")
 
 
+def get_current_user_roles(
+    payload: dict = Depends(get_current_user_token_payload),
+) -> list[str]:
+    return payload.get("roles", ["ANALYST"])
+
+
 @router.get("/me")
-def get_user_info(user: str = Depends(get_current_user)):
-    return {"username": user, "role": get_user_role(user)}
+def get_user_info(
+    user: str = Depends(get_current_user),
+    roles: list[str] = Depends(get_current_user_roles),
+):
+    # Frontend expects "role" string for backwards compat, or we update frontend.
+    # Plan says: Update frontend to support new role structure.
+    # But for now, let's also return `roles` list.
+    # And maybe `role` is the "highest" role?
+    # Logic in frontend was: user.role === 'REVIEWER'
+
+    primary_role = "ANALYST"
+    if "ADMIN" in roles:
+        primary_role = "ADMIN"
+    elif "REVIEWER" in roles:
+        primary_role = "REVIEWER"
+
+    return {
+        "username": user,
+        "role": primary_role,  # Deprecated single role
+        "roles": roles,
+    }
 
 
 @router.get("/config")

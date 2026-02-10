@@ -170,7 +170,9 @@ async def test_update_assessment_force():
 
     # When force is True, we should NOT get conflict even if data changed
     # It should return list of results (status: success)
-    results = await update_assessment(req, client=mock_client, user="test_user")
+    results = await update_assessment(
+        req, client=mock_client, user="test_user", roles=["ANALYST"]
+    )
 
     assert isinstance(results, list)
     assert len(results) == 1

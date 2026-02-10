@@ -125,20 +125,14 @@ export const checkSession = async () => {
     }
 };
 
-export const getUserInfo = async (): Promise<{ username: string; role?: string }> => {
+export interface User {
+    username: string;
+    role: string;
+    roles: string[];
+}
+
+export const getUserInfo = async (): Promise<User> => {
     const res = await axios.get(AUTH_BASE + '/me', { withCredentials: true });
-    return res.data;
-};
-
-export const getRoles = async (): Promise<Record<string, string>> => {
-    const res = await api.get('/settings/roles');
-    return res.data;
-};
-
-export const uploadRoles = async (file: File): Promise<{ status: string; message: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await api.post('/settings/roles', formData);
     return res.data;
 };
 

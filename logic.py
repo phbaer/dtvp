@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import re
 import json
 import os
@@ -24,39 +24,6 @@ def load_team_mapping(path: str = None) -> Dict[str, str]:
             return json.load(f)
     except Exception:
         return {}
-
-
-def get_user_roles_path() -> str:
-    return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
-
-
-def load_user_roles(path: str = None) -> Optional[Dict[str, str]]:
-    if path is None:
-        path = get_user_roles_path()
-
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def get_user_role(username: str, roles_map: Dict[str, str] = None) -> str:
-    """
-    Returns 'REVIEWER' or 'ANALYST'.
-    If roles_map is None (no config file), everyone is REVIEWER.
-    If roles_map matches username, return that.
-    Otherwise (config exists but user not in it), return 'ANALYST'.
-    """
-    if roles_map is None:
-        roles_map = load_user_roles()
-
-    if roles_map is None:
-        return "REVIEWER"
-
-    return roles_map.get(username, "ANALYST")
 
 
 def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -464,29 +431,3 @@ def group_vulnerabilities(
         result.append(g)
 
     return result
-
-
-def get_user_roles_path() -> str:
-    return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
-
-
-def load_user_roles(path: str = None) -> Dict[str, str]:
-    if path is None:
-        path = get_user_roles_path()
-
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def get_user_role(user: str) -> str:
-    path = get_user_roles_path()
-    if not os.path.exists(path):
-        return "REVIEWER"
-
-    roles = load_user_roles(path) or {}
-    return roles.get(user, "ANALYST")

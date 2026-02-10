@@ -193,6 +193,10 @@ async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client)
 
 
 def test_assessment_update(client, mock_dt_client):
+    from main import get_current_user_roles
+
+    app.dependency_overrides[get_current_user_roles] = lambda: ["REVIEWER"]
+
     payload = {
         "instances": [
             {
@@ -223,6 +227,8 @@ def test_assessment_update(client, mock_dt_client):
     assert "Verified as false positive" in call_kwargs["details"]
     assert "[Reviewed by: testuser]" in call_kwargs["details"]
     assert call_kwargs["suppressed"] is True
+
+    app.dependency_overrides.pop(get_current_user_roles)
 
 
 def test_assessment_update_failure(client, mock_dt_client):
