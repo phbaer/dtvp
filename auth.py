@@ -87,9 +87,7 @@ async def login():
         "scope": "openid profile email",
     }
 
-    # Construct URL manually to allow for proper encoding by starlette/fastapi if we returned RedirectResponse
-    # But here we just return the URL or RedirectResponse?
-    # Standard flow: User visits /auth/login -> 302 to IdP
+    # Construct URL manually to allow for proper encoding
 
     from urllib.parse import urlencode
 
@@ -152,8 +150,8 @@ async def callback(code: str, response: Response):
 
     session_payload = {
         "sub": username,
-        "dt_token": access_token,  # Store access token to use for DT API calls
-        "dt_url": dt_settings.api_url,  # Should we store this? Frontend uses /auth/config
+        "dt_token": access_token,
+        "dt_url": dt_settings.api_url,
     }
 
     session_token = jwt.encode(
@@ -161,8 +159,6 @@ async def callback(code: str, response: Response):
     )
 
     # Redirect to frontend
-    # If context path is set, we might need to be careful?
-    # Usually redirect to /
 
     redirect_url = "/"
     if auth_settings.CONTEXT_PATH and auth_settings.CONTEXT_PATH != "/":

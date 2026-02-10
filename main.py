@@ -96,10 +96,6 @@ async def get_user_client(
     api_key = token_payload.get("dt_key")
     bearer_token = token_payload.get("dt_token")
 
-    # If using OIDC, api_url might be missing from session if we rely on global default?
-    # In auth.py, we put dt_settings.api_url into payload only if we want to bind session to it?
-    # Actually, let's check auth.py - yes, I put default_url there.
-
     async with get_client(
         api_url=api_url, api_key=api_key, bearer_token=bearer_token
     ) as client:
@@ -265,13 +261,6 @@ async def get_task_status(task_id: str, user: str = Depends(get_current_user)):
     return task
 
 
-# Old endpoint kept for compatibility if needed, or removed?
-# Requirement implied replacing the behavior. Let's keep it but maybe it won't be used by UI.
-# actually, let's remove the old implementation logic and just return empty or error if used?
-# Or just keep it as is for API compatibility but UI uses the new one.
-# But for the "fix", we should probably encourage using the new one.
-
-
 @api_router.post("/assessments/details")
 async def get_assessment_details(
     req: AssessmentDetailsRequest,
@@ -316,14 +305,8 @@ async def update_assessment(
     client: DTClient = Depends(get_user_client),
     user: str = Depends(get_current_user),
 ):
-    print(f"Update assessment request from {user} for {len(req.instances)} instances")
-    print(
-        f"State: {req.state}, Suppressed: {req.suppressed}, Force: {req.force}, Original Analysis Provided: {bool(req.original_analysis)}"
-    )
 
-    # Conflict Check (Optimistic Locking)
     if not req.force and req.original_analysis:
-        print("Checking for conflicts...")
         # Fetch current state
         tasks = []
         for instance in req.instances:
@@ -365,7 +348,6 @@ async def update_assessment(
                     has_conflict = True
 
                 if has_conflict:
-                    print(f"Conflict found for {finding_uuid}")
                     conflicts.append(
                         {
                             "finding_uuid": finding_uuid,
@@ -389,16 +371,10 @@ async def update_assessment(
                 content={"status": "conflict", "conflicts": conflicts},
             )
 
-    print(f"Details: {req.details[:100]}...")
-
     # Iterate and update
     results = []
     for instance in req.instances:
         try:
-            print(
-                f"  Updating instance: {instance.get('finding_uuid')} (Vulnerability: {instance.get('vulnerability_uuid')})"
-            )
-
             # Check Role Logic
             role = get_user_role(user)
             action_label = "Reviewed by" if role == "REVIEWER" else "Assessed by"

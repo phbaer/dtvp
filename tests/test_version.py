@@ -1,6 +1,4 @@
-import os
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 def test_get_app_version_fallback():

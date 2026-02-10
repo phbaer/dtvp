@@ -1,7 +1,6 @@
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch
-from httpx import AsyncClient
+from unittest.mock import patch
 from main import app, get_current_user
 
 

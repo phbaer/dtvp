@@ -1,6 +1,5 @@
 import pytest
-from fastapi.testclient import TestClient
-from main import app, get_current_user, get_user_role
+from main import app, get_current_user
 from unittest.mock import patch, mock_open
 
 

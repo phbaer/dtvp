@@ -290,7 +290,6 @@ def test_group_vulnerabilities_tagging():
 
 
 def test_get_team_mapping_path_default():
-    import os
 
     original_env = os.environ.get("TEAM_MAPPING_PATH")
     if "TEAM_MAPPING_PATH" in os.environ:
@@ -304,7 +303,6 @@ def test_get_team_mapping_path_default():
 
 
 def test_get_team_mapping_path_env():
-    import os
 
     original_env = os.environ.get("TEAM_MAPPING_PATH")
     os.environ["TEAM_MAPPING_PATH"] = "/tmp/test.json"

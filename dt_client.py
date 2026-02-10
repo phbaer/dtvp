@@ -216,7 +216,6 @@ class DTSettings(BaseSettings):
     # Global API Key (optional fallback)
     # Support aliases from docker-compose.yml
     DEPENDENCY_TRACK_URL: Optional[str] = Field(default=None)
-    # DEPENDENCY_TRACK_API_KEY: Optional[str] = Field(default=None) # Deprecated
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -241,7 +240,6 @@ async def get_client(
     """
     Get a DTClient instance.
     If api_url and api_key/bearer_token are provided, use them.
-    Otherwise, fall back to global settings (mostly for backward compat or tasks).
     """
     settings = DTSettings()
 

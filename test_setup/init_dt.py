@@ -239,11 +239,11 @@ def main():
         print(f"Failed to upload BOM: {r.status_code} {r.text}")
 
     print("\n---------------------------------------------------")
-    print(f"SETUP COMPLETE.")
+    print("SETUP COMPLETE.")
     print(
-        f"Dependency-Track URL: http://localhost:8080 (Frontend) / http://localhost:8081 (API)"
+        "Dependency-Track URL: http://localhost:8080 (Frontend) / http://localhost:8081 (API)"
     )
-    print(f"Admin User: admin")
+    print("Admin User: admin")
     print(f"Admin Pass: {NEW_ADMIN_PASS}")
     print(f"API KEY: {api_key}")
     print("---------------------------------------------------\n")
