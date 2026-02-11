@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, config } from '@vue/test-utils'
+import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock API
@@ -68,11 +69,17 @@ describe('VulnGroupCard', () => {
         ]
     }
 
+
     beforeEach(() => {
         vi.clearAllMocks()
         // Mock browser alerts/confirms
         global.confirm = vi.fn(() => true)
         global.alert = vi.fn()
+
+        // Provide mock user
+        config.global.provide = {
+            user: ref({ username: 'testuser', role: 'ADMIN' })
+        }
     })
 
     it('renders vulnerability details', () => {

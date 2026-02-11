@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { mount, config } from '@vue/test-utils'
+import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock types to satisfy linting
@@ -21,6 +22,11 @@ const createMockComponent = (uuid: string, name: string, version: string, paths:
 })
 
 describe('VulnGroupCard Helper Logic', () => {
+    beforeEach(() => {
+        config.global.provide = {
+            user: ref({ username: 'testuser', role: 'ADMIN' })
+        }
+    })
 
     it('handles duplicate component versions by merging usage paths', () => {
         const groupData = {

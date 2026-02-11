@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, config } from '@vue/test-utils'
+import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock api
@@ -83,6 +84,10 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         globalThis._mockCvssState.throwOnApply = false
         globalThis._mockCvssState.throwOnGetComponents = false
         globalThis._mockCvssState.throwOnParsing = false
+
+        config.global.provide = {
+            user: ref({ username: 'testuser', role: 'ADMIN' })
+        }
     })
 
     it('handles exception in calculatorGroups computed via console.error', async () => {

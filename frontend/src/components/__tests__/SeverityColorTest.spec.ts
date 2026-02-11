@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, config } from '@vue/test-utils'
+import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock icons
@@ -21,6 +22,12 @@ vi.mock('../../lib/api', () => ({
 }))
 
 describe('VulnGroupCard Severity Colors', () => {
+    beforeEach(() => {
+        config.global.provide = {
+            user: ref({ username: 'testuser', role: 'ADMIN' })
+        }
+    })
+
     it('renders MEDIUM severity color correctly', async () => {
         const mediumGroup = {
             id: 'V1',

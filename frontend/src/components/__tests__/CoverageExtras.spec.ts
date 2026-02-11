@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, config } from '@vue/test-utils'
+import { ref } from 'vue'
 import DependencyPathList from '../DependencyPathList.vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
@@ -26,6 +27,11 @@ vi.mock('../../lib/api', () => ({
 }))
 
 describe('Coverage Extras', () => {
+    beforeEach(() => {
+        config.global.provide = {
+            user: ref({ username: 'testuser', role: 'ADMIN' })
+        }
+    })
     it('DependencyPathList handles single node path (hides it)', () => {
         const wrapper = mount(DependencyPathList, {
             props: { paths: ['OnlyComponent'], projectName: 'Proj' }

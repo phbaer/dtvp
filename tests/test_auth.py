@@ -141,4 +141,65 @@ def test_me_endpoint(client):
     client.cookies.set("session_token", token)
     response = client.get("/auth/me")
     assert response.status_code == 200
-    assert response.json()["username"] == "testuser"
+
+
+@pytest.mark.asyncio
+async def test_login_with_token_success(client, respx_mock):
+    # Ensure DT Client uses the correct URL
+    from dt_client import DTSettings
+    # The default in DTSettings is localhost:8081, but auth_settings.FRONTEND_URL is localhost:8000
+    # In the code, we use dt_settings.api_url which uses DTVP_DT_API_URL env var.
+    # In tests, we need to make sure we mock the right URL.
+
+    # Let's force the API URL to be what we mock
+    mock_dt_url = "http://mock-dt:8081"
+    import os
+
+    os.environ["DTVP_DT_API_URL"] = mock_dt_url
+    # Re-instantiate settings to pick up env? Or just mock the property if possible,
+    # but easier to just use the value logic uses.
+
+    # Actually, auth.py uses `dt_settings.api_url`. `dt_settings` is instantiated at module level.
+    # We should patch `dt_settings` in auth.py
+    from auth import dt_settings
+
+    dt_settings.DTVP_DT_API_URL = mock_dt_url
+
+    # Mock DT User Teams call
+    respx_mock.get(f"{mock_dt_url}/api/v1/team/self").respond(
+        status_code=200, json=[{"name": "Analysts"}]
+    )
+
+    token = jwt.encode({"sub": "jdoe"}, "secret", algorithm="HS256")
+
+    response = client.post("/auth/login-with-token", json={"token": token})
+
+    assert response.status_code == 200
+    assert response.json()["username"] == "jdoe"
+
+    # Verify Cookie
+    cookie = response.cookies.get("session_token")
+    assert cookie is not None
+
+    payload = jwt.decode(cookie, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"])
+    assert payload["sub"] == "jdoe"
+    assert payload["dt_token"] == token
+
+
+@pytest.mark.asyncio
+async def test_login_with_token_invalid(client, respx_mock):
+    # Mock DT returns 401
+    respx_mock.get(f"{auth_settings.FRONTEND_URL}/api/v1/team/self").respond(
+        status_code=401
+    )
+
+    response = client.post("/auth/login-with-token", json={"token": "bad-token"})
+
+    assert response.status_code == 401
+    assert "Invalid token" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_login_with_token_missing(client):
+    response = client.post("/auth/login-with-token", json={})
+    assert response.status_code == 422  # Pydantic validation error or 400

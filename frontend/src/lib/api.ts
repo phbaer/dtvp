@@ -103,7 +103,20 @@ export const getAuthConfig = async (): Promise<AuthConfig> => {
     return res.data;
 };
 
-export const login = () => {
+export const login = async () => {
+    // Parasitic Mode: Check if DT token exists in localStorage (same domain)
+    const token = localStorage.getItem('token');
+    if (token) {
+        try {
+            await axios.post(AUTH_BASE + '/login-with-token', { token });
+            // If successful, we have a session. Reload to dashboard.
+            window.location.href = '/';
+            return;
+        } catch (e) {
+            console.warn("Shared token login failed, falling back to OIDC", e);
+            // Fallback to OIDC
+        }
+    }
     window.location.href = AUTH_BASE + '/login';
 };
 

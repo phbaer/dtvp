@@ -262,6 +262,81 @@ async def process_implicit_callback(
     return {"status": "success"}
 
 
+class TokenLoginRequest(BaseModel):
+    token: str
+
+
+@router.post("/login-with-token")
+async def login_with_token(request: TokenLoginRequest, response: Response):
+    """
+    Login using an existing Dependency Track token (e.g. from local storage).
+    Validates the token against DT and creates a session.
+    """
+    token = request.token
+    if not token:
+        raise HTTPException(status_code=400, detail="Token is required")
+
+    # Validate token by fetching user info/teams from DT
+    try:
+        from dt_client import DTClient
+
+        async with DTClient(dt_settings.api_url, bearer_token=token) as dt_client:
+            # First get the user info to get the username
+            # We don't have a direct "whoami" endpoint that returns username in DT easily
+            # But get_self_teams returns teams, and we can infer success.
+            # To get the username, we might need to parse the JWT if it's a JWT.
+            # DT tokens are usually JWTs.
+
+            # Let's try to parse the token to get the username 'sub'.
+            # If it's not a valid JWT, we fail.
+            try:
+                # specific to DT: it uses RS256 usually, or HS256.
+                # We do NOT have the key to verify it.
+                # But we can decode without verification to get the 'sub'.
+                # The REAL verification is the call to `get_self_teams` below.
+                # If the token is invalid/revoked, DT will return 401.
+                claims = jwt.get_unverified_claims(token)
+                username = (
+                    claims.get("sub") or claims.get("preferred_username") or "user"
+                )
+            except Exception:
+                # Fallback if not a JWT or parse fails
+                username = "user"
+
+            # Check validity by making an API call
+            teams = await dt_client.get_self_teams()
+
+            team_names = [t.get("name") for t in teams]
+            roles = ["ANALYST"]
+            if auth_settings.REVIEWER_TEAM in team_names:
+                roles.append("REVIEWER")
+            if auth_settings.ADMIN_TEAM in team_names:
+                roles.append("ADMIN")
+
+            # Token is valid, create session
+            session_payload = {
+                "sub": username,
+                "dt_token": token,
+                "dt_url": dt_settings.api_url,
+                "roles": roles,
+            }
+
+            session_token = jwt.encode(
+                session_payload, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
+            )
+
+            response.set_cookie(
+                key="session_token", value=session_token, httponly=True, samesite="lax"
+            )
+            return {"status": "success", "username": username}
+
+    except Exception as e:
+        # If DT call fails (401), the token is invalid
+        raise HTTPException(
+            status_code=401, detail=f"Invalid token or DT error: {str(e)}"
+        )
+
+
 @router.post("/logout")
 def logout(response: Response):
     response.delete_cookie("session_token")

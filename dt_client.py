@@ -202,6 +202,14 @@ class DTClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_self_teams(self) -> List[Dict[str, Any]]:
+        """
+        Get teams for the current user.
+        """
+        response = await self.client.get(f"{self.base_url}/api/v1/team/self")
+        response.raise_for_status()
+        return response.json()
+
 
 class DTSettings(BaseSettings):
     DTVP_DT_API_URL: str = Field(
