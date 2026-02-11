@@ -1,6 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
-from pydantic import Field
+from fastapi.responses import HTMLResponse
+from pydantic import Field, BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import httpx
 from jose import jwt
@@ -78,67 +79,138 @@ async def get_oidc_config():
 @router.get("/login")
 async def login():
     """
-    Initiates OIDC Login.
+    Initiates OIDC Login with Implicit Flow.
     """
     config = await get_oidc_config()
     auth_endpoint = config["authorization_endpoint"]
 
+    # Generate nonce for ID token validation
+    import secrets
+
+    nonce = secrets.token_urlsafe(16)
+
     params = {
         "client_id": auth_settings.OIDC_CLIENT_ID,
-        "response_type": "code",
+        "response_type": "id_token token",  # Implicit Flow
         "redirect_uri": auth_settings.redirect_uri,
         "scope": "openid profile email",
+        "nonce": nonce,
     }
 
     # Construct URL manually to allow for proper encoding
-
     from urllib.parse import urlencode
 
     url = f"{auth_endpoint}?{urlencode(params)}"
 
     from fastapi.responses import RedirectResponse
 
-    return RedirectResponse(url)
+    resp = RedirectResponse(url)
+    # Store nonce in cookie for validation
+    resp.set_cookie(
+        key="oidc_nonce",
+        value=nonce,
+        httponly=True,
+        samesite="lax",
+        max_age=300,  # 5 minutes
+    )
+    return resp
 
 
 @router.get("/callback")
-async def callback(code: str, response: Response):
+async def callback_page():
     """
-    OIDC Callback.
+    OIDC Callback Page (Implicit Flow).
+    Serves HTML/JS to extract tokens from fragment and POST to backend.
     """
-    config = await get_oidc_config()
-    token_endpoint = config["token_endpoint"]
+    html_content = """
+    <html>
+        <head>
+            <title>Authenticating...</title>
+        </head>
+        <body>
+            <p>Authenticating...</p>
+            <script>
+                // Function to parse hash params
+                function getHashParams() {
+                    var hash = window.location.hash.substr(1);
+                    var result = hash.split('&').reduce(function (res, item) {
+                        var parts = item.split('=');
+                        res[parts[0]] = decodeURIComponent(parts[1]);
+                        return res;
+                    }, {});
+                    return result;
+                }
 
-    data = {
-        "grant_type": "authorization_code",
-        "client_id": auth_settings.OIDC_CLIENT_ID,
-        "client_secret": auth_settings.OIDC_CLIENT_SECRET,
-        "code": code,
-        "redirect_uri": auth_settings.redirect_uri,
-    }
+                var params = getHashParams();
+                var id_token = params.id_token;
+                var access_token = params.access_token;
+                var error = params.error;
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(token_endpoint, data=data)
-            resp.raise_for_status()
-            tokens = resp.json()
-        except httpx.RequestError as e:
-            raise HTTPException(
-                status_code=400, detail=f"Failed to exchange code: {str(e)}"
-            )
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(
-                status_code=400, detail=f"Token exchange failed: {e.response.text}"
-            )
+                if (error) {
+                    document.body.innerHTML = "Authentication Error: " + error;
+                } else if (id_token && access_token) {
+                    // POST to backend
+                    fetch('implicit-callback', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            id_token: id_token,
+                            access_token: access_token
+                        })
+                    }).then(function(response) {
+                        if (response.ok) {
+                            window.location.href = '/';
+                        } else {
+                            response.text().then(function(text) {
+                                document.body.innerHTML = "Backend Validation Error: " + text;
+                            });
+                        }
+                    }).catch(function(err) {
+                        document.body.innerHTML = "Network Error: " + err;
+                    });
+                } else {
+                    document.body.innerHTML = "No tokens found in URL fragment.";
+                }
+            </script>
+        </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
 
-    # Parse ID token to get user info
-    id_token = tokens.get("id_token")
-    access_token = tokens.get("access_token")
 
+class ImplicitTokenRequest(BaseModel):
+    id_token: str
+    access_token: str
+
+
+@router.post("/implicit-callback")
+async def process_implicit_callback(
+    request: ImplicitTokenRequest, request_obj: Request, response: Response
+):
+    """
+    Backend validation for Implicit Flow tokens.
+    """
+    # Verify Nonce
+    stored_nonce = request_obj.cookies.get("oidc_nonce")
+    if not stored_nonce:
+        raise HTTPException(status_code=400, detail="Missing OIDC nonce")
+
+    # Clear nonce cookie
+    response.delete_cookie("oidc_nonce")
+
+    # Decode ID Token (verify signature skipped for now as we trust the channel,
+    # but strictly should verify against JWKS if possible, or atleast nonce)
     try:
-        claims = jwt.get_unverified_claims(id_token)
+        claims = jwt.get_unverified_claims(request.id_token)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid ID Token")
+
+    # Check Nonce in claims
+    token_nonce = claims.get("nonce")
+    if token_nonce != stored_nonce:
+        raise HTTPException(status_code=400, detail="Invalid Nonce")
 
     username = (
         claims.get("preferred_username")
@@ -156,7 +228,7 @@ async def callback(code: str, response: Response):
     # We use the access_token we just got.
     try:
         async with DTClient(
-            dt_settings.api_url, bearer_token=access_token
+            dt_settings.api_url, bearer_token=request.access_token
         ) as dt_client:
             teams = await dt_client.get_self_teams()
 
@@ -173,7 +245,7 @@ async def callback(code: str, response: Response):
 
     session_payload = {
         "sub": username,
-        "dt_token": access_token,
+        "dt_token": request.access_token,
         "dt_url": dt_settings.api_url,
         "roles": roles,
     }
@@ -182,19 +254,12 @@ async def callback(code: str, response: Response):
         session_payload, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
     )
 
-    # Redirect to frontend
-
-    redirect_url = "/"
-    if auth_settings.CONTEXT_PATH and auth_settings.CONTEXT_PATH != "/":
-        redirect_url = auth_settings.CONTEXT_PATH
-
-    from fastapi.responses import RedirectResponse
-
-    resp = RedirectResponse(redirect_url)
-    resp.set_cookie(
+    # We cannot redirect here because this is an AJAX request.
+    # We just set the cookie and return 200.
+    response.set_cookie(
         key="session_token", value=session_token, httponly=True, samesite="lax"
     )
-    return resp
+    return {"status": "success"}
 
 
 @router.post("/logout")

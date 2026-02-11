@@ -36,42 +36,47 @@ async def test_login_redirect(client, respx_mock):
     assert response.status_code == 307
     assert "https://oidc.example.com/auth" in response.headers["location"]
     assert "client_id=client-id" in response.headers["location"]
-    assert "redirect_uri=" in response.headers["location"]
+    assert "response_type=id_token+token" in response.headers["location"]
+    assert "nonce=" in response.headers["location"]
+    # Ensure PKCE is gone
+    assert "code_challenge=" not in response.headers["location"]
+
+    # Verify cookie is set
+    assert "oidc_nonce" in response.cookies
 
 
 @pytest.mark.asyncio
-async def test_oidc_callback_success(client, respx_mock):
-    # Mock OIDC configuration
-    respx_mock.get("https://oidc.example.com/.well-known/openid-configuration").respond(
-        status_code=200,
-        json={
-            "authorization_endpoint": "https://oidc.example.com/auth",
-            "token_endpoint": "https://oidc.example.com/token",
-        },
+async def test_implicit_callback_post(client, respx_mock):
+    # Mock DT User Teams call
+    respx_mock.get(f"{auth_settings.FRONTEND_URL}/api/v1/team/self").respond(
+        status_code=200, json=[]
     )
 
-    # Mock Token Endpoint
+    # We need to trust the ID token, so we'll mock jwt.get_unverified_claims in the app??
+    # Actually checking logic calls jwt.get_unverified_claims, so we can just pass a real JWT structure
+    # that doesn't need to be signed by a real key for this test since we skip sig verification
+    # ALTHOUGH the code uses get_unverified_claims which ignores signature.
+
+    nonce = "mock-nonce"
     id_token = jwt.encode(
-        {"sub": "oidc-user", "preferred_username": "jdoe", "email": "jdoe@example.com"},
+        {"sub": "jdoe", "preferred_username": "jdoe", "nonce": nonce},
         "secret",
         algorithm="HS256",
     )
     access_token = "mock-access-token"
 
-    respx_mock.post("https://oidc.example.com/token").respond(
-        status_code=200,
-        json={
-            "id_token": id_token,
-            "access_token": access_token,
-        },
-    )
-
     auth_settings.OIDC_AUTHORITY = "https://oidc.example.com"
 
-    response = client.get("/auth/callback?code=mock-code", follow_redirects=False)
+    # Simulate cookie set by login
+    client.cookies.set("oidc_nonce", nonce)
 
-    assert response.status_code == 307
-    assert response.headers["location"] == "/"  # Redirect to dashboard
+    response = client.post(
+        "/auth/implicit-callback",
+        json={"id_token": id_token, "access_token": access_token},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
 
     # Verify Session
     cookie = response.cookies.get("session_token")
@@ -80,6 +85,36 @@ async def test_oidc_callback_success(client, respx_mock):
     payload = jwt.decode(cookie, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"])
     assert payload["sub"] == "jdoe"
     assert payload["dt_token"] == access_token
+
+
+@pytest.mark.asyncio
+async def test_implicit_callback_invalid_nonce(client):
+    # Test mismatch nonce
+    nonce = "correct-nonce"
+    bad_nonce = "bad-nonce"
+
+    id_token = jwt.encode(
+        {"sub": "jdoe", "nonce": bad_nonce}, "secret", algorithm="HS256"
+    )
+
+    client.cookies.set("oidc_nonce", nonce)
+
+    response = client.post(
+        "/auth/implicit-callback", json={"id_token": id_token, "access_token": "at"}
+    )
+
+    assert response.status_code == 400
+    assert "Invalid Nonce" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_implicit_callback_missing_cookie(client):
+    id_token = jwt.encode({"sub": "jdoe"}, "secret", algorithm="HS256")
+    response = client.post(
+        "/auth/implicit-callback", json={"id_token": id_token, "access_token": "at"}
+    )
+    assert response.status_code == 400
+    assert "Missing OIDC nonce" in response.json()["detail"]
 
 
 def test_logout(client):
