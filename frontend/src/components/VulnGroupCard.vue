@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const user = inject<any>('user')
 
-const emit = defineEmits(['update', 'update:assessment'])
+const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
 const ANALYSIS_STATES = [
     { value: 'NOT_SET', label: 'Not Set' },
@@ -207,6 +207,7 @@ watch(() => props.group, updateFormFromGroup, { immediate: true })
 
 // Fetch on Open
 watch(expanded, (isOpen) => {
+    emit('toggle-expand', props.group.id, isOpen)
     if (isOpen) {
         refreshDetails()
     }
@@ -463,7 +464,7 @@ const rescoredVectorSegments = computed(() => {
                 <!-- ID Column -->
                 <div class="w-40 shrink-0 font-mono text-lg font-bold text-yellow-400">
                     {{ group.id }}
-                    <div v-if="group.aliases && group.aliases.length > 0" class="text-[10px] text-gray-500 font-medium mt-0.5 truncate uppercase">
+                    <div v-if="group.aliases && group.aliases.length > 0" class="text-[11px] text-gray-400 font-medium mt-1 break-words leading-tight">
                         {{ group.aliases.join(', ') }}
                     </div>
                 </div>

@@ -7,7 +7,7 @@ const mockUpdateAssessment = vi.fn()
 vi.mock('../../lib/api', () => ({
     updateAssessment: (...args: any[]) => mockUpdateAssessment(...args),
     getAssessmentDetails: vi.fn(),
-    calculateScoreFromVector: (v: string) => 5.0 // dummy
+    calculateScoreFromVector: (_v: string) => 5.0 // dummy
 }))
 
 // Mock inject
