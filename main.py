@@ -256,6 +256,9 @@ async def get_assessment_details(
     client: DTClient = Depends(get_client),
     user: str = Depends(get_current_user),
 ):
+    print(
+        f"Fetching assessment details for {len(req.instances)} instances (User: {user})"
+    )
     tasks = []
     for instance in req.instances:
         tasks.append(
@@ -280,6 +283,7 @@ async def get_assessment_details(
             "error": None,
         }
         if isinstance(res, Exception):
+            print(f"Error fetching analysis for {inst.get('finding_uuid')}: {res}")
             result_item["error"] = str(res)
         else:
             result_item["analysis"] = res

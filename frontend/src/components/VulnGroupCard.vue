@@ -246,6 +246,7 @@ const refreshDetails = async () => {
         detailsList.forEach((item: any) => {
              if (item.error) {
                  console.error(`Error fetching details for ${item.finding_uuid}:`, item.error)
+                 alert(`Failed to refresh details for a component: ${item.error}`)
                  return
              }
              
@@ -257,16 +258,22 @@ const refreshDetails = async () => {
                  
                  // Update the reactive object in the group
                  // We need to find the matching component in props.group.affected_versions
-                 // This is a bit expensive but necessary
+                 // Correct logic: Match on PROJECT + COMPONENT + VULNERABILITY
+                 // finding_uuid might be ambiguous if DT returns duplicates or we have multi-version components
+                 // with same finding ID (unlikely but safe to be explicit).
+                 
+                 const targetProj = item.project_uuid
+                 const targetComp = item.component_uuid
+                 const targetVuln = item.vulnerability_uuid
+
                  props.group.affected_versions.forEach(v => {
+                     if (v.project_uuid !== targetProj) return
+                     
                      v.components.forEach(c => {
-                         if (c.finding_uuid === item.finding_uuid) {
+                         if (c.component_uuid === targetComp && c.vulnerability_uuid === targetVuln) {
                              c.analysis_state = item.analysis.analysisState
                              c.analysis_details = item.analysis.analysisDetails
                              c.is_suppressed = item.analysis.isSuppressed
-                             // Comments are not strictly updated here unless returned by backend in full structure?
-                             // getAssessmentDetails returns whatever get_analysis returns.
-                             // DT /api/v1/analysis returns comments too? Yes.
                              if (item.analysis.analysisComments) {
                                   c.analysis_comments = item.analysis.analysisComments
                              }

@@ -156,12 +156,16 @@ class DTClient:
         """
         Get analysis for a specific finding.
         """
+        import time
+        import random
+
         response = await self.client.get(
             f"{self.base_url}/api/v1/analysis",
             params={
                 "project": project_uuid,
                 "component": component_uuid,
                 "vulnerability": vulnerability_uuid,
+                "_t": f"{int(time.time() * 1000)}_{random.randint(0, 10000)}",  # Cache buster
             },
         )
         if response.status_code == 404:
