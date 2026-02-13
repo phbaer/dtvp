@@ -23,6 +23,7 @@ from logic import (
     load_user_roles,
     get_user_role,
     BOMAnalysisCache,
+    process_assessment_details,
 )
 
 
@@ -115,6 +116,9 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
         else:
             # If name is empty, we want ALL projects/versions
             versions = projects
+
+        # Sort versions deterministically by version string to ensure stable processing order
+        versions.sort(key=lambda x: x.get("version", ""))
 
         if not versions:
             tasks[task_id]["status"] = "completed"
@@ -374,13 +378,9 @@ async def update_assessment(
 
             # Check Role Logic
             role = get_user_role(user)
-            action_label = "Reviewed by" if role == "REVIEWER" else "Assessed by"
-            final_details = f"{req.details}\n\n[{action_label}: {user}]"
 
-            # Analyst Logic: Append Pending Review if not present
-            if role == "ANALYST":
-                if "[Status: Pending Review]" not in final_details:
-                    final_details += "\n\n[Status: Pending Review]"
+            # Use shared logic for tag processing
+            final_details_str = process_assessment_details(req.details, user, role)
 
             # Reviewer Logic: If they are submitting, they implicitly approve, so no flag added.
             # If they are explicitly removing the flag, it's just a normal update with new text.
@@ -390,7 +390,7 @@ async def update_assessment(
                 component_uuid=instance["component_uuid"],
                 vulnerability_uuid=instance["vulnerability_uuid"],
                 state=req.state,
-                details=final_details,
+                details=final_details_str,
                 comment=f"{req.comment} -- {user}" if req.comment else None,
                 justification=req.justification,
                 suppressed=req.suppressed,

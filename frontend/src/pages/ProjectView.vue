@@ -174,6 +174,10 @@ const filteredGroups = computed(() => {
             }
         }
         
+        if (comparison === 0) {
+            return a.id.localeCompare(b.id)
+        }
+        
         return sortOrder.value === 'asc' ? comparison : -comparison
     })
     

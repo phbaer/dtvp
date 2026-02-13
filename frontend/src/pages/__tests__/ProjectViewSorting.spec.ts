@@ -168,4 +168,51 @@ describe('ProjectView.vue Sorting', () => {
         expect(cards[1]!.attributes('data-id')).toBe('CVE-2023-0001') // IN_TRIAGE
         expect(cards[2]!.attributes('data-id')).toBe('CVE-2023-0003') // NOT_SET
     })
+    it('sorts by ID when severity is equal (stability check)', async () => {
+        const stableGroups = [
+            {
+                id: 'CVE-2023-BBB',
+                severity: 'HIGH',
+                cvss_score: 8.0,
+                tags: [],
+                affected_versions: []
+            },
+            {
+                id: 'CVE-2023-AAA',
+                severity: 'HIGH',
+                cvss_score: 8.0,
+                tags: [],
+                affected_versions: []
+            }
+        ]
+        vi.mocked(getGroupedVulns).mockResolvedValue(stableGroups as any)
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                stubs: { RouterLink: true },
+                mocks: { $route: { params: { name: 'TestProject' } } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
+            }
+        })
+
+        await flushPromises()
+            ; (wrapper.vm as any).hideAssessed = false
+            ; (wrapper.vm as any).hideMixed = false
+        await wrapper.vm.$nextTick()
+
+        let cards = wrapper.findAll('.vuln-group-card')
+        // Default sort is severity check (HIGH vs HIGH) -> fall back to ID asc
+        expect(cards[0]!.attributes('data-id')).toBe('CVE-2023-AAA')
+        expect(cards[1]!.attributes('data-id')).toBe('CVE-2023-BBB')
+
+        // Toggle sort order (should still use ID asc for tie-breaker)
+        await wrapper.find('button[title="Ascending"]').trigger('click')
+
+        cards = wrapper.findAll('.vuln-group-card')
+        // Severity desc (HIGH vs HIGH) -> tie-breaker ID asc
+        expect(cards[0]!.attributes('data-id')).toBe('CVE-2023-AAA')
+        expect(cards[1]!.attributes('data-id')).toBe('CVE-2023-BBB')
+    })
 })
