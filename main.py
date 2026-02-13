@@ -174,6 +174,7 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
                         "cvssV2Vector",
                         "cvssV3BaseScore",
                         "cvssV2BaseScore",
+                        "aliases",
                     ]:
                         if key in full_vuln and key not in vuln_summary:
                             vuln_summary[key] = full_vuln[key]

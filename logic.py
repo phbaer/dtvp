@@ -298,13 +298,15 @@ def group_vulnerabilities(
             if not vid:
                 continue
 
-            ds.find(vid)  # Register
+            # Normalize ID for grouping
+            vid_norm = vid.upper()
+            ds.find(vid_norm)  # Register
 
             aliases = vuln.get("aliases", [])
             for alias_obj in aliases:
                 for key, alias_id in alias_obj.items():
                     if alias_id and isinstance(alias_id, str):
-                        ds.union(vid, alias_id)
+                        ds.union(vid_norm, alias_id.upper())
 
     # Pass 2: Determine Canonical ID for each set
     # We want a deterministic canonical ID. Preference: CVE > GHSA > Others > lexicographical
@@ -351,9 +353,9 @@ def group_vulnerabilities(
             if not raw_id:
                 continue
 
-            # map to canonical
-            root = ds.find(raw_id)
-            canonical_id = root_to_canonical.get(root, raw_id)
+            # map to canonical (normalized)
+            root = ds.find(raw_id.upper())
+            canonical_id = root_to_canonical.get(root, raw_id.upper())
 
             if canonical_id not in groups:
                 groups[canonical_id] = {
@@ -473,7 +475,7 @@ def group_vulnerabilities(
         # Using string sort for stability.
         g["affected_versions"] = sorted(
             list(g["affected_versions"].values()),
-            key=lambda x: x.get("project_version", ""),
+            key=lambda x: x.get("project_version") or "",
             reverse=True,
         )
         g["tags"] = sorted(list(g["tags"]))

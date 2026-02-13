@@ -112,7 +112,10 @@ class DTClient:
             # Merge results
             for finding, analysis_result in zip(findings_to_enrich, results):
                 if isinstance(analysis_result, Exception):
-                    # Log or ignore error? Original code passed on exception
+                    # Log error to help debugging
+                    print(
+                        f"Error fetching analysis for finding {finding.get('uuid')}: {analysis_result}"
+                    )
                     continue
 
                 if analysis_result:

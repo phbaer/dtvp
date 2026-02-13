@@ -70,6 +70,15 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
     })
 }
 
+const expandedGroupIds = ref(new Set<string>())
+const handleToggleExpand = (id: string, expanded: boolean) => {
+    if (expanded) {
+        expandedGroupIds.value.add(id)
+    } else {
+        expandedGroupIds.value.delete(id)
+    }
+}
+
 const tagFilter = ref('')
 const idFilter = ref('')
 const hideAssessed = ref(true)
@@ -122,6 +131,7 @@ const filteredGroups = computed(() => {
 
     if (hideAssessed.value) {
         result = result.filter(g => {
+            if (expandedGroupIds.value.has(g.id)) return true
             const state = getDisplayState(g)
             // Keep if NOT_SET or MIXED
             return state === 'NOT_SET' || state === 'MIXED'
@@ -129,7 +139,10 @@ const filteredGroups = computed(() => {
     }
 
     if (hideMixed.value) {
-        result = result.filter(g => getDisplayState(g) !== 'MIXED')
+        result = result.filter(g => {
+            if (expandedGroupIds.value.has(g.id)) return true
+            return getDisplayState(g) !== 'MIXED'
+        })
     }
 
     if (showNeedsApproval.value) {
@@ -276,6 +289,7 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
             :key="group.id" 
             :group="group" 
             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)" 
+            @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
         />
         
         <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center">No vulnerabilities found matching criteria.</div>
