@@ -303,8 +303,19 @@ def group_vulnerabilities(
             ds.find(vid_norm)  # Register
 
             aliases = vuln.get("aliases", [])
+            allowed_alias_keys = {
+                "cveId",
+                "ghsaId",
+                "sonatypeId",
+                "osvId",
+                "snykId",
+                "gsdId",
+                "vulnDbId",
+            }
             for alias_obj in aliases:
                 for key, alias_id in alias_obj.items():
+                    if key not in allowed_alias_keys:
+                        continue
                     if alias_id and isinstance(alias_id, str):
                         ds.union(vid_norm, alias_id.upper())
 
