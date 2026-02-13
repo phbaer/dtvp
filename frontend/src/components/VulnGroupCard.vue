@@ -3,7 +3,7 @@
 import { ref, computed, watch, shallowRef, inject } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
-import type { GroupedVuln, AssessmentPayload } from '../types'
+import type { GroupedVuln } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-vue-next'
 import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import DependencyChainViewer from './DependencyChainViewer.vue'
@@ -293,44 +293,41 @@ const handleUpdate = async (force: boolean = false) => {
     
     updating.value = true
     try {
-        // Start with current details, but remove any existing system tags to avoid duplication
-        let cleanDetails = (details.value || '')
-            .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
-            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-            .trim()
-        
-        let finalDetails = cleanDetails
-        
-        // Add vector tag first if it exists
-        if (pendingVector.value) {
-            finalDetails = `[Rescored Vector: ${pendingVector.value}]\n${finalDetails}`.trim()
-        }
+        // Prepare details with potential new tags
+    const tags: string[] = []
 
-        // Add score tag at the very top (primary indicator)
-        if (pendingScore.value !== null && pendingScore.value !== undefined) {
-             finalDetails = `[Rescored: ${pendingScore.value}]\n${finalDetails}`.trim()
-        }
-        
-        // Ensure some spacing between tags and User details if any
-        if (cleanDetails && (pendingScore.value || pendingVector.value)) {
-             // If we have tags and original details, make sure there is a double newline
-             const tags = []
-             if (pendingScore.value) tags.push(`[Rescored: ${pendingScore.value}]`)
-             if (pendingVector.value) tags.push(`[Rescored Vector: ${pendingVector.value}]`)
-             finalDetails = tags.join('\n') + '\n\n' + cleanDetails
-        }
+    // 1. Score
+    if (pendingScore.value !== null && pendingScore.value !== undefined) {
+         tags.push(`[Rescored: ${pendingScore.value}]`)
+    }
 
-        const payload: AssessmentPayload = {
-            instances: instances,
-            state: state.value,
-            details: finalDetails,
-            comment: comment.value,
-            justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
-            suppressed: suppressed.value,
-            original_analysis: originalAnalysis.value,
-            force: force
-        }
+    // 2. Vector
+    if (pendingVector.value) {
+        tags.push(`[Rescored Vector: ${pendingVector.value}]`)
+    }
 
+    let finalDetails = tags.join('\n')
+    if (details.value) {
+         // If we added tags, separate them
+         if (finalDetails) {
+             finalDetails += '\n\n'
+         }
+         finalDetails += details.value
+    }
+    
+    // We do NOT add Author/Reviewer tags here anymore - Backend does it.
+
+    const payload = {
+        instances: instances,
+        state: state.value,
+        details: finalDetails, // Send raw combined text
+        comment: comment.value,
+        justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
+        suppressed: suppressed.value,
+        // Send original analysis for conflict checking (optimistic locking)
+        original_analysis: originalAnalysis.value,
+        force: force
+    }
         const results = await updateAssessment(payload)
         
         // Check if results array contains errors?

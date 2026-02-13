@@ -455,38 +455,97 @@ def group_vulnerabilities(
 
             aff_vers_map[proj_uuid]["components"].append(component_info)
 
+    # Define Severity Rank
+    severity_rank = {
+        "CRITICAL": 0,
+        "HIGH": 1,
+        "MEDIUM": 2,
+        "LOW": 3,
+        "INFO": 4,
+        "UNASSIGNED": 5,
+        None: 6,
+    }
+
     # Convert groups to list and flatten affected_versions
     result = []
     for g in groups.values():
-        g["affected_versions"] = list(g["affected_versions"].values())
+        # Sort affected versions by project version (descending - assuming later versions first)
+        # Using string sort for stability.
+        g["affected_versions"] = sorted(
+            list(g["affected_versions"].values()),
+            key=lambda x: x.get("project_version", ""),
+            reverse=True,
+        )
         g["tags"] = sorted(list(g["tags"]))
         g["aliases"] = sorted(list(g.get("aliases", [])))
         result.append(g)
 
+    # Sort final result: Severity (asc rank), then Score (desc), then ID (asc)
+    result.sort(
+        key=lambda x: (
+            severity_rank.get(x.get("severity"), 6),
+            -1 * (x.get("rescored_cvss") or x.get("cvss_score") or 0.0),
+            x.get("id"),
+        )
+    )
+
     return result
 
 
-def get_user_roles_path() -> str:
-    return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
+def process_assessment_details(details: str, user: str, role: str) -> str:
+    """
+    Parses the assessment details to:
+    1. Consolidate Rescored tags (max score).
+    2. Handle Rescored Vector tags.
+    3. Update/clean Assessed By and Reviewed By tags.
+    4. Append pending review status for analysts.
+    """
+    if not details:
+        details = ""
 
+    # Extract scores
+    score_matches = re.findall(r"\[Rescored:\s*([\d\.]+)\]", details)
+    scores = [float(s) for s in score_matches if s.replace(".", "", 1).isdigit()]
 
-def load_user_roles(path: str = None) -> Dict[str, str]:
-    if path is None:
-        path = get_user_roles_path()
+    # Find max score
+    final_score = max(scores) if scores else None
 
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    # Parse Vector - take the LAST one found
+    vector_matches = re.findall(r"\[Rescored Vector:\s*([^\]]+)\]", details)
+    final_vector = vector_matches[-1] if vector_matches else None
 
+    # Clean details
+    clean_details = details
+    clean_details = re.sub(r"\[Rescored:\s*[\d\.]+\]", "", clean_details)
+    clean_details = re.sub(r"\[Rescored Vector:\s*[^\]]+\]", "", clean_details)
+    clean_details = re.sub(r"\[Assessed By:\s*[^\]]+\]", "", clean_details)
+    clean_details = re.sub(r"\[Reviewed By:\s*[^\]]+\]", "", clean_details)
+    clean_details = clean_details.strip()
 
-def get_user_role(user: str) -> str:
-    path = get_user_roles_path()
-    if not os.path.exists(path):
-        return "REVIEWER"
+    # Reconstruct
+    tags = []
+    if final_score is not None:
+        tags.append(f"[Rescored: {final_score}]")
+    if final_vector:
+        tags.append(f"[Rescored Vector: {final_vector}]")
 
-    roles = load_user_roles(path) or {}
-    return roles.get(user, "ANALYST")
+    # Authorship
+    # Always update/add Assessed By for the current user
+    # Note: If there were multiple assessors in history, this logic currently only keeps the current one.
+    # Requirement: "Updating existing flags when new information is available."
+    # Typically, the last person to touch it is the "Assessor".
+    tags.append(f"[Assessed By: {user}]")
+
+    if role == "REVIEWER":
+        tags.append(f"[Reviewed By: {user}]")
+
+    final_details_str = "\n".join(tags)
+    if clean_details:
+        final_details_str += "\n\n" + clean_details
+
+    # Analyst Logic: Append Pending Review if not present and user is ANALYST
+    if role == "ANALYST":
+        if "[Status: Pending Review]" not in final_details_str:
+            final_details_str += "\n\n[Status: Pending Review]"
+
+    return final_details_str
