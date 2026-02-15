@@ -84,10 +84,11 @@ test.describe('Vulnerability View and Rescoring', () => {
         // Verify modal is open
         await expect(page.locator('text=CVSS v3.1 Calculator')).toBeVisible();
 
-        // Change a metric (e.g. Attack Complexity)
-        await page.locator('#metric-AC').selectOption('H');
+        // Change a metric (e.g. Modified Attack Complexity)
+        // Note: Base metrics are read-only in the UI, we must use Environmental Metrics to rescore
+        await page.locator('#metric-MAC').selectOption('H');
 
-        // Check if score updated (9.8 should become something else, e.g. 5.9 for AC:H in 3.1)
+        // Check if score updated (9.8 should become something else, e.g. 9.1 for MAC:H in 3.1)
         // We look for the score in the modal footer
         const modalFooter = page.locator('.fixed.inset-0 .text-2xl');
         await expect(modalFooter).not.toHaveText('9.8');

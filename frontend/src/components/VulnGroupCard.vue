@@ -5,7 +5,7 @@ import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-vue-next'
-import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
+import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import DependencyChainViewer from './DependencyChainViewer.vue'
 
 
@@ -99,6 +99,7 @@ const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
     switch(ver) {
         case '4.0': activeInstance.value = new Cvss4P0(); break;
         case '3.1': activeInstance.value = new Cvss3P1(); break;
+        case '3.0': activeInstance.value = new Cvss3P0(); break;
         case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
     }
     // Update vector immediately
@@ -121,27 +122,97 @@ const updateCalcVector = (componentShortName: string, value: string) => {
 
 
 // Grouped components for UI
-const calculatorGroups = computed(() => {
-    const instance = activeInstance.value
-    if (!instance) return []
+interface StructuredGroups {
+    rows?: { base: any; mod?: any; req?: any }[];
+    temporal?: any[]; // or Threat Metrics (V4)
+    environmental?: any[]; // V2 specific
+    supplemental?: any[]; // V4 specific
+    generic?: { category: string; components: any[] }[]; // Fallback
+}
 
-    // Map<ComponentCategory, VectorComponent[]>
-    // We convert this to a simple array of objects for v-for
-    const groups: { category: string, components: any[] }[] = []
-    
+// Structured groups for UI
+const structuredGroups = computed((): StructuredGroups | null => {
+    const instance = activeInstance.value
+    if (!instance) return null
+
     try {
         const map = instance.getRegisteredComponents()
-        for (const [cat, list] of map.entries()) {
-            groups.push({
-                category: cat.name,
-                components: list
-            })
+        const allComponents: any[] = []
+        for (const [_, list] of map.entries()) {
+            allComponents.push(...list)
         }
-    } catch (e) {
-        console.error("Error getting components", e)
+
+    const getComp = (shortName: string) => allComponents.find(c => c.shortName === shortName)
+    const mkRow = (base: string, mod?: string, req?: string) => ({
+        base: getComp(base),
+        mod: mod ? getComp(mod) : undefined,
+        req: req ? getComp(req) : undefined
+    })
+
+    // V3.x
+    if (activeVersion.value === '3.1' || activeVersion.value === '3.0') {
+        return {
+            rows: [ // Standard order: AV, AC, PR, UI, S, C, I, A
+                mkRow('AV', 'MAV'), 
+                mkRow('AC', 'MAC'), 
+                mkRow('PR', 'MPR'), 
+                mkRow('UI', 'MUI'), 
+                mkRow('S', 'MS'),
+                mkRow('C', 'MC', 'CR'), 
+                mkRow('I', 'MI', 'IR'), 
+                mkRow('A', 'MA', 'AR')
+            ].filter(r => r.base),
+            temporal: [
+                 getComp('E'), getComp('RL'), getComp('RC')
+            ].filter(Boolean)
+        }
     }
     
-    return groups
+    // V4.0
+    if (activeVersion.value === '4.0') {
+         return {
+            rows: [ // Base Group + Impact Group
+                 mkRow('AV', 'MAV'), 
+                 mkRow('AC', 'MAC'), 
+                 mkRow('AT', 'MAT'), 
+                 mkRow('PR', 'MPR'), 
+                 mkRow('UI', 'MUI'),
+                 // Vuln Impact
+                 mkRow('VC', 'MVC', 'CR'), 
+                 mkRow('VI', 'MVI', 'IR'), 
+                 mkRow('VA', 'MVA', 'AR'),
+                 // Sub Impact
+                 mkRow('SC', 'MSC'), 
+                 mkRow('SI', 'MSI'), 
+                 mkRow('SA', 'MSA')
+            ].filter(r => r.base),
+            temporal: [
+                 // V4 doesn't have temporal in same way, but Threat Group: E?
+                 getComp('E')
+            ].filter(Boolean),
+            supplemental: [
+                getComp('S'), getComp('AU'), getComp('R'), getComp('V'), getComp('RE'), getComp('U')
+            ].filter(Boolean)
+        }
+    }
+    
+    // V2.0
+    if (activeVersion.value === '2.0') {
+    }
+
+    // Fallback just returns categories
+    const groups: { category: string, components: any[] }[] = []
+    for (const [cat, list] of map.entries()) {
+        groups.push({
+            category: cat.name,
+            components: list
+        })
+    }
+    return { generic: groups }
+    } catch (e) {
+        console.error("Error getting components", e)
+        return null
+    }
 })
 
 // Helper to get all instances
@@ -746,7 +817,7 @@ const rescoredVectorSegments = computed(() => {
             <!-- Version Tabs -->
             <div class="flex border-b border-gray-700 bg-gray-850">
                 <button 
-                    v-for="v in ['4.0', '3.1', '2.0']" 
+                    v-for="v in ['4.0', '3.1', '3.0', '2.0']" 
                     :key="v"
                     @click="switchVersion(v as any)"
                     :class="[
@@ -760,8 +831,8 @@ const rescoredVectorSegments = computed(() => {
 
             <!-- Content -->
             <div class="flex-1 overflow-y-auto p-4 bg-gray-800">
-                <div v-if="calculatorGroups.length > 0" class="space-y-6">
-                    <div v-for="group in calculatorGroups" :key="group.category" class="bg-gray-850 rounded p-4 border border-gray-700">
+                <div v-if="structuredGroups?.generic" class="space-y-6">
+                    <div v-for="group in structuredGroups.generic" :key="group.category" class="bg-gray-850 rounded p-4 border border-gray-700">
                         <h4 class="font-bold text-blue-400 border-b border-gray-700 pb-2 mb-3 tracking-wide uppercase text-xs">
                             {{ group.category }} Metrics
                         </h4>
@@ -781,13 +852,140 @@ const rescoredVectorSegments = computed(() => {
                                         {{ val.name }} ({{ val.shortName }})
                                     </option>
                                 </select>
-                                <div class="text-[10px] text-gray-500 mt-1 line-clamp-1">
-                                    {{ comp.description }}
-                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                <div v-else-if="structuredGroups?.rows" class="space-y-6">
+                    <!-- Base & Environmental/Modified Metrics Table -->
+                    <div class="bg-gray-900/50 rounded border border-gray-700/50 overflow-hidden">
+                        <div class="p-3 bg-gray-800/50 border-b border-gray-700/50 flex justify-between items-center">
+                             <h4 class="font-bold text-gray-400 tracking-wide uppercase text-xs">Correction / Rescoring</h4>
+                             <button @click="resetVector" class="text-[10px] text-blue-400 hover:text-blue-300 font-bold uppercase tracking-wider">Reset All</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead>
+                                    <tr class="text-gray-500 uppercase font-bold bg-gray-800/30 border-b border-gray-700/50">
+                                        <th class="py-2 px-3 w-1/4">Metric</th>
+                                        <th class="py-2 px-3 w-1/4">Base (Read Only)</th>
+                                        <th class="py-2 px-3 w-1/4 text-indigo-300">Requirement</th>
+                                        <th class="py-2 px-3 w-1/4 text-purple-300">Modified</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="row in structuredGroups.rows" :key="row.base.shortName" class="border-b border-gray-800 last:border-0 hover:bg-gray-800/20 transition-colors">
+                                        <td class="py-2 px-3 font-bold text-gray-400" :title="row.base.description">
+                                            {{ row.base.name }} <span class="text-gray-600 ml-1">({{ row.base.shortName }})</span>
+                                        </td>
+                                        <td class="py-2 px-3">
+                                            <div class="font-mono bg-gray-900 px-2 py-1 rounded border border-gray-700 text-gray-300 w-fit inline-block">
+                                                {{ activeInstance.getComponent(row.base).name }}
+                                            </div>
+                                        </td>
+                                        <td class="py-2 px-3">
+                                            <select 
+                                                v-if="row.req"
+                                                :value="activeInstance.getComponent(row.req).shortName" 
+                                                @change="updateCalcVector(row.req.shortName, ($event.target as HTMLSelectElement).value)"
+                                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-indigo-100 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none cursor-pointer"
+                                            >
+                                                <option v-for="val in row.req.values" :key="val.shortName" :value="val.shortName" :title="val.description">
+                                                    {{ val.name }}
+                                                </option>
+                                            </select>
+                                            <span v-else class="text-gray-700 select-none">-</span>
+                                        </td>
+                                        <td class="py-2 px-3">
+                                            <select 
+                                                v-if="row.mod"
+                                                :value="activeInstance.getComponent(row.mod).shortName" 
+                                                @change="updateCalcVector(row.mod.shortName, ($event.target as HTMLSelectElement).value)"
+                                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-purple-100 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none cursor-pointer"
+                                            >
+                                                <option v-for="val in row.mod.values" :key="val.shortName" :value="val.shortName" :title="val.description">
+                                                    {{ val.name }}
+                                                </option>
+                                            </select>
+                                            <span v-else class="text-gray-700 select-none">-</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Temporal Group -->
+                     <div v-if="structuredGroups.temporal?.length" class="bg-gray-850 rounded p-4 border border-gray-700">
+                        <h4 class="font-bold text-blue-400 border-b border-gray-700 pb-2 mb-3 tracking-wide uppercase text-xs">
+                             {{ activeVersion === '4.0' ? 'Threat Metrics' : 'Temporal Metrics' }}
+                        </h4>
+                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div v-for="comp in structuredGroups.temporal" :key="comp.shortName">
+                                <label class="block text-xs font-bold text-gray-400 mb-1" :title="comp.description">
+                                    {{ comp.name }}
+                                </label>
+                                <select 
+                                    :value="activeInstance.getComponent(comp).shortName" 
+                                    @change="updateCalcVector(comp.shortName, ($event.target as HTMLSelectElement).value)"
+                                    class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-xs text-gray-200 focus:border-blue-500 cursor-pointer"
+                                >
+                                    <option v-for="val in comp.values" :key="val.shortName" :value="val.shortName" :title="val.description">
+                                        {{ val.name }} ({{ val.shortName }})
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                     </div>
+
+                    <!-- Environmental (V2 Specific) -->
+                     <div v-if="structuredGroups.environmental?.length" class="bg-gray-850 rounded p-4 border border-gray-700">
+                        <h4 class="font-bold text-green-400 border-b border-gray-700 pb-2 mb-3 tracking-wide uppercase text-xs">
+                             Environmental Metrics
+                        </h4>
+                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div v-for="comp in structuredGroups.environmental" :key="comp.shortName">
+                                <label class="block text-xs font-bold text-gray-400 mb-1" :title="comp.description">
+                                    {{ comp.name }}
+                                </label>
+                                <select 
+                                    :value="activeInstance.getComponent(comp).shortName" 
+                                    @change="updateCalcVector(comp.shortName, ($event.target as HTMLSelectElement).value)"
+                                    class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-xs text-gray-200 focus:border-blue-500 cursor-pointer"
+                                >
+                                    <option v-for="val in comp.values" :key="val.shortName" :value="val.shortName" :title="val.description">
+                                        {{ val.name }} ({{ val.shortName }})
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                     </div>
+
+                    <!-- Supplemental (V4) -->
+                     <div v-if="structuredGroups.supplemental?.length" class="bg-gray-850 rounded p-4 border border-gray-700">
+                        <h4 class="font-bold text-yellow-400 border-b border-gray-700 pb-2 mb-3 tracking-wide uppercase text-xs">
+                             Supplemental Metrics
+                        </h4>
+                         <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                            <div v-for="comp in structuredGroups.supplemental" :key="comp.shortName">
+                                <label class="block text-xs font-bold text-gray-400 mb-1" :title="comp.description">
+                                    {{ comp.name }}
+                                </label>
+                                <select 
+                                    :value="activeInstance.getComponent(comp).shortName" 
+                                    @change="updateCalcVector(comp.shortName, ($event.target as HTMLSelectElement).value)"
+                                    class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-xs text-gray-200 focus:border-blue-500 cursor-pointer"
+                                >
+                                    <option v-for="val in comp.values" :key="val.shortName" :value="val.shortName" :title="val.description">
+                                        {{ val.name }} ({{ val.shortName }})
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                     </div>
+                </div>
+
                 <div v-else class="text-center text-gray-500 p-8">
                     Loading components...
                 </div>
