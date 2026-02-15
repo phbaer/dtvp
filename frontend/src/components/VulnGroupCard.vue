@@ -120,9 +120,9 @@ const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
 
 const resetToDefault = (ver: string) => {
     switch(ver) {
-        case '4.0': activeInstance.value = new Cvss4P0(); break;
-        case '3.1': activeInstance.value = new Cvss3P1(); break;
-        case '3.0': activeInstance.value = new Cvss3P0(); break;
+        case '4.0': activeInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N'); break; // Lowest severity
+        case '3.1': activeInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
+        case '3.0': activeInstance.value = new Cvss3P0('CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
         case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break; // V2 defaults
     }
     updateVectorString()
@@ -376,6 +376,11 @@ const refreshDetails = async () => {
         if (instances.length === 0) return
 
         const detailsList = await getAssessmentDetails(instances)
+        
+        if (!detailsList) {
+            console.error('Failed to fetch assessment details: getAssessmentDetails returned undefined')
+            return
+        }
         
         // Update local state and originalAnalysis map
         const newOriginals: Record<string, any> = {}
@@ -958,6 +963,7 @@ const rescoredVectorSegments = computed(() => {
                                             </div>
                                             <select 
                                                 v-else
+                                                :id="`metric-${row.base.shortName}`"
                                                 :value="activeInstance.getComponent(row.base).shortName" 
                                                 @change="updateCalcVector(row.base.shortName, ($event.target as HTMLSelectElement).value)"
                                                 class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-gray-300 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none cursor-pointer"
@@ -970,6 +976,7 @@ const rescoredVectorSegments = computed(() => {
                                         <td class="py-2 px-3">
                                             <select 
                                                 v-if="row.req"
+                                                :id="`metric-${row.req.shortName}`"
                                                 :value="activeInstance.getComponent(row.req).shortName" 
                                                 @change="updateCalcVector(row.req.shortName, ($event.target as HTMLSelectElement).value)"
                                                 class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-indigo-100 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none cursor-pointer"
@@ -983,6 +990,7 @@ const rescoredVectorSegments = computed(() => {
                                         <td class="py-2 px-3">
                                             <select 
                                                 v-if="row.mod"
+                                                :id="`metric-${row.mod.shortName}`"
                                                 :value="activeInstance.getComponent(row.mod).shortName" 
                                                 @change="updateCalcVector(row.mod.shortName, ($event.target as HTMLSelectElement).value)"
                                                 class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-purple-100 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none cursor-pointer"
