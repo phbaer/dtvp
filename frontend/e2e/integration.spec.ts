@@ -29,7 +29,7 @@ test.describe('Integration Tests (Real Backend)', () => {
         await page.getByText('Vulnerable Project').click();
 
         // 3. Check for URL change
-        await expect(page).toHaveURL(/.*\/projects\/Vulnerable%20Project\/1.0.0/);
+        await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/);
 
         // 4. Verify Vulnerabilities from Mock DT are displayed
         // We expect CVE-2021-44228 (Log4Shell)
