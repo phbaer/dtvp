@@ -1,61 +1,16 @@
-version: '3.7'
+version: '3.8'
 
 services:
-  dtrack-apiserver:
-    image: dependencytrack/apiserver:latest
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      - ALPINE_DATABASE_MODE=external
-      - ALPINE_DATABASE_URL=jdbc:postgresql://postgres:5432/dtrack
-      - ALPINE_DATABASE_DRIVER=org.postgresql.Driver
-      - ALPINE_DATABASE_USERNAME=dtrack
-      - ALPINE_DATABASE_PASSWORD=dtrack
-      - ALPINE_METRICS_ENABLED=false
-    ports:
-      - "8081:8080"
-    volumes:
-      - "dtrack-data:/data"
-    restart: unless-stopped
-
-  dtrack-frontend:
-    image: dependencytrack/frontend:4.12.2
-    depends_on:
-      - dtrack-apiserver
-    environment:
-      - API_BASE_URL=http://localhost:8081
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_USER=dtrack
-      - POSTGRES_PASSWORD=dtrack
-      - POSTGRES_DB=dtrack
-    volumes:
-      - "dtrack-db:/var/lib/postgresql/data"
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U dtrack" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  init-dtrack:
+  mock-dt:
     image: python:3.11-slim
-    depends_on:
-      - dtrack-apiserver
-    volumes:
-      - ./init_dt.py:/app/init_dt.py:z
+    command: sh -c "pip install fastapi uvicorn && uvicorn mock_dt:app --host 0.0.0.0 --port 8081"
     working_dir: /app
-    command: sh -c "pip install requests && python init_dt.py"
-    environment:
-      - DT_API_URL=http://dtrack-apiserver:8080
-      - NEW_ADMIN_PASS=admin
+    volumes:
+      - ./mock_dt.py:/app/mock_dt.py:z
+    ports:
+      - "8081:8081"
+    networks:
+      - default
 
-volumes:
-  dtrack-data:
-  dtrack-db:
+networks:
+  default:

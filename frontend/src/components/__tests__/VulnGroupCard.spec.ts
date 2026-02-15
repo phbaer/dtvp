@@ -447,10 +447,14 @@ describe('VulnGroupCard', () => {
 
         expect(wrapper.text()).toContain('Attack Vector')
 
-        const avSelect = wrapper.find('#metric-AV')
-        if (avSelect.exists()) {
-            await avSelect.setValue('P')
-            expect(wrapper.text()).toContain('AV:P')
+        expect(wrapper.text()).toContain('Attack Vector')
+
+        // AV is read-only in 3.1, so we test with a modifier like MAV or a Temporal metric like E
+        // Let's use MAV (Modified Attack Vector)
+        const mavSelect = wrapper.find('#metric-MAV')
+        if (mavSelect.exists()) {
+            await mavSelect.setValue('P')
+            expect(wrapper.text()).toContain('MAV:P')
         }
     })
 
@@ -501,9 +505,9 @@ describe('VulnGroupCard', () => {
         await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
 
-        const avSelect = wrapper.find('#metric-AV')
-        if (avSelect.exists()) {
-            await avSelect.setValue('P')
+        const mavSelect = wrapper.find('#metric-MAV')
+        if (mavSelect.exists()) {
+            await mavSelect.setValue('P')
         }
 
         const doneBtn = wrapper.findAll('button').find(b => b.text() === 'Done')
@@ -618,8 +622,9 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         // Change metric to make vector different
-        const avSelect = wrapper.find('#metric-AV')
-        await avSelect.setValue('P')
+        // AV is read-only, use MAV
+        const mavSelect = wrapper.find('#metric-MAV')
+        await mavSelect.setValue('P')
         await wrapper.vm.$nextTick()
 
         expect(wrapper.text()).toContain('Original Vector:')

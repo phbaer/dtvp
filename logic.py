@@ -311,6 +311,7 @@ def group_vulnerabilities(
                 "snykId",
                 "gsdId",
                 "vulnDbId",
+                "bdsaId",
             }
             for alias_obj in aliases:
                 for key, alias_id in alias_obj.items():
