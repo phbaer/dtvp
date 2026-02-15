@@ -820,7 +820,9 @@ const rescoredVectorSegments = computed(() => {
                 <div v-if="activeVersion === '2.0'">
                     <CvssCalculatorV2 
                         :instance="activeInstance" 
+                        :can-edit-base="canEditBase"
                         @update="updateCalcVector" 
+                        @reset="resetVector"
                     />
                 </div>
                 <div v-else-if="activeVersion === '3.1' || activeVersion === '3.0'">
