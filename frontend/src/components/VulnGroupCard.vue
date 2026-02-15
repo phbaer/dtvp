@@ -58,6 +58,7 @@ const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Ana
 // We use shallowRef for the instance to avoid deep reactivity overhead on complex objects
 const activeVersion = ref<'4.0' | '3.1' | '3.0' | '2.0'>('3.1')
 const activeInstance = shallowRef<any>(new Cvss3P1())
+const isManualBaseMode = ref(false)
 
 // Initialize calculator state from pendingVector
 watch([showCalculatorModal, pendingVector], () => {
@@ -80,30 +81,64 @@ watch([showCalculatorModal, pendingVector], () => {
                 activeVersion.value = '2.0'
                 activeInstance.value = new Cvss2(v)
             } else {
-                // Default to 3.1 if empty or unknown
                 activeVersion.value = '3.1'
                 activeInstance.value = new Cvss3P1()
             }
         } catch {
-             // Fallback if parsing fails
-             activeVersion.value = '3.1'
-             activeInstance.value = new Cvss3P1()
+             // Fallback if parsing fails or default
+             const fallback = visibleVersions.value[0] || '3.1'
+             activeVersion.value = fallback as any
+             
+             switch(fallback) {
+                case '4.0': activeInstance.value = new Cvss4P0(); break;
+                case '3.1': activeInstance.value = new Cvss3P1(); break;
+                case '3.0': activeInstance.value = new Cvss3P0(); break;
+                case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
+             }
         }
     }
+})
+
+const visibleVersions = computed(() => {
+    // If pending vector is present, lock to its version.
+    // If empty, show all.
+    const v = pendingVector.value || ''
+    
+    if (v.startsWith('CVSS:4.0')) return ['4.0']
+    if (v.startsWith('CVSS:3.1')) return ['3.1']
+    if (v.startsWith('CVSS:3.0')) return ['3.0']
+    if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) return ['2.0']
+    
+    return ['4.0', '3.1', '3.0', '2.0']
 })
 
 // Switch version handler
 const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
     activeVersion.value = ver
-    // Reset instance to clean vector for that version
+    resetToDefault(ver)
+}
+
+const resetToDefault = (ver: string) => {
     switch(ver) {
         case '4.0': activeInstance.value = new Cvss4P0(); break;
         case '3.1': activeInstance.value = new Cvss3P1(); break;
         case '3.0': activeInstance.value = new Cvss3P0(); break;
-        case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
+        case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break; // V2 defaults
     }
-    // Update vector immediately
-    pendingVector.value = activeInstance.value.toString()
+    updateVectorString()
+}
+
+// Helper to remove 'X' (Not Defined) values from vector string
+const cleanVectorString = (vec: string) => {
+    if (!vec) return ''
+    // Remove /Key:X segments
+    // Also handling potential trailing/leading slashes if any
+    return vec.split('/').filter(part => !part.endsWith(':X')).join('/')
+}
+
+const updateVectorString = () => {
+    const raw = activeInstance.value.toString()
+    pendingVector.value = cleanVectorString(raw)
 }
 
 // Update vector when selections change
@@ -111,7 +146,7 @@ const updateCalcVector = (componentShortName: string, value: string) => {
     try {
         activeInstance.value.applyComponentString(componentShortName, value)
         // Force update of string - we need to trigger reactivity manually for the string update
-        pendingVector.value = activeInstance.value.toString()
+        updateVectorString()
         // Force shallowRef update to trigger UI re-renders if needed (though we bind to properties)
         activeInstance.value = activeInstance.value 
     } catch (e) {
@@ -292,13 +327,44 @@ watch(pendingVector, (newVector) => {
     }
 })
 
+const canEditBase = computed(() => {
+    const original = props.group.rescored_vector || props.group.cvss_vector
+    if (!original) return true
+    return isManualBaseMode.value
+})
+
 // Reset to original vector from CVE
 const resetVector = () => {
-    if (props.group.cvss_vector) {
-        pendingVector.value = props.group.cvss_vector
+    isManualBaseMode.value = false
+    // Reset to "original" vector
+    const original = props.group.rescored_vector || props.group.cvss_vector
+    if (original) {
+        pendingVector.value = original
+        try {
+             if (original.startsWith('CVSS:4.0')) {
+                 activeVersion.value = '4.0'
+                 activeInstance.value = new Cvss4P0(original)
+             } else if (original.startsWith('CVSS:3.1') || original.startsWith('CVSS:3.0')) {
+                  activeVersion.value = original.includes('3.0') ? '3.0' : '3.1'
+                  activeInstance.value = original.includes('3.0') ? new Cvss3P0(original) : new Cvss3P1(original)
+             } else {
+                 activeVersion.value = '2.0'
+                 activeInstance.value = new Cvss2(original)
+             }
+        } catch {
+            // invalid
+        }
+        updateVectorString() // ensure it is clean
     } else {
-        alert('No original vector available for this vulnerability.')
+        // No original, reset current version to default
+        resetToDefault(activeVersion.value)
     }
+}
+
+const clearVector = () => {
+    isManualBaseMode.value = true
+    resetToDefault(activeVersion.value)
+    pendingVector.value = '' // clear textual input but keep instance defaults
 }
 
 // Refresh details from backend
@@ -804,11 +870,18 @@ const rescoredVectorSegments = computed(() => {
                 <h3 class="font-bold text-lg text-gray-300">CVSS v{{ activeVersion }} Calculator</h3>
                 <div class="flex items-center gap-3">
                     <button 
+                        @click="clearVector"
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-300 transition-colors"
+                        title="Clear vector to unlock all versions"
+                    >
+                        Clear
+                    </button>
+                    <button 
                         @click="resetVector"
                         class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-300 transition-colors"
                         title="Reset to original CVE vector"
                     >
-                        Reset to Original
+                        Reset
                     </button>
                     <button @click="showCalculatorModal = false" class="text-gray-400 hover:text-white text-xl font-bold cursor-pointer">✕</button>
                 </div>
@@ -817,7 +890,7 @@ const rescoredVectorSegments = computed(() => {
             <!-- Version Tabs -->
             <div class="flex border-b border-gray-700 bg-gray-850">
                 <button 
-                    v-for="v in ['4.0', '3.1', '3.0', '2.0']" 
+                    v-for="v in visibleVersions" 
                     :key="v"
                     @click="switchVersion(v as any)"
                     :class="[
@@ -880,9 +953,19 @@ const rescoredVectorSegments = computed(() => {
                                             {{ row.base.name }} <span class="text-gray-600 ml-1">({{ row.base.shortName }})</span>
                                         </td>
                                         <td class="py-2 px-3">
-                                            <div class="font-mono bg-gray-900 px-2 py-1 rounded border border-gray-700 text-gray-300 w-fit inline-block">
+                                            <div v-if="!canEditBase" class="font-mono bg-gray-900 px-2 py-1 rounded border border-gray-700 text-gray-300 w-fit inline-block">
                                                 {{ activeInstance.getComponent(row.base).name }}
                                             </div>
+                                            <select 
+                                                v-else
+                                                :value="activeInstance.getComponent(row.base).shortName" 
+                                                @change="updateCalcVector(row.base.shortName, ($event.target as HTMLSelectElement).value)"
+                                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-gray-300 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none cursor-pointer"
+                                            >
+                                                <option v-for="val in row.base.values" :key="val.shortName" :value="val.shortName" :title="val.description">
+                                                    {{ val.name }}
+                                                </option>
+                                            </select>
                                         </td>
                                         <td class="py-2 px-3">
                                             <select 
