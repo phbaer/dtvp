@@ -24,6 +24,7 @@ from logic import (
     get_user_role,
     BOMAnalysisCache,
     process_assessment_details,
+    calculate_aggregated_state,
 )
 
 
@@ -75,8 +76,10 @@ class AssessmentRequest(BaseModel):
     comment: Optional[str] = None
     justification: Optional[str] = None
     suppressed: bool = False
+    team: Optional[str] = None
     original_analysis: Optional[Dict[str, Dict[str, Any]]] = None
     force: bool = False
+    comparison_mode: Optional[str] = "MERGE"
 
 
 class AssessmentDetailsRequest(BaseModel):
@@ -384,23 +387,53 @@ async def update_assessment(
             # Check Role Logic
             role = get_user_role(user)
 
-            # Use shared logic for tag processing
-            final_details_str = process_assessment_details(req.details, user, role)
+            # Get existing details for merging
+            finding_uuid = instance.get("finding_uuid")
+            original_analysis = (
+                req.original_analysis.get(finding_uuid)
+                if req.original_analysis
+                else None
+            )
+            existing_details = (
+                original_analysis.get("analysisDetails", "")
+                if original_analysis
+                else ""
+            )
 
-            # Reviewer Logic: If they are submitting, they implicitly approve, so no flag added.
-            # If they are explicitly removing the flag, it's just a normal update with new text.
+            # Use shared logic for tag processing and state aggregation
+            if req.comparison_mode == "REPLACE":
+                # In REPLACE mode, we trust the details provided by the client as the full source of truth
+                final_details_str = req.details
+                aggregated_state = calculate_aggregated_state(req.details)
+            else:
+                final_details_str, aggregated_state = process_assessment_details(
+                    req.details, user, role, req.team, req.state, existing_details
+                )
 
             await client.update_analysis(
                 project_uuid=instance["project_uuid"],
                 component_uuid=instance["component_uuid"],
                 vulnerability_uuid=instance["vulnerability_uuid"],
-                state=req.state,
+                state=aggregated_state,
                 details=final_details_str,
-                comment=f"{req.comment} -- {user}" if req.comment else None,
-                justification=req.justification,
+                comment=f"{req.comment}{' [Team: ' + req.team + ']' if req.team else ''} -- {user}"
+                if req.comment
+                else f"[Team: {req.team}] -- {user}"
+                if req.team
+                else f"Assessed -- {user}",
+                justification=req.justification
+                if aggregated_state == "NOT_AFFECTED"
+                else "NOT_SET",
                 suppressed=req.suppressed,
             )
-            results.append({"status": "success", "uuid": instance["finding_uuid"]})
+            results.append(
+                {
+                    "status": "success",
+                    "uuid": instance["finding_uuid"],
+                    "new_state": aggregated_state,
+                    "new_details": final_details_str,
+                }
+            )
         except Exception as e:
             results.append(
                 {

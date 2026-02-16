@@ -8,83 +8,158 @@ class TestAssessmentTags(unittest.TestCase):
         user = "alice"
         role = "USER"
 
-        result = process_assessment_details(details, user, role)
+        result, state = process_assessment_details(details, user, role)
 
         self.assertIn("[Assessed By: alice]", result)
         self.assertIn("Some details.", result)
-        self.assertNotIn("[Reviewed By:", result)
+        self.assertEqual(state, "NOT_SET")
 
     def test_assessment_details_rescored_max(self):
-        details = "History:\n[Rescored: 4.0]\n[Rescored: 8.5]\n[Rescored: 6.0]"
-        user = "bob"
-        role = "USER"
-
-        result = process_assessment_details(details, user, role)
-
-        # Should pick max 8.5
-        self.assertIn("[Rescored: 8.5]", result)
-        self.assertNotIn("[Rescored: 4.0]", result)
-        self.assertNotIn("[Rescored: 6.0]", result)
-
-        # Check count
-        self.assertEqual(result.count("[Rescored:"), 1)
-
-    def test_assessment_details_rescored_vector(self):
-        details = "[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H]"
-        user = "charlie"
-        role = "USER"
-
-        result = process_assessment_details(details, user, role)
-
-        self.assertIn(
-            "[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H]", result
+        # We need to simulate the team blocks or rely on the extraction
+        # Since process_assessment_details now parses blocks, we give it a multi-team state
+        existing = (
+            "--- [Team: Security] [State: EXPLOITABLE] [Assessed By: bob] [Rescored: 4.0] ---\n"
+            "Bad.\n"
+            "--- [Team: App] [State: NOT_AFFECTED] [Assessed By: charlie] [Rescored: 8.5] ---\n"
+            "Fine."
         )
-        self.assertIn("[Assessed By: charlie]", result)
-
-    def test_assessment_details_reviewer(self):
-        details = "LGTM"
-        user = "dave"
-        role = "REVIEWER"
-
-        result = process_assessment_details(details, user, role)
-
-        self.assertIn("[Assessed By: dave]", result)
-        self.assertIn("[Reviewed By: dave]", result)
-
-    def test_assessment_details_analyst_pending(self):
-        details = "Analysis done."
-        user = "eve"
-        role = "ANALYST"
-
-        result = process_assessment_details(details, user, role)
-
-        self.assertIn("[Assessed By: eve]", result)
-        self.assertIn("[Status: Pending Review]", result)
-
-    def test_assessment_details_analyst_already_pending(self):
-        details = "Analysis done.\n[Status: Pending Review]"
-        user = "eve"
-        role = "ANALYST"
-
-        result = process_assessment_details(details, user, role)
-
-        self.assertIn("[Assessed By: eve]", result)
-        # Should not duplicate
-        self.assertEqual(result.count("[Status: Pending Review]"), 1)
-
-    def test_assessment_details_update_authorship(self):
-        details = "Old details.\n[Assessed By: old_user]\n[Reviewed By: old_reviewer]"
         user = "new_user"
         role = "USER"
+        team = "Security"
+        new_details = "Updated security analysis.\n[Rescored: 9.0]"  # Team Security updates their score
 
-        result = process_assessment_details(details, user, role)
+        result, state = process_assessment_details(
+            new_details,
+            user,
+            role,
+            team=team,
+            state="EXPLOITABLE",
+            existing_details=existing,
+        )
 
-        self.assertIn("[Assessed By: new_user]", result)
-        self.assertNotIn("old_user", result)
-        self.assertNotIn(
-            "old_reviewer", result
-        )  # Removed since new user is not reviewer
-        self.assertIn("Old details.", result)
+        # Global tag at the top should be the max (9.0)
+        self.assertTrue(result.startswith("[Rescored: 9.0]"))
+        # Per-team scores stay in headers. Security updated from 4.0 to 9.0.
+        self.assertIn("[Rescored: 8.5]", result)  # App's score stays
+        self.assertIn(
+            "[Team: Security] [State: EXPLOITABLE] [Assessed By: new_user] [Rescored: 9.0]",
+            result,
+        )
+        self.assertEqual(state, "EXPLOITABLE")
+        # Ensure no extra --- from bad parsing
+        self.assertNotIn("---\n---", result)
+
+    def test_assessment_details_state_aggregation_worst(self):
+        existing = (
+            "--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: bob] ---\n"
+            "Looks safe."
+        )
+        user = "alice"
+        role = "USER"
+        team = "App"
+        new_state = "EXPLOITABLE"
+        new_details = "Actually we found it is exploitable here."
+
+        result, state = process_assessment_details(
+            new_details,
+            user,
+            role,
+            team=team,
+            state=new_state,
+            existing_details=existing,
+        )
+
+        # Aggregated state should be EXPLOITABLE
+        self.assertEqual(state, "EXPLOITABLE")
+        self.assertIn("[Team: Security] [State: NOT_AFFECTED]", result)
+        self.assertIn("[Team: App] [State: EXPLOITABLE]", result)
+
+    def test_assessment_details_state_aggregation_in_triage(self):
+        existing = (
+            "--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: bob] ---\n"
+            "--- [Team: Dev] [State: RESOLVED] [Assessed By: charlie] ---"
+        )
+        user = "analyst"
+        role = "USER"
+        team = "QA"
+        new_state = "IN_TRIAGE"
+
+        result, state = process_assessment_details(
+            "Checking...",
+            user,
+            role,
+            team=team,
+            state=new_state,
+            existing_details=existing,
+        )
+
+        # IN_TRIAGE (1) is worse than RESOLVED (5) or NOT_AFFECTED (4)
+        self.assertEqual(state, "IN_TRIAGE")
+
+    def test_assessment_details_reviewer_clears_pending(self):
+        existing = "Details.\n\n[Status: Pending Review]"
+        user = "admin"
+        role = "REVIEWER"
+
+        result, state = process_assessment_details(
+            "Approved.", user, role, existing_details=existing
+        )
+
+        self.assertNotIn("[Status: Pending Review]", result)
+        self.assertIn("[Assessed By: admin]", result)
+
+    def test_assessment_details_analyst_adds_pending(self):
+        details = "Draft..."
+        user = "analyst1"
+        role = "ANALYST"
+
+        result, state = process_assessment_details(details, user, role)
+
+        self.assertIn("[Status: Pending Review]", result)
+
+    def test_assessment_details_legacy_preservation(self):
+        existing = "This is some legacy text without team markers."
+        user = "alice"
+        role = "USER"
+        team = "Security"
+        state_in = "EXPLOITABLE"
+
+        result, state = process_assessment_details(
+            "New team info.",
+            user,
+            role,
+            team=team,
+            state=state_in,
+            existing_details=existing,
+        )
+
+        self.assertIn("This is some legacy text without team markers.", result)
+        self.assertIn(
+            "--- [Team: Security] [State: EXPLOITABLE] [Assessed By: alice] ---", result
+        )
+
+    def test_assessment_details_update_same_team(self):
+        existing = "--- [Team: Security] [State: IN_TRIAGE] [Assessed By: bob] ---\nInitial report."
+        user = "charlie"
+        role = "USER"
+        team = "Security"
+        state_in = "EXPLOITABLE"
+
+        result, state = process_assessment_details(
+            "Found exploit!",
+            user,
+            role,
+            team=team,
+            state=state_in,
+            existing_details=existing,
+        )
+
+        # Should only have ONE Security block, and it should be updated
+        self.assertEqual(result.count("--- [Team: Security]"), 1)
+        self.assertIn("[State: EXPLOITABLE]", result)
+        self.assertIn("[Assessed By: charlie]", result)
+        self.assertIn("Found exploit!", result)
+        self.assertNotIn("Initial report.", result)
 
 
 if __name__ == "__main__":
