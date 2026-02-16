@@ -1,12 +1,14 @@
-```
 <script setup lang="ts">
 import { ref, computed, watch, shallowRef, inject } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
-import type { GroupedVuln, AssessmentPayload } from '../types'
+import type { GroupedVuln } from '../types'
 import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-vue-next'
-import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
+import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import DependencyChainViewer from './DependencyChainViewer.vue'
+import CvssCalculatorV2 from './CvssCalculatorV2.vue'
+import CvssCalculatorV3 from './CvssCalculatorV3.vue'
+import CvssCalculatorV4 from './CvssCalculatorV4.vue'
 
 
 const props = defineProps<{
@@ -15,7 +17,7 @@ const props = defineProps<{
 
 const user = inject<any>('user')
 
-const emit = defineEmits(['update', 'update:assessment'])
+const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
 const ANALYSIS_STATES = [
     { value: 'NOT_SET', label: 'Not Set' },
@@ -54,12 +56,11 @@ const showConflictModal = ref(false)
 const conflictData = ref<any>(null)
 const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Analysis Object
 
-// Multi-version Calculator State
-// We use shallowRef for the instance to avoid deep reactivity overhead on complex objects
 const activeVersion = ref<'4.0' | '3.1' | '3.0' | '2.0'>('3.1')
 const activeInstance = shallowRef<any>(new Cvss3P1())
+const isManualBaseMode = ref(false)
 
-// Initialize calculator state from pendingVector
+
 watch([showCalculatorModal, pendingVector], () => {
     if (showCalculatorModal.value) {
         let v = pendingVector.value?.trim() || ''
@@ -80,29 +81,64 @@ watch([showCalculatorModal, pendingVector], () => {
                 activeVersion.value = '2.0'
                 activeInstance.value = new Cvss2(v)
             } else {
-                // Default to 3.1 if empty or unknown
                 activeVersion.value = '3.1'
                 activeInstance.value = new Cvss3P1()
             }
         } catch {
-             // Fallback if parsing fails
-             activeVersion.value = '3.1'
-             activeInstance.value = new Cvss3P1()
+             // Fallback if parsing fails or default
+             const fallback = visibleVersions.value[0] || '3.1'
+             activeVersion.value = fallback as any
+             
+             switch(fallback) {
+                case '4.0': activeInstance.value = new Cvss4P0(); break;
+                case '3.1': activeInstance.value = new Cvss3P1(); break;
+                case '3.0': activeInstance.value = new Cvss3P0(); break;
+                case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
+             }
         }
     }
+})
+
+const visibleVersions = computed(() => {
+    // If pending vector is present, lock to its version.
+    // If empty, show all.
+    const v = pendingVector.value || ''
+    
+    if (v.startsWith('CVSS:4.0')) return ['4.0']
+    if (v.startsWith('CVSS:3.1')) return ['3.1']
+    if (v.startsWith('CVSS:3.0')) return ['3.0']
+    if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) return ['2.0']
+    
+    return ['4.0', '3.1', '3.0', '2.0']
 })
 
 // Switch version handler
 const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
     activeVersion.value = ver
-    // Reset instance to clean vector for that version
+    resetToDefault(ver)
+}
+
+const resetToDefault = (ver: string) => {
     switch(ver) {
-        case '4.0': activeInstance.value = new Cvss4P0(); break;
-        case '3.1': activeInstance.value = new Cvss3P1(); break;
-        case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
+        case '4.0': activeInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N'); break; // Lowest severity
+        case '3.1': activeInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
+        case '3.0': activeInstance.value = new Cvss3P0('CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
+        case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break; // V2 defaults
     }
-    // Update vector immediately
-    pendingVector.value = activeInstance.value.toString()
+    updateVectorString()
+}
+
+
+const cleanVectorString = (vec: string) => {
+    if (!vec) return ''
+    // Remove /Key:X segments
+    // Also handling potential trailing/leading slashes if any
+    return vec.split('/').filter(part => !part.endsWith(':X')).join('/')
+}
+
+const updateVectorString = () => {
+    const raw = activeInstance.value.toString()
+    pendingVector.value = cleanVectorString(raw)
 }
 
 // Update vector when selections change
@@ -110,7 +146,7 @@ const updateCalcVector = (componentShortName: string, value: string) => {
     try {
         activeInstance.value.applyComponentString(componentShortName, value)
         // Force update of string - we need to trigger reactivity manually for the string update
-        pendingVector.value = activeInstance.value.toString()
+        updateVectorString()
         // Force shallowRef update to trigger UI re-renders if needed (though we bind to properties)
         activeInstance.value = activeInstance.value 
     } catch (e) {
@@ -120,31 +156,9 @@ const updateCalcVector = (componentShortName: string, value: string) => {
 
 
 
-// Grouped components for UI
-const calculatorGroups = computed(() => {
-    const instance = activeInstance.value
-    if (!instance) return []
 
-    // Map<ComponentCategory, VectorComponent[]>
-    // We convert this to a simple array of objects for v-for
-    const groups: { category: string, components: any[] }[] = []
-    
-    try {
-        const map = instance.getRegisteredComponents()
-        for (const [cat, list] of map.entries()) {
-            groups.push({
-                category: cat.name,
-                components: list
-            })
-        }
-    } catch (e) {
-        console.error("Error getting components", e)
-    }
-    
-    return groups
-})
 
-// Helper to get all instances
+
 const allInstances = computed(() => {
     return props.group.affected_versions?.flatMap(v => v.components) || []
 })
@@ -205,14 +219,15 @@ const updateFormFromGroup = () => {
 
 watch(() => props.group, updateFormFromGroup, { immediate: true })
 
-// Fetch on Open
+
 watch(expanded, (isOpen) => {
+    emit('toggle-expand', props.group.id, isOpen)
     if (isOpen) {
         refreshDetails()
     }
 })
 
-// Auto-calculate score when vector changes
+
 watch(pendingVector, (newVector) => {
     const score = calculateScoreFromVector(newVector)
     if (score !== null) {
@@ -220,16 +235,47 @@ watch(pendingVector, (newVector) => {
     }
 })
 
+const canEditBase = computed(() => {
+    const original = props.group.rescored_vector || props.group.cvss_vector
+    if (!original) return true
+    return isManualBaseMode.value
+})
+
 // Reset to original vector from CVE
 const resetVector = () => {
-    if (props.group.cvss_vector) {
-        pendingVector.value = props.group.cvss_vector
+    isManualBaseMode.value = false
+    // Reset to "original" vector
+    const original = props.group.rescored_vector || props.group.cvss_vector
+    if (original) {
+        pendingVector.value = original
+        try {
+             if (original.startsWith('CVSS:4.0')) {
+                 activeVersion.value = '4.0'
+                 activeInstance.value = new Cvss4P0(original)
+             } else if (original.startsWith('CVSS:3.1') || original.startsWith('CVSS:3.0')) {
+                  activeVersion.value = original.includes('3.0') ? '3.0' : '3.1'
+                  activeInstance.value = original.includes('3.0') ? new Cvss3P0(original) : new Cvss3P1(original)
+             } else {
+                 activeVersion.value = '2.0'
+                 activeInstance.value = new Cvss2(original)
+             }
+        } catch {
+            // invalid
+        }
+        updateVectorString() // ensure it is clean
     } else {
-        alert('No original vector available for this vulnerability.')
+        // No original, reset current version to default
+        resetToDefault(activeVersion.value)
     }
 }
 
-// Refresh details from backend
+const clearVector = () => {
+    isManualBaseMode.value = true
+    resetToDefault(activeVersion.value)
+    pendingVector.value = '' // clear textual input but keep instance defaults
+}
+
+
 const refreshDetails = async () => {
     loadingDetails.value = true
     try {
@@ -239,12 +285,18 @@ const refreshDetails = async () => {
 
         const detailsList = await getAssessmentDetails(instances)
         
+        if (!detailsList) {
+            console.error('Failed to fetch assessment details: getAssessmentDetails returned undefined')
+            return
+        }
+        
         // Update local state and originalAnalysis map
         const newOriginals: Record<string, any> = {}
         
         detailsList.forEach((item: any) => {
              if (item.error) {
                  console.error(`Error fetching details for ${item.finding_uuid}:`, item.error)
+                 alert(`Failed to refresh details for a component: ${item.error}`)
                  return
              }
              
@@ -256,16 +308,22 @@ const refreshDetails = async () => {
                  
                  // Update the reactive object in the group
                  // We need to find the matching component in props.group.affected_versions
-                 // This is a bit expensive but necessary
+                 // Correct logic: Match on PROJECT + COMPONENT + VULNERABILITY
+                 // finding_uuid might be ambiguous if DT returns duplicates or we have multi-version components
+                 // with same finding ID (unlikely but safe to be explicit).
+                 
+                 const targetProj = item.project_uuid
+                 const targetComp = item.component_uuid
+                 const targetVuln = item.vulnerability_uuid
+
                  props.group.affected_versions.forEach(v => {
+                     if (v.project_uuid !== targetProj) return
+                     
                      v.components.forEach(c => {
-                         if (c.finding_uuid === item.finding_uuid) {
+                         if (c.component_uuid === targetComp && c.vulnerability_uuid === targetVuln) {
                              c.analysis_state = item.analysis.analysisState
                              c.analysis_details = item.analysis.analysisDetails
                              c.is_suppressed = item.analysis.isSuppressed
-                             // Comments are not strictly updated here unless returned by backend in full structure?
-                             // getAssessmentDetails returns whatever get_analysis returns.
-                             // DT /api/v1/analysis returns comments too? Yes.
                              if (item.analysis.analysisComments) {
                                   c.analysis_comments = item.analysis.analysisComments
                              }
@@ -293,44 +351,41 @@ const handleUpdate = async (force: boolean = false) => {
     
     updating.value = true
     try {
-        // Start with current details, but remove any existing system tags to avoid duplication
-        let cleanDetails = (details.value || '')
-            .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
-            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-            .trim()
-        
-        let finalDetails = cleanDetails
-        
-        // Add vector tag first if it exists
-        if (pendingVector.value) {
-            finalDetails = `[Rescored Vector: ${pendingVector.value}]\n${finalDetails}`.trim()
-        }
+        // Prepare details with potential new tags
+    const tags: string[] = []
 
-        // Add score tag at the very top (primary indicator)
-        if (pendingScore.value !== null && pendingScore.value !== undefined) {
-             finalDetails = `[Rescored: ${pendingScore.value}]\n${finalDetails}`.trim()
-        }
-        
-        // Ensure some spacing between tags and User details if any
-        if (cleanDetails && (pendingScore.value || pendingVector.value)) {
-             // If we have tags and original details, make sure there is a double newline
-             const tags = []
-             if (pendingScore.value) tags.push(`[Rescored: ${pendingScore.value}]`)
-             if (pendingVector.value) tags.push(`[Rescored Vector: ${pendingVector.value}]`)
-             finalDetails = tags.join('\n') + '\n\n' + cleanDetails
-        }
+    // 1. Score
+    if (pendingScore.value !== null && pendingScore.value !== undefined) {
+         tags.push(`[Rescored: ${pendingScore.value}]`)
+    }
 
-        const payload: AssessmentPayload = {
-            instances: instances,
-            state: state.value,
-            details: finalDetails,
-            comment: comment.value,
-            justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
-            suppressed: suppressed.value,
-            original_analysis: originalAnalysis.value,
-            force: force
-        }
+    // 2. Vector
+    if (pendingVector.value) {
+        tags.push(`[Rescored Vector: ${pendingVector.value}]`)
+    }
 
+    let finalDetails = tags.join('\n')
+    if (details.value) {
+         // If we added tags, separate them
+         if (finalDetails) {
+             finalDetails += '\n\n'
+         }
+         finalDetails += details.value
+    }
+    
+    // We do NOT add Author/Reviewer tags here anymore - Backend does it.
+
+    const payload = {
+        instances: instances,
+        state: state.value,
+        details: finalDetails, // Send raw combined text
+        comment: comment.value,
+        justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
+        suppressed: suppressed.value,
+        // Send original analysis for conflict checking (optimistic locking)
+        original_analysis: originalAnalysis.value,
+        force: force
+    }
         const results = await updateAssessment(payload)
         
         // Check if results array contains errors?
@@ -466,7 +521,7 @@ const rescoredVectorSegments = computed(() => {
                 <!-- ID Column -->
                 <div class="w-40 shrink-0 font-mono text-lg font-bold text-yellow-400">
                     {{ group.id }}
-                    <div v-if="group.aliases && group.aliases.length > 0" class="text-[10px] text-gray-500 font-medium mt-0.5 truncate uppercase">
+                    <div v-if="group.aliases && group.aliases.length > 0" class="text-[11px] text-gray-400 font-medium mt-1 break-words leading-tight">
                         {{ group.aliases.join(', ') }}
                     </div>
                 </div>
@@ -728,11 +783,18 @@ const rescoredVectorSegments = computed(() => {
                 <h3 class="font-bold text-lg text-gray-300">CVSS v{{ activeVersion }} Calculator</h3>
                 <div class="flex items-center gap-3">
                     <button 
+                        @click="clearVector"
+                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-300 transition-colors"
+                        title="Clear vector to unlock all versions"
+                    >
+                        Clear
+                    </button>
+                    <button 
                         @click="resetVector"
                         class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-300 transition-colors"
                         title="Reset to original CVE vector"
                     >
-                        Reset to Original
+                        Reset
                     </button>
                     <button @click="showCalculatorModal = false" class="text-gray-400 hover:text-white text-xl font-bold cursor-pointer">✕</button>
                 </div>
@@ -741,7 +803,7 @@ const rescoredVectorSegments = computed(() => {
             <!-- Version Tabs -->
             <div class="flex border-b border-gray-700 bg-gray-850">
                 <button 
-                    v-for="v in ['4.0', '3.1', '2.0']" 
+                    v-for="v in visibleVersions" 
                     :key="v"
                     @click="switchVersion(v as any)"
                     :class="[
@@ -755,33 +817,29 @@ const rescoredVectorSegments = computed(() => {
 
             <!-- Content -->
             <div class="flex-1 overflow-y-auto p-4 bg-gray-800">
-                <div v-if="calculatorGroups.length > 0" class="space-y-6">
-                    <div v-for="group in calculatorGroups" :key="group.category" class="bg-gray-850 rounded p-4 border border-gray-700">
-                        <h4 class="font-bold text-blue-400 border-b border-gray-700 pb-2 mb-3 tracking-wide uppercase text-xs">
-                            {{ group.category }} Metrics
-                        </h4>
-                        
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div v-for="comp in group.components" :key="comp.shortName" class="border-b border-gray-700 pb-2 border-opacity-50 last:border-0">
-                                <label :for="`metric-${comp.shortName}`" class="block text-sm font-bold text-gray-300 mb-1" :title="comp.description">
-                                    {{ comp.name }} ({{ comp.shortName }})
-                                </label>
-                                <select 
-                                    :id="`metric-${comp.shortName}`"
-                                    :value="activeInstance.getComponent(comp).shortName" 
-                                    @change="updateCalcVector(comp.shortName, ($event.target as HTMLSelectElement).value)"
-                                    class="w-full p-2 rounded bg-gray-900 border border-gray-600 text-sm text-gray-200 focus:border-blue-500"
-                                >
-                                    <option v-for="val in comp.values" :key="val.shortName" :value="val.shortName" :title="val.description">
-                                        {{ val.name }} ({{ val.shortName }})
-                                    </option>
-                                </select>
-                                <div class="text-[10px] text-gray-500 mt-1 line-clamp-1">
-                                    {{ comp.description }}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div v-if="activeVersion === '2.0'">
+                    <CvssCalculatorV2 
+                        :instance="activeInstance" 
+                        :can-edit-base="canEditBase"
+                        @update="updateCalcVector" 
+                        @reset="resetVector"
+                    />
+                </div>
+                <div v-else-if="activeVersion === '3.1' || activeVersion === '3.0'">
+                    <CvssCalculatorV3 
+                        :instance="activeInstance" 
+                        :can-edit-base="canEditBase" 
+                        @update="updateCalcVector" 
+                        @reset="resetVector"
+                    />
+                </div>
+                <div v-else-if="activeVersion === '4.0'">
+                    <CvssCalculatorV4 
+                        :instance="activeInstance" 
+                        :can-edit-base="canEditBase" 
+                        @update="updateCalcVector" 
+                        @reset="resetVector"
+                    />
                 </div>
                 <div v-else class="text-center text-gray-500 p-8">
                     Loading components...

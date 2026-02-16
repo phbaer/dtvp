@@ -52,7 +52,7 @@ def test_update_assessment_appends_user(override_deps, mock_client):
 
         # Check details has username
         assert "Original details" in kwargs["details"]
-        assert "[Reviewed by: testuser]" in kwargs["details"]
+        assert "[Reviewed By: testuser]" in kwargs["details"]
         # Ensure pending flag NOT added for Reviewer
         assert "[Status: Pending Review]" not in kwargs["details"]
 
@@ -83,5 +83,5 @@ def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
 
         # Check details has username AND Pending Review flag
         assert "Analyst details" in kwargs["details"]
-        assert "[Assessed by: testuser]" in kwargs["details"]
+        assert "[Assessed By: testuser]" in kwargs["details"]
         assert "[Status: Pending Review]" in kwargs["details"]

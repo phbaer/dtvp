@@ -112,7 +112,10 @@ class DTClient:
             # Merge results
             for finding, analysis_result in zip(findings_to_enrich, results):
                 if isinstance(analysis_result, Exception):
-                    # Log or ignore error? Original code passed on exception
+                    # Log error to help debugging
+                    print(
+                        f"Error fetching analysis for finding {finding.get('uuid')}: {analysis_result}"
+                    )
                     continue
 
                 if analysis_result:
@@ -153,12 +156,16 @@ class DTClient:
         """
         Get analysis for a specific finding.
         """
+        import time
+        import random
+
         response = await self.client.get(
             f"{self.base_url}/api/v1/analysis",
             params={
                 "project": project_uuid,
                 "component": component_uuid,
                 "vulnerability": vulnerability_uuid,
+                "_t": f"{int(time.time() * 1000)}_{random.randint(0, 10000)}",  # Cache buster
             },
         )
         if response.status_code == 404:

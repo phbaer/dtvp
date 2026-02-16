@@ -191,7 +191,7 @@ describe('VulnGroupCard', () => {
         await findCalcBtn()?.trigger('click')
 
         // Reset
-        const resetBtn = wrapper.findAll('button').find(b => b.text().includes('Reset to Original'))
+        const resetBtn = wrapper.findAll('button').find(b => b.text().includes('Reset'))
         await resetBtn?.trigger('click')
 
         // Should have the original vector in output (check pendingVector internally or just UI)
@@ -296,10 +296,14 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         // Try to reset
-        const resetBtn = wrapper.findAll('button').find(b => b.text().includes('Reset to Original'))
+        const resetBtn = wrapper.findAll('button').find(b => b.text().includes('Reset'))
         await resetBtn?.trigger('click')
 
-        expect(global.alert).toHaveBeenCalledWith('No original vector available for this vulnerability.')
+        // Should reset to default 3.1 vector since no original exists
+        // Default 3.1: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N
+        const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
+        expect((input.element as HTMLInputElement).value).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N')
+        expect(global.alert).not.toHaveBeenCalled()
     })
 
     it('handles user canceling confirmation', async () => {
@@ -447,10 +451,14 @@ describe('VulnGroupCard', () => {
 
         expect(wrapper.text()).toContain('Attack Vector')
 
-        const avSelect = wrapper.find('#metric-AV')
-        if (avSelect.exists()) {
-            await avSelect.setValue('P')
-            expect(wrapper.text()).toContain('AV:P')
+        expect(wrapper.text()).toContain('Attack Vector')
+
+        // AV is read-only in 3.1, so we test with a modifier like MAV or a Temporal metric like E
+        // Let's use MAV (Modified Attack Vector)
+        const mavSelect = wrapper.find('#metric-MAV')
+        if (mavSelect.exists()) {
+            await mavSelect.setValue('P')
+            expect(wrapper.text()).toContain('MAV:P')
         }
     })
 
@@ -501,9 +509,9 @@ describe('VulnGroupCard', () => {
         await findCalcBtn()?.trigger('click')
         await wrapper.vm.$nextTick()
 
-        const avSelect = wrapper.find('#metric-AV')
-        if (avSelect.exists()) {
-            await avSelect.setValue('P')
+        const mavSelect = wrapper.find('#metric-MAV')
+        if (mavSelect.exists()) {
+            await mavSelect.setValue('P')
         }
 
         const doneBtn = wrapper.findAll('button').find(b => b.text() === 'Done')
@@ -618,8 +626,9 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         // Change metric to make vector different
-        const avSelect = wrapper.find('#metric-AV')
-        await avSelect.setValue('P')
+        // AV is read-only, use MAV
+        const mavSelect = wrapper.find('#metric-MAV')
+        await mavSelect.setValue('P')
         await wrapper.vm.$nextTick()
 
         expect(wrapper.text()).toContain('Original Vector:')

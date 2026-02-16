@@ -26,7 +26,8 @@ class AuthSettings(BaseSettings):
     # Support aliases from docker-compose.yml too
     ISSUER_URL: Optional[str] = Field(default=None)
     CLIENT_ID: Optional[str] = Field(default=None)
-    CLIENT_SECRET: Optional[str] = Field(default=None)
+    # Development settings
+    DEV_DISABLE_AUTH: bool = Field(alias="DTVP_DEV_DISABLE_AUTH", default=False)
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -84,6 +85,16 @@ async def get_oidc_config():
 
 @router.get("/login")
 async def login():
+    if auth_settings.DEV_DISABLE_AUTH:
+        # If auth disabled, redirect to main page with a dummy session if needed,
+        # or just redirect since get_current_user will pass anyway.
+        # But get_current_user checks for header/cookie? No, we'll bypass it.
+        base = auth_settings.FRONTEND_URL.rstrip("/")
+        path = auth_settings.CONTEXT_PATH
+        if not path.startswith("/"):
+            path = "/" + path
+        return RedirectResponse(f"{base}{path}")
+
     config = await get_oidc_config()
     auth_endpoint = config["authorization_endpoint"]
     return RedirectResponse(
@@ -150,6 +161,9 @@ async def callback(code: str, response: Response):
 
 
 def get_current_user(request: Request):
+    if auth_settings.DEV_DISABLE_AUTH:
+        return "devuser"
+
     token = request.cookies.get("session_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")

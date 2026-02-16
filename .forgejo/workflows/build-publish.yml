@@ -42,6 +42,10 @@ jobs:
     runs-on: node
     steps:
       - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies (backend)
+        run: uv sync --frozen
       - name: Install dependencies
         uses: nick-fields/retry@v3
         with:
@@ -60,6 +64,19 @@ jobs:
           name: vitest-coverage-report
           path: frontend/coverage/
           retention-days: 30
+      - name: Start Dev Stack
+        run: |
+          npm install -g pm2
+          pm2 start ecosystem.config.js
+          echo "Waiting for stack to spin up..."
+          sleep 15
+          pm2 list
+          pm2 logs --lines 50 --nostream
+      - name: Verify Reachability
+        run: |
+          curl -f http://localhost:8081/api/v1/project
+          curl -f http://localhost:8000/api/projects?name=Vuln
+          curl -Is http://localhost:5173 | head -n 1
       - name: Install Playwright browsers
         uses: nick-fields/retry@v3
         with:
@@ -79,14 +96,50 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 30
+      - name: Stop Dev Stack
+        if: always()
+        run: pm2 kill || true
 
-  build-push-images:
+  check-version:
     if: github.event.action != 'closed'
     needs: [test-backend, test-frontend]
     runs-on: node
     steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Extract Version
+        id: get_version
+        run: |
+          VERSION=$(uv version | awk '{print $2}')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+      - name: Check Git Tag
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          # Check remote tags
+          if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION$"; then
+            echo "Error: Git tag v$VERSION already exists."
+            exit 1
+          fi
+      - name: Check Docker Tag
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          if curl -I -s -f -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
+            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/packages/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/container/dtvp/$VERSION" >/dev/null 2>&1; then
+            echo "Error: Docker tag $VERSION already exists in registry."
+            exit 1
+          fi
+
+  build-push-images:
+    if: github.event.action != 'closed'
+    needs: [test-backend, test-frontend, check-version]
+    runs-on: node
+    steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
       - name: Install Docker Cli
         run: |-
           install -m 0755 -d /etc/apt/keyrings
@@ -109,6 +162,13 @@ jobs:
         uses: docker/setup-buildx-action@v3
         with:
           platforms: linux/amd64
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Extract Version
+        id: get_version
+        run: |
+          VERSION=$(uv version | awk '{print $2}')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
       - name: Build and Push 
         uses: docker/build-push-action@v6
         with:
@@ -117,10 +177,22 @@ jobs:
           tags: |
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
+            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
             ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
           context: .
+          build-args: |
+            BUILD_COMMIT=${{ github.sha }}
           secrets: |
             GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+      - name: Create Git Tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          git config --global user.name "Gitea Actions"
+          git config --global user.email "actions@gitea.io"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
 
   delete-pr-images:
     if: github.event.action == 'closed'
