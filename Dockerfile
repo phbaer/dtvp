@@ -21,6 +21,9 @@ RUN npm run build
 # Stage 2: Build the backend and include frontend assets
 FROM python:${PYTHON_VERSION}-alpine
 
+ARG BUILD_COMMIT=unknown
+ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT
+
 WORKDIR /app
 
 # Install uv
