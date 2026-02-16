@@ -42,6 +42,10 @@ jobs:
     runs-on: node
     steps:
       - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install dependencies (backend)
+        run: uv sync --frozen
       - name: Install dependencies
         uses: nick-fields/retry@v3
         with:
@@ -60,6 +64,19 @@ jobs:
           name: vitest-coverage-report
           path: frontend/coverage/
           retention-days: 30
+      - name: Start Dev Stack
+        run: |
+          npm install -g pm2
+          pm2 start ecosystem.config.js
+          echo "Waiting for stack to spin up..."
+          sleep 15
+          pm2 list
+          pm2 logs --lines 50 --nostream
+      - name: Verify Reachability
+        run: |
+          curl -f http://localhost:8081/api/v1/project
+          curl -f http://localhost:8000/api/projects?name=Vuln
+          curl -Is http://localhost:5173 | head -n 1
       - name: Install Playwright browsers
         uses: nick-fields/retry@v3
         with:
@@ -79,44 +96,6 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 30
-
-  test-integration:
-    if: github.event.action != 'closed'
-    runs-on: node
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - name: Install dependencies (backend)
-        run: uv sync --frozen
-      - name: Install dependencies (frontend)
-        working-directory: frontend
-        run: npm ci
-      - name: Start Dev Stack (PM2)
-        run: |
-          npm install -g pm2
-          pm2 start ecosystem.config.js
-          echo "Waiting for stack to spin up..."
-          sleep 15
-          pm2 list
-          pm2 logs --lines 50
-      - name: Verify Reachability
-        run: |
-          curl -f http://localhost:8081/api/v1/project
-          curl -f http://localhost:8000/api/projects?name=Vuln
-          curl -Is http://localhost:5173 | head -n 1
-      - name: Install Playwright browsers
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: cd frontend && npx playwright install --with-deps chromium
-      - name: Run Integration Tests
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: cd frontend && npx playwright test integration.spec.ts --reporter=line
       - name: Stop Dev Stack
         if: always()
         run: pm2 kill || true
