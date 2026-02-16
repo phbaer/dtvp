@@ -222,7 +222,7 @@ def test_assessment_update(client, mock_dt_client):
     assert call_kwargs["state"] == "NOT_AFFECTED"
     # Details now includes the appended user tag
     assert "Verified as false positive" in call_kwargs["details"]
-    assert "[Reviewed by: testuser]" in call_kwargs["details"]
+    assert "[Reviewed By: testuser]" in call_kwargs["details"]
     assert call_kwargs["suppressed"] is True
 
 
