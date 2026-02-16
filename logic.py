@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import re
 import json
 import os
@@ -11,6 +11,16 @@ RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
 
 def get_team_mapping_path() -> str:
     return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
+
+
+STATE_PRIORITY = {
+    "EXPLOITABLE": 0,
+    "IN_TRIAGE": 1,
+    "FALSE_POSITIVE": 2,
+    "NOT_AFFECTED": 3,
+    "RESOLVED": 4,
+    "NOT_SET": 5,
+}
 
 
 def load_team_mapping(path: str = None) -> Dict[str, str]:
@@ -429,13 +439,17 @@ def group_vulnerabilities(
 
             # If we found a rescored value, update the group level if not set
             if rescored_score is not None and not groups[canonical_id]["rescored_cvss"]:
-                groups[canonical_id]["rescored_cvss"] = rescored_score
+                # ONLY record if it differs from the base score
+                if rescored_score != groups[canonical_id]["cvss_score"]:
+                    groups[canonical_id]["rescored_cvss"] = rescored_score
 
             if (
                 rescored_vector is not None
                 and not groups[canonical_id]["rescored_vector"]
             ):
-                groups[canonical_id]["rescored_vector"] = rescored_vector
+                # ONLY record if it differs from the base vector
+                if rescored_vector != groups[canonical_id]["cvss_vector"]:
+                    groups[canonical_id]["rescored_vector"] = rescored_vector
 
             component_info = {
                 "project_uuid": proj_uuid,
@@ -456,6 +470,7 @@ def group_vulnerabilities(
                 "is_suppressed": analysis.get("isSuppressed", False)
                 or analysis.get("suppressed", False),
                 "usage_paths": [],
+                "tags": tags,
             }
 
             aff_vers_map = groups[canonical_id]["affected_versions"]
@@ -506,60 +521,206 @@ def group_vulnerabilities(
     return result
 
 
-def process_assessment_details(details: str, user: str, role: str) -> str:
+def process_assessment_details(
+    new_details: str,
+    user: str,
+    role: str,
+    team: Optional[str] = None,
+    state: str = "NOT_SET",
+    existing_details: str = "",
+) -> Tuple[str, str]:
     """
     Parses the assessment details to:
-    1. Consolidate Rescored tags (max score).
-    2. Handle Rescored Vector tags.
-    3. Update/clean Assessed By and Reviewed By tags.
-    4. Append pending review status for analysts.
+    1. Consolidate Per-Team assessment blocks.
+    2. Update/Add the current team's assessment.
+    3. Aggregate the "worst" state across all teams.
+    4. Maintain shared tags like [Rescored] based on aggregates.
+    """
+    if not existing_details:
+        existing_details = ""
+
+    # 1. Parse existing team blocks
+    # Format: --- [Team: Name] [State: State] [Assessed By: User] ---
+    #         Details...
+    blocks = {}  # team -> {state, user, details, rescored, vector}
+
+    # Split into potential blocks using the header prefix
+    raw_blocks = re.split(r"---(?=\s*\[Team:)", existing_details)
+    shared_text = raw_blocks[0].strip() if raw_blocks else ""
+
+    for rb in raw_blocks[1:]:
+        # Find the header ends with '---'
+        header_end = rb.find("---")
+        if header_end == -1:
+            continue
+
+        header = rb[:header_end]
+        content = rb[header_end + 3 :].strip()
+
+        match = re.search(
+            r"\[Team:\s*([^\]]+)\]\s*\[State:\s*([^\]]+)\](?:\s*\[Assessed By:\s*([^\]]+)\])?(?:\s*\[Reviewed By:\s*([^\]]+)\])?(?:\s*\[Rescored:\s*([^\]]+)\])?(?:\s*\[Rescored Vector:\s*([^\]]+)\])?",
+            header,
+        )
+        if match:
+            t_name = match.group(1)
+            blocks[t_name] = {
+                "state": match.group(2),
+                "user": match.group(3) or "unknown",
+                "reviewer": match.group(4),
+                "rescored": float(match.group(5)) if match.group(5) else None,
+                "vector": match.group(6),
+                "details": content,
+            }
+
+    # 2. Update current team
+    t_key = team or "General"
+
+    # Extract rescored info from the NEW details if tags were manually added or passed
+    # (Though usually the UI sends them via other means, but let's parse from new_details as well)
+    new_score_match = re.search(r"\[Rescored:\s*([\d\.]+)\]", new_details)
+    new_score = float(new_score_match.group(1)) if new_score_match else None
+
+    new_vector_match = re.search(r"\[Rescored Vector:\s*([^\]]+)\]", new_details)
+    new_vector = new_vector_match.group(1).strip() if new_vector_match else None
+
+    # Clean the new technical details from any tags we are about to re-add in the header
+    clean_new_details = new_details
+    clean_new_details = re.sub(r"\[Rescored:\s*[\d\.]+\]", "", clean_new_details)
+    clean_new_details = re.sub(r"\[Rescored Vector:\s*[^\]]+\]", "", clean_new_details)
+    clean_new_details = re.sub(r"\[Assessed By:\s*[^\]]+\]", "", clean_new_details)
+    clean_new_details = re.sub(r"\[Team:\s*[^\]]+\]", "", clean_new_details)
+    clean_new_details = re.sub(r"\[State:\s*[^\]]+\]", "", clean_new_details)
+    clean_new_details = clean_new_details.strip()
+
+    blocks[t_key] = {
+        "state": state,
+        "user": user,
+        "reviewer": user
+        if role == "REVIEWER"
+        else blocks.get(t_key, {}).get("reviewer"),
+        "rescored": new_score,
+        "vector": new_vector,
+        "details": clean_new_details,
+    }
+
+    # 3. Aggregate State (Global Precedence)
+    # If "General" exists and is not NOT_SET, it wins.
+    # Otherwise, fallback to worst-case priority among all blocks.
+    general_block = blocks.get("General")
+    if general_block and general_block["state"] != "NOT_SET":
+        aggregated_state = general_block["state"]
+    else:
+        all_states = [b["state"] for b in blocks.values()]
+        if all_states:
+            aggregated_state = sorted(
+                all_states, key=lambda s: STATE_PRIORITY.get(s, 5)
+            )[0]
+        else:
+            aggregated_state = "NOT_SET"
+
+    # 4. Aggregate Rescored (Max wins)
+    all_scores = [b["rescored"] for b in blocks.values() if b["rescored"] is not None]
+    max_score = max(all_scores) if all_scores else None
+
+    # Vector corresponds to the max score (or latest if tied)
+    max_vector = None
+    if max_score is not None:
+        for b in blocks.values():
+            if b["rescored"] == max_score:
+                max_vector = b["vector"]
+                break
+
+    # 5. Reconstruct final string
+    final_output = []
+
+    # Aggregated tags at the very top
+    top_tags = []
+    if max_score is not None:
+        top_tags.append(f"[Rescored: {max_score}]")
+    if max_vector:
+        top_tags.append(f"[Rescored Vector: {max_vector}]")
+
+    if top_tags:
+        final_output.append(" ".join(top_tags))
+
+    if shared_text:
+        # Keep legacy text, but avoid duplicating aggregated tags if they were there
+        clean_shared = re.sub(r"\[Rescored:\s*[\d\.]+\]", "", shared_text)
+        clean_shared = re.sub(
+            r"\[Rescored Vector:\s*[^\]]+\]", "", clean_shared
+        ).strip()
+        if clean_shared:
+            final_output.append(clean_shared)
+
+    # Team blocks
+    for t_name, data in sorted(blocks.items()):
+        header = f"--- [Team: {t_name}] [State: {data['state']}] [Assessed By: {data['user']}]"
+        if data.get("reviewer"):
+            header += f" [Reviewed By: {data['reviewer']}]"
+        if data["rescored"] is not None:
+            header += f" [Rescored: {data['rescored']}]"
+        if data["vector"]:
+            header += f" [Rescored Vector: {data['vector']}]"
+        header += " ---"
+
+        final_output.append(header)
+        if data["details"]:
+            final_output.append(data["details"])
+
+    final_str = "\n".join(final_output)
+
+    # Analysts always add the flag if missing
+    if role == "ANALYST":
+        if "[Status: Pending Review]" not in final_str:
+            final_str += "\n\n[Status: Pending Review]"
+
+    # Reviewer automatic stripping removed.
+    # The client (UI) now decides whether to strip it (Approve) or keep it (Save).
+
+    return final_str, aggregated_state
+
+
+def calculate_aggregated_state(details: str) -> str:
+    """
+    Parses the assessment details string to calculate the aggregated state
+    based on the worst-case logic.
     """
     if not details:
-        details = ""
+        return "NOT_SET"
 
-    # Extract scores
-    score_matches = re.findall(r"\[Rescored:\s*([\d\.]+)\]", details)
-    scores = [float(s) for s in score_matches if s.replace(".", "", 1).isdigit()]
+    # Split into potential blocks using the header prefix
+    raw_blocks = re.split(r"---(?=\s*\[Team:)", details)
 
-    # Find max score
-    final_score = max(scores) if scores else None
+    states = []
 
-    # Parse Vector - take the LAST one found
-    vector_matches = re.findall(r"\[Rescored Vector:\s*([^\]]+)\]", details)
-    final_vector = vector_matches[-1] if vector_matches else None
+    for rb in raw_blocks[1:]:
+        # Find the header ends with '---'
+        header_end = rb.find("---")
+        if header_end == -1:
+            continue
 
-    # Clean details
-    clean_details = details
-    clean_details = re.sub(r"\[Rescored:\s*[\d\.]+\]", "", clean_details)
-    clean_details = re.sub(r"\[Rescored Vector:\s*[^\]]+\]", "", clean_details)
-    clean_details = re.sub(r"\[Assessed By:\s*[^\]]+\]", "", clean_details)
-    clean_details = re.sub(r"\[Reviewed By:\s*[^\]]+\]", "", clean_details)
-    clean_details = clean_details.strip()
+        header = rb[:header_end]
 
-    # Reconstruct
-    tags = []
-    if final_score is not None:
-        tags.append(f"[Rescored: {final_score}]")
-    if final_vector:
-        tags.append(f"[Rescored Vector: {final_vector}]")
+        match = re.search(r"\[State:\s*([^\]]+)\]", header)
+        if match:
+            states.append(match.group(1))
 
-    # Authorship
-    # Always update/add Assessed By for the current user
-    # Note: If there were multiple assessors in history, this logic currently only keeps the current one.
-    # Requirement: "Updating existing flags when new information is available."
-    # Typically, the last person to touch it is the "Assessor".
-    tags.append(f"[Assessed By: {user}]")
+    # Aggregate State (Global Precedence)
+    # Check if a General block exists in the states we found
+    # NOTE: The simple calculate_aggregated_state might need to be more aware of which state belongs to General.
+    # If the parsing is too complex here, we can just rely on process_assessment_details during updates.
+    # But for a quick fix, let's look for the General block explicitly if possible.
 
-    if role == "REVIEWER":
-        tags.append(f"[Reviewed By: {user}]")
+    # Re-parse to find General explicitly
+    general_match = re.search(r"--- \[Team: General\] \[State: ([^\]]+)\]", details)
+    if general_match:
+        gen_state = general_match.group(1)
+        if gen_state != "NOT_SET":
+            return gen_state
 
-    final_details_str = "\n".join(tags)
-    if clean_details:
-        final_details_str += "\n\n" + clean_details
+    if not states:
+        return "NOT_SET"
 
-    # Analyst Logic: Append Pending Review if not present and user is ANALYST
-    if role == "ANALYST":
-        if "[Status: Pending Review]" not in final_details_str:
-            final_details_str += "\n\n[Status: Pending Review]"
-
-    return final_details_str
+    # Fallback: Worst wins
+    aggregated_state = sorted(states, key=lambda s: STATE_PRIORITY.get(s, 5))[0]
+    return aggregated_state

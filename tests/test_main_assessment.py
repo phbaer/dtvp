@@ -50,8 +50,13 @@ def test_update_assessment_appends_user(override_deps, mock_client):
         mock_client.update_analysis.assert_called_once()
         _, kwargs = mock_client.update_analysis.call_args
 
-        # Check details has username
+        # Check details has username in the team block header
         assert "Original details" in kwargs["details"]
+        # Using containment check for parts of the header
+        assert (
+            "[Team: General] [State: NOT_AFFECTED] [Assessed By: testuser]"
+            in kwargs["details"]
+        )
         assert "[Reviewed By: testuser]" in kwargs["details"]
         # Ensure pending flag NOT added for Reviewer
         assert "[Status: Pending Review]" not in kwargs["details"]
@@ -83,5 +88,8 @@ def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
 
         # Check details has username AND Pending Review flag
         assert "Analyst details" in kwargs["details"]
-        assert "[Assessed By: testuser]" in kwargs["details"]
+        assert (
+            "[Team: General] [State: NOT_AFFECTED] [Assessed By: testuser]"
+            in kwargs["details"]
+        )
         assert "[Status: Pending Review]" in kwargs["details"]

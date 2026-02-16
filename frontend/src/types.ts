@@ -25,6 +25,7 @@ export interface Instance {
     is_suppressed: boolean;
     usage_paths?: string[];
     justification?: string;
+    tags?: string[];
 }
 
 
@@ -57,6 +58,8 @@ export interface AssessmentPayload {
     comment?: string;
     justification?: string;
     suppressed: boolean;
+    team?: string;
     original_analysis?: Record<string, any>;
     force?: boolean;
+    comparison_mode?: 'MERGE' | 'REPLACE';
 }
