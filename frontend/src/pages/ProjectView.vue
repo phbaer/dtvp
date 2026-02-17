@@ -87,7 +87,7 @@ const handleToggleExpand = (id: string, expanded: boolean) => {
 const tagFilter = ref('')
 const idFilter = ref('')
 const hideAssessed = ref(true)
-const hideMixed = ref(true)
+const hideMixed = ref(false)
 const showNeedsApproval = ref(false)
 const sortBy = ref('severity')
 const sortOrder = ref<'asc' | 'desc'>('asc')
