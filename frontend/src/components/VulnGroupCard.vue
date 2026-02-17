@@ -99,16 +99,6 @@ const isReviewer = computed(() => {
     return user?.value?.role === 'REVIEWER'
 })
 
-
-
-
-
-
-
-
-
-
-
 const allInstances = computed(() => {
     return props.group.affected_versions?.flatMap(v => v.components) || []
 })
@@ -144,11 +134,6 @@ const approveAssessment = async (e: Event) => {
     // Get current details from first instance (assuming grouped logic holds)
     const first = allInstances.value[0]
     if (!first) return
-
-    state.value = first.analysis_state || 'NOT_SET'
-    details.value = (first.analysis_details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-    justification.value = first.justification || 'NOT_SET'
-    suppressed.value = first.is_suppressed || false
     
     // We update using the existing handleUpdate but need to make sure state is set correctly first
     // Since details.value is reactive, handleUpdate will pick it up
