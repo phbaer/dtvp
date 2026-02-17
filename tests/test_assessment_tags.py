@@ -96,16 +96,18 @@ class TestAssessmentTags(unittest.TestCase):
         # IN_TRIAGE (1) is worse than RESOLVED (5) or NOT_AFFECTED (4)
         self.assertEqual(state, "IN_TRIAGE")
 
-    def test_assessment_details_reviewer_clears_pending(self):
+    def test_assessment_details_reviewer_updates_preserves_pending(self):
+        # With the decoupled approval workflow, updates by reviewers
+        # NO LONGER automatically clear the pending status.
         existing = "Details.\n\n[Status: Pending Review]"
         user = "admin"
         role = "REVIEWER"
 
         result, state = process_assessment_details(
-            "Approved.", user, role, existing_details=existing
+            "Updated details.", user, role, existing_details=existing
         )
 
-        self.assertNotIn("[Status: Pending Review]", result)
+        self.assertIn("[Status: Pending Review]", result)
         self.assertIn("[Assessed By: admin]", result)
 
     def test_assessment_details_analyst_adds_pending(self):

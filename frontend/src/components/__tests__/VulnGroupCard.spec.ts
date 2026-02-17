@@ -1,16 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock API
 vi.mock('../../lib/api', () => ({
-    updateAssessment: vi.fn((payload) => {
+    updateAssessment: vi.fn((payload: any) => {
         // Sophisticated mock for per-team aggregation
         const results = payload.instances.map((inst: any) => ({
             status: 'success',
             uuid: inst.finding_uuid,
             new_state: payload.state, // In real backend this would be aggregated
-            new_details: `--- [Team: ${payload.team || 'General'}] [State: ${payload.state}] [Assessed By: test-mock] [Justification: ${payload.justification || 'NOT_SET'}] ---\n${payload.details}`
+            new_details: `-- - [Team: ${payload.team || 'General'}][State: ${payload.state}][Assessed By: test - mock][Justification: ${payload.justification || 'NOT_SET'}]---\n${payload.details}`
         }))
         return Promise.resolve(results)
     }),
@@ -81,9 +81,6 @@ describe('VulnGroupCard', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
-        // Mock browser alerts/confirms
-        global.confirm = vi.fn(() => true)
-        global.alert = vi.fn()
     })
 
     it('renders vulnerability details', () => {
@@ -135,18 +132,25 @@ describe('VulnGroupCard', () => {
         // Click Apply
         const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
         expect(applyBtn).toBeDefined()
-        // Check if disabled. attributes('disabled') exists if disabled=""
-        // Or element.disabled
         expect(applyBtn?.element.disabled).toBe(false)
-        await applyBtn?.trigger('click')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        // Confirm in modal
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Success alert appears, click Close
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
 
         // Verify API call
-        expect(global.confirm).toHaveBeenCalled()
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
             details: expect.stringContaining('--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: tester] [Justification: NOT_SET] ---\n\nFalse positive'),
-            team: 'Security',
-            comparison_mode: 'REPLACE'
+            team: 'Security'
         }))
 
         // Should emit update:assessment
@@ -170,9 +174,20 @@ describe('VulnGroupCard', () => {
         await wrapper.find('select').setValue('Security')
 
         const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
-        await applyBtn?.trigger('click')
+        applyBtn?.trigger('click')
+        await flushPromises()
 
-        expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('errors'))
+        // Modal appears, click Confirm
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Error alert modal appears, check text and close
+        expect(wrapper.text()).toContain('Assessment updated with 1 errors')
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
+
         consoleSpy.mockRestore()
     })
 
@@ -215,12 +230,17 @@ describe('VulnGroupCard', () => {
 
 
     it('handles user canceling confirmation', async () => {
-        global.confirm = vi.fn(() => false)
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
 
         await wrapper.find('.cursor-pointer').trigger('click')
         const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
-        await applyBtn?.trigger('click')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        // Modal appears, click Cancel
+        const cancelBtn = wrapper.findAll('button').find(b => b.text() === 'Cancel')
+        await cancelBtn?.trigger('click')
+        await flushPromises()
 
         expect(updateAssessment).not.toHaveBeenCalled()
     })
@@ -253,7 +273,18 @@ describe('VulnGroupCard', () => {
 
             // Submit
             const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
-            await applyBtn?.trigger('click')
+            applyBtn?.trigger('click')
+            await flushPromises()
+
+            // Confirm in modal
+            const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+            await confirmBtn?.trigger('click')
+            await flushPromises()
+
+            // Success alert appears, click Close
+            const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+            await closeBtn?.trigger('click')
+            await flushPromises()
 
             expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
                 comment: 'Audit comment',
@@ -302,9 +333,20 @@ describe('VulnGroupCard', () => {
         await wrapper.find('select').setValue('Security')
 
         const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
-        await applyBtn?.trigger('click')
+        applyBtn?.trigger('click')
+        await flushPromises()
 
-        expect(global.alert).toHaveBeenCalledWith('Failed to update assessment')
+        // Confirm
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Error alert modal
+        expect(wrapper.text()).toContain('Failed to update assessment')
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
+
         consoleSpy.mockRestore()
     })
 
@@ -359,12 +401,20 @@ describe('VulnGroupCard', () => {
             await selects[2]?.setValue('CODE_NOT_PRESENT')
         }
 
-        // Confirm bulk update
-        window.confirm = vi.fn(() => true)
-        window.alert = vi.fn()
-
+        // Apply bulk update
         const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
-        await applyBtn?.trigger('click')
+        applyBtn?.trigger('click') // Do NOT await here, it waits for promptConfirm
+        await flushPromises()
+
+        // Interact with custom modal
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Success alert appears, click Close
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
 
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
@@ -413,7 +463,7 @@ describe('VulnGroupCard', () => {
 
         // The previous test code had:
         // await wrapper.find('input[type="checkbox"]').setValue(true) // Target only this team
-        // If this checkbox is the Suppress checkbox, setting it to true sets `suppressed=true`.
+        // If this checkbox is the Suppress checkbox, setting it to true sets `suppressed = true`.
         // `updateAssessment` call expectation: `team: 'Security', state: 'EXPLOITABLE'`. Suppressed is not checked in expectation.
 
         // I will keep the checkbox interaction if it helps, but verify expectation.
@@ -422,9 +472,19 @@ describe('VulnGroupCard', () => {
         await wrapper.find('textarea').setValue('Security confirmed exploitable')
 
         // Click Apply
-        // We use a regex to match "Apply to 1 instance" specifically
         const applyBtn = wrapper.findAll('button').find(b => /Apply to 1 instance/.test(b.text()))
-        await applyBtn?.trigger('click')
+        applyBtn?.trigger('click') // Do NOT await
+        await flushPromises()
+
+        // Confirm in modal
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Success alert appears, click Close
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
 
         // Verify API call includes the team
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({

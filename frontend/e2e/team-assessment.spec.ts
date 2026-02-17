@@ -119,9 +119,9 @@ test.describe('Per-Team Assessment UI Flow', () => {
         await expect(cardHeader).toBeVisible();
         await cardHeader.click();
 
-        // Wait for the bulk assessment section to be visible
-        const bulkHeader = page.locator('text=Bulk Assessment');
-        await expect(bulkHeader).toBeVisible();
+        // Wait for the global assessment section to be visible
+        const globalHeader = page.getByText(/Global Assessment/i).first();
+        await expect(globalHeader).toBeVisible();
 
         // Verify Team Marker dropdown exists and has options
         const teamSelector = page.locator('label:has-text("Team assessment (Marker)")').locator('xpath=following-sibling::select').first();
@@ -136,7 +136,7 @@ test.describe('Per-Team Assessment UI Flow', () => {
         await stateSelect.selectOption('EXPLOITABLE');
 
         // Add details
-        await page.fill('textarea[placeholder="Technical details for this team..."]', 'Backend confirms this is exploitable in our environment.');
+        await page.fill('textarea[placeholder="Technical details..."]', 'Backend confirms this is exploitable in our environment.');
 
         // Mock the sophisticated server response (Aggregation)
         await page.route('**/api/assessment', async (route) => {
@@ -157,9 +157,15 @@ test.describe('Per-Team Assessment UI Flow', () => {
         // Click Apply
         // Use getByRole for better resilience
         const applyBtn = cardHeader.getByRole('button', { name: /Apply to/ });
-        await expect(applyBtn).toBeEnabled({ timeout: 10000 });
         console.log('E2E: Clickable button found:', await applyBtn.textContent());
         await applyBtn.click();
+
+        // Handle Custom Confirm Modal
+        await page.getByRole('button', { name: 'Confirm' }).click();
+
+        // Handle Success Modal
+        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
+        await page.getByRole('button', { name: 'Close' }).click();
 
         // Wait for it to close (success sync)
         await expect(page.locator('text=Backend confirms this is exploitable')).not.toBeVisible();

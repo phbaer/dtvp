@@ -54,6 +54,9 @@ test.describe('Vulnerability View and Rescoring', () => {
                                         {
                                             component_name: 'lib-a',
                                             component_version: '1.0',
+                                            component_uuid: 'c-1',
+                                            finding_uuid: 'f-1',
+                                            vulnerability_uuid: 'v-1',
                                             analysis_state: 'NOT_SET',
                                             analysis_details: '',
                                             tags: ['Security']
@@ -114,7 +117,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         await teamSelector.selectOption('Security');
 
         // Wait for the team assessment header to appear
-        await expect(page.locator('text=Security Assessment')).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('text=Team Assessment: Security')).toBeVisible({ timeout: 10000 });
 
         // Verify rescoring fields are visible
         await expect(page.locator('input[placeholder^="CVSS"]')).toBeVisible();
@@ -140,8 +143,16 @@ test.describe('Vulnerability View and Rescoring', () => {
 
         // Click Apply to All
         // We might get a confirm dialog, Playwright handles it if we set up a listener or it might just work if we use page.on('dialog')
-        page.on('dialog', dialog => dialog.accept());
-        await page.getByRole('button', { name: /Apply to/ }).click();
+        // Click Apply
+        const applyBtn = cardHeader.getByRole('button', { name: /Apply to/ });
+        await applyBtn.click();
+
+        // Handle Custom Confirm Modal
+        await page.getByRole('button', { name: 'Confirm' }).click();
+
+        // Handle Success Modal
+        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
+        await page.getByRole('button', { name: 'Close' }).click();
 
         // Check for success alert or indicator that it closed
         await expect(page.locator('text=A bad vulnerability description.')).not.toBeVisible();

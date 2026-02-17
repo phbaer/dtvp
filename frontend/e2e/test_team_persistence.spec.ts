@@ -120,7 +120,7 @@ test.describe('Team Analysis Persistence', () => {
         await stateSelect.selectOption('IN_TRIAGE');
 
         const detailsText = 'These are persistent details.';
-        await page.fill('textarea[placeholder="Technical details for this team..."]', detailsText);
+        await page.fill('textarea[placeholder="Technical details..."]', detailsText);
 
         // Mock the update response
         // IMPORTANT: We need to update the details route for subsequent calls to simulate persistence on the backend
@@ -148,6 +148,13 @@ test.describe('Team Analysis Persistence', () => {
         // Click Apply
         const applyBtn = cardHeader.getByRole('button', { name: /Apply to/ });
         await applyBtn.click();
+
+        // Handle Custom Confirm Modal
+        await page.getByRole('button', { name: 'Confirm' }).click();
+
+        // Handle Success Modal
+        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
+        await page.getByRole('button', { name: 'Close' }).click();
 
         // Wait for update to complete (button re-enables or alert)
         // In the real app, it closes the expanded view on success, so let's cycle it.
@@ -181,7 +188,7 @@ test.describe('Team Analysis Persistence', () => {
         await teamSelector.selectOption('Frontend');
 
         // Verify details persist in the textarea
-        const textarea = page.locator('textarea[placeholder="Technical details for this team..."]');
+        const textarea = page.locator('textarea[placeholder="Technical details..."]');
         await expect(textarea).toHaveValue(new RegExp(detailsText));
     });
 });
