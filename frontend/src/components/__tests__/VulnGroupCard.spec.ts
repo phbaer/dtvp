@@ -31,7 +31,8 @@ vi.mock('lucide-vue-next', () => ({
     Calculator: { template: '<span class="icon-calc" />' },
     ExternalLink: { template: '<span class="icon-link" />' },
     RefreshCw: { template: '<span class="icon-refresh" />' },
-    AlertTriangle: { template: '<span class="icon-alert" />' }
+    AlertTriangle: { template: '<span class="icon-alert" />' },
+    CheckCircle: { template: '<span class="icon-check-circle" />' }
 }))
 
 // Mock DependencyChainViewer to avoid async setup in child component

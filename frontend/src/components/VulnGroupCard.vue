@@ -3,7 +3,7 @@ import { ref, computed, watch, inject } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 
 import type { GroupedVuln, AssessmentPayload } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle } from 'lucide-vue-next'
 
 import { parseAssessmentBlocks, mergeTeamAssessment } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
@@ -596,6 +596,19 @@ const rescoredVectorSegments = computed(() => {
         normal: rescored.slice(original.length)
     }
 })
+
+const assessedTeams = computed(() => {
+    // Check key teams from the FIRST instance which usually holds the truth for groupeditems
+    const firstVersion = props.group.affected_versions?.[0]
+    if (!firstVersion || !firstVersion.components || firstVersion.components.length === 0) return new Set<string>()
+    
+    // We can assume if one instance has it, the group effectively has it in this context
+    const first = firstVersion.components[0]
+    if (!first || !first.analysis_details) return new Set<string>()
+    
+    const blocks = parseAssessmentBlocks(first.analysis_details)
+    return new Set(Object.keys(blocks))
+})
 </script>
 
 <template>
@@ -646,8 +659,9 @@ const rescoredVectorSegments = computed(() => {
                         <span 
                             v-for="tag in group.tags" 
                             :key="tag" 
-                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap flex items-center gap-1.5"
                         >
+                            <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="text-green-400" />
                             {{ tag }}
                         </span>
                      </div>
