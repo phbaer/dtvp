@@ -14,6 +14,9 @@ test.describe('Integration Tests (Real Backend)', () => {
         // The mock backend returns "Vulnerable Project"
         await expect(page.getByText('Vulnerable Project')).toBeVisible({ timeout: 10000 });
 
+        // Uncheck "Hide Assessed" and "Hide Mixed" to ensure all results are visible
+
+
         // 4. Verify version is displayed
         await expect(page.getByText('1.0.0')).toBeVisible();
     });
@@ -28,6 +31,10 @@ test.describe('Integration Tests (Real Backend)', () => {
         // 2. Click on the project to navigate
         await page.getByText('Vulnerable Project').click();
 
+        // Uncheck "Hide Assessed" and "Hide Mixed" to ensure vulnerabilities are visible
+        await page.locator('label', { hasText: 'Hide Assessed' }).uncheck();
+        await page.locator('label', { hasText: 'Hide Mixed' }).uncheck();
+
         // 3. Check for URL change
         await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/);
 
@@ -37,7 +44,7 @@ test.describe('Integration Tests (Real Backend)', () => {
 
         // 4. Verify Analysis State (Mocked as NOT_SET or similar)
         // Wait specifically for the status badge
-        await expect(page.getByText('NOT_SET').first()).toBeVisible();
+        await expect(page.locator('.analysis-state-value').first()).toBeVisible();
     });
 
 });

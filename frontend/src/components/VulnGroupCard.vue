@@ -11,6 +11,7 @@ import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
 import CvssCalculatorV3 from './CvssCalculatorV3.vue'
 import CvssCalculatorV4 from './CvssCalculatorV4.vue'
+import DependencyChainViewer from './DependencyChainViewer.vue'
 
 
 const props = defineProps<{
@@ -66,6 +67,34 @@ const isManualBaseMode = ref(false)
 const initialVector = ref('')
 const initialScore = ref<number | null>(null)
 
+const genericModal = ref({
+    show: false,
+    title: '',
+    message: '',
+    confirmOnly: false,
+    resolve: (_: boolean) => {}
+})
+
+const promptConfirm = (title: string, message: string, confirmOnly = false) => {
+    genericModal.value = {
+        show: true,
+        title,
+        message,
+        confirmOnly,
+        resolve: () => {}
+    }
+    return new Promise<boolean>((resolve) => {
+        genericModal.value.resolve = resolve
+    })
+}
+
+const showAlert = (title: string, message: string) => promptConfirm(title, message, true)
+
+const handleModalResponse = (value: boolean) => {
+    genericModal.value.show = false
+    genericModal.value.resolve(value)
+}
+
 const isReviewer = computed(() => {
     return user?.value?.role === 'REVIEWER'
 })
@@ -110,7 +139,7 @@ const canApprove = computed(() => {
 
 const approveAssessment = async (e: Event) => {
     e.stopPropagation() // Prevent card expansion
-    if (!confirm('Approve this assessment? This will remove the pending status.')) return
+    if (!await promptConfirm('Approve Assessment', 'Approve this assessment? This will remove the pending status.')) return
 
     // Get current details from first instance (assuming grouped logic holds)
     const first = allInstances.value[0]
@@ -318,11 +347,11 @@ const refreshDetails = async () => {
         // Update local state and originalAnalysis map
         const newOriginals: Record<string, any> = {}
         
-        detailsList.forEach((item: any) => {
+        for (const item of detailsList) {
              if (item.error) {
                  console.error(`Error fetching details for ${item.finding_uuid}:`, item.error)
-                 alert(`Failed to refresh details for a component: ${item.error}`)
-                 return
+                 await showAlert('Update Failed', `Failed to refresh details for a component: ${item.error}`)
+                 continue
              }
              
              if (item.analysis) {
@@ -332,11 +361,6 @@ const refreshDetails = async () => {
                  }
                  
                  // Update the reactive object in the group
-                 // We need to find the matching component in props.group.affected_versions
-                 // Correct logic: Match on PROJECT + COMPONENT + VULNERABILITY
-                 // finding_uuid might be ambiguous if DT returns duplicates or we have multi-version components
-                 // with same finding ID (unlikely but safe to be explicit).
-                 
                  const targetProj = item.project_uuid
                  const targetComp = item.component_uuid
                  const targetVuln = item.vulnerability_uuid
@@ -356,7 +380,7 @@ const refreshDetails = async () => {
                      })
                  })
              }
-        })
+        }
         
         originalAnalysis.value = { ...originalAnalysis.value, ...newOriginals }
         
@@ -385,11 +409,11 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     }
 
     if (instances.length === 0) {
-        alert('No components found for the selected team.')
+        await showAlert('Selection Error', 'No components found for the selected team.')
         return
     }
 
-    if (!force && !confirm(`Apply this assessment to ${instances.length} instances?`)) return
+    if (!force && !await promptConfirm('Apply Assessment', `Apply this assessment to ${instances.length} instances?`)) return
     
     updating.value = true
     try {
@@ -404,7 +428,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         // 2. Perform Client-Side Merge
         const targetTeam = selectedTeam.value || 'General'
         if (!targetTeam && !isReviewer.value) {
-             alert("Please select a team to assess.")
+             await showAlert('Input Required', "Please select a team to assess.")
              return
         }
 
@@ -474,20 +498,21 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         const errors = results.filter((r: any) => r.status === 'error')
         if (errors.length > 0) {
              console.error('Update completed with errors:', errors)
-             alert(`Assessment updated with ${errors.length} errors. Check console for details.`)
+             await showAlert('Update Partial', `Assessment updated with ${errors.length} errors. Check console for details.`)
         } else {
-             if (!force) alert('Assessment updated successfully')
+             if (!force) await showAlert('Success', 'Assessment updated successfully')
              const success = results.find((r: any) => r.status === 'success')
              
-             const data = {
-                 rescored_cvss: isReviewer.value ? pendingScore.value : props.group.rescored_cvss,
-                 rescored_vector: isReviewer.value ? pendingVector.value : props.group.rescored_vector,
-                 analysis_state: success ? success.new_state : payload.state,
-                 analysis_details: success ? success.new_details : finalText,
-                 is_suppressed: suppressed.value,
-                 justification: (payload.state === 'NOT_AFFECTED') ? justification.value : 'NOT_SET'
+             if (success) {
+                 const data = {
+                     rescored_cvss: isReviewer.value ? pendingScore.value : props.group.rescored_cvss,
+                     rescored_vector: isReviewer.value ? pendingVector.value : props.group.rescored_vector,
+                     analysis_state: success.new_state,
+                     analysis_details: success.new_details,
+                     is_suppressed: suppressed.value
+                 }
+                 emit('update:assessment', data)
              }
-             emit('update:assessment', data)
              showConflictModal.value = false
         }
         
@@ -497,7 +522,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             conflictData.value = err.response.data.conflicts
             showConflictModal.value = true
         } else {
-            alert('Failed to update assessment')
+            await showAlert('Error', 'Failed to update assessment')
             console.error(err)
         }
     } finally {
@@ -1048,6 +1073,43 @@ const rescoredVectorSegments = computed(() => {
             </div>
         </div>
     </div>
+    <!-- Generic Modal (Alert/Confirm) -->
+    <div v-if="genericModal.show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+        <div class="bg-gray-800 w-full max-w-md rounded-lg border border-gray-700 shadow-2xl overflow-hidden scale-in-center">
+            <div class="p-4 border-b border-gray-700 bg-gray-800 flex justify-between items-center">
+                <h3 class="font-bold text-lg text-gray-200">{{ genericModal.title }}</h3>
+                <button @click="handleModalResponse(false)" class="text-gray-400 hover:text-white transition-colors">✕</button>
+            </div>
+            <div class="p-6 bg-gray-850 text-gray-300">
+                <p class="text-sm leading-relaxed">{{ genericModal.message }}</p>
+            </div>
+            <div class="p-4 bg-gray-900 border-t border-gray-700 flex justify-end gap-3">
+                <button 
+                    v-if="!genericModal.confirmOnly"
+                    @click="handleModalResponse(false)"
+                    class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold transition-colors"
+                >
+                    Cancel
+                </button>
+                <button 
+                    @click="handleModalResponse(true)"
+                    class="px-6 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-900/20 transition-all active:scale-95"
+                >
+                    {{ genericModal.confirmOnly ? 'Close' : 'Confirm' }}
+                </button>
+            </div>
+        </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.scale-in-center {
+	animation: scale-in-center 0.15s cubic-bezier(0.250, 0.460, 0.450, 0.940) both;
+}
+@keyframes scale-in-center {
+  0% { transform: scale(0.95); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+</style>
 
