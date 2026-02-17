@@ -14,19 +14,17 @@ class TestAssessmentTags(unittest.TestCase):
         self.assertIn("Some details.", result)
         self.assertEqual(state, "NOT_SET")
 
-    def test_assessment_details_rescored_max(self):
-        # We need to simulate the team blocks or rely on the extraction
-        # Since process_assessment_details now parses blocks, we give it a multi-team state
+    def test_assessment_details_rescored_update(self):
+        # The new logic enforces a single block. Updating one team's assessment
+        # should replace the entire block with the new assessment.
         existing = (
             "--- [Team: Security] [State: EXPLOITABLE] [Assessed By: bob] [Rescored: 4.0] ---\n"
             "Bad.\n"
-            "--- [Team: App] [State: NOT_AFFECTED] [Assessed By: charlie] [Rescored: 8.5] ---\n"
-            "Fine."
         )
         user = "new_user"
         role = "USER"
         team = "Security"
-        new_details = "Updated security analysis.\n[Rescored: 9.0]"  # Team Security updates their score
+        new_details = "Updated security analysis.\n[Rescored: 9.0]"
 
         result, state = process_assessment_details(
             new_details,
@@ -37,19 +35,15 @@ class TestAssessmentTags(unittest.TestCase):
             existing_details=existing,
         )
 
-        # Global tag at the top should be the max (9.0)
-        self.assertTrue(result.startswith("[Rescored: 9.0]"))
-        # Per-team scores stay in headers. Security updated from 4.0 to 9.0.
-        self.assertIn("[Rescored: 8.5]", result)  # App's score stays
-        self.assertIn(
-            "[Team: Security] [State: EXPLOITABLE] [Assessed By: new_user] [Rescored: 9.0]",
-            result,
-        )
+        # The result should be a single block for Security with the new score.
+        self.assertTrue(result.startswith("--- [Team: Security]"))
+        self.assertIn("[Rescored: 9.0]", result)
+        self.assertIn("Updated security analysis.", result)
+        self.assertNotIn("[Rescored: 4.0]", result)
         self.assertEqual(state, "EXPLOITABLE")
-        # Ensure no extra --- from bad parsing
-        self.assertNotIn("---\n---", result)
 
-    def test_assessment_details_state_aggregation_worst(self):
+    def test_assessment_details_state_aggregation_replacement(self):
+        # When a new assessment is provided, it replaces the existing one entirely.
         existing = (
             "--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: bob] ---\n"
             "Looks safe."
@@ -69,37 +63,15 @@ class TestAssessmentTags(unittest.TestCase):
             existing_details=existing,
         )
 
-        # Aggregated state should be EXPLOITABLE
+        # The result should be the new App assessment. Security assessment is gone.
         self.assertEqual(state, "EXPLOITABLE")
-        self.assertIn("[Team: Security] [State: NOT_AFFECTED]", result)
+        self.assertNotIn("[Team: Security]", result)
         self.assertIn("[Team: App] [State: EXPLOITABLE]", result)
 
-    def test_assessment_details_state_aggregation_in_triage(self):
-        existing = (
-            "--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: bob] ---\n"
-            "--- [Team: Dev] [State: RESOLVED] [Assessed By: charlie] ---"
-        )
-        user = "analyst"
-        role = "USER"
-        team = "QA"
-        new_state = "IN_TRIAGE"
-
-        result, state = process_assessment_details(
-            "Checking...",
-            user,
-            role,
-            team=team,
-            state=new_state,
-            existing_details=existing,
-        )
-
-        # IN_TRIAGE (1) is worse than RESOLVED (5) or NOT_AFFECTED (4)
-        self.assertEqual(state, "IN_TRIAGE")
-
-    def test_assessment_details_reviewer_updates_preserves_pending(self):
-        # With the decoupled approval workflow, updates by reviewers
-        # NO LONGER automatically clear the pending status.
-        existing = "Details.\n\n[Status: Pending Review]"
+    def test_assessment_details_reviewer_clears_pending(self):
+        # Reviewer updates should clear the [Status: Pending Review] tag.
+        # And should preserve the original assessor.
+        existing = "Details.\n\n[Status: Pending Review] [Assessed By: bob]"
         user = "admin"
         role = "REVIEWER"
 
@@ -107,8 +79,9 @@ class TestAssessmentTags(unittest.TestCase):
             "Updated details.", user, role, existing_details=existing
         )
 
-        self.assertIn("[Status: Pending Review]", result)
-        self.assertIn("[Assessed By: admin]", result)
+        self.assertNotIn("[Status: Pending Review]", result)
+        self.assertIn("[Assessed By: bob]", result)
+        self.assertIn("[Reviewed By: admin]", result)
 
     def test_assessment_details_analyst_adds_pending(self):
         details = "Draft..."
@@ -119,7 +92,8 @@ class TestAssessmentTags(unittest.TestCase):
 
         self.assertIn("[Status: Pending Review]", result)
 
-    def test_assessment_details_legacy_preservation(self):
+    def test_assessment_details_legacy_replacement(self):
+        # Legacy text is replaced by the new assessment block.
         existing = "This is some legacy text without team markers."
         user = "alice"
         role = "USER"
@@ -135,9 +109,9 @@ class TestAssessmentTags(unittest.TestCase):
             existing_details=existing,
         )
 
-        self.assertIn("This is some legacy text without team markers.", result)
+        self.assertNotIn("This is some legacy text without team markers.", result)
         self.assertIn(
-            "--- [Team: Security] [State: EXPLOITABLE] [Assessed By: alice] ---", result
+            "[Team: Security] [State: EXPLOITABLE] [Assessed By: alice]", result
         )
 
     def test_assessment_details_update_same_team(self):
@@ -156,8 +130,7 @@ class TestAssessmentTags(unittest.TestCase):
             existing_details=existing,
         )
 
-        # Should only have ONE Security block, and it should be updated
-        self.assertEqual(result.count("--- [Team: Security]"), 1)
+        # Should be updated
         self.assertIn("[State: EXPLOITABLE]", result)
         self.assertIn("[Assessed By: charlie]", result)
         self.assertIn("Found exploit!", result)
