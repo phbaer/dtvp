@@ -137,6 +137,13 @@ const filteredGroups = computed(() => {
     if (hideAssessed.value) {
         result = result.filter(g => {
             if (expandedGroupIds.value.has(g.id)) return true
+            
+            // Check if ANY component is pending review - if so, show it regardless of state
+            const isPending = (g.affected_versions || []).some(v => 
+                v.components.some(c => (c.analysis_details || '').includes('[Status: Pending Review]'))
+            )
+            if (isPending) return true
+
             const state = getDisplayState(g)
             // Keep if NOT_SET or MIXED
             return state === 'NOT_SET' || state === 'MIXED'

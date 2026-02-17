@@ -68,6 +68,26 @@ describe('ProjectView Filters', () => {
         }
     ]
 
+    const mockDataWithPending = [
+        ...mockData,
+        {
+            id: 'V4',
+            severity: 'HIGH',
+            cvss_score: 8.0,
+            tags: ['team-b'],
+            affected_versions: [
+                {
+                    components: [{
+                        analysis_state: 'FALSE_POSITIVE',
+                        analysis_details: 'Some details\n\n[Status: Pending Review]'
+                    }]
+                }
+            ]
+        }
+    ]
+
+
+
     it('filters out assessed vulnerabilities when hideAssessed is true', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
 
@@ -203,5 +223,42 @@ describe('ProjectView Filters', () => {
 
         await idInput.setValue('X') // No match
         expect(wrapper.findAll('.vuln-card').length).toBe(0)
+    })
+
+    it('shows "Pending Review" vulnerabilities even when hideAssessed is true', async () => {
+        (getGroupedVulns as any).mockResolvedValue(mockDataWithPending)
+
+        router.push('/projects/p1/TestProject')
+        await router.isReady()
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
+            }
+        })
+
+        await flushPromises()
+
+        const checkboxes = wrapper.findAll('input[type="checkbox"]')
+        const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
+
+        if (hideAssessedBox) {
+            await hideAssessedBox.setValue(true)
+
+            // V2 (Assessed, no pending) should be gone.
+            // V4 (Assessed, but Pending Review) should be visible (but will fail currently).
+            const cards = wrapper.findAll('.vuln-card')
+            const ids = cards.map(c => c.text())
+            // Debug output if needed
+            // console.log('Visible IDs:', ids)
+
+            expect(ids).not.toContain('V2')
+            expect(ids).toContain('V4')
+        } else {
+            throw new Error('Hide Assessed checkbox not found')
+        }
     })
 })
