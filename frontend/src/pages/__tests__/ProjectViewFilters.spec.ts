@@ -105,15 +105,15 @@ describe('ProjectView Filters', () => {
 
         await flushPromises() // Wait for fetch
 
-        // Default state: Assessed and Mixed are hidden.
-        // We want to test that enabling the filter works, so we first disable them to show everything.
+        // Default state: Assessed is hidden, Mixed is visible.
+        // We want to test that enabling the filter works, so we first disable assessed to show everything.
         const checkboxes = wrapper.findAll('input[type="checkbox"]')
         const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
         const hideMixedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Mixed'))
 
         if (hideAssessedBox && hideMixedBox) {
             await hideAssessedBox.setValue(false)
-            await hideMixedBox.setValue(false)
+            // hideMixed is already false
         }
 
         // Initial state (after manual reset): all visible
@@ -153,15 +153,15 @@ describe('ProjectView Filters', () => {
 
         await flushPromises()
 
-        // Default state: Assessed and Mixed are hidden.
-        // We want to test that enabling the filter works, so we first disable them to show everything.
+        // Default state: Assessed is hidden, Mixed is visible.
+        // We want to test that enabling the filter works, so we first disable assessed to show everything.
         const checkboxes = wrapper.findAll('input[type="checkbox"]')
         const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
         const hideMixedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Mixed'))
 
         if (hideAssessedBox && hideMixedBox) {
             await hideAssessedBox.setValue(false)
-            await hideMixedBox.setValue(false)
+            // hideMixed is already false
         }
 
 
@@ -198,7 +198,7 @@ describe('ProjectView Filters', () => {
 
         await flushPromises()
 
-        // Default state: Assessed and Mixed are hidden.
+        // Default state: Assessed is hidden, Mixed is visible.
         // We want to test ID filtering on the full set, so we disable the state filters.
         const checkboxes = wrapper.findAll('input[type="checkbox"]')
         const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
@@ -206,7 +206,7 @@ describe('ProjectView Filters', () => {
 
         if (hideAssessedBox && hideMixedBox) {
             await hideAssessedBox.setValue(false)
-            await hideMixedBox.setValue(false)
+            // hideMixed is already false
         }
 
         const idInput = wrapper.find('input[placeholder*="Filter by ID"]')
