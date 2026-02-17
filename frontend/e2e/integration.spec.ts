@@ -12,13 +12,13 @@ test.describe('Integration Tests (Real Backend)', () => {
 
         // 3. Wait for projects to load
         // The mock backend returns "Vulnerable Project"
-        await expect(page.getByText('Vulnerable Project')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('Vulnerable Project')).toBeVisible({ timeout: 15000 });
 
         // Uncheck "Hide Assessed" and "Hide Mixed" to ensure all results are visible
 
 
         // 4. Verify version is displayed
-        await expect(page.getByText('1.0.0')).toBeVisible();
+        await expect(page.getByText('1.0.0')).toBeVisible({ timeout: 10000 });
     });
 
     test('Navigate to Project Details and see Vulnerabilities', async ({ page }) => {

@@ -57,7 +57,10 @@ const uniqueProjects = computed(() => {
           class="block p-4 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded transition-colors group"
       >
           <div class="flex justify-between items-center">
-              <span class="font-semibold text-lg group-hover:text-blue-400">{{ p.name }}</span>
+              <span class="font-semibold text-lg group-hover:text-blue-400">
+                  {{ p.name }} 
+                  <span class="text-sm text-gray-500 font-normal ml-2">v{{ p.version }}</span>
+              </span>
               <span class="text-sm text-gray-500">View Vulnerabilities &rarr;</span>
           </div>
       </router-link>
