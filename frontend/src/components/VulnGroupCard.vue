@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, watch, shallowRef, inject } from 'vue'
+import { ref, computed, watch, inject } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
+
+import type { GroupedVuln, AssessmentPayload } from '../types'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle } from 'lucide-vue-next'
+
+import { parseAssessmentBlocks, mergeTeamAssessment } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
-import type { GroupedVuln } from '../types'
-import { ChevronDown, ChevronUp, Shield, Calculator, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-vue-next'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
-import DependencyChainViewer from './DependencyChainViewer.vue'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
 import CvssCalculatorV3 from './CvssCalculatorV3.vue'
 import CvssCalculatorV4 from './CvssCalculatorV4.vue'
+import DependencyChainViewer from './DependencyChainViewer.vue'
 
 
 const props = defineProps<{
@@ -47,120 +50,65 @@ const details = ref('')
 const justification = ref('NOT_SET')
 const comment = ref('')
 const suppressed = ref(false)
+const selectedTeam = ref('')
+// Removed onlyTargetSelectedTeam - team selection now automatically targets team instances
 const updating = ref(false)
 const loadingDetails = ref(false)
-const pendingScore = ref<number | null>(null)
-const pendingVector = ref<string>('')
 const showCalculatorModal = ref(false)
 const showConflictModal = ref(false)
 const conflictData = ref<any>(null)
 const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Analysis Object
 
+const pendingScore = ref<number | null>(null)
+const pendingVector = ref<string>('')
 const activeVersion = ref<'4.0' | '3.1' | '3.0' | '2.0'>('3.1')
-const activeInstance = shallowRef<any>(new Cvss3P1())
+const cvssInstance = ref<any>(null)
 const isManualBaseMode = ref(false)
+const initialVector = ref('')
+const initialScore = ref<number | null>(null)
 
-
-watch([showCalculatorModal, pendingVector], () => {
-    if (showCalculatorModal.value) {
-        let v = pendingVector.value?.trim() || ''
-        try {
-            if (v.startsWith('CVSS:4.0')) {
-                activeVersion.value = '4.0'
-                activeInstance.value = new Cvss4P0(v)
-            } else if (v.startsWith('CVSS:3.')) {
-                // User requested to treat all CVSS 3.x as 3.1
-                activeVersion.value = '3.1'
-                // Replace prefix if it's 3.0 to avoid library validation errors if needed,
-                // or just pass to v3.1 calculator
-                if (v.startsWith('CVSS:3.0')) {
-                   v = v.replace('CVSS:3.0', 'CVSS:3.1')
-                }
-                activeInstance.value = new Cvss3P1(v)
-            } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) { // Naive v2 check
-                activeVersion.value = '2.0'
-                activeInstance.value = new Cvss2(v)
-            } else {
-                activeVersion.value = '3.1'
-                activeInstance.value = new Cvss3P1()
-            }
-        } catch {
-             // Fallback if parsing fails or default
-             const fallback = visibleVersions.value[0] || '3.1'
-             activeVersion.value = fallback as any
-             
-             switch(fallback) {
-                case '4.0': activeInstance.value = new Cvss4P0(); break;
-                case '3.1': activeInstance.value = new Cvss3P1(); break;
-                case '3.0': activeInstance.value = new Cvss3P0(); break;
-                case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
-             }
-        }
-    }
+const genericModal = ref({
+    show: false,
+    title: '',
+    message: '',
+    confirmOnly: false,
+    resolve: (_: boolean) => {}
 })
 
-const visibleVersions = computed(() => {
-    // If pending vector is present, lock to its version.
-    // If empty, show all.
-    const v = pendingVector.value || ''
-    
-    if (v.startsWith('CVSS:4.0')) return ['4.0']
-    if (v.startsWith('CVSS:3.1')) return ['3.1']
-    if (v.startsWith('CVSS:3.0')) return ['3.0']
-    if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) return ['2.0']
-    
-    return ['4.0', '3.1', '3.0', '2.0']
+const promptConfirm = (title: string, message: string, confirmOnly = false) => {
+    genericModal.value = {
+        show: true,
+        title,
+        message,
+        confirmOnly,
+        resolve: () => {}
+    }
+    return new Promise<boolean>((resolve) => {
+        genericModal.value.resolve = resolve
+    })
+}
+
+const showAlert = (title: string, message: string) => promptConfirm(title, message, true)
+
+const handleModalResponse = (value: boolean) => {
+    genericModal.value.show = false
+    genericModal.value.resolve(value)
+}
+
+const isReviewer = computed(() => {
+    return user?.value?.role === 'REVIEWER'
 })
-
-// Switch version handler
-const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
-    activeVersion.value = ver
-    resetToDefault(ver)
-}
-
-const resetToDefault = (ver: string) => {
-    switch(ver) {
-        case '4.0': activeInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N'); break; // Lowest severity
-        case '3.1': activeInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
-        case '3.0': activeInstance.value = new Cvss3P0('CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
-        case '2.0': activeInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break; // V2 defaults
-    }
-    updateVectorString()
-}
-
-
-const cleanVectorString = (vec: string) => {
-    if (!vec) return ''
-    // Remove /Key:X segments
-    // Also handling potential trailing/leading slashes if any
-    return vec.split('/').filter(part => !part.endsWith(':X')).join('/')
-}
-
-const updateVectorString = () => {
-    const raw = activeInstance.value.toString()
-    pendingVector.value = cleanVectorString(raw)
-}
-
-// Update vector when selections change
-const updateCalcVector = (componentShortName: string, value: string) => {
-    try {
-        activeInstance.value.applyComponentString(componentShortName, value)
-        // Force update of string - we need to trigger reactivity manually for the string update
-        updateVectorString()
-        // Force shallowRef update to trigger UI re-renders if needed (though we bind to properties)
-        activeInstance.value = activeInstance.value 
-    } catch (e) {
-        console.error(e)
-    }
-}
-
-
-
-
-
 
 const allInstances = computed(() => {
     return props.group.affected_versions?.flatMap(v => v.components) || []
+})
+
+const totalTargeted = computed(() => {
+    // When a team is selected, automatically target only that team's instances
+    if (selectedTeam.value) {
+        return allInstances.value.filter(inst => inst.tags && inst.tags.includes(selectedTeam.value)).length
+    }
+    return allInstances.value.length
 })
 
 const displayState = computed(() => {
@@ -181,26 +129,136 @@ const canApprove = computed(() => {
 
 const approveAssessment = async (e: Event) => {
     e.stopPropagation() // Prevent card expansion
-    if (!confirm('Approve this assessment? This will remove the pending status.')) return
+    if (!await promptConfirm('Approve Assessment', 'Approve this assessment? This will remove the pending status.')) return
 
     // Get current details from first instance (assuming grouped logic holds)
     const first = allInstances.value[0]
     if (!first) return
-
-    state.value = first.analysis_state || 'NOT_SET'
-    details.value = (first.analysis_details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-    justification.value = first.justification || 'NOT_SET'
-    suppressed.value = first.is_suppressed || false
     
     // We update using the existing handleUpdate but need to make sure state is set correctly first
     // Since details.value is reactive, handleUpdate will pick it up
-    await handleUpdate()
+    updating.value = true
+    try {
+        await handleUpdate(true, true) // force=true, isApprove=true
+    } finally {
+        updating.value = false
+    }
 }
 
-// Pre-fill form from first instance when expanded or group changes
+
+
+watch([showCalculatorModal, pendingVector], () => {
+    if (showCalculatorModal.value) {
+        let v = pendingVector.value?.trim() || ''
+        try {
+            if (v.startsWith('CVSS:4.0')) {
+                activeVersion.value = '4.0'
+                cvssInstance.value = new Cvss4P0(v)
+            } else if (v.startsWith('CVSS:3.')) {
+                activeVersion.value = '3.1'
+                if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
+                cvssInstance.value = new Cvss3P1(v)
+            } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
+                activeVersion.value = '2.0'
+                cvssInstance.value = new Cvss2(v)
+            } else {
+                activeVersion.value = '3.1'
+                cvssInstance.value = new Cvss3P1()
+            }
+        } catch {
+             const fallback = visibleVersions.value[0] || '3.1'
+             activeVersion.value = fallback as any
+             resetToDefault(fallback)
+        }
+    }
+})
+
+const visibleVersions = computed(() => {
+    const v = pendingVector.value || ''
+    if (v.startsWith('CVSS:4.0')) return ['4.0']
+    if (v.startsWith('CVSS:3.1')) return ['3.1']
+    if (v.startsWith('CVSS:3.0')) return ['3.0']
+    if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) return ['2.0']
+    return ['4.0', '3.1', '3.0', '2.0']
+})
+
+const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
+    activeVersion.value = ver
+    resetToDefault(ver)
+}
+
+const resetToDefault = (ver: string) => {
+    switch(ver) {
+        case '4.0': cvssInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N'); break;
+        case '3.1': cvssInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
+        case '3.0': cvssInstance.value = new Cvss3P0('CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
+        case '2.0': cvssInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
+    }
+    updateVectorString()
+}
+
+const updateVectorString = () => {
+    const raw = cvssInstance.value.toString()
+    pendingVector.value = raw.split('/').filter((part: string) => !part.endsWith(':X')).join('/')
+}
+
+const updateCalcVector = (componentShortName: string, value: string) => {
+    try {
+        cvssInstance.value.applyComponentString(componentShortName, value)
+        updateVectorString()
+        cvssInstance.value = cvssInstance.value 
+    } catch (e) {
+        console.error(e)
+    }
+}
+
+const canEditBase = computed(() => {
+    const original = props.group.rescored_vector || props.group.cvss_vector
+    if (!original) return true
+    return isManualBaseMode.value
+})
+
+const resetVector = () => {
+    isManualBaseMode.value = false
+    // Reset to the ORIGINAL baseline from Dependency-Track
+    const original = props.group.cvss_vector
+    if (original) {
+        pendingVector.value = original
+        try {
+             if (original.startsWith('CVSS:4.0')) {
+                 activeVersion.value = '4.0'
+                 cvssInstance.value = new Cvss4P0(original)
+             } else if (original.includes('3.0')) {
+                  activeVersion.value = '3.0'
+                  cvssInstance.value = new Cvss3P0(original)
+             } else if (original.startsWith('CVSS:3.')) {
+                  activeVersion.value = '3.1'
+                  cvssInstance.value = new Cvss3P1(original)
+             } else {
+                 activeVersion.value = '2.0'
+                 cvssInstance.value = new Cvss2(original)
+             }
+        } catch {}
+        updateVectorString()
+    } else {
+        resetToDefault(activeVersion.value)
+    }
+}
+
+const clearVector = () => {
+    isManualBaseMode.value = true
+    resetToDefault(activeVersion.value)
+    pendingVector.value = ''
+}
+
+watch(pendingVector, (newVector) => {
+    const score = calculateScoreFromVector(newVector)
+    if (score !== null) {
+        pendingScore.value = score
+    }
+})
+
 const updateFormFromGroup = () => {
-    // Reset pending values
-    // Use rescored value if present, otherwise fallback to original score, or null
     pendingScore.value = props.group.rescored_cvss ?? props.group.cvss_score ?? props.group.cvss ?? null
     pendingVector.value = props.group.rescored_vector || props.group.cvss_vector || ''
     
@@ -208,14 +266,40 @@ const updateFormFromGroup = () => {
     if (firstVersion && firstVersion.components?.length > 0) {
         const first = firstVersion.components[0]
         if (first) {
-            state.value = first.analysis_state || 'NOT_SET'
-            details.value = first.analysis_details || ''
-            justification.value = first.justification || 'NOT_SET'
+            const rawDetails = first.analysis_details || ''
+            const teamBlocks = parseAssessmentBlocks(rawDetails)
+            
+            if (selectedTeam.value) { // Team view
+                const teamName = selectedTeam.value
+                const myBlock = teamBlocks[teamName]
+                state.value = myBlock?.state || 'NOT_SET'
+                // Strip the status tag from the details shown in the textarea
+                details.value = (myBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+                justification.value = myBlock?.justification || 'NOT_SET'
+            } else {
+                 // No team selected - if Reviewer, show General block
+                 if (isReviewer.value) {
+                    const generalBlock = teamBlocks['General']
+                    state.value = generalBlock?.state || 'NOT_SET'
+                    details.value = (generalBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+                    justification.value = generalBlock?.justification || 'NOT_SET'
+                 } else {
+                    state.value = 'NOT_SET'
+                    details.value = ''
+                    justification.value = 'NOT_SET'
+                 }
+            }
             comment.value = first.analysis_comments?.[0]?.comment || ''
             suppressed.value = first.is_suppressed || false
         }
     }
+
+    // Set initial values for "touched" check
+    initialVector.value = pendingVector.value
+    initialScore.value = pendingScore.value
 }
+
+watch(selectedTeam, updateFormFromGroup)
 
 watch(() => props.group, updateFormFromGroup, { immediate: true })
 
@@ -228,52 +312,7 @@ watch(expanded, (isOpen) => {
 })
 
 
-watch(pendingVector, (newVector) => {
-    const score = calculateScoreFromVector(newVector)
-    if (score !== null) {
-        pendingScore.value = score
-    }
-})
 
-const canEditBase = computed(() => {
-    const original = props.group.rescored_vector || props.group.cvss_vector
-    if (!original) return true
-    return isManualBaseMode.value
-})
-
-// Reset to original vector from CVE
-const resetVector = () => {
-    isManualBaseMode.value = false
-    // Reset to "original" vector
-    const original = props.group.rescored_vector || props.group.cvss_vector
-    if (original) {
-        pendingVector.value = original
-        try {
-             if (original.startsWith('CVSS:4.0')) {
-                 activeVersion.value = '4.0'
-                 activeInstance.value = new Cvss4P0(original)
-             } else if (original.startsWith('CVSS:3.1') || original.startsWith('CVSS:3.0')) {
-                  activeVersion.value = original.includes('3.0') ? '3.0' : '3.1'
-                  activeInstance.value = original.includes('3.0') ? new Cvss3P0(original) : new Cvss3P1(original)
-             } else {
-                 activeVersion.value = '2.0'
-                 activeInstance.value = new Cvss2(original)
-             }
-        } catch {
-            // invalid
-        }
-        updateVectorString() // ensure it is clean
-    } else {
-        // No original, reset current version to default
-        resetToDefault(activeVersion.value)
-    }
-}
-
-const clearVector = () => {
-    isManualBaseMode.value = true
-    resetToDefault(activeVersion.value)
-    pendingVector.value = '' // clear textual input but keep instance defaults
-}
 
 
 const refreshDetails = async () => {
@@ -293,11 +332,11 @@ const refreshDetails = async () => {
         // Update local state and originalAnalysis map
         const newOriginals: Record<string, any> = {}
         
-        detailsList.forEach((item: any) => {
+        for (const item of detailsList) {
              if (item.error) {
                  console.error(`Error fetching details for ${item.finding_uuid}:`, item.error)
-                 alert(`Failed to refresh details for a component: ${item.error}`)
-                 return
+                 await showAlert('Update Failed', `Failed to refresh details for a component: ${item.error}`)
+                 continue
              }
              
              if (item.analysis) {
@@ -307,11 +346,6 @@ const refreshDetails = async () => {
                  }
                  
                  // Update the reactive object in the group
-                 // We need to find the matching component in props.group.affected_versions
-                 // Correct logic: Match on PROJECT + COMPONENT + VULNERABILITY
-                 // finding_uuid might be ambiguous if DT returns duplicates or we have multi-version components
-                 // with same finding ID (unlikely but safe to be explicit).
-                 
                  const targetProj = item.project_uuid
                  const targetComp = item.component_uuid
                  const targetVuln = item.vulnerability_uuid
@@ -331,12 +365,16 @@ const refreshDetails = async () => {
                      })
                  })
              }
-        })
+        }
         
-        originalAnalysis.value = newOriginals
+        originalAnalysis.value = { ...originalAnalysis.value, ...newOriginals }
         
         // Refresh local form state from the first instance's new data
         updateFormFromGroup()
+        
+        // Mark these as initial for "touched" check
+        initialVector.value = pendingVector.value
+        initialScore.value = pendingScore.value
         
     } catch (e) {
         console.error("Failed to refresh details", e)
@@ -345,71 +383,122 @@ const refreshDetails = async () => {
     }
 }
 
-const handleUpdate = async (force: boolean = false) => {
-    const instances = allInstances.value
-    if (!force && !confirm(`Apply this assessment to all ${instances.length} instances?`)) return
+
+const handleUpdate = async (force: boolean = false, isApprove: boolean = false) => {
+    let instances = allInstances.value
+    
+    // When a team is selected, automatically filter to only that team's instances
+    if (selectedTeam.value) {
+        const team = selectedTeam.value
+        instances = instances.filter(inst => inst.tags && inst.tags.includes(team))
+    }
+
+    if (instances.length === 0) {
+        await showAlert('Selection Error', 'No components found for the selected team.')
+        return
+    }
+
+    if (!force && !await promptConfirm('Apply Assessment', `Apply this assessment to ${instances.length} instances?`)) return
     
     updating.value = true
     try {
-        // Prepare details with potential new tags
-    const tags: string[] = []
+        // 1. Get current full details from the first instance (or use refreshed data)
+        // We need the BASE string to merge into. Use originalAnalysis.value as source of truth for "current" state
+        const refInstance = instances[0]
+        const findingUuid = refInstance?.finding_uuid
+        const currentAnalysis = findingUuid ? originalAnalysis.value[findingUuid] : null
+        // Fallback to refInstance.analysis_details if originalAnalysis is not yet populated
+        const currentFullDetails = currentAnalysis?.analysisDetails || refInstance?.analysis_details || ''
 
-    // 1. Score
-    if (pendingScore.value !== null && pendingScore.value !== undefined) {
-         tags.push(`[Rescored: ${pendingScore.value}]`)
-    }
+        // 2. Perform Client-Side Merge
+        const targetTeam = selectedTeam.value || 'General'
+        if (!targetTeam && !isReviewer.value) {
+             await showAlert('Input Required', "Please select a team to assess.")
+             return
+        }
 
-    // 2. Vector
-    if (pendingVector.value) {
-        tags.push(`[Rescored Vector: ${pendingVector.value}]`)
-    }
+        const currentUser = user.value?.username || 'unknown'
+        
+        // Prepare rescored tags if any (only for Reviewers)
+        let rescoredTags: string[] | undefined = undefined
+        if (isReviewer.value) {
+            // Check if touched in this session
+            const touched = pendingVector.value !== initialVector.value || pendingScore.value !== initialScore.value;
+            
+            if (touched) {
+                // If it now matches the ORIGINAL (DT) vector, we explicitly clear it
+                const matchesOriginal = pendingVector.value === props.group.cvss_vector && 
+                                       (pendingScore.value === (props.group.cvss_score ?? props.group.cvss));
+                
+                if (matchesOriginal) {
+                    rescoredTags = [] // Forces removal of existing tags
+                } else {
+                    rescoredTags = []
+                    if (pendingScore.value !== null && pendingScore.value !== undefined) {
+                        rescoredTags.push(`[Rescored: ${pendingScore.value}]`)
+                    }
+                    if (pendingVector.value) {
+                        rescoredTags.push(`[Rescored Vector: ${pendingVector.value}]`)
+                    }
+                }
+            } else {
+                // Not touched - leave as undefined so helper preserves existing tags from details
+                rescoredTags = undefined
+            }
+        }
 
-    let finalDetails = tags.join('\n')
-    if (details.value) {
-         // If we added tags, separate them
-         if (finalDetails) {
-             finalDetails += '\n\n'
-         }
-         finalDetails += details.value
-    }
-    
-    // We do NOT add Author/Reviewer tags here anymore - Backend does it.
+        let mergedResult: { text: string, aggregatedState: string }
+        
+         // Case: Merge with existing blocks and potentially clear/set pending flag
+         // Decoupled logic: only clear pending flag if isApprove is explicitly true.
+         // Otherwise, always keep it pending.
+         mergedResult = mergeTeamAssessment(
+            currentFullDetails,
+            targetTeam,
+            state.value,
+            details.value,
+            currentUser,
+            justification.value,
+            rescoredTags,
+            !isApprove // isPending = true unless approving
+         )
+        
+        let finalText = mergedResult.text
 
-    const payload = {
-        instances: instances,
-        state: state.value,
-        details: finalDetails, // Send raw combined text
-        comment: comment.value,
-        justification: state.value === 'NOT_AFFECTED' ? justification.value : undefined,
-        suppressed: suppressed.value,
-        // Send original analysis for conflict checking (optimistic locking)
-        original_analysis: originalAnalysis.value,
-        force: force
-    }
+        const payload: AssessmentPayload = {
+            instances: instances,
+            state: mergedResult.aggregatedState, // calculated by helper
+            details: finalText, // The FULL merged history
+            comment: comment.value, // Audit comment usually separate from details
+            justification: (state.value === 'NOT_AFFECTED') ? justification.value : undefined,
+            suppressed: suppressed.value,
+            team: selectedTeam.value || undefined, 
+            comparison_mode: 'REPLACE' as const,
+            original_analysis: originalAnalysis.value,
+            force: force
+        }
+
         const results = await updateAssessment(payload)
-        
-        // Check if results array contains errors?
-        // Wait, if API returns 409, axios throws?
-        // If my api.ts returns res.data, axios might throw on non-2xx.
-        // I need to wrap in try/catch and check error response.
-        
+
         const errors = results.filter((r: any) => r.status === 'error')
         if (errors.length > 0) {
-            console.error('Update completed with errors:', errors)
-            alert(`Assessment updated with ${errors.length} errors. Check console for details.`)
+             console.error('Update completed with errors:', errors)
+             await showAlert('Update Partial', `Assessment updated with ${errors.length} errors. Check console for details.`)
         } else {
-            if (!force) alert('Assessment updated successfully')
-            // Emit the updated assessment so the parent can update the state in memory
-            emit('update:assessment', {
-                rescored_cvss: pendingScore.value,
-                rescored_vector: pendingVector.value,
-                analysis_state: state.value,
-                analysis_details: finalDetails,
-                is_suppressed: suppressed.value,
-                justification: state.value === 'NOT_AFFECTED' ? justification.value : 'NOT_SET'
-            })
-            // If forced, we should close modal
-            showConflictModal.value = false
+             if (!force) await showAlert('Success', 'Assessment updated successfully')
+             const success = results.find((r: any) => r.status === 'success')
+             
+             if (success) {
+                 const data = {
+                     rescored_cvss: isReviewer.value ? pendingScore.value : props.group.rescored_cvss,
+                     rescored_vector: isReviewer.value ? pendingVector.value : props.group.rescored_vector,
+                     analysis_state: success.new_state,
+                     analysis_details: success.new_details,
+                     is_suppressed: suppressed.value
+                 }
+                 emit('update:assessment', data)
+             }
+             showConflictModal.value = false
         }
         
         expanded.value = false
@@ -418,7 +507,7 @@ const handleUpdate = async (force: boolean = false) => {
             conflictData.value = err.response.data.conflicts
             showConflictModal.value = true
         } else {
-            alert('Failed to update assessment')
+            await showAlert('Error', 'Failed to update assessment')
             console.error(err)
         }
     } finally {
@@ -507,6 +596,19 @@ const rescoredVectorSegments = computed(() => {
         normal: rescored.slice(original.length)
     }
 })
+
+const assessedTeams = computed(() => {
+    // Check key teams from the FIRST instance which usually holds the truth for groupeditems
+    const firstVersion = props.group.affected_versions?.[0]
+    if (!firstVersion || !firstVersion.components || firstVersion.components.length === 0) return new Set<string>()
+    
+    // We can assume if one instance has it, the group effectively has it in this context
+    const first = firstVersion.components[0]
+    if (!first || !first.analysis_details) return new Set<string>()
+    
+    const blocks = parseAssessmentBlocks(first.analysis_details)
+    return new Set(Object.keys(blocks))
+})
 </script>
 
 <template>
@@ -557,8 +659,9 @@ const rescoredVectorSegments = computed(() => {
                         <span 
                             v-for="tag in group.tags" 
                             :key="tag" 
-                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap flex items-center gap-1.5"
                         >
+                            <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="text-green-400" />
                             {{ tag }}
                         </span>
                      </div>
@@ -587,7 +690,10 @@ const rescoredVectorSegments = computed(() => {
         <div class="flex items-start gap-8 shrink-0">
             <div class="w-32 text-right">
                 <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
-                <div :class="['font-bold text-sm truncate analysis-state-value', stateColor]">
+                <div 
+                    :id="`state-${group.id}`"
+                    :class="['font-bold text-sm truncate analysis-state-value', stateColor]"
+                >
                     {{ displayState }}
                 </div>
             </div>
@@ -667,32 +773,12 @@ const rescoredVectorSegments = computed(() => {
             <div class="bg-gray-900 p-4 rounded border border-gray-700 h-fit">
                 <h4 class="font-bold flex items-center gap-2 mb-4">
                     <Shield :size="16" class="text-blue-400"/>
-                    Bulk Assessment
+                    {{ selectedTeam ? `Team Assessment: ${selectedTeam}` : 'Global Assessment' }}
                 </h4>
                 
                 <div class="space-y-4">
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
-                        <select 
-                            v-model="state" 
-                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
-                        >
-                            <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value">{{ s.label }}</option>
-                        </select>
-                    </div>
-
-                    <div v-if="state === 'NOT_AFFECTED'">
-                        <label class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
-                        <select 
-                            v-model="justification" 
-                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
-                        >
-                            <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-                        </select>
-                    </div>
-
-                    <!-- Calculator Section -->
-                    <div class="p-3 border border-gray-700 rounded bg-gray-800">
+                    <!-- CVSS Calculator Section (For Reviewers) -->
+                    <div v-if="isReviewer" class="p-3 border border-gray-700 rounded bg-gray-800">
                         <h5 class="text-xs font-bold text-gray-300 mb-2 flex items-center gap-2">
                             <Calculator :size="12" />
                             CVSS Calculator
@@ -730,20 +816,70 @@ const rescoredVectorSegments = computed(() => {
                                 />
                             </div>
                         </div>
-                        <div class="text-[10px] text-gray-600 mt-1 italic">
-                            Modifying vector auto-calculates score.
+                    </div>
+
+                    <!-- Team Selection -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 mb-1">Team assessment (Marker)</label>
+                            <select 
+                                v-model="selectedTeam" 
+                                class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
+                            >
+                                <option value="">{{ isReviewer ? 'Global assessment' : 'No team marker' }}</option>
+                                <option v-for="t in group.tags" :key="t" :value="t">{{ t }}</option>
+                            </select>
                         </div>
                     </div>
 
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
-                        <textarea 
-                            v-model="details"
-                            placeholder="Technical details..."
-                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
-                        />
+                    <!-- Assessment Section (Reviewer Global or Team Selected) -->
+                    <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
+                        <h5 class="text-xs font-bold mb-3 uppercase tracking-wide flex items-center gap-2" :class="selectedTeam ? 'text-blue-300' : 'text-purple-300'">
+                            {{ selectedTeam ? 'Team Opinion' : 'Global Baseline' }}
+                        </h5>
+                        
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Analysis State</label>
+                                <select 
+                                    v-model="state" 
+                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
+                                >
+                                    <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value">{{ s.label }}</option>
+                                </select>
+                            </div>
+
+                            <div v-if="state === 'NOT_AFFECTED'">
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Justification</label>
+                                <select 
+                                    v-model="justification" 
+                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
+                                >
+                                    <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Analysis Details</label>
+                                <textarea 
+                                    v-model="details" 
+                                    placeholder="Technical details..."
+                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
+                                />
+                            </div>
+                        </div>
                     </div>
-                    
+
+                    <!-- No-Team Section (Prompt for non-reviewers) -->
+                    <div v-if="!selectedTeam && !isReviewer" class="p-4 rounded border border-gray-700 bg-gray-800/50 flex flex-col items-center justify-center text-center space-y-2">
+                        <Shield :size="32" class="text-blue-500/50" />
+                        <h4 class="text-sm font-bold text-gray-300">Select a Team to Assess</h4>
+                        <p class="text-xs text-gray-400 max-w-xs">
+                          Global assessments are restricted to reviewers. Please select a specific team marker above to provide an assessment.
+                        </p>
+                    </div>
+
+                    <!-- Comment Section (visible to all) -->
                     <div>
                         <label class="block text-xs font-semibold text-gray-400 mb-1">Comment</label>
                         <textarea 
@@ -765,16 +901,16 @@ const rescoredVectorSegments = computed(() => {
                     
                     <button 
                         @click="() => handleUpdate(false)"
-                        :disabled="updating"
+                        :disabled="updating || loadingDetails || totalTargeted === 0"
                         class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
                     >
-                        {{ updating ? 'Updating...' : 'Apply to All' }}
+                        {{ updating ? 'Updating...' : `Apply to ${totalTargeted} ${totalTargeted === 1 ? 'instance' : 'instances'}` }}
                     </button>
                 </div>
             </div>
         </div>
     </div>
-    
+
     <!-- Grouped Calculator Modal -->
     <div v-if="showCalculatorModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
         <div class="bg-gray-800 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg border border-gray-700 shadow-2xl">
@@ -819,7 +955,7 @@ const rescoredVectorSegments = computed(() => {
             <div class="flex-1 overflow-y-auto p-4 bg-gray-800">
                 <div v-if="activeVersion === '2.0'">
                     <CvssCalculatorV2 
-                        :instance="activeInstance" 
+                        :instance="cvssInstance" 
                         :can-edit-base="canEditBase"
                         @update="updateCalcVector" 
                         @reset="resetVector"
@@ -827,7 +963,7 @@ const rescoredVectorSegments = computed(() => {
                 </div>
                 <div v-else-if="activeVersion === '3.1' || activeVersion === '3.0'">
                     <CvssCalculatorV3 
-                        :instance="activeInstance" 
+                        :instance="cvssInstance" 
                         :can-edit-base="canEditBase" 
                         @update="updateCalcVector" 
                         @reset="resetVector"
@@ -835,14 +971,11 @@ const rescoredVectorSegments = computed(() => {
                 </div>
                 <div v-else-if="activeVersion === '4.0'">
                     <CvssCalculatorV4 
-                        :instance="activeInstance" 
+                        :instance="cvssInstance" 
                         :can-edit-base="canEditBase" 
                         @update="updateCalcVector" 
                         @reset="resetVector"
                     />
-                </div>
-                <div v-else class="text-center text-gray-500 p-8">
-                    Loading components...
                 </div>
             </div>
 
@@ -852,10 +985,6 @@ const rescoredVectorSegments = computed(() => {
                     <div>
                         <div class="text-xs text-gray-500 font-mono mb-1">Current Vector</div>
                         <div class="text-sm font-mono font-bold text-white break-all mb-2">{{ pendingVector }}</div>
-                        <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="text-[10px] text-gray-500/60 font-mono flex gap-2">
-                             <span class="uppercase font-bold shrink-0">Original Vector:</span>
-                             <span class="break-all italic">{{ group.cvss_vector }}</span>
-                        </div>
                     </div>
                     <div class="text-right ml-4">
                          <div class="text-xs text-gray-500 uppercase">Score</div>
@@ -871,7 +1000,7 @@ const rescoredVectorSegments = computed(() => {
             </div>
         </div>
     </div>
-  </div>
+
     <!-- Conflict Resolution Modal -->
     <div v-if="showConflictModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
         <div class="bg-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col rounded-lg border border-red-500 shadow-2xl">
@@ -943,4 +1072,43 @@ const rescoredVectorSegments = computed(() => {
             </div>
         </div>
     </div>
+    <!-- Generic Modal (Alert/Confirm) -->
+    <div v-if="genericModal.show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+        <div class="bg-gray-800 w-full max-w-md rounded-lg border border-gray-700 shadow-2xl overflow-hidden scale-in-center">
+            <div class="p-4 border-b border-gray-700 bg-gray-800 flex justify-between items-center">
+                <h3 class="font-bold text-lg text-gray-200">{{ genericModal.title }}</h3>
+                <button @click="handleModalResponse(false)" class="text-gray-400 hover:text-white transition-colors">✕</button>
+            </div>
+            <div class="p-6 bg-gray-850 text-gray-300">
+                <p class="text-sm leading-relaxed">{{ genericModal.message }}</p>
+            </div>
+            <div class="p-4 bg-gray-900 border-t border-gray-700 flex justify-end gap-3">
+                <button 
+                    v-if="!genericModal.confirmOnly"
+                    @click="handleModalResponse(false)"
+                    class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold transition-colors"
+                >
+                    Cancel
+                </button>
+                <button 
+                    @click="handleModalResponse(true)"
+                    class="px-6 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-900/20 transition-all active:scale-95"
+                >
+                    {{ genericModal.confirmOnly ? 'Close' : 'Confirm' }}
+                </button>
+            </div>
+        </div>
+    </div>
+  </div>
 </template>
+
+<style scoped>
+.scale-in-center {
+	animation: scale-in-center 0.15s cubic-bezier(0.250, 0.460, 0.450, 0.940) both;
+}
+@keyframes scale-in-center {
+  0% { transform: scale(0.95); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+</style>
+

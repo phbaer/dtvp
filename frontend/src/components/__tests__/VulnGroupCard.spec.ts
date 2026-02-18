@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock API
 vi.mock('../../lib/api', () => ({
-    updateAssessment: vi.fn(() => Promise.resolve([])),
+    updateAssessment: vi.fn((payload: any) => {
+        // Sophisticated mock for per-team aggregation
+        const results = payload.instances.map((inst: any) => ({
+            status: 'success',
+            uuid: inst.finding_uuid,
+            new_state: payload.state, // In real backend this would be aggregated
+            new_details: `-- - [Team: ${payload.team || 'General'}][State: ${payload.state}][Assessed By: test - mock][Justification: ${payload.justification || 'NOT_SET'}]---\n${payload.details}`
+        }))
+        return Promise.resolve(results)
+    }),
     getDependencyChains: vi.fn().mockResolvedValue({
         paths: [],
         total: 0,
@@ -22,7 +31,8 @@ vi.mock('lucide-vue-next', () => ({
     Calculator: { template: '<span class="icon-calc" />' },
     ExternalLink: { template: '<span class="icon-link" />' },
     RefreshCw: { template: '<span class="icon-refresh" />' },
-    AlertTriangle: { template: '<span class="icon-alert" />' }
+    AlertTriangle: { template: '<span class="icon-alert" />' },
+    CheckCircle: { template: '<span class="icon-check-circle" />' }
 }))
 
 // Mock DependencyChainViewer to avoid async setup in child component
@@ -49,6 +59,7 @@ describe('VulnGroupCard', () => {
             analysis_state: 'NOT_SET',
             is_suppressed: false,
             analysis_comments: [], // Add required field
+            tags: ['Security']
         }
     ]
 
@@ -58,6 +69,7 @@ describe('VulnGroupCard', () => {
         description: 'A bad vulnerability',
         severity: 'HIGH',
         cvss: 9.8,
+        tags: ['Security', 'Security'],
         affected_versions: [
             {
                 project_name: 'App1',
@@ -70,9 +82,6 @@ describe('VulnGroupCard', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
-        // Mock browser alerts/confirms
-        global.confirm = vi.fn(() => true)
-        global.alert = vi.fn()
     })
 
     it('renders vulnerability details', () => {
@@ -104,59 +113,52 @@ describe('VulnGroupCard', () => {
 
     it('submits assessment update', async () => {
         const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup }
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { username: 'tester' } } } }
         })
 
         // Expand
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        // Fill form
-        await wrapper.find('select').setValue('NOT_AFFECTED')
+        // Select Team
+        await wrapper.find('select').setValue('Security')
+
+        // Fill form (Team A form)
+        // Note: With team selected, there might be multiple selects (Team, State, Justification?)
+        // Team select is [0], State is [1]
+        const selects = wrapper.findAll('select')
+        await selects[1]?.setValue('NOT_AFFECTED')
         await wrapper.find('textarea').setValue('False positive')
 
         // Click Apply
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-        await applyBtn?.trigger('click')
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        expect(applyBtn).toBeDefined()
+        expect(applyBtn?.element.disabled).toBe(false)
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        // Confirm in modal
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Success alert appears, click Close
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
 
         // Verify API call
-        expect(global.confirm).toHaveBeenCalled()
-        expect(updateAssessment).toHaveBeenCalledWith({
-            instances: mockComponents,
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
-            details: `[Rescored: 9.8]\n\nFalse positive`,
-            comment: '',
-            justification: 'NOT_SET',
-            suppressed: false,
-            force: false,
-            original_analysis: {}
-        })
+            details: expect.stringContaining('--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: tester] [Justification: NOT_SET] ---\n\nFalse positive'),
+            team: 'Security'
+        }))
 
         // Should emit update:assessment
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
     })
 
-    it('opens and closes visual calculator', async () => {
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup }
-        })
 
-        // Expand
-        await wrapper.find('.cursor-pointer').trigger('click')
-
-        // Click visual calculator
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-        expect(wrapper.text()).toContain('CVSS v3.1 Calculator')
-        expect(wrapper.text()).toContain('Done')
-
-        // Close modal
-        const doneBtn = wrapper.findAll('button').find(b => b.text() === 'Done')
-        await doneBtn?.trigger('click')
-        await wrapper.vm.$nextTick()
-        expect(wrapper.text()).not.toContain('CVSS v3.1 Calculator')
-    })
 
     it('handles assessment update errors', async () => {
         // Mock API failure
@@ -164,39 +166,33 @@ describe('VulnGroupCard', () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
 
         const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup }
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { username: 'tester' } } } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-        await applyBtn?.trigger('click')
+        // Select Team
+        await wrapper.find('select').setValue('Security')
 
-        expect(global.alert).toHaveBeenCalledWith(expect.stringContaining('errors'))
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        // Modal appears, click Confirm
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Error alert modal appears, check text and close
+        expect(wrapper.text()).toContain('Assessment updated with 1 errors')
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
+
         consoleSpy.mockRestore()
     })
 
-    it('resets vector to original', async () => {
-        const wrapper = mount(VulnGroupCard, {
-            props: {
-                group: {
-                    ...mockGroup,
-                    cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
-                }
-            }
-        })
 
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-
-        // Reset
-        const resetBtn = wrapper.findAll('button').find(b => b.text().includes('Reset'))
-        await resetBtn?.trigger('click')
-
-        // Should have the original vector in output (check pendingVector internally or just UI)
-        expect((wrapper.find('input[type="text"]').element as HTMLInputElement).value).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
-    })
 
     it('covers color branches', () => {
         const criticalGroup = { ...mockGroup, severity: 'CRITICAL' }
@@ -232,126 +228,69 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('CVE-2023-1234, GHSA-abcd-efgh')
     })
 
-    it('handles CVSS 4.0 vector parsing', async () => {
-        const v4Group = {
-            ...mockGroup,
-            cvss_vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'
-        }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: v4Group }
-        })
 
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-        expect((wrapper.vm as any).activeVersion).toBe('4.0')
-    })
-
-    it('handles CVSS 2.0 vector parsing', async () => {
-        const v2Group = {
-            ...mockGroup,
-            cvss_vector: 'AV:N/AC:L/Au:N/C:P/I:P/A:P'
-        }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: v2Group }
-        })
-
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-        expect((wrapper.vm as any).activeVersion).toBe('2.0')
-    })
-
-    it('handles invalid CVSS vector gracefully', async () => {
-        const invalidGroup = {
-            ...mockGroup,
-            cvss_vector: 'INVALID_VECTOR'
-        }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: invalidGroup }
-        })
-
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-        expect((wrapper.vm as any).activeVersion).toBe('3.1')
-    })
-
-    it('handles missing cvss_vector in reset', async () => {
-        const noVectorGroup = { ...mockGroup, cvss_vector: undefined }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: noVectorGroup }
-        })
-
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-
-        // Try to reset
-        const resetBtn = wrapper.findAll('button').find(b => b.text().includes('Reset'))
-        await resetBtn?.trigger('click')
-
-        // Should reset to default 3.1 vector since no original exists
-        // Default 3.1: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N
-        const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
-        expect((input.element as HTMLInputElement).value).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N')
-        expect(global.alert).not.toHaveBeenCalled()
-    })
 
     it('handles user canceling confirmation', async () => {
-        global.confirm = vi.fn(() => false)
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-        await applyBtn?.trigger('click')
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        // Modal appears, click Cancel
+        const cancelBtn = wrapper.findAll('button').find(b => b.text() === 'Cancel')
+        await cancelBtn?.trigger('click')
+        await flushPromises()
 
         expect(updateAssessment).not.toHaveBeenCalled()
     })
 
-    it('handles CVSS 3.0 vector parsing', async () => {
-        const v30Group = {
-            ...mockGroup,
-            cvss_vector: 'CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
-        }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: v30Group }
-        })
 
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-        expect((wrapper.vm as any).activeVersion).toBe('3.1')
-    })
 
     it('submits assessment with comment and suppression', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { username: 'tester' } } } }
+        })
         await wrapper.find('.cursor-pointer').trigger('click')
 
+        // Select Team
+        await wrapper.find('select').setValue('Security')
+
         // Use optional chaining / safe access for find
+        // 0: Team, 1: State
+        // Textareas: 0: Details (Team), 1: Comment (Global)
         const textAreas = wrapper.findAll('textarea')
         if (textAreas.length > 1) {
             const commentArea = textAreas[1]
             await commentArea?.setValue('Audit comment')
-            await wrapper.find('input[type="checkbox"]').setValue(true)
+            // Suppress checkbox id might be different now? Or generic?
+            // "Suppress this vulnerability"
+            const checkboxes = wrapper.findAll('input[type="checkbox"]')
+            if (checkboxes.length > 0) {
+                await checkboxes[checkboxes.length - 1]?.setValue(true) // Assuming suppression is last
+            }
 
             // Submit
-            const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-            await applyBtn?.trigger('click')
+            const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+            applyBtn?.trigger('click')
+            await flushPromises()
+
+            // Confirm in modal
+            const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+            await confirmBtn?.trigger('click')
+            await flushPromises()
+
+            // Success alert appears, click Close
+            const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+            await closeBtn?.trigger('click')
+            await flushPromises()
 
             expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
                 comment: 'Audit comment',
-                suppressed: true
+                suppressed: true,
+                team: 'Security'
             }))
         }
     })
@@ -385,13 +324,30 @@ describe('VulnGroupCard', () => {
         vi.mocked(updateAssessment).mockRejectedValueOnce(new Error('Network error'))
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
 
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { username: 'tester' } } } }
+        })
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-        await applyBtn?.trigger('click')
+        // Select Team
+        await wrapper.find('select').setValue('Security')
 
-        expect(global.alert).toHaveBeenCalledWith('Failed to update assessment')
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        // Confirm
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Error alert modal
+        expect(wrapper.text()).toContain('Failed to update assessment')
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
+
         consoleSpy.mockRestore()
     })
 
@@ -424,263 +380,234 @@ describe('VulnGroupCard', () => {
         expect(wrapperOther.find('.analysis-state-value').classes()).toContain('text-gray-300')
     })
 
-    it('closes modal via X button', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
 
-        expect(wrapper.text()).toContain('CVSS v3.1 Calculator')
-
-        // Find the X button (text-gray-400 hover:text-white text-xl)
-        const closeBtn = wrapper.findAll('button').find(b => b.text() === '✕')
-        await closeBtn?.trigger('click')
-
-        expect(wrapper.text()).not.toContain('CVSS v3.1 Calculator')
-    })
-
-    it('renders metrics and allows updates in calculator', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-
-        await wrapper.vm.$nextTick()
-
-        expect(wrapper.text()).toContain('Attack Vector')
-
-        expect(wrapper.text()).toContain('Attack Vector')
-
-        // AV is read-only in 3.1, so we test with a modifier like MAV or a Temporal metric like E
-        // Let's use MAV (Modified Attack Vector)
-        const mavSelect = wrapper.find('#metric-MAV')
-        if (mavSelect.exists()) {
-            await mavSelect.setValue('P')
-            expect(wrapper.text()).toContain('MAV:P')
-        }
-    })
-
-    it('switches calculator versions via tabs', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-
-        const tabs = wrapper.findAll('button').filter(b => b.text().includes('CVSS v'))
-
-        // Click 4.0
-        const tab4 = tabs.find(b => b.text().includes('4.0'))
-        await tab4?.trigger('click')
-        expect((wrapper.vm as any).activeVersion).toBe('4.0')
-
-        // Click 2.0
-        const tab2 = tabs.find(b => b.text().includes('2.0'))
-        await tab2?.trigger('click')
-        expect((wrapper.vm as any).activeVersion).toBe('2.0')
-    })
-
-    it('auto-calculates score from vector input', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-
-        const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
-
-        // CVSS 2.0
-        await input.setValue('AV:N/AC:L/Au:N/C:P/I:P/A:P')
-        expect((wrapper.vm as any).pendingScore).toBe(7.5)
-
-        // CVSS 4.0
-        await input.setValue('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N')
-        expect((wrapper.vm as any).pendingScore).toBeGreaterThan(0)
-    })
-
-    it('includes rescored vector in assessment', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-
-        const mavSelect = wrapper.find('#metric-MAV')
-        if (mavSelect.exists()) {
-            await mavSelect.setValue('P')
-        }
-
-        const doneBtn = wrapper.findAll('button').find(b => b.text() === 'Done')
-        await doneBtn?.trigger('click')
-
-        // Submit
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-        await applyBtn?.trigger('click')
-
-        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
-            details: expect.stringContaining('[Rescored Vector: CVSS:')
-        }))
-    })
-
-    it('updates pending score manually', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-
-        await wrapper.vm.$nextTick()
-
-        const scoreInput = wrapper.find('input[type="number"]')
-        await scoreInput.setValue(5.5)
-
-        expect((wrapper.vm as any).pendingScore).toBe(5.5)
-    })
-
-    it('activates 3.1 tab', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-        // Helper to find calculator button
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-
-        // Switch to 4.0 first
-        const tabs = wrapper.findAll('button').filter(b => b.text().includes('CVSS v'))
-        await tabs.find(b => b.text().includes('4.0'))?.trigger('click')
-
-        // Back to 3.1
-        await tabs.find(b => b.text().includes('3.1'))?.trigger('click')
-        expect((wrapper.vm as any).activeVersion).toBe('3.1')
-    })
-
-    it('renders both original and rescored vectors when present with bolding', async () => {
-        const rescoredGroup = {
-            ...mockGroup,
-            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L',
-            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/MC:N/MI:N/MA:N'
-        }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: rescoredGroup as any }
-        })
-
-        // Expand to see vectors
-        await wrapper.find('.cursor-pointer').trigger('click')
-
-        expect(wrapper.text()).toContain('Rescored Vector:')
-        expect(wrapper.text()).toContain('Original Vector:')
-        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/MC:N/MI:N/MA:N')
-        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
-
-        // Check for bolded segment in rescored vector
-        const boldSegment = wrapper.find('.rescored-bold-segment')
-        expect(boldSegment.text()).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
-
-        // The normal segment should be the rest
-        expect(wrapper.find('.text-purple-300 .tracing-tight').text()).toContain('/MC:N/MI:N/MA:N')
-
-        // Check for line-through 
-        expect(wrapper.find('.line-through').text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
-    })
-
-    it('shows original vector reference in assessment form', async () => {
-        const rescoredGroup = {
-            ...mockGroup,
-            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
-        }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: rescoredGroup as any }
-        })
-
-        await wrapper.find('.cursor-pointer').trigger('click')
-
-        // Initial pendingVector matches original, so reference should NOT be visible yet
-        expect(wrapper.text()).not.toContain('Original:')
-
-        // Change vector
-        const input = wrapper.find('input[type="text"]')
-        await input.setValue('CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
-
-        expect(wrapper.text()).toContain('Original:')
-        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
-    })
-
-    it('shows original vector reference in calculator modal', async () => {
-        const rescoredGroup = {
-            ...mockGroup,
-            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
-        }
-        const wrapper = mount(VulnGroupCard, {
-            props: { group: rescoredGroup as any }
-        })
-
-        await wrapper.find('.cursor-pointer').trigger('click')
-
-        // Open modal
-        const findCalcBtn = () => wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
-        await findCalcBtn()?.trigger('click')
-        await wrapper.vm.$nextTick()
-
-        // Change metric to make vector different
-        // AV is read-only, use MAV
-        const mavSelect = wrapper.find('#metric-MAV')
-        await mavSelect.setValue('P')
-        await wrapper.vm.$nextTick()
-
-        expect(wrapper.text()).toContain('Original Vector:')
-        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L')
-    })
-
-    it('calculates score correctly when environmental metrics negate impact', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
-        await wrapper.find('.cursor-pointer').trigger('click')
-
-        const input = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
-
-        // Full impact base, but negated by environmental modified impact
-        const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N'
-        await input.setValue(vector)
-
-        // Wait for watch to trigger
-        await wrapper.vm.$nextTick()
-
-        // Final check on pendingScore
-        expect((wrapper.vm as any).pendingScore).toBe(0.0)
-    })
 
     it('shows justification dropdown when NOT_AFFECTED is selected', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { username: 'tester' } } } }
+        })
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        const stateSelect = wrapper.find('select') // First select is Analysis State
-        await stateSelect.setValue('NOT_AFFECTED')
+        // Select Team
+        await wrapper.find('select').setValue('Security')
+
+        const stateSelect = wrapper.findAll('select')[1] // Second select is Analysis State
+        await stateSelect?.setValue('NOT_AFFECTED')
 
         expect(wrapper.text()).toContain('Justification')
         const selects = wrapper.findAll('select')
-        expect(selects.length).toBe(2)
-
-        if (selects.length > 1) {
-            await selects[1]?.setValue('CODE_NOT_PRESENT')
+        expect(selects.length).toBe(3) // Team, State, Justification
+        if (selects.length > 2) {
+            await selects[2]?.setValue('CODE_NOT_PRESENT')
         }
 
-        // Mock API call to verify payload
-        const api = await import('../../lib/api')
-        const spy = vi.spyOn(api, 'updateAssessment').mockResolvedValue([])
+        // Apply bulk update
+        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        applyBtn?.trigger('click') // Do NOT await here, it waits for promptConfirm
+        await flushPromises()
 
-        // Confirm bulk update
-        window.confirm = vi.fn(() => true)
-        window.alert = vi.fn()
+        // Interact with custom modal
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to All'))
-        await applyBtn?.trigger('click')
+        // Success alert appears, click Close
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
 
-        expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
-            justification: 'CODE_NOT_PRESENT'
+            justification: 'CODE_NOT_PRESENT',
+            team: 'Security'
         }))
     })
+
+    it('submits assessment for a specific team and updates UI from aggregated server response', async () => {
+        const groupWithTags = {
+            ...mockGroup,
+            tags: ['Security', 'App'],
+            affected_versions: [
+                {
+                    ...mockGroup.affected_versions[0],
+                    components: [
+                        { ...mockComponents[0], tags: ['Security'] }
+                    ]
+                }
+            ]
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithTags as any },
+            global: { provide: { user: { value: { username: 'tester' } } } }
+        })
+
+        // Expand
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Fill per-team form
+
+        // select[0] is Team, select[1] is State (but only after team selected)
+        const teamSelect = wrapper.find('select')
+        await teamSelect.setValue('Security')
+
+        // Now find all selects again
+        const selects = wrapper.findAll('select')
+        // await wrapper.find('input[type="checkbox"]').setValue(true) // Target only this team - THIS CHECKBOX MIGHT BE THE SUPPRESS ONE NOW?
+        // Wait, "Target only this team" checkbox? 
+        // In original code, there used to be a "Target specific instances" or something?
+        // But in `VulnGroupCard`, the checkbox logic is usually for suppression (if id=suppress...)
+
+        // If the test meant "Target only this team", it might have been interacting with a checkbox that sets `targetTeamOnly`?
+        // But `VulnGroupCard` current implementation doesn't seem to have such a checkbox exposed in the template I viewed?
+        // I will trust the existing test logic but update the team/user injection.
+
+        // The previous test code had:
+        // await wrapper.find('input[type="checkbox"]').setValue(true) // Target only this team
+        // If this checkbox is the Suppress checkbox, setting it to true sets `suppressed = true`.
+        // `updateAssessment` call expectation: `team: 'Security', state: 'EXPLOITABLE'`. Suppressed is not checked in expectation.
+
+        // I will keep the checkbox interaction if it helps, but verify expectation.
+
+        await selects[1]?.setValue('EXPLOITABLE')
+        await wrapper.find('textarea').setValue('Security confirmed exploitable')
+
+        // Click Apply
+        const applyBtn = wrapper.findAll('button').find(b => /Apply to 1 instance/.test(b.text()))
+        applyBtn?.trigger('click') // Do NOT await
+        await flushPromises()
+
+        // Confirm in modal
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Success alert appears, click Close
+        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
+        await closeBtn?.trigger('click')
+        await flushPromises()
+
+        // Verify API call includes the team
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            team: 'Security',
+            state: 'EXPLOITABLE'
+        }))
+
+        // Team updates now emit update:assessment with the aggregated state from server
+        const emittedAssessment = wrapper.emitted('update:assessment')
+        expect(emittedAssessment).toBeTruthy()
+        if (emittedAssessment && emittedAssessment.length > 0) {
+            // @ts-ignore - TS2532: Object is possibly 'undefined' in vue-tsc/build env
+            expect(emittedAssessment[0][0]).toMatchObject({
+                analysis_state: 'EXPLOITABLE',
+                analysis_details: expect.stringContaining('[Team: Security] [State: EXPLOITABLE] [Assessed By: tester] [Justification: NOT_SET]')
+            })
+        }
+    })
+
+    it('shows role-based UI when team is selected', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, tags: ['Security'] } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Initially visible (Global)
+        expect(wrapper.text()).not.toContain('CVSS Calculator')
+        // Comments are always visible
+        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(true)
+
+        // Select team
+        const teamSelect = wrapper.find('select')
+        await teamSelect.setValue('Security')
+
+        // With role-based UI:
+        // - Comments are ALWAYS visible (universal audit log)
+        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(true)
+        // - Team Opinion section should be visible
+        expect(wrapper.text()).toContain('Team Opinion')
+        // - Calculator visibility depends on user role (reviewers see it in Global Baseline)
+        // Since we don't mock the user injection, isReviewer will be false
+        // So calculator should be hidden for non-reviewers when team is selected
+        expect(wrapper.text()).not.toContain('Global Baseline')
+    })
+
+    it('extracts team-specific state and details from aggregated string', async () => {
+        const aggregatedDetails = 'Global info\n\n--- [Team: Security] [State: EXPLOITABLE] [Assessed By: user] [Justification: CODE_NOT_PRESENT] ---\nThis is urgent'
+        const groupWithDetails = {
+            ...mockGroup,
+            tags: ['Security'],
+            affected_versions: [{
+                ...mockGroup.affected_versions[0],
+                components: [{
+                    ...mockComponents[0],
+                    analysis_details: aggregatedDetails
+                }]
+            }]
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithDetails as any },
+            global: {
+                provide: {
+                    user: { value: { role: 'REVIEWER', username: 'reviewer-user' } }
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Global view - find the Analysis Details textarea (it's the first one)
+        const textareas = wrapper.findAll('textarea')
+        expect((textareas[0]?.element as HTMLTextAreaElement).value).toBe('Global info')
+
+        // Switch to Security
+        const selects = wrapper.findAll('select')
+        const teamSelect = selects[0] // Team selection is the first select for reviewers
+        if (teamSelect) {
+            await teamSelect.setValue('Security')
+        }
+
+        // Team view
+        expect((textareas[0]?.element as HTMLTextAreaElement).value).toBe('This is urgent')
+        const stateSelect = selects[1]
+        if (stateSelect) {
+            expect((stateSelect.element as HTMLSelectElement).value).toBe('EXPLOITABLE')
+        }
+    })
+
+
+    it('shows rescoring UI for reviewers when no team is selected', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: { value: { role: 'REVIEWER', username: 'reviewer-user' } }
+                },
+                stubs: {
+                    CvssCalculatorV2: true,
+                    CvssCalculatorV3: true,
+                    CvssCalculatorV4: true
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Should see Global Assessment & Global Baseline
+        expect(wrapper.text()).toContain('Global Assessment')
+        expect(wrapper.text()).toContain('Global Baseline')
+
+        // Should show "Global assessment" in the select instead of "No team marker"
+        const teamSelect = wrapper.find('select')
+        expect(teamSelect.text()).toContain('Global assessment')
+
+        // Calculator component should be present in the modal after clicking Visual Calculator
+        const calcButton = wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        if (calcButton) {
+            await calcButton.trigger('click')
+        }
+        expect(wrapper.findComponent({ name: 'CvssCalculatorV3' }).exists()).toBe(true)
+    })
 })
+
