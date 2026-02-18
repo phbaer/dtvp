@@ -47,27 +47,32 @@ const fetchVulns = async () => {
     }
 }
 
-const handleLocalAssessmentUpdate = (group: GroupedVuln, data: {
-    rescored_cvss: number | null,
-    rescored_vector: string,
-    analysis_state: string,
-    analysis_details: string,
-    is_suppressed: boolean,
-    justification: string
-}) => {
-    // Update the group's rescored values
+const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
     group.rescored_cvss = data.rescored_cvss
     group.rescored_vector = data.rescored_vector
 
-    // Update all affected instances in this group
-    group.affected_versions.forEach(version => {
-        version.components.forEach(instance => {
-            instance.analysis_state = data.analysis_state
-            instance.analysis_details = data.analysis_details
-            instance.is_suppressed = data.is_suppressed
-            instance.justification = data.justification
-        })
+    // Update all affected instances in this group by creating new array and object references for reactivity
+    group.affected_versions = group.affected_versions.map(version => {
+        return {
+            ...version,
+            components: version.components.map(instance => {
+                return {
+                    ...instance,
+                    analysis_state: data.analysis_state,
+                    analysis_details: data.analysis_details,
+                    is_suppressed: data.is_suppressed,
+                    justification: data.justification
+                }
+            })
+        }
     })
+    
+    // Force top-level reactivity by replacing the group object itself with a new reference
+    const idx = groups.value.findIndex(g => g.id === group.id)
+    if (idx !== -1) {
+        groups.value[idx] = { ...group }
+    }
+    groups.value = [...groups.value]
 }
 
 const expandedGroupIds = ref(new Set<string>())
@@ -82,7 +87,7 @@ const handleToggleExpand = (id: string, expanded: boolean) => {
 const tagFilter = ref('')
 const idFilter = ref('')
 const hideAssessed = ref(true)
-const hideMixed = ref(true)
+const hideMixed = ref(false)
 const showNeedsApproval = ref(false)
 const sortBy = ref('severity')
 const sortOrder = ref<'asc' | 'desc'>('asc')
@@ -132,6 +137,13 @@ const filteredGroups = computed(() => {
     if (hideAssessed.value) {
         result = result.filter(g => {
             if (expandedGroupIds.value.has(g.id)) return true
+            
+            // Check if ANY component is pending review - if so, show it regardless of state
+            const isPending = (g.affected_versions || []).some(v => 
+                v.components.some(c => (c.analysis_details || '').includes('[Status: Pending Review]'))
+            )
+            if (isPending) return true
+
             const state = getDisplayState(g)
             // Keep if NOT_SET or MIXED
             return state === 'NOT_SET' || state === 'MIXED'

@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Vulnerability View and Rescoring', () => {
     test.beforeEach(async ({ page }) => {
+        page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
         // Mock Session
         await page.route('**/auth/me', async (route) => {
             await route.fulfill({
@@ -43,6 +44,7 @@ test.describe('Vulnerability View and Rescoring', () => {
                             severity: 'HIGH',
                             cvss: 9.8,
                             cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                            tags: ['Security'],
                             affected_versions: [
                                 {
                                     project_name: 'TestProject',
@@ -52,8 +54,12 @@ test.describe('Vulnerability View and Rescoring', () => {
                                         {
                                             component_name: 'lib-a',
                                             component_version: '1.0',
+                                            component_uuid: 'c-1',
+                                            finding_uuid: 'f-1',
+                                            vulnerability_uuid: 'v-1',
                                             analysis_state: 'NOT_SET',
                                             analysis_details: '',
+                                            tags: ['Security']
                                         }
                                     ]
                                 }
@@ -63,41 +69,68 @@ test.describe('Vulnerability View and Rescoring', () => {
                 }),
             });
         });
+
+        // Mock Assessment Details
+        await page.route('**/api/assessments/details', async (route) => {
+            const body = route.request().postDataJSON();
+            const results = (body.instances || []).map((inst: any) => ({
+                finding_uuid: inst.finding_uuid,
+                project_uuid: inst.project_uuid,
+                component_uuid: inst.component_uuid,
+                vulnerability_uuid: inst.vulnerability_uuid,
+                analysis: {
+                    state: 'NOT_SET',
+                    analysisState: 'NOT_SET',
+                    isSuppressed: false,
+                    analysisDetails: '',
+                    analysisComments: []
+                }
+            }));
+            await route.fulfill({
+                status: 200,
+                body: JSON.stringify(results),
+            });
+        });
     });
 
     test('should allow rescoring a vulnerability', async ({ page }) => {
         // Go to project view
         await page.goto('/project/TestProject');
+        await page.waitForLoadState('networkidle');
+
+        // Uncheck "Hide Assessed" and "Hide Mixed"
+        await page.locator('label', { hasText: 'Hide Assessed' }).uncheck();
+        await page.locator('label', { hasText: 'Hide Mixed' }).uncheck();
 
         // Wait for CVE to appear
-        await expect(page.locator('text=CVE-2023-1234')).toBeVisible();
+        const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: /CVE-2023-1234/ }).first();
+        await expect(cardHeader).toBeVisible({ timeout: 20000 });
 
         // Expand
-        await page.locator('text=CVE-2023-1234').click();
+        await cardHeader.click();
 
         // Check description
         await expect(page.locator('text=A bad vulnerability description.')).toBeVisible();
 
-        // Open calculator
-        await page.locator('button:has-text("Visual Calculator")').click();
+        // Select Team first (required to see rescoring fields)
+        const teamSelector = cardHeader.locator('select').first();
+        await teamSelector.selectOption('Security');
 
-        // Verify modal is open
-        await expect(page.locator('text=CVSS v3.1 Calculator')).toBeVisible();
+        // Wait for the team assessment header to appear
+        await expect(page.locator('text=Team Assessment: Security')).toBeVisible({ timeout: 10000 });
 
-        // Change a metric (e.g. Modified Attack Complexity)
-        // Note: Base metrics are read-only in the UI, we must use Environmental Metrics to rescore
-        await page.locator('#metric-MAC').selectOption('H');
+        // Verify rescoring fields are visible
+        await expect(page.locator('input[placeholder^="CVSS"]')).toBeVisible();
+        await expect(page.locator('input[type="number"]')).toBeVisible();
 
-        // Check if score updated (9.8 should become something else, e.g. 9.1 for MAC:H in 3.1)
-        // We look for the score in the modal footer
-        const modalFooter = page.locator('.fixed.inset-0 .text-2xl');
-        await expect(modalFooter).not.toHaveText('9.8');
+        // Change the vector manually
+        const vectorInput = page.locator('input[placeholder^="CVSS"]');
+        await vectorInput.fill('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H');
 
-        // Click Done
-        await page.locator('button:has-text("Done")').click();
+        // Change the score manually
+        const scoreInput = page.locator('input[type="number"]');
+        await scoreInput.fill('9.1');
 
-        // Verify pending score updated in the main form
-        await expect(page.locator('input[type="number"]')).not.toHaveValue('9.8');
 
         // Submit Assessment
         // Mock the submission first
@@ -110,8 +143,16 @@ test.describe('Vulnerability View and Rescoring', () => {
 
         // Click Apply to All
         // We might get a confirm dialog, Playwright handles it if we set up a listener or it might just work if we use page.on('dialog')
-        page.on('dialog', dialog => dialog.accept());
-        await page.locator('button:has-text("Apply to All")').click();
+        // Click Apply
+        const applyBtn = cardHeader.getByRole('button', { name: /Apply to/ });
+        await applyBtn.click();
+
+        // Handle Custom Confirm Modal
+        await page.getByRole('button', { name: 'Confirm' }).click();
+
+        // Handle Success Modal
+        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
+        await page.getByRole('button', { name: 'Close' }).click();
 
         // Check for success alert or indicator that it closed
         await expect(page.locator('text=A bad vulnerability description.')).not.toBeVisible();
