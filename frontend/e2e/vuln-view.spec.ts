@@ -15,9 +15,28 @@ test.describe('Vulnerability View and Rescoring', () => {
 
         // Mock Projects
         await page.route('**/api/projects?name=TestProject', async (route) => {
+            // Return extended list immediately for search/filter
             await route.fulfill({
                 status: 200,
-                body: JSON.stringify([{ name: 'TestProject', uuid: 'p1', version: '1.0' }]),
+                body: JSON.stringify([
+                    { name: 'TestProject', uuid: 'p1', version: '1.0', classifier: 'APPLICATION' },
+                    { name: 'TestProject', uuid: 'p2', version: '1.1', classifier: 'APPLICATION' },
+                    { name: 'BackendLib', uuid: 'p3', version: '2.0', classifier: 'LIBRARY' },
+                    { name: 'FrontendApp', uuid: 'p4', version: '3.0', classifier: 'APPLICATION' },
+                ]),
+            });
+        });
+
+        // Also mock generic project search if needed
+        await page.route('**/api/projects?name=', async (route) => {
+            await route.fulfill({
+                status: 200,
+                body: JSON.stringify([
+                    { name: 'TestProject', uuid: 'p1', version: '1.0', classifier: 'APPLICATION' },
+                    { name: 'TestProject', uuid: 'p2', version: '1.1', classifier: 'APPLICATION' },
+                    { name: 'BackendLib', uuid: 'p3', version: '2.0', classifier: 'LIBRARY' },
+                    { name: 'FrontendApp', uuid: 'p4', version: '3.0', classifier: 'APPLICATION' },
+                ]),
             });
         });
 

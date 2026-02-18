@@ -7,8 +7,9 @@ test.describe('Integration Tests (Real Backend)', () => {
         await page.goto('/');
 
         // 2. Perform Search
-        await page.getByPlaceholder('Search project name...').fill('Vuln');
-        await page.getByRole('button', { name: 'Search' }).click();
+        await page.getByPlaceholder('Filter projects...').fill('Vuln');
+        // Search button is gone, filtering is instant
+        // await page.getByRole('button', { name: 'Search' }).click();
 
         // 3. Wait for projects to load
         // The mock backend returns "Vulnerable Project"
@@ -18,17 +19,17 @@ test.describe('Integration Tests (Real Backend)', () => {
 
 
         // 4. Verify version is displayed
-        await expect(page.getByText('1.0.0')).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText('v1.0.0')).toBeVisible({ timeout: 10000 });
     });
 
     test('Navigate to Project Details and see Vulnerabilities', async ({ page }) => {
         await page.goto('/');
 
         // 1. Perform Search to find project
-        await page.getByPlaceholder('Search project name...').fill('Vuln');
-        await page.getByRole('button', { name: 'Search' }).click();
+        await page.getByPlaceholder('Filter projects...').fill('Vuln');
+        // await page.getByRole('button', { name: 'Search' }).click();
 
-        // 2. Click on the project to navigate
+        // 2. Click on the project name to navigate
         await page.getByText('Vulnerable Project').click();
 
         // Uncheck "Hide Assessed" and "Hide Mixed" to ensure vulnerabilities are visible
