@@ -288,48 +288,145 @@ def get_vulns(project_uuid: str):
 def get_bom(project_uuid: str):
     project = next((p for p in mock_projects if p.uuid == project_uuid), None)
 
+    # Define intermediate components for trace
+    # App -> Intermediate Lib A -> Intermediate Lib B -> log4j-core
+    # We will only add this structure for the main "Vulnerable Project" (PROJECT_UUID)
+    # properly.
+
+    components = []
+    dependencies = []
+
+    # root component (The Project itself)
+    metadata_component = {
+        "bom-ref": project_uuid,  # Usually the project UUID is the root ref
+        "name": project.name if project else "Unknown",
+        "version": project.version if project else "0.0.0",
+        "type": "application",
+        "uuid": project_uuid,
+    }
+
+    # Internal libraries
+    lib_a_uuid = "11111111-1111-1111-1111-111111111111"
+    lib_b_uuid = "22222222-2222-2222-2222-222222222222"
+
+    comp_lib_a = {
+        "type": "library",
+        "name": "internal-lib-a",
+        "version": "1.0.0",
+        "bom-ref": lib_a_uuid,
+        "uuid": lib_a_uuid,
+    }
+
+    comp_lib_b = {
+        "type": "library",
+        "name": "internal-lib-b",
+        "version": "1.2.3",
+        "bom-ref": lib_b_uuid,
+        "uuid": lib_b_uuid,
+    }
+
+    # The Vulnerable Component (log4j-core)
+    # defined globally as COMPONENT_UUID
+    comp_log4j = {
+        "type": "library",
+        "name": "log4j-core",
+        "version": "2.14.0",
+        "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+        "bom-ref": COMPONENT_UUID,
+        "uuid": COMPONENT_UUID,
+    }
+
+    comp_jackson = {
+        "type": "library",
+        "name": "jackson-databind",
+        "version": "2.9.8",
+        "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+        "bom-ref": JACKSON_UUID,
+        "uuid": JACKSON_UUID,
+    }
+
+    comp_netty = {
+        "type": "library",
+        "name": "netty-common",
+        "version": "4.1.42.Final",
+        "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
+        "bom-ref": NETTY_UUID,
+        "uuid": NETTY_UUID,
+    }
+
+    comp_team_test = {
+        "type": "library",
+        "name": "team-test-lib",
+        "version": "1.0.0",
+        "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
+        "bom-ref": TEAM_TEST_LIB_UUID,
+        "uuid": TEAM_TEST_LIB_UUID,
+    }
+
+    components = [
+        comp_lib_a,
+        comp_lib_b,
+        comp_log4j,
+        comp_jackson,
+        comp_netty,
+        comp_team_test,
+    ]
+
+    # Dependencies (The Chain)
+    # Root -> Lib A, Jackson, Netty, Team Test Lib
+    dep_root = {
+        "ref": project_uuid,
+        "dependsOn": [lib_a_uuid, JACKSON_UUID, NETTY_UUID, TEAM_TEST_LIB_UUID],
+    }
+    # Lib A -> Lib B
+    dep_a = {
+        "ref": lib_a_uuid,
+        "dependsOn": [lib_b_uuid],
+    }
+    # Lib B -> log4j
+    dep_b = {
+        "ref": lib_b_uuid,
+        "dependsOn": [COMPONENT_UUID],
+    }
+    # log4j -> []
+    dep_log4j = {
+        "ref": COMPONENT_UUID,
+        "dependsOn": [],
+    }
+    # Jackson -> []
+    dep_jackson = {
+        "ref": JACKSON_UUID,
+        "dependsOn": [],
+    }
+    # Netty -> []
+    dep_netty = {
+        "ref": NETTY_UUID,
+        "dependsOn": [],
+    }
+    # Team Test Lib -> []
+    dep_team_test = {
+        "ref": TEAM_TEST_LIB_UUID,
+        "dependsOn": [],
+    }
+
+    dependencies = [
+        dep_root,
+        dep_a,
+        dep_b,
+        dep_log4j,
+        dep_jackson,
+        dep_netty,
+        dep_team_test,
+    ]
+
     # Minimal valid CycloneDX BOM
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.4",
         "version": 1,
-        "metadata": {
-            "component": {
-                "name": project.name if project else "Unknown",
-                "version": project.version if project else "0.0.0",
-                "type": "application",
-            }
-        },
-        "components": [
-            {
-                "type": "library",
-                "name": "log4j-core",
-                "version": "2.14.0",
-                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
-                "bom-ref": COMPONENT_UUID,
-            },
-            {
-                "type": "library",
-                "name": "jackson-databind",
-                "version": "2.9.8",
-                "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
-                "bom-ref": JACKSON_UUID,
-            },
-            {
-                "type": "library",
-                "name": "netty-common",
-                "version": "4.1.42.Final",
-                "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
-                "bom-ref": NETTY_UUID,
-            },
-            {
-                "type": "library",
-                "name": "team-test-lib",
-                "version": "1.0.0",
-                "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
-                "bom-ref": TEAM_TEST_LIB_UUID,
-            },
-        ],
+        "metadata": {"component": metadata_component},
+        "components": components,
+        "dependencies": dependencies,
     }
 
 
