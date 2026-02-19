@@ -29,8 +29,8 @@ test.describe('Integration Tests (Real Backend)', () => {
         await page.getByPlaceholder('Filter projects...').fill('Vuln');
         // await page.getByRole('button', { name: 'Search' }).click();
 
-        // 2. Click on the project name to navigate
-        await page.getByText('Vulnerable Project').click();
+        // 2. Click on the project name to navigate (pick first if multiple)
+        await page.getByText('Vulnerable Project').first().click();
 
         // Uncheck "Hide Assessed" and "Hide Mixed" to ensure vulnerabilities are visible
         await page.locator('label', { hasText: 'Hide Assessed' }).uncheck();
@@ -46,6 +46,23 @@ test.describe('Integration Tests (Real Backend)', () => {
         // 4. Verify Analysis State (Mocked as NOT_SET or similar)
         // Wait specifically for the status badge
         await expect(page.locator('.analysis-state-value').first()).toBeVisible();
+
+        // 5. Verify Dependency Chains
+        // Click to expand the card first (click the ID)
+        await page.getByText('CVE-2021-44228').click();
+
+        // Click to show dependency chains
+        const trackingBtn = page.getByRole('button', { name: 'Show Dependency Chains' }).first();
+        await expect(trackingBtn).toBeVisible({ timeout: 5000 });
+        await page.waitForTimeout(500); // Small stability wait
+        await trackingBtn.click();
+
+        // Expect the chain segments to be visible
+        // Note: The root "Vulnerable Project" is hidden by the UI component
+        // Use getByTitle because the visualization adds title attributes to the nodes
+        await expect(page.getByTitle('internal-lib-a')).toBeVisible();
+        await expect(page.getByTitle('internal-lib-b')).toBeVisible();
+        await expect(page.getByTitle('log4j-core')).toBeVisible();
     });
 
 });
