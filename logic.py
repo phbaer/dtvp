@@ -452,19 +452,28 @@ def group_vulnerabilities(
                     if match_any_vector:
                         rescored_vector = match_any_vector.group(1).strip()
 
-            # If we found a rescored value, update the group level if not set
-            if rescored_score is not None and not groups[canonical_id]["rescored_cvss"]:
-                # ONLY record if it differs from the base score
-                if rescored_score != groups[canonical_id]["cvss_score"]:
-                    groups[canonical_id]["rescored_cvss"] = rescored_score
-
+            # Determine if we should show it as rescored
+            # The user specifically requested: "If the cvss vector hasn't changed, don't show it as rescored in the UI (card)"
+            is_different = False
             if (
-                rescored_vector is not None
-                and not groups[canonical_id]["rescored_vector"]
+                rescored_vector
+                and rescored_vector != groups[canonical_id]["cvss_vector"]
             ):
-                # ONLY record if it differs from the base vector
-                if rescored_vector != groups[canonical_id]["cvss_vector"]:
-                    groups[canonical_id]["rescored_vector"] = rescored_vector
+                is_different = True
+
+            if is_different:
+                if groups[canonical_id]["rescored_cvss"] is None:
+                    groups[canonical_id]["rescored_cvss"] = (
+                        rescored_score
+                        if rescored_score is not None
+                        else groups[canonical_id]["cvss_score"]
+                    )
+                if groups[canonical_id]["rescored_vector"] is None:
+                    groups[canonical_id]["rescored_vector"] = (
+                        rescored_vector
+                        if rescored_vector
+                        else groups[canonical_id]["cvss_vector"]
+                    )
 
             component_info = {
                 "project_uuid": proj_uuid,

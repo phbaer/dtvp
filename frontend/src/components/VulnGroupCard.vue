@@ -425,7 +425,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         if (isReviewer.value) {
             // Check if touched in this session
             const touched = pendingVector.value !== initialVector.value || pendingScore.value !== initialScore.value;
-            
+
             if (touched) {
                 // If it now matches the ORIGINAL (DT) vector, we explicitly clear it
                 const matchesOriginal = pendingVector.value === props.group.cvss_vector && 
@@ -488,17 +488,18 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         } else {
              if (!force) await showAlert('Success', 'Assessment updated successfully')
              const success = results.find((r: any) => r.status === 'success')
-             
-             if (success) {
-                 const data = {
-                     rescored_cvss: isReviewer.value ? pendingScore.value : props.group.rescored_cvss,
-                     rescored_vector: isReviewer.value ? pendingVector.value : props.group.rescored_vector,
-                     analysis_state: success.new_state,
-                     analysis_details: success.new_details,
-                     is_suppressed: suppressed.value
-                 }
-                 emit('update:assessment', data)
-             }
+                          if (success) {
+                  const hasVectorChange = isReviewer.value ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
+                  
+                  const data = {
+                      rescored_cvss: hasVectorChange ? (isReviewer.value ? pendingScore.value : props.group.rescored_cvss) : null,
+                      rescored_vector: hasVectorChange ? (isReviewer.value ? pendingVector.value : props.group.rescored_vector) : null,
+                      analysis_state: success.new_state,
+                      analysis_details: success.new_details,
+                      is_suppressed: suppressed.value
+                  }
+                  emit('update:assessment', data)
+              }
              showConflictModal.value = false
         }
         
@@ -718,7 +719,7 @@ const assessedTeams = computed(() => {
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
             <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
-                <div v-if="group.rescored_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
+                <div v-if="group.rescored_vector && group.rescored_vector !== group.cvss_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
                     <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored Vector:</span>
                     <span class="tracing-tight">
                         <span class="font-bold rescored-bold-segment">{{ rescoredVectorSegments.bold }}</span>{{ rescoredVectorSegments.normal }}
