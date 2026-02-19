@@ -42,7 +42,6 @@ test.describe('Integration Tests (Real Backend)', () => {
         // 2. Click on the project name to navigate
         const projectLink = page.getByRole('link', { name: 'Vulnerable Project' }).first();
         await projectLink.click();
-
         // 3. Check for URL change
         await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/);
 
