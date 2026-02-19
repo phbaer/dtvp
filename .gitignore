@@ -8,9 +8,15 @@ wheels/
 compose.yml
 .env
 *.txt
+test-results/
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.coverage/
 
 # Virtual environments
 .venv
+venv/
 frontend/playwright-report
 frontend/test-results
 frontend/coverage
