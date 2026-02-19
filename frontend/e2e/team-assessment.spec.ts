@@ -24,7 +24,9 @@ test.describe('Per-Team Assessment UI Flow', () => {
         await page.route('**/api/projects?name=TestProject', async (route) => {
             await route.fulfill({
                 status: 200,
-                body: JSON.stringify([{ name: 'TestProject', uuid: 'p1', version: '1.0' }]),
+                body: JSON.stringify([
+                    { name: 'TestProject', uuid: 'p1', version: '1.0', classifier: 'APPLICATION' },
+                ]),
             });
         });
 

@@ -12,66 +12,95 @@ describe('Dashboard.vue', () => {
         vi.clearAllMocks()
     })
 
-    it('renders correctly', () => {
-        const wrapper = mount(Dashboard, {
-            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
-        })
-        expect(wrapper.text()).toContain('Find a Project')
-    })
+    const mockProjects = [
+        { uuid: '1', name: 'App A', version: '1.0', classifier: 'APPLICATION' },
+        { uuid: '2', name: 'App A', version: '1.1', classifier: 'APPLICATION' },
+        { uuid: '3', name: 'Lib B', version: '2.0', classifier: 'LIBRARY' },
+        { uuid: '4', name: 'Other C', version: '1.0', classifier: null } // Test missing classifier
+    ]
 
-    it('fetches projects on search', async () => {
-        // Mock response
-        const mockProjects = [
-            { uuid: '1', name: 'Test Project', version: '1.0' }
-        ]
+    it('fetches projects on mount', async () => {
         vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
 
         const wrapper = mount(Dashboard, {
             global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
         })
 
-        // Set query
-        await wrapper.find('input').setValue('Test')
-        await wrapper.find('form').trigger('submit')
+        // Initial loading state might be visible briefly
+        expect(getProjects).toHaveBeenCalledWith('')
 
-        // Skip loading assertion as it might be too fast
         await flushPromises()
 
-        expect(getProjects).toHaveBeenCalledWith('Test')
-        expect(wrapper.text()).toContain('Test Project')
-        expect(wrapper.text()).not.toContain('No projects found')
+        expect(wrapper.text()).not.toContain('Loading projects...')
+        expect(wrapper.text()).toContain('APPLICATION')
+        expect(wrapper.text()).toContain('LIBRARY')
+        expect(wrapper.text()).toContain('Unclassified')
     })
 
-    it('displays empty state when no results', async () => {
-        vi.mocked(getProjects).mockResolvedValue([])
-
+    it('groups projects by classifier and name', async () => {
+        vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
         const wrapper = mount(Dashboard, {
             global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
         })
-
-        await wrapper.find('input').setValue('NonExistent')
-        await wrapper.find('form').trigger('submit')
-
         await flushPromises()
 
-        expect(getProjects).toHaveBeenCalled()
-        expect(wrapper.text()).toContain('No projects found')
+        // Check headers
+        const headers = wrapper.findAll('h3').map(h => h.text())
+        expect(headers).toContain('APPLICATION')
+        expect(headers).toContain('LIBRARY')
+
+        // App A should appear once as a card
+        expect(wrapper.text()).toContain('App A')
+
+        // Project Name should be a link
+        const appALink = wrapper.findAll('a').find(a => a.text() === 'App A')
+        expect(appALink).toBeDefined()
+        expect(appALink?.attributes('href')).toBe('/project/App A')
+
+        // Versions should be present but not links (our valid stub makes links <a>, so we check they are NOT <a> if we weren't stubbing router-link, 
+        // but here we just check text presence and structure)
+        // With RouterLink stubbed as <a>, the versions are now <span> so they won't be found as <a>
+        const versionLinks = wrapper.findAll('a').filter(a => a.text().startsWith('v'))
+        expect(versionLinks.length).toBe(0)
+
+        expect(wrapper.text()).toContain('v1.0')
+        expect(wrapper.text()).toContain('v1.1')
     })
 
-    it('handles error', async () => {
-        vi.mocked(getProjects).mockRejectedValue(new Error('Fetch error'))
-
-        // Mock window.alert
-        const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => { })
-        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => { })
-
+    it('filters projects via search input', async () => {
+        vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
         const wrapper = mount(Dashboard, {
+            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
+        })
+        await flushPromises()
+
+        const input = wrapper.find('input')
+        await input.setValue('Lib')
+
+        expect(wrapper.text()).toContain('Lib B')
+        expect(wrapper.text()).not.toContain('App A')
+    })
+
+    it('displays empty state when no results from filter', async () => {
+        vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
+        const wrapper = mount(Dashboard, {
+            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
+        })
+        await flushPromises()
+
+        await wrapper.find('input').setValue('NonExistent')
+
+        expect(wrapper.text()).toContain('No projects found matching your filter')
+    })
+
+    it('handles fetch error', async () => {
+        vi.mocked(getProjects).mockRejectedValue(new Error('Fetch error'))
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => { })
+        const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => { })
+
+        mount(Dashboard, {
             global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } }
         })
-
-        await wrapper.find('input').setValue('Error')
-        await wrapper.find('form').trigger('submit')
-
         await flushPromises()
 
         expect(consoleError).toHaveBeenCalled()
