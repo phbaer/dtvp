@@ -101,7 +101,7 @@ jobs:
         run: pm2 kill || true
 
   check-version:
-    if: github.event.action != 'closed'
+    if: false && github.event.action != 'closed'
     needs: [test-backend, test-frontend]
     runs-on: node
     steps:
@@ -177,8 +177,8 @@ jobs:
           tags: |
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
-            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
-            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
+            ${{ false && github.event_name == 'push' && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
+            ${{ false && github.event_name == 'push' && format('{0}/{1}/dtvp:{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
             ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
           context: .
           build-args: |
@@ -186,7 +186,7 @@ jobs:
           secrets: |
             GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
       - name: Create Git Tag
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: false && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
           git config --global user.name "Gitea Actions"
