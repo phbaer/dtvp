@@ -39,14 +39,17 @@ class DTClient:
         page_size = 100
 
         while True:
+            params = {
+                "excludeInactive": "true",
+                "pageSize": page_size,
+                "pageNumber": page_number,
+            }
+            if name:
+                params["name"] = name
+
             response = await self.client.get(
                 f"{self.base_url}/api/v1/project",
-                params={
-                    "name": name,
-                    "excludeInactive": "true",
-                    "pageSize": page_size,
-                    "pageNumber": page_number,
-                },
+                params=params,
             )
             response.raise_for_status()
             projects = response.json()
