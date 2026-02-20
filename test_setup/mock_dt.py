@@ -1,7 +1,10 @@
-import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
+import uvicorn
+import time
+import uuid
 
 app = FastAPI()
 
@@ -454,6 +457,124 @@ def update_analysis(update: AnalysisUpdate):
             )  # Actually comments are separate usually
         return mock_analysis[key]
     return {"error": "Finding not found"}
+
+
+@app.get("/.well-known/openid-configuration")
+def openid_configuration(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/auth/authorize",
+        "token_endpoint": f"{base_url}/auth/token",
+        "userinfo_endpoint": f"{base_url}/auth/userinfo",
+        "jwks_uri": f"{base_url}/auth/jwks",
+        "response_types_supported": ["code", "id_token"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "scopes_supported": ["openid", "profile", "email"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_post",
+            "client_secret_basic",
+        ],
+        "claims_supported": ["sub", "preferred_username", "email", "name"],
+    }
+
+
+@app.get("/auth/authorize", response_class=HTMLResponse)
+def authorize(
+    client_id: str,
+    redirect_uri: str,
+    state: Optional[str] = None,
+    scope: str = "openid",
+    response_type: str = "code",
+):
+    return f"""
+    <html>
+        <head>
+            <title>Mock Login (Mock Service)</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="bg-gray-900 text-white flex items-center justify-center h-screen">
+            <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-96 border border-gray-700">
+                <h1 class="text-2xl font-bold mb-6 text-center text-blue-400">Mock SSO Login</h1>
+                <p class="text-gray-400 mb-8 text-center text-sm">Select a user role to simulate SSO authentication.</p>
+                <div class="space-y-4">
+                    <form action="/auth/authorize" method="POST">
+                        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                        <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="username" value="analyst">
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
+                            Login as Analyst
+                        </button>
+                    </form>
+                    <form action="/auth/authorize" method="POST">
+                        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                        <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="username" value="reviewer">
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
+                            Login as Reviewer
+                        </button>
+                    </form>
+                </div>
+                <div class="mt-8 pt-6 border-t border-gray-700 text-center">
+                   <p class="text-xs text-gray-500 italic">This page is served by the Dependency-Track Mock Service</p>
+                </div>
+            </div>
+        </body>
+    </html>
+    """
+
+
+@app.post("/auth/authorize")
+def authorize_post(
+    username: str = Form(...),
+    redirect_uri: str = Form(...),
+    state: str = Form(""),
+):
+    # Simulated auth code
+    code = f"mock_code_{username}_{int(time.time())}"
+    sep = "&" if "?" in redirect_uri else "?"
+    url = f"{redirect_uri}{sep}code={code}"
+    if state:
+        url += f"&state={state}"
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.post("/auth/token")
+def token(
+    code: str = Form(...),
+    grant_type: str = Form(...),
+    redirect_uri: str = Form(...),
+    client_id: Optional[str] = Form(None),
+    client_secret: Optional[str] = Form(None),
+):
+    # Extract username from code
+    username = "user"
+    if "mock_code_" in code:
+        username = code.split("_")[2]
+
+    # Create a dummy JWT (signed with something simple or just unverified)
+    # The production code uses jwt.get_unverified_claims, so we don't need a real signature.
+    import jose.jwt as jose_jwt
+
+    id_token = jose_jwt.encode(
+        {
+            "sub": username,
+            "preferred_username": username,
+            "name": username.capitalize(),
+            "exp": int(time.time()) + 3600,
+            "iat": int(time.time()),
+        },
+        "mock_secret",
+        algorithm="HS256",
+    )
+
+    return {
+        "access_token": "mock_access_token",
+        "id_token": id_token,
+        "token_type": "Bearer",
+        "expires_in": 3600,
+    }
 
 
 if __name__ == "__main__":

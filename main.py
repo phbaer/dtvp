@@ -646,6 +646,10 @@ if os.path.isdir("frontend/dist"):
 
             content = content.replace("${DTVP_CONTEXT_PATH}", context_path or "/")
             content = content.replace("${DTVP_FRONTEND_URL}", frontend_url)
+            content = content.replace(
+                "${DTVP_DEV_DISABLE_AUTH}",
+                "true" if auth_settings.DEV_DISABLE_AUTH else "false",
+            )
 
             # If we have a context path, we need to adjust absolute paths in index.html
             # so they point to the correct sub-path (e.g. /dtvp/assets/...)

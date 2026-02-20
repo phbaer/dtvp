@@ -1,4 +1,5 @@
 from typing import Optional
+import uuid
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from fastapi.responses import RedirectResponse
 from pydantic import Field
@@ -35,15 +36,18 @@ class AuthSettings(BaseSettings):
 
     @property
     def authority(self) -> str:
+        # Priority: DTVP_OIDC_AUTHORITY > ISSUER_URL > default None
         return self.OIDC_AUTHORITY or self.ISSUER_URL or ""
 
     @property
     def client_id(self) -> str:
+        # Priority: DTVP_OIDC_CLIENT_ID > CLIENT_ID > default None
         return self.OIDC_CLIENT_ID or self.CLIENT_ID or ""
 
     @property
     def client_secret(self) -> str:
-        return self.OIDC_CLIENT_SECRET or self.CLIENT_SECRET or ""
+        # Priority: DTVP_OIDC_CLIENT_SECRET > OIDC_CLIENT_SECRET (alias) > default None
+        return self.OIDC_CLIENT_SECRET or ""
 
     @property
     def redirect_uri(self) -> str:
@@ -52,7 +56,7 @@ class AuthSettings(BaseSettings):
 
         base = self.FRONTEND_URL.rstrip("/")
         path = self.CONTEXT_PATH
-        if not path.startswith("/"):
+        if path and not path.startswith("/"):
             path = "/" + path
         path = path.rstrip("/")
 
@@ -84,17 +88,7 @@ async def get_oidc_config():
 
 
 @router.get("/login")
-async def login():
-    if auth_settings.DEV_DISABLE_AUTH:
-        # If auth disabled, redirect to main page with a dummy session if needed,
-        # or just redirect since get_current_user will pass anyway.
-        # But get_current_user checks for header/cookie? No, we'll bypass it.
-        base = auth_settings.FRONTEND_URL.rstrip("/")
-        path = auth_settings.CONTEXT_PATH
-        if not path.startswith("/"):
-            path = "/" + path
-        return RedirectResponse(f"{base}{path}")
-
+async def login(response: Response = None):
     config = await get_oidc_config()
     auth_endpoint = config["authorization_endpoint"]
     return RedirectResponse(
@@ -102,6 +96,7 @@ async def login():
         f"client_id={auth_settings.client_id}&"
         f"response_type=code&"
         f"redirect_uri={auth_settings.redirect_uri}&"
+        f"state={uuid.uuid4() if 'uuid' in globals() else 'state'}&"
         f"scope=openid profile email"
     )
 
@@ -160,13 +155,27 @@ async def callback(code: str, response: Response):
         return response
 
 
-def get_current_user(request: Request):
-    if auth_settings.DEV_DISABLE_AUTH:
-        return "devuser"
+@router.get("/logout")
+async def logout(response: Response):
+    base = auth_settings.FRONTEND_URL.rstrip("/")
+    path = auth_settings.CONTEXT_PATH.rstrip("/")
+    if path and not path.startswith("/"):
+        path = "/" + path
 
+    # Ensure exactly one slash between base/path and login
+    redirect_path = "/login"
+    target = f"{base}{path}{redirect_path}"
+
+    response = RedirectResponse(url=target)
+    response.delete_cookie(key="session_token")
+    return response
+
+
+def get_current_user(request: Request):
     token = request.cookies.get("session_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
     try:
         payload = jwt.decode(
             token, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"]

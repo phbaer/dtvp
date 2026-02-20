@@ -956,7 +956,7 @@ const assessedTeams = computed(() => {
     </div>
 
     <!-- Grouped Calculator Modal -->
-    <div v-if="showCalculatorModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+    <div v-if="showCalculatorModal && isReviewer" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
         <div class="bg-gray-800 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg border border-gray-700 shadow-2xl">
             <!-- Modal Header -->
             <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
