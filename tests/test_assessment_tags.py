@@ -22,7 +22,7 @@ class TestAssessmentTags(unittest.TestCase):
             "Bad.\n"
         )
         user = "new_user"
-        role = "USER"
+        role = "REVIEWER"
         team = "Security"
         new_details = "Updated security analysis.\n[Rescored: 9.0]"
 

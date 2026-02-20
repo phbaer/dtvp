@@ -226,12 +226,14 @@ class DTSettings(BaseSettings):
 
     @property
     def api_url(self) -> str:
+        # Priority: DTVP_DT_API_URL > DEPENDENCY_TRACK_URL > default
         return (
             self.DTVP_DT_API_URL or self.DEPENDENCY_TRACK_URL or "http://localhost:8081"
         )
 
     @property
     def api_key(self) -> str:
+        # Priority: DTVP_DT_API_KEY > DEPENDENCY_TRACK_API_KEY > default
         return self.DTVP_DT_API_KEY or self.DEPENDENCY_TRACK_API_KEY or "change_me"
 
 

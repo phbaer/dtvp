@@ -632,25 +632,24 @@ def process_assessment_details(
 
     content = new_details
 
-    # Extract Rescored from Content
+    # Extract Rescored if Reviewer (otherwise they are null from above)
     rescored_val = None
-    match_score = RE_SCORE.search(content)
-    if match_score:
-        try:
-            rescored_val = float(match_score.group(1))
-        except ValueError:
-            pass
-
-    # Extract Vector from Content
     rescored_vector = None
-    match_vector = RE_VECTOR.search(content)
-    if match_vector:
-        rescored_vector = match_vector.group(1).strip()
-    else:
-        # Fallback search
-        match_any = RE_ANY_VECTOR.search(content)
-        if match_any:
-            rescored_vector = match_any.group(1).strip()
+    if role == "REVIEWER":
+        match_score = RE_SCORE.search(content)
+        if match_score:
+            try:
+                rescored_val = float(match_score.group(1))
+            except ValueError:
+                pass
+
+        match_vector = RE_VECTOR.search(content)
+        if match_vector:
+            rescored_vector = match_vector.group(1).strip()
+        else:
+            match_any = RE_ANY_VECTOR.search(content)
+            if match_any:
+                rescored_vector = match_any.group(1).strip()
 
     # Remove Tags/Headers from Content to get clean text
     # Remove all headers "--- ... ---"

@@ -209,11 +209,12 @@ def test_assessment_update(client, mock_dt_client):
         "suppressed": True,
     }
 
-    response = client.post("/api/assessment", json=payload)
-    assert response.status_code == 200
-    results = response.json()
-    assert len(results) == 1
-    assert results[0]["status"] == "success"
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        response = client.post("/api/assessment", json=payload)
+        assert response.status_code == 200
+        results = response.json()
+        assert len(results) == 1
+        assert results[0]["status"] == "success"
 
     # Verify client call
     mock_dt_client.update_analysis.assert_called_once()

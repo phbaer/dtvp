@@ -93,8 +93,16 @@ export const getAssessmentDetails = async (instances: any[]) => {
     return res.data;
 };
 
-export const login = () => {
-    window.location.href = AUTH_BASE + '/login';
+export const login = (username?: string) => {
+    let url = AUTH_BASE + '/login';
+    if (username) {
+        url += '?username=' + encodeURIComponent(username);
+    }
+    window.location.href = url;
+};
+
+export const logout = () => {
+    window.location.href = AUTH_BASE + '/logout';
 };
 
 export const checkSession = async () => {

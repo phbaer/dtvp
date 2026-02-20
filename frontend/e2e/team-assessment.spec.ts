@@ -8,7 +8,7 @@ test.describe('Per-Team Assessment UI Flow', () => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
-                body: JSON.stringify({ username: 'testuser' }),
+                body: JSON.stringify({ username: 'testuser', role: 'REVIEWER' }),
             });
         });
 
@@ -113,8 +113,8 @@ test.describe('Per-Team Assessment UI Flow', () => {
         await page.goto('/project/TestProject');
 
         // Uncheck "Hide Assessed" and "Hide Mixed"
-        await page.locator('label', { hasText: 'Hide Assessed' }).uncheck();
-        await page.locator('label', { hasText: 'Hide Mixed' }).uncheck();
+        await page.locator('label', { hasText: 'Hide Assessed' }).locator('input').uncheck({ force: true });
+        await page.locator('label', { hasText: 'Hide Mixed' }).locator('input').uncheck({ force: true });
 
         // Locate the team vulnerability and click it to expand
         const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: 'CVE-TEAM-TEST' }).first();
@@ -126,14 +126,14 @@ test.describe('Per-Team Assessment UI Flow', () => {
         await expect(globalHeader).toBeVisible();
 
         // Verify Team Marker dropdown exists and has options
-        const teamSelector = page.locator('label:has-text("Team assessment (Marker)")').locator('xpath=following-sibling::select').first();
+        const teamSelector = cardHeader.locator('select').first();
         await expect(teamSelector).toBeVisible();
 
         // selectOption will wait for the option to be present
         await teamSelector.selectOption('Backend');
 
         // Analysis state selection (Label is now "Team Analysis State")
-        const stateSelect = page.locator('label:has-text("Team Analysis State")').locator('xpath=following-sibling::select').first();
+        const stateSelect = cardHeader.locator('select').nth(1);
         await expect(stateSelect).toBeVisible();
         await stateSelect.selectOption('EXPLOITABLE');
 
