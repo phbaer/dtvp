@@ -1,21 +1,33 @@
 import httpx
 import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
+from fastapi import Request
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DTClient:
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str = None,
+        token: str = None,
+        cookies: dict = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.headers = {
-            "X-Api-Key": api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if api_key:
+            self.headers["X-Api-Key"] = api_key
+        if token:
+            self.headers["Authorization"] = f"Bearer {token}"
+
         # Create a persistent client with increased timeout and connection limits
         self.client = httpx.AsyncClient(
             headers=self.headers,
+            cookies=cookies,
             timeout=60.0,
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
         )
@@ -237,7 +249,20 @@ class DTSettings(BaseSettings):
         return self.DTVP_DT_API_KEY or self.DEPENDENCY_TRACK_API_KEY or "change_me"
 
 
-async def get_client() -> AsyncGenerator[DTClient, None]:
+async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
     settings = DTSettings()
-    async with DTClient(settings.api_url, settings.api_key) as client:
+
+    # Check for credentials in the incoming request to forward to DT
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+
+    # We can also forward specific cookies if needed, e.g., DT session cookies
+    # For now, we forward all cookies to be safe, or we could filter them
+    cookies = dict(request.cookies)
+
+    async with DTClient(
+        settings.api_url, api_key=settings.api_key, token=token, cookies=cookies
+    ) as client:
         yield client
