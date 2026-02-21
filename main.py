@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 import shutil
 import json
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
@@ -209,6 +209,7 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
 @api_router.post("/tasks/group-vulns")
 async def start_group_vulns_task(
     name: str,
+    request: Request,
     # We DO NOT use Dependency Injection for the client here because it's tied to request scope.
     # We must instantiate a new client for the background task.
     user: str = Depends(get_current_user),
@@ -223,14 +224,20 @@ async def start_group_vulns_task(
         "result": None,
     }
 
+    # Extract credentials from the request to forward to the background task
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    cookies = dict(request.cookies)
+
     # Instantiate a fresh client for the background task
-    # We need to manually handle its lifecycle or let the task handle it
-    # But get_client is an async generator now.
-    # Let's import get_client and use it properly in the task wrapper.
     async def task_wrapper():
         # Manually invoke the client context
         settings = DTSettings()
-        async with DTClient(settings.api_url, settings.api_key) as client:
+        async with DTClient(
+            settings.api_url, api_key=settings.api_key, token=token, cookies=cookies
+        ) as client:
             await process_grouped_vulns_task(task_id, name, client)
 
     asyncio.create_task(task_wrapper())

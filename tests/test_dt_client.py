@@ -209,15 +209,18 @@ def test_settings_properties():
 
 @pytest.mark.asyncio
 async def test_get_client():
+    from unittest.mock import MagicMock
+
     with patch("dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
-        # If accessing the property returns a mock, that's fine, we just set the string conversion or use it as is?
-        # But DTClient constructor expects string for rstrip.
-        # So we must make sure api_url returns a string.
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
 
-        async for c in get_client():
+        mock_request = MagicMock()
+        mock_request.headers = {}
+        mock_request.cookies = {}
+
+        async for c in get_client(mock_request):
             assert c.base_url == "http://mock"
             assert c.headers["X-Api-Key"] == "mock_key"
             break
