@@ -1,5 +1,6 @@
 import httpx
 import asyncio
+import os
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from fastapi import Request
 from pydantic import Field
@@ -39,7 +40,16 @@ class DTClient:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
+        if self.client:
+            await self.client.aclose()
+
+    async def get_current_user_profile(self) -> Dict[str, Any]:
+        """
+        Get the profile of the currently authenticated user in DT.
+        """
+        response = await self.client.get(f"{self.base_url}/api/v1/user/me")
+        response.raise_for_status()
+        return response.json()
 
     async def get_projects(self, name: str) -> List[Dict[str, Any]]:
         """
@@ -227,6 +237,9 @@ class DTSettings(BaseSettings):
         alias="DTVP_DT_API_URL", default="http://localhost:8081"
     )
     DTVP_DT_API_KEY: str = Field(alias="DTVP_DT_API_KEY", default="change_me")
+    DTVP_DT_API_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_DT_API_KEY_FILE", default=None
+    )
 
     # Support aliases from docker-compose.yml
     DEPENDENCY_TRACK_URL: Optional[str] = Field(default=None)
@@ -245,8 +258,17 @@ class DTSettings(BaseSettings):
 
     @property
     def api_key(self) -> str:
-        # Priority: DTVP_DT_API_KEY > DEPENDENCY_TRACK_API_KEY > default
-        return self.DTVP_DT_API_KEY or self.DEPENDENCY_TRACK_API_KEY or "change_me"
+        # Priority: DTVP_DT_API_KEY > DTVP_DT_API_KEY_FILE > DEPENDENCY_TRACK_API_KEY > default
+        key = self.DTVP_DT_API_KEY
+        if key == "change_me" and self.DTVP_DT_API_KEY_FILE:
+            if os.path.exists(self.DTVP_DT_API_KEY_FILE):
+                with open(self.DTVP_DT_API_KEY_FILE, "r") as f:
+                    key = f.read().strip()
+
+        if key == "change_me":
+            key = self.DEPENDENCY_TRACK_API_KEY or "change_me"
+
+        return key
 
 
 async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
