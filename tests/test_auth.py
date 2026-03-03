@@ -10,7 +10,8 @@ from main import app, get_current_user
 def use_real_auth():
     if get_current_user in app.dependency_overrides:
         del app.dependency_overrides[get_current_user]
-    yield
+    with patch("auth.auth_settings.DEV_DISABLE_AUTH", False):
+        yield
 
 
 async def test_get_oidc_config(respx_mock):
