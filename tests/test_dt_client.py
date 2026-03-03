@@ -190,7 +190,7 @@ def test_settings_properties():
     s = DTSettings(
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL="http://fallback",
-        DTVP_DT_API_KEY="",
+        DTVP_DT_API_KEY="change_me",
         DEPENDENCY_TRACK_API_KEY="key",
     )
 
@@ -200,7 +200,7 @@ def test_settings_properties():
     s2 = DTSettings(
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL=None,
-        DTVP_DT_API_KEY="",
+        DTVP_DT_API_KEY="change_me",
         DEPENDENCY_TRACK_API_KEY=None,
     )
     assert s2.api_url == "http://localhost:8081"
