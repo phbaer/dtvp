@@ -167,7 +167,12 @@ class BOMAnalysisCache:
 
         # Check direct match first
         if component_name in self.mapping:
-            found_tags.add(self.mapping[component_name])
+            tag_val = self.mapping[component_name]
+            if isinstance(tag_val, list):
+                if tag_val:
+                    found_tags.add(tag_val[0])
+            else:
+                found_tags.add(tag_val)
 
         target_ref = self.get_target_ref(component_uuid, component_name)
 
@@ -187,7 +192,12 @@ class BOMAnalysisCache:
                 if current_comp:
                     curr_name = current_comp.get("name")
                     if curr_name and curr_name in self.mapping:
-                        found_tags.add(self.mapping[curr_name])
+                        tag_val = self.mapping[curr_name]
+                        if isinstance(tag_val, list):
+                            if tag_val:
+                                found_tags.add(tag_val[0])
+                        else:
+                            found_tags.add(tag_val)
 
                 # Get parents
                 parents = self.parent_map.get(current_ref, [])
@@ -197,7 +207,12 @@ class BOMAnalysisCache:
                         queue.append(p_ref)
 
         if not found_tags and "*" in self.mapping:
-            found_tags.add(self.mapping["*"])
+            tag_val = self.mapping["*"]
+            if isinstance(tag_val, list):
+                if tag_val:
+                    found_tags.add(tag_val[0])
+            else:
+                found_tags.add(tag_val)
 
         return list(found_tags)
 
