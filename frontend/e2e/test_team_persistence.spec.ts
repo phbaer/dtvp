@@ -146,7 +146,7 @@ test.describe('Team Analysis Persistence', () => {
         });
 
         // Click Apply
-        const applyBtn = cardHeader.getByRole('button', { name: /Apply to/ });
+        const applyBtn = cardHeader.getByRole('button', { name: 'Apply' });
         await applyBtn.click();
 
         // Handle Custom Confirm Modal
