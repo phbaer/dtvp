@@ -1,12 +1,21 @@
-from fastapi import FastAPI, Request, Response, Form
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 import uvicorn
 import time
-import uuid
 
 app = FastAPI()
+
+
+def check_auth(request: Request):
+    api_key = request.headers.get("X-Api-Key")
+    auth_header = request.headers.get("Authorization")
+    # In a real D-T, any of these would work depending on the endpoint/session
+    if not api_key and not auth_header:
+        raise HTTPException(
+            status_code=401, detail="X-Api-Key or Authorization header required"
+        )
 
 
 # Data Models
@@ -166,7 +175,8 @@ for p in mock_projects:
 
 
 @app.get("/api/v1/project")
-def get_projects(name: Optional[str] = None):
+def get_projects(request: Request, name: Optional[str] = None):
+    check_auth(request)
     # D-T API paginates, here we return all matches
     if name:
         return [p for p in mock_projects if name.lower() in p.name.lower()]

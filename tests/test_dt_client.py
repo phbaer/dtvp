@@ -226,13 +226,30 @@ async def test_get_client():
             break
 
 
+@pytest.mark.asyncio
+async def test_get_client_forwarding():
+    from unittest.mock import MagicMock
+
+    with patch("dt_client.DTSettings") as mock_settings_cls:
+        mock_instance = mock_settings_cls.return_value
+        mock_instance.api_url = "http://mock"
+        mock_instance.api_key = "mock_key"
+
+        mock_request = MagicMock()
+        mock_request.headers = {"Authorization": "Bearer test_token"}
+        mock_request.cookies = {"test_cookie": "test_val"}
+
+        async for c in get_client(mock_request):
+            assert c.headers["Authorization"] == "Bearer test_token"
+            # Verify cookies are passed to the httpx client
+            assert c.client.cookies["test_cookie"] == "test_val"
+            break
+
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_bom_error():
-    settings = DTSettings(
-        api_url="http://dependency-track",
-        api_key="test_key",
-    )
+    settings = DTSettings()
     # DTSettings determines URL.
     # If using DTSettings constructor, we set api_url explicitly.
     # However, DTClient logic might modify it or environment variables might interfere?
