@@ -86,26 +86,27 @@ async def test_callback_failure(client, respx_mock):
 
 
 def test_me_endpoint(client):
-    # Success case
-    token = jwt.encode(
-        {"sub": "testuser"}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
-    )
+    with patch("auth.auth_settings.DEV_DISABLE_AUTH", new=False):
+        # Success case
+        token = jwt.encode(
+            {"sub": "testuser"}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
+        )
 
-    # Set cookie on client instance instead of per-request
-    client.cookies.set("session_token", token)
-    response = client.get("/auth/me")
-    assert response.status_code == 200
-    assert response.json()["username"] == "testuser"
+        # Set cookie on client instance instead of per-request
+        client.cookies.set("session_token", token)
+        response = client.get("/auth/me")
+        assert response.status_code == 200
+        assert response.json()["username"] == "testuser"
 
-    # Failure case
-    client.cookies.clear()  # Clear persisted cookies
-    response = client.get("/auth/me")
-    assert response.status_code == 401
+        # Failure case
+        client.cookies.clear()  # Clear persisted cookies
+        response = client.get("/auth/me")
+        assert response.status_code == 401
 
-    # Invalid token case
-    client.cookies.set("session_token", "invalid.token.here")
-    response = client.get("/auth/me")
-    assert response.status_code == 401
+        # Invalid token case
+        client.cookies.set("session_token", "invalid.token.here")
+        response = client.get("/auth/me")
+        assert response.status_code == 401
 
 
 def test_redirect_uri_calculation():
