@@ -42,6 +42,11 @@ LIB_V2_UUID = "6fa85f64-5717-4562-b3fc-2c963f66afa9"
 COMPONENT_UUID = "c253b708-3012-4277-8461-893bd5cd61e1"
 VULN_UUID_1 = "d9401347-1941-4c12-8700-1c0563821017"  # CVE-2021-44228 (Log4Shell)
 VULN_UUID_2 = "e5781a7b-0346-4927-991c-7033580539f5"  # Generic Vuln
+VULN_JACKSON_UUID = "f6781a7b-0346-4927-991c-7033580539f6"  # CVE-2019-12384
+VULN_NETTY_UUID = "a7781a7b-0346-4927-991c-7033580539f7"  # CVE-2021-21290
+
+JACKSON_UUID = "b253b708-3012-4277-8461-893bd5cd61e2"
+NETTY_UUID = "d253b708-3012-4277-8461-893bd5cd61e3"
 
 mock_projects = [
     Project(
@@ -94,6 +99,26 @@ mock_vulnerabilities = {
         "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
         "description": "Generic medium severity vulnerability",
         "recommendation": "Apply patch.",
+    },
+    VULN_JACKSON_UUID: {
+        "uuid": VULN_JACKSON_UUID,
+        "vulnId": "CVE-2019-12384",
+        "source": "NVD",
+        "severity": "HIGH",
+        "cvssV3BaseScore": 8.1,
+        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "description": "Jackson-databind deserialization vulnerability",
+        "recommendation": "Upgrade jackson-databind to 2.9.9.1 or later",
+    },
+    VULN_NETTY_UUID: {
+        "uuid": VULN_NETTY_UUID,
+        "vulnId": "CVE-2021-21290",
+        "source": "NVD",
+        "severity": "MEDIUM",
+        "cvssV3BaseScore": 5.9,
+        "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
+        "description": "Netty information disclosure vulnerability",
+        "recommendation": "Upgrade Netty to 4.1.59.Final or later",
     },
 }
 
@@ -176,6 +201,41 @@ def get_findings(project_uuid: str):
         }
         current_findings.append(finding2)
 
+    # Finding 3: Jackson (on all)
+    key3 = f"{project_uuid}:{JACKSON_UUID}:{VULN_JACKSON_UUID}"
+    finding3 = {
+        "component": {
+            "uuid": JACKSON_UUID,
+            "name": "jackson-databind",
+            "version": "2.9.8",
+            "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+        },
+        "vulnerability": mock_vulnerabilities[VULN_JACKSON_UUID],
+        "analysis": mock_analysis.get(
+            key3, {"analysisState": "NOT_SET", "isSuppressed": False}
+        ),
+        "matrix": key3,
+    }
+    current_findings.append(finding3)
+
+    # Finding 4: Netty (only on Vulnerable Project)
+    if "Vulnerable Project" in project.name:
+        key4 = f"{project_uuid}:{NETTY_UUID}:{VULN_NETTY_UUID}"
+        finding4 = {
+            "component": {
+                "uuid": NETTY_UUID,
+                "name": "netty-common",
+                "version": "4.1.42.Final",
+                "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
+            },
+            "vulnerability": mock_vulnerabilities[VULN_NETTY_UUID],
+            "analysis": mock_analysis.get(
+                key4, {"analysisState": "NOT_SET", "isSuppressed": False}
+            ),
+            "matrix": key4,
+        }
+        current_findings.append(finding4)
+
     return current_findings
 
 
@@ -214,7 +274,21 @@ def get_bom(project_uuid: str):
                 "version": "2.14.0",
                 "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
                 "bom-ref": COMPONENT_UUID,
-            }
+            },
+            {
+                "type": "library",
+                "name": "jackson-databind",
+                "version": "2.9.8",
+                "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+                "bom-ref": JACKSON_UUID,
+            },
+            {
+                "type": "library",
+                "name": "netty-common",
+                "version": "4.1.42.Final",
+                "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
+                "bom-ref": NETTY_UUID,
+            },
         ],
     }
 
