@@ -131,7 +131,7 @@ describe('VulnGroupCard', () => {
         await wrapper.find('textarea').setValue('False positive')
 
         // Click Apply
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         expect(applyBtn).toBeDefined()
         expect(applyBtn?.element.disabled).toBe(false)
         applyBtn?.trigger('click')
@@ -174,7 +174,7 @@ describe('VulnGroupCard', () => {
         // Select Team
         await wrapper.find('select').setValue('Security')
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         applyBtn?.trigger('click')
         await flushPromises()
 
@@ -234,7 +234,7 @@ describe('VulnGroupCard', () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         applyBtn?.trigger('click')
         await flushPromises()
 
@@ -251,7 +251,7 @@ describe('VulnGroupCard', () => {
     it('submits assessment with comment and suppression', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { username: 'tester' } } } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
         })
         await wrapper.find('.cursor-pointer').trigger('click')
 
@@ -273,7 +273,7 @@ describe('VulnGroupCard', () => {
             }
 
             // Submit
-            const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+            const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
             applyBtn?.trigger('click')
             await flushPromises()
 
@@ -333,7 +333,7 @@ describe('VulnGroupCard', () => {
         // Select Team
         await wrapper.find('select').setValue('Security')
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         applyBtn?.trigger('click')
         await flushPromises()
 
@@ -403,7 +403,7 @@ describe('VulnGroupCard', () => {
         }
 
         // Apply bulk update
-        const applyBtn = wrapper.findAll('button').find(b => b.text().includes('Apply to'))
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         applyBtn?.trigger('click') // Do NOT await here, it waits for promptConfirm
         await flushPromises()
 
@@ -473,7 +473,7 @@ describe('VulnGroupCard', () => {
         await wrapper.find('textarea').setValue('Security confirmed exploitable')
 
         // Click Apply
-        const applyBtn = wrapper.findAll('button').find(b => /Apply to 1 instance/.test(b.text()))
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         applyBtn?.trigger('click') // Do NOT await
         await flushPromises()
 
@@ -512,24 +512,41 @@ describe('VulnGroupCard', () => {
 
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        // Initially visible (Global)
+        // Initially invisible (Global for analyst)
         expect(wrapper.text()).not.toContain('CVSS Calculator')
-        // Comments are always visible
-        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(true)
+        // Comments/Suppression should be hidden for analysts
+        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(false)
+        expect(wrapper.findAll('label').some(l => l.text() === 'Suppress this vulnerability')).toBe(false)
 
         // Select team
         const teamSelect = wrapper.find('select')
         await teamSelect.setValue('Security')
 
-        // With role-based UI:
-        // - Comments are ALWAYS visible (universal audit log)
-        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(true)
+        // With role-based UI for Analyst:
+        // - Comments/Suppression are STILL hidden
+        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(false)
         // - Team Opinion section should be visible
         expect(wrapper.text()).toContain('Team Opinion')
         // - Calculator visibility depends on user role (reviewers see it in Global Baseline)
         // Since we don't mock the user injection, isReviewer will be false
         // So calculator should be hidden for non-reviewers when team is selected
         expect(wrapper.text()).not.toContain('Global Baseline')
+    })
+
+    it('shows comments and suppression for reviewers', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, tags: ['Security'] } },
+            global: {
+                provide: {
+                    user: { value: { role: 'REVIEWER', username: 'reviewer-user' } }
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(true)
+        expect(wrapper.text()).toContain('Suppress this vulnerability')
     })
 
     it('extracts team-specific state and details from aggregated string', async () => {
