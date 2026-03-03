@@ -86,6 +86,7 @@ const handleToggleExpand = (id: string, expanded: boolean) => {
 
 const tagFilter = ref('')
 const idFilter = ref('')
+const componentFilter = ref('')
 const hideAssessed = ref(true)
 const hideMixed = ref(false)
 const showNeedsApproval = ref(false)
@@ -131,6 +132,15 @@ const filteredGroups = computed(() => {
         const term = idFilter.value.toLowerCase()
         result = result.filter(g => 
             g.id.toLowerCase().includes(term)
+        )
+    }
+
+    if (componentFilter.value) {
+        const term = componentFilter.value.toLowerCase()
+        result = result.filter(g => 
+            g.affected_versions.some(v => 
+                v.components.some(c => c.component_name.toLowerCase().includes(term))
+            )
         )
     }
 
@@ -259,6 +269,12 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
                             v-model="tagFilter" 
                             type="text" 
                             placeholder="Filter by Team Tag..." 
+                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
+                        />
+                        <input 
+                            v-model="componentFilter" 
+                            type="text" 
+                            placeholder="Filter by Component..." 
                             class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
                         />
                     </div>

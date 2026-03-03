@@ -158,7 +158,7 @@ test.describe('Per-Team Assessment UI Flow', () => {
 
         // Click Apply
         // Use getByRole for better resilience
-        const applyBtn = cardHeader.getByRole('button', { name: /Apply to/ });
+        const applyBtn = cardHeader.getByRole('button', { name: 'Apply' });
         console.log('E2E: Clickable button found:', await applyBtn.textContent());
         await applyBtn.click();
 

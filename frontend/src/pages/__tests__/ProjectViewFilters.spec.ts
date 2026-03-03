@@ -37,7 +37,7 @@ describe('ProjectView Filters', () => {
             tags: ['team-a'],
             affected_versions: [
                 {
-                    components: [{ analysis_state: 'NOT_SET' }]
+                    components: [{ component_name: 'CompA', analysis_state: 'NOT_SET' }]
                 }
             ]
         },
@@ -48,7 +48,7 @@ describe('ProjectView Filters', () => {
             tags: ['team-b'],
             affected_versions: [
                 {
-                    components: [{ analysis_state: 'FALSE_POSITIVE' }] // Assessed
+                    components: [{ component_name: 'CompB', analysis_state: 'FALSE_POSITIVE' }] // Assessed
                 }
             ]
         },
@@ -60,8 +60,8 @@ describe('ProjectView Filters', () => {
             affected_versions: [
                 {
                     components: [
-                        { analysis_state: 'NOT_SET' },
-                        { analysis_state: 'FALSE_POSITIVE' }
+                        { component_name: 'CompA', analysis_state: 'NOT_SET' },
+                        { component_name: 'CompC', analysis_state: 'FALSE_POSITIVE' }
                     ]
                 }
             ] // Mixed
@@ -260,5 +260,49 @@ describe('ProjectView Filters', () => {
         } else {
             throw new Error('Hide Assessed checkbox not found')
         }
+    })
+
+    it('filters vulnerabilities by component name', async () => {
+        (getGroupedVulns as any).mockResolvedValue(mockData)
+
+        router.push('/projects/p1/TestProject')
+        await router.isReady()
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                plugins: [router],
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
+            }
+        })
+
+        await flushPromises()
+
+        // Disable state filters to see all
+        const checkboxes = wrapper.findAll('input[type="checkbox"]')
+        const hideAssessedBox = checkboxes.find(c => c.element.parentElement?.textContent?.includes('Hide Assessed'))
+        if (hideAssessedBox) await hideAssessedBox.setValue(false)
+
+        const compInput = wrapper.find('input[placeholder*="Filter by Component"]')
+        expect(compInput.exists()).toBe(true)
+
+        await compInput.setValue('CompB')
+        const cardsB = wrapper.findAll('.vuln-card')
+        expect(cardsB.length).toBe(1)
+        expect(cardsB[0]?.text()).toBe('V2')
+
+        await compInput.setValue('CompA')
+        const cardsA = wrapper.findAll('.vuln-card')
+        expect(cardsA.length).toBe(2) // V1 and V3
+        const ids = cardsA.map(c => c.text())
+        expect(ids).toContain('V1')
+        expect(ids).toContain('V3')
+
+        await compInput.setValue('comp') // Case insensitive
+        expect(wrapper.findAll('.vuln-card').length).toBe(3)
+
+        await compInput.setValue('Unknown')
+        expect(wrapper.findAll('.vuln-card').length).toBe(0)
     })
 })

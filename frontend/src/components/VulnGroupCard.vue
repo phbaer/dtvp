@@ -398,7 +398,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         return
     }
 
-    if (!force && !await promptConfirm('Apply Assessment', `Apply this assessment to ${instances.length} instances?`)) return
+    if (!force && !await promptConfirm('Apply Assessment', `Apply this assessment?`)) return
     
     updating.value = true
     try {
@@ -879,8 +879,7 @@ const assessedTeams = computed(() => {
                         </p>
                     </div>
 
-                    <!-- Comment Section (visible to all) -->
-                    <div>
+                    <div v-if="isReviewer">
                         <label class="block text-xs font-semibold text-gray-400 mb-1">Comment</label>
                         <textarea 
                             v-model="comment"
@@ -889,7 +888,7 @@ const assessedTeams = computed(() => {
                         />
                     </div>
                     
-                    <div class="flex items-center gap-2">
+                    <div v-if="isReviewer" class="flex items-center gap-2">
                         <input 
                             type="checkbox" 
                             :id="`suppress-${group.id}`"
@@ -904,7 +903,7 @@ const assessedTeams = computed(() => {
                         :disabled="updating || loadingDetails || totalTargeted === 0"
                         class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
                     >
-                        {{ updating ? 'Updating...' : `Apply to ${totalTargeted} ${totalTargeted === 1 ? 'instance' : 'instances'}` }}
+                        {{ updating ? 'Updating...' : 'Apply' }}
                     </button>
                 </div>
             </div>
