@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject } from 'vue'
+import { ref, watch, computed, inject, provide, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { getGroupedVulns } from '../lib/api'
+import { getGroupedVulns, getTeamMapping } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln } from '../types'
 import VulnGroupCard from '../components/VulnGroupCard.vue'
@@ -13,6 +13,19 @@ const loading = ref(true)
 const error = ref('')
 const loadingMessage = ref('Initializing...')
 const loadingProgress = ref(0)
+
+const teamMapping = ref<Record<string, string | string[]>>({})
+provide('teamMapping', teamMapping)
+
+const fetchTeamMapping = async () => {
+    try {
+        teamMapping.value = await getTeamMapping()
+    } catch (err) {
+        console.error('Failed to fetch team mapping:', err)
+    }
+}
+
+onMounted(fetchTeamMapping)
 
 const fetchVulns = async () => {
     let name = route.params.name as string

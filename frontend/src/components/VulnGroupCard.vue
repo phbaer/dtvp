@@ -19,6 +19,7 @@ const props = defineProps<{
 }>()
 
 const user = inject<any>('user')
+const teamMapping = inject<any>('teamMapping')
 
 const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
@@ -607,7 +608,50 @@ const assessedTeams = computed(() => {
     if (!first || !first.analysis_details) return new Set<string>()
     
     const blocks = parseAssessmentBlocks(first.analysis_details)
-    return new Set(Object.keys(blocks))
+    const existingAssessments = new Set(Object.keys(blocks))
+    
+    const matchedTeams = new Set<string>()
+    
+    // For each tag on the group, check if it or any of its aliases are assessed
+    if (props.group.tags) {
+        props.group.tags.forEach(tag => {
+            // 1. Direct match
+            if (existingAssessments.has(tag)) {
+                matchedTeams.add(tag)
+                return
+            }
+            
+            // 2. Alias match from mapping
+            // Note: The mapping is component_name -> [Primary, Alias1, Alias2]
+            // We need to find if 'tag' is the Primary tag for some component,
+            // and if so, check if any of its aliases are assessed.
+            
+            // Actually, the requirement says "The team primary tag shall be the only one shown in the ui."
+            // and "Add support for alternative team labels that will be considered when determining the assessment state".
+            
+            // So if tag 'Bla-Team' is shown, and the mapping says VPEventServer -> ['Bla-Team', 'Old-Bla-Team'],
+            // then 'Bla-Team' should get a checkmark if 'Old-Bla-Team' is assessed.
+            
+            if (teamMapping?.value) {
+                for (const componentName in teamMapping.value) {
+                    const mappingVal = teamMapping.value[componentName]
+                    if (Array.isArray(mappingVal) && mappingVal.length > 1) {
+                        const primary = mappingVal[0]
+                        if (primary === tag) {
+                            // Check all aliases
+                            const aliases = mappingVal.slice(1)
+                            if (aliases.some(alias => existingAssessments.has(alias))) {
+                                matchedTeams.add(tag)
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+    
+    return matchedTeams
 })
 </script>
 
