@@ -47,6 +47,8 @@ VULN_NETTY_UUID = "a7781a7b-0346-4927-991c-7033580539f7"  # CVE-2021-21290
 
 JACKSON_UUID = "b253b708-3012-4277-8461-893bd5cd61e2"
 NETTY_UUID = "d253b708-3012-4277-8461-893bd5cd61e3"
+TEAM_TEST_LIB_UUID = "7fa85f64-5717-4562-b3fc-2c963f66afb0"
+VULN_UUID_TEAM = "f6781a7b-0346-4927-991c-7033580539f8"
 
 mock_projects = [
     Project(
@@ -120,6 +122,16 @@ mock_vulnerabilities = {
         "description": "Netty information disclosure vulnerability",
         "recommendation": "Upgrade Netty to 4.1.59.Final or later",
     },
+    VULN_UUID_TEAM: {
+        "uuid": VULN_UUID_TEAM,
+        "vulnId": "CVE-2024-TEAM",
+        "source": "NVD",
+        "severity": "LOW",
+        "cvssV3BaseScore": 2.5,
+        "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+        "description": "Team mapping test vulnerability",
+        "recommendation": "Verify alternative labels.",
+    },
 }
 
 # Shared map for analysis state
@@ -132,6 +144,11 @@ mock_analysis = {
         "analysisState": "IN_TRIAGE",
         "isSuppressed": False,
         "analysisDetails": "Investigating impact.",
+    },
+    f"{PROJECT_UUID}:{TEAM_TEST_LIB_UUID}:{VULN_UUID_TEAM}": {
+        "analysisState": "NOT_AFFECTED",
+        "isSuppressed": False,
+        "analysisDetails": "--- [Team: Old-Label] [State: NOT_AFFECTED] [Assessed By: mock] ---\nThis was assessed using the old label.",
     },
 }
 
@@ -218,10 +235,27 @@ def get_findings(project_uuid: str):
     }
     current_findings.append(finding3)
 
-    # Finding 4: Netty (only on Vulnerable Project)
+    # Finding 4: Team Mapping Test (on all projects)
+    key4 = f"{project_uuid}:{TEAM_TEST_LIB_UUID}:{VULN_UUID_TEAM}"
+    finding4 = {
+        "component": {
+            "uuid": TEAM_TEST_LIB_UUID,
+            "name": "team-test-lib",
+            "version": "1.0.0",
+            "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
+        },
+        "vulnerability": mock_vulnerabilities[VULN_UUID_TEAM],
+        "analysis": mock_analysis.get(
+            key4, {"analysisState": "NOT_SET", "isSuppressed": False}
+        ),
+        "matrix": key4,
+    }
+    current_findings.append(finding4)
+
+    # Finding 5: Netty (only on Vulnerable Project)
     if "Vulnerable Project" in project.name:
-        key4 = f"{project_uuid}:{NETTY_UUID}:{VULN_NETTY_UUID}"
-        finding4 = {
+        key5 = f"{project_uuid}:{NETTY_UUID}:{VULN_NETTY_UUID}"
+        finding5 = {
             "component": {
                 "uuid": NETTY_UUID,
                 "name": "netty-common",
@@ -230,12 +264,11 @@ def get_findings(project_uuid: str):
             },
             "vulnerability": mock_vulnerabilities[VULN_NETTY_UUID],
             "analysis": mock_analysis.get(
-                key4, {"analysisState": "NOT_SET", "isSuppressed": False}
+                key5, {"analysisState": "NOT_SET", "isSuppressed": False}
             ),
-            "matrix": key4,
+            "matrix": key5,
         }
-        current_findings.append(finding4)
-
+        current_findings.append(finding5)
     return current_findings
 
 
@@ -288,6 +321,13 @@ def get_bom(project_uuid: str):
                 "version": "4.1.42.Final",
                 "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
                 "bom-ref": NETTY_UUID,
+            },
+            {
+                "type": "library",
+                "name": "team-test-lib",
+                "version": "1.0.0",
+                "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
+                "bom-ref": TEAM_TEST_LIB_UUID,
             },
         ],
     }

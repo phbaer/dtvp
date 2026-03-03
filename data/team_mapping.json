@@ -1,4 +1,11 @@
 {
-  "VPEventServer": "Bla-Team",
+  "VPEventServer": [
+    "Bla-Team",
+    "Old-Bla-Team"
+  ],
+  "team-test-lib": [
+    "New-Label",
+    "Old-Label"
+  ],
   "*": "Unassigned"
 }
