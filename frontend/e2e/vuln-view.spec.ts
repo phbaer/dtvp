@@ -163,7 +163,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         // Click Apply to All
         // We might get a confirm dialog, Playwright handles it if we set up a listener or it might just work if we use page.on('dialog')
         // Click Apply
-        const applyBtn = cardHeader.getByRole('button', { name: /Apply to/ });
+        const applyBtn = cardHeader.getByRole('button', { name: 'Apply' });
         await applyBtn.click();
 
         // Handle Custom Confirm Modal
