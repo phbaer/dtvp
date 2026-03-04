@@ -107,7 +107,9 @@ class TaskResponse(BaseModel):
     result: Optional[List[dict]] = None
 
 
-async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
+async def process_grouped_vulns_task(
+    task_id: str, name: str, cve: Optional[str], client: DTClient
+):
     try:
         tasks[task_id]["status"] = "running"
         tasks[task_id]["message"] = "Fetching projects..."
@@ -150,7 +152,7 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
             )
 
             # Fetch findings and full details
-            findings = await client.get_vulnerabilities(v["uuid"])
+            findings = await client.get_vulnerabilities(v["uuid"], cve=cve)
             full_vulns = await client.get_project_vulnerabilities(v["uuid"])
 
             # Fetch and PROCESS BOM immediately to save memory
@@ -209,6 +211,7 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
 @api_router.post("/tasks/group-vulns")
 async def start_group_vulns_task(
     name: str,
+    cve: Optional[str] = None,
     # We DO NOT use Dependency Injection for the client here because it's tied to request scope.
     # We must instantiate a new client for the background task.
     user: str = Depends(get_current_user),
@@ -231,7 +234,7 @@ async def start_group_vulns_task(
         # Manually invoke the client context
         settings = DTSettings()
         async with DTClient(settings.api_url, settings.api_key) as client:
-            await process_grouped_vulns_task(task_id, name, client)
+            await process_grouped_vulns_task(task_id, name, cve, client)
 
     asyncio.create_task(task_wrapper())
 

@@ -34,8 +34,12 @@ export interface TaskResponse {
     result?: GroupedVuln[];
 }
 
-export const startGroupVulnTask = async (name: string): Promise<{ task_id: string }> => {
-    const res = await api.post('/tasks/group-vulns', null, { params: { name } });
+export const startGroupVulnTask = async (name: string, cve?: string): Promise<{ task_id: string }> => {
+    const params: any = { name };
+    if (cve) {
+        params.cve = cve;
+    }
+    const res = await api.post('/tasks/group-vulns', null, { params });
     return res.data;
 };
 
@@ -45,9 +49,9 @@ export const getTaskStatus = async (taskId: string): Promise<TaskResponse> => {
 };
 
 // Start a task and poll until completion
-export const getGroupedVulns = async (name: string, onProgress?: (msg: string, progress: number) => void): Promise<GroupedVuln[]> => {
+export const getGroupedVulns = async (name: string, cve?: string, onProgress?: (msg: string, progress: number) => void): Promise<GroupedVuln[]> => {
     // 1. Start Task
-    const { task_id } = await startGroupVulnTask(name);
+    const { task_id } = await startGroupVulnTask(name, cve);
 
     // 2. Poll
     return new Promise((resolve, reject) => {

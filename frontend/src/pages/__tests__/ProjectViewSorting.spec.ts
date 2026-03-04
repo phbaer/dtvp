@@ -9,7 +9,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 vi.mock('vue-router', () => ({
-    useRoute: vi.fn(),
+    useRoute: vi.fn(() => ({ params: {}, query: {} })),
     RouterLink: { template: '<a><slot /></a>' }
 }))
 
@@ -25,7 +25,7 @@ describe('ProjectView.vue Sorting', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.mocked(useRoute).mockReturnValue({
-            params: { name: 'TestProject' }
+            params: { name: 'TestProject' }, query: {}
         } as any)
     })
 
@@ -59,7 +59,7 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } },
+                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -83,7 +83,7 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } },
+                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -120,7 +120,7 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } },
+                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -147,7 +147,7 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } },
+                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -190,7 +190,7 @@ describe('ProjectView.vue Sorting', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' } } },
+                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
