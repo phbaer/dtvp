@@ -96,7 +96,9 @@ class DTClient:
         # Placeholder as per original code
         pass
 
-    async def get_vulnerabilities(self, project_uuid: str) -> List[Dict[str, Any]]:
+    async def get_vulnerabilities(
+        self, project_uuid: str, cve: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get all vulnerabilities for a specific project version.
         Enriches findings with analysis data from the analysis endpoint.
@@ -112,10 +114,40 @@ class DTClient:
         # Use a list of tuples (finding, task) to map results back
         analysis_tasks = []
         findings_to_enrich = []
+        filtered_findings = []
 
         for finding in findings:
+            vulnerability = finding.get("vulnerability", {})
+
+            # Apply CVE filter if provided
+            if cve:
+                cve_upper = cve.upper()
+                vuln_id = (vulnerability.get("vulnId") or "").upper()
+                vuln_name = (vulnerability.get("name") or "").upper()
+
+                # Check main aliases
+                aliases = vulnerability.get("aliases", [])
+                alias_match = False
+                if aliases:
+                    for a in aliases:
+                        for v in a.values():
+                            if isinstance(v, str) and cve_upper in v.upper():
+                                alias_match = True
+                                break
+                        if alias_match:
+                            break
+
+                if (
+                    cve_upper not in vuln_id
+                    and cve_upper not in vuln_name
+                    and not alias_match
+                ):
+                    continue  # Skip this finding as it doesn't match the CVE filter
+
+            filtered_findings.append(finding)
+
             component_uuid = finding.get("component", {}).get("uuid")
-            vulnerability_uuid = finding.get("vulnerability", {}).get("uuid")
+            vulnerability_uuid = vulnerability.get("uuid")
 
             if component_uuid and vulnerability_uuid:
                 findings_to_enrich.append(finding)
@@ -146,7 +178,7 @@ class DTClient:
                 if analysis_result:
                     finding["analysis"] = analysis_result
 
-        return findings
+        return filtered_findings
 
     async def get_project_vulnerabilities(
         self, project_uuid: str

@@ -5,6 +5,7 @@ import type { Project } from '../types'
 import { Search } from 'lucide-vue-next'
 
 const query = ref('') // Kept for client-side filtering
+const cveFilter = ref('') // Optional global CVE filter
 const allProjects = ref<Project[]>([])
 const loading = ref(false)
 
@@ -81,16 +82,29 @@ const groupedProjects = computed(() => {
   <div class="mx-auto">
     <div class="flex justify-between items-center mb-6">
         <h2 class="text-3xl font-bold">Projects</h2>
-        <div class="relative w-96">
-            <span class="absolute inset-y-0 left-0 flex items-center pl-3">
-                <Search :size="20" class="text-gray-500" />
-            </span>
-            <input 
-                type="text" 
-                v-model="query"
-                placeholder="Filter projects..."
-                class="w-full pl-10 p-2 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none"
-            />
+        <div class="flex gap-4">
+            <div class="relative w-64">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                    <Search :size="20" class="text-gray-500" />
+                </span>
+                <input 
+                    type="text" 
+                    v-model="query"
+                    placeholder="Filter projects..."
+                    class="w-full pl-10 p-2 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none"
+                />
+            </div>
+            <div class="relative w-64">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                    <Search :size="20" class="text-gray-500" />
+                </span>
+                <input 
+                    type="text" 
+                    v-model="cveFilter"
+                    placeholder="Global CVE filter..."
+                    class="w-full pl-10 p-2 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none"
+                />
+            </div>
         </div>
     </div>
     
@@ -107,7 +121,7 @@ const groupedProjects = computed(() => {
                     class="bg-gray-800 border border-gray-700 rounded p-4 flex flex-col gap-2"
                 >
                     <router-link 
-                        :to="`/project/${p.name}`"
+                        :to="{ path: `/project/${p.name}`, query: cveFilter ? { cve: cveFilter } : {} }"
                         class="font-bold text-lg text-blue-400 hover:text-blue-300 hover:underline"
                     >
                         {{ p.name }}
