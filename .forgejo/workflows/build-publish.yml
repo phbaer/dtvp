@@ -74,8 +74,8 @@ jobs:
           pm2 logs --lines 50 --nostream
       - name: Verify Reachability
         run: |
-          curl -f http://localhost:8081/api/v1/project
-          curl -f http://localhost:8000/api/projects?name=Vuln
+          curl -f -H "X-Api-Key: mock_key" http://localhost:8081/api/v1/project
+          curl -f http://localhost:8000/api/version
           curl -Is http://localhost:5173 | head -n 1
       - name: Install Playwright browsers
         uses: nick-fields/retry@v3
