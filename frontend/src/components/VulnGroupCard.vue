@@ -5,7 +5,7 @@ import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -259,41 +259,75 @@ watch(pendingVector, (newVector) => {
     }
 })
 
+const mergedAssessmentData = computed(() => {
+    const allBlocks: Record<string, any> = {}
+    const allTags = new Set<string>()
+    let isPending = false
+    
+    for (const inst of allInstances.value) {
+        if (!inst.analysis_details) continue
+        
+        if (inst.analysis_details.includes('[Status: Pending Review]')) {
+            isPending = true
+        }
+
+        const blocks = parseAssessmentBlocks(inst.analysis_details)
+        for (const [teamName, block] of Object.entries(blocks)) {
+            if (!allBlocks[teamName]) {
+                allBlocks[teamName] = block
+            } else {
+                if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
+                    allBlocks[teamName] = block
+                }
+            }
+        }
+        
+        const rescoredMatch = inst.analysis_details.match(/\[Rescored:\s*[\d\.]+\]/);
+        if (rescoredMatch) allTags.add(rescoredMatch[0]);
+
+        const vectorMatch = inst.analysis_details.match(/\[Rescored Vector:\s*[^\]]+\]/);
+        if (vectorMatch) allTags.add(vectorMatch[0]);
+    }
+    
+    return {
+        blocks: allBlocks,
+        fullText: Object.keys(allBlocks).length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : '',
+        isPending
+    }
+})
+
 const updateFormFromGroup = () => {
     pendingScore.value = props.group.rescored_cvss ?? props.group.cvss_score ?? props.group.cvss ?? null
     pendingVector.value = props.group.rescored_vector || props.group.cvss_vector || ''
     
-    const firstVersion = props.group.affected_versions?.[0]
-    if (firstVersion && firstVersion.components?.length > 0) {
-        const first = firstVersion.components[0]
-        if (first) {
-            const rawDetails = first.analysis_details || ''
-            const teamBlocks = parseAssessmentBlocks(rawDetails)
-            
-            if (selectedTeam.value) { // Team view
-                const teamName = selectedTeam.value
-                const myBlock = teamBlocks[teamName]
-                state.value = myBlock?.state || 'NOT_SET'
-                // Strip the status tag from the details shown in the textarea
-                details.value = (myBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-                justification.value = myBlock?.justification || 'NOT_SET'
-            } else {
-                 // No team selected - if Reviewer, show General block
-                 if (isReviewer.value) {
-                    const generalBlock = teamBlocks['General']
-                    state.value = generalBlock?.state || 'NOT_SET'
-                    details.value = (generalBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-                    justification.value = generalBlock?.justification || 'NOT_SET'
-                 } else {
-                    state.value = 'NOT_SET'
-                    details.value = ''
-                    justification.value = 'NOT_SET'
-                 }
-            }
-            comment.value = first.analysis_comments?.[0]?.comment || ''
-            suppressed.value = first.is_suppressed || false
-        }
+    const teamBlocks = mergedAssessmentData.value.blocks
+    
+    if (selectedTeam.value) { // Team view
+        const teamName = selectedTeam.value
+        const myBlock = teamBlocks[teamName]
+        state.value = myBlock?.state || 'NOT_SET'
+        // Strip the status tag from the details shown in the textarea
+        details.value = (myBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+        justification.value = myBlock?.justification || 'NOT_SET'
+    } else {
+         // No team selected - if Reviewer, show General block
+         if (isReviewer.value) {
+            const generalBlock = teamBlocks['General']
+            state.value = generalBlock?.state || 'NOT_SET'
+            details.value = (generalBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+            justification.value = generalBlock?.justification || 'NOT_SET'
+         } else {
+            state.value = 'NOT_SET'
+            details.value = ''
+            justification.value = 'NOT_SET'
+         }
     }
+    
+    const firstWithComment = allInstances.value.find(i => i.analysis_comments && i.analysis_comments.length > 0)
+    comment.value = firstWithComment?.analysis_comments?.[0]?.comment || ''
+    
+    const firstSuppressed = allInstances.value.find(i => i.is_suppressed)
+    suppressed.value = firstSuppressed ? true : false
 
     // Set initial values for "touched" check
     initialVector.value = pendingVector.value
@@ -405,11 +439,34 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     try {
         // 1. Get current full details from the first instance (or use refreshed data)
         // We need the BASE string to merge into. Use originalAnalysis.value as source of truth for "current" state
-        const refInstance = instances[0]
-        const findingUuid = refInstance?.finding_uuid
-        const currentAnalysis = findingUuid ? originalAnalysis.value[findingUuid] : null
-        // Fallback to refInstance.analysis_details if originalAnalysis is not yet populated
-        const currentFullDetails = currentAnalysis?.analysisDetails || refInstance?.analysis_details || ''
+        // We need the BASE string to merge into. Use originalAnalysis.value as source of truth for "current" state
+        const allBlocks: Record<string, any> = {}
+        const allTags = new Set<string>()
+        let isPending = false
+        
+        for (const inst of instances) {
+            let detailsToParse = inst.analysis_details || ''
+            if (inst.finding_uuid && originalAnalysis.value[inst.finding_uuid]) {
+                detailsToParse = originalAnalysis.value[inst.finding_uuid].analysisDetails || ''
+            }
+            if (!detailsToParse) continue
+            
+            if (detailsToParse.includes('[Status: Pending Review]')) isPending = true
+            
+            const blocks = parseAssessmentBlocks(detailsToParse)
+            for (const [teamName, block] of Object.entries(blocks)) {
+                if (!allBlocks[teamName] || (block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
+                    allBlocks[teamName] = block
+                }
+            }
+            const rescoredMatch = detailsToParse.match(/\[Rescored:\s*[\d\.]+\]/);
+            if (rescoredMatch) allTags.add(rescoredMatch[0]);
+
+            const vectorMatch = detailsToParse.match(/\[Rescored Vector:\s*[^\]]+\]/);
+            if (vectorMatch) allTags.add(vectorMatch[0]);
+        }
+        
+        const currentFullDetails = Object.keys(allBlocks).length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : ''
 
         // 2. Perform Client-Side Merge
         const targetTeam = selectedTeam.value || 'General'
@@ -600,15 +657,8 @@ const rescoredVectorSegments = computed(() => {
 })
 
 const assessedTeams = computed(() => {
-    // Check key teams from the FIRST instance which usually holds the truth for groupeditems
-    const firstVersion = props.group.affected_versions?.[0]
-    if (!firstVersion || !firstVersion.components || firstVersion.components.length === 0) return new Set<string>()
+    const blocks = mergedAssessmentData.value.blocks
     
-    // We can assume if one instance has it, the group effectively has it in this context
-    const first = firstVersion.components[0]
-    if (!first || !first.analysis_details) return new Set<string>()
-    
-    const blocks = parseAssessmentBlocks(first.analysis_details)
     const existingAssessments = new Set(Object.keys(blocks))
     
     const matchedTeams = new Set<string>()
