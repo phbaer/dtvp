@@ -89,7 +89,7 @@ describe('api.ts', () => {
 
         vi.useFakeTimers()
         const onProgress = vi.fn()
-        const promise = getGroupedVulns('Test', onProgress)
+        const promise = getGroupedVulns('Test', undefined, onProgress)
 
         await vi.advanceTimersByTimeAsync(1100)
         await vi.advanceTimersByTimeAsync(1100)
