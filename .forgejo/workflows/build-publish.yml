@@ -134,7 +134,7 @@ jobs:
 
   build-push-images:
     if: github.event.action != 'closed'
-    needs: [test-backend, test-frontend, check-version]
+    needs: [test-backend, test-frontend]
     runs-on: node
     steps:
       - name: Checkout
