@@ -93,10 +93,21 @@ export function parseAssessmentBlocks(fullText: string): Record<string, Assessme
 
         const endOfContent = nextMatch ? nextMatch.index : fullText.length;
         const rawContent = fullText.slice(startOfContent, endOfContent).trim();
-        const content = rawContent
+
+        // Clean up redundant metadata from the display text
+        let content = rawContent
             .replace(/\n\n\[Status: Pending Review\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
+            .replace(/\[Comment\]/g, '')
             .trim();
+
+        // Remove [Team: current_team] if present in text
+        const teamEscaped = team.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        content = content.replace(new RegExp(`\\[Team:\\s*${teamEscaped}\\]`, 'g'), '').trim();
+
+        // Remove trailing "-- user" if it matches the assessor
+        const userEscaped = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        content = content.replace(new RegExp(`--\\s*${userEscaped}\\s*$`, 'm'), '').trim();
 
         blocks[team] = {
             team,

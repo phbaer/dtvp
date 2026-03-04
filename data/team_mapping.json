@@ -1,4 +1,6 @@
 {
+  "internal-lib-b": "InventoryTeam",
+  "internal-lib-c": "PaymentTeam",
   "VPEventServer": [
     "Bla-Team",
     "Old-Bla-Team"

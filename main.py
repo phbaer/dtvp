@@ -520,7 +520,7 @@ async def upload_team_mapping(
 
 @api_router.put("/settings/mapping")
 async def update_team_mapping(
-    mapping: Dict[str, str],
+    mapping: Dict[str, Any],
     user: str = Depends(get_current_user),
 ):
     target_path = get_team_mapping_path()
