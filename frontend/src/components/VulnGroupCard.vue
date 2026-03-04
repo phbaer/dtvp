@@ -276,8 +276,15 @@ const mergedAssessmentData = computed(() => {
             if (!allBlocks[teamName]) {
                 allBlocks[teamName] = block
             } else {
-                if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
+                const currentTimestamp = allBlocks[teamName].timestamp || 0
+                const newTimestamp = block.timestamp || 0
+                
+                if (newTimestamp > currentTimestamp) {
                     allBlocks[teamName] = block
+                } else if (newTimestamp === currentTimestamp) {
+                    if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
+                        allBlocks[teamName] = block
+                    }
                 }
             }
         }
@@ -455,8 +462,19 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             
             const blocks = parseAssessmentBlocks(detailsToParse)
             for (const [teamName, block] of Object.entries(blocks)) {
-                if (!allBlocks[teamName] || (block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
+                if (!allBlocks[teamName]) {
                     allBlocks[teamName] = block
+                } else {
+                    const currentTimestamp = allBlocks[teamName].timestamp || 0
+                    const newTimestamp = block.timestamp || 0
+                    
+                    if (newTimestamp > currentTimestamp) {
+                        allBlocks[teamName] = block
+                    } else if (newTimestamp === currentTimestamp) {
+                        if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
+                            allBlocks[teamName] = block
+                        }
+                    }
                 }
             }
             const rescoredMatch = detailsToParse.match(/\[Rescored:\s*[\d\.]+\]/);

@@ -5,6 +5,7 @@ export interface AssessmentBlock {
     user: string;
     details: string;
     justification: string;
+    timestamp?: number;
 }
 
 export const STATE_PRIORITY: Record<string, number> = {
@@ -51,9 +52,9 @@ export function parseAssessmentBlocks(fullText: string): Record<string, Assessme
     }
 
     // Now parse explicit blocks
-    // Regex to match header and content
+    // Regex to match header and content (now adding optional Date)
     // We iterate through matches
-    const headerRegex = /---\s*\[Team:\s*([^\]]+)\]\s*\[State:\s*([^\]]+)\](?:\s*\[Assessed By:\s*([^\]]+)\])?(?:\s*\[Justification:\s*([^\]]+)\])?.*?\s*---/g;
+    const headerRegex = /---\s*\[Team:\s*([^\]]+)\]\s*\[State:\s*([^\]]+)\](?:\s*\[Assessed By:\s*([^\]]+)\])?(?:\s*\[Date:\s*([^\]]+)\])?(?:\s*\[Justification:\s*([^\]]+)\])?.*?\s*---/g;
 
     let match;
     while ((match = headerRegex.exec(fullText)) !== null) {
@@ -62,7 +63,26 @@ export function parseAssessmentBlocks(fullText: string): Record<string, Assessme
 
         const state = match[2] || 'NOT_SET';
         const user = match[3] || 'Unknown';
-        const justification = match[4] || 'NOT_SET';
+
+        // Handle optional groups where Date might be present or absent
+        // Because of the order in the regex, match[4] is Date, match[5] is Justification
+        // If Justification format was used before Date exist, we need to be careful, but we control the format.
+        let timestamp: number | undefined = undefined;
+        let justification = 'NOT_SET';
+
+        if (match[4] && !isNaN(Number(match[4]))) {
+            timestamp = Number(match[4]);
+            justification = match[5] || 'NOT_SET';
+        } else if (match[4]) {
+            // It might be justification if Date is missing and the regex matched a justification block into group 4 due to how optional non-capturing groups behave?
+            // Actually, the literal `[Date:` vs `[Justification:` inside the non-capturing groups forces correct capturing or undefined.
+            timestamp = undefined;
+            justification = match[5] || 'NOT_SET';
+        }
+
+        if (match[5]) {
+            justification = match[5];
+        }
 
         const startOfContent = match.index + match[0].length;
 
@@ -83,7 +103,8 @@ export function parseAssessmentBlocks(fullText: string): Record<string, Assessme
             state,
             user,
             details: content,
-            justification
+            justification,
+            timestamp
         };
     }
 
@@ -106,7 +127,8 @@ export function constructAssessmentDetails(
     if (blocks['General']) {
         const b = blocks['General'];
         if (b) {
-            const header = `--- [Team: General] [State: ${b.state}] [Assessed By: ${b.user}] [Justification: ${b.justification || 'NOT_SET'}] ---`;
+            const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
+            const header = `--- [Team: General] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}] ---`;
             parts.push(header);
             if (b.details) parts.push(b.details);
         }
@@ -118,7 +140,8 @@ export function constructAssessmentDetails(
     for (const team of teamNames) {
         const b = blocks[team];
         if (b) {
-            const header = `--- [Team: ${team}] [State: ${b.state}] [Assessed By: ${b.user}] [Justification: ${b.justification || 'NOT_SET'}] ---`;
+            const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
+            const header = `--- [Team: ${team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}] ---`;
             parts.push(header);
             if (b.details) parts.push(b.details);
         }
@@ -170,7 +193,8 @@ export function mergeTeamAssessment(
         state: newState,
         user: user,
         details: newDetails.trim(),
-        justification: newJustification
+        justification: newJustification,
+        timestamp: Date.now()
     };
 
     // 3. Extract or use provided tags
