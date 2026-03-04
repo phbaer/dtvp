@@ -84,9 +84,9 @@ test.describe('Integration Tests (Real Backend)', () => {
         // Expect the chain segments to be visible
         // Note: The root "Vulnerable Project" is hidden by the UI component
         // Use getByTitle because the visualization adds title attributes to the nodes
-        await expect(page.getByTitle('internal-lib-a')).toBeVisible();
-        await expect(page.getByTitle('internal-lib-b')).toBeVisible();
-        await expect(page.getByTitle('log4j-core')).toBeVisible();
+        await expect(page.getByTitle('internal-lib-a').first()).toBeVisible();
+        await expect(page.getByTitle('internal-lib-b').first()).toBeVisible();
+        await expect(page.getByTitle('log4j-core').first()).toBeVisible();
     });
 
 });

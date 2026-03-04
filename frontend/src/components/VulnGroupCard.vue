@@ -861,8 +861,29 @@ const assessedTeams = computed(() => {
                                     <span>{{ inst.component_name }} {{ inst.component_version }}</span>
                                     <span>{{ inst.analysis_state }}</span>
                                 </div>
-                                <div v-if="inst.analysis_details" class="text-sm text-gray-300 mb-1 p-2 bg-gray-800 rounded whitespace-pre-wrap break-all">
-                                    {{ inst.analysis_details }}
+                                <div v-if="inst.analysis_details" class="flex flex-col gap-2 mt-2 mb-2">
+                                    <div v-for="(block, team) in parseAssessmentBlocks(inst.analysis_details)" :key="team" class="bg-gray-800/80 rounded border border-gray-700/50 p-3">
+                                        <div class="flex justify-between items-start mb-2">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-900/40 text-blue-300 border border-blue-800/50">
+                                                    {{ team === 'General' ? 'Global Policy' : team }}
+                                                </span>
+                                                <span v-if="block.state && block.state !== 'NOT_SET'" class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50">
+                                                    State: <span :class="block.state === 'NOT_AFFECTED' ? 'text-green-400' : (block.state === 'EXPLOITABLE' ? 'text-red-400' : 'text-gray-200')">{{ block.state }}</span>
+                                                </span>
+                                                <span v-if="block.justification && block.justification !== 'NOT_SET'" class="px-2 py-0.5 rounded text-[10px] font-bold text-gray-400 border border-gray-700 bg-gray-900/30">
+                                                    {{ block.justification.replace(/_/g, ' ') }}
+                                                </span>
+                                            </div>
+                                            <div class="text-[10px] text-gray-500 font-mono text-right shrink-0">
+                                                <div v-if="block.user" class="text-gray-400">{{ block.user }}</div>
+                                                <div v-if="block.timestamp">{{ new Date(typeof block.timestamp === 'number' ? block.timestamp : parseInt(block.timestamp)).toLocaleString() }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="text-sm text-gray-300 pl-2 border-l-2 border-gray-600 whitespace-pre-wrap break-words mt-2" v-if="block.details && block.details.trim()">
+                                            {{ block.details }}
+                                        </div>
+                                    </div>
                                 </div>
                                 <div v-if="inst.analysis_comments && inst.analysis_comments.length > 0" class="space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
                                     <div v-for="(c, ci) in inst.analysis_comments" :key="ci" class="text-xs text-gray-400 italic pl-2 border-l-2 border-gray-600">

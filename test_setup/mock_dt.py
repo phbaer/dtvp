@@ -149,8 +149,16 @@ mock_vulnerabilities = {
 # Shared map for analysis state
 mock_analysis = {
     f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_UUID_1}": {
-        "analysisState": "NOT_SET",
+        "analysisState": "IN_TRIAGE",
         "isSuppressed": False,
+        "analysisDetails": (
+            "--- [Team: General] [State: NOT_SET] [Assessed By: system] [Date: 1709550000000] ---\n"
+            "Global policy: Log4j usage should be reviewed for all public-facing services.\n\n"
+            "--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: inv-analyst] [Date: 1710000000000] ---\n"
+            "Confirmed exploitable in inventory management service due to permissive JNDI.\n\n"
+            "--- [Team: PaymentTeam] [State: NOT_AFFECTED] [Assessed By: pay-dev] [Date: 1710000060000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\n"
+            "Payment processing logic uses a custom wrapper that strips sensitive JNDI lookups."
+        ),
     },
     f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_UUID_2}": {
         "analysisState": "IN_TRIAGE",
@@ -321,6 +329,7 @@ def get_bom(project_uuid: str):
     # Internal libraries
     lib_a_uuid = "11111111-1111-1111-1111-111111111111"
     lib_b_uuid = "22222222-2222-2222-2222-222222222222"
+    lib_c_uuid = "33333333-3333-3333-3333-333333333333"
 
     comp_lib_a = {
         "type": "library",
@@ -336,6 +345,14 @@ def get_bom(project_uuid: str):
         "version": "1.2.3",
         "bom-ref": lib_b_uuid,
         "uuid": lib_b_uuid,
+    }
+
+    comp_lib_c = {
+        "type": "library",
+        "name": "internal-lib-c",
+        "version": "2.0.0",
+        "bom-ref": lib_c_uuid,
+        "uuid": lib_c_uuid,
     }
 
     # The Vulnerable Component (log4j-core)
@@ -379,6 +396,7 @@ def get_bom(project_uuid: str):
     components = [
         comp_lib_a,
         comp_lib_b,
+        comp_lib_c,
         comp_log4j,
         comp_jackson,
         comp_netty,
@@ -386,10 +404,16 @@ def get_bom(project_uuid: str):
     ]
 
     # Dependencies (The Chain)
-    # Root -> Lib A, Jackson, Netty, Team Test Lib
+    # Root -> Lib A, Lib C, Jackson, Netty, Team Test Lib
     dep_root = {
         "ref": project_uuid,
-        "dependsOn": [lib_a_uuid, JACKSON_UUID, NETTY_UUID, TEAM_TEST_LIB_UUID],
+        "dependsOn": [
+            lib_a_uuid,
+            lib_c_uuid,
+            JACKSON_UUID,
+            NETTY_UUID,
+            TEAM_TEST_LIB_UUID,
+        ],
     }
     # Lib A -> Lib B
     dep_a = {
@@ -399,6 +423,11 @@ def get_bom(project_uuid: str):
     # Lib B -> log4j
     dep_b = {
         "ref": lib_b_uuid,
+        "dependsOn": [COMPONENT_UUID],
+    }
+    # Lib C -> log4j
+    dep_c = {
+        "ref": lib_c_uuid,
         "dependsOn": [COMPONENT_UUID],
     }
     # log4j -> []
@@ -426,6 +455,7 @@ def get_bom(project_uuid: str):
         dep_root,
         dep_a,
         dep_b,
+        dep_c,
         dep_log4j,
         dep_jackson,
         dep_netty,
@@ -454,19 +484,26 @@ def get_analysis(project: str, component: str, vulnerability: str):
 @app.put("/api/v1/analysis")
 def update_analysis(update: AnalysisUpdate):
     key = f"{update.project}:{update.component}:{update.vulnerability}"
-    if key in mock_analysis:
-        mock_analysis[key]["analysisState"] = update.analysisState
-        mock_analysis[key]["isSuppressed"] = update.isSuppressed
+    if key not in mock_analysis:
+        mock_analysis[key] = {
+            "analysisState": "NOT_SET",
+            "isSuppressed": False,
+            "analysisDetails": "",
+        }
+
+    mock_analysis[key]["analysisState"] = update.analysisState
+    mock_analysis[key]["isSuppressed"] = update.isSuppressed
+    if update.analysisDetails is not None:
         mock_analysis[key]["analysisDetails"] = update.analysisDetails
-        if update.analysisJustification:
-            mock_analysis[key]["analysisJustification"] = update.analysisJustification
-        if update.comment:
-            # Append comment? Or verify behavior. For simplicity, just store last comment.
-            mock_analysis[key]["comment"] = (
-                update.comment
-            )  # Actually comments are separate usually
-        return mock_analysis[key]
-    return {"error": "Finding not found"}
+    if update.analysisJustification:
+        mock_analysis[key]["analysisJustification"] = update.analysisJustification
+    if update.comment:
+        # In D-T, comments are usually a list. For mock, we'll prefix details or just store it.
+        # Actually, let's keep it simple but ensure we don't lose previous details if not provided.
+        if "analysisDetails" not in mock_analysis[key]:
+            mock_analysis[key]["analysisDetails"] = ""
+        mock_analysis[key]["analysisDetails"] += f"\n\n[Comment] {update.comment}"
+    return mock_analysis[key]
 
 
 @app.get("/.well-known/openid-configuration")

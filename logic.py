@@ -169,8 +169,9 @@ class BOMAnalysisCache:
         if component_name in self.mapping:
             tag_val = self.mapping[component_name]
             if isinstance(tag_val, list):
-                if tag_val:
-                    found_tags.add(tag_val[0])
+                for t in tag_val:
+                    if t:
+                        found_tags.add(t)
             else:
                 found_tags.add(tag_val)
 
@@ -178,9 +179,6 @@ class BOMAnalysisCache:
 
         if target_ref:
             # We still need to traverse parents to find tags inherited from parents
-            # But we don't need to build full paths, just find tags.
-            # BFS is still needed but we can simplify state.
-
             queue = [target_ref]
             visited = {target_ref}
 
@@ -194,8 +192,9 @@ class BOMAnalysisCache:
                     if curr_name and curr_name in self.mapping:
                         tag_val = self.mapping[curr_name]
                         if isinstance(tag_val, list):
-                            if tag_val:
-                                found_tags.add(tag_val[0])
+                            for t in tag_val:
+                                if t:
+                                    found_tags.add(t)
                         else:
                             found_tags.add(tag_val)
 
@@ -209,12 +208,13 @@ class BOMAnalysisCache:
         if not found_tags and "*" in self.mapping:
             tag_val = self.mapping["*"]
             if isinstance(tag_val, list):
-                if tag_val:
-                    found_tags.add(tag_val[0])
+                for t in tag_val:
+                    if t:
+                        found_tags.add(t)
             else:
                 found_tags.add(tag_val)
 
-        return list(found_tags)
+        return sorted(list(found_tags))
 
     def get_dependency_paths(
         self,

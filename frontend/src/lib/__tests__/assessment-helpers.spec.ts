@@ -37,6 +37,14 @@ Details A`;
             expect(blocks['General']?.justification).toBe('NOT_SET');
             expect(blocks['TeamA']).toBeDefined();
         });
+
+        it('should clean redundant metadata from details', () => {
+            const text = `--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] ---
+[Comment] [Team: TeamA] My actual rationale -- UserA`;
+            const blocks = parseAssessmentBlocks(text);
+            expect(blocks['TeamA']).toBeDefined();
+            expect(blocks['TeamA']?.details).toBe('My actual rationale');
+        });
     });
 
     describe('constructAssessmentDetails', () => {
