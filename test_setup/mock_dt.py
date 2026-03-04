@@ -391,7 +391,6 @@ def get_bom(project_uuid: str):
         "ref": project_uuid,
         "dependsOn": [lib_a_uuid, JACKSON_UUID, NETTY_UUID, TEAM_TEST_LIB_UUID],
     }
-    }
     # Lib A -> Lib B
     dep_a = {
         "ref": lib_a_uuid,
