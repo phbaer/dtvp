@@ -139,8 +139,8 @@ pm2 stop ecosystem.config.js
 
 | Variable | Description | Default |
 | :--- | :--- | :--- |
-| `DTVP_API_KEY` | Dependency Track API key | Required |
-| `DTVP_API_URL` | Dependency Track Base URL | Required |
+| `DTVP_DT_API_KEY` | Dependency Track API key | Required |
+| `DTVP_DT_API_URL` | Dependency Track Base URL | Required |
 | `DTVP_OIDC_AUTHORITY` | OIDC Authority URL | Required |
 | `DTVP_OIDC_CLIENT_ID` | OIDC Client ID | Required |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC Client Secret | Required |
