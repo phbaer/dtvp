@@ -79,7 +79,7 @@ def test_process_grouped_vulns_task_bom_failure():
 
     import asyncio
 
-    asyncio.run(main.process_grouped_vulns_task(task_id, "Test", client))
+    asyncio.run(main.process_grouped_vulns_task(task_id, "Test", None, client))
 
     assert main.tasks[task_id]["status"] == "completed"
     assert main.tasks[task_id]["result"] == []
@@ -105,7 +105,7 @@ def test_process_grouped_vulns_task_all_projects():
     import asyncio
 
     # Call with empty name (All projects request)
-    asyncio.run(main.process_grouped_vulns_task(task_id, "", client))
+    asyncio.run(main.process_grouped_vulns_task(task_id, "", None, client))
 
     assert main.tasks[task_id]["status"] == "completed"
     # Verify that BOTH projects were processed (they would be in combined_data)

@@ -9,7 +9,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 vi.mock('vue-router', () => ({
-    useRoute: vi.fn(),
+    useRoute: vi.fn(() => ({ params: {}, query: {} })),
     RouterLink: { template: '<a><slot /></a>' }
 }))
 
@@ -25,7 +25,7 @@ describe('ProjectView.vue', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.mocked(useRoute).mockReturnValue({
-            params: { name: 'TestProject' }
+            params: { name: 'TestProject' }, query: {}
         } as any)
     })
 
@@ -39,7 +39,7 @@ describe('ProjectView.vue', () => {
                     RouterLink: true
                 },
                 mocks: {
-                    $route: { params: { name: 'TestProject' } }
+                    $route: { params: { name: 'TestProject' }, query: {} }
                 },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
@@ -52,7 +52,7 @@ describe('ProjectView.vue', () => {
             ; (wrapper.vm as any).hideMixed = false
         await wrapper.vm.$nextTick()
 
-        expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', expect.any(Function))
+        expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', undefined, expect.any(Function))
         // Child component should be rendered
         expect(wrapper.findAll('.vuln-group-card')).toHaveLength(1)
     })
@@ -65,7 +65,7 @@ describe('ProjectView.vue', () => {
             global: {
                 stubs: { RouterLink: true },
                 mocks: {
-                    $route: { params: { name: 'TestProject' } }
+                    $route: { params: { name: 'TestProject' }, query: {} }
                 }
             }
         })
@@ -83,7 +83,7 @@ describe('ProjectView.vue', () => {
             global: {
                 stubs: { RouterLink: true },
                 mocks: {
-                    $route: { params: { name: 'TestProject' } }
+                    $route: { params: { name: 'TestProject' }, query: {} }
                 }
             }
         })
@@ -112,7 +112,7 @@ describe('ProjectView.vue', () => {
             global: {
                 stubs: { RouterLink: true },
                 mocks: {
-                    $route: { params: { name: 'TestProject' } }
+                    $route: { params: { name: 'TestProject' }, query: {} }
                 }
             }
         })
@@ -135,14 +135,14 @@ describe('ProjectView.vue', () => {
 
     it('does not fetch if route param name is undefined', async () => {
         vi.mocked(useRoute).mockReturnValue({
-            params: {}
+            params: {}, query: {}
         } as any)
 
         mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
                 mocks: {
-                    $route: { params: {} }
+                    $route: { params: {}, query: {} }
                 }
             }
         })
@@ -153,14 +153,14 @@ describe('ProjectView.vue', () => {
 
     it('handles _all_ project name context', async () => {
         vi.mocked(useRoute).mockReturnValue({
-            params: { name: '_all_' }
+            params: { name: '_all_' }, query: {}
         } as any)
 
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
                 mocks: {
-                    $route: { params: { name: '_all_' } }
+                    $route: { params: { name: '_all_' }, query: {} }
                 }
             }
         })
@@ -170,6 +170,6 @@ describe('ProjectView.vue', () => {
 
         await flushPromises()
 
-        expect(getGroupedVulns).toHaveBeenCalledWith('', expect.any(Function))
+        expect(getGroupedVulns).toHaveBeenCalledWith('', undefined, expect.any(Function))
     })
 })
