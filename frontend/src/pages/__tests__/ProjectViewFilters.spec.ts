@@ -8,6 +8,8 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
     updateAssessment: vi.fn(),
+    getTeamMapping: vi.fn(() => Promise.resolve({})),
+    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
 }))
 
 // Mock Child Components

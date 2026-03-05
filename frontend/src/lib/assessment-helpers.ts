@@ -17,56 +17,63 @@ export const STATE_PRIORITY: Record<string, number> = {
     "NOT_SET": 5,
 };
 
-export function parseAssessmentBlocks(fullText: string): Record<string, AssessmentBlock> {
-    const blocks: Record<string, AssessmentBlock> = {};
+export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
+    const blocks: AssessmentBlock[] = [];
     if (!fullText) return blocks;
 
     // Split by team headers: --- [Team: Name] [State: State] ... ---
-    // We need to capture the delimiter to know where blocks start
-    // Using positive lookahead to split but keep the delimiter for the next part is tricky in JS split
-    // Easier to regex match all parts
-
-    // First, check for "Legacy" or "General" text at the start (before any header)
     const firstHeaderIndex = fullText.indexOf('--- [Team:');
+
     if (firstHeaderIndex > 0) {
-        const generalText = fullText.slice(0, firstHeaderIndex).trim();
-        if (generalText) {
-            blocks['General'] = {
+        // There is something BEFORE the first header.
+        // Check if it's just shared tags or real content
+        const textBeforeHeader = fullText.slice(0, firstHeaderIndex);
+        const contentBeforeHeader = textBeforeHeader
+            .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
+            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+            .replace(/\[Status: Pending Review\]/g, '')
+            .trim();
+
+        if (contentBeforeHeader) {
+            blocks.push({
                 team: 'General',
-                state: 'NOT_SET', // Implicit
+                state: 'NOT_SET',
                 user: 'Unknown',
-                details: generalText,
+                details: contentBeforeHeader,
                 justification: 'NOT_SET'
-            };
+            });
         }
-    } else if (firstHeaderIndex === -1 && fullText.trim()) {
-        // No headers at all, treat whole text as General
-        blocks['General'] = {
-            team: 'General',
-            state: 'NOT_SET',
-            user: 'Unknown',
-            details: fullText.trim(),
-            justification: 'NOT_SET'
-        };
-        return blocks;
+    } else if (firstHeaderIndex === -1) {
+        // No headers at all. Check if there's real content (ignoring tags)
+        const content = fullText
+            .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
+            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+            .replace(/\[Status: Pending Review\]/g, '')
+            .trim();
+
+        if (content) {
+            blocks.push({
+                team: 'General',
+                state: 'NOT_SET',
+                user: 'Unknown',
+                details: content,
+                justification: 'NOT_SET'
+            });
+            return blocks;
+        }
     }
 
     // Now parse explicit blocks
-    // Regex to match header and content (now adding optional Date)
-    // We iterate through matches
     const headerRegex = /---\s*\[Team:\s*([^\]]+)\]\s*\[State:\s*([^\]]+)\](?:\s*\[Assessed By:\s*([^\]]+)\])?(?:\s*\[Date:\s*([^\]]+)\])?(?:\s*\[Justification:\s*([^\]]+)\])?.*?\s*---/g;
 
     let match;
     while ((match = headerRegex.exec(fullText)) !== null) {
         const team = match[1];
-        if (!team) continue; // Should not happen based on regex but satisfies TS
+        if (!team) continue;
 
         const state = match[2] || 'NOT_SET';
         const user = match[3] || 'Unknown';
 
-        // Handle optional groups where Date might be present or absent
-        // Because of the order in the regex, match[4] is Date, match[5] is Justification
-        // If Justification format was used before Date exist, we need to be careful, but we control the format.
         let timestamp: number | undefined = undefined;
         let justification = 'NOT_SET';
 
@@ -74,8 +81,6 @@ export function parseAssessmentBlocks(fullText: string): Record<string, Assessme
             timestamp = Number(match[4]);
             justification = match[5] || 'NOT_SET';
         } else if (match[4]) {
-            // It might be justification if Date is missing and the regex matched a justification block into group 4 due to how optional non-capturing groups behave?
-            // Actually, the literal `[Date:` vs `[Justification:` inside the non-capturing groups forces correct capturing or undefined.
             timestamp = undefined;
             justification = match[5] || 'NOT_SET';
         }
@@ -96,34 +101,36 @@ export function parseAssessmentBlocks(fullText: string): Record<string, Assessme
 
         // Clean up redundant metadata from the display text
         let content = rawContent
-            .replace(/\n\n\[Status: Pending Review\]/g, '')
+        // Cleanup all metadata from content to prevent leakage
+        content = content
+            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .replace(/\[Comment\]/g, '')
+            .replace(/\bAssessed\s*--\s*\S+/g, '')
+            .replace(/--\s*\S+\s*$/gm, '')
             .trim();
 
-        // Remove [Team: current_team] if present in text
-        const teamEscaped = team.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        content = content.replace(new RegExp(`\\[Team:\\s*${teamEscaped}\\]`, 'g'), '').trim();
+        // Also remove the specific header and any subsequent headers if they somehow leaked into content
+        content = content.replace(/---\s*\[Team:.*?---\s*/g, '').trim();
 
-        // Remove trailing "-- user" if it matches the assessor
         const userEscaped = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         content = content.replace(new RegExp(`--\\s*${userEscaped}\\s*$`, 'm'), '').trim();
 
-        blocks[team] = {
+        blocks.push({
             team,
             state,
             user,
             details: content,
             justification,
             timestamp
-        };
+        });
     }
 
     return blocks;
 }
 
 export function constructAssessmentDetails(
-    blocks: Record<string, AssessmentBlock>,
+    blocks: AssessmentBlock[],
     sharedTags: string[] = [],
     isPending: boolean = true
 ): { text: string, aggregatedState: string } {
@@ -134,32 +141,16 @@ export function constructAssessmentDetails(
         parts.push(sharedTags.join(' '));
     }
 
-    // Always put General first if it exists
-    if (blocks['General']) {
-        const b = blocks['General'];
-        if (b) {
-            const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
-            const header = `--- [Team: General] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}] ---`;
-            parts.push(header);
-            if (b.details) parts.push(b.details);
-        }
-    }
-
-    // Sort other teams alphabetically
-    const teamNames = Object.keys(blocks).filter(k => k !== 'General').sort();
-
-    for (const team of teamNames) {
-        const b = blocks[team];
-        if (b) {
-            const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
-            const header = `--- [Team: ${team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}] ---`;
-            parts.push(header);
-            if (b.details) parts.push(b.details);
-        }
+    // Preserve the order in the array for generation
+    for (const b of blocks) {
+        const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}] ---`;
+        parts.push(header);
+        if (b.details) parts.push(b.details);
     }
 
     // Calculate Aggregated State
-    const generalBlock = blocks['General'];
+    const generalBlock = blocks.find(b => b.team === 'General');
     let aggState = 'NOT_SET';
 
     if (generalBlock && generalBlock.state !== 'NOT_SET') {
@@ -167,7 +158,7 @@ export function constructAssessmentDetails(
         aggState = generalBlock.state;
     } else {
         // Fallback: Worst of all team states
-        const allStates = Object.values(blocks).filter(b => b !== undefined).map(b => b.state);
+        const allStates = blocks.map(b => b.state).filter(s => s !== 'NOT_SET');
         if (allStates.length > 0) {
             allStates.sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10));
             aggState = allStates[0] || 'NOT_SET';
@@ -199,7 +190,8 @@ export function mergeTeamAssessment(
     const blocks = parseAssessmentBlocks(currentFullText);
 
     // 2. Update or Create block for this team
-    blocks[team] = {
+    const targetIndex = blocks.findIndex(b => b.team === team);
+    const newBlock: AssessmentBlock = {
         team: team,
         state: newState,
         user: user,
@@ -207,6 +199,12 @@ export function mergeTeamAssessment(
         justification: newJustification,
         timestamp: Date.now()
     };
+
+    if (targetIndex >= 0) {
+        blocks[targetIndex] = newBlock;
+    } else {
+        blocks.push(newBlock);
+    }
 
     // 3. Extract or use provided tags
     let tags: string[] = [];

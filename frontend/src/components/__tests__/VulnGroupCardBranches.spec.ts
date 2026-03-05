@@ -74,6 +74,6 @@ describe('VulnGroupCard Branch Coverage', () => {
             ]
         }
         const wrapper = mount(VulnGroupCard, { props: { group: group as any } })
-        expect((wrapper.vm as any).displayState).toBe('MIXED')
+        expect((wrapper.vm as any).displayState).toBe('EXPLOITABLE')
     })
 })

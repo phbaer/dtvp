@@ -187,14 +187,15 @@ def test_upload_mapping(client):
     files = {"file": ("mapping.json", mapping_content, "application/json")}
 
     # We mock get_team_mapping_path to avoid overwriting real data/temp files
-    with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
-        with patch(
-            "builtins.open", mock_open(read_data='{"test": "data"}')
-        ) as mocked_file:
-            response = client.post("/api/settings/mapping", files=files)
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+            with patch(
+                "builtins.open", mock_open(read_data='{"test": "data"}')
+            ) as mocked_file:
+                response = client.post("/api/settings/mapping", files=files)
 
-            assert response.status_code == 200
-            assert response.json()["status"] == "success"
+                assert response.status_code == 200
+                assert response.json()["status"] == "success"
 
             # Verify file write
             mocked_file.assert_called_with(
@@ -209,11 +210,12 @@ def test_upload_mapping_failure(client):
     files = {"file": ("mapping.json", mapping_content, "application/json")}
 
     # Mock open to raise exception on write or processing
-    with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
-        with patch("builtins.open", side_effect=Exception("Disk full")):
-            response = client.post("/api/settings/mapping", files=files)
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+            with patch("builtins.open", side_effect=Exception("Disk full")):
+                response = client.post("/api/settings/mapping", files=files)
 
-            assert response.status_code == 200
+                assert response.status_code == 200
             data = response.json()
             assert data["status"] == "error"
             assert "Disk full" in data["message"]
@@ -222,10 +224,32 @@ def test_upload_mapping_failure(client):
 def test_get_team_mapping(client):
     from unittest.mock import patch
 
-    with patch("main.load_team_mapping", return_value={"test": "team"}):
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        with patch("main.load_team_mapping", return_value={"test": "team"}):
+            response = client.get("/api/settings/mapping")
+            assert response.status_code == 200
+            assert response.json() == {"test": "team"}
+
+
+def test_get_team_mapping_forbidden_for_analyst(client):
+    from unittest.mock import patch
+
+    with patch("main.get_user_role", return_value="ANALYST"):
         response = client.get("/api/settings/mapping")
-        assert response.status_code == 200
-        assert response.json() == {"test": "team"}
+        assert response.status_code == 403
+        assert "Only reviewers" in response.json()["detail"]
+
+
+def test_upload_mapping_forbidden_for_analyst(client):
+    from unittest.mock import patch
+
+    mapping_content = b'{"comp": "team"}'
+    files = {"file": ("mapping.json", mapping_content, "application/json")}
+
+    with patch("main.get_user_role", return_value="ANALYST"):
+        response = client.post("/api/settings/mapping", files=files)
+        assert response.status_code == 403
+        assert "Only reviewers" in response.json()["detail"]
 
 
 def test_serve_index_no_frontend_url():

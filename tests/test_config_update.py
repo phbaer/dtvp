@@ -18,8 +18,9 @@ def test_update_team_mapping(client):
     with patch(
         "main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
     ):
-        with patch("builtins.open", mock_open()) as mocked_file:
-            response = client.put("/api/settings/mapping", json=new_mapping)
+        with patch("main.get_user_role", return_value="REVIEWER"):
+            with patch("builtins.open", mock_open()) as mocked_file:
+                response = client.put("/api/settings/mapping", json=new_mapping)
 
             assert response.status_code == 200
             assert response.json()["status"] == "success"
@@ -37,8 +38,9 @@ def test_update_team_mapping_failure(client):
     with patch(
         "main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
     ):
-        with patch("builtins.open", side_effect=Exception("Write error")):
-            response = client.put("/api/settings/mapping", json=new_mapping)
+        with patch("main.get_user_role", return_value="REVIEWER"):
+            with patch("builtins.open", side_effect=Exception("Write error")):
+                response = client.put("/api/settings/mapping", json=new_mapping)
 
             assert response.status_code == 200
             data = response.json()
@@ -69,6 +71,16 @@ def test_update_roles_analyst_forbidden(client):
     # Mock user role to be ANALYST (default for 'testuser' if not mapped, but we force it)
     with patch("main.get_user_role", return_value="ANALYST"):
         response = client.put("/api/settings/roles", json=new_roles)
+
+        assert response.status_code == 403
+        assert "Only reviewers" in response.json()["detail"]
+
+
+def test_update_team_mapping_analyst_forbidden(client):
+    new_mapping = {"comp1": "team1"}
+
+    with patch("main.get_user_role", return_value="ANALYST"):
+        response = client.put("/api/settings/mapping", json=new_mapping)
 
         assert response.status_code == 403
         assert "Only reviewers" in response.json()["detail"]

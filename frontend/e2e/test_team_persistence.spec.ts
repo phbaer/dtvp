@@ -96,6 +96,24 @@ test.describe('Team Analysis Persistence', () => {
                 }]),
             });
         });
+
+        // Mock Team Mapping
+        await page.route('**/api/team-mapping', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ 'test-lib': 'Frontend' }),
+            });
+        });
+
+        // Mock Rescore Rules
+        await page.route('**/api/rescore-rules', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ transitions: [] }),
+            });
+        });
     });
 
     test('should persist details entered for a team', async ({ page }) => {

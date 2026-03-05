@@ -32,7 +32,8 @@ vi.mock('lucide-vue-next', () => ({
     ExternalLink: { template: '<span class="icon-link" />' },
     RefreshCw: { template: '<span class="icon-refresh" />' },
     AlertTriangle: { template: '<span class="icon-alert" />' },
-    CheckCircle: { template: '<span class="icon-check-circle" />' }
+    CheckCircle: { template: '<span class="icon-check-circle" />' },
+    RotateCcw: { template: '<span class="icon-rotate-ccw" />' }
 }))
 
 // Mock DependencyChainViewer to avoid async setup in child component
@@ -410,9 +411,10 @@ describe('VulnGroupCard', () => {
     })
 
     it('auto-rescores cvss to 0 for reviewers when NOT_AFFECTED is selected', async () => {
+        const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: mockRescoreRules } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -441,13 +443,52 @@ describe('VulnGroupCard', () => {
         }))
     })
 
-    it('does not auto-rescore cvss for non-reviewers when NOT_AFFECTED is selected', async () => {
+    it('preserves cvss when state changes away from NOT_AFFECTED (requirement: user context remains)', async () => {
+        const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
+        const groupWithVector = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
+        }
         const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup },
-            global: { provide: { user: { value: { role: 'ANALYST', username: 'tester' } } } }
+            props: { group: groupWithVector },
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: mockRescoreRules } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const vectorInput = wrapper.findAll('input[type="text"]')[0]
+        const selects = wrapper.findAll('select')
+
+        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        await flushPromises()
+
+        // It should have the modified MC, MI, MA
+        expect((vectorInput?.element as HTMLInputElement).value).toContain('MC:N/MI:N/MA:N')
+        // Vector input should NOT be editable (wrong regression fixed)
+        expect((vectorInput?.element as HTMLInputElement).readOnly).toBe(true)
+
+        // Now set it back to EXPLOITABLE
+        await selects[1]?.setValue('EXPLOITABLE')
+        await flushPromises()
+
+        // It should PRESERVE the modified fields (no revert), per user requirement
+        expect((vectorInput?.element as HTMLInputElement).value).toContain('MC:N/MI:N/MA:N')
+    })
+
+    it('does not auto-rescore cvss for non-reviewers when NOT_AFFECTED is selected', async () => {
+        const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { role: 'ANALYST', username: 'tester' } }, rescoreRules: mockRescoreRules } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        // Select Team first because Analyst can't edit General state
+        const teamSelect = wrapper.findAll('select')[0]
+        await teamSelect?.setValue('Security')
         await flushPromises()
 
         const selects = wrapper.findAll('select')
