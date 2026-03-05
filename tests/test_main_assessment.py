@@ -108,7 +108,7 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
                 "finding_uuid": "f1",
             }
         ],
-        "state": "NOT_AFFECTED",
+        "state": "EXPLOITABLE",
         "details": "Analyst details [Rescored: 9.9] [Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]",
     }
 

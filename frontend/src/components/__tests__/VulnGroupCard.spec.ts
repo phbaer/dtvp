@@ -409,6 +409,69 @@ describe('VulnGroupCard', () => {
         }))
     })
 
+    it('auto-rescores cvss to 0 for reviewers when NOT_AFFECTED is selected', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const selects = wrapper.findAll('select')
+        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        await flushPromises()
+
+        await wrapper.find('textarea').setValue('False positive mock')
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Verify updateAssessment was called with the Rescored 0 vector in the payload.
+        // It should inject [Rescored: 0] and the default CVSS 3.1 0-score vector.
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            details: expect.stringContaining('[Rescored:')
+        }))
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            details: expect.stringContaining('[Rescored Vector: CVSS:3.1')
+        }))
+    })
+
+    it('does not auto-rescore cvss for non-reviewers when NOT_AFFECTED is selected', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { role: 'ANALYST', username: 'tester' } } } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const selects = wrapper.findAll('select')
+        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        await flushPromises()
+
+        await wrapper.find('textarea').setValue('Analyst no rescore')
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Analysts shouldn't inject [Rescored: 0] automatically.
+        const calls = (updateAssessment as any).mock.calls
+        const lastCallArgs = calls[calls.length - 1][0]
+
+        expect(lastCallArgs.details).not.toContain('[Rescored:')
+        expect(lastCallArgs.details).not.toContain('[Rescored Vector:')
+    })
+
+
     it('submits assessment for a specific team and updates UI from aggregated server response', async () => {
         const groupWithTags = {
             ...mockGroup,
