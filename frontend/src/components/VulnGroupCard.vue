@@ -3,9 +3,9 @@ import { ref, computed, watch, inject } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 
 import type { GroupedVuln, AssessmentPayload } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const user = inject<any>('user')
 const teamMapping = inject<any>('teamMapping')
+const rescoreRules = inject<any>('rescoreRules')
 
 const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
@@ -113,11 +114,11 @@ const totalTargeted = computed(() => {
 })
 
 const displayState = computed(() => {
-    const states = new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET'))
-    if (states.size === 0) return 'NOT_SET'
-    if (states.size > 1) return 'MIXED'
-    const state = Array.from(states)[0]
-    return state === 'NOT_SET' ? 'NOT_SET' : state
+    const states = Array.from(new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET')))
+    if (states.length === 0) return 'NOT_SET'
+    
+    // Sort all states by priority and return the first (worst)
+    return [...states].sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10))[0]
 })
 
 const isPendingReview = computed(() => {
@@ -126,6 +127,20 @@ const isPendingReview = computed(() => {
 
 const canApprove = computed(() => {
     return user?.value?.role === 'REVIEWER' && isPendingReview.value
+})
+
+const lastRescoredScore = ref<number | null>(null)
+
+const currentDisplayScore = computed(() => {
+    if (pendingScore.value !== null) return pendingScore.value
+    return props.group.rescored_cvss ?? (props.group.cvss || props.group.cvss_score) ?? 'N/A'
+})
+
+const isRescoredOrModified = computed(() => {
+    const base = props.group.cvss || props.group.cvss_score
+    const current = currentDisplayScore.value
+    if (current === 'N/A' || base === undefined) return false
+    return Math.abs(Number(current) - Number(base)) > 0.05
 })
 
 const approveAssessment = async (e: Event) => {
@@ -205,6 +220,7 @@ const updateVectorString = () => {
 
 const updateCalcVector = (componentShortName: string, value: string) => {
     try {
+        isManualBaseMode.value = true
         cvssInstance.value.applyComponentString(componentShortName, value)
         updateVectorString()
         cvssInstance.value = cvssInstance.value 
@@ -214,9 +230,16 @@ const updateCalcVector = (componentShortName: string, value: string) => {
 }
 
 const canEditBase = computed(() => {
-    const original = props.group.rescored_vector || props.group.cvss_vector
-    if (!original) return true
-    return isManualBaseMode.value
+    if (!isReviewer.value) return false
+    
+    // If a rescore rule matches the current state, we don't allow manual editing
+    // unless the user explicitly cleared/reset it.
+    const rules = rescoreRules?.value?.transitions || []
+    const hasRuleMatch = rules.some((r: any) => r.trigger.state === state.value)
+    
+    if (hasRuleMatch && !isManualBaseMode.value) return false
+    
+    return true
 })
 
 const resetVector = () => {
@@ -260,7 +283,8 @@ watch(pendingVector, (newVector) => {
 })
 
 const mergedAssessmentData = computed(() => {
-    const allBlocks: Record<string, any> = {}
+    const allBlocks: AssessmentBlock[] = []
+    const teamToIndex = new Map<string, number>()
     const allTags = new Set<string>()
     let isPending = false
     
@@ -272,18 +296,25 @@ const mergedAssessmentData = computed(() => {
         }
 
         const blocks = parseAssessmentBlocks(inst.analysis_details)
-        for (const [teamName, block] of Object.entries(blocks)) {
-            if (!allBlocks[teamName]) {
-                allBlocks[teamName] = block
+        for (const block of blocks) {
+            const teamName = block.team
+            const existingIndex = teamToIndex.get(teamName)
+            
+            if (existingIndex === undefined) {
+                teamToIndex.set(teamName, allBlocks.length)
+                allBlocks.push(block)
             } else {
-                const currentTimestamp = allBlocks[teamName].timestamp || 0
-                const newTimestamp = block.timestamp || 0
-                
-                if (newTimestamp > currentTimestamp) {
-                    allBlocks[teamName] = block
-                } else if (newTimestamp === currentTimestamp) {
-                    if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
-                        allBlocks[teamName] = block
+                const existingBlock = allBlocks[existingIndex]
+                if (existingBlock) {
+                    const currentTimestamp = existingBlock.timestamp || 0
+                    const newTimestamp = block.timestamp || 0
+                    
+                    if (newTimestamp > currentTimestamp) {
+                        allBlocks[existingIndex] = block
+                    } else if (newTimestamp === currentTimestamp) {
+                        if ((block.details?.length || 0) > (existingBlock.details?.length || 0)) {
+                            allBlocks[existingIndex] = block
+                        }
                     }
                 }
             }
@@ -298,7 +329,7 @@ const mergedAssessmentData = computed(() => {
     
     return {
         blocks: allBlocks,
-        fullText: Object.keys(allBlocks).length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : '',
+        fullText: allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : '',
         isPending
     }
 })
@@ -311,7 +342,7 @@ const updateFormFromGroup = () => {
     
     if (selectedTeam.value) { // Team view
         const teamName = selectedTeam.value
-        const myBlock = teamBlocks[teamName]
+        const myBlock = teamBlocks.find(b => b.team === teamName)
         state.value = myBlock?.state || 'NOT_SET'
         // Strip the status tag from the details shown in the textarea
         details.value = (myBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
@@ -319,7 +350,7 @@ const updateFormFromGroup = () => {
     } else {
          // No team selected - if Reviewer, show General block
          if (isReviewer.value) {
-            const generalBlock = teamBlocks['General']
+            const generalBlock = teamBlocks.find(b => b.team === 'General')
             state.value = generalBlock?.state || 'NOT_SET'
             details.value = (generalBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
             justification.value = generalBlock?.justification || 'NOT_SET'
@@ -340,6 +371,24 @@ const updateFormFromGroup = () => {
     initialScore.value = pendingScore.value
 }
 
+const applyWorstTeamAssessment = () => {
+    const teamBlocks = mergedAssessmentData.value.blocks.filter(b => b.team !== 'General')
+    
+    if (teamBlocks.length === 0) {
+        showAlert('No Team Data', 'No team assessments found to pull from.')
+        return
+    }
+
+    // Sort by STATE_PRIORITY (worst first)
+    const sorted = [...teamBlocks].sort((a, b) => (STATE_PRIORITY[a.state] ?? 10) - (STATE_PRIORITY[b.state] ?? 10))
+    const worst = sorted[0]
+
+    if (worst) {
+        state.value = worst.state
+        justification.value = worst.justification || 'NOT_SET'
+    }
+}
+
 watch(selectedTeam, updateFormFromGroup)
 
 watch(() => props.group, updateFormFromGroup, { immediate: true })
@@ -355,9 +404,51 @@ watch(state, (newState, oldState) => {
     // Only auto-rescore if we're changing states via user interaction
     // We check `loadingDetails` to avoid rescoring 0 during the initial data load
     if (!loadingDetails.value && !updating.value && newState !== oldState && isReviewer.value) {
-        if (newState === 'NOT_AFFECTED' || newState === 'FALSE_POSITIVE') {
-            isManualBaseMode.value = true
-            resetToDefault(activeVersion.value)
+        
+        const rules = rescoreRules?.value?.transitions || []
+        const newTriggerMatch = rules.find((r: any) => r.trigger.state === newState)
+
+        if (newTriggerMatch) {
+            // Map the actions applicable to the current cvss version
+            const actions = newTriggerMatch.actions?.[activeVersion.value] || {}
+            
+            // Create a fresh instance from the pending vector to apply updates safely
+            let v = pendingVector.value?.trim() || ''
+            try {
+                if (v.startsWith('CVSS:4.0')) {
+                    cvssInstance.value = new Cvss4P0(v)
+                } else if (v.startsWith('CVSS:3.')) {
+                    if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
+                    cvssInstance.value = new Cvss3P1(v)
+                } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
+                    cvssInstance.value = new Cvss2(v)
+                } else {
+                    if (activeVersion.value === '4.0') {
+                        cvssInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N')
+                    } else if (activeVersion.value === '2.0') {
+                        cvssInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N')
+                    } else {
+                        cvssInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N')
+                        activeVersion.value = '3.1'
+                    }
+                }
+            } catch {}
+
+            // Apply each configured modifier
+            for (const [key, val] of Object.entries(actions)) {
+                try {
+                    // Only apply if the base attribute is defined in the vector (e.g. apply MC if C is defined)
+                    const vectorParts = (pendingVector.value || '').split('/')
+                    const baseKey = (key.startsWith('M') && key.length > 1) ? key.slice(1) : key;
+                    const isDefined = vectorParts.some(part => part.startsWith(`${baseKey}:`));
+                    if (isDefined) {
+                        cvssInstance.value.applyComponentString(key, val as string)
+                    }
+                } catch (e) {
+                    console.error("Failed to apply component string:", key, val, e)
+                }
+            }
+            updateVectorString()
         }
     }
 })
@@ -449,10 +540,8 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     
     updating.value = true
     try {
-        // 1. Get current full details from the first instance (or use refreshed data)
-        // We need the BASE string to merge into. Use originalAnalysis.value as source of truth for "current" state
-        // We need the BASE string to merge into. Use originalAnalysis.value as source of truth for "current" state
-        const allBlocks: Record<string, any> = {}
+        const allBlocks: AssessmentBlock[] = []
+        const teamToIndex = new Map<string, number>()
         const allTags = new Set<string>()
         let isPending = false
         
@@ -466,18 +555,25 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             if (detailsToParse.includes('[Status: Pending Review]')) isPending = true
             
             const blocks = parseAssessmentBlocks(detailsToParse)
-            for (const [teamName, block] of Object.entries(blocks)) {
-                if (!allBlocks[teamName]) {
-                    allBlocks[teamName] = block
+            for (const block of blocks) {
+                const teamName = block.team
+                const existingIndex = teamToIndex.get(teamName)
+                
+                if (existingIndex === undefined) {
+                    teamToIndex.set(teamName, allBlocks.length)
+                    allBlocks.push(block)
                 } else {
-                    const currentTimestamp = allBlocks[teamName].timestamp || 0
-                    const newTimestamp = block.timestamp || 0
-                    
-                    if (newTimestamp > currentTimestamp) {
-                        allBlocks[teamName] = block
-                    } else if (newTimestamp === currentTimestamp) {
-                        if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
-                            allBlocks[teamName] = block
+                    const existingBlock = allBlocks[existingIndex]
+                    if (existingBlock) {
+                        const currentTimestamp = existingBlock.timestamp || 0
+                        const newTimestamp = block.timestamp || 0
+                        
+                        if (newTimestamp > currentTimestamp) {
+                            allBlocks[existingIndex] = block
+                        } else if (newTimestamp === currentTimestamp) {
+                            if ((block.details?.length || 0) > (existingBlock.details?.length || 0)) {
+                                allBlocks[existingIndex] = block
+                            }
                         }
                     }
                 }
@@ -489,7 +585,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             if (vectorMatch) allTags.add(vectorMatch[0]);
         }
         
-        const currentFullDetails = Object.keys(allBlocks).length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : ''
+        const currentFullDetails = allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : ''
 
         // 2. Perform Client-Side Merge
         const targetTeam = selectedTeam.value || 'General'
@@ -569,22 +665,32 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
              await showAlert('Update Partial', `Assessment updated with ${errors.length} errors. Check console for details.`)
         } else {
              const success = results.find((r: any) => r.status === 'success')
-                          if (success) {
-                  const hasVectorChange = canRescore ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
-                  
-                  const data = {
-                      rescored_cvss: hasVectorChange ? (canRescore ? pendingScore.value : props.group.rescored_cvss) : null,
-                      rescored_vector: hasVectorChange ? (canRescore ? pendingVector.value : props.group.rescored_vector) : null,
-                      analysis_state: success.new_state,
-                      analysis_details: success.new_details,
-                      is_suppressed: suppressed.value
-                  }
-                  emit('update:assessment', data)
-              }
+             if (success) {
+                 const canRescore = isReviewer.value;
+                 const hasVectorChange = canRescore ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
+                 
+                 const data = {
+                     rescored_cvss: hasVectorChange ? (canRescore ? pendingScore.value : props.group.rescored_cvss) : null,
+                     rescored_vector: hasVectorChange ? (canRescore ? pendingVector.value : props.group.rescored_vector) : null,
+                     analysis_state: success.new_state,
+                     analysis_details: success.new_details,
+                     is_suppressed: suppressed.value
+                 }
+                 emit('update:assessment', data)
+                 
+                 // Reset local state so UI reflects the new server state
+                 pendingScore.value = null
+                 pendingVector.value = data.rescored_vector || props.group.cvss_vector || ''
+                 initialVector.value = pendingVector.value
+                 initialScore.value = data.rescored_cvss ?? null
+                 isManualBaseMode.value = false
+                 lastRescoredScore.value = data.rescored_cvss ?? null
+             }
              showConflictModal.value = false
         }
         
-        expanded.value = false
+        
+        // expanded.value = false // Removed as it's confusing to close the card while the user is looking at it
     } catch (err: any) {
         if (err.response && err.response.status === 409) {
             conflictData.value = err.response.data.conflicts
@@ -629,11 +735,16 @@ const stateColor = computed(() => {
 
 
 const cardStyle = computed(() => {
+    const states = new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET'))
+    const isMixed = states.size > 1
+
+    if (isMixed) {
+        return 'bg-yellow-500/10 border-yellow-500/40 hover:bg-yellow-500/15'
+    }
+
     switch (displayState.value) {
         case 'NOT_SET': 
             return 'bg-red-500/10 border-red-500/40 hover:bg-red-500/15'
-        case 'MIXED':
-            return 'bg-yellow-500/10 border-yellow-500/40 hover:bg-yellow-500/15'
         default:
             return 'bg-gray-800 border-gray-700 hover:bg-gray-750'
     }
@@ -683,7 +794,7 @@ const rescoredVectorSegments = computed(() => {
 const assessedTeams = computed(() => {
     const blocks = mergedAssessmentData.value.blocks
     
-    const existingAssessments = new Set(Object.keys(blocks))
+    const existingAssessments = new Set(blocks.map(b => b.team))
     
     const matchedTeams = new Set<string>()
     
@@ -760,13 +871,22 @@ const assessedTeams = computed(() => {
 
                 <!-- Score Column -->
                 <div class="w-28 shrink-0 text-sm text-gray-300 flex items-center gap-2">
-                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.2)]" title="Rescored Value">
-                        {{ group.rescored_cvss }}
+                    <span 
+                        v-if="isRescoredOrModified" 
+                        :class="['px-2 py-0.5 rounded text-xs font-bold transition-all duration-300', 
+                            (pendingScore !== null) 
+                                ? 'bg-purple-900/60 text-purple-200 border border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]' 
+                                : 'bg-purple-900/40 text-purple-300 border border-purple-500/50'
+                        ]" 
+                        :title="(pendingScore !== null) ? 'Modified Score' : 'Rescored Value'"
+                        data-testid="rescored-value-badge"
+                    >
+                        {{ currentDisplayScore }}
                     </span>
                     <span v-else class="font-bold">
-                        {{ group.cvss || group.cvss_score || 'N/A' }}
+                        {{ currentDisplayScore }}
                     </span>
-                    <span v-if="group.rescored_cvss" class="text-gray-600 line-through text-[10px]" title="Original Score">
+                    <span v-if="isRescoredOrModified" class="text-gray-600 line-through text-[10px]" title="Original Score">
                         {{ group.cvss || group.cvss_score }}
                     </span>
                     <span class="text-[10px] text-gray-500 font-medium uppercase">CVSS</span>
@@ -868,11 +988,11 @@ const assessedTeams = computed(() => {
                                     <span>{{ inst.analysis_state }}</span>
                                 </div>
                                 <div v-if="inst.analysis_details" class="flex flex-col gap-2 mt-2 mb-2">
-                                    <div v-for="(block, team) in parseAssessmentBlocks(inst.analysis_details)" :key="team" class="bg-gray-800/80 rounded border border-gray-700/50 p-3">
+                                    <div v-for="block in parseAssessmentBlocks(inst.analysis_details)" :key="block.team" class="bg-gray-800/80 rounded border border-gray-700/50 p-3">
                                         <div class="flex justify-between items-start mb-2">
                                             <div class="flex flex-wrap items-center gap-2">
                                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-900/40 text-blue-300 border border-blue-800/50">
-                                                    {{ team === 'General' ? 'Global Policy' : team }}
+                                                    {{ block.team === 'General' ? 'Global Policy' : block.team }}
                                                 </span>
                                                 <span v-if="block.state && block.state !== 'NOT_SET'" class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50">
                                                     State: <span :class="block.state === 'NOT_AFFECTED' ? 'text-green-400' : (block.state === 'EXPLOITABLE' ? 'text-red-400' : 'text-gray-200')">{{ block.state }}</span>
@@ -927,15 +1047,26 @@ const assessedTeams = computed(() => {
                         <div class="mb-2">
                             <label class="block text-xs font-semibold text-gray-500 mb-1 flex justify-between">
                                 <span>Vector String</span>
-                                <button @click="showCalculatorModal = true" class="text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer">
-                                    <ExternalLink :size="10" /> Visual Calculator
-                                </button>
+                                <div class="flex items-center gap-2">
+                                    <button 
+                                        @click="resetVector" 
+                                        class="text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                                        title="Reset to Original"
+                                    >
+                                        <RotateCcw :size="10" />
+                                    </button>
+                                    <button @click="showCalculatorModal = true" class="text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer">
+                                        <ExternalLink :size="10" /> Visual Calculator
+                                    </button>
+                                </div>
                             </label>
                             <input 
                                 v-model="pendingVector"
                                 type="text" 
+                                :readonly="!canEditBase"
                                 placeholder="CVSS:4.0/AV:N/..."
-                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono"
+                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono disabled:opacity-50"
+                                :class="{ 'cursor-not-allowed text-gray-400': !canEditBase }"
                             />
                             <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 text-[9px] text-gray-500/60 flex gap-1.5 truncate">
                                 <span class="uppercase font-bold shrink-0">Original:</span>
@@ -949,10 +1080,12 @@ const assessedTeams = computed(() => {
                                 <input 
                                     v-model="pendingScore"
                                     type="number" 
+                                    :readonly="!canEditBase"
                                     step="0.1" 
                                     min="0" 
                                     max="10" 
-                                    class="w-16 p-1.5 text-right rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-sm font-bold text-yellow-400"
+                                    class="w-16 p-1.5 text-right rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-sm font-bold text-yellow-400 disabled:opacity-50"
+                                    :class="{ 'cursor-not-allowed text-gray-500': !canEditBase }"
                                 />
                             </div>
                         </div>
@@ -1038,6 +1171,16 @@ const assessedTeams = computed(() => {
                         <label :for="`suppress-${group.id}`" class="text-sm">Suppress this vulnerability</label>
                     </div>
                     
+                    <div v-if="isReviewer && !selectedTeam && Object.keys(mergedAssessmentData.blocks).filter(t => t !== 'General').length > 0" class="pt-2 border-t border-gray-700 mt-2">
+                        <button 
+                            @click="applyWorstTeamAssessment"
+                            class="w-full mb-2 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-500 border border-yellow-600/50 font-bold py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                            <AlertTriangle :size="14" />
+                            Apply Worst Team Assessment
+                        </button>
+                    </div>
+
                     <button 
                         @click="() => handleUpdate(false)"
                         :disabled="updating || loadingDetails || totalTargeted === 0"

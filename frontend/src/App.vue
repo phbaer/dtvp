@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted, provide } from 'vue'
+import { ref, onMounted, provide, computed } from 'vue'
 import { getVersion, getUserInfo, logout } from './lib/api'
 
 const version = ref('')
 const build = ref('')
 const user = ref({ username: '', role: '' })
+const realRole = ref('')
+const isAnalystView = ref(false)
 
-provide('user', user)
+provide('user', computed(() => ({
+    ...user.value,
+    role: isAnalystView.value ? 'ANALYST' : user.value.role
+})))
 
 onMounted(async () => {
     try {
@@ -21,12 +26,17 @@ onMounted(async () => {
         const u = await getUserInfo()
         user.value = { 
             username: u.username, 
-            role: u.role || 'ANALYST' // default fallback if logic.py logic fails or older backend
+            role: u.role || 'ANALYST' 
         }
+        realRole.value = u.role || 'ANALYST'
     } catch (e) {
         // Not logged in or error
     }
 })
+
+const toggleView = () => {
+    isAnalystView.value = !isAnalystView.value
+}
 </script>
 
 <template>
@@ -40,14 +50,33 @@ onMounted(async () => {
                     </h1>
                     <nav class="flex gap-4 text-sm font-medium">
                         <router-link to="/" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Dashboard</router-link>
-                        <router-link to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
+                        <router-link v-if="realRole === 'REVIEWER'" to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
                     </nav>
                 </div>
-                <div class="text-sm text-gray-400 hidden sm:flex items-center gap-4">
+                <div class="text-sm text-gray-400 hidden sm:flex items-center gap-6">
+                    <div v-if="realRole === 'REVIEWER'" class="flex items-center gap-2 mr-4 bg-gray-700/50 px-3 py-1.5 rounded-full border border-gray-600 shadow-inner">
+                        <span :class="['text-[10px] font-bold uppercase tracking-wider transition-colors duration-300', isAnalystView ? 'text-gray-400' : 'text-purple-400']">
+                            Reviewer
+                        </span>
+                        <button 
+                            @click="toggleView" 
+                            class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-gray-600"
+                            :class="isAnalystView ? 'bg-blue-600' : 'bg-purple-600'"
+                        >
+                            <span 
+                                class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                                :class="isAnalystView ? 'translate-x-4' : 'translate-x-0'"
+                            ></span>
+                        </button>
+                        <span :class="['text-[10px] font-bold uppercase tracking-wider transition-colors duration-300', isAnalystView ? 'text-blue-400' : 'text-gray-400']">
+                            Analyst
+                        </span>
+                    </div>
+
                     <div v-if="user.username" class="flex items-center gap-3">
                         <div class="flex flex-col items-end">
                             <span class="text-blue-300 font-medium leading-none">{{ user.username }}</span>
-                            <span class="text-gray-500 text-xs mt-1">({{ user.role }})</span>
+                            <span class="text-gray-500 text-xs mt-1">({{ isAnalystView ? 'ANALYST View' : user.role }})</span>
                         </div>
                         <button 
                             @click="logout"

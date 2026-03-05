@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { Project, GroupedVuln, AssessmentPayload } from '../types';
 import { getRuntimeConfig } from './env';
 
-const BASE_URL = getRuntimeConfig('DTVP_FRONTEND_URL', window.location.origin).replace(/\/$/, '');
+const BASE_URL = (getRuntimeConfig('DTVP_FRONTEND_URL', '') || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '');
 const CONTEXT_PATH = getRuntimeConfig('DTVP_CONTEXT_PATH', '/').replace(/\/$/, '');
 
 // Ensure CONTEXT_PATH starts with / if not empty
@@ -151,3 +151,21 @@ export const updateTeamMapping = async (mapping: Record<string, string>): Promis
     const res = await api.put('/settings/mapping', mapping);
     return res.data;
 };
+
+export const getRescoreRules = async (): Promise<any> => {
+    const res = await api.get('/settings/rescore-rules');
+    return res.data;
+};
+
+export const uploadRescoreRules = async (file: File): Promise<{ status: string; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post('/settings/rescore-rules', formData);
+    return res.data;
+};
+
+export const updateRescoreRules = async (rules: Record<string, any>): Promise<{ status: string; message: string }> => {
+    const res = await api.put('/settings/rescore-rules', rules);
+    return res.data;
+};
+

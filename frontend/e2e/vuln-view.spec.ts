@@ -110,6 +110,24 @@ test.describe('Vulnerability View and Rescoring', () => {
                 body: JSON.stringify(results),
             });
         });
+
+        // Mock Team Mapping
+        await page.route('**/api/team-mapping', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ 'lib-a': 'Security' }),
+            });
+        });
+
+        // Mock Rescore Rules
+        await page.route('**/api/rescore-rules', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ transitions: [] }),
+            });
+        });
     });
 
     test('should allow rescoring a vulnerability', async ({ page }) => {
@@ -169,11 +187,10 @@ test.describe('Vulnerability View and Rescoring', () => {
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
 
-        // Check for success alert or indicator that it closed
-        await expect(page.locator('text=A bad vulnerability description.')).not.toBeVisible();
+        // Check that card remains open and description is still visible
+        await expect(page.locator('text=A bad vulnerability description.')).toBeVisible();
 
         // Verify the new score is in the header
-        // We look for the span with title "Rescored Value"
-        await expect(page.locator('span[title="Rescored Value"]')).toBeVisible();
+        await expect(page.getByTestId('rescored-value-badge')).toBeVisible();
     });
 });

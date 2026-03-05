@@ -9,7 +9,9 @@ import * as api from '../../lib/api'
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
     startGroupVulnTask: vi.fn(),
-    getTaskStatus: vi.fn()
+    getTaskStatus: vi.fn(),
+    getTeamMapping: vi.fn(() => Promise.resolve({})),
+    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
 }))
 
 const router = createRouter({

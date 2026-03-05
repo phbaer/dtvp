@@ -40,7 +40,20 @@ def get_user_roles_path() -> str:
     return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
 
 
-def load_user_roles(path: str = None) -> Optional[Dict[str, str]]:
+def score_to_severity(score: float) -> str:
+    """Maps CVSS score to DT severity bands."""
+    if score >= 9.0:
+        return "CRITICAL"
+    if score >= 7.0:
+        return "HIGH"
+    if score >= 4.0:
+        return "MEDIUM"
+    if score > 0.0:
+        return "LOW"
+    return "INFO"
+
+
+def load_user_roles(path: str = None) -> Dict[str, str]:
     if path is None:
         path = get_user_roles_path()
 
@@ -51,6 +64,23 @@ def load_user_roles(path: str = None) -> Optional[Dict[str, str]]:
             return json.load(f)
     except Exception:
         return {}
+
+
+def get_rescore_rules_path() -> str:
+    return os.getenv("RESCORE_RULES_PATH", "data/rescore_rules.json")
+
+
+def load_rescore_rules(path: str = None) -> Optional[Dict[str, Any]]:
+    if path is None:
+        path = get_rescore_rules_path()
+
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def get_user_role(username: str, roles_map: Dict[str, str] = None) -> str:
@@ -473,6 +503,8 @@ def group_vulnerabilities(
                 curr_rescored = groups[canonical_id]["rescored_cvss"]
                 if curr_rescored is None or rescored_score > curr_rescored:
                     groups[canonical_id]["rescored_cvss"] = rescored_score
+                    # Also update group severity based on rescored score
+                    groups[canonical_id]["severity"] = score_to_severity(rescored_score)
                     # Also update vector if provided alongside the highest score
                     if rescored_vector:
                         groups[canonical_id]["rescored_vector"] = rescored_vector
@@ -541,7 +573,12 @@ def group_vulnerabilities(
     result.sort(
         key=lambda x: (
             severity_rank.get(x.get("severity"), 6),
-            -1 * (x.get("rescored_cvss") or x.get("cvss_score") or 0.0),
+            -1
+            * (
+                x.get("rescored_cvss")
+                if x.get("rescored_cvss") is not None
+                else (x.get("cvss_score") or 0.0)
+            ),
             x.get("id"),
         )
     )
@@ -551,16 +588,16 @@ def group_vulnerabilities(
     return result
 
 
-def _parse_assessment_blocks(details: str) -> Tuple[str, Dict[str, Dict[str, Any]]]:
+def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
     """
-    Parses assessment details string into shared text and a dictionary of team blocks.
-    Returns: (shared_text, blocks_dict)
-    blocks_dict: {team_name: {state, user, reviewer, rescored, vector, details}}
+    Parses assessment details string into shared text and a list of team blocks.
+    Returns: (shared_text, blocks_list)
+    Preserves entry order.
     """
     if not details:
-        return "", {}
+        return "", []
 
-    blocks = {}
+    blocks = []
 
     # Split into potential blocks using the header prefix
     raw_blocks = re.split(r"---(?=\s*\[Team:)", details)
@@ -574,6 +611,19 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, Dict[str, Dict[str, Any
 
         header = rb[:header_end]
         content = rb[header_end + 3 :].strip()
+
+        # Clean metadata from content to prevent leakage
+        content = re.sub(
+            r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]",
+            "",
+            content,
+        )
+        content = re.sub(
+            r"\[Status: Pending Review\]", "", content, flags=re.IGNORECASE
+        )
+        content = re.sub(r"\bAssessed\s*--\s*\S+", "", content)
+        content = re.sub(r"--\s*\S+\s*$", "", content, flags=re.MULTILINE)
+        content = content.strip()
 
         # Robust Parsing: Find all tags
         parsed_tags = {}
@@ -591,14 +641,17 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, Dict[str, Dict[str, Any
                 except ValueError:
                     pass
 
-            blocks[t_name] = {
-                "state": parsed_tags.get("State", "NOT_SET"),
-                "user": parsed_tags.get("Assessed By", "unknown"),
-                "reviewer": parsed_tags.get("Reviewed By"),
-                "rescored": rescored_val,
-                "vector": parsed_tags.get("Rescored Vector"),
-                "details": content,
-            }
+            blocks.append(
+                {
+                    "team": t_name,
+                    "state": parsed_tags.get("State", "NOT_SET"),
+                    "user": parsed_tags.get("Assessed By", "unknown"),
+                    "reviewer": parsed_tags.get("Reviewed By"),
+                    "rescored": rescored_val,
+                    "vector": parsed_tags.get("Rescored Vector"),
+                    "details": content,
+                }
+            )
 
     return shared_text, blocks
 
@@ -612,150 +665,170 @@ def process_assessment_details(
     existing_details: str = "",
 ) -> Tuple[str, str]:
     """
-    Parses the assessment details to enforce a SINGLE assessment block.
-    Any existing multi-block structure is collapsed into this single block.
+    Parses and merges assessment details, preserving multi-team blocks.
     """
     role = role.upper() if role else "ANALYST"
-
-    # 1. Determine Target Team
     target_team = team if team else "General"
 
-    # 2. Extract Metadata from Existing Details (to preserve Assessor if Reviewing)
-    # We parse existing just to find "Assessed By" if we are a Reviewer.
-    existing_assessor = "unknown"
+    # 1. Parse Existing Blocks
+    shared_text, blocks_list = _parse_assessment_blocks(existing_details)
 
-    if existing_details:
-        # Simple regex to find the FIRST Assessed By (assuming single block or taking first of many)
-        match_user = re.search(r"\[Assessed By:\s*([^\]]+)\]", existing_details)
-        if match_user:
-            existing_assessor = match_user.group(1).strip()
-
-    # 3. Clean New Details (The Content)
-    # The UI might send back the full text including headers. We want to strip ALL headers.
-    # We also want to extract Rescored tags from the body if they are there.
-
-    content = new_details
-
-    # Extract Rescored if Reviewer (otherwise they are null from above)
-    rescored_val = None
-    rescored_vector = None
+    # 2. Extract Metadata from New Content (if Reviewer)
+    new_rescored_val = None
+    new_rescored_vector = None
     if role == "REVIEWER":
-        match_score = RE_SCORE.search(content)
+        match_score = RE_SCORE.search(new_details)
         if match_score:
             try:
-                rescored_val = float(match_score.group(1))
+                new_rescored_val = float(match_score.group(1))
             except ValueError:
                 pass
 
-        match_vector = RE_VECTOR.search(content)
+        match_vector = RE_VECTOR.search(new_details) or RE_ANY_VECTOR.search(
+            new_details
+        )
         if match_vector:
-            rescored_vector = match_vector.group(1).strip()
-        else:
-            match_any = RE_ANY_VECTOR.search(content)
-            if match_any:
-                rescored_vector = match_any.group(1).strip()
+            new_rescored_vector = match_vector.group(1).strip()
 
-    # Remove Tags/Headers from Content to get clean text
-    # Remove all headers "--- ... ---"
-    content = re.sub(r"---.*?---", "", content, flags=re.DOTALL)
-
-    # Remove inline tags we might have extracted or want to move to header
-    content = re.sub(r"\[Rescored:\s*[\d\.]+\]", "", content)
-    content = re.sub(r"\[Rescored Vector:\s*[^\]]+\]", "", content)
-    content = re.sub(r"\[Assessed By:\s*[^\]]+\]", "", content)
-    content = re.sub(r"\[Reviewed By:\s*[^\]]+\]", "", content)
-    content = re.sub(r"\[Team:\s*[^\]]+\]", "", content)
-    content = re.sub(r"\[State:\s*[^\]]+\]", "", content)
+    # 3. Clean New Content (Strip all headers and tags)
+    content = re.sub(r"---.*?---", "", new_details, flags=re.DOTALL)
+    content = re.sub(
+        r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State):\s*[^\]]*\]",
+        "",
+        content,
+    )
     content = re.sub(r"\[Status: Pending Review\]", "", content, flags=re.IGNORECASE)
-
+    # Remove trailing metadata like "Assessed -- user" or "-- user"
+    content = re.sub(r"\bAssessed\s*--\s*\S+", "", content)
+    content = re.sub(r"--\s*\S+\s*$", "", content, flags=re.MULTILINE)
     content = content.strip()
 
-    # 4. Determine New Metadata
+    # 4. Handle Legacy text: If shared_text exists but no General block, move it
+    if shared_text and not any(b["team"] == "General" for b in blocks_list):
+        blocks_list.insert(
+            0,
+            {
+                "team": "General",
+                "state": "NOT_SET",
+                "user": "unknown",
+                "details": shared_text,
+                "rescored": None,
+                "vector": None,
+            },
+        )
+        shared_text = ""
+
+    # 5. Update Target Team Block
+    target_block = next((b for b in blocks_list if b["team"] == target_team), None)
+
+    # Logic for Reviewer vs Analyst
     final_user = user
     final_reviewer = None
-
     if role == "REVIEWER":
-        # Reviewer approves/modifies.
         final_reviewer = user
-        # Keep original assessor if valid
-        if existing_assessor and existing_assessor != "unknown":
-            final_user = existing_assessor
-        else:
-            # If no assessor recorded, Reviewer becomes the assessor
-            final_user = user
+        # Preserve original assessor if we are reviewing their work
+        final_user = (target_block.get("user") if target_block else None) or user
     else:
-        # Analyst
+        # Analyst update clears previous review
         final_user = user
-        # Review is cleared because content/state changed by analyst
         final_reviewer = None
 
-    # 5. Construct New Block
-    header_parts = [
-        f"[Team: {target_team}]",
-        f"[State: {state}]",
-        f"[Assessed By: {final_user}]",
-    ]
+    # Rescore Logic: Use new tags if provided, otherwise preserve existing per-team tags
+    res_val = (
+        new_rescored_val
+        if new_rescored_val is not None
+        else (target_block.get("rescored") if target_block else None)
+    )
+    res_vec = (
+        new_rescored_vector
+        if new_rescored_vector
+        else (target_block.get("vector") if target_block else None)
+    )
 
-    if final_reviewer:
-        header_parts.append(f"[Reviewed By: {final_reviewer}]")
+    if target_block:
+        target_block.update(
+            {
+                "state": state,
+                "user": final_user,
+                "reviewer": final_reviewer,
+                "rescored": res_val,
+                "vector": res_vec,
+                "details": content,
+            }
+        )
+    else:
+        blocks_list.append(
+            {
+                "team": target_team,
+                "state": state,
+                "user": final_user,
+                "reviewer": final_reviewer,
+                "rescored": res_val,
+                "vector": res_vec,
+                "details": content,
+            }
+        )
 
-    if rescored_val is not None:
-        header_parts.append(f"[Rescored: {rescored_val}]")
+    # 6. Reconstruct Final String
+    final_parts = []
+    if shared_text:
+        final_parts.append(shared_text)
 
-    if rescored_vector:
-        header_parts.append(f"[Rescored Vector: {rescored_vector}]")
+    for b in blocks_list:
+        # Skip empty blocks if they aren't the target and aren't set
+        if (
+            b["team"] != target_team
+            and b["state"] == "NOT_SET"
+            and not b.get("details")
+        ):
+            continue
 
-    header = "--- " + " ".join(header_parts) + " ---"
+        h_parts = [
+            f"[Team: {b['team']}]",
+            f"[State: {b['state']}]",
+            f"[Assessed By: {b['user']}]",
+        ]
+        if b.get("reviewer"):
+            h_parts.append(f"[Reviewed By: {b['reviewer']}]")
+        if b.get("rescored") is not None:
+            h_parts.append(f"[Rescored: {b['rescored']}]")
+        if b.get("vector"):
+            h_parts.append(f"[Rescored Vector: {b['vector']}]")
 
-    final_str = f"{header}\n{content}"
+        header = "--- " + " ".join(h_parts) + " ---"
+        final_parts.append(f"{header}\n{b.get('details') or ''}")
 
-    if role == "ANALYST":
+    final_str = "\n\n".join(final_parts).strip()
+
+    # Add Pending Status if updated by Analyst
+    if role == "ANALYST" and "[Status: Pending Review]" not in final_str:
         final_str += "\n\n[Status: Pending Review]"
 
-    return final_str, state
+    # 7. Aggregate State
+    agg_state = calculate_aggregated_state(final_str)
+
+    return final_str, agg_state
 
 
 def calculate_aggregated_state(details: str) -> str:
     """
-    Parses the assessment details string to calculate the aggregated state
-    based on the worst-case logic.
+    Parses and calculates aggregated state. General block has precedence if set.
     """
-    if not details:
+    _, blocks_list = _parse_assessment_blocks(details)
+
+    if not blocks_list:
         return "NOT_SET"
 
-    # Split into potential blocks using the header prefix
-    raw_blocks = re.split(r"---(?=\s*\[Team:)", details)
+    # Order of precedence:
+    # 1. Any block named 'General' (if set)
+    # 2. Worst state of all teams
 
-    states = []
+    general_block = next((b for b in blocks_list if b["team"] == "General"), None)
+    if general_block and general_block.get("state") != "NOT_SET":
+        return general_block["state"]
 
-    for rb in raw_blocks[1:]:
-        # Find the header ends with '---'
-        header_end = rb.find("---")
-        if header_end == -1:
-            continue
-
-        header = rb[:header_end]
-
-        match = re.search(r"\[State:\s*([^\]]+)\]", header)
-        if match:
-            states.append(match.group(1))
-
-    # Aggregate State (Global Precedence)
-    # Check if a General block exists in the states we found
-    # NOTE: The simple calculate_aggregated_state might need to be more aware of which state belongs to General.
-    # If the parsing is too complex here, we can just rely on process_assessment_details during updates.
-    # But for a quick fix, let's look for the General block explicitly if possible.
-
-    # Re-parse to find General explicitly
-    general_match = re.search(r"--- \[Team: General\] \[State: ([^\]]+)\]", details)
-    if general_match:
-        gen_state = general_match.group(1)
-        if gen_state != "NOT_SET":
-            return gen_state
-
+    states = [b["state"] for b in blocks_list if b["state"] != "NOT_SET"]
     if not states:
         return "NOT_SET"
 
-    # Fallback: Worst wins
-    aggregated_state = sorted(states, key=lambda s: STATE_PRIORITY.get(s, 5))[0]
-    return aggregated_state
+    return sorted(states, key=lambda s: STATE_PRIORITY.get(s, 10))[0]
