@@ -330,8 +330,7 @@ const updateFormFromGroup = () => {
          }
     }
     
-    const firstWithComment = allInstances.value.find(i => i.analysis_comments && i.analysis_comments.length > 0)
-    comment.value = firstWithComment?.analysis_comments?.[0]?.comment || ''
+    comment.value = ''
     
     const firstSuppressed = allInstances.value.find(i => i.is_suppressed)
     suppressed.value = firstSuppressed ? true : false
