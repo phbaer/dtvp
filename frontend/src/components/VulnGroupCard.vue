@@ -560,7 +560,6 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
              console.error('Update completed with errors:', errors)
              await showAlert('Update Partial', `Assessment updated with ${errors.length} errors. Check console for details.`)
         } else {
-             if (!force) await showAlert('Success', 'Assessment updated successfully')
              const success = results.find((r: any) => r.status === 'success')
                           if (success) {
                   const hasVectorChange = isReviewer.value ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;

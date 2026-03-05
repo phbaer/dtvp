@@ -142,11 +142,6 @@ describe('VulnGroupCard', () => {
         await confirmBtn?.trigger('click')
         await flushPromises()
 
-        // Success alert appears, click Close
-        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-        await closeBtn?.trigger('click')
-        await flushPromises()
-
         // Verify API call
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
@@ -282,11 +277,6 @@ describe('VulnGroupCard', () => {
             await confirmBtn?.trigger('click')
             await flushPromises()
 
-            // Success alert appears, click Close
-            const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-            await closeBtn?.trigger('click')
-            await flushPromises()
-
             expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
                 comment: 'Audit comment',
                 suppressed: true,
@@ -412,11 +402,6 @@ describe('VulnGroupCard', () => {
         await confirmBtn?.trigger('click')
         await flushPromises()
 
-        // Success alert appears, click Close
-        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-        await closeBtn?.trigger('click')
-        await flushPromises()
-
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
             justification: 'CODE_NOT_PRESENT',
@@ -480,11 +465,6 @@ describe('VulnGroupCard', () => {
         // Confirm in modal
         const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
         await confirmBtn?.trigger('click')
-        await flushPromises()
-
-        // Success alert appears, click Close
-        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-        await closeBtn?.trigger('click')
         await flushPromises()
 
         // Verify API call includes the team
