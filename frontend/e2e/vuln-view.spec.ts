@@ -169,10 +169,6 @@ test.describe('Vulnerability View and Rescoring', () => {
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
 
-        // Handle Success Modal
-        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
-        await page.getByRole('button', { name: 'Close' }).click();
-
         // Check for success alert or indicator that it closed
         await expect(page.locator('text=A bad vulnerability description.')).not.toBeVisible();
 

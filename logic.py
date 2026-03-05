@@ -394,17 +394,28 @@ def group_vulnerabilities(
             root = ds.find(raw_id.upper())
             canonical_id = root_to_canonical.get(root, raw_id.upper())
 
+            new_cvss_score = (
+                vuln.get("cvssV4")
+                or vuln.get("cvssV4BaseScore")
+                or vuln.get("cvssV3")
+                or vuln.get("cvssV3BaseScore")
+                or vuln.get("cvssV2")
+                or vuln.get("cvssV2BaseScore")
+            )
+            new_cvss_vector = (
+                vuln.get("cvssV4Vector")
+                or vuln.get("cvssV3Vector")
+                or vuln.get("cvssV2Vector")
+            )
+
             if canonical_id not in groups:
                 groups[canonical_id] = {
                     "id": canonical_id,
                     "title": vuln.get("title"),
                     "description": vuln.get("description"),
                     "severity": vuln.get("severity"),
-                    "cvss_score": vuln.get("cvssV3")
-                    or vuln.get("cvssV3BaseScore")
-                    or vuln.get("cvssV2")
-                    or vuln.get("cvssV2BaseScore"),
-                    "cvss_vector": vuln.get("cvssV3Vector") or vuln.get("cvssV2Vector"),
+                    "cvss_score": new_cvss_score,
+                    "cvss_vector": new_cvss_vector,
                     "rescored_cvss": None,
                     "rescored_vector": None,
                     "affected_versions": {},
@@ -412,7 +423,12 @@ def group_vulnerabilities(
                     "aliases": set(groups_by_root.get(root, [])) - {canonical_id},
                 }
             else:
-                pass
+                # Update base CVSS to maximum
+                curr_score = groups[canonical_id].get("cvss_score")
+                if new_cvss_score is not None:
+                    if curr_score is None or new_cvss_score > curr_score:
+                        groups[canonical_id]["cvss_score"] = new_cvss_score
+                        groups[canonical_id]["cvss_vector"] = new_cvss_vector
 
             # Prepare component info
             component = finding.get("component", {})
@@ -454,12 +470,14 @@ def group_vulnerabilities(
 
             # Set rescored score/vector if they were explicitly provided
             if rescored_score is not None:
-                if groups[canonical_id]["rescored_cvss"] is None:
+                curr_rescored = groups[canonical_id]["rescored_cvss"]
+                if curr_rescored is None or rescored_score > curr_rescored:
                     groups[canonical_id]["rescored_cvss"] = rescored_score
-
-            if rescored_vector:
-                if groups[canonical_id]["rescored_vector"] is None:
-                    groups[canonical_id]["rescored_vector"] = rescored_vector
+                    # Also update vector if provided alongside the highest score
+                    if rescored_vector:
+                        groups[canonical_id]["rescored_vector"] = rescored_vector
+            elif rescored_vector and groups[canonical_id]["rescored_vector"] is None:
+                groups[canonical_id]["rescored_vector"] = rescored_vector
 
             component_info = {
                 "project_uuid": proj_uuid,

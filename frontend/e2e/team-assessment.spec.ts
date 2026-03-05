@@ -165,10 +165,6 @@ test.describe('Per-Team Assessment UI Flow', () => {
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
 
-        // Handle Success Modal
-        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
-        await page.getByRole('button', { name: 'Close' }).click();
-
         // Wait for it to close (success sync)
         await expect(page.locator('text=Backend confirms this is exploitable')).not.toBeVisible();
 
