@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 import shutil
 import json
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from auth import router as auth_router, get_current_user, auth_settings
 from dt_client import get_client, DTClient, DTSettings
@@ -107,7 +107,9 @@ class TaskResponse(BaseModel):
     result: Optional[List[dict]] = None
 
 
-async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
+async def process_grouped_vulns_task(
+    task_id: str, name: str, cve: Optional[str], client: DTClient
+):
     try:
         tasks[task_id]["status"] = "running"
         tasks[task_id]["message"] = "Fetching projects..."
@@ -150,7 +152,7 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
             )
 
             # Fetch findings and full details
-            findings = await client.get_vulnerabilities(v["uuid"])
+            findings = await client.get_vulnerabilities(v["uuid"], cve=cve)
             full_vulns = await client.get_project_vulnerabilities(v["uuid"])
 
             # Fetch and PROCESS BOM immediately to save memory
@@ -209,6 +211,8 @@ async def process_grouped_vulns_task(task_id: str, name: str, client: DTClient):
 @api_router.post("/tasks/group-vulns")
 async def start_group_vulns_task(
     name: str,
+    request: Request,
+    cve: Optional[str] = None,
     # We DO NOT use Dependency Injection for the client here because it's tied to request scope.
     # We must instantiate a new client for the background task.
     user: str = Depends(get_current_user),
@@ -223,15 +227,21 @@ async def start_group_vulns_task(
         "result": None,
     }
 
+    # Extract credentials from the request to forward to the background task
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    cookies = dict(request.cookies)
+
     # Instantiate a fresh client for the background task
-    # We need to manually handle its lifecycle or let the task handle it
-    # But get_client is an async generator now.
-    # Let's import get_client and use it properly in the task wrapper.
     async def task_wrapper():
         # Manually invoke the client context
         settings = DTSettings()
-        async with DTClient(settings.api_url, settings.api_key) as client:
-            await process_grouped_vulns_task(task_id, name, client)
+        async with DTClient(
+            settings.api_url, api_key=settings.api_key, token=token, cookies=cookies
+        ) as client:
+            await process_grouped_vulns_task(task_id, name, cve, client)
 
     asyncio.create_task(task_wrapper())
 
@@ -510,7 +520,7 @@ async def upload_team_mapping(
 
 @api_router.put("/settings/mapping")
 async def update_team_mapping(
-    mapping: Dict[str, str],
+    mapping: Dict[str, Any],
     user: str = Depends(get_current_user),
 ):
     target_path = get_team_mapping_path()
@@ -646,6 +656,10 @@ if os.path.isdir("frontend/dist"):
 
             content = content.replace("${DTVP_CONTEXT_PATH}", context_path or "/")
             content = content.replace("${DTVP_FRONTEND_URL}", frontend_url)
+            content = content.replace(
+                "${DTVP_DEV_DISABLE_AUTH}",
+                "true" if auth_settings.DEV_DISABLE_AUTH else "false",
+            )
 
             # If we have a context path, we need to adjust absolute paths in index.html
             # so they point to the correct sub-path (e.g. /dtvp/assets/...)

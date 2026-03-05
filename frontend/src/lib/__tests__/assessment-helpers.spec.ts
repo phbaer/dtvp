@@ -37,6 +37,14 @@ Details A`;
             expect(blocks['General']?.justification).toBe('NOT_SET');
             expect(blocks['TeamA']).toBeDefined();
         });
+
+        it('should clean redundant metadata from details', () => {
+            const text = `--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] ---
+[Comment] [Team: TeamA] My actual rationale -- UserA`;
+            const blocks = parseAssessmentBlocks(text);
+            expect(blocks['TeamA']).toBeDefined();
+            expect(blocks['TeamA']?.details).toBe('My actual rationale');
+        });
     });
 
     describe('constructAssessmentDetails', () => {
@@ -79,7 +87,7 @@ Global Policy`;
             const result = mergeTeamAssessment(initial, 'TeamA', 'IN_TRIAGE', 'Fixing soon', 'UserA', 'CODE_NOT_PRESENT');
 
             expect(result.text).toContain('Global Policy');
-            expect(result.text).toContain('--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] [Justification: CODE_NOT_PRESENT] ---');
+            expect(result.text).toMatch(/---\s*\[Team:\s*TeamA\]\s*\[State:\s*IN_TRIAGE\]\s*\[Assessed By:\s*UserA\]\s*\[Date:\s*\d+\]\s*\[Justification:\s*CODE_NOT_PRESENT\]\s*---/);
             expect(result.aggregatedState).toBe('IN_TRIAGE'); // Fallback to TeamA
         });
 

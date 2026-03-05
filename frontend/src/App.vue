@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, provide } from 'vue'
-import { getVersion, getUserInfo } from './lib/api'
+import { getVersion, getUserInfo, logout } from './lib/api'
 
 const version = ref('')
 const build = ref('')
@@ -21,7 +21,7 @@ onMounted(async () => {
         const u = await getUserInfo()
         user.value = { 
             username: u.username, 
-            role: u.role || 'REVIEWER' // default fallback if logic.py logic fails or older backend
+            role: u.role || 'ANALYST' // default fallback if logic.py logic fails or older backend
         }
     } catch (e) {
         // Not logged in or error
@@ -43,9 +43,18 @@ onMounted(async () => {
                         <router-link to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
                     </nav>
                 </div>
-                <div class="text-sm text-gray-400 hidden sm:block flex flex-col items-end">
-                    <div v-if="user.username" class="text-blue-300 font-medium">
-                        {{ user.username }} <span class="text-gray-500 text-xs">({{ user.role }})</span>
+                <div class="text-sm text-gray-400 hidden sm:flex items-center gap-4">
+                    <div v-if="user.username" class="flex items-center gap-3">
+                        <div class="flex flex-col items-end">
+                            <span class="text-blue-300 font-medium leading-none">{{ user.username }}</span>
+                            <span class="text-gray-500 text-xs mt-1">({{ user.role }})</span>
+                        </div>
+                        <button 
+                            @click="logout"
+                            class="bg-gray-700 hover:bg-gray-600 text-white text-[10px] px-2 py-1 rounded transition-colors cursor-pointer border border-gray-600"
+                        >
+                            Logout
+                        </button>
                     </div>
                     <div v-else>Dependency Track Vulnerability Processor</div>
                 </div>

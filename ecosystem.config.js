@@ -18,7 +18,11 @@ module.exports = {
             env: {
                 DTVP_DT_API_URL: "http://127.0.0.1:8081",
                 DTVP_DT_API_KEY: "mock_key",
-                DTVP_DEV_DISABLE_AUTH: "true",
+                DTVP_OIDC_AUTHORITY: "http://127.0.0.1:8081",
+                DTVP_OIDC_CLIENT_ID: "mock_id",
+                DTVP_OIDC_CLIENT_SECRET: "mock_secret",
+                DTVP_OIDC_REDIRECT_URI: "http://localhost:5173/auth/callback",
+                DTVP_FRONTEND_URL: "http://localhost:5173",
                 PYTHONUNBUFFERED: "1"
             }
         },

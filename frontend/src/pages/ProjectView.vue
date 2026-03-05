@@ -31,6 +31,8 @@ const fetchVulns = async () => {
     let name = route.params.name as string
     if (!name) return
     
+    let cve = route.query.cve as string | undefined
+    
     const isAllProjects = name === '_all_'
     const apiName = isAllProjects ? '' : name
 
@@ -40,7 +42,7 @@ const fetchVulns = async () => {
     loadingProgress.value = 0
 
     try {
-        const data = await getGroupedVulns(apiName, (msg, progress) => {
+        const data = await getGroupedVulns(apiName, cve, (msg, progress) => {
             loadingMessage.value = msg
             loadingProgress.value = progress
         })
@@ -233,7 +235,7 @@ const filteredGroups = computed(() => {
 })
 
 
-watch(() => route.params.name, fetchVulns, { immediate: true })
+watch(() => [route.params.name, route.query.cve], fetchVulns, { immediate: true })
 </script>
 
 <template>

@@ -102,8 +102,8 @@ test.describe('Team Analysis Persistence', () => {
         await page.goto('/project/PersistenceTest');
 
         // Uncheck "Hide Assessed" and "Hide Mixed" to ensure visibility
-        await page.locator('label', { hasText: 'Hide Assessed' }).uncheck();
-        await page.locator('label', { hasText: 'Hide Mixed' }).uncheck();
+        await page.locator('label', { hasText: 'Hide Assessed' }).locator('input').uncheck({ force: true });
+        await page.locator('label', { hasText: 'Hide Mixed' }).locator('input').uncheck({ force: true });
 
         // Expand card
         const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: 'CVE-PERSISTENCE-TEST' }).first();
@@ -111,12 +111,12 @@ test.describe('Team Analysis Persistence', () => {
         await cardHeader.click();
 
         // Select Team
-        const teamSelector = page.locator('label:has-text("Team assessment (Marker)")').locator('xpath=following-sibling::select').first();
+        const teamSelector = cardHeader.locator('select').first();
         await expect(teamSelector).toBeVisible();
         await teamSelector.selectOption('Frontend');
 
         // Enter State and Details
-        const stateSelect = page.locator('label:has-text("Team Analysis State")').locator('xpath=following-sibling::select').first();
+        const stateSelect = cardHeader.locator('select').nth(1);
         await stateSelect.selectOption('IN_TRIAGE');
 
         const detailsText = 'These are persistent details.';

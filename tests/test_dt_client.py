@@ -190,7 +190,7 @@ def test_settings_properties():
     s = DTSettings(
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL="http://fallback",
-        DTVP_DT_API_KEY="",
+        DTVP_DT_API_KEY="change_me",
         DEPENDENCY_TRACK_API_KEY="key",
     )
 
@@ -200,7 +200,7 @@ def test_settings_properties():
     s2 = DTSettings(
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL=None,
-        DTVP_DT_API_KEY="",
+        DTVP_DT_API_KEY="change_me",
         DEPENDENCY_TRACK_API_KEY=None,
     )
     assert s2.api_url == "http://localhost:8081"
@@ -209,27 +209,47 @@ def test_settings_properties():
 
 @pytest.mark.asyncio
 async def test_get_client():
+    from unittest.mock import MagicMock
+
     with patch("dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
-        # If accessing the property returns a mock, that's fine, we just set the string conversion or use it as is?
-        # But DTClient constructor expects string for rstrip.
-        # So we must make sure api_url returns a string.
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
 
-        async for c in get_client():
+        mock_request = MagicMock()
+        mock_request.headers = {}
+        mock_request.cookies = {}
+
+        async for c in get_client(mock_request):
             assert c.base_url == "http://mock"
             assert c.headers["X-Api-Key"] == "mock_key"
+            break
+
+
+@pytest.mark.asyncio
+async def test_get_client_forwarding():
+    from unittest.mock import MagicMock
+
+    with patch("dt_client.DTSettings") as mock_settings_cls:
+        mock_instance = mock_settings_cls.return_value
+        mock_instance.api_url = "http://mock"
+        mock_instance.api_key = "mock_key"
+
+        mock_request = MagicMock()
+        mock_request.headers = {"Authorization": "Bearer test_token"}
+        mock_request.cookies = {"test_cookie": "test_val"}
+
+        async for c in get_client(mock_request):
+            assert c.headers["Authorization"] == "Bearer test_token"
+            # Verify cookies are passed to the httpx client
+            assert c.client.cookies["test_cookie"] == "test_val"
             break
 
 
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_bom_error():
-    settings = DTSettings(
-        api_url="http://dependency-track",
-        api_key="test_key",
-    )
+    settings = DTSettings()
     # DTSettings determines URL.
     # If using DTSettings constructor, we set api_url explicitly.
     # However, DTClient logic might modify it or environment variables might interfere?

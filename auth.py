@@ -1,4 +1,5 @@
 from typing import Optional
+import uuid
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from fastapi.responses import RedirectResponse
 from pydantic import Field
@@ -9,9 +10,11 @@ from logic import get_user_role
 
 
 class AuthSettings(BaseSettings):
-    OIDC_CLIENT_ID: str = Field(alias="DTVP_OIDC_CLIENT_ID", default=None)
-    OIDC_CLIENT_SECRET: str = Field(alias="DTVP_OIDC_CLIENT_SECRET", default=None)
-    OIDC_AUTHORITY: str = Field(alias="DTVP_OIDC_AUTHORITY", default=None)
+    OIDC_CLIENT_ID: Optional[str] = Field(alias="DTVP_OIDC_CLIENT_ID", default=None)
+    OIDC_CLIENT_SECRET: Optional[str] = Field(
+        alias="DTVP_OIDC_CLIENT_SECRET", default=None
+    )
+    OIDC_AUTHORITY: Optional[str] = Field(alias="DTVP_OIDC_AUTHORITY", default=None)
     OIDC_REDIRECT_URI: Optional[str] = Field(
         alias="DTVP_OIDC_REDIRECT_URI", default=None
     )
@@ -35,15 +38,18 @@ class AuthSettings(BaseSettings):
 
     @property
     def authority(self) -> str:
+        # Priority: DTVP_OIDC_AUTHORITY > ISSUER_URL > default None
         return self.OIDC_AUTHORITY or self.ISSUER_URL or ""
 
     @property
     def client_id(self) -> str:
+        # Priority: DTVP_OIDC_CLIENT_ID > CLIENT_ID > default None
         return self.OIDC_CLIENT_ID or self.CLIENT_ID or ""
 
     @property
     def client_secret(self) -> str:
-        return self.OIDC_CLIENT_SECRET or self.CLIENT_SECRET or ""
+        # Priority: DTVP_OIDC_CLIENT_SECRET > OIDC_CLIENT_SECRET (alias) > default None
+        return self.OIDC_CLIENT_SECRET or ""
 
     @property
     def redirect_uri(self) -> str:
@@ -52,7 +58,7 @@ class AuthSettings(BaseSettings):
 
         base = self.FRONTEND_URL.rstrip("/")
         path = self.CONTEXT_PATH
-        if not path.startswith("/"):
+        if path and not path.startswith("/"):
             path = "/" + path
         path = path.rstrip("/")
 
@@ -84,17 +90,7 @@ async def get_oidc_config():
 
 
 @router.get("/login")
-async def login():
-    if auth_settings.DEV_DISABLE_AUTH:
-        # If auth disabled, redirect to main page with a dummy session if needed,
-        # or just redirect since get_current_user will pass anyway.
-        # But get_current_user checks for header/cookie? No, we'll bypass it.
-        base = auth_settings.FRONTEND_URL.rstrip("/")
-        path = auth_settings.CONTEXT_PATH
-        if not path.startswith("/"):
-            path = "/" + path
-        return RedirectResponse(f"{base}{path}")
-
+async def login(response: Response = None):
     config = await get_oidc_config()
     auth_endpoint = config["authorization_endpoint"]
     return RedirectResponse(
@@ -102,6 +98,7 @@ async def login():
         f"client_id={auth_settings.client_id}&"
         f"response_type=code&"
         f"redirect_uri={auth_settings.redirect_uri}&"
+        f"state={uuid.uuid4() if 'uuid' in globals() else 'state'}&"
         f"scope=openid profile email"
     )
 
@@ -160,22 +157,58 @@ async def callback(code: str, response: Response):
         return response
 
 
-def get_current_user(request: Request):
+@router.get("/logout")
+async def logout(response: Response):
+    base = auth_settings.FRONTEND_URL.rstrip("/")
+    path = auth_settings.CONTEXT_PATH.rstrip("/")
+    if path and not path.startswith("/"):
+        path = "/" + path
+
+    # Ensure exactly one slash between base/path and login
+    redirect_path = "/login"
+    target = f"{base}{path}{redirect_path}"
+
+    response = RedirectResponse(url=target)
+    response.delete_cookie(key="session_token")
+    return response
+
+
+async def get_current_user(request: Request):
     if auth_settings.DEV_DISABLE_AUTH:
         return "devuser"
 
     token = request.cookies.get("session_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = jwt.decode(
-            token, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"]
-        )
-        return payload.get("sub")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid session")
+    if token:
+        try:
+            payload = jwt.decode(
+                token, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"]
+            )
+            return payload.get("sub")
+        except Exception:
+            pass
+
+    # Try Auto-Login via Dependency-Track session
+    # We only try this if there are cookies or an Authorization header in the request
+    if request.cookies or request.headers.get("Authorization"):
+        try:
+            from dt_client import get_client
+
+            async for client in get_client(request):
+                # If the client only has the static API key, we don't want to use it for identity
+                # because it would identify everyone as the automation user.
+                # However, if it has a token or cookies, we try to use it.
+                if client.headers.get("Authorization") or client.client.cookies:
+                    profile = await client.get_current_user_profile()
+                    username = (
+                        profile.get("username") or profile.get("email") or "dt_user"
+                    )
+                    return username
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 @router.get("/me")
-def get_user_info(user: str = Depends(get_current_user)):
+async def get_user_info(user: str = Depends(get_current_user)):
     return {"username": user, "role": get_user_role(user)}

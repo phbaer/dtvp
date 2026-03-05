@@ -9,7 +9,7 @@ test.describe('Vulnerability View and Rescoring', () => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
-                body: JSON.stringify({ username: 'testuser' }),
+                body: JSON.stringify({ username: 'testuser', role: 'REVIEWER' }),
             });
         });
 
@@ -139,8 +139,8 @@ test.describe('Vulnerability View and Rescoring', () => {
         await expect(page.locator('text=Team Assessment: Security')).toBeVisible({ timeout: 10000 });
 
         // Verify rescoring fields are visible
-        await expect(page.locator('input[placeholder^="CVSS"]')).toBeVisible();
-        await expect(page.locator('input[type="number"]')).toBeVisible();
+        await expect(cardHeader.locator('input[placeholder^="CVSS"]')).toBeVisible({ timeout: 10000 });
+        await expect(cardHeader.locator('input[type="number"]')).toBeVisible({ timeout: 10000 });
 
         // Change the vector manually
         const vectorInput = page.locator('input[placeholder^="CVSS"]');
