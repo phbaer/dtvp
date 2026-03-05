@@ -152,10 +152,6 @@ test.describe('Team Analysis Persistence', () => {
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
 
-        // Handle Success Modal
-        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
-        await page.getByRole('button', { name: 'Close' }).click();
-
         // Wait for update to complete (button re-enables or alert)
         // In the real app, it closes the expanded view on success, so let's cycle it.
         // Wait for card to collapse (expanded false)

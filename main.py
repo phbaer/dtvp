@@ -175,6 +175,8 @@ async def process_grouped_vulns_task(
                 full_vuln = vuln_map.get(vuln_id)
                 if full_vuln:
                     for key in [
+                        "cvssV4Vector",
+                        "cvssV4BaseScore",
                         "cvssV3Vector",
                         "cvssV2Vector",
                         "cvssV3BaseScore",
