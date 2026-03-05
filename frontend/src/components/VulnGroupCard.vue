@@ -351,10 +351,16 @@ watch(expanded, (isOpen) => {
         refreshDetails()
     }
 })
-
-
-
-
+watch(state, (newState, oldState) => {
+    // Only auto-rescore if we're changing states via user interaction
+    // We check `loadingDetails` to avoid rescoring 0 during the initial data load
+    if (!loadingDetails.value && !updating.value && newState !== oldState && isReviewer.value) {
+        if (newState === 'NOT_AFFECTED' || newState === 'FALSE_POSITIVE') {
+            isManualBaseMode.value = true
+            resetToDefault(activeVersion.value)
+        }
+    }
+})
 
 const refreshDetails = async () => {
     loadingDetails.value = true
@@ -496,7 +502,9 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         
         // Prepare rescored tags if any (only for Reviewers)
         let rescoredTags: string[] | undefined = undefined
-        if (isReviewer.value) {
+        const canRescore = isReviewer.value;
+        
+        if (canRescore) {
             // Check if touched in this session
             const touched = pendingVector.value !== initialVector.value || pendingScore.value !== initialScore.value;
 
@@ -562,11 +570,11 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         } else {
              const success = results.find((r: any) => r.status === 'success')
                           if (success) {
-                  const hasVectorChange = isReviewer.value ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
+                  const hasVectorChange = canRescore ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
                   
                   const data = {
-                      rescored_cvss: hasVectorChange ? (isReviewer.value ? pendingScore.value : props.group.rescored_cvss) : null,
-                      rescored_vector: hasVectorChange ? (isReviewer.value ? pendingVector.value : props.group.rescored_vector) : null,
+                      rescored_cvss: hasVectorChange ? (canRescore ? pendingScore.value : props.group.rescored_cvss) : null,
+                      rescored_vector: hasVectorChange ? (canRescore ? pendingVector.value : props.group.rescored_vector) : null,
                       analysis_state: success.new_state,
                       analysis_details: success.new_details,
                       is_suppressed: suppressed.value

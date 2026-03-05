@@ -137,7 +137,8 @@ async def callback(code: str, response: Response):
                 or claims.get("email")
                 or "user"
             )
-        except Exception:
+        except Exception as e:
+            print(f"Error parsing token: {e}")
             username = "user"
 
         # Create a session cookie
