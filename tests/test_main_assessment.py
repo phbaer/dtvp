@@ -93,3 +93,35 @@ def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
             in kwargs["details"]
         )
         assert "[Status: Pending Review]" in kwargs["details"]
+
+
+def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
+    client = TestClient(app)
+
+    # Analyst tries to inject rescoring tags in details
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "NOT_AFFECTED",
+        "details": "Analyst details [Rescored: 9.9] [Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]",
+    }
+
+    # Mock get_user_role to return ANALYST
+    with patch("main.get_user_role", return_value="ANALYST"):
+        resp = client.post("/api/assessment", json=payload)
+        assert resp.status_code == 200
+
+        mock_client.update_analysis.assert_called_once()
+        _, kwargs = mock_client.update_analysis.call_args
+
+        # Verify rescoring tags are STRIPPED or ignored by the backend
+        assert "[Rescored: 9.9]" not in kwargs["details"]
+        assert "[Rescored Vector: CVSS:4.0" not in kwargs["details"]
+        # Ensure it's still marked as pending
+        assert "[Status: Pending Review]" in kwargs["details"]

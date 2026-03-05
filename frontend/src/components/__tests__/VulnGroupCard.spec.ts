@@ -150,7 +150,7 @@ describe('VulnGroupCard', () => {
         // Verify API call
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
-            details: expect.stringContaining('--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: tester] [Justification: NOT_SET] ---\n\nFalse positive'),
+            details: expect.stringMatching(/---\s*\[Team:\s*Security\]\s*\[State:\s*NOT_AFFECTED\]\s*\[Assessed By:\s*tester\]\s*\[Date:\s*\d+\]\s*\[Justification:\s*NOT_SET\]\s*---\n\nFalse positive/),
             team: 'Security'
         }))
 
@@ -500,7 +500,7 @@ describe('VulnGroupCard', () => {
             // @ts-ignore - TS2532: Object is possibly 'undefined' in vue-tsc/build env
             expect(emittedAssessment[0][0]).toMatchObject({
                 analysis_state: 'EXPLOITABLE',
-                analysis_details: expect.stringContaining('[Team: Security] [State: EXPLOITABLE] [Assessed By: tester] [Justification: NOT_SET]')
+                analysis_details: expect.stringMatching(/---\s*\[Team:\s*Security\]\s*\[State:\s*EXPLOITABLE\]\s*\[Assessed By:\s*tester\]\s*\[Date:\s*\d+\]\s*\[Justification:\s*NOT_SET\]\s*---/)
             })
         }
     })

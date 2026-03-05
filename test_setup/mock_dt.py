@@ -1,9 +1,21 @@
-import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
+import uvicorn
+import time
 
 app = FastAPI()
+
+
+def check_auth(request: Request):
+    api_key = request.headers.get("X-Api-Key")
+    auth_header = request.headers.get("Authorization")
+    # In a real D-T, any of these would work depending on the endpoint/session
+    if not api_key and not auth_header:
+        raise HTTPException(
+            status_code=401, detail="X-Api-Key or Authorization header required"
+        )
 
 
 # Data Models
@@ -137,8 +149,16 @@ mock_vulnerabilities = {
 # Shared map for analysis state
 mock_analysis = {
     f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_UUID_1}": {
-        "analysisState": "NOT_SET",
+        "analysisState": "IN_TRIAGE",
         "isSuppressed": False,
+        "analysisDetails": (
+            "--- [Team: General] [State: NOT_SET] [Assessed By: system] [Date: 1709550000000] ---\n"
+            "Global policy: Log4j usage should be reviewed for all public-facing services.\n\n"
+            "--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: inv-analyst] [Date: 1710000000000] ---\n"
+            "Confirmed exploitable in inventory management service due to permissive JNDI.\n\n"
+            "--- [Team: PaymentTeam] [State: NOT_AFFECTED] [Assessed By: pay-dev] [Date: 1710000060000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\n"
+            "Payment processing logic uses a custom wrapper that strips sensitive JNDI lookups."
+        ),
     },
     f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_UUID_2}": {
         "analysisState": "IN_TRIAGE",
@@ -163,7 +183,8 @@ for p in mock_projects:
 
 
 @app.get("/api/v1/project")
-def get_projects(name: Optional[str] = None):
+def get_projects(request: Request, name: Optional[str] = None):
+    check_auth(request)
     # D-T API paginates, here we return all matches
     if name:
         return [p for p in mock_projects if name.lower() in p.name.lower()]
@@ -288,48 +309,167 @@ def get_vulns(project_uuid: str):
 def get_bom(project_uuid: str):
     project = next((p for p in mock_projects if p.uuid == project_uuid), None)
 
+    # Define intermediate components for trace
+    # App -> Intermediate Lib A -> Intermediate Lib B -> log4j-core
+    # We will only add this structure for the main "Vulnerable Project" (PROJECT_UUID)
+    # properly.
+
+    components = []
+    dependencies = []
+
+    # root component (The Project itself)
+    metadata_component = {
+        "bom-ref": project_uuid,  # Usually the project UUID is the root ref
+        "name": project.name if project else "Unknown",
+        "version": project.version if project else "0.0.0",
+        "type": "application",
+        "uuid": project_uuid,
+    }
+
+    # Internal libraries
+    lib_a_uuid = "11111111-1111-1111-1111-111111111111"
+    lib_b_uuid = "22222222-2222-2222-2222-222222222222"
+    lib_c_uuid = "33333333-3333-3333-3333-333333333333"
+
+    comp_lib_a = {
+        "type": "library",
+        "name": "internal-lib-a",
+        "version": "1.0.0",
+        "bom-ref": lib_a_uuid,
+        "uuid": lib_a_uuid,
+    }
+
+    comp_lib_b = {
+        "type": "library",
+        "name": "internal-lib-b",
+        "version": "1.2.3",
+        "bom-ref": lib_b_uuid,
+        "uuid": lib_b_uuid,
+    }
+
+    comp_lib_c = {
+        "type": "library",
+        "name": "internal-lib-c",
+        "version": "2.0.0",
+        "bom-ref": lib_c_uuid,
+        "uuid": lib_c_uuid,
+    }
+
+    # The Vulnerable Component (log4j-core)
+    # defined globally as COMPONENT_UUID
+    comp_log4j = {
+        "type": "library",
+        "name": "log4j-core",
+        "version": "2.14.0",
+        "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+        "bom-ref": COMPONENT_UUID,
+        "uuid": COMPONENT_UUID,
+    }
+
+    comp_jackson = {
+        "type": "library",
+        "name": "jackson-databind",
+        "version": "2.9.8",
+        "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+        "bom-ref": JACKSON_UUID,
+        "uuid": JACKSON_UUID,
+    }
+
+    comp_netty = {
+        "type": "library",
+        "name": "netty-common",
+        "version": "4.1.42.Final",
+        "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
+        "bom-ref": NETTY_UUID,
+        "uuid": NETTY_UUID,
+    }
+
+    comp_team_test = {
+        "type": "library",
+        "name": "team-test-lib",
+        "version": "1.0.0",
+        "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
+        "bom-ref": TEAM_TEST_LIB_UUID,
+        "uuid": TEAM_TEST_LIB_UUID,
+    }
+
+    components = [
+        comp_lib_a,
+        comp_lib_b,
+        comp_lib_c,
+        comp_log4j,
+        comp_jackson,
+        comp_netty,
+        comp_team_test,
+    ]
+
+    # Dependencies (The Chain)
+    # Root -> Lib A, Lib C, Jackson, Netty, Team Test Lib
+    dep_root = {
+        "ref": project_uuid,
+        "dependsOn": [
+            lib_a_uuid,
+            lib_c_uuid,
+            JACKSON_UUID,
+            NETTY_UUID,
+            TEAM_TEST_LIB_UUID,
+        ],
+    }
+    # Lib A -> Lib B
+    dep_a = {
+        "ref": lib_a_uuid,
+        "dependsOn": [lib_b_uuid],
+    }
+    # Lib B -> log4j
+    dep_b = {
+        "ref": lib_b_uuid,
+        "dependsOn": [COMPONENT_UUID],
+    }
+    # Lib C -> log4j
+    dep_c = {
+        "ref": lib_c_uuid,
+        "dependsOn": [COMPONENT_UUID],
+    }
+    # log4j -> []
+    dep_log4j = {
+        "ref": COMPONENT_UUID,
+        "dependsOn": [],
+    }
+    # Jackson -> []
+    dep_jackson = {
+        "ref": JACKSON_UUID,
+        "dependsOn": [],
+    }
+    # Netty -> []
+    dep_netty = {
+        "ref": NETTY_UUID,
+        "dependsOn": [],
+    }
+    # Team Test Lib -> []
+    dep_team_test = {
+        "ref": TEAM_TEST_LIB_UUID,
+        "dependsOn": [],
+    }
+
+    dependencies = [
+        dep_root,
+        dep_a,
+        dep_b,
+        dep_c,
+        dep_log4j,
+        dep_jackson,
+        dep_netty,
+        dep_team_test,
+    ]
+
     # Minimal valid CycloneDX BOM
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.4",
         "version": 1,
-        "metadata": {
-            "component": {
-                "name": project.name if project else "Unknown",
-                "version": project.version if project else "0.0.0",
-                "type": "application",
-            }
-        },
-        "components": [
-            {
-                "type": "library",
-                "name": "log4j-core",
-                "version": "2.14.0",
-                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
-                "bom-ref": COMPONENT_UUID,
-            },
-            {
-                "type": "library",
-                "name": "jackson-databind",
-                "version": "2.9.8",
-                "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
-                "bom-ref": JACKSON_UUID,
-            },
-            {
-                "type": "library",
-                "name": "netty-common",
-                "version": "4.1.42.Final",
-                "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
-                "bom-ref": NETTY_UUID,
-            },
-            {
-                "type": "library",
-                "name": "team-test-lib",
-                "version": "1.0.0",
-                "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
-                "bom-ref": TEAM_TEST_LIB_UUID,
-            },
-        ],
+        "metadata": {"component": metadata_component},
+        "components": components,
+        "dependencies": dependencies,
     }
 
 
@@ -344,19 +484,144 @@ def get_analysis(project: str, component: str, vulnerability: str):
 @app.put("/api/v1/analysis")
 def update_analysis(update: AnalysisUpdate):
     key = f"{update.project}:{update.component}:{update.vulnerability}"
-    if key in mock_analysis:
-        mock_analysis[key]["analysisState"] = update.analysisState
-        mock_analysis[key]["isSuppressed"] = update.isSuppressed
+    if key not in mock_analysis:
+        mock_analysis[key] = {
+            "analysisState": "NOT_SET",
+            "isSuppressed": False,
+            "analysisDetails": "",
+        }
+
+    mock_analysis[key]["analysisState"] = update.analysisState
+    mock_analysis[key]["isSuppressed"] = update.isSuppressed
+    if update.analysisDetails is not None:
         mock_analysis[key]["analysisDetails"] = update.analysisDetails
-        if update.analysisJustification:
-            mock_analysis[key]["analysisJustification"] = update.analysisJustification
-        if update.comment:
-            # Append comment? Or verify behavior. For simplicity, just store last comment.
-            mock_analysis[key]["comment"] = (
-                update.comment
-            )  # Actually comments are separate usually
-        return mock_analysis[key]
-    return {"error": "Finding not found"}
+    if update.analysisJustification:
+        mock_analysis[key]["analysisJustification"] = update.analysisJustification
+    if update.comment:
+        # In D-T, comments are usually a list. For mock, we'll prefix details or just store it.
+        # Actually, let's keep it simple but ensure we don't lose previous details if not provided.
+        if "analysisDetails" not in mock_analysis[key]:
+            mock_analysis[key]["analysisDetails"] = ""
+        mock_analysis[key]["analysisDetails"] += f"\n\n[Comment] {update.comment}"
+    return mock_analysis[key]
+
+
+@app.get("/.well-known/openid-configuration")
+def openid_configuration(request: Request):
+    base_url = str(request.base_url).rstrip("/")
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/auth/authorize",
+        "token_endpoint": f"{base_url}/auth/token",
+        "userinfo_endpoint": f"{base_url}/auth/userinfo",
+        "jwks_uri": f"{base_url}/auth/jwks",
+        "response_types_supported": ["code", "id_token"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "scopes_supported": ["openid", "profile", "email"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_post",
+            "client_secret_basic",
+        ],
+        "claims_supported": ["sub", "preferred_username", "email", "name"],
+    }
+
+
+@app.get("/auth/authorize", response_class=HTMLResponse)
+def authorize(
+    client_id: str,
+    redirect_uri: str,
+    state: Optional[str] = None,
+    scope: str = "openid",
+    response_type: str = "code",
+):
+    return f"""
+    <html>
+        <head>
+            <title>Mock Login (Mock Service)</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="bg-gray-900 text-white flex items-center justify-center h-screen">
+            <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-96 border border-gray-700">
+                <h1 class="text-2xl font-bold mb-6 text-center text-blue-400">Mock SSO Login</h1>
+                <p class="text-gray-400 mb-8 text-center text-sm">Select a user role to simulate SSO authentication.</p>
+                <div class="space-y-4">
+                    <form action="/auth/authorize" method="POST">
+                        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                        <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="username" value="analyst">
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
+                            Login as Analyst
+                        </button>
+                    </form>
+                    <form action="/auth/authorize" method="POST">
+                        <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                        <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="username" value="reviewer">
+                        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
+                            Login as Reviewer
+                        </button>
+                    </form>
+                </div>
+                <div class="mt-8 pt-6 border-t border-gray-700 text-center">
+                   <p class="text-xs text-gray-500 italic">This page is served by the Dependency-Track Mock Service</p>
+                </div>
+            </div>
+        </body>
+    </html>
+    """
+
+
+@app.post("/auth/authorize")
+def authorize_post(
+    username: str = Form(...),
+    redirect_uri: str = Form(...),
+    state: str = Form(""),
+):
+    # Simulated auth code
+    code = f"mock_code_{username}_{int(time.time())}"
+    sep = "&" if "?" in redirect_uri else "?"
+    url = f"{redirect_uri}{sep}code={code}"
+    if state:
+        url += f"&state={state}"
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.post("/auth/token")
+def token(
+    code: str = Form(...),
+    grant_type: str = Form(...),
+    redirect_uri: str = Form(...),
+    client_id: Optional[str] = Form(None),
+    client_secret: Optional[str] = Form(None),
+):
+    # Extract username from code
+    username = "user"
+    if "mock_code_" in code:
+        username = code.split("_")[2]
+
+    # Create a dummy JWT (signed with something simple or just unverified)
+    # The production code uses jwt.get_unverified_claims, so we don't need a real signature.
+    import jose.jwt as jose_jwt
+
+    id_token = jose_jwt.encode(
+        {
+            "sub": username,
+            "preferred_username": username,
+            "name": username.capitalize(),
+            "exp": int(time.time()) + 3600,
+            "iat": int(time.time()),
+        },
+        "mock_secret",
+        algorithm="HS256",
+    )
+
+    return {
+        "access_token": "mock_access_token",
+        "id_token": id_token,
+        "token_type": "Bearer",
+        "expires_in": 3600,
+    }
 
 
 if __name__ == "__main__":

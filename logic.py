@@ -169,8 +169,9 @@ class BOMAnalysisCache:
         if component_name in self.mapping:
             tag_val = self.mapping[component_name]
             if isinstance(tag_val, list):
-                if tag_val:
-                    found_tags.add(tag_val[0])
+                for t in tag_val:
+                    if t:
+                        found_tags.add(t)
             else:
                 found_tags.add(tag_val)
 
@@ -178,9 +179,6 @@ class BOMAnalysisCache:
 
         if target_ref:
             # We still need to traverse parents to find tags inherited from parents
-            # But we don't need to build full paths, just find tags.
-            # BFS is still needed but we can simplify state.
-
             queue = [target_ref]
             visited = {target_ref}
 
@@ -194,8 +192,9 @@ class BOMAnalysisCache:
                     if curr_name and curr_name in self.mapping:
                         tag_val = self.mapping[curr_name]
                         if isinstance(tag_val, list):
-                            if tag_val:
-                                found_tags.add(tag_val[0])
+                            for t in tag_val:
+                                if t:
+                                    found_tags.add(t)
                         else:
                             found_tags.add(tag_val)
 
@@ -209,12 +208,13 @@ class BOMAnalysisCache:
         if not found_tags and "*" in self.mapping:
             tag_val = self.mapping["*"]
             if isinstance(tag_val, list):
-                if tag_val:
-                    found_tags.add(tag_val[0])
+                for t in tag_val:
+                    if t:
+                        found_tags.add(t)
             else:
                 found_tags.add(tag_val)
 
-        return list(found_tags)
+        return sorted(list(found_tags))
 
     def get_dependency_paths(
         self,
@@ -452,18 +452,13 @@ def group_vulnerabilities(
                     if match_any_vector:
                         rescored_vector = match_any_vector.group(1).strip()
 
-            # If we found a rescored value, update the group level if not set
-            if rescored_score is not None and not groups[canonical_id]["rescored_cvss"]:
-                # ONLY record if it differs from the base score
-                if rescored_score != groups[canonical_id]["cvss_score"]:
+            # Set rescored score/vector if they were explicitly provided
+            if rescored_score is not None:
+                if groups[canonical_id]["rescored_cvss"] is None:
                     groups[canonical_id]["rescored_cvss"] = rescored_score
 
-            if (
-                rescored_vector is not None
-                and not groups[canonical_id]["rescored_vector"]
-            ):
-                # ONLY record if it differs from the base vector
-                if rescored_vector != groups[canonical_id]["cvss_vector"]:
+            if rescored_vector:
+                if groups[canonical_id]["rescored_vector"] is None:
                     groups[canonical_id]["rescored_vector"] = rescored_vector
 
             component_info = {
@@ -623,25 +618,24 @@ def process_assessment_details(
 
     content = new_details
 
-    # Extract Rescored from Content
+    # Extract Rescored if Reviewer (otherwise they are null from above)
     rescored_val = None
-    match_score = RE_SCORE.search(content)
-    if match_score:
-        try:
-            rescored_val = float(match_score.group(1))
-        except ValueError:
-            pass
-
-    # Extract Vector from Content
     rescored_vector = None
-    match_vector = RE_VECTOR.search(content)
-    if match_vector:
-        rescored_vector = match_vector.group(1).strip()
-    else:
-        # Fallback search
-        match_any = RE_ANY_VECTOR.search(content)
-        if match_any:
-            rescored_vector = match_any.group(1).strip()
+    if role == "REVIEWER":
+        match_score = RE_SCORE.search(content)
+        if match_score:
+            try:
+                rescored_val = float(match_score.group(1))
+            except ValueError:
+                pass
+
+        match_vector = RE_VECTOR.search(content)
+        if match_vector:
+            rescored_vector = match_vector.group(1).strip()
+        else:
+            match_any = RE_ANY_VECTOR.search(content)
+            if match_any:
+                rescored_vector = match_any.group(1).strip()
 
     # Remove Tags/Headers from Content to get clean text
     # Remove all headers "--- ... ---"

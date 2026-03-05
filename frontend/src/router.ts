@@ -4,7 +4,7 @@ import Dashboard from './pages/Dashboard.vue'
 import ProjectView from './pages/ProjectView.vue'
 import Settings from './pages/Settings.vue'
 
-import { login, checkSession } from './lib/api'
+import { checkSession } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
 
 const routes = [
@@ -33,7 +33,7 @@ router.beforeEach(async (to, _from, next) => {
         sessionChecked = true;
 
         if (!isAuthenticated) {
-            login(); // Redirects to OIDC
+            next('/login');
             return;
         }
     }

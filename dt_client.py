@@ -1,21 +1,34 @@
 import httpx
 import asyncio
+import os
 from typing import List, Dict, Any, Optional, AsyncGenerator
+from fastapi import Request
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DTClient:
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str = None,
+        token: str = None,
+        cookies: dict = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.headers = {
-            "X-Api-Key": api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if api_key:
+            self.headers["X-Api-Key"] = api_key
+        if token:
+            self.headers["Authorization"] = f"Bearer {token}"
+
         # Create a persistent client with increased timeout and connection limits
         self.client = httpx.AsyncClient(
             headers=self.headers,
+            cookies=cookies,
             timeout=60.0,
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
         )
@@ -27,7 +40,16 @@ class DTClient:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
+        if self.client:
+            await self.client.aclose()
+
+    async def get_current_user_profile(self) -> Dict[str, Any]:
+        """
+        Get the profile of the currently authenticated user in DT.
+        """
+        response = await self.client.get(f"{self.base_url}/api/v1/user/me")
+        response.raise_for_status()
+        return response.json()
 
     async def get_projects(self, name: str) -> List[Dict[str, Any]]:
         """
@@ -39,14 +61,17 @@ class DTClient:
         page_size = 100
 
         while True:
+            params = {
+                "excludeInactive": "true",
+                "pageSize": page_size,
+                "pageNumber": page_number,
+            }
+            if name:
+                params["name"] = name
+
             response = await self.client.get(
                 f"{self.base_url}/api/v1/project",
-                params={
-                    "name": name,
-                    "excludeInactive": "true",
-                    "pageSize": page_size,
-                    "pageNumber": page_number,
-                },
+                params=params,
             )
             response.raise_for_status()
             projects = response.json()
@@ -71,7 +96,9 @@ class DTClient:
         # Placeholder as per original code
         pass
 
-    async def get_vulnerabilities(self, project_uuid: str) -> List[Dict[str, Any]]:
+    async def get_vulnerabilities(
+        self, project_uuid: str, cve: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get all vulnerabilities for a specific project version.
         Enriches findings with analysis data from the analysis endpoint.
@@ -87,10 +114,40 @@ class DTClient:
         # Use a list of tuples (finding, task) to map results back
         analysis_tasks = []
         findings_to_enrich = []
+        filtered_findings = []
 
         for finding in findings:
+            vulnerability = finding.get("vulnerability", {})
+
+            # Apply CVE filter if provided
+            if cve:
+                cve_upper = cve.upper()
+                vuln_id = (vulnerability.get("vulnId") or "").upper()
+                vuln_name = (vulnerability.get("name") or "").upper()
+
+                # Check main aliases
+                aliases = vulnerability.get("aliases", [])
+                alias_match = False
+                if aliases:
+                    for a in aliases:
+                        for v in a.values():
+                            if isinstance(v, str) and cve_upper in v.upper():
+                                alias_match = True
+                                break
+                        if alias_match:
+                            break
+
+                if (
+                    cve_upper not in vuln_id
+                    and cve_upper not in vuln_name
+                    and not alias_match
+                ):
+                    continue  # Skip this finding as it doesn't match the CVE filter
+
+            filtered_findings.append(finding)
+
             component_uuid = finding.get("component", {}).get("uuid")
-            vulnerability_uuid = finding.get("vulnerability", {}).get("uuid")
+            vulnerability_uuid = vulnerability.get("uuid")
 
             if component_uuid and vulnerability_uuid:
                 findings_to_enrich.append(finding)
@@ -121,7 +178,7 @@ class DTClient:
                 if analysis_result:
                     finding["analysis"] = analysis_result
 
-        return findings
+        return filtered_findings
 
     async def get_project_vulnerabilities(
         self, project_uuid: str
@@ -212,6 +269,9 @@ class DTSettings(BaseSettings):
         alias="DTVP_DT_API_URL", default="http://localhost:8081"
     )
     DTVP_DT_API_KEY: str = Field(alias="DTVP_DT_API_KEY", default="change_me")
+    DTVP_DT_API_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_DT_API_KEY_FILE", default=None
+    )
 
     # Support aliases from docker-compose.yml
     DEPENDENCY_TRACK_URL: Optional[str] = Field(default=None)
@@ -223,16 +283,40 @@ class DTSettings(BaseSettings):
 
     @property
     def api_url(self) -> str:
+        # Priority: DTVP_DT_API_URL > DEPENDENCY_TRACK_URL > default
         return (
             self.DTVP_DT_API_URL or self.DEPENDENCY_TRACK_URL or "http://localhost:8081"
         )
 
     @property
     def api_key(self) -> str:
-        return self.DTVP_DT_API_KEY or self.DEPENDENCY_TRACK_API_KEY or "change_me"
+        # Priority: DTVP_DT_API_KEY > DTVP_DT_API_KEY_FILE > DEPENDENCY_TRACK_API_KEY > default
+        key = self.DTVP_DT_API_KEY
+        if key == "change_me" and self.DTVP_DT_API_KEY_FILE:
+            if os.path.exists(self.DTVP_DT_API_KEY_FILE):
+                with open(self.DTVP_DT_API_KEY_FILE, "r") as f:
+                    key = f.read().strip()
+
+        if key == "change_me":
+            key = self.DEPENDENCY_TRACK_API_KEY or "change_me"
+
+        return key
 
 
-async def get_client() -> AsyncGenerator[DTClient, None]:
+async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
     settings = DTSettings()
-    async with DTClient(settings.api_url, settings.api_key) as client:
+
+    # Check for credentials in the incoming request to forward to DT
+    token = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+
+    # We can also forward specific cookies if needed, e.g., DT session cookies
+    # For now, we forward all cookies to be safe, or we could filter them
+    cookies = dict(request.cookies)
+
+    async with DTClient(
+        settings.api_url, api_key=settings.api_key, token=token, cookies=cookies
+    ) as client:
         yield client

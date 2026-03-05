@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=dtrack
+      - POSTGRES_PASSWORD=dtrack
+      - POSTGRES_DB=dtrack
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  dtrack-apiserver:
+    image: dependencytrack/apiserver:4.11.0
+    environment:
+      - ALPINE_DATABASE_MODE=external
+      - ALPINE_DATABASE_URL=jdbc:postgresql://postgres:5432/dtrack
+      - ALPINE_DATABASE_DRIVER=org.postgresql.Driver
+      - ALPINE_DATABASE_USERNAME=dtrack
+      - ALPINE_DATABASE_PASSWORD=dtrack
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  dtrack-frontend:
+    image: dependencytrack/frontend:4.11.0
+    environment:
+      - API_BASE_URL=http://localhost:8081
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+
+  dtvp-backend:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    environment:
+      - DTVP_DT_API_URL=http://dtrack-apiserver:8080
+      # The API key will be provided via a file or manual intervention if needed
+      # but we'll try to use a volume sharing the key from the seeder
+      - DTVP_DT_API_KEY_FILE=/shared/dt_api_key.txt
+      - DTVP_CONTEXT_PATH=/
+      - DTVP_DEV_DISABLE_AUTH=true
+    volumes:
+      - shared-data:/shared
+    ports:
+      - "8000:8000"
+    depends_on:
+      - dtrack-apiserver
+
+  dt-seeder:
+    image: python:3.11-slim
+    environment:
+      - DT_URL=http://dtrack-apiserver:8080
+      - PGHOST=postgres
+      - PGUSER=dtrack
+      - PGPASSWORD=dtrack
+      - PGDATABASE=dtrack
+    volumes:
+      - .:/app
+      - shared-data:/shared
+    working_dir: /app
+    command: >
+      bash -c "apt-get update && apt-get install -y postgresql-client && pip install requests && python seed_dt.py"
+    depends_on:
+      - dtrack-apiserver
+
+volumes:
+  postgres-data:
+  shared-data:

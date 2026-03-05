@@ -9,7 +9,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 vi.mock('vue-router', () => ({
-    useRoute: vi.fn(() => ({ params: { name: 'Test' } })),
+    useRoute: vi.fn(() => ({ params: { name: 'Test' }, query: {} })),
     RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
 }))
 
@@ -34,7 +34,7 @@ describe('ProjectView Coverage Extras', () => {
                     RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
                 },
                 mocks: {
-                    $route: { params: { name: 'Test' } }
+                    $route: { params: { name: 'Test' }, query: {} }
                 },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
@@ -71,7 +71,7 @@ describe('ProjectView Coverage Extras', () => {
             global: {
                 stubs: { RouterLink: true },
                 mocks: {
-                    $route: { params: { name: 'Test' } }
+                    $route: { params: { name: 'Test' }, query: {} }
                 },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
@@ -116,7 +116,7 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } },
+                mocks: { $route: { params: { name: 'Test' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -156,7 +156,7 @@ describe('ProjectView Coverage Extras', () => {
             resolvePromise = resolve
         })
 
-        vi.mocked(getGroupedVulns).mockImplementation(async (_name, cb) => {
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, cb) => {
             callback = cb
             return promise as any
         })
@@ -164,7 +164,7 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } },
+                mocks: { $route: { params: { name: 'Test' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -195,7 +195,7 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } },
+                mocks: { $route: { params: { name: 'Test' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -210,7 +210,7 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } },
+                mocks: { $route: { params: { name: 'Test' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
@@ -232,7 +232,7 @@ describe('ProjectView Coverage Extras', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' } } },
+                mocks: { $route: { params: { name: 'Test' }, query: {} } },
                 provide: {
                     user: { value: { role: 'REVIEWER' } }
                 }
