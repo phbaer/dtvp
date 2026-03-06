@@ -447,11 +447,14 @@ watch(state, (newState, oldState) => {
             // Apply each configured modifier
             for (const [key, val] of Object.entries(actions)) {
                 try {
-                    // Only apply if the base attribute is defined in the vector (e.g. apply MC if C is defined)
+                    // Modified metrics (e.g. MC, MAV) should only be applied if their base attribute is defined
+                    // Standalone metrics (Requirement, Temporal, etc.) should bypass this guard
                     const vectorParts = (pendingVector.value || '').split('/')
-                    const baseKey = (key.startsWith('M') && key.length > 1) ? key.slice(1) : key;
+                    const isModifiedMetric = key.startsWith('M') && key.length > 1;
+                    const baseKey = isModifiedMetric ? key.slice(1) : key;
                     const isDefined = vectorParts.some(part => part.startsWith(`${baseKey}:`));
-                    if (isDefined) {
+                    
+                    if (!isModifiedMetric || isDefined) {
                         cvssInstance.value.applyComponentString(key, val as string)
                     }
                 } catch (e) {
