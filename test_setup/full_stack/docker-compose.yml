@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
 
   dtrack-apiserver:
-    image: dependencytrack/apiserver:4.11.0
+    image: dependencytrack/apiserver:4.13.6
     environment:
       - ALPINE_DATABASE_MODE=external
       - ALPINE_DATABASE_URL=jdbc:postgresql://postgres:5432/dtrack
