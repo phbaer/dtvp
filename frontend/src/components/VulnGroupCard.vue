@@ -239,7 +239,17 @@ const canEditBase = computed(() => {
     
     if (hasRuleMatch && !isManualBaseMode.value) return false
     
-    return true
+    // Explicitly unlocked via Clear or Visual Calculator
+    if (isManualBaseMode.value) return true
+
+    // If a new vector is defined (different from baseline), it's editable
+    // This covers cases where it was already rescored or manually modified.
+    if (pendingVector.value && props.group.cvss_vector && pendingVector.value !== props.group.cvss_vector) {
+        return true
+    }
+    
+    // Otherwise, stay read-only
+    return false
 })
 
 const resetVector = () => {
