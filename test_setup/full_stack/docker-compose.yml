@@ -50,7 +50,7 @@ services:
       - dtrack-apiserver
 
   dt-seeder:
-    image: python:3.11-slim
+    image: python:3.14-slim
     environment:
       - DT_URL=http://dtrack-apiserver:8080
       - PGHOST=postgres
