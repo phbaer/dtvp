@@ -25,25 +25,25 @@ const rescoreRules = inject<any>('rescoreRules')
 const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
 const ANALYSIS_STATES = [
-    { value: 'NOT_SET', label: 'Not Set' },
-    { value: 'NOT_AFFECTED', label: 'Not Affected' },
-    { value: 'EXPLOITABLE', label: 'Exploitable' },
-    { value: 'IN_TRIAGE', label: 'In Triage' },
-    { value: 'FALSE_POSITIVE', label: 'False Positive' },
-    { value: 'RESOLVED', label: 'Resolved' },
+    { value: 'NOT_SET', label: 'Not Set', description: 'No analysis has been performed yet.' },
+    { value: 'NOT_AFFECTED', label: 'Not Affected', description: 'The component is not affected by this vulnerability.' },
+    { value: 'EXPLOITABLE', label: 'Exploitable', description: 'The vulnerability is exploitable in this component.' },
+    { value: 'IN_TRIAGE', label: 'In Triage', description: 'The vulnerability is currently being investigated.' },
+    { value: 'FALSE_POSITIVE', label: 'False Positive', description: 'This finding is a false positive.' },
+    { value: 'RESOLVED', label: 'Resolved', description: 'The vulnerability has been resolved or mitigated.' },
 ]
 
 const JUSTIFICATION_OPTIONS = [
-    { value: 'NOT_SET', label: 'Not Set' },
-    { value: 'CODE_NOT_PRESENT', label: 'Code Not Present' },
-    { value: 'CODE_NOT_REACHABLE', label: 'Code Not Reachable' },
-    { value: 'REQUIRES_CONFIGURATION', label: 'Requires Configuration' },
-    { value: 'REQUIRES_DEPENDENCY', label: 'Requires Dependency' },
-    { value: 'REQUIRES_ENVIRONMENT', label: 'Requires Environment' },
-    { value: 'PROTECTED_BY_COMPILER', label: 'Protected by Compiler' },
-    { value: 'PROTECTED_AT_RUNTIME', label: 'Protected at Runtime' },
-    { value: 'PROTECTED_AT_PERIMETER', label: 'Protected at Perimeter' },
-    { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control' },
+    { value: 'NOT_SET', label: 'Not Set', description: 'No justification provided.' },
+    { value: 'CODE_NOT_PRESENT', label: 'Code Not Present', description: 'The vulnerable code is not present in the component.' },
+    { value: 'CODE_NOT_REACHABLE', label: 'Code Not Reachable', description: 'The vulnerable code is present but not reachable.' },
+    { value: 'REQUIRES_CONFIGURATION', label: 'Requires Configuration', description: 'Exploitation requires a specific non-default configuration.' },
+    { value: 'REQUIRES_DEPENDENCY', label: 'Requires Dependency', description: 'Exploitation requires an additional dependency not present.' },
+    { value: 'REQUIRES_ENVIRONMENT', label: 'Requires Environment', description: 'Exploitation requires a specific environment.' },
+    { value: 'PROTECTED_BY_COMPILER', label: 'Protected by Compiler', description: 'Protected by compiler-level security features.' },
+    { value: 'PROTECTED_AT_RUNTIME', label: 'Protected at Runtime', description: 'Protected by runtime mitigation (e.g., ASLR, DEP).' },
+    { value: 'PROTECTED_AT_PERIMETER', label: 'Protected at Perimeter', description: 'Protected by network or perimeter security controls.' },
+    { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control', description: 'Protected by other mitigating controls.' },
 ]
 
 const expanded = ref(false)
@@ -839,6 +839,16 @@ const assessedTeams = computed(() => {
     
     return matchedTeams
 })
+
+const getStateDescription = (stateValue: string | undefined) => {
+    if (!stateValue) return ''
+    return ANALYSIS_STATES.find(s => s.value === stateValue)?.description || ''
+}
+
+const getJustificationDescription = (justValue: string | undefined) => {
+    if (!justValue) return ''
+    return JUSTIFICATION_OPTIONS.find(j => j.value === justValue)?.description || ''
+}
 </script>
 
 <template>
@@ -931,7 +941,8 @@ const assessedTeams = computed(() => {
                 <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
                 <div 
                     :id="`state-${group.id}`"
-                    :class="['font-bold text-sm truncate analysis-state-value', stateColor]"
+                    :class="['font-bold text-sm truncate analysis-state-value cursor-help', stateColor]"
+                    :title="getStateDescription(displayState)"
                 >
                     {{ displayState }}
                 </div>
@@ -994,10 +1005,18 @@ const assessedTeams = computed(() => {
                                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-900/40 text-blue-300 border border-blue-800/50">
                                                     {{ block.team === 'General' ? 'Global Policy' : block.team }}
                                                 </span>
-                                                <span v-if="block.state && block.state !== 'NOT_SET'" class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50">
+                                                <span 
+                                                    v-if="block.state && block.state !== 'NOT_SET'" 
+                                                    class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50 cursor-help"
+                                                    :title="getStateDescription(block.state)"
+                                                >
                                                     State: <span :class="block.state === 'NOT_AFFECTED' ? 'text-green-400' : (block.state === 'EXPLOITABLE' ? 'text-red-400' : 'text-gray-200')">{{ block.state }}</span>
                                                 </span>
-                                                <span v-if="block.justification && block.justification !== 'NOT_SET'" class="px-2 py-0.5 rounded text-[10px] font-bold text-gray-400 border border-gray-700 bg-gray-900/30">
+                                                <span 
+                                                    v-if="block.justification && block.justification !== 'NOT_SET'" 
+                                                    class="px-2 py-0.5 rounded text-[10px] font-bold text-gray-400 border border-gray-700 bg-gray-900/30 cursor-help"
+                                                    :title="getJustificationDescription(block.justification)"
+                                                >
                                                     {{ block.justification.replace(/_/g, ' ') }}
                                                 </span>
                                             </div>
@@ -1118,7 +1137,7 @@ const assessedTeams = computed(() => {
                                     v-model="state" 
                                     class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
                                 >
-                                    <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value">{{ s.label }}</option>
+                                    <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value" :title="s.description">{{ s.label }}</option>
                                 </select>
                             </div>
 
@@ -1128,7 +1147,7 @@ const assessedTeams = computed(() => {
                                     v-model="justification" 
                                     class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
                                 >
-                                    <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                                    <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value" :title="o.description">{{ o.label }}</option>
                                 </select>
                             </div>
 
