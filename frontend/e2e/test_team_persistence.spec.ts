@@ -98,7 +98,7 @@ test.describe('Team Analysis Persistence', () => {
         });
 
         // Mock Team Mapping
-        await page.route('**/api/team-mapping', async (route) => {
+        await page.route('**/api/settings/mapping', async (route) => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -107,7 +107,7 @@ test.describe('Team Analysis Persistence', () => {
         });
 
         // Mock Rescore Rules
-        await page.route('**/api/rescore-rules', async (route) => {
+        await page.route('**/api/settings/rescore-rules', async (route) => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',

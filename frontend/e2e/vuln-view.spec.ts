@@ -112,7 +112,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         });
 
         // Mock Team Mapping
-        await page.route('**/api/team-mapping', async (route) => {
+        await page.route('**/api/settings/mapping', async (route) => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -121,7 +121,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         });
 
         // Mock Rescore Rules
-        await page.route('**/api/rescore-rules', async (route) => {
+        await page.route('**/api/settings/rescore-rules', async (route) => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -161,6 +161,11 @@ test.describe('Vulnerability View and Rescoring', () => {
         await expect(cardHeader.locator('input[type="number"]')).toBeVisible({ timeout: 10000 });
 
         // Change the vector manually
+        // First, unlock the fields (new requirement due to read-only by default)
+        await page.getByText('Visual Calculator').click();
+        await page.getByRole('button', { name: 'Clear' }).click();
+        await page.getByRole('button', { name: 'Done' }).click();
+
         const vectorInput = page.locator('input[placeholder^="CVSS"]');
         await vectorInput.fill('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H');
 
