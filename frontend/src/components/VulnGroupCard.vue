@@ -1199,7 +1199,7 @@ const getJustificationDescription = (justValue: string | undefined) => {
                                 class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
                             >
                                 <option value="">{{ isReviewer ? 'Global assessment' : 'No team marker' }}</option>
-                                <option v-for="t in group.tags" :key="t" :value="t">{{ t }}</option>
+                                <option v-for="t in normalizedTags" :key="t" :value="t">{{ t }}</option>
                             </select>
                         </div>
                     </div>
