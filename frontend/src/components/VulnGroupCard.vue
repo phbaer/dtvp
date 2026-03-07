@@ -141,6 +141,10 @@ const displayState = computed(() => {
     return [...states].sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10))[0]
 })
 
+const isAssessed = computed(() => {
+    return displayState.value !== 'NOT_SET' && !isPendingReview.value
+})
+
 const isPendingReview = computed(() => {
     return allInstances.value.some(i => (i.analysis_details || '').includes('[Status: Pending Review]'))
 })
@@ -852,51 +856,58 @@ const rescoredVectorSegments = computed(() => {
     }
 })
 
+const normalizedTags = computed(() => {
+    if (!props.group.tags) return []
+    if (!teamMapping?.value) return props.group.tags
+
+    const result = new Set<string>()
+    props.group.tags.forEach(tag => {
+        let foundPrimary = tag
+        for (const componentName in teamMapping.value) {
+            const mappingVal = teamMapping.value[componentName]
+            if (Array.isArray(mappingVal) && mappingVal.length > 1) {
+                const primary = mappingVal[0]
+                const aliases = mappingVal.slice(1)
+                if (aliases.includes(tag)) {
+                    foundPrimary = primary
+                    break
+                }
+            }
+        }
+        result.add(foundPrimary)
+    })
+    return Array.from(result)
+})
+
 const assessedTeams = computed(() => {
     const blocks = mergedAssessmentData.value.blocks
-    
     const existingAssessments = new Set(blocks.map(b => b.team))
     
     const matchedTeams = new Set<string>()
     
-    // For each tag on the group, check if it or any of its aliases are assessed
-    if (props.group.tags) {
-        props.group.tags.forEach(tag => {
-            // 1. Direct match
-            if (existingAssessments.has(tag)) {
-                matchedTeams.add(tag)
-                return
-            }
-            
-            // 2. Alias match from mapping
-            // Note: The mapping is component_name -> [Primary, Alias1, Alias2]
-            // We need to find if 'tag' is the Primary tag for some component,
-            // and if so, check if any of its aliases are assessed.
-            
-            // Actually, the requirement says "The team primary tag shall be the only one shown in the ui."
-            // and "Add support for alternative team labels that will be considered when determining the assessment state".
-            
-            // So if tag 'Bla-Team' is shown, and the mapping says VPEventServer -> ['Bla-Team', 'Old-Bla-Team'],
-            // then 'Bla-Team' should get a checkmark if 'Old-Bla-Team' is assessed.
-            
-            if (teamMapping?.value) {
-                for (const componentName in teamMapping.value) {
-                    const mappingVal = teamMapping.value[componentName]
-                    if (Array.isArray(mappingVal) && mappingVal.length > 1) {
-                        const primary = mappingVal[0]
-                        if (primary === tag) {
-                            // Check all aliases
-                            const aliases = mappingVal.slice(1)
-                            if (aliases.some(alias => existingAssessments.has(alias))) {
-                                matchedTeams.add(tag)
-                                break
-                            }
+    normalizedTags.value.forEach(tag => {
+        // A primary tag is assessed if it OR any of its aliases are assessed
+        if (existingAssessments.has(tag)) {
+            matchedTeams.add(tag)
+            return
+        }
+
+        if (teamMapping?.value) {
+            for (const componentName in teamMapping.value) {
+                const mappingVal = teamMapping.value[componentName]
+                if (Array.isArray(mappingVal) && mappingVal.length > 1) {
+                    const primary = mappingVal[0]
+                    if (primary === tag) {
+                        const aliases = mappingVal.slice(1)
+                        if (aliases.some(alias => existingAssessments.has(alias))) {
+                            matchedTeams.add(tag)
+                            break
                         }
                     }
                 }
             }
-        })
-    }
+        }
+    })
     
     return matchedTeams
 })
@@ -913,7 +924,13 @@ const getJustificationDescription = (justValue: string | undefined) => {
 </script>
 
 <template>
-  <div :class="['border rounded-lg overflow-hidden transition-colors', cardStyle]">
+  <div :class="['relative border rounded-lg overflow-hidden transition-colors', cardStyle]">
+    <!-- Assessed Corner Fold -->
+    <div v-if="isAssessed" class="absolute top-0 right-0 pointer-events-none z-20">
+        <div class="w-8 h-8 bg-green-600 [clip-path:polygon(100%_0,0_0,100%_100%)] flex justify-end items-start p-1 uppercase">
+            <CheckCircle :size="12" class="text-white" />
+        </div>
+    </div>
     <!-- Header -->
     <div 
         class="p-4 flex items-start justify-between cursor-pointer transition-colors gap-8"
@@ -963,13 +980,13 @@ const getJustificationDescription = (justValue: string | undefined) => {
                     <span class="text-[10px] text-gray-500 font-medium uppercase">CVSS</span>
                 </div>
 
-                <div v-if="group.tags && group.tags.length > 0" class="flex items-center gap-4 flex-1 min-w-0">
+                <div v-if="normalizedTags.length > 0" class="flex items-center gap-4 flex-1">
                      <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
-                     <div class="flex gap-1.5 overflow-hidden">
+                     <div class="flex gap-1.5 flex-wrap">
                         <span 
-                            v-for="tag in group.tags" 
+                            v-for="tag in normalizedTags" 
                             :key="tag" 
-                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap flex items-center gap-1.5"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 flex items-center gap-1.5"
                         >
                             <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="text-green-400" />
                             {{ tag }}
@@ -1014,10 +1031,12 @@ const getJustificationDescription = (justValue: string | undefined) => {
                     <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
                     <div class="font-bold text-sm text-gray-300">{{ group.affected_versions?.length || 0 }} Versions</div>
                     
-                    <div v-if="isPendingReview" class="mt-1 flex justify-end">
-                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide">
-                            Pending Review
-                        </span>
+                    <div class="mt-1 flex flex-col items-end gap-1">
+                        <div v-if="isPendingReview">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide">
+                                Pending Review
+                            </span>
+                        </div>
                     </div>
                 
                     <button 

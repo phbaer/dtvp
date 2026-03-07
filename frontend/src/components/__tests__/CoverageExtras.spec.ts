@@ -13,6 +13,7 @@ vi.mock('lucide-vue-next', () => ({
     Box: { template: '<span />' },
     ShieldAlert: { template: '<span />' },
     RefreshCw: { template: '<span />' },
+    CheckCircle: { template: '<span />' },
     AlertTriangle: { template: '<span />' }
 }))
 
