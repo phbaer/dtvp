@@ -27,6 +27,7 @@ from logic import (
     calculate_aggregated_state,
     load_rescore_rules,
     get_rescore_rules_path,
+    calculate_statistics,
 )
 
 
@@ -269,6 +270,87 @@ async def get_task_status(task_id: str, user: str = Depends(get_current_user)):
     if not task:
         return {"status": "not_found"}
     return task
+
+
+@api_router.get("/statistics")
+async def get_statistics(
+    name: Optional[str] = None,
+    cve: Optional[str] = None,
+    client: DTClient = Depends(get_client),
+    user: str = Depends(get_current_user),
+):
+    """
+    Returns statistics for a project or global vulnerabilities.
+    """
+    # 1. Fetch data using existing logic (matching naming in search_projects/start_group_vulns_task)
+    projects = await client.get_projects(name or "")
+    if name:
+        versions = [p for p in projects if p.get("name") == name]
+    else:
+        versions = projects
+
+    if not versions:
+        return {
+            "severity_counts": {},
+            "state_counts": {},
+            "total_unique": 0,
+            "total_findings": 0,
+            "affected_projects_count": 0,
+            "version_counts": {},
+        }
+
+    # Deterministic sort
+    versions.sort(key=lambda x: x.get("version", ""))
+
+    team_mapping = load_team_mapping()
+    combined_data = []
+    bom_cache_map = {}
+    version_counts = {}
+
+    # We fetch findings for each version
+    for v in versions:
+        findings = await client.get_vulnerabilities(v["uuid"], cve=cve)
+        full_vulns = await client.get_project_vulnerabilities(v["uuid"])
+
+        # Track counts per version before grouping
+        version_counts[v["version"]] = len(findings)
+
+        try:
+            bom = await client.get_bom(v["uuid"])
+            bom_cache_map[v["uuid"]] = BOMAnalysisCache(bom, team_mapping)
+        except Exception:
+            bom_cache_map[v["uuid"]] = BOMAnalysisCache({}, team_mapping)
+
+        vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
+        for finding in findings:
+            vuln_summary = finding.get("vulnerability", {})
+            vuln_id = vuln_summary.get("vulnId")
+            full_vuln = vuln_map.get(vuln_id)
+            if full_vuln:
+                for key in [
+                    "cvssV4Vector",
+                    "cvssV4BaseScore",
+                    "cvssV3Vector",
+                    "cvssV3BaseScore",
+                    "cvssV2Vector",
+                    "cvssV2BaseScore",
+                    "aliases",
+                ]:
+                    if key in full_vuln and key not in vuln_summary:
+                        vuln_summary[key] = full_vuln[key]
+
+        combined_data.append({"version": v, "vulnerabilities": findings})
+
+    # 2. Group vulnerabilities
+    grouped = group_vulnerabilities(
+        combined_data, project_boms={}, processed_boms=bom_cache_map
+    )
+
+    # 3. Calculate statistics
+    stats = calculate_statistics(grouped)
+    stats["version_counts"] = version_counts
+
+    return stats
 
 
 # Old endpoint kept for compatibility if needed, or removed?
