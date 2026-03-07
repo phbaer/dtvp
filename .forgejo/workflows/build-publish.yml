@@ -113,8 +113,8 @@ jobs:
         id: get_version
         run: |
           VERSION=$(uv version | awk '{print $2}')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Current version: ${VERSION}"
       - name: Check Git Tag
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
@@ -169,7 +169,7 @@ jobs:
         id: get_version
         run: |
           VERSION=$(uv version | awk '{print $2}')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
       - name: Build and Push 
         uses: docker/build-push-action@v6
         with:
