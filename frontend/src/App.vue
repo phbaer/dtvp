@@ -12,6 +12,7 @@ provide('user', computed(() => ({
     ...user.value,
     role: isAnalystView.value ? 'ANALYST' : user.value.role
 })))
+provide('realRole', realRole)
 
 onMounted(async () => {
     try {
