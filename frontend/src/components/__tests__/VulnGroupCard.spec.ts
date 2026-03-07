@@ -32,7 +32,7 @@ vi.mock('lucide-vue-next', () => ({
     ExternalLink: { template: '<span class="icon-link" />' },
     RefreshCw: { template: '<span class="icon-refresh" />' },
     AlertTriangle: { template: '<span class="icon-alert" />' },
-    CheckCircle: { template: '<span class="icon-check-circle" />' },
+    CheckCircle: { template: '<span class="icon-check" />' },
     RotateCcw: { template: '<span class="icon-rotate-ccw" />' }
 }))
 

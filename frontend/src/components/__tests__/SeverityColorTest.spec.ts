@@ -8,6 +8,7 @@ vi.mock('lucide-vue-next', () => ({
     ChevronUp: { template: '<span />' },
     Shield: { template: '<span />' },
     Calculator: { template: '<span />' },
+    CheckCircle: { template: '<span />' },
     ExternalLink: { template: '<span />' },
     Box: { template: '<span />' },
     ShieldAlert: { template: '<span />' },
