@@ -110,6 +110,24 @@ test.describe('Vulnerability View and Rescoring', () => {
                 body: JSON.stringify(results),
             });
         });
+
+        // Mock Team Mapping
+        await page.route('**/api/settings/mapping', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ 'lib-a': 'Security' }),
+            });
+        });
+
+        // Mock Rescore Rules
+        await page.route('**/api/settings/rescore-rules', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ transitions: [] }),
+            });
+        });
     });
 
     test('should allow rescoring a vulnerability', async ({ page }) => {
@@ -143,6 +161,11 @@ test.describe('Vulnerability View and Rescoring', () => {
         await expect(cardHeader.locator('input[type="number"]')).toBeVisible({ timeout: 10000 });
 
         // Change the vector manually
+        // First, unlock the fields (new requirement due to read-only by default)
+        await page.getByText('Visual Calculator').click();
+        await page.getByRole('button', { name: 'Clear' }).click();
+        await page.getByRole('button', { name: 'Done' }).click();
+
         const vectorInput = page.locator('input[placeholder^="CVSS"]');
         await vectorInput.fill('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H');
 
@@ -169,15 +192,10 @@ test.describe('Vulnerability View and Rescoring', () => {
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
 
-        // Handle Success Modal
-        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
-        await page.getByRole('button', { name: 'Close' }).click();
-
-        // Check for success alert or indicator that it closed
-        await expect(page.locator('text=A bad vulnerability description.')).not.toBeVisible();
+        // Check that card remains open and description is still visible
+        await expect(page.locator('text=A bad vulnerability description.')).toBeVisible();
 
         // Verify the new score is in the header
-        // We look for the span with title "Rescored Value"
-        await expect(page.locator('span[title="Rescored Value"]')).toBeVisible();
+        await expect(page.getByTestId('rescored-value-badge')).toBeVisible();
     });
 });

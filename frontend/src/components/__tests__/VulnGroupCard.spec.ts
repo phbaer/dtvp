@@ -32,7 +32,8 @@ vi.mock('lucide-vue-next', () => ({
     ExternalLink: { template: '<span class="icon-link" />' },
     RefreshCw: { template: '<span class="icon-refresh" />' },
     AlertTriangle: { template: '<span class="icon-alert" />' },
-    CheckCircle: { template: '<span class="icon-check-circle" />' }
+    CheckCircle: { template: '<span class="icon-check" />' },
+    RotateCcw: { template: '<span class="icon-rotate-ccw" />' }
 }))
 
 // Mock DependencyChainViewer to avoid async setup in child component
@@ -140,11 +141,6 @@ describe('VulnGroupCard', () => {
         // Confirm in modal
         const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
         await confirmBtn?.trigger('click')
-        await flushPromises()
-
-        // Success alert appears, click Close
-        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-        await closeBtn?.trigger('click')
         await flushPromises()
 
         // Verify API call
@@ -282,11 +278,6 @@ describe('VulnGroupCard', () => {
             await confirmBtn?.trigger('click')
             await flushPromises()
 
-            // Success alert appears, click Close
-            const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-            await closeBtn?.trigger('click')
-            await flushPromises()
-
             expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
                 comment: 'Audit comment',
                 suppressed: true,
@@ -412,17 +403,115 @@ describe('VulnGroupCard', () => {
         await confirmBtn?.trigger('click')
         await flushPromises()
 
-        // Success alert appears, click Close
-        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-        await closeBtn?.trigger('click')
-        await flushPromises()
-
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
             justification: 'CODE_NOT_PRESENT',
             team: 'Security'
         }))
     })
+
+    it('auto-rescores cvss to 0 for reviewers when NOT_AFFECTED is selected', async () => {
+        const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: mockRescoreRules } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const selects = wrapper.findAll('select')
+        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        await flushPromises()
+
+        await wrapper.find('textarea').setValue('False positive mock')
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Verify updateAssessment was called with the Rescored 0 vector in the payload.
+        // It should inject [Rescored: 0] and the default CVSS 3.1 0-score vector.
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            details: expect.stringContaining('[Rescored:')
+        }))
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            details: expect.stringContaining('[Rescored Vector: CVSS:3.1')
+        }))
+    })
+
+    it('preserves cvss when state changes away from NOT_AFFECTED (requirement: user context remains)', async () => {
+        const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
+        const groupWithVector = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithVector },
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: mockRescoreRules } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const vectorInput = wrapper.findAll('input[type="text"]')[0]
+        const selects = wrapper.findAll('select')
+
+        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        await flushPromises()
+
+        // It should have the modified MC, MI, MA
+        expect((vectorInput?.element as HTMLInputElement).value).toContain('MC:N/MI:N/MA:N')
+        // Vector input should NOT be editable (wrong regression fixed)
+        expect((vectorInput?.element as HTMLInputElement).readOnly).toBe(true)
+
+        // Now set it back to EXPLOITABLE
+        await selects[1]?.setValue('EXPLOITABLE')
+        await flushPromises()
+
+        // It should PRESERVE the modified fields (no revert), per user requirement
+        expect((vectorInput?.element as HTMLInputElement).value).toContain('MC:N/MI:N/MA:N')
+    })
+
+    it('does not auto-rescore cvss for non-reviewers when NOT_AFFECTED is selected', async () => {
+        const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { role: 'ANALYST', username: 'tester' } }, rescoreRules: mockRescoreRules } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        // Select Team first because Analyst can't edit General state
+        const teamSelect = wrapper.findAll('select')[0]
+        await teamSelect?.setValue('Security')
+        await flushPromises()
+
+        const selects = wrapper.findAll('select')
+        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        await flushPromises()
+
+        await wrapper.find('textarea').setValue('Analyst no rescore')
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        // Analysts shouldn't inject [Rescored: 0] automatically.
+        const calls = (updateAssessment as any).mock.calls
+        const lastCallArgs = calls[calls.length - 1][0]
+
+        expect(lastCallArgs.details).not.toContain('[Rescored:')
+        expect(lastCallArgs.details).not.toContain('[Rescored Vector:')
+    })
+
 
     it('submits assessment for a specific team and updates UI from aggregated server response', async () => {
         const groupWithTags = {
@@ -480,11 +569,6 @@ describe('VulnGroupCard', () => {
         // Confirm in modal
         const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
         await confirmBtn?.trigger('click')
-        await flushPromises()
-
-        // Success alert appears, click Close
-        const closeBtn = wrapper.findAll('button').find(b => b.text() === 'Close')
-        await closeBtn?.trigger('click')
         await flushPromises()
 
         // Verify API call includes the team

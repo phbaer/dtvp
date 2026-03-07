@@ -107,6 +107,24 @@ test.describe('Per-Team Assessment UI Flow', () => {
                 body: JSON.stringify(results),
             });
         });
+
+        // Mock Team Mapping
+        await page.route('**/api/settings/mapping', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ 'frontend-lib': 'Frontend', 'backend-lib': 'Backend' }),
+            });
+        });
+
+        // Mock Rescore Rules
+        await page.route('**/api/settings/rescore-rules', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ transitions: [] }),
+            });
+        });
     });
 
     test('should allow targeted team assessment and show aggregated result', async ({ page }) => {
@@ -165,12 +183,9 @@ test.describe('Per-Team Assessment UI Flow', () => {
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
 
-        // Handle Success Modal
-        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
-        await page.getByRole('button', { name: 'Close' }).click();
-
-        // Wait for it to close (success sync)
-        await expect(page.locator('text=Backend confirms this is exploitable')).not.toBeVisible();
+        // Check that card remains open and description is still visible
+        // Use .first() to avoid strict mode violation (appears in history and textarea)
+        await expect(page.locator('text=Backend confirms this is exploitable').first()).toBeVisible();
 
         // Verify the card header now shows the EXPLOITABLE state
         await expect(page.locator('#state-CVE-TEAM-TEST')).toHaveText('EXPLOITABLE', { timeout: 10000 });

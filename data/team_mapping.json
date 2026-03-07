@@ -7,7 +7,10 @@
   ],
   "team-test-lib": [
     "New-Label",
-    "Old-Label"
+    "Old-Label",
+    "very old label",
+    "even older label",
+    "unbelievably old label"
   ],
   "*": "Unassigned"
 }

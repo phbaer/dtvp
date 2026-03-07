@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, provide, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { getGroupedVulns, getTeamMapping } from '../lib/api'
+import { getGroupedVulns, getTeamMapping, getRescoreRules } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln } from '../types'
 import VulnGroupCard from '../components/VulnGroupCard.vue'
@@ -17,6 +17,9 @@ const loadingProgress = ref(0)
 const teamMapping = ref<Record<string, string | string[]>>({})
 provide('teamMapping', teamMapping)
 
+const rescoreRules = ref<any>(null)
+provide('rescoreRules', rescoreRules)
+
 const fetchTeamMapping = async () => {
     try {
         teamMapping.value = await getTeamMapping()
@@ -25,7 +28,18 @@ const fetchTeamMapping = async () => {
     }
 }
 
-onMounted(fetchTeamMapping)
+const fetchRescoreRules = async () => {
+    try {
+        rescoreRules.value = await getRescoreRules()
+    } catch (err) {
+        console.error('Failed to fetch rescore rules:', err)
+    }
+}
+
+onMounted(() => {
+    fetchTeamMapping()
+    fetchRescoreRules()
+})
 
 const fetchVulns = async () => {
     let name = route.params.name as string

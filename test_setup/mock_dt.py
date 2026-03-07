@@ -168,7 +168,7 @@ mock_analysis = {
     f"{PROJECT_UUID}:{TEAM_TEST_LIB_UUID}:{VULN_UUID_TEAM}": {
         "analysisState": "NOT_AFFECTED",
         "isSuppressed": False,
-        "analysisDetails": "--- [Team: Old-Label] [State: NOT_AFFECTED] [Assessed By: mock] ---\nThis was assessed using the old label.",
+        "analysisDetails": "--- [Team: Old-Label] [State: NOT_AFFECTED] [Assessed By: mock] [Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:N/I:N/A:N] ---\nThis was assessed using the old label.",
     },
 }
 
