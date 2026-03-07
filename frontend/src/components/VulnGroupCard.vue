@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 
 import type { GroupedVuln, AssessmentPayload } from '../types'
@@ -17,6 +17,26 @@ import DependencyChainViewer from './DependencyChainViewer.vue'
 const props = defineProps<{
   group: GroupedVuln
 }>()
+
+const handleCloseOnEscape = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+        if (genericModal.value.show) {
+            handleModalResponse(false)
+        } else if (showConflictModal.value) {
+            showConflictModal.value = false
+        } else if (showCalculatorModal.value) {
+            showCalculatorModal.value = false
+        }
+    }
+}
+
+onMounted(() => {
+    window.addEventListener('keydown', handleCloseOnEscape)
+})
+
+onUnmounted(() => {
+    window.removeEventListener('keydown', handleCloseOnEscape)
+})
 
 const user = inject<any>('user', ref({ role: 'ANALYST' }))
 const teamMapping = inject<any>('teamMapping', ref({}))
