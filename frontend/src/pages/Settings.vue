@@ -3,6 +3,7 @@ import { ref, onMounted, inject, watch } from 'vue'
 import { getRoles, uploadRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
 
 const user = inject<any>('user')
+const realRole = inject<any>('realRole')
 const activeTab = ref('mapping')
 
 // Mapping state
@@ -42,7 +43,7 @@ const loadMapping = async () => {
 }
 
 const loadRoles = async () => {
-    if (user?.value?.role !== 'REVIEWER') return
+    if (realRole?.value !== 'REVIEWER') return
     try {
         currentRoles.value = await getRoles()
         rolesJson.value = JSON.stringify(currentRoles.value, null, 2)
@@ -52,7 +53,7 @@ const loadRoles = async () => {
 }
 
 const loadRescoreRules = async () => {
-    if (user?.value?.role !== 'REVIEWER') return
+    if (realRole?.value !== 'REVIEWER') return
     try {
         currentRescoreRules.value = await getRescoreRules()
         rescoreJson.value = JSON.stringify(currentRescoreRules.value, null, 2)
@@ -233,7 +234,7 @@ const saveRescoreRules = async () => {
 }
 
 onMounted(() => {
-    if (user?.value?.role === 'REVIEWER') {
+    if (realRole?.value === 'REVIEWER') {
         loadMapping()
         loadRoles()
         loadRescoreRules()
@@ -242,16 +243,16 @@ onMounted(() => {
 
 // Reload roles if user role changes or tab becomes active
 watch(() => activeTab.value, (newTab) => {
-    if (newTab === 'roles' && user?.value?.role === 'REVIEWER') {
+    if (newTab === 'roles' && realRole?.value === 'REVIEWER') {
         loadRoles()
-    } else if (newTab === 'rescore' && user?.value?.role === 'REVIEWER') {
+    } else if (newTab === 'rescore' && realRole?.value === 'REVIEWER') {
         loadRescoreRules()
     }
 })
 </script>
 
 <template>
-  <div v-if="user?.role === 'REVIEWER'" class="mx-auto">
+  <div v-if="realRole === 'REVIEWER'" class="mx-auto">
     <div class="mb-8 flex flex-col gap-2">
         <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
             &larr; Back to Dashboard

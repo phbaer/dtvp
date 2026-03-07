@@ -18,9 +18,9 @@ const props = defineProps<{
   group: GroupedVuln
 }>()
 
-const user = inject<any>('user')
-const teamMapping = inject<any>('teamMapping')
-const rescoreRules = inject<any>('rescoreRules')
+const user = inject<any>('user', ref({ role: 'ANALYST' }))
+const teamMapping = inject<any>('teamMapping', ref({}))
+const rescoreRules = inject<any>('rescoreRules', ref({ transitions: [] }))
 
 const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
@@ -220,7 +220,6 @@ const updateVectorString = () => {
 
 const updateCalcVector = (componentShortName: string, value: string) => {
     try {
-        isManualBaseMode.value = true
         cvssInstance.value.applyComponentString(componentShortName, value)
         updateVectorString()
         cvssInstance.value = cvssInstance.value 
@@ -239,14 +238,8 @@ const canEditBase = computed(() => {
     
     if (hasRuleMatch && !isManualBaseMode.value) return false
     
-    // Explicitly unlocked via Clear or Visual Calculator
+    // Explicitly unlocked via Clear
     if (isManualBaseMode.value) return true
-
-    // If a new vector is defined (different from baseline), it's editable
-    // This covers cases where it was already rescored or manually modified.
-    if (pendingVector.value && props.group.cvss_vector && pendingVector.value !== props.group.cvss_vector) {
-        return true
-    }
     
     // Otherwise, stay read-only
     return false
@@ -450,11 +443,46 @@ watch(state, (newState, oldState) => {
                     // Modified metrics (e.g. MC, MAV) should only be applied if their base attribute is defined
                     // Standalone metrics (Requirement, Temporal, etc.) should bypass this guard
                     const vectorParts = (pendingVector.value || '').split('/')
-                    const isModifiedMetric = key.startsWith('M') && key.length > 1;
-                    const baseKey = isModifiedMetric ? key.slice(1) : key;
-                    const isDefined = vectorParts.some(part => part.startsWith(`${baseKey}:`));
+                    const isV4 = pendingVector.value && pendingVector.value.startsWith('CVSS:4.0');
                     
-                    if (!isModifiedMetric || isDefined) {
+                    const isModifiedMetric = key.startsWith('M') && key.length > 1;
+                    const isRequirementMetric = key === 'CR' || key === 'IR' || key === 'AR';
+                    
+                    let baseKey = key;
+                    if (isModifiedMetric) {
+                        baseKey = key.slice(1);
+                    } else if (isRequirementMetric) {
+                        baseKey = isV4 ? 'V' + key.charAt(0) : key.charAt(0);
+                    }
+
+                    const basePart = vectorParts.find(part => part.startsWith(`${baseKey}:`));
+                    const baseValue = basePart ? basePart.split(':')[1] : null;
+                    const isDefined = baseValue && baseValue !== 'X';
+                    
+                    if (isModifiedMetric) {
+                        const isSameAsBase = baseValue === val;
+                        if (isDefined && !isSameAsBase) {
+                            cvssInstance.value.applyComponentString(key, val as string)
+                        }
+                    } else if (isRequirementMetric) {
+                        const modKey = 'M' + baseKey;
+                        const modValFromActions = (actions as Record<string, unknown>)[modKey] as string | undefined;
+                        
+                        let currentModVal = null;
+                        if (modValFromActions !== undefined) {
+                            currentModVal = modValFromActions;
+                        } else {
+                            const currentModPart = vectorParts.find(part => part.startsWith(`${modKey}:`));
+                            currentModVal = currentModPart ? currentModPart.split(':')[1] : null;
+                        }
+                        
+                        const finalModVal = (currentModVal && currentModVal !== 'X') ? currentModVal : baseValue;
+                        const isSameAsBase = baseValue === finalModVal;
+                        
+                        if (isDefined && !isSameAsBase) {
+                            cvssInstance.value.applyComponentString(key, val as string)
+                        }
+                    } else {
                         cvssInstance.value.applyComponentString(key, val as string)
                     }
                 } catch (e) {

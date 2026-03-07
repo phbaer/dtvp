@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import Settings from '../Settings.vue'
 import * as api from '../../lib/api'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 vi.mock('../../lib/api', () => ({
     getRoles: vi.fn(),
@@ -29,7 +29,8 @@ describe('Settings.vue', () => {
         const wrapper = mount(Settings, {
             global: {
                 provide: {
-                    user: mockUser
+                    user: mockUser,
+                    realRole: computed(() => mockUser.value.role)
                 },
                 stubs: ['router-link']
             }
@@ -56,7 +57,8 @@ describe('Settings.vue', () => {
         const wrapper = mount(Settings, {
             global: {
                 provide: {
-                    user: mockUser
+                    user: mockUser,
+                    realRole: computed(() => mockUser.value.role)
                 },
                 stubs: ['router-link']
             }
@@ -84,7 +86,8 @@ describe('Settings.vue', () => {
         const wrapper = mount(Settings, {
             global: {
                 provide: {
-                    user: mockUser
+                    user: mockUser,
+                    realRole: computed(() => mockUser.value.role)
                 },
                 stubs: ['router-link']
             }
