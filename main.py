@@ -25,6 +25,8 @@ from logic import (
     BOMAnalysisCache,
     process_assessment_details,
     calculate_aggregated_state,
+    load_rescore_rules,
+    get_rescore_rules_path,
 )
 
 
@@ -43,9 +45,20 @@ app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
 
 
 # CORS for frontend dev
+origins = [
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+if auth_settings.FRONTEND_URL:
+    frontend_url = auth_settings.FRONTEND_URL.rstrip("/")
+    if frontend_url not in origins:
+        origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8000"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -175,6 +188,8 @@ async def process_grouped_vulns_task(
                 full_vuln = vuln_map.get(vuln_id)
                 if full_vuln:
                     for key in [
+                        "cvssV4Vector",
+                        "cvssV4BaseScore",
                         "cvssV3Vector",
                         "cvssV2Vector",
                         "cvssV3BaseScore",
@@ -485,6 +500,11 @@ def get_open_api_endpoint():
 
 @api_router.get("/settings/mapping")
 async def get_team_mapping(user: str = Depends(get_current_user)):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(
+            status_code=403, detail="Only reviewers can view team mapping"
+        )
     return load_team_mapping()
 
 
@@ -493,6 +513,11 @@ async def upload_team_mapping(
     file: UploadFile = File(...),
     user: str = Depends(get_current_user),
 ):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(
+            status_code=403, detail="Only reviewers can modify team mapping"
+        )
     target_path = get_team_mapping_path()
     # Ensure directory exists
     dir_path = os.path.dirname(target_path)
@@ -523,6 +548,11 @@ async def update_team_mapping(
     mapping: Dict[str, Any],
     user: str = Depends(get_current_user),
 ):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(
+            status_code=403, detail="Only reviewers can modify team mapping"
+        )
     target_path = get_team_mapping_path()
     dir_path = os.path.dirname(target_path)
     if dir_path:
@@ -603,6 +633,76 @@ async def update_roles(
         return {
             "status": "success",
             "message": f"User roles updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@api_router.get("/settings/rescore-rules")
+async def get_rescore_rules(user: str = Depends(get_current_user)):
+    rules = load_rescore_rules()
+    if rules is None:
+        rules = {"transitions": []}
+    return rules
+
+
+@api_router.post("/settings/rescore-rules")
+async def upload_rescore_rules(
+    file: UploadFile = File(...),
+    user: str = Depends(get_current_user),
+):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(
+            status_code=403, detail="Only reviewers can modify rescore rules"
+        )
+
+    target_path = get_rescore_rules_path()
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    try:
+        content = await file.read()
+        try:
+            json.loads(content)
+        except json.JSONDecodeError:
+            return {"status": "error", "message": "Invalid JSON"}
+
+        with open(target_path, "wb") as f:
+            f.write(content)
+
+        return {
+            "status": "success",
+            "message": f"Rescore rules updated at {target_path}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@api_router.put("/settings/rescore-rules")
+async def update_rescore_rules(
+    rules: Dict[str, Any],
+    user: str = Depends(get_current_user),
+):
+    role = get_user_role(user)
+    if role != "REVIEWER":
+        raise HTTPException(
+            status_code=403, detail="Only reviewers can modify rescore rules"
+        )
+
+    target_path = get_rescore_rules_path()
+    dir_path = os.path.dirname(target_path)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+
+    try:
+        with open(target_path, "w") as f:
+            json.dump(rules, f, indent=2)
+
+        return {
+            "status": "success",
+            "message": f"Rescore rules updated at {target_path}",
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}

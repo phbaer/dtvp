@@ -42,8 +42,8 @@ class TestAssessmentTags(unittest.TestCase):
         self.assertNotIn("[Rescored: 4.0]", result)
         self.assertEqual(state, "EXPLOITABLE")
 
-    def test_assessment_details_state_aggregation_replacement(self):
-        # When a new assessment is provided, it replaces the existing one entirely.
+    def test_assessment_details_state_aggregation_preservation(self):
+        # Now we preserve existing assessments instead of replacing them.
         existing = (
             "--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: bob] ---\n"
             "Looks safe."
@@ -63,20 +63,25 @@ class TestAssessmentTags(unittest.TestCase):
             existing_details=existing,
         )
 
-        # The result should be the new App assessment. Security assessment is gone.
+        # The result should include BOTH App and Security.
         self.assertEqual(state, "EXPLOITABLE")
-        self.assertNotIn("[Team: Security]", result)
+        self.assertIn("[Team: Security] [State: NOT_AFFECTED]", result)
         self.assertIn("[Team: App] [State: EXPLOITABLE]", result)
 
-    def test_assessment_details_reviewer_clears_pending(self):
-        # Reviewer updates should clear the [Status: Pending Review] tag.
-        # And should preserve the original assessor.
-        existing = "Details.\n\n[Status: Pending Review] [Assessed By: bob]"
+    def test_assessment_details_reviewer_updates_existing_block(self):
+        # Reviewer updates should clear the [Status: Pending Review] tag
+        # and preserve the original assessor.
+        existing = (
+            "--- [Team: App] [State: IN_TRIAGE] [Assessed By: bob] ---\n"
+            "Details.\n\n"
+            "[Status: Pending Review]"
+        )
         user = "admin"
         role = "REVIEWER"
+        team = "App"
 
         result, state = process_assessment_details(
-            "Updated details.", user, role, existing_details=existing
+            "Updated details.", user, role, team=team, existing_details=existing
         )
 
         self.assertNotIn("[Status: Pending Review]", result)
@@ -92,8 +97,8 @@ class TestAssessmentTags(unittest.TestCase):
 
         self.assertIn("[Status: Pending Review]", result)
 
-    def test_assessment_details_legacy_replacement(self):
-        # Legacy text is replaced by the new assessment block.
+    def test_assessment_details_legacy_preservation(self):
+        # Legacy text is moved into a General block.
         existing = "This is some legacy text without team markers."
         user = "alice"
         role = "USER"
@@ -109,7 +114,8 @@ class TestAssessmentTags(unittest.TestCase):
             existing_details=existing,
         )
 
-        self.assertNotIn("This is some legacy text without team markers.", result)
+        self.assertIn("This is some legacy text without team markers.", result)
+        self.assertIn("[Team: General]", result)
         self.assertIn(
             "[Team: Security] [State: EXPLOITABLE] [Assessed By: alice]", result
         )
@@ -135,6 +141,27 @@ class TestAssessmentTags(unittest.TestCase):
         self.assertIn("[Assessed By: charlie]", result)
         self.assertIn("Found exploit!", result)
         self.assertNotIn("Initial report.", result)
+
+    def test_assessment_details_metadata_leakage_prevention(self):
+        # Existing block has some leaked metadata in the details string.
+        existing = (
+            "--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: user1] ---\n"
+            "Report for TeamA. [Team: TeamB] [Status: Pending Review]\n\n"
+            "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: user2] ---\n"
+            "Report for TeamB. [Team: InventoryTeam]"
+        )
+        user = "reviewer"
+        role = "REVIEWER"
+        team = "TeamA"
+
+        result, _ = process_assessment_details(
+            "New TeamA details.", user, role, team=team, existing_details=existing
+        )
+
+        # TeamB's details should now be clean of the leaked [Team: InventoryTeam]
+        self.assertIn("Report for TeamB.", result)
+        self.assertNotIn("[Team: InventoryTeam]", result)
+        self.assertNotIn("[Status: Pending Review]", result)
 
 
 if __name__ == "__main__":

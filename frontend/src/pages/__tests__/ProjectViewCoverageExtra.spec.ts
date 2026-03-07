@@ -7,7 +7,9 @@ import { calculateScoreFromVector } from '../../lib/cvss'
 import { useRoute } from 'vue-router'
 
 vi.mock('../../lib/api', () => ({
-    getGroupedVulns: vi.fn()
+    getGroupedVulns: vi.fn(),
+    getTeamMapping: vi.fn(() => Promise.resolve({})),
+    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
 }))
 
 vi.mock('../../lib/cvss', () => ({

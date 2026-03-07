@@ -1,0 +1,68 @@
+{
+  "transitions": [
+    {
+      "trigger": {
+        "state": "NOT_AFFECTED"
+      },
+      "actions": {
+        "4.0": {
+          "CR": "L",
+          "IR": "L",
+          "AR": "L",
+          "MUI": "P",
+          "MVC": "N",
+          "MVI": "N",
+          "MVA": "N"
+        },
+        "3.1": {
+          "CR": "L",
+          "IR": "L",
+          "AR": "L",
+          "MAC": "H",
+          "MAV": "P",
+          "MPR": "H",
+          "MUI": "R",
+          "MC": "N",
+          "MI": "N",
+          "MA": "N"
+        },
+        "3.0": {
+          "CR": "L",
+          "IR": "L",
+          "AR": "L",
+          "MAC": "H",
+          "MAV": "P",
+          "MPR": "H",
+          "MUI": "R",
+          "MC": "N",
+          "MI": "N",
+          "MA": "N"
+        },
+        "2.0": {
+          "CR": "L",
+          "IR": "L",
+          "AR": "L",
+          "CDP": "N",
+          "TD": "N"
+        }
+      }
+    },
+    {
+      "trigger": {
+        "state": "FALSE_POSITIVE"
+      },
+      "actions": {
+        "4.0": {
+          "CR": "L",
+          "MVC": "N"
+        },
+        "3.1": {
+          "CR": "L",
+          "MC": "N",
+          "MI": "N",
+          "MA": "N"
+        }
+      }
+    }
+  ]
+}

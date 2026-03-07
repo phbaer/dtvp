@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 
 import type { GroupedVuln, AssessmentPayload } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -18,31 +18,52 @@ const props = defineProps<{
   group: GroupedVuln
 }>()
 
-const user = inject<any>('user')
-const teamMapping = inject<any>('teamMapping')
+const handleCloseOnEscape = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+        if (genericModal.value.show) {
+            handleModalResponse(false)
+        } else if (showConflictModal.value) {
+            showConflictModal.value = false
+        } else if (showCalculatorModal.value) {
+            showCalculatorModal.value = false
+        }
+    }
+}
+
+onMounted(() => {
+    window.addEventListener('keydown', handleCloseOnEscape)
+})
+
+onUnmounted(() => {
+    window.removeEventListener('keydown', handleCloseOnEscape)
+})
+
+const user = inject<any>('user', ref({ role: 'ANALYST' }))
+const teamMapping = inject<any>('teamMapping', ref({}))
+const rescoreRules = inject<any>('rescoreRules', ref({ transitions: [] }))
 
 const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
 const ANALYSIS_STATES = [
-    { value: 'NOT_SET', label: 'Not Set' },
-    { value: 'NOT_AFFECTED', label: 'Not Affected' },
-    { value: 'EXPLOITABLE', label: 'Exploitable' },
-    { value: 'IN_TRIAGE', label: 'In Triage' },
-    { value: 'FALSE_POSITIVE', label: 'False Positive' },
-    { value: 'RESOLVED', label: 'Resolved' },
+    { value: 'NOT_SET', label: 'Not Set', description: 'No analysis has been performed yet.' },
+    { value: 'NOT_AFFECTED', label: 'Not Affected', description: 'The component is not affected by this vulnerability.' },
+    { value: 'EXPLOITABLE', label: 'Exploitable', description: 'The vulnerability is exploitable in this component.' },
+    { value: 'IN_TRIAGE', label: 'In Triage', description: 'The vulnerability is currently being investigated.' },
+    { value: 'FALSE_POSITIVE', label: 'False Positive', description: 'This finding is a false positive.' },
+    { value: 'RESOLVED', label: 'Resolved', description: 'The vulnerability has been resolved or mitigated.' },
 ]
 
 const JUSTIFICATION_OPTIONS = [
-    { value: 'NOT_SET', label: 'Not Set' },
-    { value: 'CODE_NOT_PRESENT', label: 'Code Not Present' },
-    { value: 'CODE_NOT_REACHABLE', label: 'Code Not Reachable' },
-    { value: 'REQUIRES_CONFIGURATION', label: 'Requires Configuration' },
-    { value: 'REQUIRES_DEPENDENCY', label: 'Requires Dependency' },
-    { value: 'REQUIRES_ENVIRONMENT', label: 'Requires Environment' },
-    { value: 'PROTECTED_BY_COMPILER', label: 'Protected by Compiler' },
-    { value: 'PROTECTED_AT_RUNTIME', label: 'Protected at Runtime' },
-    { value: 'PROTECTED_AT_PERIMETER', label: 'Protected at Perimeter' },
-    { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control' },
+    { value: 'NOT_SET', label: 'Not Set', description: 'No justification provided.' },
+    { value: 'CODE_NOT_PRESENT', label: 'Code Not Present', description: 'The vulnerable code is not present in the component.' },
+    { value: 'CODE_NOT_REACHABLE', label: 'Code Not Reachable', description: 'The vulnerable code is present but not reachable.' },
+    { value: 'REQUIRES_CONFIGURATION', label: 'Requires Configuration', description: 'Exploitation requires a specific non-default configuration.' },
+    { value: 'REQUIRES_DEPENDENCY', label: 'Requires Dependency', description: 'Exploitation requires an additional dependency not present.' },
+    { value: 'REQUIRES_ENVIRONMENT', label: 'Requires Environment', description: 'Exploitation requires a specific environment.' },
+    { value: 'PROTECTED_BY_COMPILER', label: 'Protected by Compiler', description: 'Protected by compiler-level security features.' },
+    { value: 'PROTECTED_AT_RUNTIME', label: 'Protected at Runtime', description: 'Protected by runtime mitigation (e.g., ASLR, DEP).' },
+    { value: 'PROTECTED_AT_PERIMETER', label: 'Protected at Perimeter', description: 'Protected by network or perimeter security controls.' },
+    { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control', description: 'Protected by other mitigating controls.' },
 ]
 
 const expanded = ref(false)
@@ -113,11 +134,15 @@ const totalTargeted = computed(() => {
 })
 
 const displayState = computed(() => {
-    const states = new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET'))
-    if (states.size === 0) return 'NOT_SET'
-    if (states.size > 1) return 'MIXED'
-    const state = Array.from(states)[0]
-    return state === 'NOT_SET' ? 'NOT_SET' : state
+    const states = Array.from(new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET')))
+    if (states.length === 0) return 'NOT_SET'
+    
+    // Sort all states by priority and return the first (worst)
+    return [...states].sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10))[0]
+})
+
+const isAssessed = computed(() => {
+    return displayState.value !== 'NOT_SET' && !isPendingReview.value
 })
 
 const isPendingReview = computed(() => {
@@ -126,6 +151,20 @@ const isPendingReview = computed(() => {
 
 const canApprove = computed(() => {
     return user?.value?.role === 'REVIEWER' && isPendingReview.value
+})
+
+const lastRescoredScore = ref<number | null>(null)
+
+const currentDisplayScore = computed(() => {
+    if (pendingScore.value !== null) return pendingScore.value
+    return props.group.rescored_cvss ?? (props.group.cvss || props.group.cvss_score) ?? 'N/A'
+})
+
+const isRescoredOrModified = computed(() => {
+    const base = props.group.cvss || props.group.cvss_score
+    const current = currentDisplayScore.value
+    if (current === 'N/A' || base === undefined) return false
+    return Math.abs(Number(current) - Number(base)) > 0.05
 })
 
 const approveAssessment = async (e: Event) => {
@@ -214,9 +253,20 @@ const updateCalcVector = (componentShortName: string, value: string) => {
 }
 
 const canEditBase = computed(() => {
-    const original = props.group.rescored_vector || props.group.cvss_vector
-    if (!original) return true
-    return isManualBaseMode.value
+    if (!isReviewer.value) return false
+    
+    // If a rescore rule matches the current state, we don't allow manual editing
+    // unless the user explicitly cleared/reset it.
+    const rules = rescoreRules?.value?.transitions || []
+    const hasRuleMatch = rules.some((r: any) => r.trigger.state === state.value)
+    
+    if (hasRuleMatch && !isManualBaseMode.value) return false
+    
+    // Explicitly unlocked via Clear
+    if (isManualBaseMode.value) return true
+    
+    // Otherwise, stay read-only
+    return false
 })
 
 const resetVector = () => {
@@ -260,7 +310,8 @@ watch(pendingVector, (newVector) => {
 })
 
 const mergedAssessmentData = computed(() => {
-    const allBlocks: Record<string, any> = {}
+    const allBlocks: AssessmentBlock[] = []
+    const teamToIndex = new Map<string, number>()
     const allTags = new Set<string>()
     let isPending = false
     
@@ -272,18 +323,25 @@ const mergedAssessmentData = computed(() => {
         }
 
         const blocks = parseAssessmentBlocks(inst.analysis_details)
-        for (const [teamName, block] of Object.entries(blocks)) {
-            if (!allBlocks[teamName]) {
-                allBlocks[teamName] = block
+        for (const block of blocks) {
+            const teamName = block.team
+            const existingIndex = teamToIndex.get(teamName)
+            
+            if (existingIndex === undefined) {
+                teamToIndex.set(teamName, allBlocks.length)
+                allBlocks.push(block)
             } else {
-                const currentTimestamp = allBlocks[teamName].timestamp || 0
-                const newTimestamp = block.timestamp || 0
-                
-                if (newTimestamp > currentTimestamp) {
-                    allBlocks[teamName] = block
-                } else if (newTimestamp === currentTimestamp) {
-                    if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
-                        allBlocks[teamName] = block
+                const existingBlock = allBlocks[existingIndex]
+                if (existingBlock) {
+                    const currentTimestamp = existingBlock.timestamp || 0
+                    const newTimestamp = block.timestamp || 0
+                    
+                    if (newTimestamp > currentTimestamp) {
+                        allBlocks[existingIndex] = block
+                    } else if (newTimestamp === currentTimestamp) {
+                        if ((block.details?.length || 0) > (existingBlock.details?.length || 0)) {
+                            allBlocks[existingIndex] = block
+                        }
                     }
                 }
             }
@@ -298,7 +356,7 @@ const mergedAssessmentData = computed(() => {
     
     return {
         blocks: allBlocks,
-        fullText: Object.keys(allBlocks).length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : '',
+        fullText: allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : '',
         isPending
     }
 })
@@ -311,7 +369,7 @@ const updateFormFromGroup = () => {
     
     if (selectedTeam.value) { // Team view
         const teamName = selectedTeam.value
-        const myBlock = teamBlocks[teamName]
+        const myBlock = teamBlocks.find(b => b.team === teamName)
         state.value = myBlock?.state || 'NOT_SET'
         // Strip the status tag from the details shown in the textarea
         details.value = (myBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
@@ -319,7 +377,7 @@ const updateFormFromGroup = () => {
     } else {
          // No team selected - if Reviewer, show General block
          if (isReviewer.value) {
-            const generalBlock = teamBlocks['General']
+            const generalBlock = teamBlocks.find(b => b.team === 'General')
             state.value = generalBlock?.state || 'NOT_SET'
             details.value = (generalBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
             justification.value = generalBlock?.justification || 'NOT_SET'
@@ -330,8 +388,7 @@ const updateFormFromGroup = () => {
          }
     }
     
-    const firstWithComment = allInstances.value.find(i => i.analysis_comments && i.analysis_comments.length > 0)
-    comment.value = firstWithComment?.analysis_comments?.[0]?.comment || ''
+    comment.value = ''
     
     const firstSuppressed = allInstances.value.find(i => i.is_suppressed)
     suppressed.value = firstSuppressed ? true : false
@@ -339,6 +396,24 @@ const updateFormFromGroup = () => {
     // Set initial values for "touched" check
     initialVector.value = pendingVector.value
     initialScore.value = pendingScore.value
+}
+
+const applyWorstTeamAssessment = () => {
+    const teamBlocks = mergedAssessmentData.value.blocks.filter(b => b.team !== 'General')
+    
+    if (teamBlocks.length === 0) {
+        showAlert('No Team Data', 'No team assessments found to pull from.')
+        return
+    }
+
+    // Sort by STATE_PRIORITY (worst first)
+    const sorted = [...teamBlocks].sort((a, b) => (STATE_PRIORITY[a.state] ?? 10) - (STATE_PRIORITY[b.state] ?? 10))
+    const worst = sorted[0]
+
+    if (worst) {
+        state.value = worst.state
+        justification.value = worst.justification || 'NOT_SET'
+    }
 }
 
 watch(selectedTeam, updateFormFromGroup)
@@ -352,10 +427,96 @@ watch(expanded, (isOpen) => {
         refreshDetails()
     }
 })
+watch(state, (newState, oldState) => {
+    // Only auto-rescore if we're changing states via user interaction
+    // We check `loadingDetails` to avoid rescoring 0 during the initial data load
+    if (!loadingDetails.value && !updating.value && newState !== oldState && isReviewer.value) {
+        
+        const rules = rescoreRules?.value?.transitions || []
+        const newTriggerMatch = rules.find((r: any) => r.trigger.state === newState)
 
+        if (newTriggerMatch) {
+            // Map the actions applicable to the current cvss version
+            const actions = newTriggerMatch.actions?.[activeVersion.value] || {}
+            
+            // Create a fresh instance from the pending vector to apply updates safely
+            let v = pendingVector.value?.trim() || ''
+            try {
+                if (v.startsWith('CVSS:4.0')) {
+                    cvssInstance.value = new Cvss4P0(v)
+                } else if (v.startsWith('CVSS:3.')) {
+                    if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
+                    cvssInstance.value = new Cvss3P1(v)
+                } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
+                    cvssInstance.value = new Cvss2(v)
+                } else {
+                    if (activeVersion.value === '4.0') {
+                        cvssInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N')
+                    } else if (activeVersion.value === '2.0') {
+                        cvssInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N')
+                    } else {
+                        cvssInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N')
+                        activeVersion.value = '3.1'
+                    }
+                }
+            } catch {}
 
+            // Apply each configured modifier
+            for (const [key, val] of Object.entries(actions)) {
+                try {
+                    // Modified metrics (e.g. MC, MAV) should only be applied if their base attribute is defined
+                    // Standalone metrics (Requirement, Temporal, etc.) should bypass this guard
+                    const vectorParts = (pendingVector.value || '').split('/')
+                    const isV4 = pendingVector.value && pendingVector.value.startsWith('CVSS:4.0');
+                    
+                    const isModifiedMetric = key.startsWith('M') && key.length > 1;
+                    const isRequirementMetric = key === 'CR' || key === 'IR' || key === 'AR';
+                    
+                    let baseKey = key;
+                    if (isModifiedMetric) {
+                        baseKey = key.slice(1);
+                    } else if (isRequirementMetric) {
+                        baseKey = isV4 ? 'V' + key.charAt(0) : key.charAt(0);
+                    }
 
-
+                    const basePart = vectorParts.find(part => part.startsWith(`${baseKey}:`));
+                    const baseValue = basePart ? basePart.split(':')[1] : null;
+                    const isDefined = baseValue && baseValue !== 'X';
+                    
+                    if (isModifiedMetric) {
+                        const isSameAsBase = baseValue === val;
+                        if (isDefined && !isSameAsBase) {
+                            cvssInstance.value.applyComponentString(key, val as string)
+                        }
+                    } else if (isRequirementMetric) {
+                        const modKey = 'M' + baseKey;
+                        const modValFromActions = (actions as Record<string, unknown>)[modKey] as string | undefined;
+                        
+                        let currentModVal = null;
+                        if (modValFromActions !== undefined) {
+                            currentModVal = modValFromActions;
+                        } else {
+                            const currentModPart = vectorParts.find(part => part.startsWith(`${modKey}:`));
+                            currentModVal = currentModPart ? currentModPart.split(':')[1] : null;
+                        }
+                        
+                        const finalModVal = (currentModVal && currentModVal !== 'X') ? currentModVal : baseValue;
+                        const isSameAsBase = baseValue === finalModVal;
+                        
+                        if (isDefined && !isSameAsBase) {
+                            cvssInstance.value.applyComponentString(key, val as string)
+                        }
+                    } else {
+                        cvssInstance.value.applyComponentString(key, val as string)
+                    }
+                } catch (e) {
+                    console.error("Failed to apply component string:", key, val, e)
+                }
+            }
+            updateVectorString()
+        }
+    }
+})
 
 const refreshDetails = async () => {
     loadingDetails.value = true
@@ -444,10 +605,8 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     
     updating.value = true
     try {
-        // 1. Get current full details from the first instance (or use refreshed data)
-        // We need the BASE string to merge into. Use originalAnalysis.value as source of truth for "current" state
-        // We need the BASE string to merge into. Use originalAnalysis.value as source of truth for "current" state
-        const allBlocks: Record<string, any> = {}
+        const allBlocks: AssessmentBlock[] = []
+        const teamToIndex = new Map<string, number>()
         const allTags = new Set<string>()
         let isPending = false
         
@@ -461,18 +620,25 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             if (detailsToParse.includes('[Status: Pending Review]')) isPending = true
             
             const blocks = parseAssessmentBlocks(detailsToParse)
-            for (const [teamName, block] of Object.entries(blocks)) {
-                if (!allBlocks[teamName]) {
-                    allBlocks[teamName] = block
+            for (const block of blocks) {
+                const teamName = block.team
+                const existingIndex = teamToIndex.get(teamName)
+                
+                if (existingIndex === undefined) {
+                    teamToIndex.set(teamName, allBlocks.length)
+                    allBlocks.push(block)
                 } else {
-                    const currentTimestamp = allBlocks[teamName].timestamp || 0
-                    const newTimestamp = block.timestamp || 0
-                    
-                    if (newTimestamp > currentTimestamp) {
-                        allBlocks[teamName] = block
-                    } else if (newTimestamp === currentTimestamp) {
-                        if ((block.details?.length || 0) > (allBlocks[teamName].details?.length || 0)) {
-                            allBlocks[teamName] = block
+                    const existingBlock = allBlocks[existingIndex]
+                    if (existingBlock) {
+                        const currentTimestamp = existingBlock.timestamp || 0
+                        const newTimestamp = block.timestamp || 0
+                        
+                        if (newTimestamp > currentTimestamp) {
+                            allBlocks[existingIndex] = block
+                        } else if (newTimestamp === currentTimestamp) {
+                            if ((block.details?.length || 0) > (existingBlock.details?.length || 0)) {
+                                allBlocks[existingIndex] = block
+                            }
                         }
                     }
                 }
@@ -484,7 +650,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             if (vectorMatch) allTags.add(vectorMatch[0]);
         }
         
-        const currentFullDetails = Object.keys(allBlocks).length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : ''
+        const currentFullDetails = allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : ''
 
         // 2. Perform Client-Side Merge
         const targetTeam = selectedTeam.value || 'General'
@@ -497,7 +663,9 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         
         // Prepare rescored tags if any (only for Reviewers)
         let rescoredTags: string[] | undefined = undefined
-        if (isReviewer.value) {
+        const canRescore = isReviewer.value;
+        
+        if (canRescore) {
             // Check if touched in this session
             const touched = pendingVector.value !== initialVector.value || pendingScore.value !== initialScore.value;
 
@@ -561,24 +729,33 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
              console.error('Update completed with errors:', errors)
              await showAlert('Update Partial', `Assessment updated with ${errors.length} errors. Check console for details.`)
         } else {
-             if (!force) await showAlert('Success', 'Assessment updated successfully')
              const success = results.find((r: any) => r.status === 'success')
-                          if (success) {
-                  const hasVectorChange = isReviewer.value ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
-                  
-                  const data = {
-                      rescored_cvss: hasVectorChange ? (isReviewer.value ? pendingScore.value : props.group.rescored_cvss) : null,
-                      rescored_vector: hasVectorChange ? (isReviewer.value ? pendingVector.value : props.group.rescored_vector) : null,
-                      analysis_state: success.new_state,
-                      analysis_details: success.new_details,
-                      is_suppressed: suppressed.value
-                  }
-                  emit('update:assessment', data)
-              }
+             if (success) {
+                 const canRescore = isReviewer.value;
+                 const hasVectorChange = canRescore ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
+                 
+                 const data = {
+                     rescored_cvss: hasVectorChange ? (canRescore ? pendingScore.value : props.group.rescored_cvss) : null,
+                     rescored_vector: hasVectorChange ? (canRescore ? pendingVector.value : props.group.rescored_vector) : null,
+                     analysis_state: success.new_state,
+                     analysis_details: success.new_details,
+                     is_suppressed: suppressed.value
+                 }
+                 emit('update:assessment', data)
+                 
+                 // Reset local state so UI reflects the new server state
+                 pendingScore.value = null
+                 pendingVector.value = data.rescored_vector || props.group.cvss_vector || ''
+                 initialVector.value = pendingVector.value
+                 initialScore.value = data.rescored_cvss ?? null
+                 isManualBaseMode.value = false
+                 lastRescoredScore.value = data.rescored_cvss ?? null
+             }
              showConflictModal.value = false
         }
         
-        expanded.value = false
+        
+        // expanded.value = false // Removed as it's confusing to close the card while the user is looking at it
     } catch (err: any) {
         if (err.response && err.response.status === 409) {
             conflictData.value = err.response.data.conflicts
@@ -623,11 +800,16 @@ const stateColor = computed(() => {
 
 
 const cardStyle = computed(() => {
+    const states = new Set(allInstances.value.map(i => i.analysis_state || 'NOT_SET'))
+    const isMixed = states.size > 1
+
+    if (isMixed) {
+        return 'bg-yellow-500/10 border-yellow-500/40 hover:bg-yellow-500/15'
+    }
+
     switch (displayState.value) {
         case 'NOT_SET': 
             return 'bg-red-500/10 border-red-500/40 hover:bg-red-500/15'
-        case 'MIXED':
-            return 'bg-yellow-500/10 border-yellow-500/40 hover:bg-yellow-500/15'
         default:
             return 'bg-gray-800 border-gray-700 hover:bg-gray-750'
     }
@@ -674,58 +856,81 @@ const rescoredVectorSegments = computed(() => {
     }
 })
 
+const normalizedTags = computed(() => {
+    if (!props.group.tags) return []
+    if (!teamMapping?.value) return props.group.tags
+
+    const result = new Set<string>()
+    props.group.tags.forEach(tag => {
+        let foundPrimary = tag
+        for (const componentName in teamMapping.value) {
+            const mappingVal = teamMapping.value[componentName]
+            if (Array.isArray(mappingVal) && mappingVal.length > 1) {
+                const primary = mappingVal[0]
+                const aliases = mappingVal.slice(1)
+                if (aliases.includes(tag)) {
+                    foundPrimary = primary
+                    break
+                }
+            }
+        }
+        result.add(foundPrimary)
+    })
+    return Array.from(result)
+})
+
 const assessedTeams = computed(() => {
     const blocks = mergedAssessmentData.value.blocks
-    
-    const existingAssessments = new Set(Object.keys(blocks))
+    const existingAssessments = new Set(blocks.map(b => b.team))
     
     const matchedTeams = new Set<string>()
     
-    // For each tag on the group, check if it or any of its aliases are assessed
-    if (props.group.tags) {
-        props.group.tags.forEach(tag => {
-            // 1. Direct match
-            if (existingAssessments.has(tag)) {
-                matchedTeams.add(tag)
-                return
-            }
-            
-            // 2. Alias match from mapping
-            // Note: The mapping is component_name -> [Primary, Alias1, Alias2]
-            // We need to find if 'tag' is the Primary tag for some component,
-            // and if so, check if any of its aliases are assessed.
-            
-            // Actually, the requirement says "The team primary tag shall be the only one shown in the ui."
-            // and "Add support for alternative team labels that will be considered when determining the assessment state".
-            
-            // So if tag 'Bla-Team' is shown, and the mapping says VPEventServer -> ['Bla-Team', 'Old-Bla-Team'],
-            // then 'Bla-Team' should get a checkmark if 'Old-Bla-Team' is assessed.
-            
-            if (teamMapping?.value) {
-                for (const componentName in teamMapping.value) {
-                    const mappingVal = teamMapping.value[componentName]
-                    if (Array.isArray(mappingVal) && mappingVal.length > 1) {
-                        const primary = mappingVal[0]
-                        if (primary === tag) {
-                            // Check all aliases
-                            const aliases = mappingVal.slice(1)
-                            if (aliases.some(alias => existingAssessments.has(alias))) {
-                                matchedTeams.add(tag)
-                                break
-                            }
+    normalizedTags.value.forEach(tag => {
+        // A primary tag is assessed if it OR any of its aliases are assessed
+        if (existingAssessments.has(tag)) {
+            matchedTeams.add(tag)
+            return
+        }
+
+        if (teamMapping?.value) {
+            for (const componentName in teamMapping.value) {
+                const mappingVal = teamMapping.value[componentName]
+                if (Array.isArray(mappingVal) && mappingVal.length > 1) {
+                    const primary = mappingVal[0]
+                    if (primary === tag) {
+                        const aliases = mappingVal.slice(1)
+                        if (aliases.some(alias => existingAssessments.has(alias))) {
+                            matchedTeams.add(tag)
+                            break
                         }
                     }
                 }
             }
-        })
-    }
+        }
+    })
     
     return matchedTeams
 })
+
+const getStateDescription = (stateValue: string | undefined) => {
+    if (!stateValue) return ''
+    return ANALYSIS_STATES.find(s => s.value === stateValue)?.description || ''
+}
+
+const getJustificationDescription = (justValue: string | undefined) => {
+    if (!justValue) return ''
+    return JUSTIFICATION_OPTIONS.find(j => j.value === justValue)?.description || ''
+}
 </script>
 
 <template>
-  <div :class="['border rounded-lg overflow-hidden transition-colors', cardStyle]">
+  <div :class="['relative border rounded-lg overflow-hidden transition-colors', cardStyle]">
+    <!-- Assessed Corner Fold -->
+    <div v-if="isAssessed" class="absolute top-0 right-0 pointer-events-none z-20">
+        <div class="w-8 h-8 bg-green-600 [clip-path:polygon(100%_0,0_0,100%_100%)] flex justify-end items-start p-1 uppercase">
+            <CheckCircle :size="12" class="text-white" />
+        </div>
+    </div>
     <!-- Header -->
     <div 
         class="p-4 flex items-start justify-between cursor-pointer transition-colors gap-8"
@@ -754,25 +959,34 @@ const assessedTeams = computed(() => {
 
                 <!-- Score Column -->
                 <div class="w-28 shrink-0 text-sm text-gray-300 flex items-center gap-2">
-                    <span v-if="group.rescored_cvss" class="px-2 py-0.5 rounded text-xs font-bold bg-purple-900/50 text-purple-300 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.2)]" title="Rescored Value">
-                        {{ group.rescored_cvss }}
+                    <span 
+                        v-if="isRescoredOrModified" 
+                        :class="['px-2 py-0.5 rounded text-xs font-bold transition-all duration-300', 
+                            (pendingScore !== null) 
+                                ? 'bg-purple-900/60 text-purple-200 border border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.3)]' 
+                                : 'bg-purple-900/40 text-purple-300 border border-purple-500/50'
+                        ]" 
+                        :title="(pendingScore !== null) ? 'Modified Score' : 'Rescored Value'"
+                        data-testid="rescored-value-badge"
+                    >
+                        {{ currentDisplayScore }}
                     </span>
                     <span v-else class="font-bold">
-                        {{ group.cvss || group.cvss_score || 'N/A' }}
+                        {{ currentDisplayScore }}
                     </span>
-                    <span v-if="group.rescored_cvss" class="text-gray-600 line-through text-[10px]" title="Original Score">
+                    <span v-if="isRescoredOrModified" class="text-gray-600 line-through text-[10px]" title="Original Score">
                         {{ group.cvss || group.cvss_score }}
                     </span>
                     <span class="text-[10px] text-gray-500 font-medium uppercase">CVSS</span>
                 </div>
 
-                <div v-if="group.tags && group.tags.length > 0" class="flex items-center gap-4 flex-1 min-w-0">
+                <div v-if="normalizedTags.length > 0" class="flex items-center gap-4 flex-1">
                      <div class="h-5 w-0.5 bg-gray-600 shrink-0 rounded-full"></div>
-                     <div class="flex gap-1.5 overflow-hidden">
+                     <div class="flex gap-1.5 flex-wrap">
                         <span 
-                            v-for="tag in group.tags" 
+                            v-for="tag in normalizedTags" 
                             :key="tag" 
-                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 whitespace-nowrap flex items-center gap-1.5"
+                            class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800/50 flex items-center gap-1.5"
                         >
                             <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="text-green-400" />
                             {{ tag }}
@@ -805,7 +1019,8 @@ const assessedTeams = computed(() => {
                 <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
                 <div 
                     :id="`state-${group.id}`"
-                    :class="['font-bold text-sm truncate analysis-state-value', stateColor]"
+                    :class="['font-bold text-sm truncate analysis-state-value cursor-help', stateColor]"
+                    :title="getStateDescription(displayState)"
                 >
                     {{ displayState }}
                 </div>
@@ -816,10 +1031,12 @@ const assessedTeams = computed(() => {
                     <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
                     <div class="font-bold text-sm text-gray-300">{{ group.affected_versions?.length || 0 }} Versions</div>
                     
-                    <div v-if="isPendingReview" class="mt-1 flex justify-end">
-                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide">
-                            Pending Review
-                        </span>
+                    <div class="mt-1 flex flex-col items-end gap-1">
+                        <div v-if="isPendingReview">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide">
+                                Pending Review
+                            </span>
+                        </div>
                     </div>
                 
                     <button 
@@ -862,16 +1079,24 @@ const assessedTeams = computed(() => {
                                     <span>{{ inst.analysis_state }}</span>
                                 </div>
                                 <div v-if="inst.analysis_details" class="flex flex-col gap-2 mt-2 mb-2">
-                                    <div v-for="(block, team) in parseAssessmentBlocks(inst.analysis_details)" :key="team" class="bg-gray-800/80 rounded border border-gray-700/50 p-3">
+                                    <div v-for="block in parseAssessmentBlocks(inst.analysis_details)" :key="block.team" class="bg-gray-800/80 rounded border border-gray-700/50 p-3">
                                         <div class="flex justify-between items-start mb-2">
                                             <div class="flex flex-wrap items-center gap-2">
                                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-900/40 text-blue-300 border border-blue-800/50">
-                                                    {{ team === 'General' ? 'Global Policy' : team }}
+                                                    {{ block.team === 'General' ? 'Global Policy' : block.team }}
                                                 </span>
-                                                <span v-if="block.state && block.state !== 'NOT_SET'" class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50">
+                                                <span 
+                                                    v-if="block.state && block.state !== 'NOT_SET'" 
+                                                    class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50 cursor-help"
+                                                    :title="getStateDescription(block.state)"
+                                                >
                                                     State: <span :class="block.state === 'NOT_AFFECTED' ? 'text-green-400' : (block.state === 'EXPLOITABLE' ? 'text-red-400' : 'text-gray-200')">{{ block.state }}</span>
                                                 </span>
-                                                <span v-if="block.justification && block.justification !== 'NOT_SET'" class="px-2 py-0.5 rounded text-[10px] font-bold text-gray-400 border border-gray-700 bg-gray-900/30">
+                                                <span 
+                                                    v-if="block.justification && block.justification !== 'NOT_SET'" 
+                                                    class="px-2 py-0.5 rounded text-[10px] font-bold text-gray-400 border border-gray-700 bg-gray-900/30 cursor-help"
+                                                    :title="getJustificationDescription(block.justification)"
+                                                >
                                                     {{ block.justification.replace(/_/g, ' ') }}
                                                 </span>
                                             </div>
@@ -921,15 +1146,26 @@ const assessedTeams = computed(() => {
                         <div class="mb-2">
                             <label class="block text-xs font-semibold text-gray-500 mb-1 flex justify-between">
                                 <span>Vector String</span>
-                                <button @click="showCalculatorModal = true" class="text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer">
-                                    <ExternalLink :size="10" /> Visual Calculator
-                                </button>
+                                <div class="flex items-center gap-2">
+                                    <button 
+                                        @click="resetVector" 
+                                        class="text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                                        title="Reset to Original"
+                                    >
+                                        <RotateCcw :size="10" />
+                                    </button>
+                                    <button @click="showCalculatorModal = true" class="text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer">
+                                        <ExternalLink :size="10" /> Visual Calculator
+                                    </button>
+                                </div>
                             </label>
                             <input 
                                 v-model="pendingVector"
                                 type="text" 
+                                :readonly="!canEditBase"
                                 placeholder="CVSS:4.0/AV:N/..."
-                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono"
+                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono disabled:opacity-50"
+                                :class="{ 'cursor-not-allowed text-gray-400': !canEditBase }"
                             />
                             <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 text-[9px] text-gray-500/60 flex gap-1.5 truncate">
                                 <span class="uppercase font-bold shrink-0">Original:</span>
@@ -943,10 +1179,12 @@ const assessedTeams = computed(() => {
                                 <input 
                                     v-model="pendingScore"
                                     type="number" 
+                                    :readonly="!canEditBase"
                                     step="0.1" 
                                     min="0" 
                                     max="10" 
-                                    class="w-16 p-1.5 text-right rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-sm font-bold text-yellow-400"
+                                    class="w-16 p-1.5 text-right rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-sm font-bold text-yellow-400 disabled:opacity-50"
+                                    :class="{ 'cursor-not-allowed text-gray-500': !canEditBase }"
                                 />
                             </div>
                         </div>
@@ -961,7 +1199,7 @@ const assessedTeams = computed(() => {
                                 class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
                             >
                                 <option value="">{{ isReviewer ? 'Global assessment' : 'No team marker' }}</option>
-                                <option v-for="t in group.tags" :key="t" :value="t">{{ t }}</option>
+                                <option v-for="t in normalizedTags" :key="t" :value="t">{{ t }}</option>
                             </select>
                         </div>
                     </div>
@@ -979,7 +1217,7 @@ const assessedTeams = computed(() => {
                                     v-model="state" 
                                     class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
                                 >
-                                    <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value">{{ s.label }}</option>
+                                    <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value" :title="s.description">{{ s.label }}</option>
                                 </select>
                             </div>
 
@@ -989,7 +1227,7 @@ const assessedTeams = computed(() => {
                                     v-model="justification" 
                                     class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
                                 >
-                                    <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                                    <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value" :title="o.description">{{ o.label }}</option>
                                 </select>
                             </div>
 
@@ -1032,6 +1270,16 @@ const assessedTeams = computed(() => {
                         <label :for="`suppress-${group.id}`" class="text-sm">Suppress this vulnerability</label>
                     </div>
                     
+                    <div v-if="isReviewer && !selectedTeam && Object.keys(mergedAssessmentData.blocks).filter(t => t !== 'General').length > 0" class="pt-2 border-t border-gray-700 mt-2">
+                        <button 
+                            @click="applyWorstTeamAssessment"
+                            class="w-full mb-2 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-500 border border-yellow-600/50 font-bold py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                            <AlertTriangle :size="14" />
+                            Apply Worst Team Assessment
+                        </button>
+                    </div>
+
                     <button 
                         @click="() => handleUpdate(false)"
                         :disabled="updating || loadingDetails || totalTargeted === 0"

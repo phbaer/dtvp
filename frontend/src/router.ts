@@ -4,13 +4,13 @@ import Dashboard from './pages/Dashboard.vue'
 import ProjectView from './pages/ProjectView.vue'
 import Settings from './pages/Settings.vue'
 
-import { checkSession } from './lib/api'
+import { getUserInfo } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
 
 const routes = [
     { path: '/login', component: Login },
     { path: '/', component: Dashboard },
-    { path: '/settings', component: Settings },
+    { path: '/settings', component: Settings, meta: { role: 'REVIEWER' } },
     { path: '/project/:name', component: ProjectView },
 ]
 
@@ -20,6 +20,7 @@ export const router = createRouter({
 })
 
 let sessionChecked = false;
+let userRole: string | undefined = undefined;
 
 router.beforeEach(async (to, _from, next) => {
     // If going to login, allow it
@@ -29,13 +30,22 @@ router.beforeEach(async (to, _from, next) => {
     }
 
     if (!sessionChecked) {
-        const isAuthenticated = await checkSession();
-        sessionChecked = true;
-
-        if (!isAuthenticated) {
+        try {
+            const user = await getUserInfo();
+            userRole = user.role;
+            sessionChecked = true;
+        } catch {
+            sessionChecked = true;
             next('/login');
             return;
         }
     }
+
+    // Role check for routes with meta.role
+    if (to.meta.role && to.meta.role !== userRole) {
+        next('/');
+        return;
+    }
+
     next();
 });

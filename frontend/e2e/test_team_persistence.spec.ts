@@ -96,6 +96,24 @@ test.describe('Team Analysis Persistence', () => {
                 }]),
             });
         });
+
+        // Mock Team Mapping
+        await page.route('**/api/settings/mapping', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ 'test-lib': 'Frontend' }),
+            });
+        });
+
+        // Mock Rescore Rules
+        await page.route('**/api/settings/rescore-rules', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ transitions: [] }),
+            });
+        });
     });
 
     test('should persist details entered for a team', async ({ page }) => {
@@ -151,10 +169,6 @@ test.describe('Team Analysis Persistence', () => {
 
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
-
-        // Handle Success Modal
-        await expect(page.getByText('Assessment updated successfully')).toBeVisible();
-        await page.getByRole('button', { name: 'Close' }).click();
 
         // Wait for update to complete (button re-enables or alert)
         // In the real app, it closes the expanded view on success, so let's cycle it.

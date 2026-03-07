@@ -7,9 +7,10 @@ describe('Assessment Helpers', () => {
         it('should parse legacy text as General block', () => {
             const text = 'Legacy analysis text.';
             const blocks = parseAssessmentBlocks(text);
-            expect(blocks['General']).toBeDefined();
-            expect(blocks['General']?.details).toBe('Legacy analysis text.');
-            expect(blocks['General']?.justification).toBe('NOT_SET');
+            const general = blocks.find(b => b.team === 'General');
+            expect(general).toBeDefined();
+            expect(general!.details).toBe('Legacy analysis text.');
+            expect(general!.justification).toBe('NOT_SET');
         });
 
         it('should parse structured blocks', () => {
@@ -18,13 +19,19 @@ Details A
 --- [Team: TeamB] [State: FALSE_POSITIVE] [Assessed By: UserB] ---
 Details B`;
             const blocks = parseAssessmentBlocks(text);
-            expect(blocks['TeamA']).toBeDefined();
-            expect(blocks['TeamA']?.state).toBe('IN_TRIAGE');
-            expect(blocks['TeamA']?.details).toBe('Details A');
-            expect(blocks['TeamA']?.justification).toBe('CODE_NOT_PRESENT');
-            expect(blocks['TeamB']).toBeDefined();
-            expect(blocks['TeamB']?.state).toBe('FALSE_POSITIVE');
-            expect(blocks['TeamB']?.justification).toBe('NOT_SET');
+            const teamA = blocks.find(b => b.team === 'TeamA');
+            const teamB = blocks.find(b => b.team === 'TeamB');
+            expect(teamA).toBeDefined();
+            expect(teamA?.state).toBe('IN_TRIAGE');
+            expect(teamA?.details).toBe('Details A');
+            expect(teamA?.justification).toBe('CODE_NOT_PRESENT');
+            expect(teamB).toBeDefined();
+            expect(teamB?.state).toBe('FALSE_POSITIVE');
+            expect(teamB?.justification).toBe('NOT_SET');
+
+            // Check order
+            expect(blocks[0]!.team).toBe('TeamA');
+            expect(blocks[1]!.team).toBe('TeamB');
         });
 
         it('should handle General + structured blocks', () => {
@@ -32,26 +39,36 @@ Details B`;
 --- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] ---
 Details A`;
             const blocks = parseAssessmentBlocks(text);
-            expect(blocks['General']).toBeDefined();
-            expect(blocks['General']?.details).toBe('General Text');
-            expect(blocks['General']?.justification).toBe('NOT_SET');
-            expect(blocks['TeamA']).toBeDefined();
+            const general = blocks.find(b => b.team === 'General');
+            expect(general).toBeDefined();
+            expect(general!.details).toBe('General Text');
+            expect(general!.justification).toBe('NOT_SET');
+            expect(blocks.find(b => b.team === 'TeamA')).toBeDefined();
+        });
+
+        it('should clean leaked metadata from details', () => {
+            const text = `--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: user1] ---
+Details A [Team: TeamB] [Status: Pending Review] [Rescored: 5.0]`;
+            const blocks = parseAssessmentBlocks(text);
+            const teamA = blocks.find(b => b.team === 'TeamA');
+            expect(teamA?.details).toBe('Details A');
         });
 
         it('should clean redundant metadata from details', () => {
             const text = `--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] ---
 [Comment] [Team: TeamA] My actual rationale -- UserA`;
             const blocks = parseAssessmentBlocks(text);
-            expect(blocks['TeamA']).toBeDefined();
-            expect(blocks['TeamA']?.details).toBe('My actual rationale');
+            const teamA = blocks.find(b => b.team === 'TeamA');
+            expect(teamA).toBeDefined();
+            expect(teamA?.details).toBe('My actual rationale');
         });
     });
 
     describe('constructAssessmentDetails', () => {
         it('should format blocks correctly', () => {
-            const blocks = {
-                'TeamA': { team: 'TeamA', state: 'IN_TRIAGE', user: 'UserA', details: 'Details A', justification: 'CODE_NOT_PRESENT' }
-            };
+            const blocks = [
+                { team: 'TeamA', state: 'IN_TRIAGE', user: 'UserA', details: 'Details A', justification: 'CODE_NOT_PRESENT' }
+            ];
             const result = constructAssessmentDetails(blocks);
             expect(result.text).toContain('--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: UserA] [Justification: CODE_NOT_PRESENT] ---');
             expect(result.text).toContain('Details A');
@@ -60,18 +77,18 @@ Details A`;
         });
 
         it('should calculate aggregated state (Critical wins)', () => {
-            const blocks = {
-                'TeamA': { team: 'TeamA', state: 'NOT_AFFECTED', user: 'UserA', details: '', justification: 'CODE_NOT_PRESENT' },
-                'TeamB': { team: 'TeamB', state: 'EXPLOITABLE', user: 'UserB', details: '', justification: 'NOT_SET' }
-            };
+            const blocks = [
+                { team: 'TeamA', state: 'NOT_AFFECTED', user: 'UserA', details: '', justification: 'CODE_NOT_PRESENT' },
+                { team: 'TeamB', state: 'EXPLOITABLE', user: 'UserB', details: '', justification: 'NOT_SET' }
+            ];
             const result = constructAssessmentDetails(blocks);
             expect(result.aggregatedState).toBe('EXPLOITABLE');
         });
 
         it('should conditionally include or exclude the Pending Review flag', () => {
-            const blocks = {
-                'TeamA': { team: 'TeamA', state: 'IN_TRIAGE', user: 'UserA', details: 'D', justification: 'NOT_SET' }
-            };
+            const blocks = [
+                { team: 'TeamA', state: 'IN_TRIAGE', user: 'UserA', details: 'D', justification: 'NOT_SET' }
+            ];
             const pending = constructAssessmentDetails(blocks, [], true);
             expect(pending.text).toContain('[Status: Pending Review]');
 
