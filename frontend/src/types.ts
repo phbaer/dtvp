@@ -63,3 +63,12 @@ export interface AssessmentPayload {
     force?: boolean;
     comparison_mode?: 'MERGE' | 'REPLACE';
 }
+
+export interface Statistics {
+    severity_counts: Record<string, number>;
+    state_counts: Record<string, number>;
+    total_unique: number;
+    total_findings: number;
+    affected_projects_count: number;
+    version_counts: Record<string, number>;
+}

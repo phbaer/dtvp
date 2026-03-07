@@ -3,6 +3,7 @@ import Login from './pages/Login.vue'
 import Dashboard from './pages/Dashboard.vue'
 import ProjectView from './pages/ProjectView.vue'
 import Settings from './pages/Settings.vue'
+import Statistics from './pages/Statistics.vue'
 
 import { getUserInfo } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
@@ -12,6 +13,7 @@ const routes = [
     { path: '/', component: Dashboard },
     { path: '/settings', component: Settings, meta: { role: 'REVIEWER' } },
     { path: '/project/:name', component: ProjectView },
+    { path: '/statistics', component: Statistics },
 ]
 
 export const router = createRouter({
