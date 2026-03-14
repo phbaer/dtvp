@@ -585,7 +585,45 @@ def group_vulnerabilities(
 
     return result
 
-    return result
+
+def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Calculates statistics from grouped vulnerabilities.
+    """
+    stats = {
+        "severity_counts": {},
+        "state_counts": {},
+        "total_unique": len(grouped_vulns),
+        "total_findings": 0,
+        "affected_projects_count": 0,
+    }
+
+    project_uuids = set()
+
+    for group in grouped_vulns:
+        # Severity
+        sev = group.get("severity", "UNKNOWN")
+        stats["severity_counts"][sev] = stats["severity_counts"].get(sev, 0) + 1
+
+        # Collect all instances to aggregate state and count findings
+        all_instances = []
+        for av in group.get("affected_versions", []):
+            project_uuids.add(av.get("project_uuid"))
+            for comp in av.get("components", []):
+                stats["total_findings"] += 1
+                all_instances.append(comp)
+
+        states = set(i.get("analysis_state") or "NOT_SET" for i in all_instances)
+        display_state = (
+            "MIXED" if len(states) > 1 else (list(states)[0] if states else "NOT_SET")
+        )
+        stats["state_counts"][display_state] = (
+            stats["state_counts"].get(display_state, 0) + 1
+        )
+
+    stats["affected_projects_count"] = len(project_uuids)
+
+    return stats
 
 
 def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:

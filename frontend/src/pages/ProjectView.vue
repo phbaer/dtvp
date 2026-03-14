@@ -5,6 +5,7 @@ import { getGroupedVulns, getTeamMapping, getRescoreRules } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln } from '../types'
 import VulnGroupCard from '../components/VulnGroupCard.vue'
+import { BarChart3 } from 'lucide-vue-next'
 
 const route = useRoute()
 const user = inject<any>('user')
@@ -259,7 +260,16 @@ watch(() => [route.params.name, route.query.cve], fetchVulns, { immediate: true 
             <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
                 &larr; Back to Dashboard
             </router-link>
-            <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}</span></h2>
+            <div class="flex items-center gap-4">
+                <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}</span></h2>
+                <router-link 
+                    :to="{ path: '/statistics', query: { name: $route.params.name === '_all_' ? '' : $route.params.name, cve: $route.query.cve } }"
+                    class="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1.5"
+                >
+                    <BarChart3 :size="14" />
+                    View Statistics
+                </router-link>
+            </div>
         </div>
         <div class="flex flex-col gap-4">
             <div class="flex flex-col md:flex-row gap-4 md:items-end lg:items-end">

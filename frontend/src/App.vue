@@ -51,6 +51,7 @@ const toggleView = () => {
                     </h1>
                     <nav class="flex gap-4 text-sm font-medium">
                         <router-link to="/" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Dashboard</router-link>
+                        <router-link to="/statistics" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Statistics</router-link>
                         <router-link v-if="realRole === 'REVIEWER'" to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
                     </nav>
                 </div>
