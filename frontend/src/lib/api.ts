@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Project, GroupedVuln, AssessmentPayload } from '../types';
+import type { Project, GroupedVuln, AssessmentPayload, Statistics } from '../types';
 import { getRuntimeConfig } from './env';
 
 const BASE_URL = (getRuntimeConfig('DTVP_FRONTEND_URL', '') || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '');
@@ -18,6 +18,11 @@ const api = axios.create({
 
 export const getProjects = async (name: string): Promise<Project[]> => {
     const res = await api.get('/projects', { params: { name } });
+    return res.data;
+};
+
+export const getStatistics = async (name?: string, cve?: string): Promise<Statistics> => {
+    const res = await api.get('/statistics', { params: { name, cve } });
     return res.data;
 };
 
