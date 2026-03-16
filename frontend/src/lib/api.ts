@@ -31,6 +31,12 @@ export const getVersion = async (): Promise<{ version: string, build: string }> 
     return res.data;
 };
 
+export const getChangelog = async (): Promise<{ content: string }> => {
+    const res = await api.get('/changelog');
+    return res.data;
+};
+
+
 export interface TaskResponse {
     task_id: string;
     status: 'pending' | 'running' | 'completed' | 'failed';

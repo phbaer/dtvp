@@ -38,7 +38,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
 # Copy application code
-COPY *.py start.sh ./
+COPY *.py start.sh CHANGELOG.md ./
 RUN chmod +x start.sh
 
 # Copy the built frontend from the frontend-build stage

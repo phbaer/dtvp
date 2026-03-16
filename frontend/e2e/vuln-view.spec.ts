@@ -13,6 +13,14 @@ test.describe('Vulnerability View and Rescoring', () => {
             });
         });
 
+        // Mock Version
+        await page.route('**/api/version', async (route) => {
+            await route.fulfill({
+                status: 200,
+                body: JSON.stringify({ version: '1.0.0', build: 'test' }),
+            });
+        });
+
         // Mock Projects
         await page.route('**/api/projects?name=TestProject', async (route) => {
             // Return extended list immediately for search/filter
@@ -120,13 +128,17 @@ test.describe('Vulnerability View and Rescoring', () => {
             });
         });
 
-        // Mock Rescore Rules
         await page.route('**/api/settings/rescore-rules', async (route) => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
                 body: JSON.stringify({ transitions: [] }),
             });
+        });
+
+        // Bypass ChangelogModal
+        await page.addInitScript(() => {
+            window.localStorage.setItem('dtvp_last_seen_version', '1.0.0');
         });
     });
 
@@ -136,8 +148,10 @@ test.describe('Vulnerability View and Rescoring', () => {
         await page.waitForLoadState('networkidle');
 
         // Uncheck "Hide Assessed" and "Hide Mixed"
-        await page.locator('label', { hasText: 'Hide Assessed' }).uncheck();
-        await page.locator('label', { hasText: 'Hide Mixed' }).uncheck();
+        const assessedLabel = page.locator('label', { hasText: 'Hide Assessed' });
+        const mixedLabel = page.locator('label', { hasText: 'Hide Mixed' });
+        if (await assessedLabel.locator('input').isChecked()) await assessedLabel.click();
+        if (await mixedLabel.locator('input').isChecked()) await mixedLabel.click();
 
         // Wait for CVE to appear
         const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: /CVE-2023-1234/ }).first();

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, provide, computed } from 'vue'
-import { getVersion, getUserInfo, logout } from './lib/api'
+import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
+import ChangelogModal from './components/ChangelogModal.vue'
 
 const version = ref('')
 const build = ref('')
 const user = ref({ username: '', role: '' })
 const realRole = ref('')
 const isAnalystView = ref(false)
+
+const showChangelog = ref(false)
+const changelogContent = ref('')
 
 provide('user', computed(() => ({
     ...user.value,
@@ -19,6 +23,18 @@ onMounted(async () => {
         const v = await getVersion()
         version.value = v.version
         build.value = v.build
+
+        // Check for version update
+        const lastSeenVersion = localStorage.getItem('dtvp_last_seen_version')
+        if (lastSeenVersion !== v.version && v.version !== '0.0.0') {
+            try {
+                const res = await getChangelog()
+                changelogContent.value = res.content
+                showChangelog.value = true
+            } catch (e) {
+                console.error('Failed to fetch changelog', e)
+            }
+        }
     } catch (e) {
         console.error('Failed to fetch version', e)
     }
@@ -37,6 +53,11 @@ onMounted(async () => {
 
 const toggleView = () => {
     isAnalystView.value = !isAnalystView.value
+}
+
+const acknowledgeChangelog = () => {
+    showChangelog.value = false
+    localStorage.setItem('dtvp_last_seen_version', version.value)
 }
 </script>
 
@@ -99,6 +120,12 @@ const toggleView = () => {
                 DTVP v{{ version }} (build {{ build }})
             </div>
         </footer>
+
+        <ChangelogModal 
+            v-if="showChangelog" 
+            :changelog="changelogContent" 
+            @acknowledge="acknowledgeChangelog"
+        />
     </template>
     <router-view v-else></router-view>
   </div>

@@ -82,6 +82,15 @@ def get_version():
     return {"version": VERSION, "build": BUILD_COMMIT}
 
 
+@api_router.get("/changelog")
+def get_changelog():
+    changelog_path = os.path.join(os.getcwd(), "CHANGELOG.md")
+    if os.path.exists(changelog_path):
+        with open(changelog_path, "r") as f:
+            return {"content": f.read()}
+    return {"content": "Changelog not available."}
+
+
 # Models
 class AssessmentRequest(BaseModel):
     instances: List[dict]  # List of instance objects from the group
