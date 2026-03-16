@@ -17,6 +17,10 @@ async function login(page: any, role: 'Analyst' | 'Reviewer' = 'Analyst') {
 
 test.describe('Integration Tests (Real Backend)', () => {
     test.beforeEach(async ({ page }) => {
+        // Bypass ChangelogModal by setting last seen version
+        await page.addInitScript(() => {
+            window.localStorage.setItem('dtvp_last_seen_version', '1.0.3');
+        });
         await login(page);
     });
 
@@ -60,8 +64,8 @@ test.describe('Integration Tests (Real Backend)', () => {
         const assessedCheckbox = hideAssessedLabel.locator('input[type="checkbox"]');
         const mixedCheckbox = hideMixedLabel.locator('input[type="checkbox"]');
 
-        if (await assessedCheckbox.isChecked()) await assessedCheckbox.click({ force: true });
-        if (await mixedCheckbox.isChecked()) await mixedCheckbox.click({ force: true });
+        if (await assessedCheckbox.isChecked()) await hideAssessedLabel.click();
+        if (await mixedCheckbox.isChecked()) await hideMixedLabel.click();
 
         // 6. Verify Vulnerabilities from Mock DT are displayed
         // We expect CVE-2021-44228 (Log4Shell)

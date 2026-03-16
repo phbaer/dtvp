@@ -141,6 +141,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+          fetch-depth: 0
       - name: Install Docker Cli
         run: |-
           install -m 0755 -d /etc/apt/keyrings
@@ -170,6 +171,10 @@ jobs:
         run: |
           VERSION=$(uv version | awk '{print $2}')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+      - name: Generate CHANGELOG.md for Docker
+        run: |
+          # Ensure changelog is up to date in the build context
+          uv run git-cliff -o CHANGELOG.md
       - name: Build and Push
         uses: docker/build-push-action@v6
         with:
@@ -229,11 +234,6 @@ jobs:
           echo "NOTES<<HEREDOC" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "HEREDOC" >> $GITHUB_OUTPUT
-
-      - name: Commit changelog
-        run: |
-          git add CHANGELOG.md
-          git diff --staged --quiet || git commit -m "chore: update changelog for ${{ steps.version.outputs.TAG }} [skip ci]"
 
       - name: Create and push git tag
         run: |

@@ -106,7 +106,6 @@ test.describe('Team Analysis Persistence', () => {
             });
         });
 
-        // Mock Rescore Rules
         await page.route('**/api/settings/rescore-rules', async (route) => {
             await route.fulfill({
                 status: 200,
@@ -114,14 +113,21 @@ test.describe('Team Analysis Persistence', () => {
                 body: JSON.stringify({ transitions: [] }),
             });
         });
+
+        // Bypass ChangelogModal
+        await page.addInitScript(() => {
+            window.localStorage.setItem('dtvp_last_seen_version', '1.0.0');
+        });
     });
 
     test('should persist details entered for a team', async ({ page }) => {
         await page.goto('/project/PersistenceTest');
 
         // Uncheck "Hide Assessed" and "Hide Mixed" to ensure visibility
-        await page.locator('label', { hasText: 'Hide Assessed' }).locator('input').uncheck({ force: true });
-        await page.locator('label', { hasText: 'Hide Mixed' }).locator('input').uncheck({ force: true });
+        const assessedLabel = page.locator('label', { hasText: 'Hide Assessed' });
+        const mixedLabel = page.locator('label', { hasText: 'Hide Mixed' });
+        if (await assessedLabel.locator('input').isChecked()) await assessedLabel.click();
+        if (await mixedLabel.locator('input').isChecked()) await mixedLabel.click();
 
         // Expand card
         const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: 'CVE-PERSISTENCE-TEST' }).first();

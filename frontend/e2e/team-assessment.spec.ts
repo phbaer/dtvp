@@ -117,7 +117,6 @@ test.describe('Per-Team Assessment UI Flow', () => {
             });
         });
 
-        // Mock Rescore Rules
         await page.route('**/api/settings/rescore-rules', async (route) => {
             await route.fulfill({
                 status: 200,
@@ -125,14 +124,21 @@ test.describe('Per-Team Assessment UI Flow', () => {
                 body: JSON.stringify({ transitions: [] }),
             });
         });
+
+        // Bypass ChangelogModal
+        await page.addInitScript(() => {
+            window.localStorage.setItem('dtvp_last_seen_version', '1.0.0');
+        });
     });
 
     test('should allow targeted team assessment and show aggregated result', async ({ page }) => {
         await page.goto('/project/TestProject');
 
         // Uncheck "Hide Assessed" and "Hide Mixed"
-        await page.locator('label', { hasText: 'Hide Assessed' }).locator('input').uncheck({ force: true });
-        await page.locator('label', { hasText: 'Hide Mixed' }).locator('input').uncheck({ force: true });
+        const assessedLabel = page.locator('label', { hasText: 'Hide Assessed' });
+        const mixedLabel = page.locator('label', { hasText: 'Hide Mixed' });
+        if (await assessedLabel.locator('input').isChecked()) await assessedLabel.click();
+        if (await mixedLabel.locator('input').isChecked()) await mixedLabel.click();
 
         // Locate the team vulnerability and click it to expand
         const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: 'CVE-TEAM-TEST' }).first();

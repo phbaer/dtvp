@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getProjects, getGroupedVulns, updateAssessment, login, checkSession, getVersion, getDependencyChains } from '../api'
+import { getProjects, getGroupedVulns, updateAssessment, login, checkSession, getVersion, getDependencyChains, getChangelog } from '../api'
 
 const mocks = vi.hoisted(() => ({
     get: vi.fn(),
@@ -45,6 +45,16 @@ describe('api.ts', () => {
         const result = await getVersion()
 
         expect(mocks.get).toHaveBeenCalledWith('/version')
+        expect(result).toEqual(mockData)
+    })
+
+    it('getChangelog calls /changelog', async () => {
+        const mockData = { content: '# Changelog' }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getChangelog()
+
+        expect(mocks.get).toHaveBeenCalledWith('/changelog')
         expect(result).toEqual(mockData)
     })
 
