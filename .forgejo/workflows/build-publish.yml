@@ -102,11 +102,17 @@ jobs:
         run: pm2 kill || true
 
   check-version:
-    if: false && github.event.action != 'closed'
+    # Runs on push to main to verify the version tag doesn't already exist
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [test-backend, test-frontend]
     runs-on: node
+    outputs:
+      version: ${{ steps.get_version.outputs.VERSION }}
+      tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Extract Version
@@ -116,20 +122,14 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
       - name: Check Git Tag
+        id: check_tag
         run: |
           VERSION=${{ steps.get_version.outputs.VERSION }}
-          # Check remote tags
-          if git ls-remote --tags origin | grep -q "refs/tags/v$VERSION$"; then
-            echo "Error: Git tag v$VERSION already exists."
-            exit 1
-          fi
-      - name: Check Docker Tag
-        run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-          if curl -I -s -f -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
-            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/packages/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/container/dtvp/$VERSION" >/dev/null 2>&1; then
-            echo "Error: Docker tag $VERSION already exists in registry."
-            exit 1
+          if git tag -l | grep -q "^v${VERSION}$"; then
+            echo "Git tag v$VERSION already exists — skipping release."
+            echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
+          else
+            echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
           fi
 
   build-push-images:
@@ -170,7 +170,7 @@ jobs:
         run: |
           VERSION=$(uv version | awk '{print $2}')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-      - name: Build and Push 
+      - name: Build and Push
         uses: docker/build-push-action@v6
         with:
           push: true
@@ -178,22 +178,81 @@ jobs:
           tags: |
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
-            ${{ false && github.event_name == 'push' && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
-            ${{ false && github.event_name == 'push' && format('{0}/{1}/dtvp:{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
             ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
           context: .
           build-args: |
             BUILD_COMMIT=${{ github.sha }}
           secrets: |
             GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
-      - name: Create Git Tag
-        if: false && github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+  release:
+    # Creates changelog, git tag, and Forgejo release — only on main push when tag is new
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check-version.outputs.tag_exists == 'false'
+    needs: [check-version, build-push-images]
+    runs-on: node
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Configure Git
         run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
           git config --global user.name "Gitea Actions"
           git config --global user.email "actions@gitea.io"
-          git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin "v$VERSION"
+
+      - name: Set version
+        id: version
+        run: |
+          VERSION=${{ needs.check-version.outputs.version }}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate CHANGELOG.md with git-cliff
+        run: |
+          uv run git-cliff --tag ${{ steps.version.outputs.TAG }} -o CHANGELOG.md
+          echo "--- Preview (last 40 lines) ---"
+          tail -40 CHANGELOG.md
+
+      - name: Extract release notes for this version
+        id: release_notes
+        run: |
+          # Extract the section for the current tag from the changelog
+          NOTES=$(uv run git-cliff --tag ${{ steps.version.outputs.TAG }} --unreleased --strip all 2>/dev/null || uv run git-cliff --latest --strip all)
+          echo "NOTES<<HEREDOC" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "HEREDOC" >> $GITHUB_OUTPUT
+
+      - name: Commit changelog
+        run: |
+          git add CHANGELOG.md
+          git diff --staged --quiet || git commit -m "chore: update changelog for ${{ steps.version.outputs.TAG }} [skip ci]"
+
+      - name: Create and push git tag
+        run: |
+          git tag -a "${{ steps.version.outputs.TAG }}" -m "Release ${{ steps.version.outputs.TAG }}"
+          git push origin HEAD:main --follow-tags
+
+      - name: Create Forgejo Release
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/repos/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/dtvp/releases" \
+            -d "$(jq -n \
+              --arg tag "${{ steps.version.outputs.TAG }}" \
+              --arg name "Release ${{ steps.version.outputs.TAG }}" \
+              --arg body "${{ steps.release_notes.outputs.NOTES }}" \
+              '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}'\
+            )"
+
 
   delete-pr-images:
     if: github.event.action == 'closed'
