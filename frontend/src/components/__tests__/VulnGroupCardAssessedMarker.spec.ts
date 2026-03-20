@@ -76,7 +76,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const tags = wrapper.findAll('.rounded.text-\\[10px\\].font-semibold')
+        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
         expect(tags.length).toBe(2) // TeamA, TeamB
 
         // CheckCircle should not be present
@@ -100,7 +100,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const tags = wrapper.findAll('.rounded.text-\\[10px\\].font-semibold')
+        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
         expect(tags.length).toBe(2)
 
         // First tag (TeamA) should have checkmark
@@ -130,7 +130,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const tags = wrapper.findAll('.rounded.text-\\[10px\\].font-semibold')
+        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
         expect(tags.length).toBe(2)
 
         expect(tags[0]?.findComponent(CheckCircle).exists()).toBe(true)

@@ -29,4 +29,19 @@ describe('env.ts', () => {
         }
         expect(getRuntimeConfig('DTVP_FRONTEND_URL', 'default')).toBe('https://api.example.com')
     })
+
+    it('falls back to process.env when window.__env__ is not available', () => {
+        delete (window as any).__env__
+        const original = (process as any).env.VITE_DTVP_DEFAULT_PROJECT_FILTER
+        ;(process as any).env.VITE_DTVP_DEFAULT_PROJECT_FILTER = 'DefaultFilter'
+
+        expect(getRuntimeConfig('DTVP_DEFAULT_PROJECT_FILTER', 'fallback')).toBe('DefaultFilter')
+
+        // Restore
+        if (original !== undefined) {
+            ;(process as any).env.VITE_DTVP_DEFAULT_PROJECT_FILTER = original
+        } else {
+            delete (process as any).env.VITE_DTVP_DEFAULT_PROJECT_FILTER
+        }
+    })
 })

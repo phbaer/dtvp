@@ -1,21 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { getProjects } from '../lib/api'
+import { getRuntimeConfig } from '../lib/env'
 import type { Project } from '../types'
 import { Search } from 'lucide-vue-next'
 
-const query = ref('') // Kept for client-side filtering
+const query = ref(getRuntimeConfig('DTVP_DEFAULT_PROJECT_FILTER', '')) // Kept for client-side filtering
 const cveFilter = ref('') // Optional global CVE filter
 const allProjects = ref<Project[]>([])
 const loading = ref(false)
 
-onMounted(async () => {
+const fetchProjects = async () => {
     loading.value = true
     try {
-        // Fetch ALL projects (empty string as per existing API logic usually implies 'all' or we might need to adjust client logic if API requires empty string for wildcard)
-        // Checking dt_client.py: if name is empty, it returns all versions if specific logic isn't restricting it. 
-        // Actually dt_client.get_projects handles pagination to get ALL matching.
-        const data = await getProjects('') 
+        // Fetch projects from backend (backend handles filtering by name if provided)
+        const data = await getProjects(query.value || '')
         allProjects.value = data
     } catch (err) {
         console.error(err)
@@ -23,7 +22,13 @@ onMounted(async () => {
     } finally {
         loading.value = false
     }
-})
+}
+
+// Fetch projects when the component mounts and whenever the search query changes.
+// This ensures that the default project filter (from runtime config) is applied immediately.
+watch(query, () => {
+    fetchProjects()
+}, { immediate: true })
 
 // Grouping logic
 interface GroupedProject {
@@ -121,7 +126,7 @@ const groupedProjects = computed(() => {
                     class="bg-gray-800 border border-gray-700 rounded p-4 flex flex-col gap-2"
                 >
                     <router-link 
-                        :to="{ path: `/project/${p.name}`, query: cveFilter ? { cve: cveFilter } : {} }"
+                        :to="{ path: `/project/${p.name}`, query: cveFilter ? { id: cveFilter } : {} }"
                         class="font-bold text-lg text-blue-400 hover:text-blue-300 hover:underline"
                     >
                         {{ p.name }}

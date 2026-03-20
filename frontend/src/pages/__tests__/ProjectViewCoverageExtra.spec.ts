@@ -18,6 +18,7 @@ vi.mock('../../lib/cvss', () => ({
 
 vi.mock('vue-router', () => ({
     useRoute: vi.fn(() => ({ params: { name: 'Test' }, query: {} })),
+    useRouter: vi.fn(() => ({ replace: vi.fn(() => Promise.resolve()) })),
     RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
 }))
 
@@ -49,7 +50,10 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } }
+                mocks: { $route: { params: { name: 'Test' }, query: {} } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
         await flushPromises()
@@ -86,7 +90,10 @@ describe('ProjectView Coverage Extra Detailed', () => {
         const wrapper = mount(ProjectView, {
             global: {
                 stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } }
+                mocks: { $route: { params: { name: 'Test' }, query: {} } },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
             }
         })
 
@@ -117,8 +124,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             }
         })
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('analysis')
@@ -148,8 +155,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             }
         })
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('tags')
@@ -179,8 +186,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             }
         })
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('score')
@@ -211,8 +218,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             }
         })
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('severity')
@@ -242,8 +249,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             }
         })
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
         await wrapper.find('select').setValue('score')
@@ -272,8 +279,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             }
         })
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
         await wrapper.find('select').setValue('analysis')
         const sorted = (wrapper.vm as any).filteredGroups
@@ -299,8 +306,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             }
         })
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
         await wrapper.vm.$nextTick()
         await wrapper.find('select').setValue('tags')
         const sorted = (wrapper.vm as any).filteredGroups

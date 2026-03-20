@@ -8,7 +8,12 @@ const CONTEXT_PATH = getRuntimeConfig('DTVP_CONTEXT_PATH', '/').replace(/\/$/, '
 // Ensure CONTEXT_PATH starts with / if not empty
 const NORMALIZED_CONTEXT_PATH = CONTEXT_PATH ? (CONTEXT_PATH.startsWith('/') ? CONTEXT_PATH : '/' + CONTEXT_PATH) : '';
 
-const API_BASE = BASE_URL + NORMALIZED_CONTEXT_PATH + '/api';
+// Avoid double-appending context path if BASE_URL already includes it.
+const BASE_WITH_CONTEXT = NORMALIZED_CONTEXT_PATH && BASE_URL.endsWith(NORMALIZED_CONTEXT_PATH)
+    ? BASE_URL
+    : BASE_URL + NORMALIZED_CONTEXT_PATH;
+
+const API_BASE = BASE_WITH_CONTEXT + '/api';
 const AUTH_BASE = BASE_URL + NORMALIZED_CONTEXT_PATH + '/auth';
 
 const api = axios.create({
@@ -16,8 +21,15 @@ const api = axios.create({
     withCredentials: true, // For cookies
 });
 
-export const getProjects = async (name: string): Promise<Project[]> => {
-    const res = await api.get('/projects', { params: { name } });
+export const getProjects = async (name?: string): Promise<Project[]> => {
+    // If the caller provides an empty string or only whitespace, avoid sending `?name=`.
+    // Some backends (and our mock servers) treat an empty name parameter as a filters-for-nothing
+    // request, which can return 422 or empty results.
+    const normalized = name?.trim() || '';
+    const params: Record<string, string> = {};
+    if (normalized) params.name = normalized;
+
+    const res = await api.get('/projects', { params });
     return res.data;
 };
 
@@ -160,6 +172,11 @@ export const uploadTeamMapping = async (file: File): Promise<{ status: string; m
 
 export const updateTeamMapping = async (mapping: Record<string, string>): Promise<{ status: string; message: string }> => {
     const res = await api.put('/settings/mapping', mapping);
+    return res.data;
+};
+
+export const updateRoles = async (roles: Record<string, string>): Promise<{ status: string; message: string }> => {
+    const res = await api.put('/settings/roles', roles);
     return res.data;
 };
 

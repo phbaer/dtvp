@@ -19,6 +19,7 @@ echo "Using DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}"
 # We use a temp file to avoid issues with sed in-place on some busybox versions
 sed -e "s|\${DTVP_CONTEXT_PATH}|${DTVP_CONTEXT_PATH}|g" \
     -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
+    -e "s|\${DTVP_DEFAULT_PROJECT_FILTER}|${DTVP_DEFAULT_PROJECT_FILTER}|g" \
     /usr/share/nginx/html/index.html > /usr/share/nginx/html/index.html.tmp && mv /usr/share/nginx/html/index.html.tmp /usr/share/nginx/html/index.html
 
 # Generate nginx.conf

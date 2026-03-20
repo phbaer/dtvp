@@ -1,11 +1,13 @@
 import httpx
 import asyncio
 import os
+import logging
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from fastapi import Request
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+logger = logging.getLogger(__name__)
 
 class DTClient:
     def __init__(
@@ -51,14 +53,18 @@ class DTClient:
         response.raise_for_status()
         return response.json()
 
-    async def get_projects(self, name: str) -> List[Dict[str, Any]]:
+    async def get_projects(self, name: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Search for projects by name.
         Handles pagination to retrieve ALL matching projects.
+
+        If no name is provided, this will retrieve all projects (no name filter).
         """
         all_projects = []
         page_number = 1
         page_size = 100
+
+        normalized = (name or "").strip()
 
         while True:
             params = {
@@ -66,8 +72,8 @@ class DTClient:
                 "pageSize": page_size,
                 "pageNumber": page_number,
             }
-            if name:
-                params["name"] = name
+            if normalized:
+                params["name"] = normalized
 
             response = await self.client.get(
                 f"{self.base_url}/api/v1/project",
@@ -170,7 +176,7 @@ class DTClient:
             for finding, analysis_result in zip(findings_to_enrich, results):
                 if isinstance(analysis_result, Exception):
                     # Log error to help debugging
-                    print(
+                    logger.error(
                         f"Error fetching analysis for finding {finding.get('uuid')}: {analysis_result}"
                     )
                     continue

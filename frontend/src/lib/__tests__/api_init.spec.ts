@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+vi.mock('axios', () => ({
+    default: {
+        create: vi.fn(() => ({
+            interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
+            get: vi.fn(),
+            post: vi.fn()
+        }))
+    }
+}))
+
 describe('api.ts initialization', () => {
     beforeEach(() => {
         vi.resetModules()
-        // Mock axios to track create calls
-        vi.mock('axios', () => ({
-            default: {
-                create: vi.fn(() => ({
-                    interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
-                    get: vi.fn(),
-                    post: vi.fn()
-                }))
-            }
-        }))
+        vi.clearAllMocks()
     })
 
     afterEach(() => {
@@ -75,6 +76,24 @@ describe('api.ts initialization', () => {
 
         // CONTEXT_PATH='/my-app' -> NORMALIZED='/my-app'
         // API_BASE = http://localhost:8000 + /my-app + /api
+        expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
+            baseURL: 'http://localhost:8000/my-app/api'
+        }))
+    })
+
+    it('does not duplicate context path if FRONTEND_URL already contains it', async () => {
+        vi.doMock('../env', () => ({
+            getRuntimeConfig: (key: string, def: string) => {
+                if (key === 'DTVP_CONTEXT_PATH') return '/my-app'
+                if (key === 'DTVP_FRONTEND_URL') return 'http://localhost:8000/my-app'
+                return def
+            }
+        }))
+
+        await import('../api')
+        const axios = (await import('axios')).default
+
+        // Ensure we don't end up with http://localhost:8000/my-app/my-app/api
         expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
             baseURL: 'http://localhost:8000/my-app/api'
         }))

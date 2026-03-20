@@ -6,6 +6,7 @@ declare global {
             DTVP_CONTEXT_PATH: string;
             DTVP_FRONTEND_URL: string;
             DTVP_DEV_DISABLE_AUTH: string;
+            DTVP_DEFAULT_PROJECT_FILTER: string;
         };
     }
 }

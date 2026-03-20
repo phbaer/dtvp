@@ -16,7 +16,11 @@ vi.mock('../../lib/api', () => ({
 
 const router = createRouter({
     history: createWebHistory(),
-    routes: [{ path: '/project/:name', component: ProjectView }]
+    routes: [
+        { path: '/', component: { template: '<div />' } },
+        { path: '/statistics', component: { template: '<div />' } },
+        { path: '/project/:name', component: ProjectView }
+    ]
 })
 
 describe('ProjectView Sorting Extra', () => {
@@ -48,8 +52,8 @@ describe('ProjectView Sorting Extra', () => {
         })
 
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+        ;(wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT']
+        ;(wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
         await wrapper.vm.$nextTick()
 
         // Set sortBy to tags

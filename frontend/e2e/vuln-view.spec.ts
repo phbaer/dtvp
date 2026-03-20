@@ -147,11 +147,8 @@ test.describe('Vulnerability View and Rescoring', () => {
         await page.goto('/project/TestProject');
         await page.waitForLoadState('networkidle');
 
-        // Uncheck "Hide Assessed" and "Hide Mixed"
-        const assessedLabel = page.locator('label', { hasText: 'Hide Assessed' });
-        const mixedLabel = page.locator('label', { hasText: 'Hide Mixed' });
-        if (await assessedLabel.locator('input').isChecked()) await assessedLabel.click();
-        if (await mixedLabel.locator('input').isChecked()) await mixedLabel.click();
+        // Ensure "Assessed" vulnerabilities are visible (avoid matching the similar "Assessed (Legacy)" button)
+        await page.getByRole('button', { name: /^Assessed(?!.*Legacy)/ }).click();
 
         // Wait for CVE to appear
         const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: /CVE-2023-1234/ }).first();

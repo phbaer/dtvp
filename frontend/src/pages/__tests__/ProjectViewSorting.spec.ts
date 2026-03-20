@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
 
 vi.mock('vue-router', () => ({
     useRoute: vi.fn(() => ({ params: {}, query: {} })),
+    useRouter: vi.fn(() => ({ replace: vi.fn(() => Promise.resolve()) })),
     RouterLink: { template: '<a><slot /></a>' }
 }))
 
@@ -69,8 +70,7 @@ describe('ProjectView.vue Sorting', () => {
         })
 
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
         await wrapper.vm.$nextTick()
 
         const cards = wrapper.findAll('.vuln-group-card')
@@ -93,8 +93,7 @@ describe('ProjectView.vue Sorting', () => {
         })
 
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
         await wrapper.vm.$nextTick()
 
         // Change sortBy to score
@@ -130,8 +129,7 @@ describe('ProjectView.vue Sorting', () => {
         })
 
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
         await wrapper.vm.$nextTick()
 
         const select = wrapper.find('select')
@@ -157,8 +155,7 @@ describe('ProjectView.vue Sorting', () => {
         })
 
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
         await wrapper.vm.$nextTick()
 
         const select = wrapper.find('select')
@@ -200,8 +197,7 @@ describe('ProjectView.vue Sorting', () => {
         })
 
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED']
         await wrapper.vm.$nextTick()
 
         let cards = wrapper.findAll('.vuln-group-card')

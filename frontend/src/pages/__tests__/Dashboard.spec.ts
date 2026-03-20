@@ -81,6 +81,26 @@ describe('Dashboard.vue', () => {
         expect(wrapper.text()).not.toContain('App A')
     })
 
+    it('applies default project filter from runtime config', async () => {
+        // Emulate runtime config injection
+        const originalEnv = (window as any).__env__
+        ;(window as any).__env__ = { ...originalEnv, DTVP_DEFAULT_PROJECT_FILTER: 'App' }
+
+        vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
+        const wrapper = mount(Dashboard, {
+            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
+        })
+        await flushPromises()
+
+        // Should only render projects matching "App" (case-insensitive)
+        expect(wrapper.text()).toContain('App A')
+        expect(wrapper.text()).not.toContain('Lib B')
+        expect(wrapper.text()).not.toContain('Other C')
+
+        // Restore original env
+        ;(window as any).__env__ = originalEnv
+    })
+
     it('displays empty state when no results from filter', async () => {
         vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
         const wrapper = mount(Dashboard, {

@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
 
 vi.mock('vue-router', () => ({
     useRoute: vi.fn(() => ({ params: {}, query: {} })),
+    useRouter: vi.fn(() => ({ replace: vi.fn(() => Promise.resolve()) })),
     RouterLink: { template: '<a><slot /></a>' }
 }))
 
@@ -50,8 +51,7 @@ describe('ProjectView.vue', () => {
         })
 
         await flushPromises()
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED']
         await wrapper.vm.$nextTick()
 
         expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', undefined, expect.any(Function))
@@ -68,6 +68,9 @@ describe('ProjectView.vue', () => {
                 stubs: { RouterLink: true },
                 mocks: {
                     $route: { params: { name: 'TestProject' }, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })
@@ -86,6 +89,9 @@ describe('ProjectView.vue', () => {
                 stubs: { RouterLink: true },
                 mocks: {
                     $route: { params: { name: 'TestProject' }, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })
@@ -115,11 +121,19 @@ describe('ProjectView.vue', () => {
                 stubs: { RouterLink: true },
                 mocks: {
                     $route: { params: { name: 'TestProject' }, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })
 
         await flushPromises()
+
+        // Ensure visible
+        ;(wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT']
+        ;(wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
+        await wrapper.vm.$nextTick()
 
         const updateData = {
             rescored_cvss: 5.0,
@@ -145,6 +159,9 @@ describe('ProjectView.vue', () => {
                 stubs: { RouterLink: true },
                 mocks: {
                     $route: { params: {}, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })
@@ -163,6 +180,9 @@ describe('ProjectView.vue', () => {
                 stubs: { RouterLink: true },
                 mocks: {
                     $route: { params: { name: '_all_' }, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
                 }
             }
         })

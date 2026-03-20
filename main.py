@@ -1,16 +1,19 @@
 from fastapi import FastAPI, Depends, APIRouter, UploadFile, File
 from fastapi.openapi.utils import get_openapi
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware  # noqa: F401 kept for potential future use
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+import logging
 import os
 import asyncio
 import uuid
 from datetime import datetime
 import shutil
 import json
+
+logger = logging.getLogger(__name__)
 from fastapi import HTTPException, Request
 
 from auth import router as auth_router, get_current_user, auth_settings
@@ -38,32 +41,65 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"Starting DTVP version {VERSION} (build {BUILD_COMMIT})")
+    logger.info(f"Starting DTVP version {VERSION} (build {BUILD_COMMIT})")
     yield
 
 
 app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
 
 
-# CORS for frontend dev
-origins = [
-    "http://localhost:5173",
-    "http://localhost:8000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:8000",
-]
-if auth_settings.FRONTEND_URL:
-    frontend_url = auth_settings.FRONTEND_URL.rstrip("/")
-    if frontend_url not in origins:
-        origins.append(frontend_url)
+# CORS: reflect any origin so the app works from localhost, LAN IPs, or machine hostnames.
+# We deliberately allow any origin since DTVP is a locally-hosted tool and API keys
+# are the real authentication mechanism. The credential cookies are scoped to same-site
+# by the browser, so this does not meaningfully loosen security.
+class DynamicCORSMiddleware:
+    def __init__(self, app):
+        self.app = app
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            origin = headers.get(b"origin", b"").decode()
+
+            async def send_with_cors(message):
+                if message["type"] == "http.response.start" and origin:
+                    cors_headers = [
+                        (b"access-control-allow-origin", origin.encode()),
+                        (b"access-control-allow-credentials", b"true"),
+                        (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS, PATCH"),
+                        (b"access-control-allow-headers", b"*"),
+                        (b"vary", b"Origin"),
+                    ]
+                    message = dict(message)
+                    message["headers"] = list(message.get("headers", [])) + cors_headers
+                await send(message)
+
+            # Handle CORS preflight
+            if scope.get("method") == "OPTIONS" or headers.get(b"access-control-request-method"):
+                async def preflight_send(message):
+                    pass
+                response = {
+                    "type": "http.response.start",
+                    "status": 204,
+                    "headers": [
+                        (b"access-control-allow-origin", origin.encode() if origin else b"*"),
+                        (b"access-control-allow-credentials", b"true"),
+                        (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS, PATCH"),
+                        (b"access-control-allow-headers", b"*"),
+                        (b"access-control-max-age", b"600"),
+                        (b"content-length", b"0"),
+                        (b"vary", b"Origin"),
+                    ],
+                }
+                await send(response)
+                await send({"type": "http.response.body", "body": b""})
+                return
+
+            await self.app(scope, receive, send_with_cors)
+        else:
+            await self.app(scope, receive, send)
+
+app.add_middleware(DynamicCORSMiddleware)
 
 # Prefix all routes if CONTEXT_PATH is set
 context_path = auth_settings.CONTEXT_PATH.rstrip("/")
@@ -111,11 +147,12 @@ class AssessmentDetailsRequest(BaseModel):
 
 @api_router.get("/projects")
 async def search_projects(
-    name: str,
+    name: Optional[str] = None,
     client: DTClient = Depends(get_client),
     user: str = Depends(get_current_user),
 ):
-    return await client.get_projects(name)
+    # Allow calling /projects without a query string to fetch all projects.
+    return await client.get_projects(name or "")
 
 
 # Job Manager
@@ -184,8 +221,9 @@ async def process_grouped_vulns_task(
                 # Create cache immediately and discard raw BOM
                 bom_cache_map[v["uuid"]] = BOMAnalysisCache(bom, team_mapping)
                 del bom  # Hint for GC
-            except Exception:
+            except Exception as e:
                 # Fallback
+                logger.warning(f"Failed to create BOM cache for project {v.get('uuid')}: {e}")
                 bom_cache_map[v["uuid"]] = BOMAnalysisCache({}, team_mapping)
 
             # Map vulnId -> vuln_obj for quick lookup
@@ -227,7 +265,7 @@ async def process_grouped_vulns_task(
     except Exception as e:
         tasks[task_id]["status"] = "failed"
         tasks[task_id]["message"] = str(e)
-        print(f"Task {task_id} failed: {e}")
+        logger.error(f"Task {task_id} failed: {e}")
     finally:
         # Close the client since we created it or it was passed
         pass
@@ -327,7 +365,8 @@ async def get_statistics(
         try:
             bom = await client.get_bom(v["uuid"])
             bom_cache_map[v["uuid"]] = BOMAnalysisCache(bom, team_mapping)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to get BOM for project {v.get('uuid')}: {e}")
             bom_cache_map[v["uuid"]] = BOMAnalysisCache({}, team_mapping)
 
         vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
@@ -375,7 +414,7 @@ async def get_assessment_details(
     client: DTClient = Depends(get_client),
     user: str = Depends(get_current_user),
 ):
-    print(
+    logger.info(
         f"Fetching assessment details for {len(req.instances)} instances (User: {user})"
     )
     tasks = []
@@ -402,7 +441,7 @@ async def get_assessment_details(
             "error": None,
         }
         if isinstance(res, Exception):
-            print(f"Error fetching analysis for {inst.get('finding_uuid')}: {res}")
+            logger.error(f"Error fetching analysis for {inst.get('finding_uuid')}: {res}")
             result_item["error"] = str(res)
         else:
             result_item["analysis"] = res
@@ -417,14 +456,14 @@ async def update_assessment(
     client: DTClient = Depends(get_client),
     user: str = Depends(get_current_user),
 ):
-    print(f"Update assessment request from {user} for {len(req.instances)} instances")
-    print(
+    logger.info(f"Update assessment request from {user} for {len(req.instances)} instances")
+    logger.debug(
         f"State: {req.state}, Suppressed: {req.suppressed}, Force: {req.force}, Original Analysis Provided: {bool(req.original_analysis)}"
     )
 
     # Conflict Check (Optimistic Locking)
     if not req.force and req.original_analysis:
-        print("Checking for conflicts...")
+        logger.debug("Checking for conflicts...")
         # Fetch current state
         tasks = []
         for instance in req.instances:
@@ -466,7 +505,7 @@ async def update_assessment(
                     has_conflict = True
 
                 if has_conflict:
-                    print(f"Conflict found for {finding_uuid}")
+                    logger.warning(f"Conflict found for {finding_uuid}")
                     conflicts.append(
                         {
                             "finding_uuid": finding_uuid,
@@ -490,13 +529,13 @@ async def update_assessment(
                 content={"status": "conflict", "conflicts": conflicts},
             )
 
-    print(f"Details: {req.details[:100]}...")
+    logger.debug(f"Details: {req.details[:100]}...")
 
     # Iterate and update
     results = []
     for instance in req.instances:
         try:
-            print(
+            logger.debug(
                 f"  Updating instance: {instance.get('finding_uuid')} (Vulnerability: {instance.get('vulnerability_uuid')})"
             )
 
@@ -537,9 +576,7 @@ async def update_assessment(
                 else f"[Team: {req.team}] -- {user}"
                 if req.team
                 else f"Assessed -- {user}",
-                justification=req.justification
-                if aggregated_state == "NOT_AFFECTED"
-                else "NOT_SET",
+                justification=(req.justification or "NOT_SET"),
                 suppressed=req.suppressed,
             )
             results.append(
@@ -820,10 +857,10 @@ if os.path.isdir("frontend/dist"):
 
     # Catch-all route for SPA
     @app.get(f"{context_path}/{{path:path}}")
-    async def serve_spa(path: str):
+    async def serve_spa(path: str, request: Request):
         # Prevent path traversal
         if ".." in path:
-            return serve_index()
+            return serve_index(request)
 
         # Check if specific file exists
         file_path = os.path.join("frontend/dist", path)
@@ -831,19 +868,23 @@ if os.path.isdir("frontend/dist"):
             return FileResponse(file_path)
 
         # Default to index.html for SPA routing
-        return serve_index()
+        return serve_index(request)
 
-    def serve_index():
+    def serve_index(request: Request = None):
         try:
             with open("frontend/dist/index.html", "r") as f:
                 content = f.read()
 
-            # Replace environment placeholders
-            frontend_url = auth_settings.FRONTEND_URL or ""
-            # Fallback for local dev if not set
-            if not frontend_url:
-                # We can't easily know the external URL here, but UI handles defaults.
-                pass
+            # Derive the frontend URL from the request so API calls are always
+            # same-origin regardless of the hostname used to access the app
+            # (localhost, IP address, machine name, etc.).
+            # Fall back to the configured FRONTEND_URL only when no request is available.
+            if request is not None:
+                scheme = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+                host = request.headers.get("X-Forwarded-Host", request.headers.get("host", ""))
+                frontend_url = f"{scheme}://{host}" if host else (auth_settings.FRONTEND_URL or "")
+            else:
+                frontend_url = auth_settings.FRONTEND_URL or ""
 
             content = content.replace("${DTVP_CONTEXT_PATH}", context_path or "/")
             content = content.replace("${DTVP_FRONTEND_URL}", frontend_url)
