@@ -1,8 +1,78 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle } from '../assessment-helpers';
 
 describe('Assessment Helpers', () => {
+    describe('getGroupLifecycle', () => {
+        it('should return OPEN when no component has a technical assessment', () => {
+            const group: any = {
+                id: 'CVE-OPEN',
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        components: [
+                            { analysis_state: 'NOT_SET', analysis_details: '' }
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('OPEN');
+        });
+
+        it('should return ASSESSED_LEGACY when technical state exists but the format is legacy', () => {
+            const group: any = {
+                id: 'CVE-LEGACY',
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        components: [
+                            { analysis_state: 'FALSE_POSITIVE', analysis_details: '' }
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('ASSESSED_LEGACY');
+        });
+
+        it('should return INCOMPLETE when required team assessments are missing despite structured blocks', () => {
+            const group: any = {
+                id: 'CVE-INCOMPLETE',
+                tags: ['team-a', 'team-b'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                analysis_state: 'FALSE_POSITIVE',
+                                analysis_details: '--- [Team: team-a] [State: FALSE_POSITIVE] ---'
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
+        });
+
+        it('should return INCONSISTENT when multiple distinct component states exist but no assessment blocks', () => {
+            const group: any = {
+                id: 'CVE-INCONSISTENT',
+                tags: ['team-a', 'team-b'],
+                affected_versions: [
+                    {
+                        components: [
+                            { analysis_state: 'EXPLOITABLE', analysis_details: '' },
+                            { analysis_state: 'NOT_AFFECTED', analysis_details: '' }
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
+        });
+    });
+
     describe('parseAssessmentBlocks', () => {
         it('should parse legacy text as General block', () => {
             const text = 'Legacy analysis text.';
@@ -144,5 +214,97 @@ Text`;
             const result = mergeTeamAssessment(initial, 'TeamA', 'NOT_SET', 'TextA', 'UserA');
             expect(result.text).toContain('[Rescored: 8.5]');
         });
+    });
+
+    describe('buildBulkSyncDetails', () => {
+        it('should create a General block with team state summary when none exists', () => {
+            const blocks = [
+                { team: 'TeamA', state: 'IN_TRIAGE', user: 'UserA', details: 'Investigating now', justification: 'NOT_SET' },
+                { team: 'TeamB', state: 'FALSE_POSITIVE', user: 'UserB', details: 'Not relevant', justification: 'NOT_SET' },
+            ]
+            const { text, aggregatedState } = buildBulkSyncDetails(blocks)
+
+            // General block should exist
+            const parsed = parseAssessmentBlocks(text)
+            const general = parsed.find(b => b.team === 'General')
+            expect(general).toBeDefined()
+
+            // Summary of team states should be in General block
+            expect(general!.details).toContain('[TeamA] IN_TRIAGE')
+            expect(general!.details).toContain('[TeamB] FALSE_POSITIVE')
+
+            // Team blocks should still be present
+            expect(parsed.find(b => b.team === 'TeamA')).toBeDefined()
+            expect(parsed.find(b => b.team === 'TeamB')).toBeDefined()
+
+            // Aggregated state should be worst (IN_TRIAGE < FALSE_POSITIVE)
+            expect(aggregatedState).toBe('IN_TRIAGE')
+        })
+
+        it('should preserve existing user comment in General block', () => {
+            const existingText = `--- [Team: General] [State: NOT_SET] [Assessed By: Reviewer] [Justification: NOT_SET] ---
+My Policy Comment: track this carefully`
+            const blocks = [
+                { team: 'TeamA', state: 'NOT_AFFECTED', user: 'UserA', details: 'Safe path checked', justification: 'CODE_NOT_PRESENT' },
+            ]
+            const { text } = buildBulkSyncDetails(blocks, existingText)
+
+            const parsed = parseAssessmentBlocks(text)
+            const general = parsed.find(b => b.team === 'General')
+            expect(general).toBeDefined()
+            // User comment must be preserved
+            expect(general!.details).toContain('My Policy Comment: track this carefully')
+            // Team summary should also be appended
+            expect(general!.details).toContain('[TeamA] NOT_AFFECTED')
+        })
+
+        it('should NOT duplicate raw team details inside the General block', () => {
+            const blocks = [
+                { team: 'TeamA', state: 'EXPLOITABLE', user: 'UserA', details: 'Active attack vector confirmed', justification: 'NOT_SET' },
+            ]
+            const { text } = buildBulkSyncDetails(blocks)
+
+            const parsed = parseAssessmentBlocks(text)
+            const general = parsed.find(b => b.team === 'General')!
+            // Raw details of TeamA must NOT appear in the General block
+            expect(general.details).not.toContain('Active attack vector confirmed')
+        })
+
+        it('should preserve explicit General state (Global Precedence)', () => {
+            const blocks = [
+                { team: 'General', state: 'NOT_AFFECTED', user: 'Reviewer', details: 'Mitigated globally', justification: 'CODE_NOT_PRESENT' },
+                { team: 'TeamA', state: 'EXPLOITABLE', user: 'UserA', details: 'Exploit found', justification: 'NOT_SET' },
+            ]
+            const { text, aggregatedState } = buildBulkSyncDetails(blocks)
+
+            // General state was explicitly set, so it must win
+            expect(aggregatedState).toBe('NOT_AFFECTED')
+
+            const parsed = parseAssessmentBlocks(text)
+            const general = parsed.find(b => b.team === 'General')!
+            expect(general.state).toBe('NOT_AFFECTED')
+        })
+
+        it('should skip NOT_SET teams from the summary', () => {
+            const blocks = [
+                { team: 'TeamA', state: 'NOT_SET', user: 'UserA', details: '', justification: 'NOT_SET' },
+                { team: 'TeamB', state: 'RESOLVED', user: 'UserB', details: 'Fixed', justification: 'NOT_SET' },
+            ]
+            const { text } = buildBulkSyncDetails(blocks)
+
+            const parsed = parseAssessmentBlocks(text)
+            const general = parsed.find(b => b.team === 'General')!
+            // TeamA (NOT_SET) should not appear in summary
+            expect(general.details).not.toContain('[TeamA]')
+            expect(general.details).toContain('[TeamB] RESOLVED')
+        })
+
+        it('should not be marked as pending (bulk sync is a reviewer action)', () => {
+            const blocks = [
+                { team: 'TeamA', state: 'RESOLVED', user: 'UserA', details: 'Done', justification: 'NOT_SET' },
+            ]
+            const { text } = buildBulkSyncDetails(blocks)
+            expect(text).not.toContain('[Status: Pending Review]')
+        })
     });
 });

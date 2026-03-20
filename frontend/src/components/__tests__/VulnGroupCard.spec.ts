@@ -24,17 +24,23 @@ vi.mock('../../lib/api', () => ({
 }))
 
 // Mock Icons
-vi.mock('lucide-vue-next', () => ({
-    ChevronDown: { template: '<span class="icon-down" />' },
-    ChevronUp: { template: '<span class="icon-up" />' },
-    Shield: { template: '<span class="icon-shield" />' },
-    Calculator: { template: '<span class="icon-calc" />' },
-    ExternalLink: { template: '<span class="icon-link" />' },
-    RefreshCw: { template: '<span class="icon-refresh" />' },
-    AlertTriangle: { template: '<span class="icon-alert" />' },
-    CheckCircle: { template: '<span class="icon-check" />' },
-    RotateCcw: { template: '<span class="icon-rotate-ccw" />' }
-}))
+vi.mock('lucide-vue-next', async (importOriginal) => {
+    const actual = await importOriginal() as any
+    return {
+        ...actual,
+        ChevronDown: { template: '<span class="icon-down" />' },
+        ChevronUp: { template: '<span class="icon-up" />' },
+        Shield: { template: '<span class="icon-shield" />' },
+        Calculator: { template: '<span class="icon-calc" />' },
+        ExternalLink: { template: '<span class="icon-link" />' },
+        RefreshCw: { template: '<span class="icon-refresh" />' },
+        AlertTriangle: { template: '<span class="icon-alert" />' },
+        CheckCircle: { template: '<span class="icon-check" />' },
+        RotateCcw: { template: '<span class="icon-rotate-ccw" />' },
+        History: { template: '<span class="icon-history" />' },
+        LayoutList: { template: '<span class="icon-layout-list" />' }
+    }
+})
 
 // Mock DependencyChainViewer to avoid async setup in child component
 vi.mock('../DependencyChainViewer.vue', () => ({
@@ -195,33 +201,35 @@ describe('VulnGroupCard', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: criticalGroup }
         })
-        expect(wrapper.find('span.rounded').classes()).toContain('bg-red-600')
+        expect(wrapper.find('span.rounded-lg').classes()).toContain('bg-red-600')
 
         const lowGroup = { ...mockGroup, severity: 'LOW' }
         const wrapper2 = mount(VulnGroupCard, {
             props: { group: lowGroup }
         })
-        expect(wrapper2.find('span.rounded').classes()).toContain('bg-green-600')
+        expect(wrapper2.find('span.rounded-lg').classes()).toContain('bg-green-600')
 
         // Test card style branches (brighter colors)
         const unassessedWrapper = mount(VulnGroupCard, { props: { group: { ...mockGroup, severity: 'CRITICAL' } } })
-        expect(unassessedWrapper.find('.border.rounded-lg').classes()).toContain('bg-red-500/10')
+        expect(unassessedWrapper.find('.border.rounded-lg').classes()).toContain('bg-red-500/5')
 
         const mixedGroup = {
             ...mockGroup,
+            tags: ['Security'],
             affected_versions: [
-                { components: [{ analysis_state: 'EXPLOITABLE' }] },
-                { components: [{ analysis_state: 'NOT_SET' }] }
+                { components: [{ analysis_state: 'EXPLOITABLE', analysis_details: '--- [Team: Security] [State: EXPLOITABLE] ---' }] },
+                { components: [{ analysis_state: 'FALSE_POSITIVE', analysis_details: '--- [Team: Security] [State: FALSE_POSITIVE] ---' }] }
             ]
         }
         const mixedWrapper = mount(VulnGroupCard, { props: { group: mixedGroup as any } })
-        expect(mixedWrapper.find('.border.rounded-lg').classes()).toContain('bg-yellow-500/10')
+        expect(mixedWrapper.find('.border.rounded-lg').classes()).toContain('stripe-bg')
     })
 
     it('renders vulnerability aliases', () => {
         const aliasGroup = { ...mockGroup, aliases: ['CVE-2023-1234', 'GHSA-abcd-efgh'] }
         const wrapper = mount(VulnGroupCard, { props: { group: aliasGroup } })
-        expect(wrapper.text()).toContain('CVE-2023-1234, GHSA-abcd-efgh')
+        expect(wrapper.text()).toContain('CVE-2023-1234')
+        expect(wrapper.text()).toContain('GHSA-abcd-efgh')
     })
 
 
@@ -306,6 +314,10 @@ describe('VulnGroupCard', () => {
             props: { group: groupWithComments as any }
         })
         await wrapper.find('.cursor-pointer').trigger('click')
+        
+        // Expand Audit Trail
+        const expandBtn = wrapper.findAll('button').find(b => b.text().includes('Expand Trail'))
+        await expandBtn?.trigger('click')
 
         expect(wrapper.text()).toContain('Previous comment')
     })
@@ -366,9 +378,17 @@ describe('VulnGroupCard', () => {
         const wrapperNotAffected = makeWrapper('NOT_AFFECTED')
         expect(wrapperNotAffected.find('.analysis-state-value').classes()).toContain('text-green-400')
 
-        // MIXED/Other -> Gray
+        // INCOMPLETE -> Amber
+        const wrapperIncomplete = makeWrapper('INCOMPLETE')
+        expect(wrapperIncomplete.find('.analysis-state-value').classes()).toContain('text-amber-500')
+        
+        // INCONSISTENT -> Indigo
+        const wrapperInconsistent = makeWrapper('INCONSISTENT')
+        expect(wrapperInconsistent.find('.analysis-state-value').classes()).toContain('text-indigo-400')
+        
+        // NOT_SET -> Subdued Red
         const wrapperOther = makeWrapper('NOT_SET')
-        expect(wrapperOther.find('.analysis-state-value').classes()).toContain('text-gray-300')
+        expect(wrapperOther.find('.analysis-state-value').classes()).toContain('text-red-500/80')
     })
 
 

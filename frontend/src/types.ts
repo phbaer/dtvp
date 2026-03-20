@@ -6,6 +6,9 @@ export interface Project {
     active: boolean;
 }
 
+export type TagValue = string | { name?: string; tag?: string } | Record<string, unknown>;
+export type Tags = TagValue[];
+
 export interface Instance {
     project_name: string;
     project_version: string;
@@ -17,15 +20,23 @@ export interface Instance {
     finding_uuid: string;
     analysis_state: string;
     analysis_details?: string;
+    analysisState?: string;
+    analysisDetails?: string;
     analysis_comments?: Array<{
         comment: string;
         timestamp: number;
         user?: string;
     }>;
+    analysisComments?: Array<{
+        comment: string;
+        timestamp: number;
+        user?: string;
+    }>;
     is_suppressed: boolean;
+    isSuppressed?: boolean;
     usage_paths?: string[];
     justification?: string;
-    tags?: string[];
+    tags?: Tags;
 }
 
 
@@ -46,7 +57,7 @@ export interface GroupedVuln {
     cvss_vector?: string;
     rescored_cvss?: number | null;
     rescored_vector?: string | null;
-    tags?: string[];
+    tags?: Tags;
     aliases?: string[];
     affected_versions: AffectedVersion[];
 }

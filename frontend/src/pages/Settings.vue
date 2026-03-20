@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, watch } from 'vue'
-import { getRoles, uploadRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
+import { getRoles, uploadRoles, updateRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
 
 const user = inject<any>('user')
 const realRole = inject<any>('realRole')
@@ -156,22 +156,14 @@ const saveRoles = async () => {
             throw new Error("Invalid JSON format")
         }
 
-        const res = await fetch('/api/settings/roles', {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(parsed)
-        })
+        const res = await updateRoles(parsed)
 
-        if (!res.ok) {
-            const data = await res.json()
-            throw new Error(data.message || 'Save failed')
+        if (res.status === 'success') {
+            rolesMessage.value = res.message || 'Roles saved successfully!'
+            await loadRoles()
+        } else {
+            throw new Error(res.message)
         }
-
-        const data = await res.json()
-        rolesMessage.value = data.message || 'Roles saved successfully!'
-        await loadRoles()
     } catch (err: any) {
         rolesError.value = err.message
     } finally {
@@ -234,7 +226,17 @@ const saveRescoreRules = async () => {
 }
 
 onMounted(() => {
+    // Load data once we know the real permission of the user
     if (realRole?.value === 'REVIEWER') {
+        loadMapping()
+        loadRoles()
+        loadRescoreRules()
+    }
+})
+
+// In case user info loads after the component mounts, reload when role becomes REVIEWER
+watch(realRole, (role) => {
+    if (role === 'REVIEWER') {
         loadMapping()
         loadRoles()
         loadRescoreRules()

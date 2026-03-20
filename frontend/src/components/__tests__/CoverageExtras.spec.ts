@@ -41,15 +41,17 @@ describe('Coverage Extras', () => {
         }
         const wrapper = mount(VulnGroupCard, { props: { group: infoGroup } })
 
-        const badge = wrapper.find('.ring-1')
-        expect(badge.classes()).toContain('bg-blue-600')
+        const spans = wrapper.findAll('span')
+        const badge = spans.find(s => s.text() === 'INFO')
+        expect(badge?.classes()).toContain('bg-blue-600')
 
         const otherGroup = {
             id: 'G2', severity: 'UNKNOWN', affected_versions: [],
             cvss: 0, cvss_score: 0, tags: []
         }
         const wrapper2 = mount(VulnGroupCard, { props: { group: otherGroup } })
-        expect(wrapper2.find('.rounded-full').classes()).toContain('bg-gray-600')
+        const badge2 = wrapper2.findAll('span').find(s => s.text() === 'UNKNOWN')
+        expect(badge2?.classes()).toContain('bg-gray-600')
     })
 
     it('VulnGroupCard aggregates paths for same component', async () => {
@@ -82,7 +84,7 @@ describe('Coverage Extras', () => {
         const wrapper = mount(VulnGroupCard, { props: { group } })
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        const componentBlocks = wrapper.findAll('.bg-gray-900.p-3.rounded')
+        const componentBlocks = wrapper.findAll('[data-testid="grouped-assessment"]')
         expect(componentBlocks.length).toBe(1) // Should group components
 
         // Open dependency chains

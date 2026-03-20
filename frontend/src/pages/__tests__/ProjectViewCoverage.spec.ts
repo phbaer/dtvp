@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
 
 vi.mock('vue-router', () => ({
     useRoute: vi.fn(() => ({ params: { name: 'Test' }, query: {} })),
+    useRouter: vi.fn(() => ({ replace: vi.fn(() => Promise.resolve()) })),
     RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
 }))
 
@@ -84,8 +85,8 @@ describe('ProjectView Coverage Extras', () => {
         await flushPromises()
 
             // Reset filters to ensure items are visible
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
         // Trigger update
@@ -127,12 +128,12 @@ describe('ProjectView Coverage Extras', () => {
         await flushPromises()
 
             // Reset filters to ensure items are visible
-            ; (wrapper.vm as any).hideAssessed = false
-            ; (wrapper.vm as any).hideMixed = false
+            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
+            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
         // Set filter
-        const input = wrapper.find('input[placeholder="Filter by Team Tag..."]')
+        const input = wrapper.find('input[placeholder*="Team Identifier"]')
         await input.setValue('Team')
 
         // Should only show group 1
@@ -243,11 +244,12 @@ describe('ProjectView Coverage Extras', () => {
         await flushPromises()
 
         // Toggle sort order (hits branch 210)
-        const sortBtn = wrapper.find('button.bg-gray-800')
+        const sortBtn = wrapper.find('button[title="Ascending"]')
+        expect(sortBtn).toBeDefined()
         expect((wrapper.vm as any).sortOrder).toBe('asc')
-        await sortBtn.trigger('click')
+        await sortBtn?.trigger('click')
         expect((wrapper.vm as any).sortOrder).toBe('desc')
-        await sortBtn.trigger('click')
+        await sortBtn?.trigger('click')
         expect((wrapper.vm as any).sortOrder).toBe('asc')
 
         // Change sort by to hit branches

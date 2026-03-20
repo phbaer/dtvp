@@ -2,6 +2,9 @@ from typing import List, Dict, Any, Optional, Tuple
 import re
 import json
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Pre-compile regex patterns
 RE_SCORE = re.compile(r"\[Rescored:\s*([\d\.]+)\]")
@@ -32,7 +35,8 @@ def load_team_mapping(path: str = None) -> Dict[str, str]:
     try:
         with open(path, "r") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to load team mapping from {path}: {e}")
         return {}
 
 
@@ -62,7 +66,8 @@ def load_user_roles(path: str = None) -> Dict[str, str]:
     try:
         with open(path, "r") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to load user roles from {path}: {e}")
         return {}
 
 
@@ -79,7 +84,8 @@ def load_rescore_rules(path: str = None) -> Optional[Dict[str, Any]]:
     try:
         with open(path, "r") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to load rescore rules from {path}: {e}")
         return None
 
 
@@ -614,9 +620,18 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
                 all_instances.append(comp)
 
         states = set(i.get("analysis_state") or "NOT_SET" for i in all_instances)
-        display_state = (
-            "MIXED" if len(states) > 1 else (list(states)[0] if states else "NOT_SET")
-        )
+        non_missing_states = set(s for s in states if s != "NOT_SET")
+
+        if not non_missing_states:
+            display_state = "NOT_SET"
+        elif len(non_missing_states) == 1:
+            if "NOT_SET" in states:
+                display_state = "INCOMPLETE"
+            else:
+                display_state = list(non_missing_states)[0]
+        else:
+            display_state = "INCONSISTENT"
+
         stats["state_counts"][display_state] = (
             stats["state_counts"].get(display_state, 0) + 1
         )

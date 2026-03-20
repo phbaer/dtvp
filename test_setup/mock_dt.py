@@ -32,6 +32,7 @@ class Analysis(BaseModel):
     analysisDetails: Optional[str] = None
     analysisJustification: Optional[str] = None
     comment: Optional[str] = None
+    analysisComments: Optional[list] = None
 
 
 class AnalysisUpdate(BaseModel):
@@ -56,12 +57,16 @@ VULN_UUID_1 = "d9401347-1941-4c12-8700-1c0563821017"  # CVE-2021-44228 (Log4Shel
 VULN_UUID_2 = "e5781a7b-0346-4927-991c-7033580539f5"  # Generic Vuln
 VULN_JACKSON_UUID = "f6781a7b-0346-4927-991c-7033580539f6"  # CVE-2019-12384
 VULN_NETTY_UUID = "a7781a7b-0346-4927-991c-7033580539f7"  # CVE-2021-21290
+VULN_INCOMPLETE_UUID = "b8881a7b-0346-4927-991c-7033580539f8"
+VULN_INCONSISTENT_UUID = "c9991a7b-0346-4927-991c-7033580539f9"
 
 JACKSON_UUID = "b253b708-3012-4277-8461-893bd5cd61e2"
 NETTY_UUID = "d253b708-3012-4277-8461-893bd5cd61e3"
 TEAM_TEST_LIB_UUID = "7fa85f64-5717-4562-b3fc-2c963f66afb0"
 VULN_UUID_TEAM = "f6781a7b-0346-4927-991c-7033580539f8"
-
+# Additional mock vulnerabilities to exercise plaintext assessment formats
+VULN_PLAINTEXT_NOT_SET_UUID = "d1111a7b-0346-4927-991c-7033580539f0"
+VULN_PLAINTEXT_NOT_AFFECTED_UUID = "d2222a7b-0346-4927-991c-7033580539f1"
 mock_projects = [
     Project(
         name="Vulnerable Project",
@@ -144,6 +149,46 @@ mock_vulnerabilities = {
         "description": "Team mapping test vulnerability",
         "recommendation": "Verify alternative labels.",
     },
+    VULN_PLAINTEXT_NOT_SET_UUID: {
+        "uuid": VULN_PLAINTEXT_NOT_SET_UUID,
+        "vulnId": "CVE-2026-PLAINTEXT-NS",
+        "source": "NVD",
+        "severity": "LOW",
+        "cvssV3BaseScore": 2.0,
+        "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+        "description": "Plaintext NOT_SET vulnerability for testing.",
+        "recommendation": "Verify handling of plaintext analysis details.",
+    },
+    VULN_PLAINTEXT_NOT_AFFECTED_UUID: {
+        "uuid": VULN_PLAINTEXT_NOT_AFFECTED_UUID,
+        "vulnId": "CVE-2026-PLAINTEXT-NA",
+        "source": "NVD",
+        "severity": "LOW",
+        "cvssV3BaseScore": 2.0,
+        "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+        "description": "Plaintext NOT_AFFECTED vulnerability for testing.",
+        "recommendation": "Verify handling of plaintext analysis details.",
+    },
+    VULN_INCOMPLETE_UUID: {
+        "uuid": VULN_INCOMPLETE_UUID,
+        "vulnId": "CVE-2025-INCOMPLETE",
+        "source": "NVD",
+        "severity": "HIGH",
+        "cvssV3BaseScore": 7.5,
+        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+        "description": "Mock Incomplete Analysis",
+        "recommendation": "Review missing assessments.",
+    },
+    VULN_INCONSISTENT_UUID: {
+        "uuid": VULN_INCONSISTENT_UUID,
+        "vulnId": "CVE-2025-INCONSISTENT",
+        "source": "NVD",
+        "severity": "CRITICAL",
+        "cvssV3BaseScore": 9.8,
+        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "description": "Mock Inconsistent Analysis",
+        "recommendation": "Resolve assessment conflicts.",
+    },
 }
 
 # Shared map for analysis state
@@ -152,23 +197,91 @@ mock_analysis = {
         "analysisState": "IN_TRIAGE",
         "isSuppressed": False,
         "analysisDetails": (
-            "--- [Team: General] [State: NOT_SET] [Assessed By: system] [Date: 1709550000000] ---\n"
+            "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\n"
             "Global policy: Log4j usage should be reviewed for all public-facing services.\n\n"
             "--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: inv-analyst] [Date: 1710000000000] ---\n"
             "Confirmed exploitable in inventory management service due to permissive JNDI.\n\n"
             "--- [Team: PaymentTeam] [State: NOT_AFFECTED] [Assessed By: pay-dev] [Date: 1710000060000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\n"
             "Payment processing logic uses a custom wrapper that strips sensitive JNDI lookups."
         ),
+        "analysisComments": [
+            {"comment": "System detected Log4j vulnerability in transit.", "timestamp": 1709549000000},
+            {"comment": "User 'admin' moved finding to triage.", "timestamp": 1709550000000},
+            {"comment": "Confirmed by security team after internal scan.", "timestamp": 1710000000000}
+        ]
     },
     f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_UUID_2}": {
         "analysisState": "IN_TRIAGE",
         "isSuppressed": False,
-        "analysisDetails": "Investigating impact.",
+        "analysisDetails": (
+            "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\n"
+            "Initial automated triage flag."
+        ),
+        "analysisComments": [
+            {"comment": "Automated ingestion from NVD feed.", "timestamp": 1709548000000}
+        ]
+    },
+    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_SET_UUID}": {
+        "analysisState": "NOT_SET",
+        "isSuppressed": False,
+        "analysisDetails": (
+            "This is a plaintext NOT_SET assessment.\n"
+            "No structured team state blocks are present."
+        ),
+    },
+    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_AFFECTED_UUID}": {
+        "analysisState": "NOT_AFFECTED",
+        "isSuppressed": False,
+        "analysisDetails": (
+            "This is a plaintext NOT_AFFECTED assessment.\n"
+            "System says it does not apply in our context."
+        ),
     },
     f"{PROJECT_UUID}:{TEAM_TEST_LIB_UUID}:{VULN_UUID_TEAM}": {
         "analysisState": "NOT_AFFECTED",
         "isSuppressed": False,
         "analysisDetails": "--- [Team: Old-Label] [State: NOT_AFFECTED] [Assessed By: mock] [Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:N/I:N/A:N] ---\nThis was assessed using the old label.",
+    },
+    # INCOMPLETE state mock simulation
+    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_INCOMPLETE_UUID}": {
+        "analysisState": "FALSE_POSITIVE",
+        "isSuppressed": False,
+        "analysisDetails": (
+            "--- [Team: General] [State: FALSE_POSITIVE] [Assessed By: system] [Date: 1709550000000] ---\n"
+            "Baseline: This component does not use the vulnerable function.\n\n"
+            "--- [Team: ComplianceTeam] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] ---\n"
+            "Confirmed: No usage found in current deployment context."
+        ),
+    },
+    # Will leave the PROJECT_V2_UUID instance NOT_SET for INCOMPLETE, mapped in get_findings below
+    
+    # INCONSISTENT state mock simulation
+    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_INCONSISTENT_UUID}": {
+        "analysisState": "FALSE_POSITIVE",
+        "isSuppressed": False,
+        "analysisDetails": (
+            "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\n"
+            "Please review team assessments for conflict resolution.\n\n"
+            "--- [Team: TeamA] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] ---\n"
+            "V1: This version is definitely safe based on restricted access."
+        ),
+    },
+    f"{PROJECT_V2_UUID}:{COMPONENT_UUID}:{VULN_INCONSISTENT_UUID}": {
+        "analysisState": "EXPLOITABLE",
+        "isSuppressed": False,
+        "analysisDetails": (
+            "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: analyst2] [Date: 1710000060000] ---\n"
+            "V2: We found a direct path to the vulnerable code in the new module."
+        ),
+    },
+    # Additional plaintext sample for clients that need to handle non-block text.
+    f"{LIB_UUID}:{JACKSON_UUID}:{VULN_JACKSON_UUID}": {
+        "analysisState": "RESOLVED",
+        "isSuppressed": False,
+        "analysisDetails": (
+            "Upgrade completed during maintenance window.\n"
+            "Verification: unit tests and smoke tests passed."
+        ),
     },
 }
 
@@ -180,6 +293,12 @@ for p in mock_projects:
         "analysisState": "NOT_SET",
         "isSuppressed": False,
     }
+
+
+@app.get("/api/v1/user/me")
+def get_me(request: Request):
+    check_auth(request)
+    return {"username": "analyst", "email": "analyst@example.com"}
 
 
 @app.get("/api/v1/project")
@@ -239,6 +358,40 @@ def get_findings(project_uuid: str):
         }
         current_findings.append(finding2)
 
+        # Add a plaintext NOT_SET assessment vuln for filter coverage
+        key_plain_not_set = f"{project_uuid}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_SET_UUID}"
+        finding_plain_not_set = {
+            "component": {
+                "uuid": COMPONENT_UUID,
+                "name": "log4j-core",
+                "version": "2.14.0",
+                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+            },
+            "vulnerability": mock_vulnerabilities[VULN_PLAINTEXT_NOT_SET_UUID],
+            "analysis": mock_analysis.get(
+                key_plain_not_set, {"analysisState": "NOT_SET", "isSuppressed": False}
+            ),
+            "matrix": key_plain_not_set,
+        }
+        current_findings.append(finding_plain_not_set)
+
+        # Add a plaintext NOT_AFFECTED assessment vuln for filter coverage
+        key_plain_not_affected = f"{project_uuid}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_AFFECTED_UUID}"
+        finding_plain_not_affected = {
+            "component": {
+                "uuid": COMPONENT_UUID,
+                "name": "log4j-core",
+                "version": "2.14.0",
+                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+            },
+            "vulnerability": mock_vulnerabilities[VULN_PLAINTEXT_NOT_AFFECTED_UUID],
+            "analysis": mock_analysis.get(
+                key_plain_not_affected, {"analysisState": "NOT_AFFECTED", "isSuppressed": False}
+            ),
+            "matrix": key_plain_not_affected,
+        }
+        current_findings.append(finding_plain_not_affected)
+
     # Finding 3: Jackson (on all)
     key3 = f"{project_uuid}:{JACKSON_UUID}:{VULN_JACKSON_UUID}"
     finding3 = {
@@ -285,11 +438,82 @@ def get_findings(project_uuid: str):
             },
             "vulnerability": mock_vulnerabilities[VULN_NETTY_UUID],
             "analysis": mock_analysis.get(
-                key5, {"analysisState": "NOT_SET", "isSuppressed": False}
+                key5,
+                {
+                    "analysisState": "NOT_SET",
+                    "isSuppressed": False,
+                    # Plain-text details for NOT_SET state
+                    "analysisDetails": "Default not set assessment; no structured blocks present.",
+                },
             ),
             "matrix": key5,
         }
         current_findings.append(finding5)
+
+        # Finding 6: INCOMPLETE logic triggers when some are matching and others missing
+        key_inc = f"{project_uuid}:{COMPONENT_UUID}:{VULN_INCOMPLETE_UUID}"
+        finding_inc = {
+            "component": {
+                "uuid": COMPONENT_UUID,
+                "name": "log4j-core",
+                "version": "2.14.0",
+                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+            },
+            "vulnerability": mock_vulnerabilities[VULN_INCOMPLETE_UUID],
+            "analysis": mock_analysis.get(
+                key_inc, {"analysisState": "NOT_SET", "isSuppressed": False}
+            ),
+            "matrix": key_inc,
+        }
+        current_findings.append(finding_inc)
+
+        # Second instance for INCOMPLETE state (Jackson doesn't have assessment for this vuln)
+        key_inc_2 = f"{project_uuid}:{JACKSON_UUID}:{VULN_INCOMPLETE_UUID}"
+        finding_inc_2 = {
+            "component": {
+                "uuid": JACKSON_UUID,
+                "name": "jackson-databind",
+                "version": "2.9.8",
+                "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+            },
+            "vulnerability": mock_vulnerabilities[VULN_INCOMPLETE_UUID],
+            "analysis": {"analysisState": "NOT_SET", "isSuppressed": False},
+            "matrix": key_inc_2,
+        }
+        current_findings.append(finding_inc_2)
+
+        # Finding 7: INCONSISTENT logic triggers when there are matching conflicting states
+        key_incon = f"{project_uuid}:{COMPONENT_UUID}:{VULN_INCONSISTENT_UUID}"
+        finding_incon = {
+            "component": {
+                "uuid": COMPONENT_UUID,
+                "name": "log4j-core",
+                "version": "2.14.0",
+                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+            },
+            "vulnerability": mock_vulnerabilities[VULN_INCONSISTENT_UUID],
+            "analysis": mock_analysis.get(
+                key_incon, {"analysisState": "NOT_SET", "isSuppressed": False}
+            ),
+            "matrix": key_incon,
+        }
+        current_findings.append(finding_incon)
+
+        # Second instance for INCONSISTENT state (EXPLOITABLE vs FALSE_POSITIVE)
+        key_incon_2 = f"{project_uuid}:{JACKSON_UUID}:{VULN_INCONSISTENT_UUID}"
+        finding_incon_2 = {
+            "component": {
+                "uuid": JACKSON_UUID,
+                "name": "jackson-databind",
+                "version": "2.9.8",
+                "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+            },
+            "vulnerability": mock_vulnerabilities[VULN_INCONSISTENT_UUID],
+            "analysis": {"analysisState": "EXPLOITABLE", "isSuppressed": False},
+            "matrix": key_incon_2,
+        }
+        current_findings.append(finding_incon_2)
+
     return current_findings
 
 
@@ -489,6 +713,7 @@ def update_analysis(update: AnalysisUpdate):
             "analysisState": "NOT_SET",
             "isSuppressed": False,
             "analysisDetails": "",
+            "analysisComments": []
         }
 
     mock_analysis[key]["analysisState"] = update.analysisState
@@ -498,11 +723,21 @@ def update_analysis(update: AnalysisUpdate):
     if update.analysisJustification:
         mock_analysis[key]["analysisJustification"] = update.analysisJustification
     if update.comment:
-        # In D-T, comments are usually a list. For mock, we'll prefix details or just store it.
-        # Actually, let's keep it simple but ensure we don't lose previous details if not provided.
+        # In D-T, comments are usually a list.
+        if "analysisComments" not in mock_analysis[key]:
+            mock_analysis[key]["analysisComments"] = []
+        
+        # Add to the comments list (which is what DTVP reads)
+        mock_analysis[key]["analysisComments"].append({
+            "comment": update.comment,
+            "timestamp": int(time.time() * 1000)
+        })
+        
+        # Also append to details for backward compatibility in the text view if needed
         if "analysisDetails" not in mock_analysis[key]:
             mock_analysis[key]["analysisDetails"] = ""
         mock_analysis[key]["analysisDetails"] += f"\n\n[Comment] {update.comment}"
+    
     return mock_analysis[key]
 
 

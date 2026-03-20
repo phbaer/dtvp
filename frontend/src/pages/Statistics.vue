@@ -11,11 +11,11 @@ const loading = ref(true)
 const error = ref('')
 
 const projectName = computed(() => route.query.name as string || '')
-const cveFilter = computed(() => route.query.cve as string || '')
+const idFilter = computed(() => (route.query.id || route.query.cve) as string || '')
 
 onMounted(async () => {
     try {
-        stats.value = await getStatistics(projectName.value, cveFilter.value)
+        stats.value = await getStatistics(projectName.value, idFilter.value)
     } catch (err: any) {
         error.value = 'Failed to load statistics: ' + (err.message || err)
     } finally {
@@ -39,7 +39,8 @@ const stateColors: Record<string, string> = {
     'NOT_AFFECTED': 'bg-green-600',
     'RESOLVED': 'bg-blue-500',
     'NOT_SET': 'bg-purple-500',
-    'MIXED': 'bg-orange-400'
+    'INCOMPLETE': 'bg-orange-400',
+    'INCONSISTENT': 'bg-pink-500'
 }
 
 const severityOrder = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'UNKNOWN']
@@ -63,9 +64,9 @@ const maxStateCount = computed(() => {
             <p v-if="projectName" class="text-gray-400 mt-1">Project: <span class="text-blue-400">{{ projectName }}</span></p>
             <p v-else class="text-gray-400 mt-1">Global view across all projects</p>
         </div>
-        <div v-if="cveFilter" class="bg-gray-800 border border-gray-700 px-3 py-1 rounded text-sm flex items-center gap-2">
+        <div v-if="idFilter" class="bg-gray-800 border border-gray-700 px-3 py-1 rounded text-sm flex items-center gap-2">
             <ListFilter :size="16" class="text-blue-400" />
-            <span class="text-gray-300">Filtered by: <span class="font-mono text-blue-300">{{ cveFilter }}</span></span>
+            <span class="text-gray-300">Filtered by: <span class="font-mono text-blue-300">{{ idFilter }}</span></span>
         </div>
     </div>
 

@@ -11,29 +11,29 @@
     "test:ui": "playwright test"
   },
   "dependencies": {
-    "@tailwindcss/postcss": "^4.1.18",
-    "ae-cvss-calculator": "^1.0.9",
-    "autoprefixer": "^10.4.22",
-    "axios": "^1.13.2",
+    "@tailwindcss/postcss": "^4.2.2",
+    "ae-cvss-calculator": "^1.0.11",
+    "autoprefixer": "^10.4.27",
+    "axios": "^1.13.6",
     "lucide-vue-next": "^0.577.0",
     "marked": "^17.0.4",
-    "mermaid": "^11.12.2",
-    "postcss": "^8.5.6",
-    "vue": "^3.5.24",
-    "vue-router": "^5.0.0"
+    "mermaid": "^11.13.0",
+    "postcss": "^8.5.8",
+    "vue": "^3.5.30",
+    "vue-router": "^5.0.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.57.0",
-    "@types/node": "^25.0.0",
-    "@vitejs/plugin-vue": "^6.0.1",
-    "@vitest/coverage-v8": "^4.0.16",
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.5.0",
+    "@vitejs/plugin-vue": "^6.0.5",
+    "@vitest/coverage-v8": "^4.1.0",
     "@vue/test-utils": "^2.4.6",
     "@vue/tsconfig": "^0.9.0",
     "flush-promises": "^1.0.2",
-    "jsdom": "^28.0.0",
+    "jsdom": "^29.0.0",
     "typescript": "~5.9.3",
-    "vite": "^7.2.4",
-    "vitest": "^4.0.15",
-    "vue-tsc": "^3.1.4"
+    "vite": "^8.0.1",
+    "vitest": "^4.1.0",
+    "vue-tsc": "^3.2.6"
   }
 }

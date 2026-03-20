@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock api
@@ -18,7 +18,8 @@ vi.mock('lucide-vue-next', () => ({
     ExternalLink: { template: '<span />' },
     RefreshCw: { template: '<span />' },
     CheckCircle: { template: '<span />' },
-    AlertTriangle: { template: '<span />' }
+    AlertTriangle: { template: '<span />' },
+    RotateCcw: { template: '<span />' }
 }))
 
 
@@ -42,7 +43,8 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         }
         const wrapper = mount(VulnGroupCard, { props: { group: taggedGroup } })
 
-        const tags = wrapper.findAll('.bg-blue-900\\/40')
+        const container = wrapper.find('.border-l.border-white\\/5')
+        const tags = container.findAll('.rounded-lg.font-black')
         expect(tags.length).toBe(2)
         if (tags.length >= 2) {
             expect(tags[0]!.text()).toBe('Tag1')
@@ -64,7 +66,38 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         const wrapper = mount(VulnGroupCard, { props: { group: group as any } })
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        const instanceBlocks = wrapper.findAll('.mb-2.bg-gray-900')
+        const instanceBlocks = wrapper.findAll('[data-testid="grouped-assessment"]')
         expect(instanceBlocks.length).toBe(1)
+    })
+
+    it('updates form when a team is selected', async () => {
+        const aggregatedDetails = 'Global info\n\n--- [Team: Security] [State: EXPLOITABLE] [Assessed By: user] [Justification: CODE_NOT_PRESENT] ---\nTeam info'
+        const group = {
+            id: 'V1',
+            tags: ['Security'],
+            affected_versions: [{
+                project_uuid: 'p1',
+                components: [{
+                    component_uuid: 'c1',
+                    analysis_details: aggregatedDetails
+                }]
+            }]
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: group as any },
+            global: { provide: { user: { value: { role: 'REVIEWER' } } } }
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Default state (no team selected)
+        expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('Global info')
+
+        // Select Security team
+        await wrapper.find('select').setValue('Security')
+        await flushPromises()
+
+        // Should show team info
+        expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('Team info')
+        expect((wrapper.findAll('select')[1]?.element as HTMLSelectElement).value).toBe('EXPLOITABLE')
     })
 })

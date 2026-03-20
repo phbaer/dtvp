@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, provide, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules } from '../lib/api'
+import { getGroupLifecycle, isPendingReview as isPendingReviewHelper, matchesFilters, getGroupTechnicalState, tagToString } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln } from '../types'
 import VulnGroupCard from '../components/VulnGroupCard.vue'
-import { BarChart3 } from 'lucide-vue-next'
+import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal.vue'
+import BulkApproveModal from '../components/BulkApproveModal.vue'
+import { BarChart3, Layers, ChevronLeft, ShieldCheck, LayoutList } from 'lucide-vue-next'
 
 const route = useRoute()
+const router = useRouter()
 const user = inject<any>('user')
 const groups = ref<GroupedVuln[]>([])
 const loading = ref(true)
@@ -46,8 +50,6 @@ const fetchVulns = async () => {
     let name = route.params.name as string
     if (!name) return
     
-    let cve = route.query.cve as string | undefined
-    
     const isAllProjects = name === '_all_'
     const apiName = isAllProjects ? '' : name
 
@@ -57,7 +59,7 @@ const fetchVulns = async () => {
     loadingProgress.value = 0
 
     try {
-        const data = await getGroupedVulns(apiName, cve, (msg, progress) => {
+        const data = await getGroupedVulns(apiName, undefined, (msg, progress) => {
             loadingMessage.value = msg
             loadingProgress.value = progress
         })
@@ -105,6 +107,30 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
     groups.value = [...groups.value]
 }
 
+const handleBulkUpdates = (updates: Array<{ id: string; data: any }>, onComplete?: () => void) => {
+    for (const update of updates) {
+        const group = groups.value.find(g => g.id === update.id)
+        if (group) {
+            handleLocalAssessmentUpdate(group, update.data)
+        }
+    }
+    if (onComplete) onComplete()
+}
+
+const showBulkModal = ref(false)
+const showBulkApproveModal = ref(false)
+const incompleteGroups = computed(() => {
+    return groups.value.filter(g => getDisplayState(g) === 'INCOMPLETE')
+})
+
+const needsApprovalGroups = computed(() => {
+    return groups.value.filter(g => {
+        return (g.affected_versions || []).some(v => 
+            (v.components || []).some(c => (c.analysis_details || '').includes('[Status: Pending Review]'))
+        )
+    })
+})
+
 const expandedGroupIds = ref(new Set<string>())
 const handleToggleExpand = (id: string, expanded: boolean) => {
     if (expanded) {
@@ -117,11 +143,129 @@ const handleToggleExpand = (id: string, expanded: boolean) => {
 const tagFilter = ref('')
 const idFilter = ref('')
 const componentFilter = ref('')
-const hideAssessed = ref(true)
-const hideMixed = ref(false)
-const showNeedsApproval = ref(false)
+const lifecycleFilters = ref<string[]>([])
+const analysisFilters = ref<string[]>([])
 const sortBy = ref('severity')
 const sortOrder = ref<'asc' | 'desc'>('asc')
+
+onMounted(() => {
+    const q = route.query
+    const hasFilterParams = Object.entries(q).some(([k, v]) => {
+        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'sort', 'order'].includes(k)) return false;
+        if (Array.isArray(v)) return v.length > 0;
+        return v !== undefined && v !== null && v !== '';
+    })
+
+    if (hasFilterParams) {
+        if (q.lifecycle) lifecycleFilters.value = (Array.isArray(q.lifecycle) ? q.lifecycle : [q.lifecycle]) as string[]
+        else lifecycleFilters.value = (user?.value?.role === 'REVIEWER')
+            ? ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
+            : ['OPEN']
+        
+        if (q.analysis) analysisFilters.value = (Array.isArray(q.analysis) ? q.analysis : [q.analysis]) as string[]
+        else analysisFilters.value = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
+        
+        if (q.tag) tagFilter.value = q.tag as string
+        if (q.id) idFilter.value = q.id as string
+        else if (q.cve) idFilter.value = q.cve as string
+        
+        if (q.component) componentFilter.value = q.component as string
+        if (q.sort) sortBy.value = q.sort as string
+        if (q.order) sortOrder.value = q.order as 'asc' | 'desc'
+    } else {
+        resetFilters()
+    }
+})
+
+// If the user switches between reviewer and analyst, reapply defaults (unless URL explicitly defines filters)
+watch(() => user?.value?.role, (newRole, oldRole) => {
+    if (!newRole || newRole === oldRole) return
+
+    const q = route.query
+    const hasFilterParams = Object.entries(q).some(([k, v]) => {
+        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'sort', 'order'].includes(k)) return false;
+        if (Array.isArray(v)) return v.length > 0;
+        return v !== undefined && v !== null && v !== '';
+    })
+
+    if (!hasFilterParams) {
+        resetFilters()
+    }
+})
+
+const resetFilters = () => {
+    const allAnalysis = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
+    analysisFilters.value = [...allAnalysis]
+    
+    if (user?.value?.role === 'REVIEWER') {
+        lifecycleFilters.value = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
+    } else {
+        lifecycleFilters.value = ['OPEN']
+    }
+    idFilter.value = ''
+    tagFilter.value = ''
+    componentFilter.value = ''
+    sortBy.value = 'severity'
+    sortOrder.value = 'asc'
+}
+
+watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, sortBy, sortOrder], () => {
+    const query = { ...route.query }
+    
+    if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
+    else delete query.lifecycle
+    
+    if (analysisFilters.value.length > 0) query.analysis = analysisFilters.value
+    else delete query.analysis
+
+    if (tagFilter.value) query.tag = tagFilter.value
+    else delete query.tag
+
+    if (idFilter.value) query.id = idFilter.value
+    else delete query.id
+
+    if (componentFilter.value) query.component = componentFilter.value
+    else delete query.component
+
+    query.sort = sortBy.value
+    query.order = sortOrder.value
+
+    router.replace({ query }).catch(() => {})
+}, { deep: true })
+
+const LIFECYCLE_OPTIONS = [
+    { value: 'OPEN', label: 'Open', color: 'bg-amber-500', description: 'No global assessment AND at least one team assessment is missing' },
+    { value: 'ASSESSED', label: 'Assessed', color: 'bg-blue-600', description: 'Approved assessments with a global assessment' },
+    { value: 'ASSESSED_LEGACY', label: 'Assessed (Legacy)', color: 'bg-sky-600', description: 'Legacy assessments without structured DTvP format' },
+    { value: 'INCOMPLETE', label: 'Incomplete', color: 'bg-amber-700', description: 'Some assessment for some version is missing, the others are identical' },
+    { value: 'INCONSISTENT', label: 'Inconsistent', color: 'bg-indigo-600', description: 'Different assessments for at least two versions; empty assessments don\'t count' },
+    { value: 'NEEDS_APPROVAL', label: 'Needs Approval', color: 'bg-purple-600', description: 'When there\'s a need for an approval (flag)' }
+]
+
+const ANALYSIS_OPTIONS = [
+    { value: 'NOT_SET', label: 'Not Set', color: 'bg-gray-600' },
+    { value: 'EXPLOITABLE', label: 'Exploitable', color: 'bg-red-600' },
+    { value: 'IN_TRIAGE', label: 'In Triage', color: 'bg-amber-400' },
+    { value: 'RESOLVED', label: 'Resolved', color: 'bg-green-600' },
+    { value: 'FALSE_POSITIVE', label: 'False Positive', color: 'bg-teal-600' },
+    { value: 'NOT_AFFECTED', label: 'Not Affected', color: 'bg-slate-600' }
+]
+
+const toggleLifecycleFilter = (val: string) => {
+    if (lifecycleFilters.value.includes(val)) {
+        lifecycleFilters.value = lifecycleFilters.value.filter(s => s !== val)
+    } else {
+        lifecycleFilters.value.push(val)
+    }
+}
+
+const toggleAnalysisFilter = (val: string) => {
+    if (analysisFilters.value.includes(val)) {
+        analysisFilters.value = analysisFilters.value.filter(s => s !== val)
+    } else {
+        analysisFilters.value.push(val)
+    }
+}
 
 const SEVERITY_ORDER: Record<string, number> = {
     'CRITICAL': 0,
@@ -138,24 +282,25 @@ const ANALYSIS_STATE_ORDER: Record<string, number> = {
     'NOT_SET': 2,
     'RESOLVED': 3,
     'FALSE_POSITIVE': 4,
-    'NOT_AFFECTED': 5,
-    'MIXED': 6
+    'NOT_AFFECTED': 5
 }
 
-const getDisplayState = (group: GroupedVuln) => {
-    const allInstances = group.affected_versions?.flatMap(v => v.components) || []
-    const uniqueStates = Array.from(new Set(allInstances.map(i => i.analysis_state || 'NOT_SET')))
-    return uniqueStates.length === 1 ? uniqueStates[0] : 'MIXED'
+
+const getDisplayState = (group: GroupedVuln): string => {
+    return getGroupLifecycle(group, group.tags || [], teamMapping.value)
 }
 
 const filteredGroups = computed(() => {
     let result = [...groups.value]
     
-    if (tagFilter.value) {
-        const term = tagFilter.value.toLowerCase()
-        result = result.filter(g => 
-            g.tags?.some(t => t.toLowerCase().includes(term))
-        )
+    const rawTagFilter = tagFilter.value.trim().toLowerCase()
+    if (rawTagFilter) {
+        result = result.filter(g => {
+            return g.tags?.some(t => {
+                const tagText = tagToString(t)
+                return tagText.toLowerCase().includes(rawTagFilter)
+            })
+        })
     }
 
     if (idFilter.value) {
@@ -174,50 +319,23 @@ const filteredGroups = computed(() => {
         )
     }
 
-    if (hideAssessed.value) {
-        result = result.filter(g => {
-            if (expandedGroupIds.value.has(g.id)) return true
-            
-            // Check if ANY component is pending review - if so, show it regardless of state
-            const isPending = (g.affected_versions || []).some(v => 
-                v.components.some(c => (c.analysis_details || '').includes('[Status: Pending Review]'))
-            )
-            if (isPending) return true
-
-            const state = getDisplayState(g)
-            // Keep if NOT_SET or MIXED
-            return state === 'NOT_SET' || state === 'MIXED'
-        })
-    }
-
-    if (hideMixed.value) {
-        result = result.filter(g => {
-            if (expandedGroupIds.value.has(g.id)) return true
-            return getDisplayState(g) !== 'MIXED'
-        })
-    }
-
-    if (showNeedsApproval.value) {
-        result = result.filter(g => {
-            return g.affected_versions.some(v => 
-                v.components.some(c => (c.analysis_details || '').includes('[Status: Pending Review]'))
-            )
-        })
-    }
+    result = result.filter(g => {
+        return matchesFilters(g, lifecycleFilters.value, analysisFilters.value, teamMapping.value)
+    })
 
     result.sort((a, b) => {
         let comparison = 0
         
         switch (sortBy.value) {
             case 'analysis': {
-                const stateA = getDisplayState(a) || 'NOT_SET'
-                const stateB = getDisplayState(b) || 'NOT_SET'
+                const stateA = getGroupTechnicalState(a)
+                const stateB = getGroupTechnicalState(b)
                 comparison = (ANALYSIS_STATE_ORDER[stateA] ?? 99) - (ANALYSIS_STATE_ORDER[stateB] ?? 99)
                 break
             }
             case 'tags': {
-                const tagA = (a.tags && a.tags.length > 0) ? (a.tags[0] || '') : ''
-                const tagB = (b.tags && b.tags.length > 0) ? (b.tags[0] || '') : ''
+                const tagA = (a.tags && a.tags.length > 0) ? tagToString(a.tags[0]) : ''
+                const tagB = (b.tags && b.tags.length > 0) ? tagToString(b.tags[0]) : ''
                 comparison = tagA.localeCompare(tagB)
                 break
             }
@@ -250,35 +368,106 @@ const filteredGroups = computed(() => {
 })
 
 
-watch(() => [route.params.name, route.query.cve], fetchVulns, { immediate: true })
+const filterCounts = computed(() => {
+    const counts: Record<string, number> = {
+        OPEN: 0,
+        ASSESSED: 0,
+        ASSESSED_LEGACY: 0,
+        INCOMPLETE: 0,
+        INCONSISTENT: 0,
+        NOT_SET: 0,
+        EXPLOITABLE: 0,
+        IN_TRIAGE: 0,
+        RESOLVED: 0,
+        FALSE_POSITIVE: 0,
+        NOT_AFFECTED: 0,
+        NEEDS_APPROVAL: 0
+    }
+
+    groups.value.forEach(g => {
+        const state = getDisplayState(g)
+        const isPendingGroup = isPendingReviewHelper(g)
+
+        // 1. Lifecycle counts (Global)
+        if (state === 'OPEN') counts.OPEN++
+        if (state === 'ASSESSED') counts.ASSESSED++
+        if (state === 'ASSESSED_LEGACY') counts.ASSESSED_LEGACY++
+        if (state === 'INCOMPLETE') counts.INCOMPLETE++
+        if (state === 'INCONSISTENT') counts.INCONSISTENT++
+
+        // 2. Analysis counts (Hierarchical: respect Lifecycle filters)
+        // We use a simplified version of matchesFilters logic here for counts
+        const lifecycleActiveMatch = lifecycleFilters.value.length === 0 || lifecycleFilters.value.includes(state) || (lifecycleFilters.value.includes('NEEDS_APPROVAL') && isPendingGroup)
+        
+        if (lifecycleActiveMatch) {
+            const techState = getGroupTechnicalState(g)
+            counts[techState]++
+        }
+
+        // 3. Needs Approval count (Global)
+        if (isPendingGroup) counts.NEEDS_APPROVAL++
+    })
+
+    return counts
+})
+
+
+watch(() => route.params.name, fetchVulns, { immediate: true })
 </script>
 
 <template>
   <div class="mx-auto">
-    <div class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div class="flex flex-col gap-2">
-            <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
-                &larr; Back to Dashboard
+    <div class="mb-10 flex flex-col gap-6">
+        <!-- Breadcrumbs & Header -->
+        <div class="flex flex-col gap-3">
+            <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1.5 font-medium transition-colors">
+                <ChevronLeft :size="16" />
+                Back to Dashboard
             </router-link>
-            <div class="flex items-center gap-4">
-                <h2 class="text-3xl font-bold">Vulnerabilities for <span class="text-blue-500">{{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}</span></h2>
-                <router-link 
-                    :to="{ path: '/statistics', query: { name: $route.params.name === '_all_' ? '' : $route.params.name, cve: $route.query.cve } }"
-                    class="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center gap-1.5"
-                >
-                    <BarChart3 :size="14" />
-                    View Statistics
-                </router-link>
+            <div class="flex items-end justify-between gap-6 flex-wrap">
+                <div class="flex items-center gap-6">
+                    <h2 class="text-4xl font-extrabold tracking-tight text-white leading-none">
+                        Vulnerabilities <span class="text-blue-500 italic font-medium px-2">for</span> {{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}
+                    </h2>
+                    <div class="flex gap-2">
+                        <router-link 
+                            :to="{ path: '/statistics', query: { name: $route.params.name === '_all_' ? '' : $route.params.name, id: idFilter } }"
+                            class="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2"
+                        >
+                            <BarChart3 :size="14" />
+                            Statistics
+                        </router-link>
+                        <button 
+                            v-if="user?.role === 'REVIEWER' && incompleteGroups.length > 0"
+                            @click="showBulkModal = true"
+                            class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl shadow-amber-900/5 active:scale-95"
+                        >
+                            <Layers :size="14" />
+                            Bulk Sync ({{ incompleteGroups.length }})
+                        </button>
+                        <button 
+                            v-if="user?.role === 'REVIEWER' && needsApprovalGroups.length > 0"
+                            @click="showBulkApproveModal = true"
+                            class="bg-purple-500/10 hover:bg-purple-500/20 text-purple-500 border border-purple-500/20 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl shadow-purple-900/5 active:scale-95"
+                        >
+                            <ShieldCheck :size="14" />
+                            Bulk Approve ({{ needsApprovalGroups.length }})
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="flex flex-col gap-4">
-            <div class="flex flex-col md:flex-row gap-4 md:items-end lg:items-end">
-                <div class="flex flex-col gap-1">
-                    <label class="text-[10px] font-bold text-gray-500 uppercase">Sort By</label>
-                    <div class="flex gap-2">
+
+        <!-- Premium Filter Bar -->
+        <div class="bg-white/2 border border-white/5 rounded-2xl p-6 flex flex-col gap-6 backdrop-blur-sm">
+            <div class="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-8 items-end">
+                <!-- Sorting Section -->
+                <div class="flex flex-col gap-2">
+                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Sort Catalog</label>
+                    <div class="flex gap-2 h-10">
                         <select 
                             v-model="sortBy"
-                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                            class="bg-black/40 border border-white/10 rounded-xl px-4 text-sm font-medium text-gray-200 focus:outline-none focus:border-blue-500/50 flex-1 appearance-none bg-no-repeat bg-[right_1rem_center] cursor-pointer"
                         >
                             <option value="severity">Criticality</option>
                             <option value="score">Score</option>
@@ -288,55 +477,107 @@ watch(() => [route.params.name, route.query.cve], fetchVulns, { immediate: true 
                         </select>
                         <button 
                             @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'"
-                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm hover:bg-gray-700 transition-colors"
+                            class="bg-black/40 border border-white/10 rounded-xl px-4 text-sm hover:bg-white/5 transition-colors font-medium text-blue-400 border-dashed"
                             :title="sortOrder === 'asc' ? 'Ascending' : 'Descending'"
                         >
-                            {{ sortOrder === 'asc' ? '↑' : '↓' }}
+                            {{ sortOrder === 'asc' ? 'ASC' : 'DESC' }}
                         </button>
                     </div>
                 </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[10px] font-bold text-gray-500 uppercase">Filter</label>
-                    <div class="flex flex-col md:flex-row gap-2">
-                        <input 
-                            v-model="idFilter" 
-                            type="text" 
-                            placeholder="Filter by ID (CVE...)" 
-                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
-                        />
+
+                <!-- Input Filters Section -->
+                <div class="flex flex-col gap-2">
+                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Search & Refine</label>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 h-10">
+                        <div class="relative group">
+                            <input 
+                                v-model="idFilter" 
+                                type="text" 
+                                placeholder="Vulnerability ID..." 
+                                class="bg-black/40 border border-white/10 rounded-xl px-4 w-full h-full text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600"
+                            />
+                        </div>
                         <input 
                             v-model="tagFilter" 
                             type="text" 
-                            placeholder="Filter by Team Tag..." 
-                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
+                            placeholder="Team Identifier..." 
+                            class="bg-black/40 border border-white/10 rounded-xl px-4 w-full h-full text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600"
                         />
                         <input 
                             v-model="componentFilter" 
                             type="text" 
-                            placeholder="Filter by Component..." 
-                            class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full md:w-48"
+                            placeholder="Component Name..." 
+                            class="bg-black/40 border border-white/10 rounded-xl px-4 w-full h-full text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600"
                         />
                     </div>
                 </div>
             </div>
-            <div class="flex gap-4 self-end">
-                <label class="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="hideAssessed" class="sr-only peer">
-                    <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                    <span class="ms-2 text-xs font-medium text-gray-300">Hide Assessed</span>
-                </label>
-                <label class="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="hideMixed" class="sr-only peer">
-                    <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                    <span class="ms-2 text-xs font-medium text-gray-300">Hide Mixed</span>
-                </label>
-            </div>
-            <div class="flex gap-4 self-end">
-                 <label v-if="user?.role === 'REVIEWER'" class="inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="showNeedsApproval" class="sr-only peer">
-                    <div class="relative w-9 h-5 bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-yellow-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-yellow-600"></div>
-                    <span class="ms-2 text-xs font-medium text-yellow-300">Needs Approval</span>
-                </label>
+
+            <!-- Status Selection Chips -->
+            <div class="pt-6 border-t border-white/5 space-y-4">
+                <div class="flex flex-col gap-3">
+                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Lifecycle Status</label>
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <button 
+                            v-for="opt in LIFECYCLE_OPTIONS" 
+                            :key="opt.value"
+                            @click="toggleLifecycleFilter(opt.value)"
+                            :title="opt.description"
+                            :class="[
+                                'px-4 py-1.5 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-2',
+                                lifecycleFilters.includes(opt.value) 
+                                    ? `${opt.color} text-white border-transparent shadow-lg shadow-blue-900/40`
+                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
+                            ]"
+                        >
+                            {{ opt.label }}
+                            <span 
+                                class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
+                                :class="lifecycleFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
+                            >
+                                {{ filterCounts[opt.value] || 0 }}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex flex-col gap-3">
+                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Analysis State</label>
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <button 
+                            v-for="opt in ANALYSIS_OPTIONS" 
+                            :key="opt.value"
+                            @click="toggleAnalysisFilter(opt.value)"
+                            :class="[
+                                'px-4 py-1.5 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-2',
+                                analysisFilters.includes(opt.value) 
+                                    ? `${opt.color} text-white border-transparent shadow-lg shadow-gray-900/40`
+                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
+                            ]"
+                        >
+                            {{ opt.label }}
+                            <span 
+                                class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
+                                :class="analysisFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
+                            >
+                                {{ filterCounts[opt.value] || 0 }}
+                            </span>
+                        </button>
+
+                        <div class="ms-auto flex items-center gap-6">
+                            <div class="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                                <LayoutList :size="12" class="text-blue-400" />
+                                <span class="text-[10px] font-black text-blue-400 uppercase tracking-widest">{{ filteredGroups.length }} Findings Visible</span>
+                            </div>
+                            <button 
+                                @click="resetFilters"
+                                class="text-[10px] font-black text-blue-500 hover:text-blue-400 uppercase tracking-widest transition-colors flex items-center gap-1"
+                            >
+                                Reset All
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -361,5 +602,19 @@ watch(() => [route.params.name, route.query.cve], fetchVulns, { immediate: true 
         
         <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center">No vulnerabilities found matching criteria.</div>
     </div>
+
+    <BulkResolveIncompleteModal 
+        :show="showBulkModal" 
+        :incomplete-groups="incompleteGroups" 
+        @close="showBulkModal = false" 
+        @updated="(updates) => handleBulkUpdates(updates, () => { showBulkModal = false })" 
+    />
+
+    <BulkApproveModal 
+        :show="showBulkApproveModal" 
+        :needs-approval-groups="needsApprovalGroups" 
+        @close="showBulkApproveModal = false" 
+        @updated="(updates) => handleBulkUpdates(updates, () => { showBulkApproveModal = false })" 
+    />
   </div>
 </template>
