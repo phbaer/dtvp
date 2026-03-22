@@ -482,7 +482,7 @@ const updateFormFromGroup = (force = true) => {
              // No team selected - if Reviewer, show General block
              if (isReviewer.value) {
                 const generalBlock = teamBlocks.find(b => b.team === 'General')
-                if (generalBlock) {
+                if (generalBlock && generalBlock.state !== 'NOT_SET') {
                     state.value = generalBlock.state || 'NOT_SET'
                     details.value = (generalBlock.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
                     justification.value = generalBlock.justification || 'NOT_SET'
@@ -507,7 +507,24 @@ const updateFormFromGroup = (force = true) => {
                     if (dtWorstCandidate) {
                         state.value = dtWorstCandidate.state
                         details.value = dtWorstCandidate.details.replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-                        justification.value = dtWorstCandidate.justification || parseJustificationFromText(dtWorstCandidate.details) || 'NOT_SET'
+
+                        let resolvedJustification = dtWorstCandidate.justification && dtWorstCandidate.justification !== 'NOT_SET'
+                            ? dtWorstCandidate.justification
+                            : undefined
+
+                        if (!resolvedJustification) {
+                            resolvedJustification = dtCandidates.find(c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET')?.justification
+                        }
+
+                        if (!resolvedJustification) {
+                            resolvedJustification = parseJustificationFromText(dtWorstCandidate.details)
+                        }
+
+                        justification.value = resolvedJustification || 'NOT_SET'
+                    } else if (generalBlock) {
+                        state.value = generalBlock.state || 'NOT_SET'
+                        details.value = (generalBlock.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+                        justification.value = generalBlock.justification || 'NOT_SET'
                     } else {
                         state.value = 'NOT_SET'
                         details.value = ''
@@ -566,18 +583,31 @@ const applyConsensusAssessment = () => {
     const dtStates = dtCandidates.map(i => i.state)
     let dtJustification = dtWorstCandidate ? dtWorstCandidate.justification : undefined
 
-    // If DT provides a state but no explicit justification, try to extract it from the structured details.
+    // If DT provides a state but no explicit justification, try to extract it from the structured details
+    // or from another same-state DT candidate, then fallback to parsing from the block.
     if (dtWorstCandidate && (!dtJustification || dtJustification === 'NOT_SET')) {
-        const blocks = parseAssessmentBlocks(dtWorstCandidate.details)
-        const matching = blocks.find(b => b.state === dtWorstCandidate.state && b.justification && b.justification !== 'NOT_SET')
-        if (matching) {
-            dtJustification = matching.justification
+        const sameStateCandidateJustification = dtCandidates.find(
+            c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET'
+        )?.justification
+
+        if (sameStateCandidateJustification) {
+            dtJustification = sameStateCandidateJustification
         } else {
-            const parsed = parseJustificationFromText(dtWorstCandidate.details)
-            if (parsed) dtJustification = parsed
+            const blocks = parseAssessmentBlocks(dtWorstCandidate.details)
+            const matching = blocks.find(
+                b => b.state === dtWorstCandidate.state && b.justification && b.justification !== 'NOT_SET'
+            )
+            if (matching) {
+                dtJustification = matching.justification
+            } else {
+                const parsed = parseJustificationFromText(dtWorstCandidate.details)
+                if (parsed) dtJustification = parsed
+            }
 
             if ((!dtJustification || dtJustification === 'NOT_SET') && dtCandidates) {
-                const fallbackCandidate = dtCandidates.find(c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET')
+                const fallbackCandidate = dtCandidates.find(
+                    c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET'
+                )
                 if (fallbackCandidate) {
                     dtJustification = fallbackCandidate.justification
                 }
@@ -751,7 +781,7 @@ const refreshDetails = async () => {
                              c.analysis_state = item.analysis.analysisState || item.analysis.analysis_state
                              c.analysis_details = item.analysis.analysisDetails || item.analysis.analysis_details
                              c.is_suppressed = item.analysis.isSuppressed || item.analysis.is_suppressed
-                             c.justification = item.analysis.justification
+                             c.justification = item.analysis.analysisJustification || item.analysis.justification || parseJustificationFromText(item.analysis.analysisDetails || item.analysis.analysis_details || '') || 'NOT_SET'
                              const comments = item.analysis.analysisComments || item.analysis.analysis_comments
                              if (comments) {
                                   c.analysis_comments = comments

@@ -1,0 +1,84 @@
+{
+  "mock_analysis": {
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "IN_TRIAGE",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\nGlobal policy: Log4j usage should be reviewed for all public-facing services.\n\n--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: inv-analyst] [Date: 1710000000000] ---\nConfirmed exploitable in inventory management service due to permissive JNDI.\n\n--- [Team: PaymentTeam] [State: NOT_AFFECTED] [Assessed By: pay-dev] [Date: 1710000060000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\nPayment processing logic uses a custom wrapper that strips sensitive JNDI lookups.",
+      "analysisComments": [
+        {"comment": "System detected Log4j vulnerability in transit.", "timestamp": 1709549000000},
+        {"comment": "User 'admin' moved finding to triage.", "timestamp": 1709550000000},
+        {"comment": "Confirmed by security team after internal scan.", "timestamp": 1710000000000}
+      ]
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:e5781a7b-0346-4927-991c-7033580539f5": {
+      "analysisState": "IN_TRIAGE",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\nInitial automated triage flag.",
+      "analysisComments": [{"comment": "Automated ingestion from NVD feed.", "timestamp": 1709548000000}]
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:d1111a7b-0346-4927-991c-7033580539f0": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false,
+      "analysisDetails": "This is a plaintext NOT_SET assessment.\nNo structured team state blocks are present."
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:d2222a7b-0346-4927-991c-7033580539f1": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisDetails": "This is a plaintext NOT_AFFECTED assessment.\nSystem says it does not apply in our context."
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:7fa85f64-5717-4562-b3fc-2c963f66afb0:f6781a7b-0346-4927-991c-7033580539f8": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisJustification": "CODE_NOT_PRESENT",
+      "analysisDetails": "--- [Team: Old-Label] [State: NOT_AFFECTED] [Assessed By: mock] [Justification: CODE_NOT_PRESENT] [Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:N/I:N/A:N] ---\nThis was assessed using the old label."
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:b8881a7b-0346-4927-991c-7033580539f8": {
+      "analysisState": "FALSE_POSITIVE",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: General] [State: FALSE_POSITIVE] [Assessed By: system] [Date: 1709550000000] ---\nBaseline: This component does not use the vulnerable function.\n\n--- [Team: ComplianceTeam] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] ---\nConfirmed: No usage found in current deployment context."
+    },
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7:c253b708-3012-4277-8461-893bd5cd61e1:b8881a7b-0346-4927-991c-7033580539f8": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisJustification": "CODE_NOT_PRESENT",
+      "analysisDetails": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: system] [Date: 1709551000000] [Justification: CODE_NOT_PRESENT] ---\nThis version appears unaffected due to removed call path."
+    },
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7:c253b708-3012-4277-8461-893bd5cd61e1:a7781a7b-0346-4927-991c-7033580539f7": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: analyst2] ---\nNetwork exposure is mitigated by WAF and environment scope."
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:c9991a7b-0346-4927-991c-7033580539f9": {
+      "analysisState": "FALSE_POSITIVE",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\nPlease review team assessments for conflict resolution.\n\n--- [Team: TeamA] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] ---\nV1: This version is definitely safe based on restricted access."
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:f6781a7b-0346-4927-991c-7033580539f8": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisJustification": "CODE_NOT_PRESENT",
+      "analysisDetails": "--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: user1] [Date: 1710001000000] [Justification: CODE_NOT_PRESENT] ---\nOnly safe path reached in this component."
+    },
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7:c253b708-3012-4277-8461-893bd5cd61e1:f6781a7b-0346-4927-991c-7033580539f8": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: user2] ---\nApp-wide block, no exploit surface.\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: user1] [Justification: CODE_REQUIRES_CONFIG] ---\nConditional path exists.",
+      "analysisComments": [{"comment": "Legacy team entry from previous release", "timestamp": 1710005000000}]
+    },
+
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7:c253b708-3012-4277-8461-893bd5cd61e1:custom-doc-1": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisJustification": "NO_RELEVANT_CODE",
+      "analysisDetails": "--- [Team: Documentation] [State: NOT_AFFECTED] [Assessed By: doc-team] [Date: 1710010000000] [Justification: NO_RELEVANT_CODE] ---\nDocumentation states that this is not applicable to current deployment.",
+      "analysisComments": [{"comment": "Doc team ruled out inapplicable environment.", "timestamp": 1710010005000}]
+    },
+
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7:c253b708-3012-4277-8461-893bd5cd61e1:custom-doc-2": {
+      "analysisState": "RESOLVED",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: Security] [State: RESOLVED] [Assessed By: sec-team] [Date: 1710011000000] [Justification: PATCH_APPLIED] ---\nAll mitigation documentation has been published and tested.",
+      "analysisComments": [{"comment": "Published KB article and confirmed fix is working.", "timestamp": 1710011005000}]
+    }
+  }
+}

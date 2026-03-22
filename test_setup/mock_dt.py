@@ -140,101 +140,15 @@ def load_vulnerability_definitions():
         payload = json.load(f)
     return {entry["uuid"]: entry for entry in payload}
 
-mock_vulnerabilities = load_vulnerability_definitions()
 
-# Shared map for analysis state
-mock_analysis = {
-    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_UUID_1}": {
-        "analysisState": "IN_TRIAGE",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\n"
-            "Global policy: Log4j usage should be reviewed for all public-facing services.\n\n"
-            "--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: inv-analyst] [Date: 1710000000000] ---\n"
-            "Confirmed exploitable in inventory management service due to permissive JNDI.\n\n"
-            "--- [Team: PaymentTeam] [State: NOT_AFFECTED] [Assessed By: pay-dev] [Date: 1710000060000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\n"
-            "Payment processing logic uses a custom wrapper that strips sensitive JNDI lookups."
-        ),
-        "analysisComments": [
-            {"comment": "System detected Log4j vulnerability in transit.", "timestamp": 1709549000000},
-            {"comment": "User 'admin' moved finding to triage.", "timestamp": 1709550000000},
-            {"comment": "Confirmed by security team after internal scan.", "timestamp": 1710000000000}
-        ]
-    },
-    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_UUID_2}": {
-        "analysisState": "IN_TRIAGE",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\n"
-            "Initial automated triage flag."
-        ),
-        "analysisComments": [
-            {"comment": "Automated ingestion from NVD feed.", "timestamp": 1709548000000}
-        ]
-    },
-    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_SET_UUID}": {
-        "analysisState": "NOT_SET",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "This is a plaintext NOT_SET assessment.\n"
-            "No structured team state blocks are present."
-        ),
-    },
-    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_AFFECTED_UUID}": {
-        "analysisState": "NOT_AFFECTED",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "This is a plaintext NOT_AFFECTED assessment.\n"
-            "System says it does not apply in our context."
-        ),
-    },
-    f"{PROJECT_UUID}:{TEAM_TEST_LIB_UUID}:{VULN_UUID_TEAM}": {
-        "analysisState": "NOT_AFFECTED",
-        "isSuppressed": False,
-        "analysisDetails": "--- [Team: Old-Label] [State: NOT_AFFECTED] [Assessed By: mock] [Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:N/I:N/A:N] ---\nThis was assessed using the old label.",
-    },
-    # INCOMPLETE state mock simulation
-    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_INCOMPLETE_UUID}": {
-        "analysisState": "FALSE_POSITIVE",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "--- [Team: General] [State: FALSE_POSITIVE] [Assessed By: system] [Date: 1709550000000] ---\n"
-            "Baseline: This component does not use the vulnerable function.\n\n"
-            "--- [Team: ComplianceTeam] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] ---\n"
-            "Confirmed: No usage found in current deployment context."
-        ),
-    },
-    # Will leave the PROJECT_V2_UUID instance NOT_SET for INCOMPLETE, mapped in get_findings below
-    
-    # INCONSISTENT state mock simulation
-    f"{PROJECT_UUID}:{COMPONENT_UUID}:{VULN_INCONSISTENT_UUID}": {
-        "analysisState": "FALSE_POSITIVE",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\n"
-            "Please review team assessments for conflict resolution.\n\n"
-            "--- [Team: TeamA] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] ---\n"
-            "V1: This version is definitely safe based on restricted access."
-        ),
-    },
-    f"{PROJECT_V2_UUID}:{COMPONENT_UUID}:{VULN_INCONSISTENT_UUID}": {
-        "analysisState": "EXPLOITABLE",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: analyst2] [Date: 1710000060000] ---\n"
-            "V2: We found a direct path to the vulnerable code in the new module."
-        ),
-    },
-    # Additional plaintext sample for clients that need to handle non-block text.
-    f"{LIB_UUID}:{JACKSON_UUID}:{VULN_JACKSON_UUID}": {
-        "analysisState": "RESOLVED",
-        "isSuppressed": False,
-        "analysisDetails": (
-            "Upgrade completed during maintenance window.\n"
-            "Verification: unit tests and smoke tests passed."
-        ),
-    },
-}
+def load_mock_analysis():
+    analysis_path = Path(__file__).resolve().parent / "mock_dt_analysis.json"
+    with open(analysis_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return payload.get("mock_analysis", {})
+
+mock_vulnerabilities = load_vulnerability_definitions()
+mock_analysis = load_mock_analysis()
 
 # Pre-populate other projects with default state
 for p in mock_projects:

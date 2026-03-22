@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
-import { updateAssessment } from '../../lib/api'
+import { updateAssessment, getAssessmentDetails } from '../../lib/api'
 
 
 vi.mock('../../lib/api', () => ({
@@ -288,6 +288,94 @@ describe('VulnGroupCard Branch Coverage', () => {
         await (wrapper.vm as any).handleUpdate(true)
         const calledWith3 = (updateAssessment as any).mock.calls[0][0]
         expect(calledWith3.justification).toBe('CODE_NOT_PRESENT')
+    })
+
+    it('pulls justification from another NOT_AFFECTED instance during single sync fallback', () => {
+        const group = {
+            ...baseGroup,
+            affected_versions: [
+                {
+                    project_uuid: 'p1', project_name: 'P1',
+                    components: [{
+                        component_uuid: 'c1',
+                        component_name: 'C1',
+                        component_version: '1.0',
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: user1] ---\nAssessed as not affected'
+                    }]
+                },
+                {
+                    project_uuid: 'p2', project_name: 'P2',
+                    components: [{
+                        component_uuid: 'c2',
+                        component_name: 'C2',
+                        component_version: '1.0',
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: '--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: user2] [Justification: CODE_NOT_PRESENT] ---\nSafe path'
+                    }]
+                }
+            ]
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: group as any },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER' })
+                }
+            }
+        })
+
+        expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
+        expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
+    })
+
+    it('initializes justification from analysisJustification when dt analysisDetails lack justified block', async () => {
+        const group = {
+            ...baseGroup,
+            affected_versions: [
+                {
+                    project_uuid: 'p1', project_name: 'P1',
+                    components: [{
+                        component_uuid: 'c1',
+                        component_name: 'C1',
+                        component_version: '1.0',
+                        vulnerability_uuid: 'v1',
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: 'Plain text no block',
+                        analysisJustification: 'CODE_NOT_PRESENT'
+                    }]
+                }
+            ]
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: group as any },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER' })
+                }
+            }
+        })
+
+        const fakeDetails = [{
+            finding_uuid: 'fake',
+            project_uuid: 'p1',
+            component_uuid: 'c1',
+            vulnerability_uuid: 'v1',
+            analysis: {
+                analysisState: 'NOT_AFFECTED',
+                analysisDetails: 'Plain text no block',
+                analysisJustification: 'CODE_NOT_PRESENT'
+            }
+        }]
+
+        ;(getAssessmentDetails as any).mockResolvedValue(fakeDetails)
+
+        await (wrapper.vm as any).refreshDetails()
+
+        expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
+        expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
     })
 
     it('applies consensus (Apply worst assessment) for INCONSISTENT state', async () => {
