@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics } from '../lib/api'
 import { getGroupLifecycle, isPendingReview as isPendingReviewHelper, matchesFilters, getGroupTechnicalState, tagToString } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
@@ -13,7 +13,6 @@ import ProjectStatistics from '../components/ProjectStatistics.vue'
 import { BarChart3, Layers, ChevronLeft, ShieldCheck, LayoutList } from 'lucide-vue-next'
 
 const route = useRoute()
-const router = useRouter()
 const user = inject<any>('user')
 const groups = ref<GroupedVuln[]>([])
 const loading = ref(true)
@@ -281,29 +280,33 @@ const resetFilters = () => {
     sortOrder.value = 'asc'
 }
 
-watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, sortBy, sortOrder], () => {
-    const query = { ...route.query }
-    
-    if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
-    else delete query.lifecycle
-    
-    if (analysisFilters.value.length > 0) query.analysis = analysisFilters.value
-    else delete query.analysis
+// Filter state now remains local in the frontend and does not cause backend re-fetch.
+// This reduces unnecessary chattiness and keeps filtering fast and responsive.
+// URL sync was removed to avoid automatic API refresh for every filter tweak.
 
-    if (tagFilter.value) query.tag = tagFilter.value
-    else delete query.tag
-
-    if (idFilter.value) query.id = idFilter.value
-    else delete query.id
-
-    if (componentFilter.value) query.component = componentFilter.value
-    else delete query.component
-
-    query.sort = sortBy.value
-    query.order = sortOrder.value
-
-    router.replace({ query }).catch(() => {})
-}, { deep: true })
+// watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, sortBy, sortOrder], () => {
+//     const query = { ...route.query }
+//
+//     if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
+//     else delete query.lifecycle
+//
+//     if (analysisFilters.value.length > 0) query.analysis = analysisFilters.value
+//     else delete query.analysis
+//
+//     if (tagFilter.value) query.tag = tagFilter.value
+//     else delete query.tag
+//
+//     if (idFilter.value) query.id = idFilter.value
+//     else delete query.id
+//
+//     if (componentFilter.value) query.component = componentFilter.value
+//     else delete query.component
+//
+//     query.sort = sortBy.value
+//     query.order = sortOrder.value
+//
+//     router.replace({ query }).catch(() => {})
+// }, { deep: true })
 
 const LIFECYCLE_OPTIONS = [
     { value: 'OPEN', label: 'Open', color: 'bg-amber-500', description: 'No global assessment AND at least one team assessment is missing' },
@@ -484,7 +487,7 @@ const filterCounts = computed(() => {
     return counts
 })
 
-watch(() => [route.params.name, route.query.cve], () => {
+watch(() => route.params.name, () => {
     fetchVulns()
     if (viewMode.value === 'statistics') {
         fetchStats()

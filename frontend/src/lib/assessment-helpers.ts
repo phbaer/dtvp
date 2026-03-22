@@ -224,12 +224,18 @@ export function getConsensusAssessment(
         if (dtJustification) {
             justification = dtJustification
         } else {
-            // Fallback to a matching block justification, or just any justification we can find.
-            const matching = blocks.find(b => b.state === dtWorstState)
-            if (matching) {
-                justification = matching.justification || 'NOT_SET'
+            // Prefer a justification from a matching DT state block if present.
+            const matchingStateJustification = blocks.find(
+                b => b.state === dtWorstState && b.justification && b.justification !== 'NOT_SET'
+            )?.justification
+
+            if (matchingStateJustification) {
+                justification = matchingStateJustification
             } else if (justificationFromBlocks) {
+                // If no matching state justification, use any available assessment justification.
                 justification = justificationFromBlocks
+            } else {
+                justification = 'NOT_SET'
             }
         }
     } else if (dtJustification) {

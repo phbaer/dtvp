@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getConsensusAssessment } from '../assessment-helpers';
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -117,11 +117,21 @@ Details A`;
         });
 
         it('should clean leaked metadata from details', () => {
-            const text = `--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: user1] ---
-Details A [Team: TeamB] [Status: Pending Review] [Rescored: 5.0]`;
+            const text = `--- [Team: TeamA] [State: IN_TRIAGE] [Assessed By: user1] ---\nDetails A [Team: TeamB] [Status: Pending Review] [Rescored: 5.0]`;
             const blocks = parseAssessmentBlocks(text);
             const teamA = blocks.find(b => b.team === 'TeamA');
             expect(teamA?.details).toBe('Details A');
+        });
+
+        it('should use justification from another NOT_AFFECTED block when DT state has no justification', () => {
+            const blocks = [
+                { team: 'TeamA', state: 'NOT_AFFECTED', user: 'UserA', details: 'x', justification: 'NOT_SET' },
+                { team: 'TeamB', state: 'NOT_AFFECTED', user: 'UserB', details: 'y', justification: 'CODE_NOT_PRESENT' }
+            ];
+
+            const result = getConsensusAssessment(blocks, 'INCOMPLETE', ['NOT_AFFECTED'], undefined);
+            expect(result.state).toBe('NOT_AFFECTED');
+            expect(result.justification).toBe('CODE_NOT_PRESENT');
         });
 
         it('should clean redundant metadata from details', () => {
