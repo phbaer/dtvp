@@ -10,5 +10,18 @@ export default defineConfig({
       '/api': 'http://localhost:8000',
       '/auth': 'http://localhost:8000',
     }
+  },
+  build: {
+    // Bring down warnings or re-split if chunck sizes are intentionally large
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            return 'vendor'
+          }
+        }
+      }
+    }
   }
 })

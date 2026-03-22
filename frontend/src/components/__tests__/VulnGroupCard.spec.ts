@@ -381,11 +381,11 @@ describe('VulnGroupCard', () => {
         // INCOMPLETE -> Amber
         const wrapperIncomplete = makeWrapper('INCOMPLETE')
         expect(wrapperIncomplete.find('.analysis-state-value').classes()).toContain('text-amber-500')
-        
+
         // INCONSISTENT -> Indigo
         const wrapperInconsistent = makeWrapper('INCONSISTENT')
         expect(wrapperInconsistent.find('.analysis-state-value').classes()).toContain('text-indigo-400')
-        
+
         // NOT_SET -> Subdued Red
         const wrapperOther = makeWrapper('NOT_SET')
         expect(wrapperOther.find('.analysis-state-value').classes()).toContain('text-red-500/80')

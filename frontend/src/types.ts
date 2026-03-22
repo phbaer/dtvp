@@ -6,8 +6,8 @@ export interface Project {
     active: boolean;
 }
 
-export type TagValue = string | { name?: string; tag?: string } | Record<string, unknown>;
-export type Tags = TagValue[];
+export type TagValue = string | { name?: string; tag?: string } | null;
+export type Tags = Array<string | TagValue>;
 
 export interface Instance {
     project_name: string;
@@ -19,24 +19,18 @@ export interface Instance {
     vulnerability_uuid: string;
     finding_uuid: string;
     analysis_state: string;
-    analysis_details?: string;
     analysisState?: string;
+    analysis_details?: string;
     analysisDetails?: string;
     analysis_comments?: Array<{
         comment: string;
         timestamp: number;
         user?: string;
     }>;
-    analysisComments?: Array<{
-        comment: string;
-        timestamp: number;
-        user?: string;
-    }>;
     is_suppressed: boolean;
-    isSuppressed?: boolean;
     usage_paths?: string[];
     justification?: string;
-    tags?: Tags;
+    tags?: string[];
 }
 
 
@@ -57,7 +51,7 @@ export interface GroupedVuln {
     cvss_vector?: string;
     rescored_cvss?: number | null;
     rescored_vector?: string | null;
-    tags?: Tags;
+    tags?: string[];
     aliases?: string[];
     affected_versions: AffectedVersion[];
 }
@@ -82,4 +76,8 @@ export interface Statistics {
     total_findings: number;
     affected_projects_count: number;
     version_counts: Record<string, number>;
+    major_version_counts?: Record<string, number>;
+    major_version_details?: Record<string, Record<string, number>>;
+    major_version_severity_counts?: Record<string, Record<string, number>>;
+    version_severity_counts?: Record<string, Record<string, number>>;
 }

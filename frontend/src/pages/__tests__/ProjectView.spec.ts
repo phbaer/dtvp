@@ -1,11 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ProjectView from '../ProjectView.vue'
-import { getGroupedVulns } from '../../lib/api'
+import { getGroupedVulns, getStatistics } from '../../lib/api'
 import { useRoute } from 'vue-router'
 
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
+    getStatistics: vi.fn(() => Promise.resolve({
+        severity_counts: {},
+        state_counts: {},
+        total_unique: 0,
+        total_findings: 0,
+        affected_projects_count: 0,
+        version_counts: {},
+        version_severity_counts: {},
+        major_version_severity_counts: {},
+        major_version_counts: {},
+        major_version_details: {},
+    })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
 }))
@@ -147,6 +159,51 @@ describe('ProjectView.vue', () => {
 
         expect(mockGroup.rescored_cvss).toBe(5.0)
         expect(mockGroup.affected_versions?.[0]?.components?.[0]?.analysis_state).toBe('EXPLOITABLE')
+    })
+
+    it('refreshes statistics when assessment update occurs in statistics mode', async () => {
+        const mockGroup = {
+            id: '1',
+            title: 'Vuln 1',
+            rescored_cvss: null,
+            affected_versions: [{ components: [{ analysis_state: 'NOT_SET' }] }]
+        }
+        vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                stubs: { RouterLink: true },
+                mocks: {
+                    $route: { params: { name: 'TestProject' }, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
+            }
+        })
+
+        await flushPromises()
+
+        ;(wrapper.vm as any).viewMode = 'analysis'
+        ;(wrapper.vm as any).stats = { total_unique: 0 } // mark stats loaded
+
+        const updateData = {
+            rescored_cvss: 5.0,
+            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+            analysis_state: 'EXPLOITABLE',
+            analysis_details: 'Details',
+            is_suppressed: false
+        }
+
+        await wrapper.findComponent({ name: 'VulnGroupCard' }).vm.$emit('update:assessment', updateData)
+
+        // Not in statistics mode yet, so update should only mark dirty, not fetch.
+        expect(getStatistics).not.toHaveBeenCalled()
+
+        ;(wrapper.vm as any).viewMode = 'statistics'
+        await flushPromises()
+
+        expect(getStatistics).toHaveBeenCalled()
     })
 
     it('does not fetch if route param name is undefined', async () => {

@@ -2,10 +2,18 @@ import { ref } from 'vue'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
+import { updateAssessment } from '../../lib/api'
 
 
 vi.mock('../../lib/api', () => ({
-    updateAssessment: vi.fn(() => Promise.resolve([])),
+    updateAssessment: vi.fn(async (payload: any) => {
+        return payload.instances.map((inst: any) => ({
+            status: 'success',
+            uuid: inst.finding_uuid,
+            new_state: payload.state,
+            new_details: payload.details
+        }))
+    }),
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
     getDependencyChains: vi.fn().mockResolvedValue([])
 }))
@@ -126,7 +134,7 @@ describe('VulnGroupCard Branch Coverage', () => {
         expect((wrapper.vm as any).details).toContain('[General] Baseline details')
     })
 
-    it('uses Dependency Track state as the source of truth when syncing', async () => {
+    it('uses Dependency Track state as the source of truth when syncing and syncs justification', async () => {
         const group = {
             ...baseGroup,
             affected_versions: [
@@ -152,10 +160,134 @@ describe('VulnGroupCard Branch Coverage', () => {
             }
         })
 
+        // Apply consensus so the form state reflects DT state + justification
         await (wrapper.vm as any).applyConsensusAssessment()
         expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
         expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
-        expect((wrapper.vm as any).details).toContain('Block says NOT_AFFECTED')
+
+        // Then apply (sync) using handleUpdate, which should pass the justification through
+        await (wrapper.vm as any).handleUpdate(true)
+
+        expect(updateAssessment).toHaveBeenCalled()
+        const calledWith = (updateAssessment as any).mock.calls[0][0]
+        expect(calledWith.justification).toBe('CODE_NOT_PRESENT')
+    })
+
+    it('applies justification when provided via analysisJustification field (not in details)', async () => {
+        const group = {
+            ...baseGroup,
+            affected_versions: [
+                {
+                    project_uuid: 'p1', project_name: 'P1',
+                    components: [{ 
+                        component_uuid: 'c1', 
+                        component_name: 'C1', 
+                        component_version: '1.0', 
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: 'Plain text without structured blocks',
+                        justification: 'CODE_NOT_PRESENT',
+                    }]
+                }
+            ]
+        }
+
+        const wrapper = mount(VulnGroupCard, { 
+            props: { group: group as any },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER' })
+                }
+            }
+        })
+
+        await (wrapper.vm as any).applyConsensusAssessment()
+        expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
+
+        await (wrapper.vm as any).handleUpdate(true)
+        const calledWith2 = (updateAssessment as any).mock.calls[0][0]
+        expect(calledWith2.justification).toBe('CODE_NOT_PRESENT')
+    })
+
+    it('syncs DT justification for incomplete assessments even when only another instance detail contains it', async () => {
+        const group = {
+            ...baseGroup,
+            affected_versions: [
+                {
+                    project_uuid: 'p1', project_name: 'P1',
+                    components: [{
+                        component_uuid: 'c1',
+                        component_name: 'C1',
+                        component_version: '1.0',
+                        vulnerability_uuid: 'v1',
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: user1] ---\nAssessment block without justification'
+                    }]
+                },
+                {
+                    project_uuid: 'p2', project_name: 'P2',
+                    components: [{
+                        component_uuid: 'c2',
+                        component_name: 'C2',
+                        component_version: '1.0',
+                        vulnerability_uuid: 'v1',
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: 'Plain DT text. Justification: CODE_NOT_PRESENT'
+                    }]
+                }
+            ]
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: group as any },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER' })
+                }
+            }
+        })
+
+        await (wrapper.vm as any).applyConsensusAssessment()
+        expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
+        expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
+
+        await (wrapper.vm as any).handleUpdate(true)
+        const calledWith4 = (updateAssessment as any).mock.calls[0][0]
+        expect(calledWith4.justification).toBe('CODE_NOT_PRESENT')
+    })
+
+    it('applies justification when details are empty but analysisJustification is present', async () => {
+        const group = {
+            ...baseGroup,
+            affected_versions: [
+                {
+                    project_uuid: 'p1', project_name: 'P1',
+                    components: [{ 
+                        component_uuid: 'c1', 
+                        component_name: 'C1', 
+                        component_version: '1.0', 
+                        analysis_state: 'NOT_AFFECTED',
+                        analysis_details: '',
+                        justification: 'CODE_NOT_PRESENT',
+                    }]
+                }
+            ]
+        }
+
+        const wrapper = mount(VulnGroupCard, { 
+            props: { group: group as any },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER' })
+                }
+            }
+        })
+
+        // Should show the global justification even though details are empty
+        expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
+
+        await (wrapper.vm as any).handleUpdate(true)
+        const calledWith3 = (updateAssessment as any).mock.calls[0][0]
+        expect(calledWith3.justification).toBe('CODE_NOT_PRESENT')
     })
 
     it('applies consensus (Apply worst assessment) for INCONSISTENT state', async () => {
