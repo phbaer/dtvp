@@ -597,7 +597,13 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
     Calculates statistics from grouped vulnerabilities.
     """
     stats = {
+        # Total findings across versions/components (not deduplicated)
         "severity_counts": {},
+        # Unique vulnerability group counts (deduplicated by canonical vuln)
+        "unique_severity_counts": {},
+        # Total instance (finding-level) state counts
+        "finding_state_counts": {},
+        # Group-level deduped state counts based on aggregated analysis for each vuln group
         "state_counts": {},
         "total_unique": len(grouped_vulns),
         "total_findings": 0,
@@ -607,9 +613,9 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
     project_uuids = set()
 
     for group in grouped_vulns:
-        # Severity
+        # Group severity (unique vulnerability canonical grouping)
         sev = group.get("severity", "UNKNOWN")
-        stats["severity_counts"][sev] = stats["severity_counts"].get(sev, 0) + 1
+        stats["unique_severity_counts"][sev] = stats["unique_severity_counts"].get(sev, 0) + 1
 
         # Collect all instances to aggregate state and count findings
         all_instances = []
@@ -617,6 +623,13 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
             project_uuids.add(av.get("project_uuid"))
             for comp in av.get("components", []):
                 stats["total_findings"] += 1
+                # Reporting findings-based severity distribution by the group severity
+                stats["severity_counts"][sev] = stats["severity_counts"].get(sev, 0) + 1
+
+                # Findings-level state distribution (each component finding)
+                fv_state = (comp.get("analysis_state") or "NOT_SET").upper()
+                stats["finding_state_counts"][fv_state] = stats["finding_state_counts"].get(fv_state, 0) + 1
+
                 all_instances.append(comp)
 
         states = set(i.get("analysis_state") or "NOT_SET" for i in all_instances)

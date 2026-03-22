@@ -5,7 +5,7 @@ import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, History } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, hasGlobalAssessment, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -149,6 +149,7 @@ const technicalState = computed(() => {
 
 const consensusButtonLabel = computed(() => {
     return displayState.value === 'INCOMPLETE' ? 'Sync all' : 'Apply worst assessment'
+
 })
 
 const isAssessed = computed(() => {
@@ -481,9 +482,38 @@ const updateFormFromGroup = (force = true) => {
              // No team selected - if Reviewer, show General block
              if (isReviewer.value) {
                 const generalBlock = teamBlocks.find(b => b.team === 'General')
-                state.value = generalBlock?.state || 'NOT_SET'
-                details.value = (generalBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-                justification.value = generalBlock?.justification || 'NOT_SET'
+                if (generalBlock) {
+                    state.value = generalBlock.state || 'NOT_SET'
+                    details.value = (generalBlock.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+                    justification.value = generalBlock.justification || 'NOT_SET'
+                } else {
+                    const dtCandidates = allInstances.value
+                        .map(i => {
+                            const rawState = i.analysis_state || i.analysisState || 'NOT_SET'
+                            const rawDetails = (i as any).analysis_details || (i as any).analysisDetails || ''
+                            const rawJust = (i as any).justification || (i as any).analysisJustification
+                            const parsedJust = parseJustificationFromText(rawDetails)
+                            return {
+                                state: rawState,
+                                justification: rawJust || parsedJust || 'NOT_SET',
+                                details: rawDetails
+                            }
+                        })
+                        .filter(i => i.state && i.state !== 'NOT_SET')
+
+                    const dtWorstCandidate = dtCandidates
+                        .sort((a, b) => (STATE_PRIORITY[a.state] ?? 10) - (STATE_PRIORITY[b.state] ?? 10))[0]
+
+                    if (dtWorstCandidate) {
+                        state.value = dtWorstCandidate.state
+                        details.value = dtWorstCandidate.details.replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+                        justification.value = dtWorstCandidate.justification || parseJustificationFromText(dtWorstCandidate.details) || 'NOT_SET'
+                    } else {
+                        state.value = 'NOT_SET'
+                        details.value = ''
+                        justification.value = 'NOT_SET'
+                    }
+                }
              } else {
                 state.value = 'NOT_SET'
                 details.value = ''
@@ -516,11 +546,18 @@ const applyConsensusAssessment = () => {
 
     // Derive the authoritative Dependency Track state (worst state across instances)
     const dtCandidates = allInstances.value
-        .map(i => ({
-            state: i.analysis_state || i.analysisState || 'NOT_SET',
-            justification: (i as any).justification || (i as any).analysisJustification || 'NOT_SET',
-            details: (i as any).analysis_details || (i as any).analysisDetails || ''
-        }))
+        .map(i => {
+            const rawState = i.analysis_state || i.analysisState || 'NOT_SET'
+            const rawDetails = (i as any).analysis_details || (i as any).analysisDetails || ''
+            const rawJustification = (i as any).justification || (i as any).analysisJustification
+            const parsedJustification = parseJustificationFromText(rawDetails)
+
+            return {
+                state: rawState,
+                justification: rawJustification || parsedJustification || 'NOT_SET',
+                details: rawDetails
+            }
+        })
         .filter(i => i.state && i.state !== 'NOT_SET')
 
     const dtWorstCandidate = dtCandidates
@@ -535,6 +572,16 @@ const applyConsensusAssessment = () => {
         const matching = blocks.find(b => b.state === dtWorstCandidate.state && b.justification && b.justification !== 'NOT_SET')
         if (matching) {
             dtJustification = matching.justification
+        } else {
+            const parsed = parseJustificationFromText(dtWorstCandidate.details)
+            if (parsed) dtJustification = parsed
+
+            if ((!dtJustification || dtJustification === 'NOT_SET') && dtCandidates) {
+                const fallbackCandidate = dtCandidates.find(c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET')
+                if (fallbackCandidate) {
+                    dtJustification = fallbackCandidate.justification
+                }
+            }
         }
     }
 
@@ -961,7 +1008,7 @@ const stateColor = computed(() => {
         case 'NOT_AFFECTED': return 'text-green-400'
         case 'EXPLOITABLE': return 'text-red-400'
         case 'NOT_SET': return 'text-red-500/80'
-        case 'IN_TRIAGE': return 'text-blue-400'
+        case 'IN_TRIAGE': return 'text-amber-400'
         case 'FALSE_POSITIVE': return 'text-teal-400'
         case 'RESOLVED': return 'text-purple-400'
         case 'INCOMPLETE': return 'text-amber-500'

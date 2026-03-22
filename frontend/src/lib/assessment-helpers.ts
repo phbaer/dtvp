@@ -275,6 +275,13 @@ export function getConsensusAssessment(
     return { state, justification, details }
 }
 
+export function parseJustificationFromText(text: string): string | undefined {
+    if (!text) return undefined
+    const match = text.match(/justification\s*:\s*([A-Z0-9_]+)/i)
+    if (match?.[1]) return match[1].toUpperCase()
+    return undefined
+}
+
 export function mergeTeamAssessment(
     currentFullText: string,
     team: string,
@@ -462,7 +469,7 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
 
     if (isPendingReview(group)) return 'NEEDS_APPROVAL';
 
-    const missingTeams = (requiredTeams || []).filter(t => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
+    const missingTeams = (requiredTeams || []).filter((t: string) => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
     // OPEN should only mean nothing is assessed yet. If a technical state exists but
     // required team/global assessments are missing, classify it as INCOMPLETE.
     if (!hasGlobal && missingTeams.length > 0) {
@@ -565,7 +572,7 @@ export function normalizeTags(tags: Tags | undefined, teamMapping: Record<string
     if (!teamMapping) return tags.map(tagToString).filter(Boolean);
 
     const result = new Set<string>();
-    tags.forEach(tag => {
+    tags.forEach((tag: TagValue) => {
         const strTag = tagToString(tag);
         if (!strTag) return;
 

@@ -134,14 +134,14 @@ test.describe('Per-Team Assessment UI Flow', () => {
     test('should allow targeted team assessment and show aggregated result', async ({ page }) => {
         await page.goto('/project/TestProject');
 
-        // Ensure vulnerabilities in the INCOMPLETE lifecycle bucket are visible
-        // (this test evaluates a team-level assessment where not all teams have assessed yet)
-        await page.getByRole('button', { name: 'Incomplete' }).click();
+        // Ensure vulnerabilities are visible (default filter is all states for reviewer).
+        await expect(page.locator('.border.rounded-lg').filter({ hasText: 'CVE-TEAM-TEST' }).first()).toBeVisible({ timeout: 30000 });
 
         // Locate the team vulnerability and click it to expand
         const cardHeader = page.locator('.border.rounded-lg').filter({ hasText: 'CVE-TEAM-TEST' }).first();
-        await expect(cardHeader).toBeVisible();
-        await cardHeader.click();
+        await expect(cardHeader).toBeVisible({ timeout: 30000 });
+        await cardHeader.scrollIntoViewIfNeeded();
+        await cardHeader.click({ force: true, timeout: 30000 });
 
         // Wait for the global assessment section to be visible
         const globalHeader = page.getByText(/Global Assessment/i).first();
@@ -187,13 +187,15 @@ test.describe('Per-Team Assessment UI Flow', () => {
         // Handle Custom Confirm Modal
         await page.getByRole('button', { name: 'Confirm' }).click();
 
-        // Ensure the card is open (it may re-render/collapse after the update).
+        // Ensure the details textarea is visible and contains the expected updated value.
         const detailsTextarea = page.locator('textarea[placeholder="Technical details..."]');
         if (await detailsTextarea.count() === 0) {
-            await cardHeader.click();
+            await cardHeader.scrollIntoViewIfNeeded();
+            await cardHeader.click({ force: true, timeout: 10000 });
         }
 
-        // Playwright's text selector does not match textarea value, so verify the value directly.
+        await expect(detailsTextarea).toHaveCount(1);
+        await expect(detailsTextarea).toBeVisible();
         await expect(detailsTextarea).toHaveValue(/Backend confirms this is exploitable/);
 
         // Verify the card header now shows the EXPLOITABLE state

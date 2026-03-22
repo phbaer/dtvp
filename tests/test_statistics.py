@@ -26,7 +26,10 @@ def test_calculate_statistics_incomplete():
     
     stats = calculate_statistics(grouped_vulns)
     assert stats["state_counts"]["INCOMPLETE"] == 1
-    assert stats["severity_counts"]["HIGH"] == 1
+    assert stats["finding_state_counts"]["EXPLOITABLE"] == 1
+    assert stats["finding_state_counts"]["NOT_SET"] == 1
+    assert stats["severity_counts"]["HIGH"] == 2
+    assert stats["unique_severity_counts"]["HIGH"] == 1
     assert stats["total_findings"] == 2
 
 def test_calculate_statistics_inconsistent():
@@ -54,7 +57,8 @@ def test_calculate_statistics_inconsistent():
     
     stats = calculate_statistics(grouped_vulns)
     assert stats["state_counts"]["INCONSISTENT"] == 1
-    assert stats["severity_counts"]["CRITICAL"] == 1
+    assert stats["severity_counts"]["CRITICAL"] == 2
+    assert stats["unique_severity_counts"]["CRITICAL"] == 1
     assert stats["total_findings"] == 2
 
 def test_calculate_statistics_consistent():
@@ -77,6 +81,7 @@ def test_calculate_statistics_consistent():
     stats = calculate_statistics(grouped_vulns)
     assert stats["state_counts"]["FALSE_POSITIVE"] == 1
     assert stats["severity_counts"]["MEDIUM"] == 1
+    assert stats["unique_severity_counts"]["MEDIUM"] == 1
 
 def test_calculate_statistics_none_assessed():
     # Scenario: All NOT_SET
@@ -103,4 +108,6 @@ def test_calculate_statistics_none_assessed():
     
     stats = calculate_statistics(grouped_vulns)
     assert stats["state_counts"]["NOT_SET"] == 1
-    assert stats["severity_counts"]["LOW"] == 1
+    assert stats["finding_state_counts"]["NOT_SET"] == 2
+    assert stats["severity_counts"]["LOW"] == 2
+    assert stats["unique_severity_counts"]["LOW"] == 1

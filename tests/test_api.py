@@ -25,6 +25,17 @@ def test_search_projects(client, mock_dt_client):
     assert data[0]["name"] == "TestProj"
 
 
+def test_search_projects_no_name(client, mock_dt_client):
+    mock_dt_client.get_projects.return_value = [
+        {"name": "TestProj", "uuid": "uuid1", "version": "1.0"}
+    ]
+
+    response = client.get("/api/projects")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+
+
 @pytest.mark.asyncio
 async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
     # Configure mock for context manager usage
@@ -136,6 +147,53 @@ def test_get_task_status_not_found(client):
 
 
 @pytest.mark.asyncio
+async def test_statistics_major_version_split(client, mock_dt_client):
+    mock_dt_client.__aenter__.return_value = mock_dt_client
+    mock_dt_client.__aexit__.return_value = None
+
+    mock_dt_client.get_projects.return_value = [
+        {"name": "TestApp", "uuid": "uuid1", "version": "1.0.0"},
+        {"name": "TestApp", "uuid": "uuid2", "version": "2.0.0"},
+    ]
+
+    mock_dt_client.get_vulnerabilities.side_effect = [
+        [
+            {
+                "vulnerability": {"vulnId": "CVE-1", "severity": "HIGH"},
+                "component": {"name": "lib", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+        [
+            {
+                "vulnerability": {"vulnId": "CVE-2", "severity": "CRITICAL"},
+                "component": {"name": "lib", "version": "1.1", "uuid": "comp2"},
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+    ]
+
+    mock_dt_client.get_project_vulnerabilities.return_value = []
+    mock_dt_client.get_bom.return_value = {}
+
+    with patch("main.DTClient", return_value=mock_dt_client):
+        response = client.get("/api/statistics?name=TestApp")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["version_counts"]["1.0.0"] == 1
+        assert data["version_counts"]["2.0.0"] == 1
+        assert data["major_version_counts"]["1"] == 1
+        assert data["major_version_counts"]["2"] == 1
+        assert data["version_severity_counts"]["1.0.0"]["HIGH"] == 1
+        assert data["version_severity_counts"]["2.0.0"]["CRITICAL"] == 1
+        assert data["major_version_severity_counts"]["1"]["HIGH"] == 1
+        assert data["major_version_severity_counts"]["2"]["CRITICAL"] == 1
+        assert data["severity_counts"]["HIGH"] == 1
+        assert data["severity_counts"]["CRITICAL"] == 1
+        assert data["unique_severity_counts"]["HIGH"] == 1
+        assert data["unique_severity_counts"]["CRITICAL"] == 1
+        assert data["finding_state_counts"]["NOT_SET"] == 2
 async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client):
     # Configure mock
     mock_dt_client.__aenter__.return_value = mock_dt_client

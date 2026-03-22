@@ -1,0 +1,122 @@
+[
+  {
+    "uuid": "d9401347-1941-4c12-8700-1c0563821017",
+    "vulnId": "CVE-2021-44228",
+    "source": "NVD",
+    "severity": "CRITICAL",
+    "cvssV3BaseScore": 10.0,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+    "description": "Log4j JNDI remote code execution vulnerability.",
+    "recommendation": "Upgrade to Log4j 2.17.1 or later."
+  },
+  {
+    "uuid": "e5781a7b-0346-4927-991c-7033580539f5",
+    "vulnId": "CVE-2023-12345",
+    "source": "NVD",
+    "severity": "MEDIUM",
+    "cvssV3BaseScore": 5.4,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
+    "description": "Generic medium severity vulnerability for dependencies.",
+    "recommendation": "Apply vendor patch."
+  },
+  {
+    "uuid": "f6781a7b-0346-4927-991c-7033580539f6",
+    "vulnId": "CVE-2019-12384",
+    "source": "NVD",
+    "severity": "HIGH",
+    "cvssV3BaseScore": 8.1,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "description": "Jackson-databind deserialization vulnerability.",
+    "recommendation": "Upgrade jackson-databind to 2.9.9.1 or later."
+  },
+  {
+    "uuid": "a7781a7b-0346-4927-991c-7033580539f7",
+    "vulnId": "CVE-2021-21290",
+    "source": "NVD",
+    "severity": "MEDIUM",
+    "cvssV3BaseScore": 5.9,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
+    "description": "Netty message conversion vulnerability.",
+    "recommendation": "Upgrade Netty to 4.1.59.Final or later."
+  },
+  {
+    "uuid": "f6781a7b-0346-4927-991c-7033580539f8",
+    "vulnId": "CVE-2024-TEAM",
+    "source": "NVD",
+    "severity": "LOW",
+    "cvssV3BaseScore": 2.5,
+    "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+    "description": "Team mapping placeholder vulnerability.",
+    "recommendation": "Validate team association mapping rules."
+  },
+  {
+    "uuid": "d1111a7b-0346-4927-991c-7033580539f0",
+    "vulnId": "CVE-2026-PLAINTEXT-NS",
+    "source": "NVD",
+    "severity": "LOW",
+    "cvssV3BaseScore": 2.0,
+    "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+    "description": "Plaintext NOT_SET assessment test case.",
+    "recommendation": "Verify assessment parsing."
+  },
+  {
+    "uuid": "d2222a7b-0346-4927-991c-7033580539f1",
+    "vulnId": "CVE-2026-PLAINTEXT-NA",
+    "source": "NVD",
+    "severity": "LOW",
+    "cvssV3BaseScore": 2.0,
+    "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+    "description": "Plaintext NOT_AFFECTED assessment test case.",
+    "recommendation": "Verify assessment parsing."
+  },
+  {
+    "uuid": "b8881a7b-0346-4927-991c-7033580539f8",
+    "vulnId": "CVE-2025-INCOMPLETE",
+    "source": "NVD",
+    "severity": "HIGH",
+    "cvssV3BaseScore": 7.5,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+    "description": "Incomplete assessment test case.",
+    "recommendation": "Review root cause and confirm status."
+  },
+  {
+    "uuid": "c9991a7b-0346-4927-991c-7033580539f9",
+    "vulnId": "CVE-2025-INCONSISTENT",
+    "source": "NVD",
+    "severity": "CRITICAL",
+    "cvssV3BaseScore": 9.8,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "description": "Inconsistent assessment test case.",
+    "recommendation": "Resolve assessment conflicts across teams."
+  },
+  {
+    "uuid": "d3331a7b-0346-4927-991c-7033580539f2",
+    "vulnId": "CVE-2025-NEW-01",
+    "source": "NVD",
+    "severity": "LOW",
+    "cvssV3BaseScore": 3.1,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+    "description": "Newly discovered low risk dependency issue.",
+    "recommendation": "Monitor and apply vendor updates when available."
+  },
+  {
+    "uuid": "d4441a7b-0346-4927-991c-7033580539f3",
+    "vulnId": "CVE-2025-NEW-02",
+    "source": "NVD",
+    "severity": "MEDIUM",
+    "cvssV3BaseScore": 6.2,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N",
+    "description": "Missing input validation issue in subsystem.",
+    "recommendation": "Add boundary checks and fuzz testing."
+  },
+  {
+    "uuid": "d5551a7b-0346-4927-991c-7033580539f4",
+    "vulnId": "CVE-2025-NEW-03",
+    "source": "NVD",
+    "severity": "HIGH",
+    "cvssV3BaseScore": 8.4,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+    "description": "Authentication bypass vulnerability in auth module.",
+    "recommendation": "Enforce proper session validation."
+  }
+]

@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import Optional
 import uvicorn
 import time
+import json
+from pathlib import Path
 
 app = FastAPI()
 
@@ -64,6 +66,10 @@ JACKSON_UUID = "b253b708-3012-4277-8461-893bd5cd61e2"
 NETTY_UUID = "d253b708-3012-4277-8461-893bd5cd61e3"
 TEAM_TEST_LIB_UUID = "7fa85f64-5717-4562-b3fc-2c963f66afb0"
 VULN_UUID_TEAM = "f6781a7b-0346-4927-991c-7033580539f8"
+PROJECT_V1_1_UUID = "8fa85f64-5717-4562-b3fc-2c963f66afb1"
+PROJECT_V1_2_UUID = "9fa85f64-5717-4562-b3fc-2c963f66afb2"
+PROJECT_V2_1_UUID = "afa85f64-5717-4562-b3fc-2c963f66afb3"
+PROJECT_V3_UUID = "bfa85f64-5717-4562-b3fc-2c963f66afb4"
 # Additional mock vulnerabilities to exercise plaintext assessment formats
 VULN_PLAINTEXT_NOT_SET_UUID = "d1111a7b-0346-4927-991c-7033580539f0"
 VULN_PLAINTEXT_NOT_AFFECTED_UUID = "d2222a7b-0346-4927-991c-7033580539f1"
@@ -92,104 +98,49 @@ mock_projects = [
         uuid=LIB_V2_UUID,
         classifier="LIBRARY",
     ),
+    Project(
+        name="Vulnerable Project",
+        version="1.1.0",
+        uuid=PROJECT_V1_1_UUID,
+        classifier="APPLICATION",
+    ),
+    Project(
+        name="Vulnerable Project",
+        version="1.2.0",
+        uuid=PROJECT_V1_2_UUID,
+        classifier="APPLICATION",
+    ),
+    Project(
+        name="Vulnerable Project",
+        version="1.2.10",
+        uuid="cfa85f64-5717-4562-b3fc-2c963f66afb5",
+        classifier="APPLICATION",
+    ),
+    Project(
+        name="Vulnerable Project",
+        version="2.1.0",
+        uuid=PROJECT_V2_1_UUID,
+        classifier="APPLICATION",
+    ),
+    Project(
+        name="Vulnerable Project",
+        version="3.0.0",
+        uuid=PROJECT_V3_UUID,
+        classifier="APPLICATION",
+    ),
 ]
 
 # Analysis key format: project_uuid:component_uuid:vulnerability_uuid
 # We will generate mock analysis/findings dynamically for all projects for simplicity
 # but keep specific state for the main PROJECT_UUID to pass existing tests.
 
-mock_vulnerabilities = {
-    VULN_UUID_1: {
-        "uuid": VULN_UUID_1,
-        "vulnId": "CVE-2021-44228",
-        "source": "NVD",
-        "severity": "CRITICAL",
-        "cvssV3BaseScore": 10.0,
-        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-        "description": "Log4j JNDI vulnerabilities",
-        "recommendation": "Upgrade to Log4j 2.17.1",
-    },
-    VULN_UUID_2: {
-        "uuid": VULN_UUID_2,
-        "vulnId": "CVE-2023-12345",
-        "source": "NVD",
-        "severity": "MEDIUM",
-        "cvssV3BaseScore": 5.4,
-        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
-        "description": "Generic medium severity vulnerability",
-        "recommendation": "Apply patch.",
-    },
-    VULN_JACKSON_UUID: {
-        "uuid": VULN_JACKSON_UUID,
-        "vulnId": "CVE-2019-12384",
-        "source": "NVD",
-        "severity": "HIGH",
-        "cvssV3BaseScore": 8.1,
-        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "description": "Jackson-databind deserialization vulnerability",
-        "recommendation": "Upgrade jackson-databind to 2.9.9.1 or later",
-    },
-    VULN_NETTY_UUID: {
-        "uuid": VULN_NETTY_UUID,
-        "vulnId": "CVE-2021-21290",
-        "source": "NVD",
-        "severity": "MEDIUM",
-        "cvssV3BaseScore": 5.9,
-        "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
-        "description": "Netty information disclosure vulnerability",
-        "recommendation": "Upgrade Netty to 4.1.59.Final or later",
-    },
-    VULN_UUID_TEAM: {
-        "uuid": VULN_UUID_TEAM,
-        "vulnId": "CVE-2024-TEAM",
-        "source": "NVD",
-        "severity": "LOW",
-        "cvssV3BaseScore": 2.5,
-        "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
-        "description": "Team mapping test vulnerability",
-        "recommendation": "Verify alternative labels.",
-    },
-    VULN_PLAINTEXT_NOT_SET_UUID: {
-        "uuid": VULN_PLAINTEXT_NOT_SET_UUID,
-        "vulnId": "CVE-2026-PLAINTEXT-NS",
-        "source": "NVD",
-        "severity": "LOW",
-        "cvssV3BaseScore": 2.0,
-        "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
-        "description": "Plaintext NOT_SET vulnerability for testing.",
-        "recommendation": "Verify handling of plaintext analysis details.",
-    },
-    VULN_PLAINTEXT_NOT_AFFECTED_UUID: {
-        "uuid": VULN_PLAINTEXT_NOT_AFFECTED_UUID,
-        "vulnId": "CVE-2026-PLAINTEXT-NA",
-        "source": "NVD",
-        "severity": "LOW",
-        "cvssV3BaseScore": 2.0,
-        "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
-        "description": "Plaintext NOT_AFFECTED vulnerability for testing.",
-        "recommendation": "Verify handling of plaintext analysis details.",
-    },
-    VULN_INCOMPLETE_UUID: {
-        "uuid": VULN_INCOMPLETE_UUID,
-        "vulnId": "CVE-2025-INCOMPLETE",
-        "source": "NVD",
-        "severity": "HIGH",
-        "cvssV3BaseScore": 7.5,
-        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
-        "description": "Mock Incomplete Analysis",
-        "recommendation": "Review missing assessments.",
-    },
-    VULN_INCONSISTENT_UUID: {
-        "uuid": VULN_INCONSISTENT_UUID,
-        "vulnId": "CVE-2025-INCONSISTENT",
-        "source": "NVD",
-        "severity": "CRITICAL",
-        "cvssV3BaseScore": 9.8,
-        "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "description": "Mock Inconsistent Analysis",
-        "recommendation": "Resolve assessment conflicts.",
-    },
-}
+def load_vulnerability_definitions():
+    definitions_path = Path(__file__).resolve().parent / "vuln_definitions.json"
+    with open(definitions_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return {entry["uuid"]: entry for entry in payload}
+
+mock_vulnerabilities = load_vulnerability_definitions()
 
 # Shared map for analysis state
 mock_analysis = {
@@ -310,6 +261,44 @@ def get_projects(request: Request, name: Optional[str] = None):
     return mock_projects
 
 
+def _component_for_vuln(vuln_uuid: str):
+    if vuln_uuid in [VULN_UUID_1, VULN_UUID_2, VULN_INCOMPLETE_UUID, VULN_INCONSISTENT_UUID]:
+        return {
+            "uuid": COMPONENT_UUID,
+            "name": "log4j-core",
+            "version": "2.14.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+        }
+    if vuln_uuid == VULN_JACKSON_UUID:
+        return {
+            "uuid": JACKSON_UUID,
+            "name": "jackson-databind",
+            "version": "2.9.8",
+            "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+        }
+    if vuln_uuid == VULN_NETTY_UUID:
+        return {
+            "uuid": NETTY_UUID,
+            "name": "netty-common",
+            "version": "4.1.42.Final",
+            "purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
+        }
+    if vuln_uuid == VULN_UUID_TEAM:
+        return {
+            "uuid": TEAM_TEST_LIB_UUID,
+            "name": "team-test-lib",
+            "version": "1.0.0",
+            "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
+        }
+    # default fallback component
+    return {
+        "uuid": COMPONENT_UUID,
+        "name": "misc-lib",
+        "version": "1.0.0",
+        "purl": "pkg:maven/com.example/misc-lib@1.0.0",
+    }
+
+
 @app.get("/api/v1/finding/project/{project_uuid}")
 def get_findings(project_uuid: str):
     # Check if project exists
@@ -339,9 +328,8 @@ def get_findings(project_uuid: str):
     }
     current_findings.append(finding1)
 
-    # Finding 2: Generic (only on Vulnerable Project v1 for variety?)
-    # Let's add it to all for now, or just v1s
-    if "1.0.0" in project.version:
+    # Finding 2: Generic + plaintext state coverage (for major version 1 and 2 builds)
+    if project.version.startswith("1.") or project.version.startswith("2."):
         key2 = f"{project_uuid}:{COMPONENT_UUID}:{VULN_UUID_2}"
         finding2 = {
             "component": {
@@ -513,6 +501,61 @@ def get_findings(project_uuid: str):
             "matrix": key_incon_2,
         }
         current_findings.append(finding_incon_2)
+
+    # Add additional vulnerabilities to simulate realistic count
+    existing_vuln_uuids = {fv["vulnerability"]["uuid"] for fv in current_findings}
+
+    def add_vuln(vuln_uuid, component_override=None, analysis_override=None):
+        if vuln_uuid in existing_vuln_uuids:
+            return
+        component = component_override or _component_for_vuln(vuln_uuid)
+        key = f"{project_uuid}:{component['uuid']}:{vuln_uuid}"
+        current_findings.append(
+            {
+                "component": component,
+                "vulnerability": mock_vulnerabilities[vuln_uuid],
+                "analysis": mock_analysis.get(
+                    key,
+                    analysis_override or {"analysisState": "NOT_SET", "isSuppressed": False},
+                ),
+                "matrix": key,
+            }
+        )
+
+    # Baseline realistic coverage per project type
+    if project.name == "Vulnerable Project":
+        base_set = [VULN_UUID_1, VULN_JACKSON_UUID, VULN_UUID_2]
+        extra_by_version = {
+            "1.0.0": [VULN_NETTY_UUID, VULN_PLAINTEXT_NOT_SET_UUID],
+            "1.1.0": [VULN_NETTY_UUID, VULN_PLAINTEXT_NOT_SET_UUID, VULN_PLAINTEXT_NOT_AFFECTED_UUID],
+            "1.2.0": [VULN_NETTY_UUID, VULN_INCOMPLETE_UUID, VULN_PLAINTEXT_NOT_SET_UUID, VULN_PLAINTEXT_NOT_AFFECTED_UUID],
+            "1.2.10": [VULN_NETTY_UUID, VULN_INCOMPLETE_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2"],
+            "2.0.0": [VULN_NETTY_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2", "d4441a7b-0346-4927-991c-7033580539f3"],
+            "2.1.0": [VULN_NETTY_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2", "d4441a7b-0346-4927-991c-7033580539f3", "d5551a7b-0346-4927-991c-7033580539f4"],
+            "3.0.0": [VULN_NETTY_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2", "d4441a7b-0346-4927-991c-7033580539f3", "d5551a7b-0346-4927-991c-7033580539f4", VULN_INCOMPLETE_UUID],
+        }
+
+        add_vuln_list = base_set + extra_by_version.get(project.version, [])
+        for vuln_uuid in add_vuln_list:
+            add_vuln(vuln_uuid)
+
+        # some projects add a second component to simulate dependency chain
+        component = {
+            "uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+            "name": "utility-lib",
+            "version": "3.1.2",
+            "purl": "pkg:maven/org.example/utility-lib@3.1.2",
+        }
+        add_vuln("d3331a7b-0346-4927-991c-7033580539f2", component_override=component)
+
+    elif project.name == "Core Library":
+        for vuln_uuid in [VULN_JACKSON_UUID, VULN_NETTY_UUID, VULN_UUID_2, VULN_PLAINTEXT_NOT_SET_UUID, "d4441a7b-0346-4927-991c-7033580539f3"]:
+            add_vuln(vuln_uuid)
+
+    else:
+        # Economical sample data for other project versions
+        for vuln_uuid in [VULN_UUID_1, VULN_JACKSON_UUID, VULN_UUID_2]:
+            add_vuln(vuln_uuid)
 
     return current_findings
 

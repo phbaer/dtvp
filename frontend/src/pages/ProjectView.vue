@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject, provide, onMounted } from 'vue'
+import { ref, watch, computed, inject, provide, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getGroupedVulns, getTeamMapping, getRescoreRules } from '../lib/api'
+import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics } from '../lib/api'
 import { getGroupLifecycle, isPendingReview as isPendingReviewHelper, matchesFilters, getGroupTechnicalState, tagToString } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
-import type { GroupedVuln } from '../types'
+import type { GroupedVuln, Statistics } from '../types'
+
 import VulnGroupCard from '../components/VulnGroupCard.vue'
 import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal.vue'
 import BulkApproveModal from '../components/BulkApproveModal.vue'
+import ProjectStatistics from '../components/ProjectStatistics.vue'
 import { BarChart3, Layers, ChevronLeft, ShieldCheck, LayoutList } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -18,12 +20,19 @@ const loading = ref(true)
 const error = ref('')
 const loadingMessage = ref('Initializing...')
 const loadingProgress = ref(0)
+const viewMode = ref<'analysis' | 'statistics'>('analysis')
+const stats = ref<Statistics | null>(null)
+const statsLoading = ref(false)
+const statsError = ref('')
+const statsDirty = ref(false)
 
 const teamMapping = ref<Record<string, string | string[]>>({})
 provide('teamMapping', teamMapping)
 
 const rescoreRules = ref<any>(null)
 provide('rescoreRules', rescoreRules)
+
+const isFilterCollapsed = ref(false)
 
 const fetchTeamMapping = async () => {
     try {
@@ -32,6 +41,27 @@ const fetchTeamMapping = async () => {
         console.error('Failed to fetch team mapping:', err)
     }
 }
+
+
+const selectedLifecycleOptions = computed(() => {
+    return LIFECYCLE_OPTIONS.filter(opt => lifecycleFilters.value.includes(opt.value))
+})
+
+const selectedAnalysisOptions = computed(() => {
+    return ANALYSIS_OPTIONS.filter(opt => analysisFilters.value.includes(opt.value))
+})
+
+const onScroll = () => {
+    isFilterCollapsed.value = window.scrollY > 160
+}
+
+onMounted(() => {
+    window.addEventListener('scroll', onScroll, { passive: true })
+})
+
+onUnmounted(() => {
+    window.removeEventListener('scroll', onScroll)
+})
 
 const fetchRescoreRules = async () => {
     try {
@@ -79,15 +109,36 @@ const fetchVulns = async () => {
     }
 }
 
+const fetchStats = async () => {
+    let name = route.params.name as string
+    if (!name || name === '_all_') return
+
+    statsLoading.value = true
+    statsError.value = ''
+    try {
+        stats.value = await getStatistics(name, route.query.cve as string)
+    } catch (err: any) {
+        statsError.value = 'Failed to load statistics: ' + (err.message || err)
+    } finally {
+        statsLoading.value = false
+    }
+}
+
+watch(() => viewMode.value, (newMode) => {
+    if (newMode === 'statistics' && (!stats.value || statsDirty.value)) {
+        fetchStats().finally(() => { statsDirty.value = false })
+    }
+})
+
 const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
     group.rescored_cvss = data.rescored_cvss
     group.rescored_vector = data.rescored_vector
 
     // Update all affected instances in this group by creating new array and object references for reactivity
-    group.affected_versions = group.affected_versions.map(version => {
+    group.affected_versions = group.affected_versions.map((version: any) => {
         return {
             ...version,
-            components: version.components.map(instance => {
+            components: version.components.map((instance: any) => {
                 return {
                     ...instance,
                     analysis_state: data.analysis_state,
@@ -100,11 +151,21 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
     })
     
     // Force top-level reactivity by replacing the group object itself with a new reference
-    const idx = groups.value.findIndex(g => g.id === group.id)
+    const idx = groups.value.findIndex((g: any) => g.id === group.id)
     if (idx !== -1) {
         groups.value[idx] = { ...group }
     }
     groups.value = [...groups.value]
+
+    statsDirty.value = true
+
+    if (viewMode.value === 'statistics') {
+        fetchStats()
+            .then(() => { statsDirty.value = false })
+            .catch((err) => {
+                console.error('Failed to refresh statistics after assessment update', err)
+            })
+    }
 }
 
 const handleBulkUpdates = (updates: Array<{ id: string; data: any }>, onComplete?: () => void) => {
@@ -114,6 +175,17 @@ const handleBulkUpdates = (updates: Array<{ id: string; data: any }>, onComplete
             handleLocalAssessmentUpdate(group, update.data)
         }
     }
+
+    statsDirty.value = true
+
+    if (viewMode.value === 'statistics') {
+        fetchStats()
+            .then(() => { statsDirty.value = false })
+            .catch((err) => {
+                console.error('Failed to refresh statistics after bulk assessment updates', err)
+            })
+    }
+
     if (onComplete) onComplete()
 }
 
@@ -177,20 +249,20 @@ onMounted(() => {
     }
 })
 
-// If the user switches between reviewer and analyst, reapply defaults (unless URL explicitly defines filters)
+// If the user switches between reviewer and analyst, reapply defaults for lifecycle/analysis
 watch(() => user?.value?.role, (newRole, oldRole) => {
     if (!newRole || newRole === oldRole) return
 
-    const q = route.query
-    const hasFilterParams = Object.entries(q).some(([k, v]) => {
-        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'sort', 'order'].includes(k)) return false;
-        if (Array.isArray(v)) return v.length > 0;
-        return v !== undefined && v !== null && v !== '';
-    })
+    const allAnalysis = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
+    analysisFilters.value = [...allAnalysis]
 
-    if (!hasFilterParams) {
-        resetFilters()
+    if (newRole === 'REVIEWER') {
+        lifecycleFilters.value = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
+    } else {
+        lifecycleFilters.value = ['OPEN']
     }
+
+    // Keep explicit tag/id/component/sort/order if present, but apply role-specific default lifecycle+analysis.
 })
 
 const resetFilters = () => {
@@ -312,9 +384,9 @@ const filteredGroups = computed(() => {
 
     if (componentFilter.value) {
         const term = componentFilter.value.toLowerCase()
-        result = result.filter(g => 
-            g.affected_versions.some(v => 
-                v.components.some(c => c.component_name.toLowerCase().includes(term))
+        result = result.filter((g: any) => 
+            g.affected_versions.some((v: any) => 
+                v.components.some((c: any) => c.component_name.toLowerCase().includes(term))
             )
         )
     }
@@ -322,6 +394,7 @@ const filteredGroups = computed(() => {
     result = result.filter(g => {
         return matchesFilters(g, lifecycleFilters.value, analysisFilters.value, teamMapping.value)
     })
+
 
     result.sort((a, b) => {
         let comparison = 0
@@ -411,13 +484,39 @@ const filterCounts = computed(() => {
     return counts
 })
 
-
-watch(() => route.params.name, fetchVulns, { immediate: true })
+watch(() => [route.params.name, route.query.cve], () => {
+    fetchVulns()
+    if (viewMode.value === 'statistics') {
+        fetchStats()
+    } else {
+        stats.value = null // Reset stats to force refresh if they toggle back
+    }
+}, { immediate: true })
 </script>
 
 <template>
   <div class="mx-auto">
-    <div class="mb-10 flex flex-col gap-6">
+    <transition name="overlay-fade">
+      <div v-if="isFilterCollapsed" class="fixed top-0 left-0 right-0 z-50 bg-gray-900/70 border-b border-white/10 backdrop-blur-md px-4 py-2 pointer-events-none">
+        <div class="mx-auto max-w-7xl">
+          <div class="flex flex-wrap items-center gap-2 text-xs text-gray-300 mb-1">
+            <span class="font-bold text-gray-400">Lifecycle:</span>
+            <template v-if="selectedLifecycleOptions.length">
+              <span v-for="opt in selectedLifecycleOptions" :key="`top-lc-${opt.value}`" :class="[opt.color, 'text-white text-[10px] font-semibold px-2 py-0.5 rounded-full']">{{ opt.label }}</span>
+            </template>
+            <span v-else class="text-gray-500">All</span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-xs text-gray-300">
+            <span class="font-bold text-gray-400">Analysis:</span>
+            <template v-if="selectedAnalysisOptions.length">
+              <span v-for="opt in selectedAnalysisOptions" :key="`top-as-${opt.value}`" :class="[opt.color, 'text-white text-[10px] font-semibold px-2 py-0.5 rounded-full']">{{ opt.label }}</span>
+            </template>
+            <span v-else class="text-gray-500">All</span>
+          </div>
+         </div>
+      </div>
+    </transition>
+    <div class="mb-10 flex flex-col gap-6 transition-all duration-300">
         <!-- Breadcrumbs & Header -->
         <div class="flex flex-col gap-3">
             <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1.5 font-medium transition-colors">
@@ -430,13 +529,15 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
                         Vulnerabilities <span class="text-blue-500 italic font-medium px-2">for</span> {{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}
                     </h2>
                     <div class="flex gap-2">
-                        <router-link 
-                            :to="{ path: '/statistics', query: { name: $route.params.name === '_all_' ? '' : $route.params.name, id: idFilter } }"
-                            class="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2"
+                        <button 
+                            v-if="$route.params.name !== '_all_'"
+                            @click="viewMode = viewMode === 'analysis' ? 'statistics' : 'analysis'"
+                            class="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-lg active:scale-95"
                         >
-                            <BarChart3 :size="14" />
-                            Statistics
-                        </router-link>
+                            <BarChart3 v-if="viewMode === 'analysis'" :size="14" class="group-hover:rotate-12 transition-transform" />
+                            <LayoutList v-else :size="14" class="group-hover:-rotate-12 transition-transform" />
+                            {{ viewMode === 'analysis' ? 'Statistics' : 'Analysis' }}
+                        </button>
                         <button 
                             v-if="user?.role === 'REVIEWER' && incompleteGroups.length > 0"
                             @click="showBulkModal = true"
@@ -458,9 +559,8 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
             </div>
         </div>
 
-        <!-- Premium Filter Bar -->
-        <div class="bg-white/2 border border-white/5 rounded-2xl p-6 flex flex-col gap-6 backdrop-blur-sm">
-            <div class="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-8 items-end">
+            <div class="sticky top-0 z-40 shadow-xl transition-all duration-300 ease-in-out bg-white/2 border border-white/5 rounded-2xl p-6 backdrop-blur-sm">
+                <div class="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-8 items-end">
                 <!-- Sorting Section -->
                 <div class="flex flex-col gap-2">
                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Sort Catalog</label>
@@ -591,16 +691,27 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
     </div>
     <div v-else-if="error" class="text-red-500 text-center py-10">{{ error }}</div>
     
-    <div v-else class="space-y-4">
-        <VulnGroupCard 
-            v-for="group in filteredGroups" 
-            :key="group.id" 
-            :group="group" 
-            @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)" 
-            @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
-        />
-        
-        <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center">No vulnerabilities found matching criteria.</div>
+    <div v-else>
+        <div v-if="viewMode === 'analysis'" class="space-y-4">
+            <VulnGroupCard 
+                v-for="group in filteredGroups" 
+                :key="group.id" 
+                :group="group" 
+                @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)" 
+                @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
+            />
+            <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center py-20 font-medium">No vulnerabilities found matching criteria.</div>
+        </div>
+        <div v-else class="py-4">
+            <div v-if="statsLoading" class="text-center py-20">
+                <div class="animate-pulse flex flex-col items-center">
+                    <BarChart3 :size="48" class="text-blue-500 mb-4" />
+                    <div class="text-xl font-black text-gray-300 uppercase tracking-tight">Calculating metrics...</div>
+                </div>
+            </div>
+            <div v-else-if="statsError" class="text-red-500 text-center py-20">{{ statsError }}</div>
+            <ProjectStatistics v-else-if="stats" :stats="stats" :projectName="($route.params.name as string)" />
+        </div>
     </div>
 
     <BulkResolveIncompleteModal 
@@ -618,3 +729,28 @@ watch(() => route.params.name, fetchVulns, { immediate: true })
     />
   </div>
 </template>
+
+<style scoped>
+.overlay-fade-enter-active, .overlay-fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.overlay-fade-enter-from, .overlay-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.overlay-fade-enter-to, .overlay-fade-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+.filter-transition-enter-active, .filter-transition-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.filter-transition-enter-from, .filter-transition-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.filter-transition-enter-to, .filter-transition-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+</style>
