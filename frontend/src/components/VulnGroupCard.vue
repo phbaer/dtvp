@@ -5,7 +5,7 @@ import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, History } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -1113,14 +1113,12 @@ const normalizedTags = computed(() => {
 })
 
 const assessedTeams = computed(() => {
-    const blocks = mergedAssessmentData.value.blocks
-    const existingAssessments = new Set(blocks.map(b => b.team))
-    
+    const assessed = getAssessedTeams(props.group)
     const matchedTeams = new Set<string>()
-    
+
     normalizedTags.value.forEach(tag => {
         // A primary tag is assessed if it OR any of its aliases are assessed
-        if (existingAssessments.has(tag)) {
+        if (assessed.has(tag)) {
             matchedTeams.add(tag)
             return
         }
@@ -1132,7 +1130,7 @@ const assessedTeams = computed(() => {
                     const primary = mappingVal[0]
                     if (primary === tag) {
                         const aliases = mappingVal.slice(1)
-                        if (aliases.some(alias => existingAssessments.has(alias))) {
+                        if (aliases.some(alias => assessed.has(alias))) {
                             matchedTeams.add(tag)
                             break
                         }
@@ -1141,7 +1139,7 @@ const assessedTeams = computed(() => {
             }
         }
     })
-    
+
     return matchedTeams
 })
 

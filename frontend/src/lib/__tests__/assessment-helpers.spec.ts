@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getConsensusAssessment } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getConsensusAssessment, getAssessedTeams, hasOpenTeamAssessment } from '../assessment-helpers';
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -70,6 +70,34 @@ describe('Assessment Helpers', () => {
             };
 
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
+        });
+
+        it('should use the same team assessment check for open team assessment and chip state', () => {
+            const group: any = {
+                id: 'CVE-OPEN-TEAM',
+                tags: ['team-a', 'team-b'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                analysis_state: 'EMPTY',
+                                analysis_details: '--- [Team: team-a] [State: NOT_AFFECTED] ---'
+                            },
+                            {
+                                analysis_state: 'NOT_SET',
+                                analysis_details: ''
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            const assessed = getAssessedTeams(group);
+            expect(assessed.has('team-a')).toBe(true);
+            expect(assessed.has('team-b')).toBe(false);
+
+            const open = hasOpenTeamAssessment(group, group.tags, {});
+            expect(open).toBe(true);
         });
     });
 

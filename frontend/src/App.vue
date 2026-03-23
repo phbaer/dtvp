@@ -153,12 +153,8 @@ const acknowledgeChangelog = () => {
         <footer class="border-t border-gray-700 bg-gray-900">
             <div class="max-w-7xl mx-auto p-4 text-center text-xs text-gray-500 space-y-1">
                 <div>DTVP v{{ version }} (build {{ build }})</div>
+                <div>Author: {{ projectAuthor }}</div>
                 <div>
-                    Author: {{ projectAuthor }}
-                    <span v-if="projectUrls.mastodon">(Mastodon: {{ projectUrls.mastodon }})</span>
-                    <span v-if="projectEmail">(email: {{ projectEmail }})</span>
-                </div>
-                            <div>
                     <a :href="projectUrls.main" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Main repo</a>
                     •
                     <a :href="projectUrls.github" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">GitHub</a>

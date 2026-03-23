@@ -52,9 +52,25 @@ async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
     mock_dt_client.get_vulnerabilities.return_value = [
         {
             "vulnerability": {"vulnId": "CVE-1", "severity": "HIGH"},
-            "component": {"name": "c1"},
+            "component": {"name": "c1", "uuid": "comp1", "version": "1.0"},
             "analysis": {"state": "NOT_SET"},
-        }
+        },
+        {
+            "vulnerability": {"vulnId": "CVE-OPEN", "severity": "MEDIUM"},
+            "component": {"name": "c2", "uuid": "comp2", "version": "1.0"},
+            "analysis": {
+                "state": "IN_TRIAGE",
+                "analysisDetails": "--- [Team: team-a] [State: NOT_SET] ---\n[Status: Pending Review]",
+            },
+        },
+        {
+            "vulnerability": {"vulnId": "CVE-2026-TEAM-PARTIAL", "severity": "MEDIUM"},
+            "component": {"name": "c3", "uuid": "comp3", "version": "1.0"},
+            "analysis": {
+                "state": "IN_TRIAGE",
+                "analysisDetails": "--- [Team: team-a] [State: NOT_AFFECTED] ---\n--- [Team: team-b] [State: NOT_SET] ---\n[Status: Pending Review]",
+            },
+        },
     ]
     # Mock project_vulnerabilities
     mock_dt_client.get_project_vulnerabilities.return_value = []
@@ -88,9 +104,28 @@ async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
     assert status["status"] == "completed"
     data = status["result"]
 
-    assert len(data) == 1
-    assert data[0]["id"] == "CVE-1"
-    assert len(data[0]["affected_versions"]) == 1
+    assert len(data) == 3
+
+    ids = {item["id"] for item in data}
+    assert "CVE-1" in ids
+    assert "CVE-OPEN" in ids
+    assert "CVE-2026-TEAM-PARTIAL" in ids
+
+    open_group = next(item for item in data if item["id"] == "CVE-OPEN")
+    assert len(open_group["affected_versions"]) == 1
+    open_comp = open_group["affected_versions"][0]["components"][0]
+    assert open_comp["analysis_state"] == "IN_TRIAGE"
+    assert "[Status: Pending Review]" in open_comp["analysis_details"]
+
+    partial_group = next(item for item in data if item["id"] == "CVE-2026-TEAM-PARTIAL")
+    assert len(partial_group["affected_versions"]) == 1
+    partial_comp = partial_group["affected_versions"][0]["components"][0]
+    assert partial_comp["analysis_state"] == "IN_TRIAGE"
+    assert "Team: team-a" in partial_comp["analysis_details"]
+    assert "Team: team-b" in partial_comp["analysis_details"]
+
+    # The partial team case should still show as pending review with open work left
+    assert "[Status: Pending Review]" in partial_comp["analysis_details"]
 
 
 @pytest.mark.asyncio

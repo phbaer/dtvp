@@ -136,6 +136,10 @@ describe('ProjectView Filters', () => {
                     components: [{
                         analysis_state: 'FALSE_POSITIVE',
                         analysis_details: 'Some details\n\n[Status: Pending Review]'
+                    },
+                    {
+                        analysis_state: 'NOT_SET',
+                        analysis_details: ''
                     }]
                 }
             ]
@@ -304,6 +308,25 @@ describe('ProjectView Filters', () => {
         await wrapper.vm.$nextTick()
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
         expect(wrapper.findAll('.vuln-card')[0]?.text()).toBe('V4')
+    })
+
+    it('includes pending review items with open team assessment in OPEN filter', async () => {
+        (getGroupedVulns as any).mockResolvedValue(mockDataWithPending)
+        router.push('/projects/p1/TestProject')
+        await router.isReady()
+
+        const wrapper = mount(ProjectView, {
+            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
+        })
+        await flushPromises()
+
+        ;(wrapper.vm as any).lifecycleFilters = ['OPEN']
+        ;(wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
+        await wrapper.vm.$nextTick()
+
+        const openCards = wrapper.findAll('.vuln-card')
+        expect(openCards.length).toBeGreaterThanOrEqual(1)
+        expect(openCards.map(c => c.text())).toContain('V4')
     })
 
     it('should treat plaintext assessments as valid data for filters', async () => {

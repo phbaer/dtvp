@@ -5,6 +5,10 @@
     "Bla-Team",
     "Old-Bla-Team"
   ],
+  "log4j-core": [
+    "team-a",
+    "team-b"
+  ],
   "team-test-lib": [
     "New-Label",
     "Old-Label",
