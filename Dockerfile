@@ -39,6 +39,8 @@ RUN uv sync --frozen --no-dev
 
 # Copy application code
 COPY *.py start.sh CHANGELOG.md ./
+COPY sbom/dtvp-frontend-cyclonedx.json /app/sbom/dtvp-frontend-cyclonedx.json
+COPY sbom/dtvp-backend-cyclonedx.json /app/sbom/dtvp-backend-cyclonedx.json
 RUN chmod +x start.sh
 
 # Copy the built frontend from the frontend-build stage

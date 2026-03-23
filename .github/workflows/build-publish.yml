@@ -102,7 +102,6 @@ jobs:
         run: pm2 kill || true
 
   check-version:
-    # Runs on push to main to verify the version tag doesn't already exist
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [test-backend, test-frontend]
     runs-on: node
@@ -142,6 +141,8 @@ jobs:
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
       - name: Install Docker Cli
         run: |-
           install -m 0755 -d /etc/apt/keyrings
@@ -158,6 +159,23 @@ jobs:
           registry: https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
           username: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}
           password: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+      - name: Generate Backend CycloneDX SBOM (Python)
+        run: |
+          mkdir -p sbom
+          uv add --dev cyclonedx-bom
+          uv run cyclonedx-py environment --short-PURLs -o sbom/dtvp-backend-cyclonedx.json --sv 1.6 --mc-type application --pyproject pyproject.toml
+
+      - name: Generate Frontend CycloneDX SBOM (npm)
+        run: |
+          cd frontend
+          npm install --save-dev --silent @cyclonedx/bom
+          ./node_modules/.bin/cyclonedx-npm --omit dev --mc-type application -o ../sbom/dtvp-frontend-cyclonedx.json --ignore-npm-errors --package-lock-only package.json
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: dtvp-sbom
+          path: sbom/*.json
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Setup Docker Buildx
@@ -173,7 +191,6 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
       - name: Generate CHANGELOG.md for Docker
         run: |
-          # Ensure changelog is up to date in the build context
           uv run git-cliff -o CHANGELOG.md
       - name: Build and Push
         uses: docker/build-push-action@v6
@@ -183,6 +200,7 @@ jobs:
           tags: |
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ github.event_name == 'push' && steps.get_version.outputs.VERSION && format('{0}/{1}/dtvp:v{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
             ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
           context: .
           build-args: |
@@ -191,7 +209,6 @@ jobs:
             GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
 
   release:
-    # Creates changelog, git tag, and Forgejo release — only on main push when tag is new
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check-version.outputs.tag_exists == 'false'
     needs: [check-version, build-push-images]
     runs-on: node
@@ -229,7 +246,6 @@ jobs:
       - name: Extract release notes for this version
         id: release_notes
         run: |
-          # Extract the section for the current tag from the changelog
           NOTES=$(uv run git-cliff --tag ${{ steps.version.outputs.TAG }} --unreleased --strip all 2>/dev/null || uv run git-cliff --latest --strip all)
           echo "NOTES<<HEREDOC" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
@@ -252,7 +268,6 @@ jobs:
               --arg body "${{ steps.release_notes.outputs.NOTES }}" \
               '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}'\
             )"
-
 
   delete-pr-images:
     if: github.event.action == 'closed'

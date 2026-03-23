@@ -4,6 +4,18 @@ DTVP is a FastAPI and Vue application for reviewing Dependency-Track findings ac
 
 The repository also includes a mock Dependency-Track service, which makes it possible to run the full application locally without a live upstream instance.
 
+Repository links:
+
+- Main repo: https://git.baer.one/phbaer/dtvp/
+- GitHub mirror: https://github.com/phbaer/dtvp/
+
+SBOM
+
+- The container includes a CycloneDX SBOM at `/sbom/dtvp-cyclonedx.json`.
+- Generated via `syft` (standard SBOM tooling) during Docker image build. 
+- The app exposes it at `/api/sbom` and `/api/sbom/html`; footer includes "Download CycloneDX SBOM".
+- Includes production frontend (`frontend/package.json`/`frontend/package-lock.json`) and backend (`pyproject.toml`/`uv.lock`) dependency components; test/dev dependencies excluded by design.
+
 ## What It Does
 
 - Group the same vulnerability across multiple project versions.

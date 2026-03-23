@@ -1,41 +1,47 @@
-import logging
-from fastapi import FastAPI, Depends, APIRouter, UploadFile, File
-from fastapi.openapi.utils import get_openapi
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-import os
 import asyncio
-import uuid
-from datetime import datetime
-import shutil
 import json
-from fastapi import HTTPException, Request
-
-from auth import router as auth_router, get_current_user, auth_settings
-from dt_client import get_client, DTClient, DTSettings
-from logic import (
-    group_vulnerabilities,
-    get_team_mapping_path,
-    load_team_mapping,
-    get_user_roles_path,
-    load_user_roles,
-    get_user_role,
-    BOMAnalysisCache,
-    process_assessment_details,
-    calculate_aggregated_state,
-    load_rescore_rules,
-    get_rescore_rules_path,
-    calculate_statistics,
-)
-
-
-from version import VERSION, BUILD_COMMIT
-
+import logging
+import os
+import shutil
+import tomllib
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from auth import auth_settings, get_current_user
+from auth import router as auth_router
+from dt_client import DTClient, DTSettings, get_client
+from logic import (
+    BOMAnalysisCache,
+    calculate_aggregated_state,
+    calculate_statistics,
+    get_rescore_rules_path,
+    get_team_mapping_path,
+    get_user_role,
+    get_user_roles_path,
+    group_vulnerabilities,
+    load_rescore_rules,
+    load_team_mapping,
+    load_user_roles,
+    process_assessment_details,
+)
+from version import BUILD_COMMIT, VERSION
 
 logger = logging.getLogger("dtvp")
 logger.setLevel(logging.INFO)
@@ -82,9 +88,32 @@ app.include_router(auth_router, prefix=context_path)
 api_router = APIRouter(prefix="/api", tags=["api"])
 
 
+def load_pyproject_metadata():
+    pyproject_file = os.path.join(os.getcwd(), "pyproject.toml")
+    if not os.path.exists(pyproject_file):
+        return {}
+    with open(pyproject_file, "rb") as f:
+        data = tomllib.load(f)
+    project = data.get("project", {})
+    return {
+        "name": project.get("name"),
+        "version": project.get("version"),
+        "authors": project.get("authors", []),
+        "urls": project.get("urls", {}),
+    }
+
+
 @api_router.get("/version")
 def get_version():
     return {"version": VERSION, "build": BUILD_COMMIT}
+
+
+@api_router.get("/metadata")
+def get_metadata():
+    metadata = load_pyproject_metadata()
+    if not metadata:
+        raise HTTPException(status_code=404, detail="pyproject.toml metadata not found")
+    return metadata
 
 
 @api_router.get("/changelog")
@@ -94,6 +123,73 @@ def get_changelog():
         with open(changelog_path, "r") as f:
             return {"content": f.read()}
     return {"content": "Changelog not available."}
+
+
+@api_router.get("/sbom")
+def get_sbom():
+    # Default SBOM for legacy compatibility. Prefer backend/frontend explicit endpoints.
+    sbom_path = os.path.join(os.getcwd(), "sbom", "dtvp-backend-cyclonedx.json")
+    if os.path.exists(sbom_path):
+        return FileResponse(
+            sbom_path,
+            media_type="application/json",
+            filename="dtvp-backend-cyclonedx.json",
+        )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Backend SBOM not available. Generate in CI and include in container at /sbom/dtvp-backend-cyclonedx.json.",
+    )
+
+
+@api_router.get("/sbom/backend")
+def get_sbom_backend():
+    sbom_path = os.path.join(os.getcwd(), "sbom", "dtvp-backend-cyclonedx.json")
+    if os.path.exists(sbom_path):
+        return FileResponse(
+            sbom_path,
+            media_type="application/json",
+            filename="dtvp-backend-cyclonedx.json",
+        )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Backend SBOM not available. Generate in CI and include in container at /sbom/dtvp-backend-cyclonedx.json.",
+    )
+
+
+@api_router.get("/sbom/frontend")
+def get_sbom_frontend():
+    sbom_path = os.path.join(os.getcwd(), "sbom", "dtvp-frontend-cyclonedx.json")
+    if os.path.exists(sbom_path):
+        return FileResponse(
+            sbom_path,
+            media_type="application/json",
+            filename="dtvp-frontend-cyclonedx.json",
+        )
+
+    raise HTTPException(
+        status_code=404,
+        detail="Frontend SBOM not available. Generate in CI and include in container at /sbom/dtvp-frontend-cyclonedx.json.",
+    )
+
+
+@api_router.get("/sbom/html")
+def get_sbom_html():
+    sbom_path = os.path.join(os.getcwd(), "sbom", "dtvp-cyclonedx.json")
+    if not os.path.exists(sbom_path):
+        raise HTTPException(
+            status_code=404,
+            detail="SBOM not available. Generate in CI and include in container at /sbom/dtvp-cyclonedx.json.",
+        )
+
+    with open(sbom_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    return HTMLResponse(
+        f"<html><head><title>DTVP SBOM</title></head><body><h1>DTVP CycloneDX SBOM</h1><p><a href='/api/sbom'>Download JSON</a></p><pre>{content}</pre></body></html>",
+        media_type="text/html",
+    )
 
 
 # Models
@@ -359,7 +455,9 @@ async def get_statistics(
             vuln_summary = finding.get("vulnerability", {})
             vuln_id = vuln_summary.get("vulnId")
             severity_label = (vuln_summary.get("severity") or "UNKNOWN").upper()
-            version_severity_counts[v["version"]][severity_label] = version_severity_counts[v["version"]].get(severity_label, 0) + 1
+            version_severity_counts[v["version"]][severity_label] = (
+                version_severity_counts[v["version"]].get(severity_label, 0) + 1
+            )
 
             full_vuln = vuln_map.get(vuln_id)
             if full_vuln:
@@ -396,15 +494,28 @@ async def get_statistics(
         major = ver.split(".")[0] if isinstance(ver, str) and "." in ver else ver
         major = major or "unknown"
 
-        major_version_counts[major] = major_version_counts.get(major, 0) + version_counts.get(ver, 0)
+        major_version_counts[major] = major_version_counts.get(
+            major, 0
+        ) + version_counts.get(ver, 0)
         version_major_details.setdefault(major, {})[ver] = version_counts.get(ver, 0)
 
         # per-severity counts for this major version
         major_version_severity_counts.setdefault(major, {})
-        findings = next((cd["vulnerabilities"] for cd in combined_data if cd["version"]["uuid"] == v["uuid"]), [])
+        findings = next(
+            (
+                cd["vulnerabilities"]
+                for cd in combined_data
+                if cd["version"]["uuid"] == v["uuid"]
+            ),
+            [],
+        )
         for finding in findings:
-            severity = (finding.get("vulnerability", {}).get("severity") or "UNKNOWN").upper()
-            major_version_severity_counts[major][severity] = major_version_severity_counts[major].get(severity, 0) + 1
+            severity = (
+                finding.get("vulnerability", {}).get("severity") or "UNKNOWN"
+            ).upper()
+            major_version_severity_counts[major][severity] = (
+                major_version_severity_counts[major].get(severity, 0) + 1
+            )
 
     stats["major_version_counts"] = major_version_counts
     stats["major_version_details"] = version_major_details
@@ -412,13 +523,6 @@ async def get_statistics(
     stats["version_severity_counts"] = version_severity_counts
 
     return stats
-
-
-# Old endpoint kept for compatibility if needed, or removed?
-# Requirement implied replacing the behavior. Let's keep it but maybe it won't be used by UI.
-# actually, let's remove the old implementation logic and just return empty or error if used?
-# Or just keep it as is for API compatibility but UI uses the new one.
-# But for the "fix", we should probably encourage using the new one.
 
 
 @api_router.post("/assessments/details")

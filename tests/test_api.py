@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import os
 from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient
 from main import app, get_current_user
@@ -249,6 +250,38 @@ async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client)
     # Verify vector was merged
     assert data[0]["cvss_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
     assert data[0]["cvss_score"] == 9.8
+
+
+def test_get_sbom_endpoints(client, tmp_path):
+    sbom_dir = tmp_path / "sbom"
+    sbom_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create backend and frontend BOM files as well as default
+    backend_path = sbom_dir / "dtvp-backend-cyclonedx.json"
+    frontend_path = sbom_dir / "dtvp-frontend-cyclonedx.json"
+    default_path = sbom_dir / "dtvp-cyclonedx.json"
+
+    backend_path.write_text('{"bomFormat": "CycloneDX", "type": "backend"}')
+    frontend_path.write_text('{"bomFormat": "CycloneDX", "type": "frontend"}')
+    default_path.write_text('{"bomFormat": "CycloneDX", "type": "default"}')
+
+    # Monkey-patch working directory for the app
+    original_cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        r = client.get("/api/sbom")
+        assert r.status_code == 200
+        assert r.json()["type"] == "backend"
+
+        r = client.get("/api/sbom/backend")
+        assert r.status_code == 200
+        assert r.json()["type"] == "backend"
+
+        r = client.get("/api/sbom/frontend")
+        assert r.status_code == 200
+        assert r.json()["type"] == "frontend"
+    finally:
+        os.chdir(original_cwd)
 
 
 def test_assessment_update(client, mock_dt_client):
