@@ -1,6 +1,8 @@
 [project]
 name = "dtvp"
-version = "1.0.5"
+version = "1.0.6"
+authors = ["phbaer <git@ph.baer.one> (@phbaer@baer.im)"]
+urls = { "Homepage" = "https://baer.one", "Main repo" = "https://git.baer.one/phbaer/dtvp", "GitHub" = "https://github.com/phbaer/dtvp", "Mastodon" = "https://baer.im/@phbaer" }
 description = "A vulnerability management platform for dependency track"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -21,6 +23,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "respx>=0.22.0",
     "git-cliff>=2.7.0",
+    "cyclonedx-bom>=7.2.2",
 ]
 
 [tool.pytest.ini_options]

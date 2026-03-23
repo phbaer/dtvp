@@ -15,7 +15,6 @@ const BASE_WITH_CONTEXT = NORMALIZED_CONTEXT_PATH && BASE_URL.endsWith(NORMALIZE
 
 const API_BASE = BASE_WITH_CONTEXT + '/api';
 const AUTH_BASE = BASE_URL + NORMALIZED_CONTEXT_PATH + '/auth';
-
 const api = axios.create({
     baseURL: API_BASE,
     withCredentials: true, // For cookies

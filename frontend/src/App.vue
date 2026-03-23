@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, provide, computed } from 'vue'
 import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
+import { getRuntimeConfig } from './lib/env'
 import ChangelogModal from './components/ChangelogModal.vue'
 
 const version = ref('')
@@ -8,6 +9,16 @@ const build = ref('')
 const user = ref({ username: '', role: '' })
 const realRole = ref('')
 const isAnalystView = ref(false)
+
+const projectAuthor = ref('')
+const projectEmail = ref('')
+const projectUrls = ref({ homepage: '', main: '', github: '', mastodon: '' })
+
+const contextPathRaw = getRuntimeConfig('DTVP_CONTEXT_PATH', '')
+const contextPath = contextPathRaw ? (contextPathRaw.startsWith('/') ? contextPathRaw.replace(/\/$/, '') : '/' + contextPathRaw.replace(/\/$/, '')) : ''
+const apiBase = `${contextPath || ''}/api`
+const sbomUrl = ref(`${apiBase}/sbom`)
+const metadataUrl = `${apiBase}/metadata`
 
 const showChangelog = ref(false)
 const changelogContent = ref('')
@@ -37,6 +48,30 @@ onMounted(async () => {
         }
     } catch (e) {
         console.error('Failed to fetch version', e)
+    }
+
+    try {
+        const metaRes = await fetch(metadataUrl)
+        if (metaRes.ok) {
+            const meta = await metaRes.json()
+            if (Array.isArray(meta.authors) && meta.authors.length > 0) {
+                const author = meta.authors[0]
+                const nameMatch = author.match(/^([^<]+)/)
+                const emailMatch = author.match(/<([^>]+)>/)
+                projectAuthor.value = (nameMatch && nameMatch[1].trim()) || author
+                projectEmail.value = (emailMatch && emailMatch[1]) || ''
+            }
+            if (meta.urls) {
+                projectUrls.value = {
+                    homepage: meta.urls.Homepage || projectUrls.value.homepage,
+                    main: meta.urls['Main repo'] || projectUrls.value.main,
+                    github: meta.urls.GitHub || projectUrls.value.github,
+                    mastodon: meta.urls.Mastodon || projectUrls.value.mastodon,
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch metadata', e)
     }
 
     try {
@@ -116,8 +151,26 @@ const acknowledgeChangelog = () => {
             <router-view></router-view>
         </main>
         <footer class="border-t border-gray-700 bg-gray-900">
-            <div class="max-w-7xl mx-auto p-4 text-center text-xs text-gray-500">
-                DTVP v{{ version }} (build {{ build }})
+            <div class="max-w-7xl mx-auto p-4 text-center text-xs text-gray-500 space-y-1">
+                <div>DTVP v{{ version }} (build {{ build }})</div>
+                <div>
+                    Author: {{ projectAuthor }}
+                    <span v-if="projectUrls.mastodon">(Mastodon: {{ projectUrls.mastodon }})</span>
+                    <span v-if="projectEmail">(email: {{ projectEmail }})</span>
+                </div>
+                            <div>
+                    <a :href="projectUrls.main" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Main repo</a>
+                    •
+                    <a :href="projectUrls.github" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">GitHub</a>
+                </div>
+                <div>
+                    <a :href="sbomUrl + '/backend'" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download Backend SBOM</a>
+                    •
+                    <a :href="sbomUrl + '/frontend'" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download Frontend SBOM</a>
+                </div>
+                <div>
+                    <a :href="sbomUrl" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download CycloneDX SBOM</a>
+                </div>
             </div>
         </footer>
 

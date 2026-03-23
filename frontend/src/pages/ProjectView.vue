@@ -500,9 +500,9 @@ watch(() => route.params.name, () => {
 <template>
   <div class="mx-auto">
     <transition name="overlay-fade">
-      <div v-if="isFilterCollapsed" class="fixed top-0 left-0 right-0 z-50 bg-gray-900/70 border-b border-white/10 backdrop-blur-md px-4 py-2 pointer-events-none">
-        <div class="mx-auto max-w-7xl">
-          <div class="flex flex-wrap items-center gap-2 text-xs text-gray-300 mb-1">
+      <div v-if="isFilterCollapsed" class="fixed top-0 left-0 right-0 z-50 bg-gray-900/70 border-b border-white/10 backdrop-blur-md px-0 py-2 pointer-events-none text-left">
+        <div class="w-full max-w-7xl px-4">
+          <div class="flex flex-wrap items-start justify-start gap-2 text-xs text-gray-300 mb-1">
             <span class="font-bold text-gray-400">Lifecycle:</span>
             <template v-if="selectedLifecycleOptions.length">
               <span v-for="opt in selectedLifecycleOptions" :key="`top-lc-${opt.value}`" :class="[opt.color, 'text-white text-[10px] font-semibold px-2 py-0.5 rounded-full']">{{ opt.label }}</span>

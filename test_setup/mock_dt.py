@@ -1,11 +1,12 @@
-from fastapi import FastAPI, Request, Form, HTTPException
+import json
+import time
+from pathlib import Path
+from typing import Optional
+
+import uvicorn
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
-from typing import Optional
-import uvicorn
-import time
-import json
-from pathlib import Path
 
 app = FastAPI()
 
@@ -134,6 +135,7 @@ mock_projects = [
 # We will generate mock analysis/findings dynamically for all projects for simplicity
 # but keep specific state for the main PROJECT_UUID to pass existing tests.
 
+
 def load_vulnerability_definitions():
     definitions_path = Path(__file__).resolve().parent / "vuln_definitions.json"
     with open(definitions_path, "r", encoding="utf-8") as f:
@@ -146,6 +148,7 @@ def load_mock_analysis():
     with open(analysis_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
     return payload.get("mock_analysis", {})
+
 
 mock_vulnerabilities = load_vulnerability_definitions()
 mock_analysis = load_mock_analysis()
@@ -176,7 +179,12 @@ def get_projects(request: Request, name: Optional[str] = None):
 
 
 def _component_for_vuln(vuln_uuid: str):
-    if vuln_uuid in [VULN_UUID_1, VULN_UUID_2, VULN_INCOMPLETE_UUID, VULN_INCONSISTENT_UUID]:
+    if vuln_uuid in [
+        VULN_UUID_1,
+        VULN_UUID_2,
+        VULN_INCOMPLETE_UUID,
+        VULN_INCONSISTENT_UUID,
+    ]:
         return {
             "uuid": COMPONENT_UUID,
             "name": "log4j-core",
@@ -261,7 +269,9 @@ def get_findings(project_uuid: str):
         current_findings.append(finding2)
 
         # Add a plaintext NOT_SET assessment vuln for filter coverage
-        key_plain_not_set = f"{project_uuid}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_SET_UUID}"
+        key_plain_not_set = (
+            f"{project_uuid}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_SET_UUID}"
+        )
         finding_plain_not_set = {
             "component": {
                 "uuid": COMPONENT_UUID,
@@ -278,7 +288,9 @@ def get_findings(project_uuid: str):
         current_findings.append(finding_plain_not_set)
 
         # Add a plaintext NOT_AFFECTED assessment vuln for filter coverage
-        key_plain_not_affected = f"{project_uuid}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_AFFECTED_UUID}"
+        key_plain_not_affected = (
+            f"{project_uuid}:{COMPONENT_UUID}:{VULN_PLAINTEXT_NOT_AFFECTED_UUID}"
+        )
         finding_plain_not_affected = {
             "component": {
                 "uuid": COMPONENT_UUID,
@@ -288,7 +300,8 @@ def get_findings(project_uuid: str):
             },
             "vulnerability": mock_vulnerabilities[VULN_PLAINTEXT_NOT_AFFECTED_UUID],
             "analysis": mock_analysis.get(
-                key_plain_not_affected, {"analysisState": "NOT_AFFECTED", "isSuppressed": False}
+                key_plain_not_affected,
+                {"analysisState": "NOT_AFFECTED", "isSuppressed": False},
             ),
             "matrix": key_plain_not_affected,
         }
@@ -430,7 +443,8 @@ def get_findings(project_uuid: str):
                 "vulnerability": mock_vulnerabilities[vuln_uuid],
                 "analysis": mock_analysis.get(
                     key,
-                    analysis_override or {"analysisState": "NOT_SET", "isSuppressed": False},
+                    analysis_override
+                    or {"analysisState": "NOT_SET", "isSuppressed": False},
                 ),
                 "matrix": key,
             }
@@ -441,12 +455,44 @@ def get_findings(project_uuid: str):
         base_set = [VULN_UUID_1, VULN_JACKSON_UUID, VULN_UUID_2]
         extra_by_version = {
             "1.0.0": [VULN_NETTY_UUID, VULN_PLAINTEXT_NOT_SET_UUID],
-            "1.1.0": [VULN_NETTY_UUID, VULN_PLAINTEXT_NOT_SET_UUID, VULN_PLAINTEXT_NOT_AFFECTED_UUID],
-            "1.2.0": [VULN_NETTY_UUID, VULN_INCOMPLETE_UUID, VULN_PLAINTEXT_NOT_SET_UUID, VULN_PLAINTEXT_NOT_AFFECTED_UUID],
-            "1.2.10": [VULN_NETTY_UUID, VULN_INCOMPLETE_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2"],
-            "2.0.0": [VULN_NETTY_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2", "d4441a7b-0346-4927-991c-7033580539f3"],
-            "2.1.0": [VULN_NETTY_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2", "d4441a7b-0346-4927-991c-7033580539f3", "d5551a7b-0346-4927-991c-7033580539f4"],
-            "3.0.0": [VULN_NETTY_UUID, VULN_INCONSISTENT_UUID, "d3331a7b-0346-4927-991c-7033580539f2", "d4441a7b-0346-4927-991c-7033580539f3", "d5551a7b-0346-4927-991c-7033580539f4", VULN_INCOMPLETE_UUID],
+            "1.1.0": [
+                VULN_NETTY_UUID,
+                VULN_PLAINTEXT_NOT_SET_UUID,
+                VULN_PLAINTEXT_NOT_AFFECTED_UUID,
+            ],
+            "1.2.0": [
+                VULN_NETTY_UUID,
+                VULN_INCOMPLETE_UUID,
+                VULN_PLAINTEXT_NOT_SET_UUID,
+                VULN_PLAINTEXT_NOT_AFFECTED_UUID,
+            ],
+            "1.2.10": [
+                VULN_NETTY_UUID,
+                VULN_INCOMPLETE_UUID,
+                VULN_INCONSISTENT_UUID,
+                "d3331a7b-0346-4927-991c-7033580539f2",
+            ],
+            "2.0.0": [
+                VULN_NETTY_UUID,
+                VULN_INCONSISTENT_UUID,
+                "d3331a7b-0346-4927-991c-7033580539f2",
+                "d4441a7b-0346-4927-991c-7033580539f3",
+            ],
+            "2.1.0": [
+                VULN_NETTY_UUID,
+                VULN_INCONSISTENT_UUID,
+                "d3331a7b-0346-4927-991c-7033580539f2",
+                "d4441a7b-0346-4927-991c-7033580539f3",
+                "d5551a7b-0346-4927-991c-7033580539f4",
+            ],
+            "3.0.0": [
+                VULN_NETTY_UUID,
+                VULN_INCONSISTENT_UUID,
+                "d3331a7b-0346-4927-991c-7033580539f2",
+                "d4441a7b-0346-4927-991c-7033580539f3",
+                "d5551a7b-0346-4927-991c-7033580539f4",
+                VULN_INCOMPLETE_UUID,
+            ],
         }
 
         add_vuln_list = base_set + extra_by_version.get(project.version, [])
@@ -463,7 +509,13 @@ def get_findings(project_uuid: str):
         add_vuln("d3331a7b-0346-4927-991c-7033580539f2", component_override=component)
 
     elif project.name == "Core Library":
-        for vuln_uuid in [VULN_JACKSON_UUID, VULN_NETTY_UUID, VULN_UUID_2, VULN_PLAINTEXT_NOT_SET_UUID, "d4441a7b-0346-4927-991c-7033580539f3"]:
+        for vuln_uuid in [
+            VULN_JACKSON_UUID,
+            VULN_NETTY_UUID,
+            VULN_UUID_2,
+            VULN_PLAINTEXT_NOT_SET_UUID,
+            "d4441a7b-0346-4927-991c-7033580539f3",
+        ]:
             add_vuln(vuln_uuid)
 
     else:
@@ -670,7 +722,7 @@ def update_analysis(update: AnalysisUpdate):
             "analysisState": "NOT_SET",
             "isSuppressed": False,
             "analysisDetails": "",
-            "analysisComments": []
+            "analysisComments": [],
         }
 
     mock_analysis[key]["analysisState"] = update.analysisState
@@ -683,18 +735,17 @@ def update_analysis(update: AnalysisUpdate):
         # In D-T, comments are usually a list.
         if "analysisComments" not in mock_analysis[key]:
             mock_analysis[key]["analysisComments"] = []
-        
+
         # Add to the comments list (which is what DTVP reads)
-        mock_analysis[key]["analysisComments"].append({
-            "comment": update.comment,
-            "timestamp": int(time.time() * 1000)
-        })
-        
+        mock_analysis[key]["analysisComments"].append(
+            {"comment": update.comment, "timestamp": int(time.time() * 1000)}
+        )
+
         # Also append to details for backward compatibility in the text view if needed
         if "analysisDetails" not in mock_analysis[key]:
             mock_analysis[key]["analysisDetails"] = ""
         mock_analysis[key]["analysisDetails"] += f"\n\n[Comment] {update.comment}"
-    
+
     return mock_analysis[key]
 
 
