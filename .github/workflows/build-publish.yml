@@ -193,7 +193,7 @@ jobs:
         run: |
           uv run git-cliff -o CHANGELOG.md
       - name: Build and Push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           push: true
           platforms: linux/amd64
