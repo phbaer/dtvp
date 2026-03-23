@@ -17,7 +17,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Install dependencies
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies (backend)
         run: uv sync --frozen
       - name: Install dependencies
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -79,13 +79,13 @@ jobs:
           curl -f http://localhost:8000/api/version
           curl -Is http://localhost:5173 | head -n 1
       - name: Install Playwright browsers
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: cd frontend && npx playwright install --with-deps chromium
       - name: Run UI tests
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           timeout_minutes: 10
           max_attempts: 3
