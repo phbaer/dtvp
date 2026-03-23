@@ -118,5 +118,25 @@
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
     "description": "Authentication bypass vulnerability in auth module.",
     "recommendation": "Enforce proper session validation."
+  },
+  {
+    "uuid": "d7777a7b-0346-4927-991c-7033580539fa",
+    "vulnId": "CVE-2026-OPEN-PENDING",
+    "source": "NVD",
+    "severity": "MEDIUM",
+    "cvssV3BaseScore": 5.8,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "description": "Pending review open team assessment test case.",
+    "recommendation": "Review team assessment and approve if verified."
+  },
+  {
+    "uuid": "d8888a7b-0346-4927-991c-7033580539fb",
+    "vulnId": "CVE-2026-TEAM-PARTIAL",
+    "source": "NVD",
+    "severity": "MEDIUM",
+    "cvssV3BaseScore": 5.7,
+    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+    "description": "One team assessed, another open team assessment test case.",
+    "recommendation": "Ensure second team completes assessment." 
   }
 ]

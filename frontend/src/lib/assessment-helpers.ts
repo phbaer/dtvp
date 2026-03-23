@@ -425,6 +425,58 @@ export function isPendingReview(group: GroupedVuln): boolean {
     );
 }
 
+export function getAssessedTeams(group: GroupedVuln): Set<string> {
+    const allInstances = (group.affected_versions || []).flatMap(v => v.components || []);
+    const allBlocks: AssessmentBlock[] = [];
+    allInstances.forEach(inst => {
+        const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
+        if (details) {
+            allBlocks.push(...parseAssessmentBlocks(details));
+        }
+    });
+
+    const assessed = new Set<string>();
+    allBlocks.forEach(block => {
+        if (block.team && block.team !== 'General' && block.state && block.state !== 'NOT_SET') {
+            assessed.add(block.team);
+        }
+    });
+
+    return assessed;
+}
+
+export function hasOpenTeamAssessment(group: GroupedVuln, requiredTeamsOrTags?: Tags | undefined, teamMapping?: Record<string, string | string[]>): boolean {
+    const requiredTeams = teamMapping
+        ? normalizeTags(requiredTeamsOrTags, teamMapping)
+        : (requiredTeamsOrTags || []).map(tagToString).filter(Boolean);
+
+    const assessedTeams = getAssessedTeams(group);
+
+    if (requiredTeams.length > 0) {
+        const missingAssessment = requiredTeams.some(team => !assessedTeams.has(team));
+        if (missingAssessment) return true;
+    }
+
+    const allInstances = (group.affected_versions || []).flatMap(v => v.components || []);
+
+    // A NOT_SET technical state on any component is an open team assessment.
+    const hasNotSetState = allInstances.some(i =>
+        ((i as any).analysis_state || (i as any).analysisState || 'NOT_SET') === 'NOT_SET'
+    );
+    if (hasNotSetState) return true;
+
+    // If structured blocks exist, look for a team (non-General) block that remains NOT_SET.
+    const allBlocks: AssessmentBlock[] = [];
+    allInstances.forEach(inst => {
+        const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
+        if (details) {
+            allBlocks.push(...parseAssessmentBlocks(details));
+        }
+    });
+
+    return allBlocks.some(b => b.team !== 'General' && b.state === 'NOT_SET');
+}
+
 export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags | undefined, teamMapping?: Record<string, string | string[]>): string {
     const requiredTeams = teamMapping
         ? normalizeTags(requiredTeamsOrTags, teamMapping)
@@ -612,7 +664,9 @@ export function matchesFilters(
     const isPending = isPendingReview(group);
 
     // 1. Lifecycle Match
-    const lifecycleMatch = (lifecycleFilters.includes('OPEN') && state === 'OPEN') ||
+    const openPendingWithOpenTeam = isPending && hasOpenTeamAssessment(group, tags, teamMapping);
+
+    const lifecycleMatch = (lifecycleFilters.includes('OPEN') && (state === 'OPEN' || openPendingWithOpenTeam)) ||
                            (lifecycleFilters.includes('ASSESSED') && state === 'ASSESSED') ||
                            (lifecycleFilters.includes('ASSESSED_LEGACY') && state === 'ASSESSED_LEGACY') ||
                            (lifecycleFilters.includes('INCOMPLETE') && state === 'INCOMPLETE') ||

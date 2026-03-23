@@ -1,7 +1,7 @@
 [project]
 name = "dtvp"
 version = "1.0.6"
-authors = ["phbaer <git@ph.baer.one> (@phbaer@baer.im)"]
+authors = ["phbaer <git@ph.baer.one>"]
 urls = { "Homepage" = "https://baer.one", "Main repo" = "https://git.baer.one/phbaer/dtvp", "GitHub" = "https://github.com/phbaer/dtvp", "Mastodon" = "https://baer.im/@phbaer" }
 description = "A vulnerability management platform for dependency track"
 readme = "README.md"

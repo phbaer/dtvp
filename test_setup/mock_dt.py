@@ -74,6 +74,8 @@ PROJECT_V3_UUID = "bfa85f64-5717-4562-b3fc-2c963f66afb4"
 # Additional mock vulnerabilities to exercise plaintext assessment formats
 VULN_PLAINTEXT_NOT_SET_UUID = "d1111a7b-0346-4927-991c-7033580539f0"
 VULN_PLAINTEXT_NOT_AFFECTED_UUID = "d2222a7b-0346-4927-991c-7033580539f1"
+VULN_OPEN_PENDING_UUID = "d7777a7b-0346-4927-991c-7033580539fa"
+VULN_TEAM_PARTIAL_UUID = "d8888a7b-0346-4927-991c-7033580539fb"
 mock_projects = [
     Project(
         name="Vulnerable Project",
@@ -340,6 +342,50 @@ def get_findings(project_uuid: str):
         "matrix": key4,
     }
     current_findings.append(finding4)
+
+    # Finding 5: Open-filter scenario (pending review with open team assessment)
+    key_open = f"{project_uuid}:{COMPONENT_UUID}:{VULN_OPEN_PENDING_UUID}"
+    finding_open = {
+        "component": {
+            "uuid": COMPONENT_UUID,
+            "name": "log4j-core",
+            "version": "2.14.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+        },
+        "vulnerability": mock_vulnerabilities[VULN_OPEN_PENDING_UUID],
+        "analysis": mock_analysis.get(
+            key_open,
+            {
+                "analysisState": "IN_TRIAGE",
+                "isSuppressed": False,
+                "analysisDetails": "--- [Team: team-a] [State: NOT_SET] [Assessed By: internal-test] ---\nPending approval for open workflow.\n\n[Status: Pending Review]",
+            },
+        ),
+        "matrix": key_open,
+    }
+    current_findings.append(finding_open)
+
+    # Finding 6: Partial team assessment (team-a assessed, team-b still open)
+    key_partial = f"{project_uuid}:{COMPONENT_UUID}:{VULN_TEAM_PARTIAL_UUID}"
+    finding_partial = {
+        "component": {
+            "uuid": COMPONENT_UUID,
+            "name": "log4j-core",
+            "version": "2.14.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+        },
+        "vulnerability": mock_vulnerabilities[VULN_TEAM_PARTIAL_UUID],
+        "analysis": mock_analysis.get(
+            key_partial,
+            {
+                "analysisState": "IN_TRIAGE",
+                "isSuppressed": False,
+                "analysisDetails": "--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\n--- [Team: team-b] [State: NOT_SET] [Assessed By: reviewer] ---\nTeam-b assessment still required.\n\n[Status: Pending Review]",
+            },
+        ),
+        "matrix": key_partial,
+    }
+    current_findings.append(finding_partial)
 
     # Finding 5: Netty (only on Vulnerable Project)
     if "Vulnerable Project" in project.name:

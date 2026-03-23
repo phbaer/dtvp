@@ -79,6 +79,16 @@
       "isSuppressed": false,
       "analysisDetails": "--- [Team: Security] [State: RESOLVED] [Assessed By: sec-team] [Date: 1710011000000] [Justification: PATCH_APPLIED] ---\nAll mitigation documentation has been published and tested.",
       "analysisComments": [{"comment": "Published KB article and confirmed fix is working.", "timestamp": 1710011005000}]
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:d7777a7b-0346-4927-991c-7033580539fa": {
+      "analysisState": "IN_TRIAGE",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: team-a] [State: NOT_SET] [Assessed By: internal-test] ---\nPlease review this finding; pending security approval.\n\n[Status: Pending Review]"
+    },
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:d8888a7b-0346-4927-991c-7033580539fb": {
+      "analysisState": "IN_TRIAGE",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\n--- [Team: team-b] [State: NOT_SET] [Assessed By: reviewer] ---\nPending team-b input.\n\n[Status: Pending Review]"
     }
   }
 }

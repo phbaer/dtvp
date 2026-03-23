@@ -114,6 +114,33 @@ describe('VulnGroupCard Assessment Markers', () => {
         expect(teamBTag?.findComponent(CheckCircle).exists()).toBe(false)
     })
 
+    it('in partial team assessment, shows green check for assessed team only', () => {
+        const partialGroup = JSON.parse(JSON.stringify(defaultGroup))
+        partialGroup.affected_versions[0].components[0].analysis_details =
+            '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: analyst] ---\n' +
+            '--- [Team: TeamB] [State: NOT_SET] [Assessed By: analyst] ---'
+
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: partialGroup as any
+            },
+            global: {
+                provide: {
+                    user: userMock
+                }
+            }
+        })
+
+        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
+        expect(tags.length).toBe(2)
+
+        const teamATag = tags.find(t => t.text().includes('TeamA'))
+        const teamBTag = tags.find(t => t.text().includes('TeamB'))
+
+        expect(teamATag?.findComponent(CheckCircle).exists()).toBe(true)
+        expect(teamBTag?.findComponent(CheckCircle).exists()).toBe(false)
+    })
+
     it('shows checkmark for multiple assessed teams', () => {
         const assessedGroup = JSON.parse(JSON.stringify(defaultGroup))
         assessedGroup.affected_versions[0].components[0].analysis_details =
