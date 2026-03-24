@@ -488,6 +488,83 @@ describe('VulnGroupCard', () => {
         }))
     })
 
+    it('cleans up requirement and modified metrics that match base values', async () => {
+        const groupWithVector = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L'
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithVector },
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const modalBtn = wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await modalBtn?.trigger('click')
+        await flushPromises()
+
+        const mprSelect = wrapper.find('select#metric-MPR')
+        const crSelect = wrapper.find('select#metric-CR')
+        const vectorInput = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
+
+        await mprSelect?.setValue('N')
+        await crSelect?.setValue('L')
+        await flushPromises()
+
+        // No cleanup yet, modifications are still present in the vector string
+        expect((vectorInput.element as HTMLInputElement).value).toContain('MPR:N')
+        expect((vectorInput.element as HTMLInputElement).value).toContain('CR:L')
+
+        const cleanBtn = wrapper.findAll('button').find(b => b.text() === 'Clean')
+        await cleanBtn?.trigger('click')
+        await flushPromises()
+
+        expect((vectorInput.element as HTMLInputElement).value).not.toContain('MPR:')
+        expect((vectorInput.element as HTMLInputElement).value).not.toContain('CR:')
+
+        await mprSelect?.setValue('L')
+        await crSelect?.setValue('H')
+        await flushPromises()
+
+        expect((vectorInput.element as HTMLInputElement).value).toContain('MPR:L')
+        expect((vectorInput.element as HTMLInputElement).value).toContain('CR:H')
+
+        expect((vectorInput.element as HTMLInputElement).readOnly).toBe(false)
+    })
+
+    it('cleans MI when it matches base I in CVSS 3.1 vector', async () => {
+        const groupWithVector = {
+            ...mockGroup,
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N/IR:M/MAV:P/MI:H'
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithVector },
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        const modalBtn = wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))
+        await modalBtn?.trigger('click')
+        await flushPromises()
+
+        const vectorInput = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
+        expect((vectorInput.element as HTMLInputElement).value).toContain('MI:H')
+        expect((vectorInput.element as HTMLInputElement).value).toContain('IR:M')
+
+        const cleanBtn = wrapper.findAll('button').find(b => b.text() === 'Clean')
+        await cleanBtn?.trigger('click')
+        await flushPromises()
+
+        expect((vectorInput.element as HTMLInputElement).value).not.toContain('MI:')
+        expect((vectorInput.element as HTMLInputElement).value).toContain('IR:M')
+    })
+
     it('preserves cvss when state changes away from NOT_AFFECTED (requirement: user context remains)', async () => {
         const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
         const groupWithVector = {
@@ -510,8 +587,8 @@ describe('VulnGroupCard', () => {
 
         // It should have the modified MC, MI, MA
         expect((vectorInput?.element as HTMLInputElement).value).toContain('MC:N/MI:N/MA:N')
-        // Vector input should NOT be editable (wrong regression fixed)
-        expect((vectorInput?.element as HTMLInputElement).readOnly).toBe(true)
+        // Vector input should be editable per new explicit cleanup behavior
+        expect((vectorInput?.element as HTMLInputElement).readOnly).toBe(false)
 
         // Now set it back to EXPLOITABLE
         await selects[1]?.setValue('EXPLOITABLE')
