@@ -31,7 +31,7 @@ jobs:
       - name: Run tests with coverage
         run: uv run pytest
       - name: Upload Python Coverage Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: python-coverage-report
@@ -59,7 +59,7 @@ jobs:
         working-directory: frontend
         run: npm run test:unit -- --run --coverage
       - name: Upload Vitest Coverage Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: vitest-coverage-report
@@ -91,7 +91,7 @@ jobs:
           max_attempts: 3
           command: cd frontend && npm run test:ui -- --reporter=line
       - name: Upload Playwright Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: playwright-report
@@ -171,7 +171,7 @@ jobs:
           npm install --save-dev --silent @cyclonedx/bom
           ./node_modules/.bin/cyclonedx-npm --omit dev --mc-type application -o ../sbom/dtvp-frontend-cyclonedx.json --ignore-npm-errors --package-lock-only package.json
       - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: dtvp-sbom
           path: sbom/*.json
