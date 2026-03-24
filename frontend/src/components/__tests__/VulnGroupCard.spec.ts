@@ -66,7 +66,8 @@ describe('VulnGroupCard', () => {
             analysis_state: 'NOT_SET',
             is_suppressed: false,
             analysis_comments: [], // Add required field
-            tags: ['Security']
+            tags: ['Security'],
+            usage_paths: ['lib -> framework -> App1']
         }
     ]
 
@@ -107,6 +108,14 @@ describe('VulnGroupCard', () => {
 
         const versionChips = wrapper.findAll('[data-testid="assessment-version-chip"]')
         expect(versionChips.length).toBe(0) // not expanded yet
+    })
+
+    it('shows minimal dependency depth badge', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        expect(wrapper.text()).toContain('Depth: 2')
     })
 
     it('shows sorted project versions in analysis details block', async () => {

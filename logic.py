@@ -548,6 +548,17 @@ def group_vulnerabilities(
                     "components": [],
                 }
 
+            # Try to fill dependency usage paths from BOM cache if available
+            if proj_uuid in bom_processors:
+                try:
+                    component_info["usage_paths"] = bom_processors[proj_uuid].get_dependency_paths(
+                        comp_uuid,
+                        comp_name,
+                    )
+                except Exception:
+                    # best effort, keep empty list on failure
+                    component_info["usage_paths"] = component_info.get("usage_paths", [])
+
             aff_vers_map[proj_uuid]["components"].append(component_info)
 
     # Define Severity Rank
