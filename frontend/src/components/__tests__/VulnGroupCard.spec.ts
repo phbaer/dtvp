@@ -100,6 +100,31 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('HIGH')
         expect(wrapper.text()).toContain('9.8')
         expect(wrapper.text()).toContain('lib 1.0')
+
+        const versionSummary = wrapper.find('[data-testid="affected-version-summary"]')
+        expect(versionSummary.exists()).toBe(true)
+        expect(versionSummary.text()).toContain('1 Versions')
+
+        const versionChips = wrapper.findAll('[data-testid="assessment-version-chip"]')
+        expect(versionChips.length).toBe(0) // not expanded yet
+    })
+
+    it('shows sorted project versions in analysis details block', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const versionChips = wrapper.findAll('[data-testid="assessment-version-chip"]')
+        expect(versionChips.length).toBe(1)
+        expect(versionChips[0].text()).toBe('v1.0')
+
+        const instanceBadges = wrapper.findAll('[data-testid="assessment-instance-badge"]')
+        expect(instanceBadges.length).toBe(1)
+        expect(instanceBadges[0].attributes('title')).toContain('App1 1.0 - lib 1.0')
+
+        await versionChips[0].trigger('click')
+        expect(wrapper.text()).toContain('Components in 1.0:')
+        expect(wrapper.text()).toContain('lib@1.0')
     })
 
     it('toggles expansion on click', async () => {
