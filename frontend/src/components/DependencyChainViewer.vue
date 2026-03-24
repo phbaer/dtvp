@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { getDependencyChains } from '../lib/api'
 import DependencyPathList from './DependencyPathList.vue'
 
@@ -7,14 +7,49 @@ const props = defineProps<{
     projectUuid: string
     componentUuid: string
     projectName: string
+    paths?: string[]
 }>()
 
-const paths = ref<string[]>([])
+const emit = defineEmits<{
+    (e: 'depth-updated', depth: number | null): void
+}>()
+
+const paths = ref<string[]>(props.paths ? [...props.paths] : [])
 const loading = ref(false)
 const error = ref('')
-const total = ref(0)
-const loaded = ref(false)
+const total = ref(paths.value.length)
+const loaded = ref(!!props.paths && props.paths.length > 0)
 const expanded = ref(false)
+
+const minimalDepth = computed<number | null>(() => {
+    if (!paths.value || paths.value.length === 0) return null
+    let min = Number.POSITIVE_INFINITY
+    for (const p of paths.value) {
+        const depth = p.split(' -> ').length - 1
+        if (!Number.isNaN(depth) && depth >= 0) {
+            min = Math.min(min, depth)
+        }
+    }
+    return min === Number.POSITIVE_INFINITY ? null : min
+})
+
+watch(minimalDepth, (value) => {
+    emit('depth-updated', value)
+}, { immediate: true })
+
+watch(
+    () => props.paths,
+    (newPaths) => {
+        if (newPaths && newPaths.length > 0) {
+            paths.value = [...newPaths]
+            total.value = paths.value.length
+            loaded.value = true
+            loading.value = false
+            error.value = ''
+        }
+    },
+    { immediate: true }
+)
 
 const loadChains = async (reset = false) => {
     if (reset) {
@@ -22,12 +57,18 @@ const loadChains = async (reset = false) => {
         loaded.value = false
     }
 
+    if (props.paths && props.paths.length > 0) {
+        total.value = props.paths.length
+        loaded.value = true
+        return
+    }
+
     loading.value = true
     error.value = ''
     try {
         const res = await getDependencyChains(props.projectUuid, props.componentUuid)
-        paths.value = res
-        total.value = res.length
+        paths.value = res || []
+        total.value = paths.value.length
         loaded.value = true
     } catch (e: any) {
         error.value = e.message || 'Failed to load chains'
@@ -42,9 +83,6 @@ const toggle = () => {
         loadChains(true)
     }
 }
-
-
-
 </script>
 
 <template>

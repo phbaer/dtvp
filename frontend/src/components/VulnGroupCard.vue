@@ -511,7 +511,8 @@ const groupedAssessments = computed(() => {
             component_name: string,
             component_version: string,
             component_uuid: string,
-            project_uuid: string
+            project_uuid: string,
+            usage_paths?: string[]
         }[]
     }> = new Map()
 
@@ -553,7 +554,8 @@ const groupedAssessments = computed(() => {
                 component_name: c.component_name,
                 component_version: c.component_version,
                 component_uuid: c.component_uuid,
-                project_uuid: v.project_uuid
+                project_uuid: v.project_uuid,
+                usage_paths: c.usage_paths || []
             })
         })
     })
@@ -1173,6 +1175,37 @@ const cardStyle = computed(() => {
     }
 })
 
+const dependencyDepthByInstance = ref<Record<string, number>>({})
+
+const minimalDependencyDepth = computed<number | null>(() => {
+    const depths: number[] = []
+
+    allInstances.value.forEach(inst => {
+        (inst.usage_paths || []).forEach((path: string) => {
+            const value = (path || '').split(' -> ').length - 1
+            if (!Number.isNaN(value)) {
+                depths.push(value)
+            }
+        })
+
+        const calculated = dependencyDepthByInstance.value[inst.component_uuid]
+        if (typeof calculated === 'number') {
+            depths.push(calculated)
+        }
+    })
+
+    if (depths.length === 0) return null
+    return Math.min(...depths)
+})
+
+const setDependencyDepth = (componentUuid: string, depth: number | null) => {
+    if (!componentUuid) return
+    if (depth === null || depth === undefined) {
+        delete dependencyDepthByInstance.value[componentUuid]
+    } else {
+        dependencyDepthByInstance.value[componentUuid] = depth
+    }
+}
 
 
 const affectedComponentNames = computed(() => {
@@ -1434,7 +1467,22 @@ const getJustificationDescription = (justValue: string | undefined) => {
                     >
                         {{ group.affected_versions?.length || 0 }} Versions
                     </div>
-                    
+
+                    <div v-if="minimalDependencyDepth !== null" class="mt-1">
+                        <span v-if="minimalDependencyDepth === 1" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wide text-white bg-red-600 border border-red-500">
+                            Direct
+                        </span>
+                        <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-200 bg-purple-600/20 border border-purple-600/30">
+                            Depth: {{ minimalDependencyDepth }}
+                        </span>
+                    </div>
+
+                    <div v-else class="mt-1">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-700/30 border border-gray-600/30">
+                            Depth: N/A
+                        </span>
+                    </div>
+
                     <div class="mt-1 flex flex-col items-end gap-1">
                         <div v-if="isPendingReview">
                             <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide">
@@ -1585,6 +1633,8 @@ const getJustificationDescription = (justValue: string | undefined) => {
                                                 :project-uuid="inst.project_uuid"
                                                 :component-uuid="inst.component_uuid"
                                                 :project-name="inst.project_name"
+                                                :paths="inst.usage_paths"
+                                                @depth-updated="(depth) => setDependencyDepth(inst.component_uuid, depth)"
                                             />
                                          </div>
                                      </div>
