@@ -7,6 +7,7 @@ import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, E
 
 import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
+import { compareVersions, sortVersions } from '../lib/version'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
 import CvssCalculatorV3 from './CvssCalculatorV3.vue'
@@ -1073,6 +1074,42 @@ const affectedComponentNames = computed(() => {
     return Array.from(names).join(', ')
 })
 
+const getDistinctSortedProjectVersions = (instances: { project_version: string }[]) => {
+    const allVersions = instances
+        .map(i => i.project_version)
+        .filter((v): v is string => !!v)
+
+    const distinct = Array.from(new Set(allVersions))
+    return sortVersions(distinct, true)
+}
+
+const sortedAffectedProjectVersions = computed(() => {
+    const versions = (props.group.affected_versions || [])
+        .map(v => v.project_version)
+        .filter((version): version is string => !!version)
+
+    const uniqueVersions = Array.from(new Set(versions))
+    return sortVersions(uniqueVersions, true)
+})
+
+const affectedVersionTooltip = computed(() => {
+    const versions = sortedAffectedProjectVersions.value
+    if (!versions.length) return 'No affected project versions'
+
+    const components = props.group.affected_versions
+        .flatMap(v => v.components.map(c => `${v.project_version} → ${c.component_name}@${c.component_version}`))
+
+    const uniqueComponents = Array.from(new Set(components)).sort((a, b) => {
+        const [vA] = a.split('→').map(s => s.trim())
+        const [vB] = b.split('→').map(s => s.trim())
+        const compareProjectVersion = compareVersions(vA, vB)
+        if (compareProjectVersion !== 0) return compareProjectVersion
+        return a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
+    })
+
+    return `Affected versions: ${versions.join(', ')}\nComponent instances: ${uniqueComponents.join(', ')}`
+})
+
 const rescoredVectorSegments = computed(() => {
     const rescored = props.group.rescored_vector
     const original = props.group.cvss_vector
@@ -1142,6 +1179,18 @@ const assessedTeams = computed(() => {
 
     return matchedTeams
 })
+
+const expandedVersion = ref<string | null>(null)
+
+const getVersionToComponentTooltip = (version: string, instances: any[]) => {
+    const dataForVersion = instances.filter(i => i.project_version === version)
+    const unique = Array.from(new Set(dataForVersion.map(i => `${i.component_name}@${i.component_version}`)))
+    return unique.length ? unique.join(', ') : 'No components for this version'
+}
+
+const toggleVersionDetails = (version: string) => {
+    expandedVersion.value = expandedVersion.value === version ? null : version
+}
 
 const getStateDescription = (stateValue: string | undefined) => {
     if (!stateValue) return ''
@@ -1272,7 +1321,13 @@ const getJustificationDescription = (justValue: string | undefined) => {
             
             <div class="w-24 text-right">
                     <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
-                    <div class="font-bold text-sm text-gray-300">{{ group.affected_versions?.length || 0 }} Versions</div>
+                    <div 
+                        class="font-bold text-sm text-gray-300"
+                        :title="affectedVersionTooltip"
+                        data-testid="affected-version-summary"
+                    >
+                        {{ group.affected_versions?.length || 0 }} Versions
+                    </div>
                     
                     <div class="mt-1 flex flex-col items-end gap-1">
                         <div v-if="isPendingReview">
@@ -1318,13 +1373,33 @@ const getJustificationDescription = (justValue: string | undefined) => {
                               class="mb-8 last:mb-0 border-l-2 border-gray-700 pl-4 py-2 bg-gray-900/10 rounded-r-lg"
                               data-testid="grouped-assessment">
                              
-                             <!-- Affected Instances List -->
+                             <!-- Affected Versions Chips -->
+                             <div class="mb-2 flex flex-wrap gap-1">
+                                 <span class="text-xs text-gray-400">Affected versions:</span>
+                                 <span v-for="ver in getDistinctSortedProjectVersions(assessment.instances)" :key="ver" 
+                                       class="px-2 py-0.5 rounded text-xs font-semibold cursor-pointer"
+                                       :class="expandedVersion === ver ? 'bg-blue-600 text-white' : 'bg-blue-700/30 text-blue-200 hover:bg-blue-600/40'"
+                                       data-testid="assessment-version-chip"
+                                       :title="getVersionToComponentTooltip(ver, assessment.instances)"
+                                       @click.stop="toggleVersionDetails(ver)">
+                                     v{{ ver }}
+                                 </span>
+                                 <span v-if="getDistinctSortedProjectVersions(assessment.instances).length === 0" class="text-xs text-gray-500">none</span>
+                             </div>
+                             <div v-if="expandedVersion" class="mb-2 text-xs text-gray-300">
+                                 Components in {{ expandedVersion }}:
+                                 <span class="ml-1 text-gray-100">
+                                     {{ getVersionToComponentTooltip(expandedVersion, assessment.instances) || 'none' }}
+                                 </span>
+                             </div>
+
+                             <!-- Affected Instance Badges (component-only) -->
                              <div class="mb-3 flex flex-wrap gap-1.5">
-                                 <span v-for="inst in assessment.instances" :key="inst.component_uuid" 
-                                       class="px-2 py-0.5 bg-gray-800 text-[9px] text-gray-400 rounded border border-gray-700 font-mono"
+                                 <span v-for="inst in assessment.instances" :key="inst.component_uuid"
+                                       class="px-2 py-0.5 bg-gray-800 text-[9px] text-gray-300 rounded border border-gray-700 font-mono"
                                        data-testid="assessment-instance-badge"
-                                       :title="`${inst.project_name} ${inst.project_version}`">
-                                     v{{ inst.project_version }} {{ inst.component_name }} ({{ inst.component_version }})
+                                       :title="`${inst.project_name} ${inst.project_version} - ${inst.component_name} ${inst.component_version}`">
+                                     {{ inst.component_name }}
                                  </span>
                              </div>
 
