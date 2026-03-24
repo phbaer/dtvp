@@ -249,9 +249,115 @@ const resetToDefault = (ver: string) => {
     updateVectorString()
 }
 
+const normalizeRescoredVector = () => {
+    if (!cvssInstance.value) return
+
+    const instance = cvssInstance.value
+
+    const getComponentSafe = (name: string) => {
+        if (typeof instance.getComponentByStringOpt === 'function') {
+            return instance.getComponentByStringOpt(name)
+        }
+        try {
+            return instance.getComponent(name)
+        } catch {
+            return null
+        }
+    }
+
+    const modifiedPairs: [string, string][] = [
+        ['MAV', 'AV'], ['MAC', 'AC'], ['MAT', 'AT'], ['MPR', 'PR'], ['MUI', 'UI'],
+        ['MVC', 'VC'], ['MVI', 'VI'], ['MVA', 'VA'], ['MSC', 'SC'], ['MSI', 'SI'], ['MSA', 'SA'],
+        // CVSS 3.x environmental modified integrity/confidentiality/availability
+        ['MC', 'C'], ['MI', 'I'], ['MA', 'A']
+    ]
+
+    for (const [mod, base] of modifiedPairs) {
+        const modComp = getComponentSafe(mod)
+        const baseComp = getComponentSafe(base)
+        if (!modComp || !baseComp) continue
+
+        const modVal = modComp.shortName
+        const baseVal = baseComp.shortName
+
+        if (modVal === 'X' || baseVal === 'X') continue
+        if (modVal === baseVal) {
+            instance.applyComponentString(mod, 'X')
+        }
+    }
+
+    const requirementMap: Record<string, string[]> = {
+        CR: ['C', 'VC'],
+        IR: ['I', 'VI'],
+        AR: ['A', 'VA']
+    }
+
+    for (const [req, bases] of Object.entries(requirementMap)) {
+        const reqComp = getComponentSafe(req)
+        if (!reqComp) continue
+
+        const reqVal = reqComp.shortName
+        if (reqVal === 'X') continue
+
+        let baseComp = null
+        for (const baseName of bases) {
+            baseComp = getComponentSafe(baseName)
+            if (baseComp) break
+        }
+
+        if (!baseComp) continue
+        const baseVal = baseComp.shortName
+        if (baseVal === 'X') continue
+
+        if (reqVal === baseVal) {
+            instance.applyComponentString(req, 'X')
+        }
+    }
+}
+
+const setCvssInstanceFromVector = (vector: string) => {
+    if (!vector) return
+
+    let v = vector.trim()
+    try {
+        if (v.startsWith('CVSS:4.0')) {
+            cvssInstance.value = new Cvss4P0(v)
+        } else if (v.startsWith('CVSS:3.0')) {
+            v = v.replace('CVSS:3.0', 'CVSS:3.1')
+            cvssInstance.value = new Cvss3P1(v)
+        } else if (v.startsWith('CVSS:3.1')) {
+            cvssInstance.value = new Cvss3P1(v)
+        } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
+            cvssInstance.value = new Cvss2(v)
+        } else {
+            // default to 3.1 fallback when version is missing
+            cvssInstance.value = new Cvss3P1(v)
+            activeVersion.value = '3.1'
+        }
+    } catch (e) {
+        console.error('Failed to parse vector for instance set:', e)
+    }
+}
+
 const updateVectorString = () => {
+    if (!cvssInstance.value) return
     const raw = cvssInstance.value.toString()
     pendingVector.value = raw.split('/').filter((part: string) => !part.endsWith(':X')).join('/')
+}
+
+const cleanRescoredVector = () => {
+    try {
+        if (!pendingVector.value) return
+
+        setCvssInstanceFromVector(pendingVector.value)
+        normalizeRescoredVector()
+        updateVectorString()
+
+        const score = calculateScoreFromVector(pendingVector.value)
+        if (score !== null) pendingScore.value = score
+    } catch (e) {
+        console.error('Failed to clean rescored vector:', e)
+    }
 }
 
 const updateCalcVector = (componentShortName: string, value: string) => {
@@ -1513,6 +1619,13 @@ const getJustificationDescription = (justValue: string | undefined) => {
                                     >
                                         <RotateCcw :size="10" />
                                     </button>
+                                    <button 
+                                        @click="cleanRescoredVector"
+                                        class="text-purple-300 hover:text-purple-200 flex items-center gap-1 cursor-pointer"
+                                        title="Clean unresolved modifiers/requirements"
+                                    >
+                                        Clean
+                                    </button>
                                     <button @click="showCalculatorModal = true" class="text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer">
                                         <ExternalLink :size="10" /> Visual Calculator
                                     </button>
@@ -1521,10 +1634,8 @@ const getJustificationDescription = (justValue: string | undefined) => {
                             <input 
                                 v-model="pendingVector"
                                 type="text" 
-                                :readonly="!canEditBase"
                                 placeholder="CVSS:4.0/AV:N/..."
-                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono disabled:opacity-50"
-                                :class="{ 'cursor-not-allowed text-gray-400': !canEditBase }"
+                                class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono"
                             />
                             <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 text-[9px] text-gray-500/60 flex gap-1.5 truncate">
                                 <span class="uppercase font-bold shrink-0">Original:</span>
