@@ -22,9 +22,10 @@ vi.mock('../../lib/api', () => ({
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
 }))
 
+const replaceSpy = vi.fn(() => Promise.resolve())
 vi.mock('vue-router', () => ({
     useRoute: vi.fn(() => ({ params: {}, query: {} })),
-    useRouter: vi.fn(() => ({ replace: vi.fn(() => Promise.resolve()) })),
+    useRouter: vi.fn(() => ({ replace: replaceSpy })),
     RouterLink: { template: '<a><slot /></a>' }
 }))
 
@@ -37,8 +38,15 @@ vi.mock('../../components/VulnGroupCard.vue', () => ({
 }))
 
 describe('ProjectView.vue', () => {
+    const writeTextSpy = vi.fn(() => Promise.resolve())
+
     beforeEach(() => {
         vi.clearAllMocks()
+        Object.defineProperty(navigator, 'clipboard', {
+            value: { writeText: writeTextSpy },
+            writable: true,
+            configurable: true
+        })
         vi.mocked(useRoute).mockReturnValue({
             params: { name: 'TestProject' }, query: {}
         } as any)
@@ -111,6 +119,98 @@ describe('ProjectView.vue', () => {
         await flushPromises()
 
         expect(wrapper.text()).toContain('No vulnerabilities found')
+    })
+
+    it('filters by direct dependency and versions', async () => {
+        const mockGroups = [
+            {
+                id: '1',
+                title: 'Direct vuln',
+                affected_versions: [
+                    { project_version: '1.0', components: [{ is_direct_dependency: true }] }
+                ]
+            },
+            {
+                id: '2',
+                title: 'Transitive vuln',
+                affected_versions: [
+                    { project_version: '2.0', components: [{ is_direct_dependency: false }] }
+                ]
+            }
+        ]
+        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                stubs: { RouterLink: true },
+                mocks: {
+                    $route: { params: { name: 'TestProject' }, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
+            }
+        })
+
+        await flushPromises()
+
+        expect(wrapper.findAll('.vuln-group-card').length).toBe(2)
+
+        ;(wrapper.vm as any).dependencyFilter = 'DIRECT'
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-group-card').length).toBe(1)
+
+        ;(wrapper.vm as any).dependencyFilter = 'ALL'
+        ;(wrapper.vm as any).versionFilterInput = '1.0'
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-group-card').length).toBe(1)
+
+        ;(wrapper.vm as any).versionFilterInput = '2.0'
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-group-card').length).toBe(1)
+
+        ;(wrapper.vm as any).versionFilterInput = '1.0,2.0'
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-group-card').length).toBe(2)
+
+        // Verify dependency relationship badge counts
+        expect(wrapper.text()).toContain('Direct')
+        expect(wrapper.text()).toContain('Transitive')
+
+        // Query update should occur for state-driven filters
+        expect(replaceSpy).toHaveBeenCalled()
+        const lastCall = replaceSpy.mock.calls[replaceSpy.mock.calls.length - 1] as any[] | undefined
+        const latestQuery = lastCall?.[0]?.query
+        expect(latestQuery).toMatchObject({ versions: '1.0,2.0' })
+    })
+
+    it('copies the current filter URL to clipboard', async () => {
+        vi.mocked(getGroupedVulns).mockResolvedValue([{ id: '1', affected_versions: [] } as any])
+
+        const wrapper = mount(ProjectView, {
+            global: {
+                stubs: { RouterLink: true },
+                mocks: {
+                    $route: { params: { name: 'TestProject' }, query: {} }
+                },
+                provide: {
+                    user: { value: { role: 'REVIEWER' } }
+                }
+            }
+        })
+
+        await flushPromises()
+
+        const copyBtn = wrapper.findAll('button').find(b => b.text().includes('Copy filter URL'))
+        expect(copyBtn).toBeDefined()
+        if (!copyBtn) {
+            throw new Error('Copy button not found')
+        }
+
+        await copyBtn.trigger('click')
+
+        expect(writeTextSpy).toHaveBeenCalled()
+        expect(wrapper.text()).toContain('Copied!')
     })
 
     it('updates local state on assessment update', async () => {

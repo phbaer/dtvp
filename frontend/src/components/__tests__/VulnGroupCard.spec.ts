@@ -67,7 +67,7 @@ describe('VulnGroupCard', () => {
             is_suppressed: false,
             analysis_comments: [], // Add required field
             tags: ['Security'],
-            usage_paths: ['lib -> framework -> App1']
+            is_direct_dependency: false
         }
     ]
 
@@ -110,12 +110,12 @@ describe('VulnGroupCard', () => {
         expect(versionChips.length).toBe(0) // not expanded yet
     })
 
-    it('shows minimal dependency depth badge', () => {
+    it('shows transitive dependency badge', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
         })
 
-        expect(wrapper.text()).toContain('Depth: 2')
+        expect(wrapper.text()).toContain('Transitive')
     })
 
     it('shows sorted project versions in analysis details block', async () => {
@@ -125,15 +125,12 @@ describe('VulnGroupCard', () => {
 
         const versionChips = wrapper.findAll('[data-testid="assessment-version-chip"]')
         expect(versionChips.length).toBe(1)
-        expect(versionChips[0].text()).toBe('v1.0')
+        expect(versionChips[0].text()).toBe('1.0')
 
         const instanceBadges = wrapper.findAll('[data-testid="assessment-instance-badge"]')
         expect(instanceBadges.length).toBe(1)
-        expect(instanceBadges[0].attributes('title')).toContain('App1 1.0 - lib 1.0')
-
-        await versionChips[0].trigger('click')
-        expect(wrapper.text()).toContain('Components in 1.0:')
-        expect(wrapper.text()).toContain('lib@1.0')
+        expect(instanceBadges[0].text()).toContain('lib')
+        expect(instanceBadges[0].text()).toContain('1.0')
     })
 
     it('toggles expansion on click', async () => {
@@ -162,13 +159,12 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         // Select Team
-        await wrapper.find('select').setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
 
-        // Fill form (Team A form)
-        // Note: With team selected, there might be multiple selects (Team, State, Justification?)
-        // Team select is [0], State is [1]
-        const selects = wrapper.findAll('select')
-        await selects[1]?.setValue('NOT_AFFECTED')
+        // Set state
+        ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        await wrapper.vm.$nextTick()
         await wrapper.find('textarea').setValue('False positive')
 
         // Click Apply
@@ -208,7 +204,8 @@ describe('VulnGroupCard', () => {
 
         await wrapper.find('.cursor-pointer').trigger('click')
         // Select Team
-        await wrapper.find('select').setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
 
         const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         applyBtn?.trigger('click')
@@ -294,7 +291,8 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         // Select Team
-        await wrapper.find('select').setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
 
         // Use optional chaining / safe access for find
         // 0: Team, 1: State
@@ -368,7 +366,8 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         // Select Team
-        await wrapper.find('select').setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
 
         const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
         applyBtn?.trigger('click')
@@ -435,17 +434,16 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         // Select Team
-        await wrapper.find('select').setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
 
-        const stateSelect = wrapper.findAll('select')[1] // Second select is Analysis State
-        await stateSelect?.setValue('NOT_AFFECTED')
+        // Set state to NOT_AFFECTED
+        ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        await wrapper.vm.$nextTick()
 
         expect(wrapper.text()).toContain('Justification')
-        const selects = wrapper.findAll('select')
-        expect(selects.length).toBe(3) // Team, State, Justification
-        if (selects.length > 2) {
-            await selects[2]?.setValue('CODE_NOT_PRESENT')
-        }
+        ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
+        await wrapper.vm.$nextTick()
 
         // Apply bulk update
         const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
@@ -474,8 +472,8 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
         await flushPromises()
 
-        const selects = wrapper.findAll('select')
-        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
         await wrapper.find('textarea').setValue('False positive mock')
@@ -515,12 +513,11 @@ describe('VulnGroupCard', () => {
         await modalBtn?.trigger('click')
         await flushPromises()
 
-        const mprSelect = wrapper.find('select#metric-MPR')
-        const crSelect = wrapper.find('select#metric-CR')
         const vectorInput = wrapper.find('input[placeholder="CVSS:4.0/AV:N/..."]')
 
-        await mprSelect?.setValue('N')
-        await crSelect?.setValue('L')
+        ;(wrapper.vm as any).updateCalcVector('MPR', 'N')
+        ;(wrapper.vm as any).updateCalcVector('CR', 'L')
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
         // No cleanup yet, modifications are still present in the vector string
@@ -534,8 +531,9 @@ describe('VulnGroupCard', () => {
         expect((vectorInput.element as HTMLInputElement).value).not.toContain('MPR:')
         expect((vectorInput.element as HTMLInputElement).value).not.toContain('CR:')
 
-        await mprSelect?.setValue('L')
-        await crSelect?.setValue('H')
+        ;(wrapper.vm as any).updateCalcVector('MPR', 'L')
+        ;(wrapper.vm as any).updateCalcVector('CR', 'H')
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
         expect((vectorInput.element as HTMLInputElement).value).toContain('MPR:L')
@@ -589,9 +587,9 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         const vectorInput = wrapper.findAll('input[type="text"]')[0]
-        const selects = wrapper.findAll('select')
 
-        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
         // It should have the modified MC, MI, MA
@@ -600,7 +598,8 @@ describe('VulnGroupCard', () => {
         expect((vectorInput?.element as HTMLInputElement).readOnly).toBe(false)
 
         // Now set it back to EXPLOITABLE
-        await selects[1]?.setValue('EXPLOITABLE')
+        ;(wrapper.vm as any).state = 'EXPLOITABLE'
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
         // It should PRESERVE the modified fields (no revert), per user requirement
@@ -618,12 +617,12 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         // Select Team first because Analyst can't edit General state
-        const teamSelect = wrapper.findAll('select')[0]
-        await teamSelect?.setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
-        const selects = wrapper.findAll('select')
-        await selects[1]?.setValue('NOT_AFFECTED') // State dropdown
+        ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
         await wrapper.find('textarea').setValue('Analyst no rescore')
@@ -667,12 +666,9 @@ describe('VulnGroupCard', () => {
 
         // Fill per-team form
 
-        // select[0] is Team, select[1] is State (but only after team selected)
-        const teamSelect = wrapper.find('select')
-        await teamSelect.setValue('Security')
-
-        // Now find all selects again
-        const selects = wrapper.findAll('select')
+        // Select team
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
         // await wrapper.find('input[type="checkbox"]').setValue(true) // Target only this team - THIS CHECKBOX MIGHT BE THE SUPPRESS ONE NOW?
         // Wait, "Target only this team" checkbox? 
         // In original code, there used to be a "Target specific instances" or something?
@@ -689,7 +685,8 @@ describe('VulnGroupCard', () => {
 
         // I will keep the checkbox interaction if it helps, but verify expectation.
 
-        await selects[1]?.setValue('EXPLOITABLE')
+        ;(wrapper.vm as any).state = 'EXPLOITABLE'
+        await wrapper.vm.$nextTick()
         await wrapper.find('textarea').setValue('Security confirmed exploitable')
 
         // Click Apply
@@ -734,8 +731,8 @@ describe('VulnGroupCard', () => {
         expect(wrapper.findAll('label').some(l => l.text() === 'Suppress this vulnerability')).toBe(false)
 
         // Select team
-        const teamSelect = wrapper.find('select')
-        await teamSelect.setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
 
         // With role-based UI for Analyst:
         // - Comments/Suppression are STILL hidden
@@ -794,18 +791,12 @@ describe('VulnGroupCard', () => {
         expect((textareas[0]?.element as HTMLTextAreaElement).value).toBe('Global info')
 
         // Switch to Security
-        const selects = wrapper.findAll('select')
-        const teamSelect = selects[0] // Team selection is the first select for reviewers
-        if (teamSelect) {
-            await teamSelect.setValue('Security')
-        }
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
 
         // Team view
         expect((textareas[0]?.element as HTMLTextAreaElement).value).toBe('This is urgent')
-        const stateSelect = selects[1]
-        if (stateSelect) {
-            expect((stateSelect.element as HTMLSelectElement).value).toBe('EXPLOITABLE')
-        }
+        expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
     })
 
 
@@ -830,9 +821,8 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Global Assessment')
         expect(wrapper.text()).toContain('Global Baseline')
 
-        // Should show "Global assessment" in the select instead of "No team marker"
-        const teamSelect = wrapper.find('select')
-        expect(teamSelect.text()).toContain('Global assessment')
+        // Should show "Global assessment" for the team selector
+        expect(wrapper.text()).toContain('Global assessment')
 
         // Calculator component should be present in the modal after clicking Visual Calculator
         const calcButton = wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))

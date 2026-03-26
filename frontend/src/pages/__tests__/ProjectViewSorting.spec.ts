@@ -97,8 +97,8 @@ describe('ProjectView.vue Sorting', () => {
         await wrapper.vm.$nextTick()
 
         // Change sortBy to score
-        const select = wrapper.find('select')
-        await select.setValue('score')
+        ;(wrapper.vm as any).sortBy = 'score'
+        await wrapper.vm.$nextTick()
 
         let cards = wrapper.findAll('.vuln-group-card')
         // Default sortOrder is asc, so score 5.0 -> 8.0 -> 9.8
@@ -132,8 +132,8 @@ describe('ProjectView.vue Sorting', () => {
             ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
         await wrapper.vm.$nextTick()
 
-        const select = wrapper.find('select')
-        await select.setValue('id')
+        ;(wrapper.vm as any).sortBy = 'id'
+        await wrapper.vm.$nextTick()
 
         const cards = wrapper.findAll('.vuln-group-card')
         expect(cards[0]!.attributes('data-id')).toBe('CVE-2023-0001')
@@ -158,8 +158,8 @@ describe('ProjectView.vue Sorting', () => {
             ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
         await wrapper.vm.$nextTick()
 
-        const select = wrapper.find('select')
-        await select.setValue('analysis')
+        ;(wrapper.vm as any).sortBy = 'analysis'
+        await wrapper.vm.$nextTick()
 
         const cards = wrapper.findAll('.vuln-group-card')
         // Order: EXPLOITABLE -> IN_TRIAGE -> NOT_SET

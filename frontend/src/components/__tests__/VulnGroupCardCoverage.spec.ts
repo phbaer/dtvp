@@ -52,14 +52,14 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         }
     })
 
-    it('merges duplicate components and specific usage paths', async () => {
+    it('merges duplicate components with the same assessment state', async () => {
         const group = {
             id: 'V1',
             affected_versions: [{
                 project_uuid: 'p1', project_name: 'P1',
                 components: [
-                    { component_uuid: 'c1', component_name: 'C1', component_version: '1.0', usage_paths: ['PathA'], analysis_state: 'S1' },
-                    { component_uuid: 'c1', component_name: 'C1', component_version: '1.0', usage_paths: ['PathB'], analysis_state: 'S1' }
+                    { component_uuid: 'c1', component_name: 'C1', component_version: '1.0', is_direct_dependency: true, analysis_state: 'S1' },
+                    { component_uuid: 'c1', component_name: 'C1', component_version: '1.0', is_direct_dependency: false, analysis_state: 'S1' }
                 ]
             }]
         }
@@ -93,11 +93,12 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('Global info')
 
         // Select Security team
-        await wrapper.find('select').setValue('Security')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
         await flushPromises()
 
         // Should show team info
         expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('Team info')
-        expect((wrapper.findAll('select')[1]?.element as HTMLSelectElement).value).toBe('EXPLOITABLE')
+        expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
     })
 })

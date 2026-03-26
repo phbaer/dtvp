@@ -24,10 +24,9 @@ export const router = createRouter({
 let sessionChecked = false;
 let userRole: string | undefined = undefined;
 
-router.beforeEach(async (to, _from, next) => {
+router.beforeEach(async (to) => {
     // If going to login, allow it
     if (to.path === '/login') {
-        next();
         return;
     }
 
@@ -38,16 +37,12 @@ router.beforeEach(async (to, _from, next) => {
             sessionChecked = true;
         } catch {
             sessionChecked = true;
-            next('/login');
-            return;
+            return '/login';
         }
     }
 
     // Role check for routes with meta.role
     if (to.meta.role && to.meta.role !== userRole) {
-        next('/');
-        return;
+        return '/';
     }
-
-    next();
 });

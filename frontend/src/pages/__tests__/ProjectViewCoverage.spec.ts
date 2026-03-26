@@ -253,18 +253,20 @@ describe('ProjectView Coverage Extras', () => {
         expect((wrapper.vm as any).sortOrder).toBe('asc')
 
         // Change sort by to hit branches
-        const select = wrapper.find('select')
 
         // Severity (hits branch 145 default 5)
-        await select.setValue('severity')
+        ;(wrapper.vm as any).sortBy = 'severity'
+        await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).sortBy).toBe('severity')
 
         // Score (hits fallbacks in 149-150)
-        await select.setValue('score')
+        ;(wrapper.vm as any).sortBy = 'score'
+        await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).sortBy).toBe('score')
 
         // Tags (hits branch 137/138 fallbacks)
-        await select.setValue('tags')
+        ;(wrapper.vm as any).sortBy = 'tags'
+        await wrapper.vm.$nextTick()
         expect((wrapper.vm as any).sortBy).toBe('tags')
     })
 })

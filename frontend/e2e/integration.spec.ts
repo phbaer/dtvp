@@ -306,15 +306,10 @@ test.describe('Integration Tests (Real Backend)', () => {
         await cardHeader.click();
         await page.waitForTimeout(500); // Wait for expansion
 
-        // Click the 'Usage Paths' collapsible summary to expand it
-        const usagePathsSummary = vulnCard.locator('summary').filter({ hasText: 'Usage Paths' }).first();
-        await expect(usagePathsSummary).toBeVisible({ timeout: 5000 });
-        await usagePathsSummary.click();
-
-        // Click the inner 'Show Dependency Chains' button inside DependencyChainViewer
-        const showChainsBtn = page.getByRole('button', { name: /Show Dependency Chains/ }).first();
-        await expect(showChainsBtn).toBeVisible({ timeout: 5000 });
-        await showChainsBtn.click();
+        // Click the dependency chain toggler button on this vulnerability card
+        const chainToggleButton = vulnCard.getByRole('button', { name: /chains/i }).first();
+        await expect(chainToggleButton).toBeVisible({ timeout: 5000 });
+        await chainToggleButton.click();
 
         // Expect the chain segments to be visible in the dependency chain viewer
         await expect(page.getByTitle('log4j-core').first()).toBeVisible({ timeout: 15000 });

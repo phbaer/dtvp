@@ -76,6 +76,8 @@ VULN_PLAINTEXT_NOT_SET_UUID = "d1111a7b-0346-4927-991c-7033580539f0"
 VULN_PLAINTEXT_NOT_AFFECTED_UUID = "d2222a7b-0346-4927-991c-7033580539f1"
 VULN_OPEN_PENDING_UUID = "d7777a7b-0346-4927-991c-7033580539fa"
 VULN_TEAM_PARTIAL_UUID = "d8888a7b-0346-4927-991c-7033580539fb"
+COMMONS_TEXT_UUID = "e253b708-3012-4277-8461-893bd5cd61e4"
+VULN_COMMONS_TEXT_UUID = "e1111a7b-0346-4927-991c-7033580539fc"
 mock_projects = [
     Project(
         name="Vulnerable Project",
@@ -214,6 +216,13 @@ def _component_for_vuln(vuln_uuid: str):
             "version": "1.0.0",
             "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
         }
+    if vuln_uuid == VULN_COMMONS_TEXT_UUID:
+        return {
+            "uuid": COMMONS_TEXT_UUID,
+            "name": "commons-text",
+            "version": "1.9",
+            "purl": "pkg:maven/org.apache.commons/commons-text@1.9",
+        }
     # default fallback component
     return {
         "uuid": COMPONENT_UUID,
@@ -342,6 +351,23 @@ def get_findings(project_uuid: str):
         "matrix": key4,
     }
     current_findings.append(finding4)
+
+    # Finding: Transitive dependency (commons-text via internal-lib-a, NOT team-mapped)
+    key_ct = f"{project_uuid}:{COMMONS_TEXT_UUID}:{VULN_COMMONS_TEXT_UUID}"
+    finding_ct = {
+        "component": {
+            "uuid": COMMONS_TEXT_UUID,
+            "name": "commons-text",
+            "version": "1.9",
+            "purl": "pkg:maven/org.apache.commons/commons-text@1.9",
+        },
+        "vulnerability": mock_vulnerabilities[VULN_COMMONS_TEXT_UUID],
+        "analysis": mock_analysis.get(
+            key_ct, {"analysisState": "NOT_SET", "isSuppressed": False}
+        ),
+        "matrix": key_ct,
+    }
+    current_findings.append(finding_ct)
 
     # Finding 5: Open-filter scenario (pending review with open team assessment)
     key_open = f"{project_uuid}:{COMPONENT_UUID}:{VULN_OPEN_PENDING_UUID}"
@@ -672,6 +698,15 @@ def get_bom(project_uuid: str):
         "uuid": TEAM_TEST_LIB_UUID,
     }
 
+    comp_commons_text = {
+        "type": "library",
+        "name": "commons-text",
+        "version": "1.9",
+        "purl": "pkg:maven/org.apache.commons/commons-text@1.9",
+        "bom-ref": COMMONS_TEXT_UUID,
+        "uuid": COMMONS_TEXT_UUID,
+    }
+
     components = [
         comp_lib_a,
         comp_lib_b,
@@ -680,6 +715,7 @@ def get_bom(project_uuid: str):
         comp_jackson,
         comp_netty,
         comp_team_test,
+        comp_commons_text,
     ]
 
     # Dependencies (The Chain)
@@ -694,10 +730,10 @@ def get_bom(project_uuid: str):
             TEAM_TEST_LIB_UUID,
         ],
     }
-    # Lib A -> Lib B
+    # Lib A -> Lib B, Commons Text
     dep_a = {
         "ref": lib_a_uuid,
-        "dependsOn": [lib_b_uuid],
+        "dependsOn": [lib_b_uuid, COMMONS_TEXT_UUID],
     }
     # Lib B -> log4j
     dep_b = {
@@ -729,6 +765,11 @@ def get_bom(project_uuid: str):
         "ref": TEAM_TEST_LIB_UUID,
         "dependsOn": [],
     }
+    # Commons Text -> [] (transitive via lib_a which is NOT team-mapped)
+    dep_commons_text = {
+        "ref": COMMONS_TEXT_UUID,
+        "dependsOn": [],
+    }
 
     dependencies = [
         dep_root,
@@ -739,6 +780,7 @@ def get_bom(project_uuid: str):
         dep_jackson,
         dep_netty,
         dep_team_test,
+        dep_commons_text,
     ]
 
     # Minimal valid CycloneDX BOM

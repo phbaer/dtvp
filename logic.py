@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 import re
 import json
 import os
@@ -152,17 +152,34 @@ class BOMAnalysisCache:
         self.mapping = mapping
         self.parent_map = build_parent_map(bom)
         self.comp_map = {}  # ref -> comp
+        self.direct_tags_by_name = {}
 
         # Caches
         self.uuid_to_ref = {}
         self.name_to_ref_candidates = {}  # name -> list of refs (in case of dupes, though rare)
+        self.tags_cache = {}  # ref -> tuple(tags)
+        self.path_cache = {}  # ref -> tuple(paths)
         self.analysis_cache = {}  # (component_uuid, component_name) -> (tags, paths)
+        self.ref_to_name = {}  # ref -> human-readable name (includes metadata component)
 
         self._preprocess_components()
 
     def _preprocess_components(self):
+        for name, tag_val in self.mapping.items():
+            self.direct_tags_by_name[name] = self._normalize_tags(tag_val)
+
         if not self.bom:
             return
+
+        # Index metadata component (project root) if present
+        meta_comp = self.bom.get("metadata", {}).get("component", {})
+        meta_ref = meta_comp.get("bom-ref")
+        if meta_ref:
+            if meta_ref not in self.comp_map:
+                self.comp_map[meta_ref] = meta_comp
+            meta_name = meta_comp.get("name")
+            if meta_name:
+                self.ref_to_name[meta_ref] = meta_name
 
         for comp in self.bom.get("components", []):
             ref = comp.get("bom-ref")
@@ -178,9 +195,143 @@ class BOMAnalysisCache:
                 self.uuid_to_ref[c_uuid] = ref
 
             if c_name:
+                self.ref_to_name[ref] = c_name
                 if c_name not in self.name_to_ref_candidates:
                     self.name_to_ref_candidates[c_name] = []
                 self.name_to_ref_candidates[c_name].append(ref)
+
+    def _normalize_tags(self, tag_val: Any) -> Tuple[str, ...]:
+        if isinstance(tag_val, list):
+            return tuple(sorted({str(tag).strip() for tag in tag_val if tag}))
+        if tag_val:
+            return (str(tag_val).strip(),)
+        return ()
+
+    def _get_direct_tags(self, component_name: Optional[str]) -> Set[str]:
+        if not component_name:
+            return set()
+        return set(self.direct_tags_by_name.get(component_name, ()))
+
+    def _get_component_name(self, ref: str) -> str:
+        # Fast path: pre-built ref→name mapping (covers components + metadata)
+        if ref in self.ref_to_name:
+            return self.ref_to_name[ref]
+        # Fallback to comp_map lookup
+        comp = self.comp_map.get(ref, {})
+        name = comp.get("name")
+        if name:
+            self.ref_to_name[ref] = name
+            return name
+        # Try extracting a human-readable name from purl or ref
+        readable = self._humanize_ref(ref)
+        self.ref_to_name[ref] = readable
+        return readable
+
+    @staticmethod
+    def _humanize_ref(ref: str) -> str:
+        """Extract a human-readable name from a purl or bom-ref string."""
+        # purl format: pkg:type/namespace/name@version or pkg:type/name@version
+        if ref.startswith("pkg:"):
+            path = ref.split(":", 1)[1]  # drop "pkg:"
+            path = path.split("?", 1)[0]  # drop qualifiers
+            path = path.split("#", 1)[0]  # drop subpath
+            # type/namespace/name@version or type/name@version
+            parts = path.split("/", 1)
+            if len(parts) > 1:
+                name_part = parts[1]  # namespace/name@version or name@version
+                name_part = name_part.split("@", 1)[0]  # drop version
+                return name_part
+        return ref
+
+    def _get_parent_refs(self, ref: str) -> List[str]:
+        return list(dict.fromkeys(self.parent_map.get(ref, [])))
+
+    def _is_team_mapped_ref(self, ref: str) -> bool:
+        """Check whether a BOM ref corresponds to a component with an explicit team mapping."""
+        name = self._get_component_name(ref)
+        return bool(name and name in self.mapping and name != "*")
+
+    def is_direct_dependency(
+        self,
+        component_uuid: str,
+        component_name: str,
+    ) -> Optional[bool]:
+        """
+        Determine whether a component is a direct dependency.  A component is
+        *direct* when at least one of its immediate parents is either:
+          - the project root (a ref with no parents of its own), or
+          - a team-mapped component.
+        It is *transitive* (False) when none of its parents satisfy the above.
+        Returns None when the component cannot be located or has no parents.
+        """
+        target_ref = self.get_target_ref(component_uuid, component_name)
+        if not target_ref:
+            return None
+
+        parent_refs = self._get_parent_refs(target_ref)
+        if not parent_refs:
+            return None
+
+        for parent_ref in parent_refs:
+            # Direct child of the project root
+            if not self._get_parent_refs(parent_ref):
+                return True
+            # Direct child of a team-mapped component
+            if self._is_team_mapped_ref(parent_ref):
+                return True
+
+        return False
+
+    def _get_tags_for_ref(self, ref: str, visiting: Optional[Set[str]] = None) -> Set[str]:
+        if ref in self.tags_cache:
+            return set(self.tags_cache[ref])
+
+        if visiting is None:
+            visiting = set()
+        if ref in visiting:
+            return set()
+
+        visiting.add(ref)
+        tags = self._get_direct_tags(self._get_component_name(ref))
+        for parent_ref in self._get_parent_refs(ref):
+            tags.update(self._get_tags_for_ref(parent_ref, visiting))
+        visiting.remove(ref)
+
+        cached_tags = tuple(sorted(tags))
+        self.tags_cache[ref] = cached_tags
+        return set(cached_tags)
+
+    def _get_dependency_paths_for_ref(
+        self,
+        ref: str,
+        visiting: Optional[Set[str]] = None,
+    ) -> Tuple[str, ...]:
+        if ref in self.path_cache:
+            return self.path_cache[ref]
+
+        if visiting is None:
+            visiting = set()
+        if ref in visiting:
+            return ()
+
+        parent_refs = self._get_parent_refs(ref)
+        current_name = self._get_component_name(ref)
+        if not parent_refs:
+            paths = (current_name,)
+            self.path_cache[ref] = paths
+            return paths
+
+        visiting.add(ref)
+        found_paths = set()
+        for parent_ref in parent_refs:
+            parent_paths = self._get_dependency_paths_for_ref(parent_ref, visiting)
+            for parent_path in parent_paths:
+                found_paths.add(f"{current_name} -> {parent_path}")
+        visiting.remove(ref)
+
+        cached_paths = tuple(sorted(found_paths))
+        self.path_cache[ref] = cached_paths
+        return cached_paths
 
     def get_target_ref(self, component_uuid: str, component_name: str) -> str:
         # 1. Match by UUID
@@ -199,58 +350,24 @@ class BOMAnalysisCache:
         return None
 
     def get_tags_only(self, component_uuid: str, component_name: str) -> List[str]:
-        found_tags = set()
+        cache_key = (component_uuid or "", component_name or "")
+        cached = self.analysis_cache.get(cache_key)
+        if cached and cached[0] is not None:
+            return list(cached[0])
 
-        # Check direct match first
-        if component_name in self.mapping:
-            tag_val = self.mapping[component_name]
-            if isinstance(tag_val, list):
-                for t in tag_val:
-                    if t:
-                        found_tags.add(t)
-            else:
-                found_tags.add(tag_val)
+        found_tags = self._get_direct_tags(component_name)
 
         target_ref = self.get_target_ref(component_uuid, component_name)
 
         if target_ref:
-            # We still need to traverse parents to find tags inherited from parents
-            queue = [target_ref]
-            visited = {target_ref}
-
-            while queue:
-                current_ref = queue.pop(0)
-
-                # Check current node for Tags
-                current_comp = self.comp_map.get(current_ref)
-                if current_comp:
-                    curr_name = current_comp.get("name")
-                    if curr_name and curr_name in self.mapping:
-                        tag_val = self.mapping[curr_name]
-                        if isinstance(tag_val, list):
-                            for t in tag_val:
-                                if t:
-                                    found_tags.add(t)
-                        else:
-                            found_tags.add(tag_val)
-
-                # Get parents
-                parents = self.parent_map.get(current_ref, [])
-                for p_ref in parents:
-                    if p_ref not in visited:
-                        visited.add(p_ref)
-                        queue.append(p_ref)
+            found_tags.update(self._get_tags_for_ref(target_ref))
 
         if not found_tags and "*" in self.mapping:
-            tag_val = self.mapping["*"]
-            if isinstance(tag_val, list):
-                for t in tag_val:
-                    if t:
-                        found_tags.add(t)
-            else:
-                found_tags.add(tag_val)
+            found_tags.update(self.direct_tags_by_name.get("*", ()))
 
-        return sorted(list(found_tags))
+        tag_list = sorted(found_tags)
+        self.analysis_cache[cache_key] = (tuple(tag_list), cached[1] if cached else None)
+        return tag_list
 
     def get_dependency_paths(
         self,
@@ -260,7 +377,10 @@ class BOMAnalysisCache:
         """
         Returns all dependency paths.
         """
-        # Note: This recalculates paths. Caching might be useful if called often for same comp.
+        cache_key = (component_uuid or "", component_name or "")
+        cached = self.analysis_cache.get(cache_key)
+        if cached and cached[1] is not None:
+            return list(cached[1])
 
         found_paths = set()
         target_ref = self.get_target_ref(component_uuid, component_name)
@@ -272,52 +392,15 @@ class BOMAnalysisCache:
                 start_name = target_comp.get("name") or component_name
 
         if target_ref:
-            # BFS/Queue for traversal
-            queue = [(target_ref, [start_name])]
-            visited_states = set()
-            visited_states.add((target_ref, tuple([start_name])))
-
-            # Safety break to avoid infinite loops or massive memory
-            # The user asked for pagination. If we have 1000s paths, generating all might be slow.
-            # But since we need "total" for pagination, we likely need to generate most of them
-            # or use a smart counting algorithm.
-            # For now, let's generate all (assuming it's reasonable for a single component)
-            # and then slice.
-
-            while queue:
-                current_ref, current_path = queue.pop(0)
-
-                # Get parents
-                parents = self.parent_map.get(current_ref, [])
-
-                if not parents:
-                    # Root node
-                    path_str = " -> ".join(current_path)
-                    found_paths.add(path_str)
-                    continue
-
-                for p_ref in parents:
-                    p_comp = self.comp_map.get(p_ref)
-                    p_name = p_comp.get("name") if p_comp else p_ref
-
-                    if p_name in current_path:
-                        continue
-
-                    new_path = current_path + [str(p_name)]
-                    state = (p_ref, tuple(new_path))
-
-                    if state in visited_states:
-                        continue
-                    visited_states.add(state)
-                    queue.append((p_ref, new_path))
-
+            found_paths.update(self._get_dependency_paths_for_ref(target_ref))
             if not found_paths:
                 found_paths.add(start_name)
         else:
             found_paths.add(component_name)
 
-        # Convert to sorted list
-        return sorted(list(found_paths))
+        path_list = sorted(found_paths)
+        self.analysis_cache[cache_key] = (cached[0] if cached else None, tuple(path_list))
+        return path_list
 
 
 def group_vulnerabilities(
@@ -535,7 +618,8 @@ def group_vulnerabilities(
                 "analysis_comments": analysis.get("analysisComments", []),
                 "is_suppressed": analysis.get("isSuppressed", False)
                 or analysis.get("suppressed", False),
-                "usage_paths": [],
+                "is_direct_dependency": None,
+                "dependency_chains": [],
                 "tags": tags,
             }
 
@@ -548,16 +632,20 @@ def group_vulnerabilities(
                     "components": [],
                 }
 
-            # Try to fill dependency usage paths from BOM cache if available
+            # Resolve the cheap direct/transitive classification without expanding full paths.
             if proj_uuid in bom_processors:
                 try:
-                    component_info["usage_paths"] = bom_processors[proj_uuid].get_dependency_paths(
+                    component_info["is_direct_dependency"] = bom_processors[
+                        proj_uuid
+                    ].is_direct_dependency(
                         comp_uuid,
                         comp_name,
                     )
                 except Exception:
-                    # best effort, keep empty list on failure
-                    component_info["usage_paths"] = component_info.get("usage_paths", [])
+                    # best effort, keep unknown on failure
+                    component_info["is_direct_dependency"] = component_info.get(
+                        "is_direct_dependency"
+                    )
 
             aff_vers_map[proj_uuid]["components"].append(component_info)
 

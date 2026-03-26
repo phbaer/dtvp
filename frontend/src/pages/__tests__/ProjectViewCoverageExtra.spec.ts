@@ -128,7 +128,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
-        await wrapper.find('select').setValue('analysis')
+        ;(wrapper.vm as any).sortBy = 'analysis'
+        await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
         // EXPLOITABLE (0) < NOT_SET (4)
@@ -159,7 +160,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
-        await wrapper.find('select').setValue('tags')
+        ;(wrapper.vm as any).sortBy = 'tags'
+        await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
         // '', '', Alpha, Beta
@@ -190,7 +192,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
-        await wrapper.find('select').setValue('score')
+        ;(wrapper.vm as any).sortBy = 'score'
+        await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
         // 0, 2.0, 5.0, 9.0
@@ -222,7 +225,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
-        await wrapper.find('select').setValue('severity')
+        ;(wrapper.vm as any).sortBy = 'severity'
+        await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
         // CRITICAL (0), HIGH (1), UNKNOWN (5)
@@ -253,7 +257,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
 
-        await wrapper.find('select').setValue('score')
+        ;(wrapper.vm as any).sortBy = 'score'
+        await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
         // 1.0, 3.0, 5.0
@@ -282,7 +287,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
             ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'UNKNOWN_STATE']
         await wrapper.vm.$nextTick()
-        await wrapper.find('select').setValue('analysis')
+        ;(wrapper.vm as any).sortBy = 'analysis'
+        await wrapper.vm.$nextTick()
         const sorted = (wrapper.vm as any).filteredGroups
         expect(sorted[1].id).toBe('V1') // Unknown (99) comes last
     })
@@ -309,7 +315,8 @@ describe('ProjectView Coverage Extra Detailed', () => {
             ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
             ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
         await wrapper.vm.$nextTick()
-        await wrapper.find('select').setValue('tags')
+        ;(wrapper.vm as any).sortBy = 'tags'
+        await wrapper.vm.$nextTick()
         const sorted = (wrapper.vm as any).filteredGroups
         expect(sorted.length).toBe(4)
     })

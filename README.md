@@ -136,6 +136,7 @@ export DTVP_OIDC_CLIENT_ID=mock_id
 export DTVP_OIDC_CLIENT_SECRET=mock_secret
 export DTVP_OIDC_REDIRECT_URI=http://localhost:5173/auth/callback
 export DTVP_FRONTEND_URL=http://localhost:5173
+export DTVP_VERSION_FETCH_CONCURRENCY=4
 uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -182,7 +183,19 @@ The dashboard groups projects by classifier and shows all known versions of a pr
 
 Selecting a project opens the grouped vulnerability view. This is the core workflow: filter by lifecycle and analysis state, inspect team markers, expand a CVE, review the aggregated history, and apply a synchronized assessment.
 
+Recent UI updates reflected in this screenshot:
+- lifecycle and analysis badges now recalculate against the currently filtered dependency/version/search result set instead of showing only overall totals
+- direct/transitive dependency chain rendering now hides the vulnerable endpoint component in each chain for reduced redundancy
+- long chain lists are capped at three items with a “show more” link to expand full chain list for the group
+- team mapping now resolves aliases to the primary configured team name for consistency across lifecycle badges and assessment blocks
+
 ![Expanded project vulnerability view](docs/screenshots/project-view.png)
+
+### 3.1. Dependency Chain Detail
+
+The dependency section groups paths by direct dependency, shows only the primary configured team name for mapped components, and lets you expand longer path lists without repeating the vulnerable endpoint component itself.
+
+![Dependency chain detail view](docs/screenshots/project-view-dependencies.png)
 
 ### 4. Statistics
 
@@ -256,6 +269,7 @@ The image mounts `./data` into the container so local mapping and rule files per
 | `DTVP_CONTEXT_PATH` | Application mount path | `/` |
 | `DTVP_SESSION_SECRET_KEY` | Session signing key | `change_me` |
 | `DTVP_DEFAULT_PROJECT_FILTER` | Default project filter shown on the dashboard | empty |
+| `DTVP_VERSION_FETCH_CONCURRENCY` | Max number of project versions fetched in parallel when building grouped views and statistics | `4` |
 | `DTVP_DEV_DISABLE_AUTH` | Disable OIDC and force the backend to return `devuser` locally | `false` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
 

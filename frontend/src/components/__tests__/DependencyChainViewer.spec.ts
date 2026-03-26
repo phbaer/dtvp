@@ -23,39 +23,30 @@ describe('DependencyChainViewer', () => {
         vi.clearAllMocks()
     })
 
-    it('renders initial closed state', () => {
-        const wrapper = mount(DependencyChainViewer, { props: defaultProps })
-        expect(wrapper.text()).toContain('Show Dependency Chains')
-        expect(wrapper.text()).not.toContain('Loading')
-    })
-
-    it('loads chains when toggled open', async () => {
-        let resolvePromise: (value: any) => void
-        const promise = new Promise(resolve => { resolvePromise = resolve })
-        vi.mocked(getDependencyChains).mockReturnValue(promise as any)
+    it('auto-loads chains on mount', async () => {
+        vi.mocked(getDependencyChains).mockResolvedValue(['A->B', 'C->D'])
 
         const wrapper = mount(DependencyChainViewer, { props: defaultProps })
-
-        await wrapper.find('button').trigger('click')
-        expect(wrapper.text()).toContain('Hide Dependency Chains')
-        expect(wrapper.text()).toContain('Loading dependency chains...')
-
-        resolvePromise!(['A->B', 'C->D'])
         await flushPromises()
 
-        expect(wrapper.text()).not.toContain('Loading dependency chains...')
         expect(getDependencyChains).toHaveBeenCalledWith('p1', 'c1')
         expect(wrapper.find('[data-testid="path-list"]').text()).toContain('2 paths')
-        expect(wrapper.text()).toContain('(2)')
     })
 
+    it('uses pre-loaded paths without API call', async () => {
+        const wrapper = mount(DependencyChainViewer, {
+            props: { ...defaultProps, paths: ['X->Y'] }
+        })
+        await flushPromises()
 
+        expect(getDependencyChains).not.toHaveBeenCalled()
+        expect(wrapper.find('[data-testid="path-list"]').text()).toContain('1 paths')
+    })
 
     it('handles API errors', async () => {
         vi.mocked(getDependencyChains).mockRejectedValue(new Error('API Error'))
 
         const wrapper = mount(DependencyChainViewer, { props: defaultProps })
-        await wrapper.find('button').trigger('click')
         await flushPromises()
 
         expect(wrapper.text()).toContain('API Error')
@@ -65,7 +56,6 @@ describe('DependencyChainViewer', () => {
         vi.mocked(getDependencyChains).mockRejectedValue('Unknown string error')
 
         const wrapper = mount(DependencyChainViewer, { props: defaultProps })
-        await wrapper.find('button').trigger('click')
         await flushPromises()
 
         expect(wrapper.text()).toContain('Failed to load chains')
@@ -75,27 +65,23 @@ describe('DependencyChainViewer', () => {
         vi.mocked(getDependencyChains).mockResolvedValue([])
 
         const wrapper = mount(DependencyChainViewer, { props: defaultProps })
-        await wrapper.find('button').trigger('click')
         await flushPromises()
 
         expect(wrapper.text()).toContain('No dependency chains found')
     })
 
-    it('does not reload if already loaded when toggling', async () => {
+    it('does not reload if paths are provided later via prop', async () => {
         vi.mocked(getDependencyChains).mockResolvedValue(['A'])
         const wrapper = mount(DependencyChainViewer, { props: defaultProps })
-
-        // Open
-        await wrapper.find('button').trigger('click')
         await flushPromises()
+
         expect(getDependencyChains).toHaveBeenCalledTimes(1)
 
-        // Close
-        await wrapper.find('button').trigger('click')
-        expect(wrapper.text()).toContain('Show Dependency Chains')
+        // Simulate paths arriving via prop update
+        await wrapper.setProps({ paths: ['X->Y', 'Z->W'] })
+        await flushPromises()
 
-        // Open again - should not call API again
-        await wrapper.find('button').trigger('click')
+        // Should not call API again
         expect(getDependencyChains).toHaveBeenCalledTimes(1)
     })
 })

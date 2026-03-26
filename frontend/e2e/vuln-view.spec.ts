@@ -161,8 +161,9 @@ test.describe('Vulnerability View and Rescoring', () => {
         await expect(page.locator('text=A bad vulnerability description.')).toBeVisible();
 
         // Select Team first (required to see rescoring fields)
-        const teamSelector = cardHeader.locator('select').first();
-        await teamSelector.selectOption('Security');
+        const teamDropdown = cardHeader.getByRole('button', { name: 'Global assessment' });
+        await teamDropdown.click();
+        await page.locator('.absolute.z-50 button', { hasText: 'Security' }).click();
 
         // Wait for the team assessment header to appear
         await expect(page.locator('text=Team Assessment: Security')).toBeVisible({ timeout: 10000 });

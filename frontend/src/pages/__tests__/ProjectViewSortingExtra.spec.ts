@@ -57,8 +57,8 @@ describe('ProjectView Sorting Extra', () => {
         await wrapper.vm.$nextTick()
 
         // Set sortBy to tags
-        const select = wrapper.find('select')
-        await select.setValue('tags')
+        ;(wrapper.vm as any).sortBy = 'tags'
+        await wrapper.vm.$nextTick()
 
         await wrapper.vm.$nextTick()
 
