@@ -2,7 +2,11 @@ import axios from 'axios';
 import type { Project, GroupedVuln, AssessmentPayload, Statistics } from '../types';
 import { getRuntimeConfig } from './env';
 
-const BASE_URL = (getRuntimeConfig('DTVP_FRONTEND_URL', '') || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '');
+const envApiUrl = getRuntimeConfig('DTVP_API_URL', '').replace(/\/$/, '');
+const envFrontendUrl = getRuntimeConfig('DTVP_FRONTEND_URL', '').replace(/\/$/, '');
+const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '';
+
+const BASE_URL = (envApiUrl || runtimeOrigin || envFrontendUrl).replace(/\/$/, '');
 const CONTEXT_PATH = getRuntimeConfig('DTVP_CONTEXT_PATH', '/').replace(/\/$/, '');
 
 // Ensure CONTEXT_PATH starts with / if not empty
@@ -54,6 +58,7 @@ export interface TaskResponse {
     message: string;
     progress: number;
     result?: GroupedVuln[];
+    log?: string[];
 }
 
 export const startGroupVulnTask = async (name: string, cve?: string): Promise<{ task_id: string }> => {
@@ -71,7 +76,7 @@ export const getTaskStatus = async (taskId: string): Promise<TaskResponse> => {
 };
 
 // Start a task and poll until completion
-export const getGroupedVulns = async (name: string, cve?: string, onProgress?: (msg: string, progress: number) => void): Promise<GroupedVuln[]> => {
+export const getGroupedVulns = async (name: string, cve?: string, onProgress?: (msg: string, progress: number, log?: string[]) => void): Promise<GroupedVuln[]> => {
     // 1. Start Task
     const { task_id } = await startGroupVulnTask(name, cve);
 
@@ -81,7 +86,7 @@ export const getGroupedVulns = async (name: string, cve?: string, onProgress?: (
             try {
                 const status = await getTaskStatus(task_id);
                 if (onProgress) {
-                    onProgress(status.message, status.progress);
+                    onProgress(status.message, status.progress, status.log);
                 }
 
                 if (status.status === 'completed') {

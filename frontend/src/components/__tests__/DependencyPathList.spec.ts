@@ -3,39 +3,51 @@ import { mount } from '@vue/test-utils'
 import DependencyPathList from '../DependencyPathList.vue'
 
 describe('DependencyPathList', () => {
-    it('renders paths as a sparse tree and hides root', () => {
-        const paths = ['Child -> Parent -> Root']
+    it('renders a chain grouped by direct dependency', () => {
+        // Chain: Root -> Parent -> Child  (Root is project, Parent is direct dep, Child is affected)
+        const paths = ['Root -> Parent -> Child']
         const wrapper = mount(DependencyPathList, {
             props: { paths }
         })
 
-        // Should show minimal tree nodes: Parent and Child
-        const items = wrapper.findAll('li')
-
-        expect(items.length).toBe(2)
-        expect(items[0].text()).toBe('Parent')
-        expect(items[1].text()).toBe('Child')
+        const text = wrapper.text()
+        // Should show direct dep 'Parent' (intermediates only, affected component is omitted as redundant)
+        expect(text).toContain('Parent')
+        // Should NOT show stripped project root
+        expect(text).not.toContain('Root')
     })
 
-    it('renders multiple merged paths in sparse tree structure', () => {
+    it('renders multiple chains grouped by direct dependency', () => {
         const paths = [
-            'Vuln1 -> App',
-            'Vuln2 -> Lib -> App'
+            'App -> Vuln1',
+            'App -> Lib -> Vuln2'
         ]
         const wrapper = mount(DependencyPathList, { props: { paths } })
 
-        const listItems = wrapper.findAll('li')
-        // Vuln1 (depth 0), Lib (depth 0), Vuln2 (depth 1)
-        const texts = listItems.map(i => i.text())
+        const text = wrapper.text()
 
-        expect(texts).toContain('Vuln1')
-        expect(texts).toContain('Lib')
-        expect(texts).toContain('Vuln2')
+        // Vuln1 is a direct dependency (chain length 1 after stripping root)
+        expect(text).toContain('Vuln1')
+        expect(text).toContain('(direct)')
 
-        expect(listItems[0].attributes('style')).toContain('padding-left: 0rem')
-        // child should have indent
-        expect(listItems[2].attributes('style')).toContain('padding-left: 1rem')
+        // Lib is a direct dep leading to Vuln2 (Vuln2 is the affected component, omitted from chain)
+        expect(text).toContain('Lib')
     })
 
+    it('shows empty state when no paths', () => {
+        const wrapper = mount(DependencyPathList, { props: { paths: [] } })
+        expect(wrapper.text()).toContain('No dependency chains found')
+    })
 
+    it('shows all intermediates in long chains', () => {
+        const paths = ['Root -> A -> B -> C -> D -> E -> F -> G -> H -> I -> J']
+        const wrapper = mount(DependencyPathList, { props: { paths } })
+
+        const text = wrapper.text()
+        expect(text).toContain('A')
+        expect(text).toContain('B')
+        expect(text).toContain('E')
+        expect(text).toContain('H')
+        expect(text).toContain('I')
+    })
 })

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import shutil
+import socket
 import tomllib
 import uuid
 from contextlib import asynccontextmanager
@@ -57,16 +58,30 @@ app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
 
 
 # CORS for frontend dev
-origins = [
-    "http://localhost:5173",
-    "http://localhost:8000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:8000",
-]
-if auth_settings.FRONTEND_URL:
-    frontend_url = auth_settings.FRONTEND_URL.rstrip("/")
-    if frontend_url not in origins:
-        origins.append(frontend_url)
+# Optionally override via environment variable (comma-separated)
+cors_from_env = os.getenv("DTVP_CORS_ORIGINS")
+if cors_from_env:
+    origins = [o.strip() for o in cors_from_env.split(",") if o.strip()]
+else:
+    origins = [
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000",
+    ]
+    if auth_settings.FRONTEND_URL:
+        frontend_url = auth_settings.FRONTEND_URL.rstrip("/")
+        if frontend_url not in origins:
+            origins.append(frontend_url)
+
+    try:
+        _hostname = socket.gethostname()
+        for _port in ("5173", "8000"):
+            _origin = f"http://{_hostname}:{_port}"
+            if _origin not in origins:
+                origins.append(_origin)
+    except Exception:
+        pass
 
 app.add_middleware(
     CORSMiddleware,
@@ -239,12 +254,143 @@ class TaskResponse(BaseModel):
     result: Optional[List[dict]] = None
 
 
+def get_version_fetch_concurrency() -> int:
+    raw_value = os.getenv("DTVP_VERSION_FETCH_CONCURRENCY", "4")
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid DTVP_VERSION_FETCH_CONCURRENCY=%r, falling back to 4",
+            raw_value,
+        )
+        return 4
+
+
+def merge_vulnerability_details(
+    findings: List[Dict[str, Any]],
+    full_vulns: List[Dict[str, Any]],
+) -> Dict[str, int]:
+    vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
+    severity_counts: Dict[str, int] = {}
+
+    for finding in findings:
+        vuln_summary = finding.get("vulnerability", {})
+        vuln_id = vuln_summary.get("vulnId")
+        severity_label = (vuln_summary.get("severity") or "UNKNOWN").upper()
+        severity_counts[severity_label] = severity_counts.get(severity_label, 0) + 1
+
+        full_vuln = vuln_map.get(vuln_id)
+        if not full_vuln:
+            continue
+
+        for key in [
+            "cvssV4Vector",
+            "cvssV4BaseScore",
+            "cvssV3Vector",
+            "cvssV3BaseScore",
+            "cvssV2Vector",
+            "cvssV2BaseScore",
+            "aliases",
+        ]:
+            if key in full_vuln and key not in vuln_summary:
+                vuln_summary[key] = full_vuln[key]
+
+    return severity_counts
+
+
+async def fetch_version_snapshot(
+    client: DTClient,
+    version_info: Dict[str, Any],
+    cve: Optional[str],
+    team_mapping: Dict[str, Any],
+) -> tuple[Dict[str, Any], BOMAnalysisCache, Dict[str, int]]:
+    findings_result, full_vulns_result, bom_result = await asyncio.gather(
+        client.get_vulnerabilities(version_info["uuid"], cve=cve),
+        client.get_project_vulnerabilities(version_info["uuid"]),
+        client.get_bom(version_info["uuid"]),
+        return_exceptions=True,
+    )
+
+    if isinstance(findings_result, Exception):
+        raise findings_result
+    if isinstance(full_vulns_result, Exception):
+        raise full_vulns_result
+
+    severity_counts = merge_vulnerability_details(findings_result, full_vulns_result)
+
+    if isinstance(bom_result, Exception):
+        bom_cache = BOMAnalysisCache({}, team_mapping)
+    else:
+        bom_cache = BOMAnalysisCache(bom_result or {}, team_mapping)
+
+    return (
+        {"version": version_info, "vulnerabilities": findings_result},
+        bom_cache,
+        severity_counts,
+    )
+
+
+async def collect_version_snapshots(
+    versions: List[Dict[str, Any]],
+    client: DTClient,
+    cve: Optional[str],
+    team_mapping: Dict[str, Any],
+    progress_callback=None,
+) -> tuple[List[Dict[str, Any]], Dict[str, BOMAnalysisCache], Dict[str, Dict[str, int]]]:
+    concurrency = min(get_version_fetch_concurrency(), len(versions)) if versions else 1
+    semaphore = asyncio.Semaphore(concurrency)
+    results: List[Optional[tuple[Dict[str, Any], BOMAnalysisCache, Dict[str, int]]]] = [None] * len(versions)
+
+    async def worker(index: int, version_info: Dict[str, Any]):
+        async with semaphore:
+            combined_entry, bom_cache, severity_counts = await fetch_version_snapshot(
+                client,
+                version_info,
+                cve,
+                team_mapping,
+            )
+            return index, version_info, combined_entry, bom_cache, severity_counts
+
+    pending = [
+        asyncio.create_task(worker(index, version_info))
+        for index, version_info in enumerate(versions)
+    ]
+
+    completed = 0
+    try:
+        for pending_task in asyncio.as_completed(pending):
+            index, version_info, combined_entry, bom_cache, severity_counts = await pending_task
+            results[index] = (combined_entry, bom_cache, severity_counts)
+            completed += 1
+            if progress_callback:
+                progress_callback(completed, len(versions), version_info)
+    finally:
+        for pending_task in pending:
+            if not pending_task.done():
+                pending_task.cancel()
+
+    combined_data = []
+    bom_cache_map = {}
+    version_severity_counts = {}
+    for result in results:
+        if result is None:
+            continue
+        combined_entry, bom_cache, severity_counts = result
+        version_info = combined_entry["version"]
+        combined_data.append(combined_entry)
+        bom_cache_map[version_info["uuid"]] = bom_cache
+        version_severity_counts[version_info.get("version")] = severity_counts
+
+    return combined_data, bom_cache_map, version_severity_counts
+
+
 async def process_grouped_vulns_task(
     task_id: str, name: str, cve: Optional[str], client: DTClient
 ):
     try:
         tasks[task_id]["status"] = "running"
         tasks[task_id]["message"] = "Fetching projects..."
+        tasks[task_id].setdefault("log", []).append("Fetching projects...")
         logger.info("Task %s started for grouped vulnerabilities", task_id)
 
         # 1. Get all projects matching name to find versions
@@ -264,66 +410,30 @@ async def process_grouped_vulns_task(
             tasks[task_id]["result"] = []
             return
 
-        tasks[task_id]["message"] = (
-            f"Found {len(versions)} versions. Fetching vulnerabilities..."
-        )
+        found_msg = f"Found {len(versions)} versions. Fetching vulnerabilities..."
+        tasks[task_id]["message"] = found_msg
+        tasks[task_id].setdefault("log", []).append(found_msg)
 
         # Pre-load mapping once
         team_mapping = load_team_mapping()
-
-        # 2. Sequential fetching with progress update to avoid overloading backend
-        combined_data = []
-        bom_cache_map = {}  # uuid -> BOMAnalysisCache
         total_versions = len(versions)
 
-        for i, v in enumerate(versions):
-            # Update progress
-            progress = int((i / total_versions) * 90)
-            tasks[task_id]["progress"] = progress
-            tasks[task_id]["message"] = (
-                f"Processing version {v['version']} ({i + 1}/{total_versions})..."
-            )
+        def update_progress(completed: int, total: int, version_info: Dict[str, Any]):
+            tasks[task_id]["progress"] = int((completed / total) * 90)
+            msg = f"Processed version {version_info.get('version')} ({completed}/{total})..."
+            tasks[task_id]["message"] = msg
+            tasks[task_id].setdefault("log", []).append(msg)
 
-            # Fetch findings and full details
-            findings = await client.get_vulnerabilities(v["uuid"], cve=cve)
-            full_vulns = await client.get_project_vulnerabilities(v["uuid"])
-
-            # Fetch and PROCESS BOM immediately to save memory
-            try:
-                bom = await client.get_bom(v["uuid"])
-                # Create cache immediately and discard raw BOM
-                bom_cache_map[v["uuid"]] = BOMAnalysisCache(bom, team_mapping)
-                del bom  # Hint for GC
-            except Exception:
-                # Fallback
-                bom_cache_map[v["uuid"]] = BOMAnalysisCache({}, team_mapping)
-
-            # Map vulnId -> vuln_obj for quick lookup
-            vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
-
-            # Merge vector into each finding's vulnerability summary if missing
-            for finding in findings:
-                vuln_summary = finding.get("vulnerability", {})
-                vuln_id = vuln_summary.get("vulnId")
-                full_vuln = vuln_map.get(vuln_id)
-                if full_vuln:
-                    for key in [
-                        "cvssV4Vector",
-                        "cvssV4BaseScore",
-                        "cvssV3Vector",
-                        "cvssV2Vector",
-                        "cvssV3BaseScore",
-                        "cvssV2BaseScore",
-                        "aliases",
-                    ]:
-                        if key in full_vuln and key not in vuln_summary:
-                            vuln_summary[key] = full_vuln[key]
-
-            # Store only what is needed: version info and findings
-            # NO BOM here
-            combined_data.append({"version": v, "vulnerabilities": findings})
+        combined_data, bom_cache_map, _ = await collect_version_snapshots(
+            versions,
+            client,
+            cve,
+            team_mapping,
+            progress_callback=update_progress,
+        )
 
         tasks[task_id]["message"] = "Grouping vulnerabilities..."
+        tasks[task_id].setdefault("log", []).append("Grouping vulnerabilities...")
 
         # Pass the pre-processed BOM cache map
         result = group_vulnerabilities(
@@ -360,6 +470,7 @@ async def start_group_vulns_task(
         "progress": 0,
         "created_at": datetime.now(),
         "result": None,
+        "log": ["Starting..."],
     }
 
     # Extract credentials from the request to forward to the background task
@@ -430,50 +541,16 @@ async def get_statistics(
     versions.sort(key=lambda x: x.get("version", ""))
 
     team_mapping = load_team_mapping()
-    combined_data = []
-    bom_cache_map = {}
-    version_counts = {}
-    version_severity_counts = {}
-
-    # We fetch findings for each version
-    for v in versions:
-        findings = await client.get_vulnerabilities(v["uuid"], cve=cve)
-        full_vulns = await client.get_project_vulnerabilities(v["uuid"])
-
-        # Track counts per version before grouping
-        version_counts[v["version"]] = len(findings)
-        version_severity_counts[v["version"]] = {}
-
-        try:
-            bom = await client.get_bom(v["uuid"])
-            bom_cache_map[v["uuid"]] = BOMAnalysisCache(bom, team_mapping)
-        except Exception:
-            bom_cache_map[v["uuid"]] = BOMAnalysisCache({}, team_mapping)
-
-        vuln_map = {vuln.get("vulnId"): vuln for vuln in full_vulns}
-        for finding in findings:
-            vuln_summary = finding.get("vulnerability", {})
-            vuln_id = vuln_summary.get("vulnId")
-            severity_label = (vuln_summary.get("severity") or "UNKNOWN").upper()
-            version_severity_counts[v["version"]][severity_label] = (
-                version_severity_counts[v["version"]].get(severity_label, 0) + 1
-            )
-
-            full_vuln = vuln_map.get(vuln_id)
-            if full_vuln:
-                for key in [
-                    "cvssV4Vector",
-                    "cvssV4BaseScore",
-                    "cvssV3Vector",
-                    "cvssV3BaseScore",
-                    "cvssV2Vector",
-                    "cvssV2BaseScore",
-                    "aliases",
-                ]:
-                    if key in full_vuln and key not in vuln_summary:
-                        vuln_summary[key] = full_vuln[key]
-
-        combined_data.append({"version": v, "vulnerabilities": findings})
+    combined_data, bom_cache_map, version_severity_counts = await collect_version_snapshots(
+        versions,
+        client,
+        cve,
+        team_mapping,
+    )
+    version_counts = {
+        entry["version"].get("version"): len(entry["vulnerabilities"])
+        for entry in combined_data
+    }
 
     # 2. Group vulnerabilities
     grouped = group_vulnerabilities(

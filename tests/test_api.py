@@ -192,22 +192,27 @@ async def test_statistics_major_version_split(client, mock_dt_client):
         {"name": "TestApp", "uuid": "uuid2", "version": "2.0.0"},
     ]
 
-    mock_dt_client.get_vulnerabilities.side_effect = [
-        [
+    findings_by_uuid = {
+        "uuid1": [
             {
                 "vulnerability": {"vulnId": "CVE-1", "severity": "HIGH"},
                 "component": {"name": "lib", "version": "1.0", "uuid": "comp1"},
                 "analysis": {"state": "NOT_SET"},
             }
         ],
-        [
+        "uuid2": [
             {
                 "vulnerability": {"vulnId": "CVE-2", "severity": "CRITICAL"},
                 "component": {"name": "lib", "version": "1.1", "uuid": "comp2"},
                 "analysis": {"state": "NOT_SET"},
             }
         ],
-    ]
+    }
+
+    async def get_vulnerabilities(project_uuid, cve=None):
+        return findings_by_uuid[project_uuid]
+
+    mock_dt_client.get_vulnerabilities.side_effect = get_vulnerabilities
 
     mock_dt_client.get_project_vulnerabilities.return_value = []
     mock_dt_client.get_bom.return_value = {}

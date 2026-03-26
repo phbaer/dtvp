@@ -13,8 +13,7 @@ import CvssCalculatorV2 from './CvssCalculatorV2.vue'
 import CvssCalculatorV3 from './CvssCalculatorV3.vue'
 import CvssCalculatorV4 from './CvssCalculatorV4.vue'
 import DependencyChainViewer from './DependencyChainViewer.vue'
-
-
+import CustomSelect from './CustomSelect.vue'
 const props = defineProps<{
   group: GroupedVuln
 }>()
@@ -500,7 +499,7 @@ watch(details, (val, old) => {
 })
 
 const groupedAssessments = computed(() => {
-    const groups: Map<string, {
+    const groups = {} as Record<string, {
         state: string,
         details: string,
         isSuppressed: boolean,
@@ -512,30 +511,31 @@ const groupedAssessments = computed(() => {
             component_version: string,
             component_uuid: string,
             project_uuid: string,
-            usage_paths?: string[]
+            is_direct_dependency?: boolean | null,
+            dependency_chains?: string[]
         }[]
-    }> = new Map()
+    }>
 
-    props.group.affected_versions.forEach(v => {
-        v.components.forEach(c => {
-            const stateVal = c.analysis_state || 'NOT_SET'
+    ((props.group && props.group.affected_versions) || []).forEach(v => {
+        ((v && v.components) || []).forEach(c => {
+            const stateVal = (c && c.analysis_state) || 'NOT_SET'
             const detailsVal = c.analysis_details || ''
             const suppressedVal = !!c.is_suppressed
             
-            // Key for grouping
+            // Group by state, details, and suppression — different details get separate boxes
             const key = `${stateVal}|${detailsVal}|${suppressedVal}`
             
-            if (!groups.has(key)) {
-                groups.set(key, {
+            if (!Object.prototype.hasOwnProperty.call(groups, key)) {
+                groups[key] = {
                     state: stateVal,
                     details: detailsVal,
                     isSuppressed: suppressedVal,
                     comments: [],
                     instances: []
-                })
+                }
             }
             
-            const groupItem = groups.get(key)!;
+            const groupItem = groups[key];
             
             // Add unique comments
             (c.analysis_comments || []).forEach((comm: any) => {
@@ -549,19 +549,31 @@ const groupedAssessments = computed(() => {
             })
 
             groupItem.instances.push({
-                project_name: v.project_name,
-                project_version: v.project_version,
+                project_name: v.project_name || '',
+                project_version: v.project_version || '',
                 component_name: c.component_name,
                 component_version: c.component_version,
                 component_uuid: c.component_uuid,
                 project_uuid: v.project_uuid,
-                usage_paths: c.usage_paths || []
+                is_direct_dependency: c.is_direct_dependency ?? null,
+                dependency_chains: c.dependency_chains || []
             })
         })
     })
 
-    return Array.from(groups.values())
+    return Object.values(groups)
 })
+
+const expandedChainComponents = ref(new Set<string>())
+
+const toggleChainForComponent = (key: string) => {
+    const s = new Set(expandedChainComponents.value)
+    if (s.has(key)) s.delete(key)
+    else s.add(key)
+    expandedChainComponents.value = s
+}
+
+const isChainExpanded = (key: string) => expandedChainComponents.value.has(key)
 
 const updateFormFromGroup = (force = true) => {
     // If not forced and user has touched the form, don't overwrite
@@ -1175,37 +1187,15 @@ const cardStyle = computed(() => {
     }
 })
 
-const dependencyDepthByInstance = ref<Record<string, number>>({})
+const dependencyRelationship = computed<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>(() => {
+    const flags = allInstances.value
+        .map(inst => inst.is_direct_dependency)
+        .filter((value): value is boolean => typeof value === 'boolean')
 
-const minimalDependencyDepth = computed<number | null>(() => {
-    const depths: number[] = []
-
-    allInstances.value.forEach(inst => {
-        (inst.usage_paths || []).forEach((path: string) => {
-            const value = (path || '').split(' -> ').length - 1
-            if (!Number.isNaN(value)) {
-                depths.push(value)
-            }
-        })
-
-        const calculated = dependencyDepthByInstance.value[inst.component_uuid]
-        if (typeof calculated === 'number') {
-            depths.push(calculated)
-        }
-    })
-
-    if (depths.length === 0) return null
-    return Math.min(...depths)
+    if (flags.includes(true)) return 'DIRECT'
+    if (flags.includes(false)) return 'TRANSITIVE'
+    return 'UNKNOWN'
 })
-
-const setDependencyDepth = (componentUuid: string, depth: number | null) => {
-    if (!componentUuid) return
-    if (depth === null || depth === undefined) {
-        delete dependencyDepthByInstance.value[componentUuid]
-    } else {
-        dependencyDepthByInstance.value[componentUuid] = depth
-    }
-}
 
 
 const affectedComponentNames = computed(() => {
@@ -1288,6 +1278,17 @@ const normalizedTags = computed(() => {
     return Array.from(result)
 })
 
+const resolveTeamAlias = (name: string): string => {
+    if (!teamMapping?.value) return name
+    for (const componentName in teamMapping.value) {
+        const mappingVal = teamMapping.value[componentName]
+        if (Array.isArray(mappingVal) && mappingVal.length > 1) {
+            if (mappingVal.slice(1).includes(name)) return mappingVal[0]
+        }
+    }
+    return name
+}
+
 const assessedTeams = computed(() => {
     const assessed = getAssessedTeams(props.group)
     const matchedTeams = new Set<string>()
@@ -1319,16 +1320,10 @@ const assessedTeams = computed(() => {
     return matchedTeams
 })
 
-const expandedVersion = ref<string | null>(null)
-
 const getVersionToComponentTooltip = (version: string, instances: any[]) => {
     const dataForVersion = instances.filter(i => i.project_version === version)
     const unique = Array.from(new Set(dataForVersion.map(i => `${i.component_name}@${i.component_version}`)))
     return unique.length ? unique.join(', ') : 'No components for this version'
-}
-
-const toggleVersionDetails = (version: string) => {
-    expandedVersion.value = expandedVersion.value === version ? null : version
 }
 
 const getStateDescription = (stateValue: string | undefined) => {
@@ -1339,6 +1334,50 @@ const getStateDescription = (stateValue: string | undefined) => {
 const getJustificationDescription = (justValue: string | undefined) => {
     if (!justValue) return ''
     return JUSTIFICATION_OPTIONS.find(j => j.value === justValue)?.description || ''
+}
+
+const getComponentSummary = (instances: { component_name: string, component_version: string }[]) => {
+    const map = new Map<string, Set<string>>()
+    instances.forEach(i => {
+        if (!map.has(i.component_name)) map.set(i.component_name, new Set())
+        map.get(i.component_name)!.add(i.component_version)
+    })
+    return Array.from(map.entries()).map(([name, versions]) => ({
+        name,
+        versions: Array.from(versions).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    }))
+}
+
+const partitionByRelationship = (instances: { component_name: string, component_version: string, is_direct_dependency?: boolean | null }[]) => {
+    const direct: typeof instances = []
+    const transitive: typeof instances = []
+    const unknown: typeof instances = []
+    const seenDirect = new Set<string>()
+    const seenTransitive = new Set<string>()
+    const seenUnknown = new Set<string>()
+
+    instances.forEach(i => {
+        const key = `${i.component_name}@${i.component_version}`
+        if (i.is_direct_dependency === true) {
+            if (!seenDirect.has(key)) { direct.push(i); seenDirect.add(key) }
+        } else if (i.is_direct_dependency === false) {
+            if (!seenTransitive.has(key)) { transitive.push(i); seenTransitive.add(key) }
+        } else {
+            if (!seenUnknown.has(key)) { unknown.push(i); seenUnknown.add(key) }
+        }
+    })
+
+    return { direct, transitive, unknown }
+}
+
+const getUniqueComponentInstances = (instances: { component_name: string, component_version: string, component_uuid: string, project_uuid: string, project_name: string, project_version: string, dependency_chains?: string[] }[]) => {
+    const seen = new Set<string>()
+    return instances.filter(i => {
+        const key = `${i.component_name}@${i.component_version}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+    })
 }
 </script>
 
@@ -1468,18 +1507,15 @@ const getJustificationDescription = (justValue: string | undefined) => {
                         {{ group.affected_versions?.length || 0 }} Versions
                     </div>
 
-                    <div v-if="minimalDependencyDepth !== null" class="mt-1">
-                        <span v-if="minimalDependencyDepth === 1" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wide text-white bg-red-600 border border-red-500">
+                    <div class="mt-1">
+                        <span v-if="dependencyRelationship === 'DIRECT'" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wide text-white bg-red-600 border border-red-500">
                             Direct
                         </span>
-                        <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-200 bg-purple-600/20 border border-purple-600/30">
-                            Depth: {{ minimalDependencyDepth }}
+                        <span v-else-if="dependencyRelationship === 'TRANSITIVE'" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-200 bg-purple-600/20 border border-purple-600/30">
+                            Transitive
                         </span>
-                    </div>
-
-                    <div v-else class="mt-1">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-700/30 border border-gray-600/30">
-                            Depth: N/A
+                        <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-700/30 border border-gray-600/30">
+                            Relation: N/A
                         </span>
                     </div>
 
@@ -1527,34 +1563,34 @@ const getJustificationDescription = (justValue: string | undefined) => {
                               class="mb-8 last:mb-0 border-l-2 border-gray-700 pl-4 py-2 bg-gray-900/10 rounded-r-lg"
                               data-testid="grouped-assessment">
                              
-                             <!-- Affected Versions Chips -->
-                             <div class="mb-2 flex flex-wrap gap-1">
-                                 <span class="text-xs text-gray-400">Affected versions:</span>
-                                 <span v-for="ver in getDistinctSortedProjectVersions(assessment.instances)" :key="ver" 
-                                       class="px-2 py-0.5 rounded text-xs font-semibold cursor-pointer"
-                                       :class="expandedVersion === ver ? 'bg-blue-600 text-white' : 'bg-blue-700/30 text-blue-200 hover:bg-blue-600/40'"
-                                       data-testid="assessment-version-chip"
-                                       :title="getVersionToComponentTooltip(ver, assessment.instances)"
-                                       @click.stop="toggleVersionDetails(ver)">
-                                     v{{ ver }}
-                                 </span>
-                                 <span v-if="getDistinctSortedProjectVersions(assessment.instances).length === 0" class="text-xs text-gray-500">none</span>
-                             </div>
-                             <div v-if="expandedVersion" class="mb-2 text-xs text-gray-300">
-                                 Components in {{ expandedVersion }}:
-                                 <span class="ml-1 text-gray-100">
-                                     {{ getVersionToComponentTooltip(expandedVersion, assessment.instances) || 'none' }}
-                                 </span>
+                             <!-- Affected Versions (inline chips) -->
+                             <div class="mb-2">
+                                 <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Affected in</span>
+                                 <div v-if="getDistinctSortedProjectVersions(assessment.instances).length === 0" class="text-xs text-gray-500 italic mt-1">
+                                     Loading versions...
+                                 </div>
+                                 <div v-else class="flex flex-wrap gap-1 mt-1">
+                                     <span
+                                         v-for="ver in getDistinctSortedProjectVersions(assessment.instances)"
+                                         :key="ver"
+                                         class="px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-blue-900/30 text-blue-300 rounded border border-blue-800/30"
+                                         data-testid="assessment-version-chip"
+                                         :title="getVersionToComponentTooltip(ver, assessment.instances)">
+                                         {{ ver }}
+                                     </span>
+                                 </div>
                              </div>
 
-                             <!-- Affected Instance Badges (component-only) -->
-                             <div class="mb-3 flex flex-wrap gap-1.5">
-                                 <span v-for="inst in assessment.instances" :key="inst.component_uuid"
-                                       class="px-2 py-0.5 bg-gray-800 text-[9px] text-gray-300 rounded border border-gray-700 font-mono"
-                                       data-testid="assessment-instance-badge"
-                                       :title="`${inst.project_name} ${inst.project_version} - ${inst.component_name} ${inst.component_version}`">
-                                     {{ inst.component_name }}
-                                 </span>
+                             <!-- Affected Components (compact summary) -->
+                             <div class="mb-3">
+                                 <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Components</span>
+                                 <div class="flex flex-wrap gap-1.5 mt-1">
+                                     <span v-for="comp in getComponentSummary(assessment.instances)" :key="comp.name"
+                                           class="px-1.5 py-0.5 text-[10px] font-mono text-gray-300 bg-gray-800 rounded border border-gray-700"
+                                           data-testid="assessment-instance-badge">
+                                         {{ comp.name }}<span class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
+                                     </span>
+                                 </div>
                              </div>
 
                              <!-- Assessment Data -->
@@ -1565,7 +1601,7 @@ const getJustificationDescription = (justValue: string | undefined) => {
                                          <div class="flex justify-between items-start mb-2">
                                              <div class="flex flex-wrap items-center gap-2">
                                                  <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-900/40 text-blue-300 border border-blue-800/50">
-                                                     {{ block.team === 'General' ? 'Global Policy' : block.team }}
+                                                     {{ block.team === 'General' ? 'Global Policy' : resolveTeamAlias(block.team) }}
                                                  </span>
                                                  <span v-if="block.state && block.state !== 'NOT_SET'" 
                                                        class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50 cursor-help"
@@ -1616,29 +1652,103 @@ const getJustificationDescription = (justValue: string | undefined) => {
                                  No assessment recorded for these versions.
                              </div>
 
-                             <!-- Usage Chains Section (Collapsible) -->
+                             <!-- Dependency Relationship & Chains Section -->
                              <div class="mt-4 pt-2 border-t border-gray-800/50">
-                                 <details class="group/usage">
-                                     <summary class="text-[10px] font-bold text-gray-600 cursor-pointer hover:text-gray-400 select-none flex items-center gap-1.5 uppercase tracking-widest">
-                                         <ChevronDown :size="10" class="group-open/usage:rotate-180 transition-transform" />
-                                         Usage Paths ({{ assessment.instances.length }})
-                                     </summary>
-                                     <div class="mt-3 space-y-6">
-                                         <div v-for="inst in assessment.instances" :key="'graph-' + inst.component_uuid" class="relative">
-                                             <div class="text-[9px] text-gray-500 mb-2 font-mono uppercase tracking-tight flex items-center gap-2">
-                                                 <span class="w-1.5 h-1.5 rounded-full bg-gray-700"></span>
-                                                 {{ inst.project_name }} › {{ inst.component_name }}
+                                 <div class="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2">
+                                     Dependencies
+                                 </div>
+                                 <template v-for="(rel, relIdx) in [partitionByRelationship(assessment.instances)]" :key="relIdx">
+                                     <!-- Direct dependencies -->
+                                     <template v-if="rel.direct.length > 0">
+                                         <div v-for="inst in rel.direct" :key="'d-' + inst.component_name + inst.component_version" class="mb-1">
+                                             <div class="flex items-center gap-1.5">
+                                                 <span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                                                 <span class="text-[10px] font-mono font-semibold text-gray-200">
+                                                     {{ inst.component_name }}<span class="text-gray-500">@{{ inst.component_version }}</span>
+                                                 </span>
+                                                 <span class="px-1 py-0 text-[8px] font-black uppercase text-red-400 bg-red-600/15 rounded border border-red-600/25">Direct</span>
+                                                 <button
+                                                     @click.stop="toggleChainForComponent('d-' + inst.component_name + inst.component_version)"
+                                                     class="ml-auto text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
+                                                     title="Show dependency chains"
+                                                 >
+                                                     <ChevronDown :size="10" :class="isChainExpanded('d-' + inst.component_name + inst.component_version) ? 'rotate-180' : ''" class="transition-transform" />
+                                                     chains
+                                                 </button>
                                              </div>
-                                             <DependencyChainViewer 
-                                                :project-uuid="inst.project_uuid"
-                                                :component-uuid="inst.component_uuid"
-                                                :project-name="inst.project_name"
-                                                :paths="inst.usage_paths"
-                                                @depth-updated="(depth) => setDependencyDepth(inst.component_uuid, depth)"
-                                            />
+                                             <div v-if="isChainExpanded('d-' + inst.component_name + inst.component_version)" class="ml-4 mt-1">
+                                                 <DependencyChainViewer
+                                                     v-for="ui in getUniqueComponentInstances(assessment.instances).filter(u => u.component_name === inst.component_name && u.component_version === inst.component_version)"
+                                                     :key="'chain-d-' + ui.component_uuid"
+                                                     :project-uuid="ui.project_uuid"
+                                                     :component-uuid="ui.component_uuid"
+                                                     :project-name="ui.project_name"
+                                                     :paths="ui.dependency_chains"
+                                                 />
+                                             </div>
                                          </div>
-                                     </div>
-                                 </details>
+                                     </template>
+                                     <!-- Transitive dependencies -->
+                                     <template v-if="rel.transitive.length > 0">
+                                         <div v-for="inst in rel.transitive" :key="'t-' + inst.component_name + inst.component_version" class="mb-1">
+                                             <div class="flex items-center gap-1.5">
+                                                 <span class="w-1.5 h-1.5 rounded-full bg-purple-500/60 shrink-0"></span>
+                                                 <span class="text-[10px] font-mono text-gray-400">
+                                                     {{ inst.component_name }}<span class="text-gray-600">@{{ inst.component_version }}</span>
+                                                 </span>
+                                                 <span class="px-1 py-0 text-[8px] font-bold uppercase text-purple-400/70 bg-purple-600/10 rounded border border-purple-600/20">Transitive</span>
+                                                 <button
+                                                     @click.stop="toggleChainForComponent('t-' + inst.component_name + inst.component_version)"
+                                                     class="ml-auto text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
+                                                     title="Show dependency chains"
+                                                 >
+                                                     <ChevronDown :size="10" :class="isChainExpanded('t-' + inst.component_name + inst.component_version) ? 'rotate-180' : ''" class="transition-transform" />
+                                                     chains
+                                                 </button>
+                                             </div>
+                                             <div v-if="isChainExpanded('t-' + inst.component_name + inst.component_version)" class="ml-4 mt-1">
+                                                 <DependencyChainViewer
+                                                     v-for="ui in getUniqueComponentInstances(assessment.instances).filter(u => u.component_name === inst.component_name && u.component_version === inst.component_version)"
+                                                     :key="'chain-t-' + ui.component_uuid"
+                                                     :project-uuid="ui.project_uuid"
+                                                     :component-uuid="ui.component_uuid"
+                                                     :project-name="ui.project_name"
+                                                     :paths="ui.dependency_chains"
+                                                 />
+                                             </div>
+                                         </div>
+                                     </template>
+                                     <!-- Unknown relationship -->
+                                     <template v-if="rel.unknown.length > 0">
+                                         <div v-for="inst in rel.unknown" :key="'u-' + inst.component_name + inst.component_version" class="mb-1">
+                                             <div class="flex items-center gap-1.5">
+                                                 <span class="w-1.5 h-1.5 rounded-full bg-gray-600 shrink-0"></span>
+                                                 <span class="text-[10px] font-mono text-gray-500">
+                                                     {{ inst.component_name }}<span class="text-gray-600">@{{ inst.component_version }}</span>
+                                                 </span>
+                                                 <span class="px-1 py-0 text-[8px] font-bold uppercase text-gray-500 bg-gray-700/20 rounded border border-gray-600/25">Unknown</span>
+                                                 <button
+                                                     @click.stop="toggleChainForComponent('u-' + inst.component_name + inst.component_version)"
+                                                     class="ml-auto text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
+                                                     title="Show dependency chains"
+                                                 >
+                                                     <ChevronDown :size="10" :class="isChainExpanded('u-' + inst.component_name + inst.component_version) ? 'rotate-180' : ''" class="transition-transform" />
+                                                     chains
+                                                 </button>
+                                             </div>
+                                             <div v-if="isChainExpanded('u-' + inst.component_name + inst.component_version)" class="ml-4 mt-1">
+                                                 <DependencyChainViewer
+                                                     v-for="ui in getUniqueComponentInstances(assessment.instances).filter(u => u.component_name === inst.component_name && u.component_version === inst.component_version)"
+                                                     :key="'chain-u-' + ui.component_uuid"
+                                                     :project-uuid="ui.project_uuid"
+                                                     :component-uuid="ui.component_uuid"
+                                                     :project-name="ui.project_name"
+                                                     :paths="ui.dependency_chains"
+                                                 />
+                                             </div>
+                                         </div>
+                                     </template>
+                                 </template>
                              </div>
                          </div>
                     </div>
@@ -1714,13 +1824,12 @@ const getJustificationDescription = (justValue: string | undefined) => {
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-semibold text-gray-400 mb-1">Team assessment (Marker)</label>
-                            <select 
-                                v-model="selectedTeam" 
-                                class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
-                            >
-                                <option value="">{{ isReviewer ? 'Global assessment' : 'No team marker' }}</option>
-                                <option v-for="t in normalizedTags" :key="t" :value="t">{{ t }}</option>
-                            </select>
+                            <CustomSelect
+                                :modelValue="selectedTeam"
+                                @update:modelValue="selectedTeam = $event"
+                                :options="[{ value: '', label: isReviewer ? 'Global assessment' : 'No team marker' }, ...normalizedTags.map(t => ({ value: t, label: t }))]"
+                                size="sm"
+                            />
                         </div>
                     </div>
 
@@ -1733,23 +1842,22 @@ const getJustificationDescription = (justValue: string | undefined) => {
                         <div class="space-y-3">
                             <div>
                                 <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Analysis State</label>
-                                <select 
-                                    v-model="state" 
-                                    @change="formTouched = true"
-                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
-                                >
-                                    <option v-for="s in ANALYSIS_STATES" :key="s.value" :value="s.value" :title="s.description">{{ s.label }}</option>
-                                </select>
+                                <CustomSelect
+                                    :modelValue="state"
+                                    @update:modelValue="state = $event; formTouched = true"
+                                    :options="ANALYSIS_STATES"
+                                    size="sm"
+                                />
                             </div>
 
                             <div v-if="state === 'NOT_AFFECTED'">
                                 <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Justification</label>
-                                <select 
-                                    v-model="justification" 
-                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500"
-                                >
-                                    <option v-for="o in JUSTIFICATION_OPTIONS" :key="o.value" :value="o.value" :title="o.description">{{ o.label }}</option>
-                                </select>
+                                <CustomSelect
+                                    :modelValue="justification"
+                                    @update:modelValue="justification = $event"
+                                    :options="JUSTIFICATION_OPTIONS"
+                                    size="sm"
+                                />
                             </div>
 
                             <div>

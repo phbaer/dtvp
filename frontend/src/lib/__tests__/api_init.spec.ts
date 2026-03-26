@@ -45,7 +45,32 @@ describe('api.ts initialization', () => {
         Object.defineProperty(window, 'location', { value: originalLocation });
     })
 
-    it('respects custom FRONTEND_URL', async () => {
+    it('DTVP_API_URL takes priority over frontend origin for API requests', async () => {
+        vi.doMock('../env', () => ({
+            getRuntimeConfig: (key: string, def: string) => {
+                if (key === 'DTVP_API_URL') return 'http://localhost:5173';
+                if (key === 'DTVP_FRONTEND_URL') return 'http://localhost:8000';
+                return def;
+            }
+        }))
+
+        const originalLocation = window.location;
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: { origin: 'http://localhost:8000' },
+        });
+
+        await import('../api')
+        const axios = (await import('axios')).default
+
+        expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
+            baseURL: 'http://localhost:5173/api'
+        }))
+
+        Object.defineProperty(window, 'location', { value: originalLocation });
+    })
+
+    it('respects custom FRONTEND_URL when runtime origin is empty', async () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => {
                 if (key === 'DTVP_FRONTEND_URL') return 'https://custom-domain.com'
@@ -53,15 +78,23 @@ describe('api.ts initialization', () => {
             }
         }))
 
+        const originalLocation = window.location;
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: { origin: '' },
+        });
+
         await import('../api')
         const axios = (await import('axios')).default
 
         expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
             baseURL: 'https://custom-domain.com/api'
         }))
+
+        Object.defineProperty(window, 'location', { value: originalLocation });
     })
 
-    it('handles context path with leading slash', async () => {
+    it('handles context path with leading slash when runtime origin is empty', async () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => {
                 if (key === 'DTVP_CONTEXT_PATH') return '/my-app'
@@ -71,6 +104,12 @@ describe('api.ts initialization', () => {
             }
         }))
 
+        const originalLocation = window.location;
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: { origin: '' },
+        });
+
         await import('../api')
         const axios = (await import('axios')).default
 
@@ -79,9 +118,11 @@ describe('api.ts initialization', () => {
         expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
             baseURL: 'http://localhost:8000/my-app/api'
         }))
+
+        Object.defineProperty(window, 'location', { value: originalLocation });
     })
 
-    it('does not duplicate context path if FRONTEND_URL already contains it', async () => {
+    it('does not duplicate context path if FRONTEND_URL already contains it when runtime origin is empty', async () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => {
                 if (key === 'DTVP_CONTEXT_PATH') return '/my-app'
@@ -90,6 +131,12 @@ describe('api.ts initialization', () => {
             }
         }))
 
+        const originalLocation = window.location;
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: { origin: '' },
+        });
+
         await import('../api')
         const axios = (await import('axios')).default
 
@@ -97,9 +144,11 @@ describe('api.ts initialization', () => {
         expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
             baseURL: 'http://localhost:8000/my-app/api'
         }))
+
+        Object.defineProperty(window, 'location', { value: originalLocation });
     })
 
-    it('normalizes context path missing leading slash', async () => {
+    it('normalizes context path missing leading slash when runtime origin is empty', async () => {
         vi.doMock('../env', () => ({
             getRuntimeConfig: (key: string, def: string) => {
                 if (key === 'DTVP_CONTEXT_PATH') return 'my-app' // Missing slash
@@ -108,6 +157,12 @@ describe('api.ts initialization', () => {
             }
         }))
 
+        const originalLocation = window.location;
+        Object.defineProperty(window, 'location', {
+            configurable: true,
+            value: { origin: '' },
+        });
+
         await import('../api')
         const axios = (await import('axios')).default
 
@@ -115,5 +170,7 @@ describe('api.ts initialization', () => {
         expect(axios.create).toHaveBeenCalledWith(expect.objectContaining({
             baseURL: 'http://localhost:8000/my-app/api'
         }))
+
+        Object.defineProperty(window, 'location', { value: originalLocation });
     })
 })

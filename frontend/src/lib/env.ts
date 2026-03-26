@@ -1,4 +1,11 @@
-export const getRuntimeConfig = (key: 'DTVP_CONTEXT_PATH' | 'DTVP_FRONTEND_URL' | 'DTVP_DEV_DISABLE_AUTH' | 'DTVP_DEFAULT_PROJECT_FILTER', defaultValue: string): string => {
+export type RuntimeConfigKey =
+    | 'DTVP_CONTEXT_PATH'
+    | 'DTVP_FRONTEND_URL'
+    | 'DTVP_API_URL'
+    | 'DTVP_DEV_DISABLE_AUTH'
+    | 'DTVP_DEFAULT_PROJECT_FILTER';
+
+export const getRuntimeConfig = (key: RuntimeConfigKey, defaultValue: string): string => {
     // Primary source: server-side injected config via index.html (window.__env__)
     const val = (typeof window !== 'undefined' ? (window as any).__env__?.[key] : undefined);
     if (typeof val === 'string' && val && !val.startsWith('${')) {

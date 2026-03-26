@@ -89,7 +89,7 @@ describe('api.ts', () => {
 
     it('getGroupedVulns reports progress', async () => {
         const mockTaskStart = { task_id: 'task-123' }
-        const mockTaskRunning = { status: 'running', progress: 50, message: 'Step 1' }
+        const mockTaskRunning = { status: 'running', progress: 50, message: 'Step 1', log: ['Starting...', 'Step 1'] }
         const mockTaskCompleted = { status: 'completed', result: [] }
 
         mocks.post.mockResolvedValue({ data: mockTaskStart })
@@ -105,7 +105,7 @@ describe('api.ts', () => {
         await vi.advanceTimersByTimeAsync(1100)
 
         await promise
-        expect(onProgress).toHaveBeenCalledWith('Step 1', 50)
+        expect(onProgress).toHaveBeenCalledWith('Step 1', 50, ['Starting...', 'Step 1'])
         vi.useRealTimers()
     })
 

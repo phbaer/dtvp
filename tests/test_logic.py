@@ -1,5 +1,5 @@
 import logic
-import os
+from unittest.mock import patch
 from logic import group_vulnerabilities, BOMAnalysisCache
 
 
@@ -524,6 +524,34 @@ def test_get_component_analysis_redundant_parents():
     assert paths == ["Child -> Parent"]
 
 
+def test_is_direct_dependency_classification():
+    """Direct means 'immediate child of root or of a team-mapped component'."""
+    bom = {
+        "metadata": {"component": {"bom-ref": "root", "name": "RootProject"}},
+        "components": [
+            {"bom-ref": "team-comp", "uuid": "u-team", "name": "TeamLib"},
+            {"bom-ref": "direct", "uuid": "u-direct", "name": "DirectLib"},
+            {"bom-ref": "transitive", "uuid": "u-trans", "name": "TransitiveLib"},
+        ],
+        "dependencies": [
+            {"ref": "root", "dependsOn": ["team-comp"]},
+            {"ref": "team-comp", "dependsOn": ["direct"]},
+            {"ref": "direct", "dependsOn": ["transitive"]},
+        ],
+    }
+
+    mapping = {"TeamLib": "TeamA"}
+    cache = BOMAnalysisCache(bom, mapping)
+
+    # TeamLib's parent is root (no parents) → True (direct child of root)
+    assert cache.is_direct_dependency("u-team", "TeamLib") is True
+    # DirectLib's parent is TeamLib (team-mapped) → True
+    assert cache.is_direct_dependency("u-direct", "DirectLib") is True
+    # TransitiveLib's parent is DirectLib (not root, not team-mapped) → False
+    assert cache.is_direct_dependency("u-trans", "TransitiveLib") is False
+    assert cache.is_direct_dependency("missing", "Missing") is None
+
+
 def test_group_vulnerabilities_cache_hit():
     import logic
 
@@ -555,3 +583,52 @@ def test_group_vulnerabilities_cache_hit():
 
     grouped = logic.group_vulnerabilities([v1_data], project_boms)
     assert len(grouped) == 2
+
+
+def test_component_analysis_results_are_cached_per_component():
+    bom = {
+        "components": [
+            {"bom-ref": "parent", "uuid": "u1", "name": "Parent"},
+            {"bom-ref": "child", "uuid": "u2", "name": "Child"},
+        ],
+        "dependencies": [{"ref": "parent", "dependsOn": ["child"]}],
+    }
+
+    cache = BOMAnalysisCache(bom, {"Parent": "TeamP"})
+
+    with patch.object(
+        cache,
+        "_get_tags_for_ref",
+        wraps=cache._get_tags_for_ref,
+    ) as wrapped_tags, patch.object(
+        cache,
+        "_get_dependency_paths_for_ref",
+        wraps=cache._get_dependency_paths_for_ref,
+    ) as wrapped_paths:
+        assert cache.get_tags_only("u2", "Child") == ["TeamP"]
+        first_tag_calls = wrapped_tags.call_count
+        assert cache.get_tags_only("u2", "Child") == ["TeamP"]
+        assert wrapped_tags.call_count == first_tag_calls
+
+        assert cache.get_dependency_paths("u2", "Child") == ["Child -> Parent"]
+        first_path_calls = wrapped_paths.call_count
+        assert cache.get_dependency_paths("u2", "Child") == ["Child -> Parent"]
+        assert wrapped_paths.call_count == first_path_calls
+
+
+def test_group_vulnerabilities_emits_dependency_chains():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+    }
+
+    grouped = logic.group_vulnerabilities([v1_data])
+    component = grouped[0]["affected_versions"][0]["components"][0]
+
+    assert component["dependency_chains"] == []

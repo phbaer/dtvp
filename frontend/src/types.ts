@@ -28,7 +28,8 @@ export interface Instance {
         user?: string;
     }>;
     is_suppressed: boolean;
-    usage_paths?: string[];
+    is_direct_dependency?: boolean | null;
+    dependency_chains?: string[];
     justification?: string;
     tags?: string[];
 }

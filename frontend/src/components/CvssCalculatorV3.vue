@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import CustomSelect from './CustomSelect.vue'
 
 const props = defineProps<{
   instance: any
@@ -75,44 +76,32 @@ const structuredGroups = computed(() => {
                 <div v-if="!canEditBase" class="font-mono bg-gray-900 px-2 py-1 rounded border border-gray-700 text-gray-300 w-fit inline-block">
                   {{ instance.getComponent(row.base).name }}
                 </div>
-                <select 
+                <CustomSelect
                   v-else
-                  :id="`metric-${row.base.shortName}`"
-                  :value="instance.getComponent(row.base).shortName" 
-                  @change="emit('update', row.base.shortName, ($event.target as HTMLSelectElement).value)"
-                  class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-gray-300 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 outline-none cursor-pointer"
-                >
-                  <option v-for="val in row.base.values" :key="val.shortName" :value="val.shortName" :title="val.description">
-                    {{ val.name }}
-                  </option>
-                </select>
+                  :modelValue="instance.getComponent(row.base).shortName"
+                  @update:modelValue="emit('update', row.base.shortName, $event)"
+                  :options="row.base.values.map((val: any) => ({ value: val.shortName, label: val.name, description: val.description }))"
+                  size="sm"
+                />
               </td>
               <td class="py-2 px-3">
-                <select 
+                <CustomSelect
                   v-if="row.req"
-                  :id="`metric-${row.req.shortName}`"
-                  :value="instance.getComponent(row.req).shortName" 
-                  @change="emit('update', row.req.shortName, ($event.target as HTMLSelectElement).value)"
-                  class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-indigo-100 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 outline-none cursor-pointer"
-                >
-                  <option v-for="val in row.req.values" :key="val.shortName" :value="val.shortName" :title="val.description">
-                    {{ val.name }}
-                  </option>
-                </select>
+                  :modelValue="instance.getComponent(row.req).shortName"
+                  @update:modelValue="emit('update', row.req.shortName, $event)"
+                  :options="row.req.values.map((val: any) => ({ value: val.shortName, label: val.name, description: val.description }))"
+                  size="sm"
+                />
                 <span v-else class="text-gray-700 select-none">-</span>
               </td>
               <td class="py-2 px-3">
-                <select 
+                <CustomSelect
                   v-if="row.mod"
-                  :id="`metric-${row.mod.shortName}`"
-                  :value="instance.getComponent(row.mod).shortName" 
-                  @change="emit('update', row.mod.shortName, ($event.target as HTMLSelectElement).value)"
-                  class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-purple-100 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none cursor-pointer"
-                >
-                  <option v-for="val in row.mod.values" :key="val.shortName" :value="val.shortName" :title="val.description">
-                    {{ val.name }}
-                  </option>
-                </select>
+                  :modelValue="instance.getComponent(row.mod).shortName"
+                  @update:modelValue="emit('update', row.mod.shortName, $event)"
+                  :options="row.mod.values.map((val: any) => ({ value: val.shortName, label: val.name, description: val.description }))"
+                  size="sm"
+                />
                 <span v-else class="text-gray-700 select-none">-</span>
               </td>
             </tr>
@@ -131,15 +120,12 @@ const structuredGroups = computed(() => {
           <label class="block text-xs font-bold text-gray-400 mb-1" :title="comp.description">
             {{ comp.name }}
           </label>
-          <select 
-            :value="instance.getComponent(comp).shortName" 
-            @change="emit('update', comp.shortName, ($event.target as HTMLSelectElement).value)"
-            class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 text-xs text-gray-200 focus:border-blue-500 cursor-pointer"
-          >
-            <option v-for="val in comp.values" :key="val.shortName" :value="val.shortName" :title="val.description">
-              {{ val.name }} ({{ val.shortName }})
-            </option>
-          </select>
+          <CustomSelect
+            :modelValue="instance.getComponent(comp).shortName"
+            @update:modelValue="emit('update', comp.shortName, $event)"
+            :options="comp.values.map((val: any) => ({ value: val.shortName, label: `${val.name} (${val.shortName})`, description: val.description }))"
+            size="sm"
+          />
         </div>
       </div>
     </div>

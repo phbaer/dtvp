@@ -147,17 +147,17 @@ test.describe('Per-Team Assessment UI Flow', () => {
         const globalHeader = page.getByText(/Global Assessment/i).first();
         await expect(globalHeader).toBeVisible();
 
-        // Verify Team Marker dropdown exists and has options
-        const teamSelector = cardHeader.locator('select').first();
-        await expect(teamSelector).toBeVisible();
+        // Verify Team Marker dropdown exists and select 'Backend'
+        const teamDropdown = cardHeader.getByRole('button', { name: 'Global assessment' });
+        await expect(teamDropdown).toBeVisible();
+        await teamDropdown.click();
+        await page.locator('.absolute.z-50 button', { hasText: 'Backend' }).click();
 
-        // selectOption will wait for the option to be present
-        await teamSelector.selectOption('Backend');
-
-        // Analysis state selection (Label is now "Team Analysis State")
-        const stateSelect = cardHeader.locator('select').nth(1);
-        await expect(stateSelect).toBeVisible();
-        await stateSelect.selectOption('EXPLOITABLE');
+        // Analysis state selection
+        const stateDropdown = cardHeader.getByRole('button', { name: 'Not Set' });
+        await expect(stateDropdown).toBeVisible();
+        await stateDropdown.click();
+        await page.locator('.absolute.z-50 button', { hasText: 'Exploitable' }).click();
 
         // Add details
         await page.fill('textarea[placeholder="Technical details..."]', 'Backend confirms this is exploitable in our environment.');
