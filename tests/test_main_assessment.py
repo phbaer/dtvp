@@ -125,3 +125,61 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
         assert "[Rescored Vector: CVSS:4.0" not in kwargs["details"]
         # Ensure it's still marked as pending
         assert "[Status: Pending Review]" in kwargs["details"]
+
+
+def test_update_assessment_replace_mode_derives_rescored_score(override_deps, mock_client):
+    client = TestClient(app)
+
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "EXPLOITABLE",
+        "details": "[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]\n\n--- [Team: General] [State: EXPLOITABLE] [Assessed By: testuser] ---\nReviewer details",
+        "comparison_mode": "REPLACE",
+    }
+
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        resp = client.post("/api/assessment", json=payload)
+        assert resp.status_code == 200
+
+        mock_client.update_analysis.assert_called_once()
+        _, kwargs = mock_client.update_analysis.call_args
+
+        assert "[Rescored: 7.7]" in kwargs["details"]
+        assert "[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]" in kwargs["details"]
+        assert "[Virtual Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]" in kwargs["details"]
+
+
+def test_update_assessment_replace_mode_embeds_virtual_vector_for_cvss4(override_deps, mock_client):
+    client = TestClient(app)
+
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "IN_TRIAGE",
+        "details": "[Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]\n\n--- [Team: General] [State: IN_TRIAGE] [Assessed By: testuser] ---\nReviewer details",
+        "comparison_mode": "REPLACE",
+    }
+
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        resp = client.post("/api/assessment", json=payload)
+        assert resp.status_code == 200
+
+        mock_client.update_analysis.assert_called_once()
+        _, kwargs = mock_client.update_analysis.call_args
+
+        assert "[Rescored: 10.0]" in kwargs["details"]
+        assert "[Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]" in kwargs["details"]
+        assert "[Virtual Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H]" in kwargs["details"]

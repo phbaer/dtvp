@@ -1,6 +1,6 @@
 import logic
 import os
-from logic import group_vulnerabilities, BOMAnalysisCache
+from logic import group_vulnerabilities, BOMAnalysisCache, calculate_virtual_cvss31_vector
 
 
 def test_group_vulnerabilities_basic():
@@ -105,6 +105,79 @@ def test_group_vulnerabilities_rescored():
     assert g["rescored_vector"] == "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L"
     assert g["cvss_score"] == 9.8
     assert g["cvss_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+
+
+def test_group_vulnerabilities_derives_rescored_score_from_vector():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-VECTOR-ONLY",
+                    "uuid": "vuuid1",
+                    "severity": "HIGH",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]\nSome details",
+                },
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 1
+    g = grouped[0]
+    assert g["rescored_cvss"] == 7.7
+    assert g["rescored_vector"] == "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L"
+
+
+def test_group_vulnerabilities_maps_cvss4_vector_to_virtual_cvss31_score():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-V4-VECTOR",
+                    "uuid": "vuuid1",
+                    "severity": "HIGH",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "[Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]\nSome details",
+                },
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 1
+    g = grouped[0]
+    assert g["rescored_cvss"] == 10.0
+    assert g["rescored_vector"] == "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L"
+
+
+def test_calculate_virtual_cvss31_vector_returns_same_v31_vector():
+    vector = "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L"
+    assert calculate_virtual_cvss31_vector(vector) == vector
+
+
+def test_calculate_virtual_cvss31_vector_maps_cvss2_to_v31():
+    assert (
+        calculate_virtual_cvss31_vector("AV:N/AC:L/Au:N/C:P/I:P/A:P")
+        == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"
+    )
+
+
+def test_calculate_virtual_cvss31_vector_maps_cvss4_to_v31():
+    assert (
+        calculate_virtual_cvss31_vector(
+            "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L"
+        )
+        == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"
+    )
 
 
 def test_group_vulnerabilities_missing_data():

@@ -3,13 +3,281 @@ import re
 import json
 import os
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
 # Pre-compile regex patterns
 RE_SCORE = re.compile(r"\[Rescored:\s*([\d\.]+)\]")
 RE_VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
+RE_VIRTUAL_VECTOR = re.compile(r"\[Virtual Rescored Vector:\s*([^\]]+)\]")
 RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
+RE_SCORE_ANY = re.compile(r"\[Rescored:\s*[^\]]*\]")
+
+CVSS31_AV = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
+CVSS31_AC = {"L": 0.77, "H": 0.44}
+CVSS31_UI = {"N": 0.85, "R": 0.62}
+CVSS31_PR = {
+    "U": {"N": 0.85, "L": 0.62, "H": 0.27},
+    "C": {"N": 0.85, "L": 0.68, "H": 0.5},
+}
+CVSS31_CIA = {"N": 0.0, "L": 0.22, "H": 0.56}
+
+
+def _round_up_cvss(score: float) -> float:
+    return math.ceil((score * 10) - 1e-10) / 10.0
+
+
+def _format_cvss31_vector(metrics: Dict[str, str]) -> str:
+    ordered_keys = ("AV", "AC", "PR", "UI", "S", "C", "I", "A")
+    parts = [f"{key}:{metrics[key]}" for key in ordered_keys]
+    return "CVSS:3.1/" + "/".join(parts)
+
+
+def _parse_vector_metrics(vector: str) -> Dict[str, str]:
+    metrics = {}
+    if not vector:
+        return metrics
+
+    for part in vector.strip().split("/"):
+        if ":" not in part:
+            continue
+        key, value = part.split(":", 1)
+        if key == "CVSS":
+            continue
+        metrics[key] = value
+    return metrics
+
+
+def _map_cvss2_to_cvss31(metrics: Dict[str, str]) -> Optional[Dict[str, str]]:
+    mapped = {
+        "AV": metrics.get("AV"),
+        "AC": "L" if metrics.get("AC") == "L" else "H",
+        "PR": {"N": "N", "S": "L", "M": "H"}.get(metrics.get("Au")),
+        "UI": "N",
+        "S": "U",
+        "C": {"N": "N", "P": "L", "C": "H"}.get(metrics.get("C")),
+        "I": {"N": "N", "P": "L", "C": "H"}.get(metrics.get("I")),
+        "A": {"N": "N", "P": "L", "C": "H"}.get(metrics.get("A")),
+    }
+
+    if any(value is None for value in mapped.values()):
+        return None
+    return mapped
+
+
+def _map_cvss4_to_cvss31(metrics: Dict[str, str]) -> Optional[Dict[str, str]]:
+    av = metrics.get("AV")
+    ac = metrics.get("AC")
+    at = metrics.get("AT")
+    pr = metrics.get("PR")
+    ui = metrics.get("UI")
+
+    if at and at != "N":
+        ac = "H"
+
+    mapped = {
+        "AV": av,
+        "AC": ac,
+        "PR": pr,
+        "UI": {"N": "N", "P": "R", "A": "R"}.get(ui, ui),
+        "S": "C"
+        if any(metrics.get(key, "N") != "N" for key in ("SC", "SI", "SA"))
+        else "U",
+        "C": "H"
+        if "H" in {metrics.get("VC", "N"), metrics.get("SC", "N")}
+        else "L"
+        if "L" in {metrics.get("VC", "N"), metrics.get("SC", "N")}
+        else "N",
+        "I": "H"
+        if "H" in {metrics.get("VI", "N"), metrics.get("SI", "N")}
+        else "L"
+        if "L" in {metrics.get("VI", "N"), metrics.get("SI", "N")}
+        else "N",
+        "A": "H"
+        if "H" in {metrics.get("VA", "N"), metrics.get("SA", "N")}
+        else "L"
+        if "L" in {metrics.get("VA", "N"), metrics.get("SA", "N")}
+        else "N",
+    }
+
+    if any(value is None for value in mapped.values()):
+        return None
+    return mapped
+
+
+def calculate_virtual_cvss31_score(vector: Optional[str]) -> Optional[float]:
+    virtual_vector = calculate_virtual_cvss31_vector(vector)
+    if not virtual_vector:
+        return None
+
+    cvss31_metrics = _parse_vector_metrics(virtual_vector)
+
+    if not cvss31_metrics or any(value is None for value in cvss31_metrics.values()):
+        return None
+
+    try:
+        scope = cvss31_metrics["S"]
+        iss = 1 - (
+            (1 - CVSS31_CIA[cvss31_metrics["C"]])
+            * (1 - CVSS31_CIA[cvss31_metrics["I"]])
+            * (1 - CVSS31_CIA[cvss31_metrics["A"]])
+        )
+
+        if scope == "U":
+            impact = 6.42 * iss
+        else:
+            impact = 7.52 * (iss - 0.029) - 3.25 * math.pow(iss - 0.02, 15)
+
+        exploitability = 8.22 * (
+            CVSS31_AV[cvss31_metrics["AV"]]
+            * CVSS31_AC[cvss31_metrics["AC"]]
+            * CVSS31_PR[scope][cvss31_metrics["PR"]]
+            * CVSS31_UI[cvss31_metrics["UI"]]
+        )
+
+        if impact <= 0:
+            return 0.0
+
+        if scope == "U":
+            score = min(impact + exploitability, 10.0)
+        else:
+            score = min(1.08 * (impact + exploitability), 10.0)
+
+        return _round_up_cvss(score)
+    except (KeyError, ValueError, TypeError):
+        logger.warning("Failed to calculate virtual CVSS v3.1 score for vector %s", vector)
+        return None
+
+
+def calculate_virtual_cvss31_vector(vector: Optional[str]) -> Optional[str]:
+    if not vector:
+        return None
+
+    normalized = vector.strip()
+    metrics = _parse_vector_metrics(normalized)
+    if not metrics:
+        return None
+
+    if normalized.startswith("CVSS:3.1/"):
+        return normalized
+
+    if normalized.startswith("CVSS:4.0/"):
+        cvss31_metrics = _map_cvss4_to_cvss31(metrics)
+    elif normalized.startswith("CVSS:3."):
+        cvss31_metrics = {
+            "AV": metrics.get("AV"),
+            "AC": metrics.get("AC"),
+            "PR": metrics.get("PR"),
+            "UI": metrics.get("UI"),
+            "S": metrics.get("S"),
+            "C": metrics.get("C"),
+            "I": metrics.get("I"),
+            "A": metrics.get("A"),
+        }
+    else:
+        cvss31_metrics = _map_cvss2_to_cvss31(metrics)
+
+    if not cvss31_metrics or any(value is None for value in cvss31_metrics.values()):
+        return None
+
+    return _format_cvss31_vector(cvss31_metrics)
+
+
+def extract_rescored_metadata(
+    details: str,
+) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+    rescored_score = None
+    rescored_vector = None
+    virtual_rescored_vector = None
+
+    if not details:
+        return rescored_score, rescored_vector, virtual_rescored_vector
+
+    match_score = RE_SCORE.search(details)
+    if match_score:
+        try:
+            rescored_score = float(match_score.group(1))
+        except ValueError:
+            rescored_score = None
+
+    match_vector = RE_VECTOR.search(details)
+    if match_vector:
+        rescored_vector = match_vector.group(1).strip()
+    else:
+        match_any_vector = RE_ANY_VECTOR.search(details)
+        if match_any_vector:
+            rescored_vector = match_any_vector.group(1).strip()
+
+    match_virtual_vector = RE_VIRTUAL_VECTOR.search(details)
+    if match_virtual_vector:
+        virtual_rescored_vector = match_virtual_vector.group(1).strip()
+
+    if rescored_vector:
+        virtual_rescored_vector = calculate_virtual_cvss31_vector(rescored_vector)
+
+    if rescored_score is None and rescored_vector:
+        rescored_score = calculate_virtual_cvss31_score(rescored_vector)
+
+    return rescored_score, rescored_vector, virtual_rescored_vector
+
+
+def extract_rescored_values(details: str) -> Tuple[Optional[float], Optional[str]]:
+    rescored_score, rescored_vector, _ = extract_rescored_metadata(details)
+    return rescored_score, rescored_vector
+
+
+def extract_virtual_rescored_vector(details: str) -> Optional[str]:
+    _, _, virtual_rescored_vector = extract_rescored_metadata(details)
+    return virtual_rescored_vector
+
+
+def normalize_rescored_tags(details: str, role: str) -> str:
+    if not details:
+        return details
+
+    if role != "REVIEWER":
+        cleaned = RE_SCORE_ANY.sub("", details)
+        cleaned = RE_VECTOR.sub("", cleaned)
+        cleaned = RE_VIRTUAL_VECTOR.sub("", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    rescored_score, rescored_vector, virtual_rescored_vector = extract_rescored_metadata(
+        details
+    )
+    cleaned = RE_SCORE_ANY.sub("", details).strip()
+    cleaned = RE_VIRTUAL_VECTOR.sub("", cleaned).strip()
+
+    if rescored_score is None:
+        return cleaned
+
+    score_tag = f"[Rescored: {rescored_score}]"
+    virtual_vector_tag = (
+        f"[Virtual Rescored Vector: {virtual_rescored_vector}]"
+        if virtual_rescored_vector
+        else None
+    )
+    vector_match = RE_VECTOR.search(cleaned)
+    if vector_match:
+        replacement_tags = [score_tag, cleaned[vector_match.start() : vector_match.end()].strip()]
+        if virtual_vector_tag:
+            replacement_tags.append(virtual_vector_tag)
+        return (
+            cleaned[: vector_match.start()].rstrip()
+            + (" " if cleaned[: vector_match.start()].strip() else "")
+            + " ".join(replacement_tags)
+            + cleaned[vector_match.end() :]
+        ).strip()
+
+    extra_tags = [score_tag]
+    if rescored_vector:
+        extra_tags.append(f"[Rescored Vector: {rescored_vector}]")
+    if virtual_vector_tag:
+        extra_tags.append(virtual_vector_tag)
+
+    return (" ".join(extra_tags) + (f"\n{cleaned}" if cleaned else "")).strip()
 
 
 def get_team_mapping_path() -> str:
@@ -454,6 +722,7 @@ def group_vulnerabilities(
                     "cvss_vector": new_cvss_vector,
                     "rescored_cvss": None,
                     "rescored_vector": None,
+                    "rescored_virtual_vector": None,
                     "affected_versions": {},
                     "tags": set(),
                     "aliases": set(groups_by_root.get(root, [])) - {canonical_id},
@@ -482,27 +751,9 @@ def group_vulnerabilities(
             analysis = finding.get("analysis", {})
             details = analysis.get("analysisDetails") or ""
 
-            # Parse rescored value if present
-            rescored_score = None
-            rescored_vector = None
-            if details:
-                # Parse Score
-                match_score = RE_SCORE.search(details)
-                if match_score:
-                    try:
-                        rescored_score = float(match_score.group(1))
-                    except ValueError:
-                        pass
-
-                # Parse Vector
-                match_vector = RE_VECTOR.search(details)
-                if match_vector:
-                    rescored_vector = match_vector.group(1).strip()
-                else:
-                    # Fallback: Search for any CVSS vector string in the details
-                    match_any_vector = RE_ANY_VECTOR.search(details)
-                    if match_any_vector:
-                        rescored_vector = match_any_vector.group(1).strip()
+            rescored_score, rescored_vector, rescored_virtual_vector = (
+                extract_rescored_metadata(details)
+            )
 
             # Set rescored score/vector if they were explicitly provided
             if rescored_score is not None:
@@ -514,8 +765,13 @@ def group_vulnerabilities(
                     # Also update vector if provided alongside the highest score
                     if rescored_vector:
                         groups[canonical_id]["rescored_vector"] = rescored_vector
+                    if rescored_virtual_vector:
+                        groups[canonical_id]["rescored_virtual_vector"] = (
+                            rescored_virtual_vector
+                        )
             elif rescored_vector and groups[canonical_id]["rescored_vector"] is None:
                 groups[canonical_id]["rescored_vector"] = rescored_vector
+                groups[canonical_id]["rescored_virtual_vector"] = rescored_virtual_vector
 
             component_info = {
                 "project_uuid": proj_uuid,
@@ -691,7 +947,7 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
 
         # Clean metadata from content to prevent leakage
         content = re.sub(
-            r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]",
+            r"\[(Rescored|Rescored Vector|Virtual Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]",
             "",
             content,
         )
@@ -726,6 +982,7 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                     "reviewer": parsed_tags.get("Reviewed By"),
                     "rescored": rescored_val,
                     "vector": parsed_tags.get("Rescored Vector"),
+                    "virtual_vector": parsed_tags.get("Virtual Rescored Vector"),
                     "details": content,
                 }
             )
@@ -754,23 +1011,16 @@ def process_assessment_details(
     new_rescored_val = None
     new_rescored_vector = None
     if role == "REVIEWER":
-        match_score = RE_SCORE.search(new_details)
-        if match_score:
-            try:
-                new_rescored_val = float(match_score.group(1))
-            except ValueError:
-                pass
-
-        match_vector = RE_VECTOR.search(new_details) or RE_ANY_VECTOR.search(
-            new_details
+        new_rescored_val, new_rescored_vector, new_virtual_rescored_vector = (
+            extract_rescored_metadata(new_details)
         )
-        if match_vector:
-            new_rescored_vector = match_vector.group(1).strip()
+    else:
+        new_virtual_rescored_vector = None
 
     # 3. Clean New Content (Strip all headers and tags)
     content = re.sub(r"---.*?---", "", new_details, flags=re.DOTALL)
     content = re.sub(
-        r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State):\s*[^\]]*\]",
+        r"\[(Rescored|Rescored Vector|Virtual Rescored Vector|Assessed By|Reviewed By|Team|State):\s*[^\]]*\]",
         "",
         content,
     )
@@ -791,6 +1041,7 @@ def process_assessment_details(
                 "details": shared_text,
                 "rescored": None,
                 "vector": None,
+                "virtual_vector": None,
             },
         )
         shared_text = ""
@@ -821,6 +1072,15 @@ def process_assessment_details(
         if new_rescored_vector
         else (target_block.get("vector") if target_block else None)
     )
+    if res_val is None and res_vec:
+        res_val = calculate_virtual_cvss31_score(res_vec)
+    res_virtual_vec = (
+        new_virtual_rescored_vector
+        if new_virtual_rescored_vector
+        else (target_block.get("virtual_vector") if target_block else None)
+    )
+    if res_virtual_vec is None and res_vec:
+        res_virtual_vec = calculate_virtual_cvss31_vector(res_vec)
 
     if target_block:
         target_block.update(
@@ -830,6 +1090,7 @@ def process_assessment_details(
                 "reviewer": final_reviewer,
                 "rescored": res_val,
                 "vector": res_vec,
+                "virtual_vector": res_virtual_vec,
                 "details": content,
             }
         )
@@ -842,6 +1103,7 @@ def process_assessment_details(
                 "reviewer": final_reviewer,
                 "rescored": res_val,
                 "vector": res_vec,
+                "virtual_vector": res_virtual_vec,
                 "details": content,
             }
         )
@@ -871,6 +1133,8 @@ def process_assessment_details(
             h_parts.append(f"[Rescored: {b['rescored']}]")
         if b.get("vector"):
             h_parts.append(f"[Rescored Vector: {b['vector']}]")
+        if b.get("virtual_vector"):
+            h_parts.append(f"[Virtual Rescored Vector: {b['virtual_vector']}]")
 
         header = "--- " + " ".join(h_parts) + " ---"
         final_parts.append(f"{header}\n{b.get('details') or ''}")

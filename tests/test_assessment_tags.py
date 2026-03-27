@@ -163,6 +163,48 @@ class TestAssessmentTags(unittest.TestCase):
         self.assertNotIn("[Team: InventoryTeam]", result)
         self.assertNotIn("[Status: Pending Review]", result)
 
+    def test_assessment_details_derives_rescored_score_from_vector(self):
+        result, state = process_assessment_details(
+            "Updated security analysis.\n[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]",
+            "reviewer",
+            "REVIEWER",
+            team="Security",
+            state="EXPLOITABLE",
+            existing_details="",
+        )
+
+        self.assertIn("[Rescored: 7.7]", result)
+        self.assertIn(
+            "[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]",
+            result,
+        )
+        self.assertIn(
+            "[Virtual Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]",
+            result,
+        )
+        self.assertEqual(state, "EXPLOITABLE")
+
+    def test_assessment_details_embeds_virtual_vector_for_cvss4(self):
+        result, state = process_assessment_details(
+            "Updated platform analysis.\n[Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]",
+            "reviewer",
+            "REVIEWER",
+            team="Platform",
+            state="IN_TRIAGE",
+            existing_details="",
+        )
+
+        self.assertIn("[Rescored: 10.0]", result)
+        self.assertIn(
+            "[Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]",
+            result,
+        )
+        self.assertIn(
+            "[Virtual Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H]",
+            result,
+        )
+        self.assertEqual(state, "IN_TRIAGE")
+
 
 if __name__ == "__main__":
     unittest.main()

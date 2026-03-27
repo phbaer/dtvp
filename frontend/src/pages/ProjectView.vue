@@ -3,7 +3,7 @@ import { ref, watch, computed, inject, provide, onMounted, onUnmounted } from 'v
 import { useRoute } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics } from '../lib/api'
 import { getGroupLifecycle, isPendingReview as isPendingReviewHelper, matchesFilters, getGroupTechnicalState, tagToString } from '../lib/assessment-helpers'
-import { calculateScoreFromVector } from '../lib/cvss'
+import { calculateScoreFromVector, calculateVirtualCvss31Vector } from '../lib/cvss'
 import type { GroupedVuln, Statistics } from '../types'
 
 import VulnGroupCard from '../components/VulnGroupCard.vue'
@@ -98,6 +98,9 @@ const fetchVulns = async () => {
             if (!g.rescored_cvss && g.rescored_vector) {
                 g.rescored_cvss = calculateScoreFromVector(g.rescored_vector)
             }
+            if (!g.rescored_virtual_vector && g.rescored_vector) {
+                g.rescored_virtual_vector = calculateVirtualCvss31Vector(g.rescored_vector)
+            }
             return g
         })
     } catch (err: any) {
@@ -132,6 +135,7 @@ watch(() => viewMode.value, (newMode) => {
 const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
     group.rescored_cvss = data.rescored_cvss
     group.rescored_vector = data.rescored_vector
+    group.rescored_virtual_vector = data.rescored_virtual_vector
 
     // Update all affected instances in this group by creating new array and object references for reactivity
     group.affected_versions = group.affected_versions.map((version: any) => {

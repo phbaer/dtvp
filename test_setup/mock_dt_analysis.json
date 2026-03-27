@@ -89,6 +89,17 @@
       "analysisState": "IN_TRIAGE",
       "isSuppressed": false,
       "analysisDetails": "--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\n--- [Team: team-b] [State: NOT_SET] [Assessed By: reviewer] ---\nPending team-b input.\n\n[Status: Pending Review]"
+    },
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4:e253b708-3012-4277-8461-893bd5cd61e4:d9999a7b-0346-4927-991c-7033580539fc": {
+      "analysisState": "NOT_AFFECTED",
+      "isSuppressed": false,
+      "analysisJustification": "CODE_NOT_PRESENT",
+      "analysisDetails": "--- [Team: LegacyTeam] [State: NOT_AFFECTED] [Assessed By: mock] [Justification: CODE_NOT_PRESENT] [Rescored Vector: AV:N/AC:L/Au:N/C:P/I:P/A:P] ---\nLegacy CVSS v2 vector test entry for rescoring coverage."
+    },
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4:f253b708-3012-4277-8461-893bd5cd61e5:daaaa7b0-0346-4927-991c-7033580539fd": {
+      "analysisState": "IN_TRIAGE",
+      "isSuppressed": false,
+      "analysisDetails": "--- [Team: Platform] [State: IN_TRIAGE] [Assessed By: mock] [Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L] ---\nCVSS v4 vector test entry for virtual rescoring coverage."
     }
   }
 }

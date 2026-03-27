@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns } from '../../lib/api'
-import { calculateScoreFromVector } from '../../lib/cvss'
+import { calculateScoreFromVector, calculateVirtualCvss31Vector } from '../../lib/cvss'
 import { useRoute } from 'vue-router'
 
 vi.mock('../../lib/api', () => ({
@@ -13,7 +13,8 @@ vi.mock('../../lib/api', () => ({
 }))
 
 vi.mock('../../lib/cvss', () => ({
-    calculateScoreFromVector: vi.fn(() => 7.5)
+    calculateScoreFromVector: vi.fn(() => 7.5),
+    calculateVirtualCvss31Vector: vi.fn(() => 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
 }))
 
 vi.mock('vue-router', () => ({
@@ -59,8 +60,10 @@ describe('ProjectView Coverage Extra Detailed', () => {
         await flushPromises()
 
         expect(calculateScoreFromVector).toHaveBeenCalledWith('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
+        expect(calculateVirtualCvss31Vector).toHaveBeenCalledWith('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
         const groups = (wrapper.vm as any).groups
         expect(groups[0].rescored_cvss).toBe(7.5)
+        expect(groups[0].rescored_virtual_vector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
     })
 
     it('handles global search when name is _all_', async () => {

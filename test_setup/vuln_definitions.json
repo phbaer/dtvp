@@ -138,5 +138,25 @@
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
     "description": "One team assessed, another open team assessment test case.",
     "recommendation": "Ensure second team completes assessment." 
+  },
+  {
+    "uuid": "d9999a7b-0346-4927-991c-7033580539fc",
+    "vulnId": "CVE-2014-CVSS2-TEST",
+    "source": "NVD",
+    "severity": "HIGH",
+    "cvssV2BaseScore": 7.5,
+    "cvssV2Vector": "AV:N/AC:L/Au:N/C:P/I:P/A:P",
+    "description": "Legacy CVSS v2-only test entry for mock Dependency-Track data.",
+    "recommendation": "Use this fixture to validate CVSS v2 handling and virtual v3.1 rescoring."
+  },
+  {
+    "uuid": "daaaa7b0-0346-4927-991c-7033580539fd",
+    "vulnId": "CVE-2025-CVSS4-TEST",
+    "source": "NVD",
+    "severity": "CRITICAL",
+    "cvssV4BaseScore": 9.3,
+    "cvssV4Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L",
+    "description": "CVSS v4-only test entry for mock Dependency-Track data.",
+    "recommendation": "Use this fixture to validate CVSS v4 handling and closest virtual v3.1 mapping."
   }
 ]

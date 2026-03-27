@@ -76,6 +76,10 @@ VULN_PLAINTEXT_NOT_SET_UUID = "d1111a7b-0346-4927-991c-7033580539f0"
 VULN_PLAINTEXT_NOT_AFFECTED_UUID = "d2222a7b-0346-4927-991c-7033580539f1"
 VULN_OPEN_PENDING_UUID = "d7777a7b-0346-4927-991c-7033580539fa"
 VULN_TEAM_PARTIAL_UUID = "d8888a7b-0346-4927-991c-7033580539fb"
+VULN_CVSS2_UUID = "d9999a7b-0346-4927-991c-7033580539fc"
+VULN_CVSS4_UUID = "daaaa7b0-0346-4927-991c-7033580539fd"
+LEGACY_LIB_UUID = "e253b708-3012-4277-8461-893bd5cd61e4"
+MODERN_GATEWAY_UUID = "f253b708-3012-4277-8461-893bd5cd61e5"
 mock_projects = [
     Project(
         name="Vulnerable Project",
@@ -213,6 +217,20 @@ def _component_for_vuln(vuln_uuid: str):
             "name": "team-test-lib",
             "version": "1.0.0",
             "purl": "pkg:maven/org.example/team-test-lib@1.0.0",
+        }
+    if vuln_uuid == VULN_CVSS2_UUID:
+        return {
+            "uuid": LEGACY_LIB_UUID,
+            "name": "legacy-http-stack",
+            "version": "2.4.0",
+            "purl": "pkg:generic/legacy-http-stack@2.4.0",
+        }
+    if vuln_uuid == VULN_CVSS4_UUID:
+        return {
+            "uuid": MODERN_GATEWAY_UUID,
+            "name": "modern-edge-gateway",
+            "version": "4.0.0",
+            "purl": "pkg:generic/modern-edge-gateway@4.0.0",
         }
     # default fallback component
     return {
@@ -538,6 +556,8 @@ def get_findings(project_uuid: str):
                 "d4441a7b-0346-4927-991c-7033580539f3",
                 "d5551a7b-0346-4927-991c-7033580539f4",
                 VULN_INCOMPLETE_UUID,
+                VULN_CVSS2_UUID,
+                VULN_CVSS4_UUID,
             ],
         }
 

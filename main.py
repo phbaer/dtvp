@@ -31,6 +31,7 @@ from logic import (
     BOMAnalysisCache,
     calculate_aggregated_state,
     calculate_statistics,
+    extract_rescored_metadata,
     get_rescore_rules_path,
     get_team_mapping_path,
     get_user_role,
@@ -39,6 +40,7 @@ from logic import (
     load_rescore_rules,
     load_team_mapping,
     load_user_roles,
+    normalize_rescored_tags,
     process_assessment_details,
 )
 from version import BUILD_COMMIT, VERSION
@@ -690,9 +692,8 @@ async def update_assessment(
 
             # Use shared logic for tag processing and state aggregation
             if req.comparison_mode == "REPLACE":
-                # In REPLACE mode, we trust the details provided by the client as the full source of truth
-                final_details_str = req.details
-                aggregated_state = calculate_aggregated_state(req.details)
+                final_details_str = normalize_rescored_tags(req.details, role)
+                aggregated_state = calculate_aggregated_state(final_details_str)
             else:
                 final_details_str, aggregated_state = process_assessment_details(
                     req.details, user, role, req.team, req.state, existing_details
@@ -714,12 +715,18 @@ async def update_assessment(
                 else "NOT_SET",
                 suppressed=req.suppressed,
             )
+            rescored_cvss, rescored_vector, rescored_virtual_vector = (
+                extract_rescored_metadata(final_details_str)
+            )
             results.append(
                 {
                     "status": "success",
                     "uuid": instance["finding_uuid"],
                     "new_state": aggregated_state,
                     "new_details": final_details_str,
+                    "rescored_cvss": rescored_cvss,
+                    "rescored_vector": rescored_vector,
+                    "rescored_virtual_vector": rescored_virtual_vector,
                 }
             )
         except Exception as e:

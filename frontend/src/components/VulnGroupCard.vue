@@ -6,7 +6,7 @@ import type { GroupedVuln, AssessmentPayload } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, History } from 'lucide-vue-next'
 
 import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
-import { calculateScoreFromVector } from '../lib/cvss'
+import { calculateScoreFromVector, calculateVirtualCvss31Vector } from '../lib/cvss'
 import { compareVersions, sortVersions } from '../lib/version'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -166,6 +166,25 @@ const canApprove = computed(() => {
 })
 
 const lastRescoredScore = ref<number | null>(null)
+
+const baseScore = computed(() => props.group.cvss_score ?? props.group.cvss ?? null)
+
+const hasLiveRescoreChange = computed(() => {
+    const baseVector = props.group.cvss_vector || ''
+    const vectorChanged = !!pendingVector.value && pendingVector.value !== baseVector
+    const scoreChanged = pendingScore.value !== null && pendingScore.value !== baseScore.value
+    return vectorChanged || scoreChanged
+})
+
+const currentActualRescoredVector = computed(() => {
+    if (hasLiveRescoreChange.value && pendingVector.value) return pendingVector.value
+    return props.group.rescored_vector || null
+})
+
+const currentActualRescoredScore = computed(() => {
+    if (hasLiveRescoreChange.value && pendingScore.value !== null) return pendingScore.value
+    return props.group.rescored_cvss ?? null
+})
 
 const currentDisplayScore = computed(() => {
     if (pendingScore.value !== null) return pendingScore.value
@@ -993,6 +1012,9 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
 
             const vectorMatch = detailsToParse.match(/\[Rescored Vector:\s*[^\]]+\]/);
             if (vectorMatch) allTags.add(vectorMatch[0]);
+
+            const virtualVectorMatch = detailsToParse.match(/\[Virtual Rescored Vector:\s*[^\]]+\]/);
+            if (virtualVectorMatch) allTags.add(virtualVectorMatch[0]);
         }
         
         const currentFullDetails = allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : ''
@@ -1090,8 +1112,9 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
                  const hasVectorChange = canRescore ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
                  
                  const data = {
-                     rescored_cvss: hasVectorChange ? (canRescore ? pendingScore.value : props.group.rescored_cvss) : null,
-                     rescored_vector: hasVectorChange ? (canRescore ? pendingVector.value : props.group.rescored_vector) : null,
+                     rescored_cvss: hasVectorChange ? (canRescore ? (success.rescored_cvss ?? pendingScore.value) : props.group.rescored_cvss) : null,
+                     rescored_vector: hasVectorChange ? (canRescore ? (success.rescored_vector ?? pendingVector.value) : props.group.rescored_vector) : null,
+                     rescored_virtual_vector: hasVectorChange ? (canRescore ? (success.rescored_virtual_vector ?? props.group.rescored_virtual_vector ?? null) : props.group.rescored_virtual_vector) : null,
                      analysis_state: success.new_state,
                      analysis_details: success.new_details,
                      is_suppressed: suppressed.value
@@ -1263,6 +1286,29 @@ const rescoredVectorSegments = computed(() => {
     }
 })
 
+const currentVirtualVector = computed(() => {
+    if (currentActualRescoredVector.value) {
+        return calculateVirtualCvss31Vector(currentActualRescoredVector.value) || props.group.rescored_virtual_vector || null
+    }
+    return props.group.rescored_virtual_vector || null
+})
+
+const currentVirtualScore = computed(() => {
+    if (!currentVirtualVector.value) return null
+    return calculateScoreFromVector(currentVirtualVector.value)
+})
+
+const extractAssessmentMetadata = (details: string) => {
+    const safeDetails = details || ''
+    const score = safeDetails.match(/\[Rescored:\s*([^\]]+)\]/)?.[1]?.trim() || null
+    const rescoredVector = safeDetails.match(/\[Rescored Vector:\s*([^\]]+)\]/)?.[1]?.trim() || null
+    const virtualVector = safeDetails.match(/\[Virtual Rescored Vector:\s*([^\]]+)\]/)?.[1]?.trim()
+        || (rescoredVector ? calculateVirtualCvss31Vector(rescoredVector) : null)
+    const virtualScore = virtualVector ? calculateScoreFromVector(virtualVector) : null
+
+    return { score, rescoredVector, virtualVector, virtualScore }
+}
+
 const normalizedTags = computed(() => {
     if (!props.group.tags) return []
 
@@ -1428,16 +1474,29 @@ const getJustificationDescription = (justValue: string | undefined) => {
             </div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
-                <div v-if="group.rescored_vector && group.rescored_vector !== group.cvss_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
-                    <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored Vector:</span>
+            <div v-if="expanded && (group.rescored_vector || group.rescored_virtual_vector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
+                <div v-if="group.rescored_vector && group.rescored_virtual_vector" class="text-[9px] text-gray-500 italic">
+                    Virtual CVSS 3.1 is derived from the actual rescored vector.
+                </div>
+                <div v-if="group.rescored_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
+                    <span class="text-purple-400/70 uppercase font-bold shrink-0">Actual Rescored Vector:</span>
+                    <span class="shrink-0 rounded border border-purple-500/30 bg-purple-950/40 px-1.5 py-0.5 text-[9px] font-black text-purple-200">
+                        Score {{ group.rescored_cvss ?? 'N/A' }}
+                    </span>
                     <span class="tracing-tight">
                         <span class="font-bold rescored-bold-segment">{{ rescoredVectorSegments.bold }}</span>{{ rescoredVectorSegments.normal }}
                     </span>
                 </div>
+                <div v-if="group.rescored_virtual_vector" class="font-mono text-[10px] text-amber-300 break-all bg-amber-900/20 p-1.5 rounded border border-amber-500/30 flex items-center gap-2">
+                    <span class="text-amber-400/70 uppercase font-bold shrink-0">Virtual CVSS 3.1 Vector:</span>
+                    <span class="shrink-0 rounded border border-amber-500/30 bg-amber-950/40 px-1.5 py-0.5 text-[9px] font-black text-amber-200">
+                        Score {{ group.rescored_cvss ?? calculateScoreFromVector(group.rescored_virtual_vector) ?? 'N/A' }}
+                    </span>
+                    <span>{{ group.rescored_virtual_vector }}</span>
+                </div>
                 <div class="font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50 flex items-center gap-2">
-                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ group.rescored_vector ? 'Original Vector:' : 'Vector:' }}</span>
-                    <span :class="{ 'line-through opacity-50': group.rescored_vector }">{{ group.cvss_vector || 'N/A' }}</span>
+                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ group.rescored_vector ? 'Source Vector:' : 'Base Vector:' }}</span>
+                    <span :class="{ 'line-through opacity-50': group.rescored_vector && group.rescored_vector !== group.cvss_vector }">{{ group.cvss_vector || 'N/A' }}</span>
                 </div>
             </div>
         </div>
@@ -1559,6 +1618,28 @@ const getJustificationDescription = (justValue: string | undefined) => {
 
                              <!-- Assessment Data -->
                              <div v-if="assessment.state !== 'NOT_SET' || assessment.details || assessment.comments.length > 0" class="space-y-3">
+                                 <div v-if="extractAssessmentMetadata(assessment.details).rescoredVector || extractAssessmentMetadata(assessment.details).virtualVector || group.cvss_vector" class="bg-gray-900/40 rounded border border-gray-800/70 p-3 space-y-2">
+                                     <h5 class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-600">Vector Comparison</h5>
+                                     <div v-if="extractAssessmentMetadata(assessment.details).rescoredVector && extractAssessmentMetadata(assessment.details).virtualVector" class="text-[9px] text-gray-500 italic">
+                                         Virtual CVSS 3.1 is derived from the actual rescored vector.
+                                     </div>
+                                     <div v-if="extractAssessmentMetadata(assessment.details).rescoredVector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/10 p-2 rounded border border-purple-500/20 flex items-start gap-2">
+                                         <span class="text-purple-400/70 uppercase font-bold shrink-0">Actual Rescored Vector</span>
+                                         <span>{{ extractAssessmentMetadata(assessment.details).rescoredVector }}</span>
+                                     </div>
+                                         <div v-if="extractAssessmentMetadata(assessment.details).virtualVector" class="font-mono text-[10px] text-amber-300 break-all bg-amber-900/10 p-2 rounded border border-amber-500/20 flex items-start gap-2">
+                                         <span class="text-amber-400/70 uppercase font-bold shrink-0">Virtual CVSS 3.1 Vector</span>
+                                             <span class="shrink-0 rounded border border-amber-500/30 bg-amber-950/40 px-1.5 py-0.5 text-[9px] font-black text-amber-200">
+                                             Score {{ extractAssessmentMetadata(assessment.details).score || extractAssessmentMetadata(assessment.details).virtualScore || 'N/A' }}
+                                             </span>
+                                             <span>{{ extractAssessmentMetadata(assessment.details).virtualVector }}</span>
+                                     </div>
+                                     <div v-if="group.cvss_vector" class="font-mono text-[10px] text-gray-400 break-all bg-black/20 p-2 rounded border border-white/5 flex items-start gap-2">
+                                         <span class="text-gray-500 uppercase font-bold shrink-0">Source Vector</span>
+                                         <span>{{ group.cvss_vector }}</span>
+                                     </div>
+                                 </div>
+
                                  <div v-if="assessment.state !== 'NOT_SET' || assessment.details" class="space-y-3">
                                      <div v-for="block in parseAssessmentBlocks(assessment.details)" :key="block.team" 
                                           class="bg-gray-800/60 rounded border border-gray-700/50 p-3">
@@ -1690,6 +1771,27 @@ const getJustificationDescription = (justValue: string | undefined) => {
                             <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 text-[9px] text-gray-500/60 flex gap-1.5 truncate">
                                 <span class="uppercase font-bold shrink-0">Original:</span>
                                 <span class="truncate italic">{{ group.cvss_vector }}</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 space-y-2 rounded border border-gray-700/70 bg-black/20 p-3">
+                            <div class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-600">Vector Comparison</div>
+                            <div v-if="currentActualRescoredVector && currentVirtualVector" class="text-[9px] text-gray-500 italic">
+                                Virtual CVSS 3.1 is derived from the actual rescored vector.
+                            </div>
+                            <div v-if="currentActualRescoredVector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/10 p-2 rounded border border-purple-500/20">
+                                <span class="text-purple-400/70 uppercase font-bold mr-2">Actual Rescored Vector</span>
+                                <span class="mr-2 rounded border border-purple-500/30 bg-purple-950/40 px-1.5 py-0.5 text-[9px] font-black text-purple-200">Score {{ currentActualRescoredScore ?? 'N/A' }}</span>
+                                <span>{{ currentActualRescoredVector }}</span>
+                            </div>
+                            <div v-if="currentVirtualVector" class="font-mono text-[10px] text-amber-300 break-all bg-amber-900/10 p-2 rounded border border-amber-500/20">
+                                <span class="text-amber-400/70 uppercase font-bold mr-2">Virtual CVSS 3.1 Vector</span>
+                                <span class="mr-2 rounded border border-amber-500/30 bg-amber-950/40 px-1.5 py-0.5 text-[9px] font-black text-amber-200">Score {{ currentVirtualScore ?? 'N/A' }}</span>
+                                <span>{{ currentVirtualVector }}</span>
+                            </div>
+                            <div v-if="group.cvss_vector" class="font-mono text-[10px] text-gray-400 break-all bg-gray-900/40 p-2 rounded border border-white/5">
+                                <span class="text-gray-500 uppercase font-bold mr-2">Source Vector</span>
+                                <span>{{ group.cvss_vector }}</span>
                             </div>
                         </div>
                         
@@ -1856,6 +1958,27 @@ const getJustificationDescription = (justValue: string | undefined) => {
 
             <!-- Content -->
             <div class="flex-1 overflow-y-auto p-4 bg-gray-800">
+                <div class="mb-4 rounded border border-gray-700/70 bg-black/20 p-3 space-y-2">
+                    <div class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-600">Vector Comparison</div>
+                    <div v-if="currentActualRescoredVector && currentVirtualVector" class="text-[9px] text-gray-500 italic">
+                        Virtual CVSS 3.1 is derived from the actual rescored vector.
+                    </div>
+                    <div v-if="currentActualRescoredVector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/10 p-2 rounded border border-purple-500/20">
+                        <span class="text-purple-400/70 uppercase font-bold mr-2">Actual Rescored Vector</span>
+                        <span class="mr-2 rounded border border-purple-500/30 bg-purple-950/40 px-1.5 py-0.5 text-[9px] font-black text-purple-200">Score {{ currentActualRescoredScore ?? 'N/A' }}</span>
+                        <span>{{ currentActualRescoredVector }}</span>
+                    </div>
+                    <div v-if="currentVirtualVector" class="font-mono text-[10px] text-amber-300 break-all bg-amber-900/10 p-2 rounded border border-amber-500/20">
+                        <span class="text-amber-400/70 uppercase font-bold mr-2">Virtual CVSS 3.1 Vector</span>
+                        <span class="mr-2 rounded border border-amber-500/30 bg-amber-950/40 px-1.5 py-0.5 text-[9px] font-black text-amber-200">Score {{ currentVirtualScore ?? 'N/A' }}</span>
+                        <span>{{ currentVirtualVector }}</span>
+                    </div>
+                    <div v-if="group.cvss_vector" class="font-mono text-[10px] text-gray-400 break-all bg-gray-900/40 p-2 rounded border border-white/5">
+                        <span class="text-gray-500 uppercase font-bold mr-2">Source Vector</span>
+                        <span>{{ group.cvss_vector }}</span>
+                    </div>
+                </div>
+
                 <div v-if="activeVersion === '2.0'">
                     <CvssCalculatorV2 
                         :instance="cvssInstance" 

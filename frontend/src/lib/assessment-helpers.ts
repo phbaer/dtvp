@@ -43,6 +43,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const contentBeforeHeader = textBeforeHeader
             .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
             .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+            .replace(/\[Virtual Rescored Vector:\s*[^\]]+\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .trim();
 
@@ -60,6 +61,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const content = fullText
             .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
             .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+            .replace(/\[Virtual Rescored Vector:\s*[^\]]+\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .trim();
 
@@ -115,7 +117,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         let content = rawContent
         // Cleanup all metadata from content to prevent leakage
         content = content
-            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
+            .replace(/\[(Rescored|Rescored Vector|Virtual Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .replace(/\[Comment\]/g, '')
             .replace(/\bAssessed\s*--\s*\S+/g, '')
