@@ -33,7 +33,7 @@ DTVP can optionally call an external tmrescore service to re-score vulnerabiliti
 - Optionally set `DTVP_TMRESCORE_CACHE_PATH` to control where the latest per-project proposal snapshots are stored. By default DTVP writes them to `data/tmrescore_proposals.json`.
 - Open a project and use the `Threat Model` action from the dashboard or project view.
 - Upload the current `.tm7` file and optional `items.csv` / analysis config inputs.
-- If the tmrescore backend is configured with `OLLAMA_HOST`, you can enable `LLM enrichment` in the Threat Model UI and optionally choose the Ollama model used for threat-justification enrichment.
+- If an LLM backend is configured for tmrescore, you can enable `LLM enrichment` in the Threat Model UI and optionally choose the model used for threat-justification enrichment.
 - After a successful run, the latest cached proposal set for that project is available directly inside each reviewer rescoring dialog where the vulnerability ID matches.
 - Returning to the project view after a run triggers an immediate proposal refresh so the rescoring dialog can use the new suggestions without waiting for a backend restart or a manual reload.
 

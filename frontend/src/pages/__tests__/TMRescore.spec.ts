@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { createRouter, createMemoryHistory } from 'vue-router'
+import { flushPromises } from '@vue/test-utils'
 import TMRescore from '../TMRescore.vue'
 import { getTMRescoreContext, runTMRescoreAnalysis } from '../../lib/api'
+import { mountWithRouter } from './routerTestUtils'
 
 vi.mock('../../lib/api', () => ({
     getTMRescoreContext: vi.fn(),
@@ -10,6 +10,11 @@ vi.mock('../../lib/api', () => ({
 }))
 
 describe('TMRescore.vue', () => {
+    const tmRescoreRoutes = [
+        { path: '/project/:name', component: { template: '<div />' } },
+        { path: '/project/:name/tmrescore', component: TMRescore },
+    ]
+
     beforeEach(() => {
         vi.clearAllMocks()
         window.sessionStorage.clear()
@@ -36,24 +41,10 @@ describe('TMRescore.vue', () => {
             },
         } as any)
 
-        const router = createRouter({
-            history: createMemoryHistory(),
-            routes: [
-                { path: '/project/:name', component: { template: '<div />' } },
-                { path: '/project/:name/tmrescore', component: TMRescore },
-            ],
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
+            routes: tmRescoreRoutes,
         })
-
-        router.push('/project/ExampleApp/tmrescore')
-        await router.isReady()
-
-        const wrapper = mount(TMRescore, {
-            global: {
-                plugins: [router],
-            },
-        })
-
-        await flushPromises()
 
         expect(getTMRescoreContext).toHaveBeenCalledWith('ExampleApp')
         expect(wrapper.text()).toContain('Merged Multi-Version SBOM')
@@ -104,24 +95,10 @@ describe('TMRescore.vue', () => {
             outputs: {},
         } as any)
 
-        const router = createRouter({
-            history: createMemoryHistory(),
-            routes: [
-                { path: '/project/:name', component: { template: '<div />' } },
-                { path: '/project/:name/tmrescore', component: TMRescore },
-            ],
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
+            routes: tmRescoreRoutes,
         })
-
-        router.push('/project/ExampleApp/tmrescore')
-        await router.isReady()
-
-        const wrapper = mount(TMRescore, {
-            global: {
-                plugins: [router],
-            },
-        })
-
-        await flushPromises()
 
         const input = wrapper.get('[data-testid="threatmodel-input"]')
         const file = new File(['tm7'], 'model.tm7', { type: 'application/octet-stream' })
@@ -169,24 +146,10 @@ describe('TMRescore.vue', () => {
             },
         } as any)
 
-        const router = createRouter({
-            history: createMemoryHistory(),
-            routes: [
-                { path: '/project/:name', component: { template: '<div />' } },
-                { path: '/project/:name/tmrescore', component: TMRescore },
-            ],
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
+            routes: tmRescoreRoutes,
         })
-
-        router.push('/project/ExampleApp/tmrescore')
-        await router.isReady()
-
-        const wrapper = mount(TMRescore, {
-            global: {
-                plugins: [router],
-            },
-        })
-
-        await flushPromises()
 
         expect(wrapper.get('[data-testid="llm-enrichment-status"]').text()).toBe('Unavailable')
         expect(wrapper.text()).toContain('Could not verify LLM enrichment availability from the tmrescore backend.')

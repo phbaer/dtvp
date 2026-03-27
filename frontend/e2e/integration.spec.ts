@@ -256,7 +256,9 @@ test.describe('Integration Tests (Real Backend)', () => {
         await expect(projectLink).toBeVisible({ timeout: 15000 });
 
         // 3. Verify version 1.0.0 is present on the card
-        const projectCard = projectLink.locator('..');
+        const projectCard = page.locator('div.bg-gray-800.border.border-gray-700.rounded').filter({
+            has: projectLink,
+        }).first();
         await expect(projectCard.getByText('v1.0.0')).toBeVisible({ timeout: 10000 });
     });
 

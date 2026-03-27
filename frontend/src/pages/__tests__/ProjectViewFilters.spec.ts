@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { flushPromises } from '@vue/test-utils'
 import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns } from '../../lib/api'
-import { createRouter, createMemoryHistory } from 'vue-router'
+import { createRouter } from 'vue-router'
+import { mountWithRouter } from './routerTestUtils'
 
 // Mock API
 vi.mock('../../lib/api', () => ({
@@ -10,6 +11,7 @@ vi.mock('../../lib/api', () => ({
     updateAssessment: vi.fn(),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
+    getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} })),
 }))
 
 // Mock Child Components
@@ -21,18 +23,30 @@ vi.mock('../../components/VulnGroupCard.vue', () => ({
 }))
 
 describe('ProjectView Filters', () => {
-    let router: ReturnType<typeof createRouter>
+    let mountProjectViewRoute: () => Promise<any>
 
     beforeEach(() => {
         vi.clearAllMocks()
-        router = createRouter({
-            history: createMemoryHistory(),
-            routes: [
+        const routes = [
                 { path: '/', component: { template: '<div />' } },
                 { path: '/statistics', component: { template: '<div />' } },
-                { path: '/projects/:uuid/:name', component: ProjectView }
+                { path: '/projects/:uuid/:name', component: ProjectView },
+                { path: '/project/:name/tmrescore', component: { template: '<div />' } }
             ]
-        })
+        mountProjectViewRoute = async () => {
+            const { wrapper } = await mountWithRouter(ProjectView, {
+                initialPath: '/projects/p1/TestProject',
+                routes,
+                mountOptions: {
+                    global: {
+                        provide: {
+                            user: { value: { role: 'REVIEWER' } }
+                        }
+                    }
+                }
+            })
+            return wrapper
+        }
     })
 
     const mockData = [
@@ -182,20 +196,7 @@ describe('ProjectView Filters', () => {
 
     it('filters vulnerabilities by lifecycle status chips', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
-
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: {
-                plugins: [router],
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises() // Wait for fetch
+        const wrapper = await mountProjectViewRoute()
 
         // Default for REVIEWER: All Lifecycle + All Analysis.
         // Shows V1, V2, V3, V8
@@ -222,13 +223,7 @@ describe('ProjectView Filters', () => {
 
     it('ANDs lifecycle and analysis filters strictly', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
         
         // Default REVIEWER: shows 4
         expect(wrapper.findAll('.vuln-card').length).toBe(4)
@@ -263,13 +258,7 @@ describe('ProjectView Filters', () => {
 
     it('supports "Reset All" to return to default view', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
         const getButton = (text: string) => wrapper.findAll('button').find(b => b.text().includes(text))
 
         ;(wrapper.vm as any).analysisFilters = []
@@ -285,13 +274,7 @@ describe('ProjectView Filters', () => {
 
     it('shows "Pending Review" vulnerabilities regardless of filters', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockDataWithPending)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
         
         // Clear all filters
         ;(wrapper.vm as any).lifecycleFilters = []
@@ -312,13 +295,7 @@ describe('ProjectView Filters', () => {
 
     it('includes pending review items with open team assessment in OPEN filter', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockDataWithPending)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
 
         ;(wrapper.vm as any).lifecycleFilters = ['OPEN']
         ;(wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
@@ -331,13 +308,7 @@ describe('ProjectView Filters', () => {
 
     it('should treat plaintext assessments as valid data for filters', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockDataWithPlaintext)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
 
         // All vulnerabilities should be visible by default
         expect(wrapper.findAll('.vuln-card').length).toBe(6)
@@ -380,13 +351,7 @@ describe('ProjectView Filters', () => {
         ];
 
         (getGroupedVulns as any).mockResolvedValue(legacyData)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
 
         // When filtering only by Open, the legacy assessed item is excluded
         ;(wrapper.vm as any).lifecycleFilters = ['OPEN']
@@ -424,13 +389,7 @@ describe('ProjectView Filters', () => {
         ];
 
         ;(getGroupedVulns as any).mockResolvedValue(mockData)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
 
         ;(wrapper.vm as any).lifecycleFilters = ['OPEN']
         ;(wrapper.vm as any).analysisFilters = ['NOT_SET']
@@ -452,13 +411,7 @@ describe('ProjectView Filters', () => {
 
     it('calculates hierarchical counts correctly', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
-        router.push('/projects/p1/TestProject')
-        await router.isReady()
-
-        const wrapper = mount(ProjectView, {
-            global: { plugins: [router], provide: { user: { value: { role: 'REVIEWER' } } } }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectViewRoute()
 
         // Helper to get count from a chip button
         const getCount = (text: string) => {

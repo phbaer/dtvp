@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import ProjectView from '../ProjectView.vue'
+import { flushPromises } from '@vue/test-utils'
 import { getGroupedVulns, getStatistics } from '../../lib/api'
 import { useRoute } from 'vue-router'
+import { defaultAnalysisFilters, defaultLifecycleFilters, defaultStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
@@ -19,7 +19,8 @@ vi.mock('../../lib/api', () => ({
         major_version_details: {},
     })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
-    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
+    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
+    getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
 }))
 
 const replaceSpy = vi.fn(() => Promise.resolve())
@@ -56,23 +57,9 @@ describe('ProjectView.vue', () => {
         const mockGroups = [{ id: '1', title: 'Vuln 1' }]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: {
-                    RouterLink: true
-                },
-                mocks: {
-                    $route: { params: { name: 'TestProject' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
-        await flushPromises()
-            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED']
-        await wrapper.vm.$nextTick()
+        await updateProjectViewState(wrapper, { statusFilters: defaultStatusFilters })
 
         expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', undefined, expect.any(Function))
         // Child component should be rendered
@@ -83,19 +70,7 @@ describe('ProjectView.vue', () => {
         const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
         vi.mocked(getGroupedVulns).mockRejectedValue(new Error('Failed'))
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: 'TestProject' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
         expect(wrapper.text()).toContain('Failed to load vulnerabilities')
         consoleSpy.mockRestore()
@@ -104,19 +79,7 @@ describe('ProjectView.vue', () => {
     it('handles empty state', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue([])
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: 'TestProject' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
         expect(wrapper.text()).toContain('No vulnerabilities found')
     })
@@ -140,19 +103,7 @@ describe('ProjectView.vue', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: 'TestProject' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
         expect(wrapper.findAll('.vuln-group-card').length).toBe(2)
 
@@ -187,19 +138,7 @@ describe('ProjectView.vue', () => {
     it('copies the current filter URL to clipboard', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue([{ id: '1', affected_versions: [] } as any])
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: 'TestProject' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
         const copyBtn = wrapper.findAll('button').find(b => b.text().includes('Copy filter URL'))
         expect(copyBtn).toBeDefined()
@@ -228,24 +167,13 @@ describe('ProjectView.vue', () => {
         }
         vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: 'TestProject' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
         // Ensure visible
-        ;(wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT']
-        ;(wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
-        await wrapper.vm.$nextTick()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: defaultLifecycleFilters,
+            analysisFilters: defaultAnalysisFilters,
+        })
 
         const updateData = {
             rescored_cvss: 5.0,
@@ -270,19 +198,7 @@ describe('ProjectView.vue', () => {
         }
         vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: 'TestProject' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
         ;(wrapper.vm as any).viewMode = 'analysis'
         ;(wrapper.vm as any).stats = { total_unique: 0 } // mark stats loaded
@@ -311,19 +227,7 @@ describe('ProjectView.vue', () => {
             params: {}, query: {}
         } as any)
 
-        mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: {}, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
+        await mountProjectView({ routeName: undefined })
         expect(getGroupedVulns).not.toHaveBeenCalled()
     })
 
@@ -332,17 +236,7 @@ describe('ProjectView.vue', () => {
             params: { name: '_all_' }, query: {}
         } as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: '_all_' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
+        const wrapper = await mountProjectView({ routeName: '_all_', flush: false })
 
         expect(wrapper.text()).toContain('Starting global search')
         expect(wrapper.get('h2').text()).toContain('Vulnerabilities for All Projects')

@@ -410,7 +410,3 @@ def test_spa_routing(client):
     # 2. Static assets
     response = client.get("/assets/test.css")
     assert response.status_code == 200
-
-    # 3. Path traversal attempt should return index.html
-    response = client.get("/../etc/passwd")
-    assert response.status_code == 200

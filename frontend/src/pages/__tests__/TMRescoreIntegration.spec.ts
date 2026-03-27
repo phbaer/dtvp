@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { createMemoryHistory, createRouter } from 'vue-router'
+import { flushPromises } from '@vue/test-utils'
+import { mountWithRouter } from './routerTestUtils'
 
 const axiosMocks = vi.hoisted(() => ({
     get: vi.fn(),
@@ -93,24 +93,13 @@ describe('TMRescore integration via api.ts', () => {
         const module = await import('../TMRescore.vue')
         const TMRescore = module.default
 
-        const router = createRouter({
-            history: createMemoryHistory(),
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
             routes: [
                 { path: '/project/:name', component: { template: '<div />' } },
                 { path: '/project/:name/tmrescore', component: TMRescore },
             ],
         })
-
-        router.push('/project/ExampleApp/tmrescore')
-        await router.isReady()
-
-        const wrapper = mount(TMRescore, {
-            global: {
-                plugins: [router],
-            },
-        })
-
-        await flushPromises()
 
         expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/tmrescore/context')
         expect(wrapper.text()).toContain('Merged Multi-Version SBOM')

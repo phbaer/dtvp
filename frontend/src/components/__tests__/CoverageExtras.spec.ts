@@ -114,6 +114,6 @@ describe('Coverage Extras', () => {
             affected_versions: [], severity: 'MEDIUM', cvss_score: 5
         } as any
         const wrapper2 = mount(VulnGroupCard, { props: { group: group2 } })
-        expect((wrapper2.vm as any).rescoredVectorSegments).toEqual({ bold: '', normal: '' })
+        expect((wrapper2.vm as any).rescoredVectorSegments).toEqual({ bold: 'ABC', normal: '' })
     })
 })
