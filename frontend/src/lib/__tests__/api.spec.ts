@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getProjects, getGroupedVulns, updateAssessment, login, checkSession, getVersion, getDependencyChains, getChangelog } from '../api'
+import {
+    getProjects,
+    getGroupedVulns,
+    updateAssessment,
+    login,
+    checkSession,
+    getVersion,
+    getDependencyChains,
+    getChangelog,
+    getTMRescoreContext,
+    runTMRescoreAnalysis,
+} from '../api'
 
 const mocks = vi.hoisted(() => ({
     get: vi.fn(),
@@ -201,5 +212,35 @@ describe('api.ts', () => {
         const result = await promise
         expect(result).toEqual([])
         vi.useRealTimers()
+    })
+
+    it('getTMRescoreContext calls the project context endpoint', async () => {
+        const mockData = { enabled: true, latest_version: '1.10.0' }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getTMRescoreContext('Example App')
+
+        expect(mocks.get).toHaveBeenCalledWith('/projects/Example%20App/tmrescore/context')
+        expect(result).toEqual(mockData)
+    })
+
+    it('runTMRescoreAnalysis posts multipart form data', async () => {
+        mocks.post.mockResolvedValue({ data: { session_id: 'session-1' } })
+
+        const result = await runTMRescoreAnalysis('Example App', {
+            scope: 'merged_versions',
+            threatmodel: new File(['tm7'], 'model.tm7', { type: 'application/octet-stream' }),
+            whatIf: true,
+            enrich: true,
+            ollamaModel: 'llama3.1:8b',
+        })
+
+        expect(mocks.post).toHaveBeenCalledTimes(1)
+        expect(mocks.post.mock.calls[0]?.[0]).toBe('/projects/Example%20App/tmrescore/analyze')
+        const formData = mocks.post.mock.calls[0]?.[1] as FormData
+        expect(formData).toBeInstanceOf(FormData)
+        expect(formData.get('enrich')).toBe('true')
+        expect(formData.get('ollama_model')).toBe('llama3.1:8b')
+        expect(result).toEqual({ session_id: 'session-1' })
     })
 })

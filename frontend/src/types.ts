@@ -82,3 +82,78 @@ export interface Statistics {
     major_version_severity_counts?: Record<string, Record<string, number>>;
     version_severity_counts?: Record<string, Record<string, number>>;
 }
+
+export interface TMRescoreScopeOption {
+    id: 'latest_only' | 'merged_versions';
+    label: string;
+    description: string;
+}
+
+export interface TMRescoreContext {
+    enabled: boolean;
+    project_name: string;
+    latest_version: string;
+    versions: string[];
+    recommended_scope: 'latest_only' | 'merged_versions';
+    scopes: TMRescoreScopeOption[];
+    warnings: string[];
+    llm_enrichment?: {
+        available: boolean;
+        status: 'available' | 'not_configured' | 'unreachable' | 'integration_disabled';
+        default_model: string;
+        host_configured: boolean;
+        warning?: string | null;
+    };
+}
+
+export interface TMRescoreAnalysisResult {
+    session_id: string;
+    status: string;
+    total_cves: number;
+    rescored_count: number;
+    avg_score_reduction: number;
+    elapsed_seconds: number;
+    outputs?: Record<string, any>;
+    error?: string | null;
+    session?: Record<string, any>;
+    scope: 'latest_only' | 'merged_versions';
+    recommended_scope: 'latest_only' | 'merged_versions';
+    latest_version: string;
+    analyzed_versions: string[];
+    sbom_component_count: number;
+    sbom_vulnerability_count: number;
+    strategy_note: string;
+    llm_enrichment?: {
+        enabled: boolean;
+        ollama_model?: string | null;
+    };
+    download_urls: {
+        json: string;
+        vex: string;
+    };
+}
+
+export interface TMRescoreProposal {
+    vuln_id: string;
+    description?: string;
+    rescored_score: number | null;
+    rescored_vector: string | null;
+    original_score: number | null;
+    original_vector: string | null;
+    affected_refs: string[];
+    session_id: string;
+    scope: 'latest_only' | 'merged_versions';
+    latest_version: string;
+    analyzed_versions: string[];
+    generated_at?: string | null;
+}
+
+export interface TMRescoreProposalSnapshot {
+    project_name: string;
+    session_id: string;
+    scope: 'latest_only' | 'merged_versions';
+    latest_version: string;
+    analyzed_versions: string[];
+    generated_at?: string | null;
+    proposals: Record<string, TMRescoreProposal>;
+}

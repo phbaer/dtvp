@@ -125,12 +125,20 @@ const groupedProjects = computed(() => {
                     :key="p.name"
                     class="bg-gray-800 border border-gray-700 rounded p-4 flex flex-col gap-2"
                 >
-                    <router-link 
-                        :to="{ path: `/project/${p.name}`, query: cveFilter ? { id: cveFilter } : {} }"
-                        class="font-bold text-lg text-blue-400 hover:text-blue-300 hover:underline"
-                    >
-                        {{ p.name }}
-                    </router-link>
+                    <div class="flex items-start justify-between gap-3">
+                        <router-link 
+                            :to="{ path: `/project/${p.name}`, query: cveFilter ? { id: cveFilter } : {} }"
+                            class="font-bold text-lg text-blue-400 hover:text-blue-300 hover:underline"
+                        >
+                            {{ p.name }}
+                        </router-link>
+                        <router-link
+                            :to="`/project/${p.name}/tmrescore`"
+                            class="shrink-0 rounded-lg border border-blue-500/30 bg-blue-600/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-200 transition-colors hover:bg-blue-600/20"
+                        >
+                            Threat Model
+                        </router-link>
+                    </div>
                     
                     <div class="flex flex-wrap gap-2 mt-2">
                         <span 

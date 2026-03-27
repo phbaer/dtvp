@@ -1,0 +1,528 @@
+{
+  "ExampleApp": {
+    "analyzed_versions": [
+      "1.9.0",
+      "1.10.0"
+    ],
+    "generated_at": "2026-03-27T13:54:14.553023+00:00",
+    "latest_version": "1.10.0",
+    "project_name": "ExampleApp",
+    "proposals": {
+      "CVE-2024-0001": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:proj-1:component:comp-1"
+        ],
+        "analyzed_versions": [
+          "1.9.0",
+          "1.10.0"
+        ],
+        "description": "CVE-2024-0001",
+        "generated_at": "2026-03-27T13:54:14.553023+00:00",
+        "latest_version": "1.10.0",
+        "original_score": 9.8,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "rescored_score": 9.4,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MA:L",
+        "scope": "merged_versions",
+        "session_id": "34d5ace4-37e1-4dfd-a44e-25fffadf0a59",
+        "vuln_id": "CVE-2024-0001"
+      },
+      "CVE-2024-0002": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:proj-2:component:comp-2"
+        ],
+        "analyzed_versions": [
+          "1.9.0",
+          "1.10.0"
+        ],
+        "description": "CVE-2024-0002",
+        "generated_at": "2026-03-27T13:54:14.553023+00:00",
+        "latest_version": "1.10.0",
+        "original_score": 5.4,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+        "rescored_score": 4.2,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MAC:H",
+        "scope": "merged_versions",
+        "session_id": "34d5ace4-37e1-4dfd-a44e-25fffadf0a59",
+        "vuln_id": "CVE-2024-0002"
+      }
+    },
+    "scope": "merged_versions",
+    "session_id": "34d5ace4-37e1-4dfd-a44e-25fffadf0a59"
+  },
+  "Vulnerable Project": {
+    "analyzed_versions": [
+      "1.0.0",
+      "1.1.0",
+      "1.2.0",
+      "1.2.10",
+      "2.0.0",
+      "2.1.0",
+      "3.0.0"
+    ],
+    "generated_at": "2026-03-27T13:31:20.236597+00:00",
+    "latest_version": "3.0.0",
+    "project_name": "Vulnerable Project",
+    "proposals": {
+      "CVE-2019-12384": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Jackson-databind deserialization vulnerability.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 9.8,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "rescored_score": 8.1,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAC:H",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2019-12384"
+      },
+      "CVE-2021-21290": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:d253b708-3012-4277-8461-893bd5cd61e3"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Netty message conversion vulnerability.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 5.9,
+        "original_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
+        "rescored_score": 5.3,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MUI:R",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2021-21290"
+      },
+      "CVE-2021-44228": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Log4j JNDI remote code execution vulnerability.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 10.0,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "rescored_score": 9.7,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/MAV:A",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2021-44228"
+      },
+      "CVE-2022-42889": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:e253b708-3012-4277-8461-893bd5cd61e4"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Apache Commons Text StringSubstitutor interpolation vulnerability (Text4Shell).",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 9.8,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "rescored_score": 9.4,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MA:L",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2022-42889"
+      },
+      "CVE-2023-12345": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Generic medium severity vulnerability for dependencies.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 5.4,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
+        "rescored_score": 4.6,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N/MUI:R",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2023-12345"
+      },
+      "CVE-2024-TEAM": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:7fa85f64-5717-4562-b3fc-2c963f66afb0"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Team mapping placeholder vulnerability.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 3.3,
+        "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+        "rescored_score": 2.9,
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2024-TEAM"
+      },
+      "CVE-2025-INCOMPLETE": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Incomplete assessment test case.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 7.5,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+        "rescored_score": 5.3,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/MC:L",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2025-INCOMPLETE"
+      },
+      "CVE-2025-INCONSISTENT": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Inconsistent assessment test case.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 9.8,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "rescored_score": 8.8,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:A",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2025-INCONSISTENT"
+      },
+      "CVE-2025-NEW-01": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:root",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:root",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:root",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:root",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:root",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:root",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:root"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Newly discovered low risk dependency issue.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 5.4,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+        "rescored_score": 4.3,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MC:N",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2025-NEW-01"
+      },
+      "CVE-2025-NEW-02": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Missing input validation issue in subsystem.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 6.5,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N",
+        "rescored_score": 5.7,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N/MUI:R",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2025-NEW-02"
+      },
+      "CVE-2025-NEW-03": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Authentication bypass vulnerability in auth module.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 9.1,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+        "rescored_score": 8.1,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2025-NEW-03"
+      },
+      "CVE-2026-OPEN-PENDING": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Pending review open team assessment test case.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 6.5,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+        "rescored_score": 5.4,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MAV:A",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2026-OPEN-PENDING"
+      },
+      "CVE-2026-PLAINTEXT-NA": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Plaintext NOT_AFFECTED assessment test case.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 3.3,
+        "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+        "rescored_score": 2.2,
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MC:N",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2026-PLAINTEXT-NA"
+      },
+      "CVE-2026-PLAINTEXT-NS": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "Plaintext NOT_SET assessment test case.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 3.3,
+        "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
+        "rescored_score": 2.2,
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MC:N",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2026-PLAINTEXT-NS"
+      },
+      "CVE-2026-TEAM-PARTIAL": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+        ],
+        "analyzed_versions": [
+          "1.0.0",
+          "1.1.0",
+          "1.2.0",
+          "1.2.10",
+          "2.0.0",
+          "2.1.0",
+          "3.0.0"
+        ],
+        "description": "One team assessed, another open team assessment test case.",
+        "generated_at": "2026-03-27T13:31:20.236597+00:00",
+        "latest_version": "3.0.0",
+        "original_score": 6.5,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
+        "rescored_score": 5.4,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MPR:L",
+        "scope": "merged_versions",
+        "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65",
+        "vuln_id": "CVE-2026-TEAM-PARTIAL"
+      }
+    },
+    "scope": "merged_versions",
+    "session_id": "7039f145-e9bc-453d-99e3-eea8ffacea65"
+  }
+}

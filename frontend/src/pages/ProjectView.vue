@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics } from '../lib/api'
+import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMRescoreProposals } from '../lib/api'
 import { getGroupLifecycle, isPendingReview as isPendingReviewHelper, matchesFilters, getGroupTechnicalState, tagToString } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
-import type { GroupedVuln, Statistics } from '../types'
+import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
 
 import VulnGroupCard from '../components/VulnGroupCard.vue'
 import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal.vue'
@@ -35,7 +35,25 @@ provide('teamMapping', teamMapping)
 const rescoreRules = ref<any>(null)
 provide('rescoreRules', rescoreRules)
 
+const tmrescoreProposalSnapshot = ref<TMRescoreProposalSnapshot | null>(null)
+provide('tmrescoreProposals', computed(() => tmrescoreProposalSnapshot.value?.proposals || {}))
+
 const isFilterCollapsed = ref(false)
+const threatModelRefreshSignal = computed(() => String(route.query.refreshThreatModel || ''))
+
+const consumeThreatModelRefreshSignal = () => {
+    const name = route.params.name as string
+    if (!name || name === '_all_' || typeof window === 'undefined' || !window.sessionStorage) {
+        return false
+    }
+
+    const key = `dtvp:tmrescore-refresh:${name}`
+    const hasSignal = !!window.sessionStorage.getItem(key)
+    if (hasSignal) {
+        window.sessionStorage.removeItem(key)
+    }
+    return hasSignal
+}
 
 const fetchTeamMapping = async () => {
     try {
@@ -71,6 +89,25 @@ const fetchRescoreRules = async () => {
         rescoreRules.value = await getRescoreRules()
     } catch (err) {
         console.error('Failed to fetch rescore rules:', err)
+    }
+}
+
+const fetchTMRescoreProposals = async () => {
+    const name = route.params.name as string
+    if (!name || name === '_all_') {
+        tmrescoreProposalSnapshot.value = null
+        return
+    }
+
+    try {
+        tmrescoreProposalSnapshot.value = await getTMRescoreProposals(name)
+    } catch (err: any) {
+        if (err?.response?.status === 404) {
+            tmrescoreProposalSnapshot.value = null
+            return
+        }
+        console.error('Failed to fetch threat-model proposals:', err)
+        tmrescoreProposalSnapshot.value = null
     }
 }
 
@@ -680,8 +717,10 @@ const dependencyRelationshipCounts = computed(() => {
     return counts
 })
 
-watch(() => route.params.name, () => {
+watch([() => route.params.name, () => threatModelRefreshSignal.value], () => {
+    consumeThreatModelRefreshSignal()
     fetchVulns()
+    fetchTMRescoreProposals()
     if (viewMode.value === 'statistics') {
         fetchStats()
     } else {
@@ -725,6 +764,14 @@ watch(() => route.params.name, () => {
                         Vulnerabilities <span class="text-blue-500 italic font-medium px-2">for</span> {{ $route.params.name === '_all_' ? 'All Projects' : $route.params.name }}
                     </h2>
                     <div class="flex gap-2">
+                        <router-link
+                            v-if="$route.params.name !== '_all_'"
+                            :to="`/project/${$route.params.name}/tmrescore`"
+                            class="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 group shadow-lg active:scale-95"
+                        >
+                            <ShieldCheck :size="14" class="group-hover:rotate-6 transition-transform" />
+                            Threat Model
+                        </router-link>
                         <button 
                             v-if="$route.params.name !== '_all_'"
                             @click="viewMode = viewMode === 'analysis' ? 'statistics' : 'analysis'"

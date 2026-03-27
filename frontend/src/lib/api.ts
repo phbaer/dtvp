@@ -1,5 +1,13 @@
 import axios from 'axios';
-import type { Project, GroupedVuln, AssessmentPayload, Statistics } from '../types';
+import type {
+    Project,
+    GroupedVuln,
+    AssessmentPayload,
+    Statistics,
+    TMRescoreAnalysisResult,
+    TMRescoreContext,
+    TMRescoreProposalSnapshot,
+} from '../types';
 import { getRuntimeConfig } from './env';
 
 const envApiUrl = getRuntimeConfig('DTVP_API_URL', '').replace(/\/$/, '');
@@ -198,6 +206,51 @@ export const uploadRescoreRules = async (file: File): Promise<{ status: string; 
 
 export const updateRescoreRules = async (rules: Record<string, any>): Promise<{ status: string; message: string }> => {
     const res = await api.put('/settings/rescore-rules', rules);
+    return res.data;
+};
+
+export const getTMRescoreContext = async (projectName: string): Promise<TMRescoreContext> => {
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/context`);
+    return res.data;
+};
+
+export interface TMRescoreAnalysisOptions {
+    scope: 'latest_only' | 'merged_versions';
+    threatmodel: File;
+    itemsCsv?: File | null;
+    config?: File | null;
+    chainAnalysis?: boolean;
+    prioritize?: boolean;
+    whatIf?: boolean;
+    enrich?: boolean;
+    ollamaModel?: string;
+}
+
+export const runTMRescoreAnalysis = async (
+    projectName: string,
+    options: TMRescoreAnalysisOptions,
+): Promise<TMRescoreAnalysisResult> => {
+    const formData = new FormData();
+    formData.append('scope', options.scope);
+    formData.append('threatmodel', options.threatmodel);
+    formData.append('chain_analysis', String(options.chainAnalysis ?? true));
+    formData.append('prioritize', String(options.prioritize ?? true));
+    formData.append('what_if', String(options.whatIf ?? false));
+    formData.append('enrich', String(options.enrich ?? false));
+    formData.append('ollama_model', options.ollamaModel ?? 'qwen2.5:7b');
+    if (options.itemsCsv) {
+        formData.append('items_csv', options.itemsCsv);
+    }
+    if (options.config) {
+        formData.append('config', options.config);
+    }
+
+    const res = await api.post(`/projects/${encodeURIComponent(projectName)}/tmrescore/analyze`, formData);
+    return res.data;
+};
+
+export const getTMRescoreProposals = async (projectName: string): Promise<TMRescoreProposalSnapshot> => {
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/proposals`);
     return res.data;
 };
 

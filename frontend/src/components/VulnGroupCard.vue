@@ -2,7 +2,7 @@
 import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 
-import type { GroupedVuln, AssessmentPayload } from '../types'
+import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, History } from 'lucide-vue-next'
 
 import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
@@ -41,6 +41,7 @@ onUnmounted(() => {
 const user = inject<any>('user', ref({ role: 'ANALYST' }))
 const teamMapping = inject<any>('teamMapping', ref({}))
 const rescoreRules = inject<any>('rescoreRules', ref({ transitions: [] }))
+const tmrescoreProposals = inject<any>('tmrescoreProposals', ref({}))
 
 const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
@@ -92,6 +93,7 @@ const cvssInstance = ref<any>(null)
 const isManualBaseMode = ref(false)
 const initialVector = ref('')
 const initialScore = ref<number | null>(null)
+const preservePendingScoreOnNextVectorChange = ref(false)
 
 const genericModal = ref({
     show: false,
@@ -169,6 +171,18 @@ const lastRescoredScore = ref<number | null>(null)
 const currentDisplayScore = computed(() => {
     if (pendingScore.value !== null) return pendingScore.value
     return props.group.rescored_cvss ?? (props.group.cvss || props.group.cvss_score) ?? 'N/A'
+})
+
+const persistedDisplayVector = computed(() => {
+    return props.group.rescored_vector || props.group.cvss_vector || ''
+})
+
+const currentDisplayVector = computed(() => {
+    return pendingVector.value !== '' ? pendingVector.value : persistedDisplayVector.value
+})
+
+const hasDraftVectorChange = computed(() => {
+    return currentDisplayVector.value !== (props.group.cvss_vector || '')
 })
 
 const isRescoredOrModified = computed(() => {
@@ -320,13 +334,17 @@ const setCvssInstanceFromVector = (vector: string) => {
     let v = vector.trim()
     try {
         if (v.startsWith('CVSS:4.0')) {
+            activeVersion.value = '4.0'
             cvssInstance.value = new Cvss4P0(v)
         } else if (v.startsWith('CVSS:3.0')) {
+            activeVersion.value = '3.0'
             v = v.replace('CVSS:3.0', 'CVSS:3.1')
             cvssInstance.value = new Cvss3P1(v)
         } else if (v.startsWith('CVSS:3.1')) {
+            activeVersion.value = '3.1'
             cvssInstance.value = new Cvss3P1(v)
         } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
+            activeVersion.value = '2.0'
             cvssInstance.value = new Cvss2(v)
         } else {
             // default to 3.1 fallback when version is missing
@@ -386,6 +404,40 @@ const canEditBase = computed(() => {
     return false
 })
 
+const matchedThreatModelProposal = computed<TMRescoreProposal | null>(() => {
+    const proposals = tmrescoreProposals?.value || {}
+    const candidateIds = [props.group.id, ...(props.group.aliases || [])]
+
+    for (const candidateId of candidateIds) {
+        const normalized = String(candidateId || '').trim().toUpperCase()
+        if (!normalized) continue
+        const proposal = proposals[normalized]
+        if (proposal) return proposal
+    }
+
+    return null
+})
+
+const applyThreatModelProposal = () => {
+    const proposal = matchedThreatModelProposal.value
+    if (!proposal) return
+
+    if (proposal.rescored_vector) {
+        preservePendingScoreOnNextVectorChange.value = proposal.rescored_score !== null && proposal.rescored_score !== undefined
+        pendingVector.value = proposal.rescored_vector
+        setCvssInstanceFromVector(proposal.rescored_vector)
+    }
+
+    if (proposal.rescored_score !== null && proposal.rescored_score !== undefined) {
+        pendingScore.value = proposal.rescored_score
+    } else if (proposal.rescored_vector) {
+        pendingScore.value = calculateScoreFromVector(proposal.rescored_vector)
+    }
+
+    formTouched.value = true
+    isManualBaseMode.value = true
+}
+
 const resetVector = () => {
     isManualBaseMode.value = false
     // Reset to the ORIGINAL baseline from Dependency-Track
@@ -420,6 +472,11 @@ const clearVector = () => {
 }
 
 watch(pendingVector, (newVector) => {
+    if (preservePendingScoreOnNextVectorChange.value) {
+        preservePendingScoreOnNextVectorChange.value = false
+        return
+    }
+
     const score = calculateScoreFromVector(newVector)
     if (score !== null) {
         pendingScore.value = score
@@ -1240,7 +1297,7 @@ const affectedVersionTooltip = computed(() => {
 })
 
 const rescoredVectorSegments = computed(() => {
-    const rescored = props.group.rescored_vector
+    const rescored = currentDisplayVector.value
     const original = props.group.cvss_vector
     
     if (!rescored || !original || !rescored.startsWith(original)) {
@@ -1467,16 +1524,16 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
             </div>
             
             <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
-                <div v-if="group.rescored_vector && group.rescored_vector !== group.cvss_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
+            <div v-if="expanded && (currentDisplayVector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
+                <div v-if="hasDraftVectorChange && currentDisplayVector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2" data-testid="current-vector-display">
                     <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored Vector:</span>
                     <span class="tracing-tight">
                         <span class="font-bold rescored-bold-segment">{{ rescoredVectorSegments.bold }}</span>{{ rescoredVectorSegments.normal }}
                     </span>
                 </div>
                 <div class="font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50 flex items-center gap-2">
-                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ group.rescored_vector ? 'Original Vector:' : 'Vector:' }}</span>
-                    <span :class="{ 'line-through opacity-50': group.rescored_vector }">{{ group.cvss_vector || 'N/A' }}</span>
+                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ hasDraftVectorChange ? 'Original Vector:' : 'Vector:' }}</span>
+                    <span :class="{ 'line-through opacity-50': hasDraftVectorChange }">{{ group.cvss_vector || currentDisplayVector || 'N/A' }}</span>
                 </div>
             </div>
         </div>
@@ -1767,6 +1824,35 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                             <Calculator :size="12" />
                             CVSS Calculator
                         </h5>
+
+                        <div
+                            v-if="matchedThreatModelProposal"
+                            class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-950/20 p-3"
+                            data-testid="threat-model-proposal"
+                        >
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <div class="text-[11px] font-black uppercase tracking-[0.2em] text-emerald-300">Threat-Model Proposal</div>
+                                    <div class="mt-1 text-xs text-emerald-100">
+                                        <span v-if="matchedThreatModelProposal.rescored_score !== null">Score {{ matchedThreatModelProposal.rescored_score }}</span>
+                                        <span v-if="matchedThreatModelProposal.rescored_score !== null && matchedThreatModelProposal.rescored_vector"> · </span>
+                                        <span v-if="matchedThreatModelProposal.rescored_vector" class="font-mono break-all">{{ matchedThreatModelProposal.rescored_vector }}</span>
+                                    </div>
+                                    <div class="mt-1 text-[10px] text-emerald-200/70">
+                                        {{ matchedThreatModelProposal.scope === 'merged_versions' ? 'Merged multi-version analysis' : 'Latest-version analysis' }}
+                                        <span v-if="matchedThreatModelProposal.analyzed_versions?.length"> · {{ matchedThreatModelProposal.analyzed_versions.join(', ') }}</span>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    @click="applyThreatModelProposal"
+                                    class="shrink-0 rounded-md border border-emerald-400/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                                    data-testid="apply-threat-model-proposal"
+                                >
+                                    Use Proposal
+                                </button>
+                            </div>
+                        </div>
                         
                         <div class="mb-2">
                             <label class="block text-xs font-semibold text-gray-500 mb-1 flex justify-between">

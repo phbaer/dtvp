@@ -15,13 +15,20 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
+    Form,
     HTTPException,
     Request,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -43,14 +50,76 @@ from logic import (
     process_assessment_details,
 )
 from version import BUILD_COMMIT, VERSION
+from tmrescore_integration import (
+    SUPPORTED_TMRESCORE_SCOPES,
+    TMRescoreClient,
+    TMRescoreSettings,
+    build_analysis_sbom,
+    build_tmrescore_proposals,
+    natural_version_key,
+    normalize_tmrescore_snapshot,
+    sort_projects_by_version,
+)
 
 logger = logging.getLogger("dtvp")
 logger.setLevel(logging.INFO)
 
 
+def get_tmrescore_cache_path() -> str:
+    configured_path = os.getenv("DTVP_TMRESCORE_CACHE_PATH", "").strip()
+    if configured_path:
+        return configured_path
+    return os.path.join(os.getcwd(), "data", "tmrescore_proposals.json")
+
+
+def load_tmrescore_project_cache() -> Dict[str, Dict[str, Any]]:
+    cache_path = get_tmrescore_cache_path()
+    if not os.path.exists(cache_path):
+        return {}
+
+    try:
+        with open(cache_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception as exc:
+        logger.warning("Failed to load tmrescore cache from %s: %s", cache_path, exc)
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    return {
+        project_name: normalize_tmrescore_snapshot(snapshot)
+        for project_name, snapshot in payload.items()
+        if isinstance(snapshot, dict)
+    }
+
+
+def save_tmrescore_project_cache(cache: Dict[str, Dict[str, Any]]) -> None:
+    cache_path = get_tmrescore_cache_path()
+    cache_dir = os.path.dirname(cache_path)
+    if cache_dir:
+        os.makedirs(cache_dir, exist_ok=True)
+
+    temp_path = f"{cache_path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(cache, handle, indent=2, sort_keys=True)
+    os.replace(temp_path, cache_path)
+
+
+def persist_tmrescore_project_snapshot(
+    project_name: str,
+    snapshot: Dict[str, Any],
+) -> None:
+    normalized_snapshot = normalize_tmrescore_snapshot(snapshot)
+    tmrescore_project_cache[project_name] = normalized_snapshot
+    save_tmrescore_project_cache(tmrescore_project_cache)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting DTVP version {VERSION} (build {BUILD_COMMIT})")
+    tmrescore_project_cache.clear()
+    tmrescore_project_cache.update(load_tmrescore_project_cache())
     yield
 
 
@@ -244,6 +313,7 @@ async def search_projects(
 
 # Job Manager
 tasks = {}
+tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
 
 
 class TaskResponse(BaseModel):
@@ -384,6 +454,66 @@ async def collect_version_snapshots(
     return combined_data, bom_cache_map, version_severity_counts
 
 
+async def fetch_version_analysis_input(
+    client: DTClient,
+    version_info: Dict[str, Any],
+) -> Dict[str, Any]:
+    findings_result, full_vulns_result, bom_result = await asyncio.gather(
+        client.get_vulnerabilities(version_info["uuid"]),
+        client.get_project_vulnerabilities(version_info["uuid"]),
+        client.get_bom(version_info["uuid"]),
+        return_exceptions=True,
+    )
+
+    if isinstance(findings_result, Exception):
+        raise findings_result
+    if isinstance(full_vulns_result, Exception):
+        raise full_vulns_result
+
+    merge_vulnerability_details(findings_result, full_vulns_result)
+
+    if isinstance(bom_result, Exception):
+        bom_result = {}
+
+    return {
+        "version": version_info,
+        "vulnerabilities": findings_result,
+        "bom": bom_result or {},
+    }
+
+
+async def collect_tmrescore_analysis_inputs(
+    versions: List[Dict[str, Any]],
+    client: DTClient,
+) -> List[Dict[str, Any]]:
+    if not versions:
+        return []
+
+    concurrency = min(get_version_fetch_concurrency(), len(versions))
+    semaphore = asyncio.Semaphore(concurrency)
+    results: List[Optional[Dict[str, Any]]] = [None] * len(versions)
+
+    async def worker(index: int, version_info: Dict[str, Any]):
+        async with semaphore:
+            return index, await fetch_version_analysis_input(client, version_info)
+
+    pending = [
+        asyncio.create_task(worker(index, version_info))
+        for index, version_info in enumerate(versions)
+    ]
+
+    try:
+        for pending_task in asyncio.as_completed(pending):
+            index, result = await pending_task
+            results[index] = result
+    finally:
+        for pending_task in pending:
+            if not pending_task.done():
+                pending_task.cancel()
+
+    return [item for item in results if item is not None]
+
+
 async def process_grouped_vulns_task(
     task_id: str, name: str, cve: Optional[str], client: DTClient
 ):
@@ -402,7 +532,7 @@ async def process_grouped_vulns_task(
             versions = projects
 
         # Sort versions deterministically by version string to ensure stable processing order
-        versions.sort(key=lambda x: x.get("version", ""))
+        versions = sort_projects_by_version(versions)
 
         if not versions:
             tasks[task_id]["status"] = "completed"
@@ -538,7 +668,7 @@ async def get_statistics(
         }
 
     # Deterministic sort
-    versions.sort(key=lambda x: x.get("version", ""))
+    versions = sort_projects_by_version(versions)
 
     team_mapping = load_team_mapping()
     combined_data, bom_cache_map, version_severity_counts = await collect_version_snapshots(
@@ -825,6 +955,301 @@ async def get_dependency_chains(
     processor = BOMAnalysisCache(bom, team_mapping)
     # component_name is not strictly needed for lookup if uuid works, but we can pass empty string
     return processor.get_dependency_paths(component_uuid, component_name="")
+
+
+@api_router.get("/projects/{project_name}/tmrescore/context")
+async def get_tmrescore_context(
+    project_name: str,
+    client: DTClient = Depends(get_client),
+    user: str = Depends(get_current_user),
+):
+    settings = TMRescoreSettings()
+
+    llm_enrichment_available = False
+    llm_enrichment_status = "integration_disabled"
+    llm_enrichment_warning = None
+
+    if settings.enabled:
+        try:
+            async with TMRescoreClient(settings) as tmrescore_client:
+                health = await tmrescore_client.get_health()
+            llm_enrichment_available = bool(health.get("ollama_configured"))
+            llm_enrichment_status = (
+                "available" if llm_enrichment_available else "not_configured"
+            )
+            if not llm_enrichment_available:
+                llm_enrichment_warning = (
+                    "LLM enrichment requires OLLAMA_HOST to be configured on the tmrescore backend."
+                )
+        except Exception as exc:
+            llm_enrichment_status = "unreachable"
+            logger.warning(
+                "Unable to determine tmrescore Ollama configuration for %s: %s",
+                project_name,
+                exc,
+            )
+            llm_enrichment_warning = (
+                "Could not verify LLM enrichment availability from the tmrescore backend."
+            )
+    else:
+        llm_enrichment_status = "integration_disabled"
+        llm_enrichment_warning = (
+            "TMRescore integration is not configured. Set DTVP_TMRESCORE_URL to enable threat-model analysis."
+        )
+
+    try:
+        projects = await client.get_projects(project_name)
+    except Exception as e:
+        logger.error("Error fetching projects for tmrescore context: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Dependency-Track unavailable while preparing threat-model analysis context.",
+        )
+
+    versions = [project for project in projects if project.get("name") == project_name]
+    versions = sort_projects_by_version(versions)
+
+    if not versions:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    latest_version = versions[-1].get("version", "unknown")
+
+    return {
+        "enabled": settings.enabled,
+        "project_name": project_name,
+        "latest_version": latest_version,
+        "versions": [version.get("version") for version in versions],
+        "recommended_scope": "merged_versions",
+        "scopes": [
+            {
+                "id": "merged_versions",
+                "label": "Merged Multi-Version SBOM",
+                "description": "Recommended. Builds a synthetic analysis-only SBOM with separate roots per project version so historical findings stay attached to the components that actually carried them.",
+            },
+            {
+                "id": "latest_only",
+                "label": "Latest Version Only",
+                "description": "Uses only the latest Dependency-Track version. This is a clean single-version snapshot, but it intentionally ignores findings that exist only in older releases.",
+            },
+        ],
+        "warnings": [
+            "Do not combine the latest SBOM with vulnerabilities from older versions. That would create false positives on components that are not part of that inventory.",
+            "The merged mode produces an analysis-only synthetic SBOM. It is appropriate for threat-model rescoring, but not as a deployable inventory attestation.",
+            "Upload the current threat model and optional mapping inputs for each run so the rescoring reflects the latest architecture assumptions.",
+        ],
+        "llm_enrichment": {
+            "available": llm_enrichment_available,
+            "status": llm_enrichment_status,
+            "default_model": os.getenv("DTVP_TMRESCORE_OLLAMA_MODEL", "qwen2.5:7b"),
+            "host_configured": llm_enrichment_available,
+            "warning": llm_enrichment_warning,
+        },
+    }
+
+
+@api_router.post("/projects/{project_name}/tmrescore/analyze")
+async def analyze_project_with_tmrescore(
+    project_name: str,
+    threatmodel: UploadFile = File(...),
+    items_csv: UploadFile | None = File(None),
+    config: UploadFile | None = File(None),
+    scope: str = Form("merged_versions"),
+    chain_analysis: bool = Form(True),
+    prioritize: bool = Form(True),
+    what_if: bool = Form(False),
+    enrich: bool = Form(False),
+    ollama_model: str = Form("qwen2.5:7b"),
+    client: DTClient = Depends(get_client),
+    user: str = Depends(get_current_user),
+):
+    if scope not in SUPPORTED_TMRESCORE_SCOPES:
+        raise HTTPException(status_code=400, detail="Unsupported tmrescore analysis scope")
+
+    settings = TMRescoreSettings()
+    if not settings.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="TMRescore integration is not configured. Set DTVP_TMRESCORE_URL to enable threat-model analysis.",
+        )
+
+    try:
+        projects = await client.get_projects(project_name)
+    except Exception as e:
+        logger.error("Error fetching projects for tmrescore analysis: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Dependency-Track unavailable while preparing threat-model analysis.",
+        )
+
+    versions = [project for project in projects if project.get("name") == project_name]
+    versions = sort_projects_by_version(versions)
+
+    if not versions:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    selected_versions = versions[-1:] if scope == "latest_only" else versions
+    latest_version = versions[-1].get("version", "unknown")
+
+    analysis_inputs = await collect_tmrescore_analysis_inputs(selected_versions, client)
+    synthetic_sbom = build_analysis_sbom(
+        project_name,
+        analysis_inputs,
+        scope,
+        latest_version,
+    )
+
+    session_version_label = (
+        latest_version
+        if scope == "latest_only"
+        else f"multi-version:{latest_version}"
+    )
+
+    threatmodel_bytes = await threatmodel.read()
+    items_csv_bytes = await items_csv.read() if items_csv else None
+    config_bytes = await config.read() if config else None
+
+    async with TMRescoreClient(settings) as tmrescore_client:
+        session = await tmrescore_client.create_session(project_name, session_version_label)
+        result = await tmrescore_client.analyze_inventory(
+            session["session_id"],
+            threatmodel_bytes=threatmodel_bytes,
+            sbom_bytes=json.dumps(synthetic_sbom).encode("utf-8"),
+            items_csv_bytes=items_csv_bytes,
+            config_bytes=config_bytes,
+            chain_analysis=chain_analysis,
+            prioritize=prioritize,
+            what_if=what_if,
+            enrich=enrich,
+            ollama_model=ollama_model if enrich else None,
+        )
+
+        session_id = result.get("session_id") or session.get("session_id")
+        if session_id:
+            try:
+                raw_results = await tmrescore_client.get_results_json(session_id)
+                persist_tmrescore_project_snapshot(project_name, {
+                    "project_name": project_name,
+                    "session_id": session_id,
+                    "scope": scope,
+                    "latest_version": latest_version,
+                    "analyzed_versions": [
+                        version.get("version", "unknown")
+                        for version in selected_versions
+                    ],
+                    "generated_at": raw_results.get("generated_at"),
+                    "proposals": {
+                        vuln_id: {
+                            **proposal,
+                            "session_id": session_id,
+                            "scope": scope,
+                            "latest_version": latest_version,
+                            "analyzed_versions": [
+                                version.get("version", "unknown")
+                                for version in selected_versions
+                            ],
+                            "generated_at": raw_results.get("generated_at"),
+                        }
+                        for vuln_id, proposal in build_tmrescore_proposals(raw_results).items()
+                    },
+                })
+            except Exception as exc:
+                logger.warning(
+                    "Unable to cache tmrescore proposals for %s session %s: %s",
+                    project_name,
+                    session_id,
+                    exc,
+                )
+
+    session_id = result.get("session_id") or session.get("session_id")
+    return {
+        **result,
+        "session": session,
+        "scope": scope,
+        "recommended_scope": "merged_versions",
+        "latest_version": latest_version,
+        "analyzed_versions": [
+            version.get("version", "unknown") for version in selected_versions
+        ],
+        "sbom_component_count": len(synthetic_sbom.get("components") or []),
+        "sbom_vulnerability_count": len(synthetic_sbom.get("vulnerabilities") or []),
+        "strategy_note": (
+            "Merged multi-version analysis keeps historical vulnerabilities attached to the versioned components they came from."
+            if scope == "merged_versions"
+            else "Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases."
+        ),
+        "llm_enrichment": {
+            "enabled": enrich,
+            "ollama_model": ollama_model if enrich else None,
+        },
+        "download_urls": {
+            "json": f"{context_path}/api/tmrescore/sessions/{session_id}/results/json",
+            "vex": f"{context_path}/api/tmrescore/sessions/{session_id}/results/vex",
+        },
+    }
+
+
+@api_router.get("/projects/{project_name}/tmrescore/proposals")
+async def get_tmrescore_project_proposals(
+    project_name: str,
+    user: str = Depends(get_current_user),
+):
+    cached = tmrescore_project_cache.get(project_name)
+    if not cached:
+        raise HTTPException(
+            status_code=404,
+            detail="No cached threat-model proposals are available for this project yet.",
+        )
+    normalized_cached = normalize_tmrescore_snapshot(cached)
+    if normalized_cached != cached:
+        persist_tmrescore_project_snapshot(project_name, normalized_cached)
+    return normalized_cached
+
+
+@api_router.get("/tmrescore/sessions/{session_id}/results/json")
+async def get_tmrescore_results_json(
+    session_id: str,
+    user: str = Depends(get_current_user),
+):
+    settings = TMRescoreSettings()
+    if not settings.enabled:
+        raise HTTPException(status_code=503, detail="TMRescore integration is not configured")
+
+    async with TMRescoreClient(settings) as tmrescore_client:
+        return await tmrescore_client.get_results_json(session_id)
+
+
+@api_router.get("/tmrescore/sessions/{session_id}/results/vex")
+async def get_tmrescore_results_vex(
+    session_id: str,
+    user: str = Depends(get_current_user),
+):
+    settings = TMRescoreSettings()
+    if not settings.enabled:
+        raise HTTPException(status_code=503, detail="TMRescore integration is not configured")
+
+    async with TMRescoreClient(settings) as tmrescore_client:
+        return await tmrescore_client.get_results_vex(session_id)
+
+
+@api_router.get("/tmrescore/sessions/{session_id}/outputs/{filename}")
+async def get_tmrescore_output_file(
+    session_id: str,
+    filename: str,
+    user: str = Depends(get_current_user),
+):
+    settings = TMRescoreSettings()
+    if not settings.enabled:
+        raise HTTPException(status_code=503, detail="TMRescore integration is not configured")
+
+    async with TMRescoreClient(settings) as tmrescore_client:
+        response = await tmrescore_client.get_output_file(session_id, filename)
+
+    media_type = response.headers.get("content-type", "application/octet-stream")
+    content_disposition = response.headers.get("content-disposition")
+    headers = {}
+    if content_disposition:
+        headers["content-disposition"] = content_disposition
+    return Response(content=response.content, media_type=media_type, headers=headers)
 
 
 @api_router.get("/openapi.json")

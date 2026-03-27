@@ -190,6 +190,48 @@ describe('VulnGroupCard', () => {
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
     })
 
+    it('shows and applies a threat-model proposal in the rescoring dialog', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: { value: { username: 'tester', role: 'REVIEWER' } },
+                    tmrescoreProposals: {
+                        value: {
+                            'CVE-2023-1234': {
+                                vuln_id: 'CVE-2023-1234',
+                                rescored_score: 6.4,
+                                rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L',
+                                original_score: 9.8,
+                                original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                affected_refs: [],
+                                session_id: 'session-1',
+                                scope: 'merged_versions',
+                                latest_version: '1.0',
+                                analyzed_versions: ['0.9', '1.0']
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const proposal = wrapper.find('[data-testid="threat-model-proposal"]')
+        expect(proposal.exists()).toBe(true)
+        expect(proposal.text()).toContain('Threat-Model Proposal')
+        expect(proposal.text()).toContain('6.4')
+        expect(proposal.text()).toContain('/MPR:L/MC:L/MI:L/MA:L')
+
+        await wrapper.find('[data-testid="apply-threat-model-proposal"]').trigger('click')
+
+        expect((wrapper.vm as any).pendingScore).toBe(6.4)
+        expect((wrapper.vm as any).pendingVector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L')
+        expect((wrapper.get('input[type="text"]').element as HTMLInputElement).value).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L')
+        expect(wrapper.get('[data-testid="current-vector-display"]').text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L')
+    })
+
 
 
     it('handles assessment update errors', async () => {
