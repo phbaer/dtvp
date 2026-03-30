@@ -20,6 +20,16 @@ describe('TMRescore.vue', () => {
         window.sessionStorage.clear()
     })
 
+    const deferred = <T,>() => {
+        let resolve!: (value: T) => void
+        let reject!: (reason?: unknown) => void
+        const promise = new Promise<T>((res, rej) => {
+            resolve = res
+            reject = rej
+        })
+        return { promise, resolve, reject }
+    }
+
     it('loads context and renders recommended scope', async () => {
         vi.mocked(getTMRescoreContext).mockResolvedValue({
             enabled: true,
@@ -53,6 +63,42 @@ describe('TMRescore.vue', () => {
         expect(wrapper.text()).toContain('LLM enrichment')
         expect(wrapper.get('[data-testid="llm-enrichment-status"]').text()).toBe('Available')
         expect((wrapper.get('[data-testid="ollama-model-input"]').element as HTMLInputElement).value).toBe('qwen2.5:14b')
+    })
+
+    it('shows a scrolling progress log while loading context', async () => {
+        const pendingContext = deferred<any>()
+        vi.mocked(getTMRescoreContext).mockReturnValue(pendingContext.promise)
+
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
+            routes: tmRescoreRoutes,
+        })
+
+        const log = wrapper.get('[data-testid="tmrescore-progress-log"]')
+        expect(log.text()).toContain('Starting threat-model context load...')
+        expect(log.text()).toContain('Checking TMRescore backend availability...')
+
+        pendingContext.resolve({
+            enabled: true,
+            project_name: 'ExampleApp',
+            latest_version: '1.10.0',
+            versions: ['1.10.0'],
+            recommended_scope: 'merged_versions',
+            scopes: [
+                { id: 'merged_versions', label: 'Merged Multi-Version SBOM', description: 'Recommended scope' },
+            ],
+            warnings: [],
+            llm_enrichment: {
+                available: true,
+                status: 'available',
+                default_model: 'qwen2.5:7b',
+                host_configured: true,
+                warning: null,
+            },
+        })
+        await flushPromises()
+
+        expect(wrapper.text()).toContain('Threat-Model Analysis for ExampleApp')
     })
 
     it('submits analysis once a threat model file is selected', async () => {
@@ -119,11 +165,81 @@ describe('TMRescore.vue', () => {
             threatmodel: file,
             enrich: true,
             ollamaModel: 'llama3.1:8b',
+        }), expect.objectContaining({
+            onUploadProgress: expect.any(Function),
         }))
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
         expect(window.sessionStorage.getItem('dtvp:tmrescore-refresh:ExampleApp')).toBeTruthy()
         expect(wrapper.getComponent({ name: 'RouterLink' }).props('to')).toBe('/project/ExampleApp?refreshThreatModel=1')
+    })
+
+    it('shows a scrolling progress log while analysis is running', async () => {
+        vi.mocked(getTMRescoreContext).mockResolvedValue({
+            enabled: true,
+            project_name: 'ExampleApp',
+            latest_version: '1.10.0',
+            versions: ['1.10.0'],
+            recommended_scope: 'merged_versions',
+            scopes: [
+                { id: 'merged_versions', label: 'Merged Multi-Version SBOM', description: 'Recommended scope' },
+            ],
+            warnings: [],
+            llm_enrichment: {
+                available: true,
+                status: 'available',
+                default_model: 'qwen2.5:7b',
+                host_configured: true,
+                warning: null,
+            },
+        } as any)
+
+        const pendingAnalysis = deferred<any>()
+        vi.mocked(runTMRescoreAnalysis).mockReturnValue(pendingAnalysis.promise)
+
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
+            routes: tmRescoreRoutes,
+        })
+        await flushPromises()
+
+        const input = wrapper.get('[data-testid="threatmodel-input"]')
+        const file = new File(['tm7'], 'model.tm7', { type: 'application/octet-stream' })
+        Object.defineProperty(input.element, 'files', {
+            value: [file],
+            configurable: true,
+        })
+        await input.trigger('change')
+        await wrapper.get('form').trigger('submit.prevent')
+        await wrapper.vm.$nextTick()
+
+        const log = wrapper.get('[data-testid="tmrescore-progress-log"]')
+        expect(log.text()).toContain('Preparing threat-model analysis request...')
+        expect(log.text()).toContain('Uploading threat model and analysis inputs...')
+
+        pendingAnalysis.resolve({
+            session_id: 'session-1',
+            status: 'completed',
+            total_cves: 2,
+            rescored_count: 1,
+            avg_score_reduction: 0.4,
+            elapsed_seconds: 1.2,
+            scope: 'merged_versions',
+            recommended_scope: 'merged_versions',
+            latest_version: '1.10.0',
+            analyzed_versions: ['1.10.0'],
+            sbom_component_count: 4,
+            sbom_vulnerability_count: 2,
+            strategy_note: 'Merged multi-version analysis keeps findings attached.',
+            download_urls: {
+                json: '/api/tmrescore/sessions/session-1/results/json',
+                vex: '/api/tmrescore/sessions/session-1/results/vex',
+            },
+            outputs: {},
+        })
+        await flushPromises()
+
+        expect(wrapper.text()).toContain('Analysis completed. 1 of 2 CVEs were rescored.')
     })
 
     it('renders unavailable when remote enrichment status cannot be verified', async () => {

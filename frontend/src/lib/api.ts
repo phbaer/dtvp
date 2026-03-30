@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { AxiosProgressEvent } from 'axios';
 import type {
     Project,
     GroupedVuln,
@@ -226,9 +227,14 @@ export interface TMRescoreAnalysisOptions {
     ollamaModel?: string;
 }
 
+export interface TMRescoreAnalysisProgressHandlers {
+    onUploadProgress?: (event: AxiosProgressEvent) => void;
+}
+
 export const runTMRescoreAnalysis = async (
     projectName: string,
     options: TMRescoreAnalysisOptions,
+    handlers?: TMRescoreAnalysisProgressHandlers,
 ): Promise<TMRescoreAnalysisResult> => {
     const formData = new FormData();
     formData.append('scope', options.scope);
@@ -245,7 +251,9 @@ export const runTMRescoreAnalysis = async (
         formData.append('config', options.config);
     }
 
-    const res = await api.post(`/projects/${encodeURIComponent(projectName)}/tmrescore/analyze`, formData);
+    const res = await api.post(`/projects/${encodeURIComponent(projectName)}/tmrescore/analyze`, formData, {
+        onUploadProgress: handlers?.onUploadProgress,
+    });
     return res.data;
 };
 

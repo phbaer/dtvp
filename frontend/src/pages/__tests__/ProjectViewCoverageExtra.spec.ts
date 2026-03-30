@@ -1,6 +1,5 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
 import { getGroupedVulns } from '../../lib/api'
 import { calculateScoreFromVector } from '../../lib/cvss'
 import { useRoute } from 'vue-router'

@@ -125,6 +125,21 @@ test.describe('Per-Team Assessment UI Flow', () => {
             });
         });
 
+        await page.route('**/api/projects/*/tmrescore/proposals', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    project_name: 'TestProject',
+                    session_id: '',
+                    scope: 'merged_versions',
+                    latest_version: '1.0',
+                    analyzed_versions: [],
+                    proposals: {},
+                }),
+            });
+        });
+
         // Bypass ChangelogModal
         await page.addInitScript(() => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.0');

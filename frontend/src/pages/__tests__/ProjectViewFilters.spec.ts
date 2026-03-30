@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
 import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns } from '../../lib/api'
-import { createRouter } from 'vue-router'
 import { mountWithRouter } from './routerTestUtils'
 
 // Mock API
@@ -209,9 +207,9 @@ describe('ProjectView Filters', () => {
         // Shows V1 (OPEN), V3 (INCONSISTENT), V8 (INCONSISTENT)
         cards = wrapper.findAll('.vuln-card')
         expect(cards.length).toBe(3)
-        expect(cards.map(c => c.text())).toContain('V1')
-        expect(cards.map(c => c.text())).toContain('V3')
-        expect(cards.map(c => c.text())).toContain('V8')
+        expect(cards.map((card: any) => card.text())).toContain('V1')
+        expect(cards.map((card: any) => card.text())).toContain('V3')
+        expect(cards.map((card: any) => card.text())).toContain('V8')
 
         // Turn on specific 'Incomplete' chip in Lifecycle and 'Not Set' in Analysis
         ;(wrapper.vm as any).lifecycleFilters = ['INCOMPLETE']
@@ -259,7 +257,7 @@ describe('ProjectView Filters', () => {
     it('supports "Reset All" to return to default view', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
         const wrapper = await mountProjectViewRoute()
-        const getButton = (text: string) => wrapper.findAll('button').find(b => b.text().includes(text))
+        const getButton = (text: string) => wrapper.findAll('button').find((button: any) => button.text().includes(text))
 
         ;(wrapper.vm as any).analysisFilters = []
         await wrapper.vm.$nextTick()
@@ -303,7 +301,7 @@ describe('ProjectView Filters', () => {
 
         const openCards = wrapper.findAll('.vuln-card')
         expect(openCards.length).toBeGreaterThanOrEqual(1)
-        expect(openCards.map(c => c.text())).toContain('V4')
+        expect(openCards.map((card: any) => card.text())).toContain('V4')
     })
 
     it('should treat plaintext assessments as valid data for filters', async () => {
@@ -318,8 +316,8 @@ describe('ProjectView Filters', () => {
         ;(wrapper.vm as any).analysisFilters = ['NOT_SET']
         await wrapper.vm.$nextTick()
         expect(wrapper.findAll('.vuln-card').length).toBe(2)
-        expect(wrapper.findAll('.vuln-card').map(c => c.text())).toContain('V1')
-        expect(wrapper.findAll('.vuln-card').map(c => c.text())).toContain('V5')
+        expect(wrapper.findAll('.vuln-card').map((card: any) => card.text())).toContain('V1')
+        expect(wrapper.findAll('.vuln-card').map((card: any) => card.text())).toContain('V5')
 
         // Assessed Legacy + Not Affected should show only the plaintext NOT_AFFECTED vuln (V6)
         ;(wrapper.vm as any).lifecycleFilters = ['ASSESSED_LEGACY']
@@ -415,9 +413,9 @@ describe('ProjectView Filters', () => {
 
         // Helper to get count from a chip button
         const getCount = (text: string) => {
-            const btns = wrapper.findAll('button').filter(b => b.text().includes(text))
+            const btns = wrapper.findAll('button').filter((button: any) => button.text().includes(text))
             // Only consider buttons that have the label exactly or with a count
-            const btn = btns.find(b => b.text().trim().startsWith(text))
+            const btn = btns.find((button: any) => button.text().trim().startsWith(text))
             return parseInt(btn?.find('span').text() || '0')
         }
 

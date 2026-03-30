@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ChevronLeft, ShieldCheck, Upload } from 'lucide-vue-next'
 import { getTMRescoreContext, runTMRescoreAnalysis } from '../lib/api'
@@ -12,6 +12,10 @@ const projectName = computed(() => String(route.params.name || ''))
 const context = ref<TMRescoreContext | null>(null)
 const loading = ref(true)
 const error = ref('')
+const progressMessage = ref('Initializing threat-model analysis...')
+const progressValue = ref(0)
+const progressLog = ref<string[]>([])
+const logContainer = ref<HTMLElement | null>(null)
 
 const selectedScope = ref<'latest_only' | 'merged_versions'>('merged_versions')
 const threatModelFile = ref<File | null>(null)
@@ -33,6 +37,77 @@ const refreshSignalKey = computed(() => `dtvp:tmrescore-refresh:${projectName.va
 const projectReturnUrl = computed(() => `/project/${projectName.value}?refreshThreatModel=1`)
 
 const outputFiles = computed(() => Object.keys(result.value?.outputs || {}))
+
+const progressTimer = ref<number | null>(null)
+const stagedProgressTimers: number[] = []
+
+const stopProgressTimer = () => {
+  if (progressTimer.value !== null && typeof window !== 'undefined') {
+    window.clearInterval(progressTimer.value)
+  }
+  progressTimer.value = null
+}
+
+const clearStagedProgressTimers = () => {
+  if (typeof window === 'undefined') return
+  while (stagedProgressTimers.length > 0) {
+    const timerId = stagedProgressTimers.pop()
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId)
+    }
+  }
+}
+
+const appendProgressLog = (message: string) => {
+  if (!message) return
+  if (progressLog.value[progressLog.value.length - 1] === message) return
+  progressLog.value.push(message)
+}
+
+const setProgressState = (message: string, progress: number, writeLog = true) => {
+  progressMessage.value = message
+  progressValue.value = Math.max(progressValue.value, Math.min(progress, 100))
+  if (writeLog) {
+    appendProgressLog(message)
+  }
+}
+
+const resetProgressState = (message: string) => {
+  stopProgressTimer()
+  clearStagedProgressTimers()
+  progressMessage.value = message
+  progressValue.value = 0
+  progressLog.value = []
+  appendProgressLog(message)
+}
+
+const driftProgressTo = (target: number, intervalMs = 400) => {
+  stopProgressTimer()
+  if (typeof window === 'undefined') return
+  progressTimer.value = window.setInterval(() => {
+    if (progressValue.value >= target) {
+      stopProgressTimer()
+      return
+    }
+    progressValue.value += progressValue.value < 30 ? 4 : 2
+  }, intervalMs)
+}
+
+const scheduleProgressState = (delayMs: number, message: string, progress: number) => {
+  if (typeof window === 'undefined') return
+  const timerId = window.setTimeout(() => {
+    setProgressState(message, progress)
+  }, delayMs)
+  stagedProgressTimers.push(timerId)
+}
+
+watch(() => progressLog.value.length, () => {
+  nextTick(() => {
+    if (logContainer.value) {
+      logContainer.value.scrollTop = logContainer.value.scrollHeight
+    }
+  })
+})
 
 const enrichmentStatus = computed(() => context.value?.llm_enrichment?.status || 'integration_disabled')
 const enrichmentBadgeLabel = computed(() => {
@@ -74,13 +149,25 @@ const handleFileChange = (event: Event, target: 'threatmodel' | 'items' | 'confi
 const loadContext = async () => {
     loading.value = true
     error.value = ''
+  resetProgressState('Starting threat-model context load...')
+  setProgressState('Checking TMRescore backend availability...', 12)
+  driftProgressTo(72)
     try {
         context.value = await getTMRescoreContext(projectName.value)
         selectedScope.value = context.value.recommended_scope
-      ollamaModel.value = context.value.llm_enrichment?.default_model || 'qwen2.5:7b'
+    ollamaModel.value = context.value.llm_enrichment?.default_model || 'qwen2.5:7b'
+    setProgressState(`Loaded ${context.value.versions.length} project version${context.value.versions.length === 1 ? '' : 's'} for analysis.`, 84)
+    if (context.value.llm_enrichment?.warning) {
+      appendProgressLog(context.value.llm_enrichment.warning)
+    }
+    setProgressState('Threat-model analysis context is ready.', 100)
     } catch (err: any) {
+    stopProgressTimer()
         error.value = err?.response?.data?.detail || err?.message || 'Failed to load threat-model analysis context.'
+    setProgressState(error.value, 100)
     } finally {
+    stopProgressTimer()
+    clearStagedProgressTimers()
         loading.value = false
     }
 }
@@ -94,6 +181,16 @@ const submit = async () => {
     submitting.value = true
     submitError.value = ''
     result.value = null
+    resetProgressState('Preparing threat-model analysis request...')
+    setProgressState(`Queued ${selectedScope.value === 'merged_versions' ? 'merged multi-version' : 'latest-only'} analysis scope.`, 10)
+    if (enrich.value) {
+      appendProgressLog(`LLM enrichment enabled with model ${ollamaModel.value}.`)
+    }
+    setProgressState('Uploading threat model and analysis inputs...', 18)
+    driftProgressTo(58)
+    scheduleProgressState(900, 'Building analysis inventory from Dependency-Track versions...', 62)
+    scheduleProgressState(1800, 'Submitting synthetic SBOM and threat model to tmrescore...', 72)
+    scheduleProgressState(3200, 'Waiting for tmrescore analysis results...', 84)
 
     try {
         result.value = await runTMRescoreAnalysis(projectName.value, {
@@ -106,12 +203,30 @@ const submit = async () => {
             whatIf: whatIf.value,
             enrich: enrich.value,
             ollamaModel: ollamaModel.value,
+          }, {
+            onUploadProgress: (event) => {
+              const total = event.total || 0
+              if (total <= 0) return
+              const uploadPercent = Math.round((event.loaded / total) * 100)
+              const mappedProgress = Math.min(58, 18 + Math.round(uploadPercent * 0.4))
+              progressMessage.value = `Uploading threat model and analysis inputs... ${uploadPercent}%`
+              progressValue.value = Math.max(progressValue.value, mappedProgress)
+              if (uploadPercent === 100) {
+                appendProgressLog('Upload complete. Waiting for tmrescore processing...')
+              }
+            },
         })
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.setItem(refreshSignalKey.value, String(Date.now()))
-      }
+          stopProgressTimer()
+          clearStagedProgressTimers()
+          setProgressState(`Analysis completed. ${result.value.rescored_count} of ${result.value.total_cves} CVEs were rescored.`, 100)
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            window.sessionStorage.setItem(refreshSignalKey.value, String(Date.now()))
+          }
     } catch (err: any) {
+          stopProgressTimer()
+          clearStagedProgressTimers()
         submitError.value = err?.response?.data?.detail || err?.message || 'Threat-model analysis failed.'
+          setProgressState(submitError.value, 100)
     } finally {
         submitting.value = false
     }
@@ -120,6 +235,11 @@ const submit = async () => {
 onMounted(() => {
     loadContext()
 })
+
+      onBeforeUnmount(() => {
+        stopProgressTimer()
+        clearStagedProgressTimers()
+      })
 </script>
 
 <template>
@@ -140,8 +260,18 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="loading" class="rounded-2xl border border-gray-800 bg-gray-900/80 p-6 text-gray-300">
-      Loading threat-model analysis context...
+    <div v-if="loading" class="rounded-2xl border border-gray-800 bg-gray-900/80 p-6 text-gray-300 shadow-xl shadow-black/20">
+      <div class="text-lg font-semibold text-white">{{ progressMessage }}</div>
+      <div class="mt-4 h-3 w-full overflow-hidden rounded-full bg-gray-800">
+        <div class="h-full rounded-full bg-blue-500 transition-all duration-300" :style="{ width: `${progressValue}%` }"></div>
+      </div>
+      <div class="mt-2 text-sm text-gray-400">{{ progressValue }}%</div>
+      <div ref="logContainer" data-testid="tmrescore-progress-log" class="mt-4 max-h-48 overflow-y-auto rounded-xl border border-gray-700 bg-black/30 p-3 text-left">
+        <div v-for="(entry, index) in progressLog" :key="`${index}-${entry}`" class="py-0.5 font-mono text-xs text-gray-300">
+          <span class="select-none text-gray-600">{{ String(index + 1).padStart(2, '0') }}</span>
+          {{ entry }}
+        </div>
+      </div>
     </div>
 
     <div v-else-if="error" class="rounded-2xl border border-red-800/40 bg-red-950/30 p-6 text-red-200">
@@ -268,6 +398,28 @@ onMounted(() => {
 
             <div v-if="submitError" class="rounded-xl border border-red-800/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
               {{ submitError }}
+            </div>
+
+            <div
+              v-if="progressLog.length > 0"
+              class="rounded-2xl border border-gray-800 bg-gray-950/60 p-4"
+            >
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Progress Log</div>
+                  <div class="mt-1 text-sm text-gray-300">{{ progressMessage }}</div>
+                </div>
+                <div class="text-sm font-medium text-gray-400">{{ progressValue }}%</div>
+              </div>
+              <div class="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-800">
+                <div class="h-full rounded-full bg-blue-500 transition-all duration-300" :style="{ width: `${progressValue}%` }"></div>
+              </div>
+              <div ref="logContainer" data-testid="tmrescore-progress-log" class="mt-4 max-h-52 overflow-y-auto rounded-xl border border-gray-700 bg-black/30 p-3 text-left">
+                <div v-for="(entry, index) in progressLog" :key="`${index}-${entry}`" class="py-0.5 font-mono text-xs text-gray-300">
+                  <span class="select-none text-gray-600">{{ String(index + 1).padStart(2, '0') }}</span>
+                  {{ entry }}
+                </div>
+              </div>
             </div>
 
             <div class="flex items-center gap-4">

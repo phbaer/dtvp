@@ -1,4 +1,4 @@
-import { mount, flushPromises, type MountingOptions } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import ProjectView from '../ProjectView.vue'
 
 export const defaultLifecycleFilters = ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT']
@@ -11,7 +11,7 @@ export const extendedStatusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', '
 export async function mountProjectView(options: {
     routeName?: string
     query?: Record<string, unknown>
-    mountOptions?: MountingOptions<any>
+    mountOptions?: Record<string, any>
     flush?: boolean
 } = {}) {
     const {
@@ -21,8 +21,7 @@ export async function mountProjectView(options: {
         flush = true,
     } = options
     const global = mountOptions.global ?? {}
-
-    const wrapper = mount(ProjectView, {
+    const resolvedMountOptions = {
         ...mountOptions,
         global: {
             ...global,
@@ -42,7 +41,9 @@ export async function mountProjectView(options: {
                 ...global.provide,
             },
         },
-    })
+    }
+
+    const wrapper = mount(ProjectView as any, resolvedMountOptions as any)
 
     if (flush) {
         await flushPromises()

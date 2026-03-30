@@ -17,6 +17,20 @@ async function login(page: any, role: 'Analyst' | 'Reviewer' = 'Analyst') {
 
 test.describe('Integration Tests (Real Backend)', () => {
     test.beforeEach(async ({ page }) => {
+        page.on('response', (response) => {
+            if (response.status() === 401) {
+                const request = response.request()
+                console.log(`[E2E 401] ${request.method()} ${response.url()}`)
+            }
+        })
+
+        page.on('requestfailed', (request) => {
+            const url = request.url()
+            if (url.includes('/auth/') || url.includes('/api/')) {
+                console.log(`[E2E REQUEST FAILED] ${request.method()} ${url} :: ${request.failure()?.errorText || 'unknown error'}`)
+            }
+        })
+
         // Bypass ChangelogModal by setting last seen version
         await page.addInitScript(() => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.4');
@@ -230,6 +244,21 @@ test.describe('Integration Tests (Real Backend)', () => {
                 status: 200,
                 contentType: 'application/json',
                 body: JSON.stringify({ transitions: [] }),
+            });
+        });
+
+        await page.route('**/api/projects/*/tmrescore/proposals', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    project_name: 'Vulnerable Project',
+                    session_id: '',
+                    scope: 'merged_versions',
+                    latest_version: '2.0.0',
+                    analyzed_versions: [],
+                    proposals: {},
+                }),
             });
         });
 

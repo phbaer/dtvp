@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
 import { getGroupedVulns } from '../../lib/api'
 import { useRoute } from 'vue-router'
 import { extendedStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
