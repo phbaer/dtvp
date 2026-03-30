@@ -1,11 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import TMRescore from '../TMRescore.vue'
-import { getTMRescoreContext, runTMRescoreAnalysis } from '../../lib/api'
+import {
+    getTMRescoreContext,
+    getTMRescoreProjectState,
+    getTMRescoreSyntheticSbomDownloadUrl,
+    getTMRescoreSyntheticSbomSummary,
+    resumeTMRescoreAnalysis,
+    runTMRescoreAnalysis,
+} from '../../lib/api'
 import { mountWithRouter } from './routerTestUtils'
 
 vi.mock('../../lib/api', () => ({
     getTMRescoreContext: vi.fn(),
+    getTMRescoreProjectState: vi.fn(),
+    getTMRescoreSyntheticSbomDownloadUrl: vi.fn((projectName: string, scope: string) => `/api/projects/${projectName}/tmrescore/sbom?scope=${scope}`),
+    getTMRescoreSyntheticSbomSummary: vi.fn(async (_projectName: string, scope: string) => ({
+        scope,
+        latest_version: '1.10.0',
+        analyzed_versions: scope === 'merged_versions' ? ['1.9.0', '1.10.0'] : ['1.10.0'],
+        component_count: scope === 'merged_versions' ? 6 : 3,
+        vulnerability_count: scope === 'merged_versions' ? 4 : 2,
+        strategy_note: scope === 'merged_versions'
+            ? 'Merged multi-version analysis keeps historical vulnerabilities attached to the versioned components they came from.'
+            : 'Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases.',
+    })),
+    resumeTMRescoreAnalysis: vi.fn(),
     runTMRescoreAnalysis: vi.fn(),
 }))
 
@@ -18,6 +38,8 @@ describe('TMRescore.vue', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         window.sessionStorage.clear()
+        vi.mocked(getTMRescoreProjectState).mockRejectedValue({ response: { status: 404 } })
+        vi.spyOn(Date, 'now').mockReturnValue(new Date('2024-03-30T12:10:00Z').getTime())
     })
 
     const deferred = <T,>() => {
@@ -63,6 +85,174 @@ describe('TMRescore.vue', () => {
         expect(wrapper.text()).toContain('LLM enrichment')
         expect(wrapper.get('[data-testid="llm-enrichment-status"]').text()).toBe('Available')
         expect((wrapper.get('[data-testid="ollama-model-input"]').element as HTMLInputElement).value).toBe('qwen2.5:14b')
+        expect(getTMRescoreSyntheticSbomDownloadUrl).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
+        expect(getTMRescoreSyntheticSbomSummary).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
+        expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toBe('/api/projects/ExampleApp/tmrescore/sbom?scope=merged_versions')
+        expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('6')
+        expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('4')
+        expect(wrapper.get('a[href="/project/ExampleApp"]').text()).toContain('Back to Project View')
+    })
+
+    it('refreshes the synthetic SBOM summary when the scope changes', async () => {
+        vi.mocked(getTMRescoreContext).mockResolvedValue({
+            enabled: true,
+            project_name: 'ExampleApp',
+            latest_version: '1.10.0',
+            versions: ['1.9.0', '1.10.0'],
+            recommended_scope: 'merged_versions',
+            scopes: [
+                { id: 'merged_versions', label: 'Merged Multi-Version SBOM', description: 'Recommended scope' },
+                { id: 'latest_only', label: 'Latest Version Only', description: 'Single-version scope' },
+            ],
+            warnings: [],
+            llm_enrichment: {
+                available: true,
+                status: 'available',
+                default_model: 'qwen2.5:7b',
+                host_configured: true,
+                warning: null,
+            },
+        } as any)
+
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
+            routes: tmRescoreRoutes,
+        })
+        await flushPromises()
+
+        await wrapper.get('[data-testid="scope-latest_only"]').trigger('click')
+        await flushPromises()
+
+        expect(getTMRescoreSyntheticSbomSummary).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
+        expect(getTMRescoreSyntheticSbomDownloadUrl).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
+        expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('3')
+        expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('2')
+    })
+
+    it('restores a cached tmrescore session after page reload', async () => {
+        const nowSeconds = Math.floor(Date.now() / 1000)
+        vi.mocked(getTMRescoreContext).mockResolvedValue({
+            enabled: true,
+            project_name: 'ExampleApp',
+            latest_version: '1.10.0',
+            versions: ['1.9.0', '1.10.0'],
+            recommended_scope: 'merged_versions',
+            scopes: [
+                { id: 'merged_versions', label: 'Merged Multi-Version SBOM', description: 'Recommended scope' },
+                { id: 'latest_only', label: 'Latest Version Only', description: 'Single-version scope' },
+            ],
+            warnings: [],
+            llm_enrichment: {
+                available: true,
+                status: 'available',
+                default_model: 'qwen2.5:7b',
+                host_configured: true,
+                warning: null,
+            },
+        } as any)
+        vi.mocked(getTMRescoreProjectState).mockResolvedValue({
+            session_id: 'session-1',
+            status: 'running',
+            progress: 64,
+            message: 'Rescoring vulnerabilities against the threat model...',
+            log: ['Queued tmrescore analysis.', 'Rescoring vulnerabilities against the threat model...'],
+            scope: 'latest_only',
+            latest_version: '1.10.0',
+            analyzed_versions: ['1.10.0'],
+            llm_enrichment: {
+                enabled: true,
+                ollama_model: 'llama3.1:8b',
+            },
+            created_at: nowSeconds - 600,
+            updated_at: nowSeconds - 300,
+            completed_at: null,
+            result: null,
+        } as any)
+        vi.mocked(resumeTMRescoreAnalysis).mockResolvedValue({
+            session_id: 'session-1',
+            status: 'completed',
+            total_cves: 2,
+            rescored_count: 1,
+            avg_score_reduction: 0.4,
+            elapsed_seconds: 1.2,
+            scope: 'latest_only',
+            recommended_scope: 'merged_versions',
+            latest_version: '1.10.0',
+            analyzed_versions: ['1.10.0'],
+            sbom_component_count: 3,
+            sbom_vulnerability_count: 2,
+            strategy_note: 'Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases.',
+            download_urls: {
+                json: '/api/tmrescore/sessions/session-1/results/json',
+                vex: '/api/tmrescore/sessions/session-1/results/vex',
+            },
+            outputs: {},
+        } as any)
+
+        const { wrapper } = await mountWithRouter(TMRescore, {
+            initialPath: '/project/ExampleApp/tmrescore',
+            routes: tmRescoreRoutes,
+        })
+        await flushPromises()
+
+        expect(getTMRescoreProjectState).toHaveBeenCalledWith('ExampleApp')
+        expect(resumeTMRescoreAnalysis).toHaveBeenCalledWith(
+            'session-1',
+            expect.objectContaining({ scope: 'latest_only', status: 'running' }),
+            expect.objectContaining({ onAnalysisProgress: expect.any(Function) }),
+        )
+        expect(getTMRescoreSyntheticSbomDownloadUrl).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
+        expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('3')
+        expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('Latest Version')
+        expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('1.10.0')
+        expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('Last Updated')
+        expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('5 minutes ago')
+        expect(wrapper.text()).toContain('Analysis Result')
+        expect(wrapper.text()).toContain('session-1')
+
+        vi.mocked(getTMRescoreProjectState).mockResolvedValueOnce({
+            session_id: 'session-1',
+            status: 'completed',
+            progress: 100,
+            message: 'TMRescore analysis completed.',
+            log: ['TMRescore analysis completed.'],
+            scope: 'latest_only',
+            latest_version: '1.10.0',
+            analyzed_versions: ['1.10.0'],
+            llm_enrichment: {
+                enabled: true,
+                ollama_model: 'llama3.1:8b',
+            },
+            created_at: nowSeconds - 600,
+            updated_at: nowSeconds,
+            completed_at: nowSeconds,
+            result: {
+                session_id: 'session-1',
+                status: 'completed',
+                total_cves: 2,
+                rescored_count: 1,
+                avg_score_reduction: 0.4,
+                elapsed_seconds: 1.2,
+                scope: 'latest_only',
+                recommended_scope: 'merged_versions',
+                latest_version: '1.10.0',
+                analyzed_versions: ['1.10.0'],
+                sbom_component_count: 3,
+                sbom_vulnerability_count: 2,
+                strategy_note: 'Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases.',
+                download_urls: {
+                    json: '/api/tmrescore/sessions/session-1/results/json',
+                    vex: '/api/tmrescore/sessions/session-1/results/vex',
+                },
+                outputs: {},
+            },
+        } as any)
+
+        await wrapper.get('[data-testid="refresh-cached-analysis-state"]').trigger('click')
+        await flushPromises()
+
+        expect(getTMRescoreProjectState).toHaveBeenCalledTimes(2)
+        expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('0 seconds ago')
     })
 
     it('shows a scrolling progress log while loading context', async () => {
@@ -75,8 +265,8 @@ describe('TMRescore.vue', () => {
         })
 
         const log = wrapper.get('[data-testid="tmrescore-progress-log"]')
-        expect(log.text()).toContain('Starting threat-model context load...')
-        expect(log.text()).toContain('Checking TMRescore backend availability...')
+        expect(log.text()).toContain('Opening threat-model analysis page...')
+        expect(log.text()).toContain('Loading project versions, tmrescore settings, and enrichment options...')
 
         pendingContext.resolve({
             enabled: true,
@@ -99,6 +289,8 @@ describe('TMRescore.vue', () => {
         await flushPromises()
 
         expect(wrapper.text()).toContain('Threat-Model Analysis for ExampleApp')
+        expect(log.text()).toContain('Preparing merged multi-version synthetic SBOM preview from Dependency-Track data...')
+        expect(log.text()).toContain('Prepared SBOM preview for 2 versions with 6 components and 4 vulnerabilities.')
     })
 
     it('submits analysis once a threat model file is selected', async () => {
@@ -171,7 +363,7 @@ describe('TMRescore.vue', () => {
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
         expect(window.sessionStorage.getItem('dtvp:tmrescore-refresh:ExampleApp')).toBeTruthy()
-        expect(wrapper.getComponent({ name: 'RouterLink' }).props('to')).toBe('/project/ExampleApp?refreshThreatModel=1')
+        expect(wrapper.getComponent({ name: 'RouterLink' }).props('to')).toBe('/project/ExampleApp')
     })
 
     it('shows a scrolling progress log while analysis is running', async () => {

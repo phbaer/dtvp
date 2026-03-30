@@ -333,6 +333,10 @@ The mock tmrescore UI is then available on `http://localhost:8090/ui`.
 | `DTVP_DT_API_URL` | Base URL of the Dependency-Track API | `http://localhost:8081` |
 | `DTVP_DT_API_KEY` | Dependency-Track API key | `change_me` |
 | `DTVP_TMRESCORE_URL` | Base URL of the external or mock tmrescore service | unset |
+| `DTVP_TMRESCORE_TIMEOUT_SECONDS` | HTTP timeout for tmrescore API calls before DTVP falls back to polling `/progress` | `180` |
+| `DTVP_TMRESCORE_CACHE_PATH` | Path to the cached per-project tmrescore proposal snapshot file | `data/tmrescore_proposals.json` |
+| `DTVP_TMRESCORE_OLLAMA_MODEL` | Default Ollama model preselected for LLM enrichment in the threat-model UI | `qwen2.5:7b` |
+| `DTVP_TMRESCORE_TASK_TTL_SECONDS` | How long completed or failed tmrescore analysis tasks stay in DTVP memory for `/progress` polling | `3600` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |

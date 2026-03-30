@@ -435,6 +435,20 @@ class TMRescoreClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_results(self, session_id: str) -> Dict[str, Any]:
+        response = await self.client.get(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/results"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_progress(self, session_id: str) -> Dict[str, Any]:
+        response = await self.client.get(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/progress"
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def get_results_json(self, session_id: str) -> Dict[str, Any]:
         response = await self.client.get(
             f"{self.settings.base_url}/api/v1/sessions/{session_id}/results/json"
@@ -457,11 +471,35 @@ class TMRescoreClient:
         return response
 
 
-def build_tmrescore_proposals(raw_results: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def get_tmrescore_generated_at(results_document: Dict[str, Any]) -> Optional[str]:
+    return (
+        results_document.get("generated_at")
+        or (results_document.get("metadata") or {}).get("timestamp")
+    )
+
+
+def _extract_vex_rating(vulnerability: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    for rating in vulnerability.get("ratings") or []:
+        if not isinstance(rating, dict):
+            continue
+        score = rating.get("score")
+        vector = rating.get("vector") or None
+        if score is None and not vector:
+            continue
+        return (float(score) if score is not None else None), vector
+    return None, None
+
+
+def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     proposals: Dict[str, Dict[str, Any]] = {}
 
-    for vulnerability in raw_results.get("vulnerabilities") or []:
-        vuln_id = str(vulnerability.get("id") or "").strip()
+    for vulnerability in results_document.get("vulnerabilities") or []:
+        vuln_id = str(
+            vulnerability.get("id")
+            or vulnerability.get("vulnId")
+            or vulnerability.get("name")
+            or ""
+        ).strip()
         if not vuln_id:
             continue
 
@@ -469,6 +507,23 @@ def build_tmrescore_proposals(raw_results: Dict[str, Any]) -> Dict[str, Dict[str
         rescored_vector = vulnerability.get("rescored_vector") or None
         original_score = vulnerability.get("original_score")
         original_vector = vulnerability.get("original_vector") or None
+
+        if rescored_score is None and not rescored_vector:
+            rescored_score, rescored_vector = _extract_vex_rating(vulnerability)
+
+        affected_refs = vulnerability.get("affected_refs") or []
+        if not affected_refs:
+            affected_refs = [
+                item.get("ref") if isinstance(item, dict) else item
+                for item in (vulnerability.get("affects") or [])
+            ]
+
+        description = (
+            vulnerability.get("description")
+            or vulnerability.get("title")
+            or (vulnerability.get("analysis") or {}).get("detail")
+            or vuln_id
+        )
 
         if rescored_score is None and not rescored_vector:
             continue
@@ -480,10 +535,8 @@ def build_tmrescore_proposals(raw_results: Dict[str, Any]) -> Dict[str, Dict[str
             "rescored_vector": rescored_vector,
             "original_score": float(original_score) if original_score is not None else None,
             "original_vector": original_vector,
-            "affected_refs": [
-                ref for ref in (vulnerability.get("affected_refs") or []) if ref
-            ],
-            "description": vulnerability.get("description") or vuln_id,
+            "affected_refs": [ref for ref in affected_refs if ref],
+            "description": description,
         })
 
         existing = proposals.get(key)
@@ -503,6 +556,51 @@ def build_tmrescore_proposals(raw_results: Dict[str, Any]) -> Dict[str, Dict[str
         merged_refs = set(existing.get("affected_refs") or [])
         merged_refs.update(candidate["affected_refs"])
         existing["affected_refs"] = sorted(merged_refs)
+
+    return proposals
+
+
+def build_dtvp_vulnerability_proposals(
+    analysis_inputs: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    proposals: Dict[str, Dict[str, Any]] = {}
+
+    for entry in analysis_inputs:
+        for finding in entry.get("vulnerabilities") or []:
+            vulnerability = finding.get("vulnerability") or {}
+            vuln_id = str(
+                vulnerability.get("vulnId")
+                or vulnerability.get("id")
+                or vulnerability.get("name")
+                or ""
+            ).strip()
+            if not vuln_id:
+                continue
+
+            _, original_score, original_vector, _ = _extract_primary_rating(vulnerability)
+            if original_score is None and not original_vector:
+                continue
+
+            key = vuln_id.upper()
+            candidate = normalize_tmrescore_proposal({
+                "vuln_id": vuln_id,
+                "description": vulnerability.get("description") or vulnerability.get("title") or vuln_id,
+                "original_score": original_score,
+                "original_vector": original_vector,
+                "rescored_score": None,
+                "rescored_vector": None,
+                "affected_refs": [],
+            })
+
+            existing = proposals.get(key)
+            if not existing:
+                proposals[key] = candidate
+                continue
+
+            if existing.get("original_score") is None and candidate["original_score"] is not None:
+                existing["original_score"] = candidate["original_score"]
+            if not existing.get("original_vector") and candidate["original_vector"]:
+                existing["original_vector"] = candidate["original_vector"]
 
     return proposals
 

@@ -64,6 +64,17 @@ describe('TMRescore integration via api.ts', () => {
                 },
             },
         })
+        axiosMocks.get.mockRejectedValueOnce({ response: { status: 404 } })
+        axiosMocks.get.mockResolvedValueOnce({
+            data: {
+                scope: 'merged_versions',
+                latest_version: '1.10.0',
+                analyzed_versions: ['1.9.0', '1.10.0'],
+                component_count: 5,
+                vulnerability_count: 2,
+                strategy_note: 'Merged multi-version analysis keeps findings attached.',
+            },
+        })
 
         axiosMocks.post.mockResolvedValueOnce({
             data: {
@@ -102,7 +113,14 @@ describe('TMRescore integration via api.ts', () => {
         })
 
         expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/tmrescore/context')
+        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/tmrescore/state')
+        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/tmrescore/sbom/summary', {
+            params: { scope: 'merged_versions' },
+        })
         expect(wrapper.text()).toContain('Merged Multi-Version SBOM')
+        expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toContain('/api/projects/ExampleApp/tmrescore/sbom?scope=merged_versions')
+        expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('5')
+        expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('2')
 
         const input = wrapper.get('[data-testid="threatmodel-input"]')
         const file = new File(['tm7'], 'model.tm7', { type: 'application/octet-stream' })

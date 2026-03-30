@@ -404,6 +404,21 @@ const canEditBase = computed(() => {
     return false
 })
 
+const containsRescoreModifiers = (vector: string | null | undefined) => {
+    if (!vector) return false
+    return /\/(M[A-Z]{1,3}|E|RL|RC|CR|IR|AR):/.test(vector)
+}
+
+const isMeaningfulThreatModelProposal = (proposal: TMRescoreProposal | null) => {
+    if (!proposal?.rescored_vector) return false
+
+    const originalVector = proposal.original_vector || props.group.cvss_vector || null
+    if (!originalVector) return false
+    if (proposal.rescored_vector === originalVector) return false
+
+    return containsRescoreModifiers(proposal.rescored_vector)
+}
+
 const matchedThreatModelProposal = computed<TMRescoreProposal | null>(() => {
     const proposals = tmrescoreProposals?.value || {}
     const candidateIds = [props.group.id, ...(props.group.aliases || [])]
@@ -412,7 +427,7 @@ const matchedThreatModelProposal = computed<TMRescoreProposal | null>(() => {
         const normalized = String(candidateId || '').trim().toUpperCase()
         if (!normalized) continue
         const proposal = proposals[normalized]
-        if (proposal) return proposal
+        if (proposal && isMeaningfulThreatModelProposal(proposal)) return proposal
     }
 
     return null
@@ -1479,7 +1494,9 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
 
                 <!-- CVSS Base Score -->
                 <div class="flex flex-col items-center gap-1.5 w-24 shrink-0">
-                    <span class="text-[9px] font-black text-gray-600 uppercase tracking-[0.2em] leading-none">CVSS Base</span>
+                    <span class="text-[9px] font-black text-gray-600 uppercase tracking-[0.2em] leading-none">
+                        {{ isRescoredOrModified ? 'Rescored CVSS' : 'Original CVSS' }}
+                    </span>
                     <div class="flex items-center gap-2">
                         <span 
                             v-if="isRescoredOrModified" 
@@ -1495,7 +1512,7 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                         <span v-else class="text-lg font-black text-gray-100">
                             {{ currentDisplayScore }}
                         </span>
-                        <span v-if="isRescoredOrModified" class="text-[10px] text-gray-600 line-through font-bold opacity-40">
+                        <span v-if="isRescoredOrModified" class="text-[10px] text-gray-600 line-through font-bold opacity-40" title="Original CVSS">
                             {{ group.cvss || group.cvss_score }}
                         </span>
                     </div>
@@ -1526,13 +1543,13 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
             <!-- Vector Display in Header if expanded or explicitly shown -->
             <div v-if="expanded && (currentDisplayVector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
                 <div v-if="hasDraftVectorChange && currentDisplayVector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2" data-testid="current-vector-display">
-                    <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored Vector:</span>
+                    <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored CVSS Vector:</span>
                     <span class="tracing-tight">
                         <span class="font-bold rescored-bold-segment">{{ rescoredVectorSegments.bold }}</span>{{ rescoredVectorSegments.normal }}
                     </span>
                 </div>
                 <div class="font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50 flex items-center gap-2">
-                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ hasDraftVectorChange ? 'Original Vector:' : 'Vector:' }}</span>
+                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ hasDraftVectorChange ? 'Original CVSS Vector:' : 'CVSS Vector:' }}</span>
                     <span :class="{ 'line-through opacity-50': hasDraftVectorChange }">{{ group.cvss_vector || currentDisplayVector || 'N/A' }}</span>
                 </div>
             </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject, provide, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMRescoreProposals } from '../lib/api'
 import { getGroupLifecycle, isPendingReview as isPendingReviewHelper, matchesFilters, getGroupTechnicalState, tagToString } from '../lib/assessment-helpers'
@@ -39,8 +39,6 @@ const tmrescoreProposalSnapshot = ref<TMRescoreProposalSnapshot | null>(null)
 provide('tmrescoreProposals', computed(() => tmrescoreProposalSnapshot.value?.proposals || {}))
 
 const isFilterCollapsed = ref(false)
-const threatModelRefreshSignal = computed(() => String(route.query.refreshThreatModel || ''))
-
 const consumeThreatModelRefreshSignal = () => {
     const name = route.params.name as string
     if (!name || name === '_all_' || typeof window === 'undefined' || !window.sessionStorage) {
@@ -53,6 +51,13 @@ const consumeThreatModelRefreshSignal = () => {
         window.sessionStorage.removeItem(key)
     }
     return hasSignal
+}
+
+const refreshThreatModelProposalsIfNeeded = async () => {
+    if (!consumeThreatModelRefreshSignal()) {
+        return
+    }
+    await fetchTMRescoreProposals()
 }
 
 const fetchTeamMapping = async () => {
@@ -114,6 +119,10 @@ const fetchTMRescoreProposals = async () => {
 onMounted(() => {
     fetchTeamMapping()
     fetchRescoreRules()
+})
+
+onActivated(() => {
+    void refreshThreatModelProposalsIfNeeded()
 })
 
 // Auto-scroll the loading log to the bottom when new entries appear
@@ -271,6 +280,7 @@ const tagFilter = ref('')
 const idFilter = ref('')
 const componentFilter = ref('')
 const dependencyFilter = ref<'ALL' | 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>('ALL')
+const tmrescoreProposalFilter = ref<'ALL' | 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>('ALL')
 
 const SORT_OPTIONS = [
     { value: 'severity', label: 'Criticality' },
@@ -284,6 +294,11 @@ const DEPENDENCY_OPTIONS = [
     { value: 'DIRECT', label: 'Direct' },
     { value: 'TRANSITIVE', label: 'Transitive' },
     { value: 'UNKNOWN', label: 'Unknown' },
+] as const
+const TMRESCORE_PROPOSAL_OPTIONS = [
+    { value: 'ALL', label: 'All Findings' },
+    { value: 'WITH_PROPOSAL', label: 'With TMRescore Proposal' },
+    { value: 'WITHOUT_PROPOSAL', label: 'Without TMRescore Proposal' },
 ] as const
 const versionFilterInput = ref('')
 const versionSearch = ref('')
@@ -355,6 +370,12 @@ const filterUrl = computed(() => {
         delete query.dependency
     }
 
+    if (tmrescoreProposalFilter.value && tmrescoreProposalFilter.value !== 'ALL') {
+        query.tmrescore = tmrescoreProposalFilter.value
+    } else {
+        delete query.tmrescore
+    }
+
     if (versionFilterInput.value) {
         query.versions = versionFilterInput.value
     } else {
@@ -404,7 +425,7 @@ const sortOrder = ref<'asc' | 'desc'>('asc')
 onMounted(() => {
     const q = route.query
     const hasFilterParams = Object.entries(q).some(([k, v]) => {
-        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'sort', 'order'].includes(k)) return false;
+        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'dependency', 'tmrescore', 'versions', 'sort', 'order'].includes(k)) return false;
         if (Array.isArray(v)) return v.length > 0;
         return v !== undefined && v !== null && v !== '';
     })
@@ -424,6 +445,7 @@ onMounted(() => {
 
         if (q.component) componentFilter.value = q.component as string
         if (q.dependency) dependencyFilter.value = (q.dependency as string).toUpperCase() as 'ALL'|'DIRECT'|'TRANSITIVE'|'UNKNOWN'
+        if (q.tmrescore) tmrescoreProposalFilter.value = (q.tmrescore as string).toUpperCase() as 'ALL'|'WITH_PROPOSAL'|'WITHOUT_PROPOSAL'
         if (q.versions) versionFilterInput.value = Array.isArray(q.versions) ? q.versions.join(',') : (q.versions as string)
         if (q.sort) sortBy.value = q.sort as string
         if (q.order) sortOrder.value = q.order as 'asc' | 'desc'
@@ -461,6 +483,7 @@ const resetFilters = () => {
     tagFilter.value = ''
     componentFilter.value = ''
     dependencyFilter.value = 'ALL'
+    tmrescoreProposalFilter.value = 'ALL'
     versionFilterInput.value = ''
     versionSearch.value = ''
     sortBy.value = 'severity'
@@ -471,7 +494,7 @@ const resetFilters = () => {
 // This reduces unnecessary chattiness and keeps filtering fast and responsive.
 // URL sync was removed to avoid automatic API refresh for every filter tweak.
 
-watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, dependencyFilter, versionFilterInput, sortBy, sortOrder], () => {
+watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, sortBy, sortOrder], () => {
     const query = { ...route.query }
 
     if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
@@ -491,6 +514,9 @@ watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, 
 
     if (dependencyFilter.value && dependencyFilter.value !== 'ALL') query.dependency = dependencyFilter.value
     else delete query.dependency
+
+    if (tmrescoreProposalFilter.value && tmrescoreProposalFilter.value !== 'ALL') query.tmrescore = tmrescoreProposalFilter.value
+    else delete query.tmrescore
 
     if (versionFilterInput.value) query.versions = versionFilterInput.value
     else delete query.versions
@@ -568,6 +594,15 @@ const getGroupDependencyRelationship = (group: GroupedVuln): 'DIRECT' | 'TRANSIT
     return 'UNKNOWN'
 }
 
+const hasTMRescoreProposal = (group: GroupedVuln) => {
+    const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
+    const candidateIds = [group.id, ...(group.aliases || [])]
+    return candidateIds.some((candidateId) => {
+        const normalized = String(candidateId || '').trim().toUpperCase()
+        return normalized && Boolean(proposals[normalized])
+    })
+}
+
 // Groups after applying all non-lifecycle/non-analysis filters (used for filter counts)
 const preFilteredGroups = computed(() => {
     let result = [...groups.value]
@@ -584,6 +619,12 @@ const preFilteredGroups = computed(() => {
 
     if (dependencyFilter.value !== 'ALL') {
         result = result.filter(g => getGroupDependencyRelationship(g) === dependencyFilter.value)
+    }
+
+    if (tmrescoreProposalFilter.value === 'WITH_PROPOSAL') {
+        result = result.filter(g => hasTMRescoreProposal(g))
+    } else if (tmrescoreProposalFilter.value === 'WITHOUT_PROPOSAL') {
+        result = result.filter(g => !hasTMRescoreProposal(g))
     }
 
     if (versionFilterList.value.length > 0) {
@@ -717,8 +758,7 @@ const dependencyRelationshipCounts = computed(() => {
     return counts
 })
 
-watch([() => route.params.name, () => threatModelRefreshSignal.value], () => {
-    consumeThreatModelRefreshSignal()
+watch(() => route.params.name, () => {
     fetchVulns()
     fetchTMRescoreProposals()
     if (viewMode.value === 'statistics') {
@@ -843,6 +883,14 @@ watch([() => route.params.name, () => threatModelRefreshSignal.value], () => {
                                 :modelValue="dependencyFilter"
                                 @update:modelValue="dependencyFilter = $event as typeof dependencyFilter"
                                 :options="[...DEPENDENCY_OPTIONS]"
+                            />
+                        </div>
+                        <div class="flex flex-col gap-1 min-w-[12rem]">
+                            <label class="text-[9px] uppercase tracking-widest text-gray-400">TMRescore</label>
+                            <CustomSelect
+                                :modelValue="tmrescoreProposalFilter"
+                                @update:modelValue="tmrescoreProposalFilter = $event as typeof tmrescoreProposalFilter"
+                                :options="[...TMRESCORE_PROPOSAL_OPTIONS]"
                             />
                         </div>
                     </div>

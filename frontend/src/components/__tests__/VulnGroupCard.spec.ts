@@ -77,6 +77,7 @@ describe('VulnGroupCard', () => {
         description: 'A bad vulnerability',
         severity: 'HIGH',
         cvss: 9.8,
+        cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
         tags: ['Security', 'Security'],
         affected_versions: [
             {
@@ -230,6 +231,70 @@ describe('VulnGroupCard', () => {
         expect((wrapper.vm as any).pendingVector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L')
         expect((wrapper.get('input[type="text"]').element as HTMLInputElement).value).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L')
         expect(wrapper.get('[data-testid="current-vector-display"]').text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L')
+        expect(wrapper.text()).toContain('Original:')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
+    })
+
+    it('does not show a tmrescore proposal when the vector matches the original vulnerability vector', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: { value: { username: 'tester', role: 'REVIEWER' } },
+                    tmrescoreProposals: {
+                        value: {
+                            'CVE-2023-1234': {
+                                vuln_id: 'CVE-2023-1234',
+                                rescored_score: 9.8,
+                                rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                original_score: 9.8,
+                                original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                affected_refs: [],
+                                session_id: 'session-1',
+                                scope: 'merged_versions',
+                                latest_version: '1.0',
+                                analyzed_versions: ['1.0']
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        expect(wrapper.find('[data-testid="threat-model-proposal"]').exists()).toBe(false)
+    })
+
+    it('does not show a tmrescore proposal when the rescored vector has no modifiers', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: { value: { username: 'tester', role: 'REVIEWER' } },
+                    tmrescoreProposals: {
+                        value: {
+                            'CVE-2023-1234': {
+                                vuln_id: 'CVE-2023-1234',
+                                rescored_score: 8.2,
+                                rescored_vector: 'CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                original_score: 9.8,
+                                original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                affected_refs: [],
+                                session_id: 'session-1',
+                                scope: 'merged_versions',
+                                latest_version: '1.0',
+                                analyzed_versions: ['1.0']
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        expect(wrapper.find('[data-testid="threat-model-proposal"]').exists()).toBe(false)
     })
 
 

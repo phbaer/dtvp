@@ -4,7 +4,7 @@
       "1.9.0",
       "1.10.0"
     ],
-    "generated_at": "2026-03-27T15:10:29.163322+00:00",
+    "generated_at": "2026-03-30T09:06:09.358126+00:00",
     "latest_version": "1.10.0",
     "project_name": "ExampleApp",
     "proposals": {
@@ -16,15 +16,15 @@
           "1.9.0",
           "1.10.0"
         ],
-        "description": "CVE-2024-0001",
-        "generated_at": "2026-03-27T15:10:29.163322+00:00",
+        "description": "Mock tmrescore result generated for local testing.",
+        "generated_at": "2026-03-30T09:06:09.358126+00:00",
         "latest_version": "1.10.0",
         "original_score": 9.8,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "rescored_score": 9.4,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MA:L",
         "scope": "merged_versions",
-        "session_id": "36140c64-7592-4578-a4e8-39d2457e7427",
+        "session_id": "0d95406d-be3c-47ea-96f6-9d0027eef9cf",
         "vuln_id": "CVE-2024-0001"
       },
       "CVE-2024-0002": {
@@ -35,20 +35,20 @@
           "1.9.0",
           "1.10.0"
         ],
-        "description": "CVE-2024-0002",
-        "generated_at": "2026-03-27T15:10:29.163322+00:00",
+        "description": "Mock tmrescore result generated for local testing.",
+        "generated_at": "2026-03-30T09:06:09.358126+00:00",
         "latest_version": "1.10.0",
         "original_score": 5.4,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
         "rescored_score": 4.2,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MAC:H",
         "scope": "merged_versions",
-        "session_id": "36140c64-7592-4578-a4e8-39d2457e7427",
+        "session_id": "0d95406d-be3c-47ea-96f6-9d0027eef9cf",
         "vuln_id": "CVE-2024-0002"
       }
     },
     "scope": "merged_versions",
-    "session_id": "36140c64-7592-4578-a4e8-39d2457e7427"
+    "session_id": "0d95406d-be3c-47ea-96f6-9d0027eef9cf"
   },
   "Vulnerable Project": {
     "analyzed_versions": [
@@ -60,7 +60,7 @@
       "2.1.0",
       "3.0.0"
     ],
-    "generated_at": "2026-03-30T04:56:08.821513+00:00",
+    "generated_at": "2026-03-30T07:01:54.104826+00:00",
     "latest_version": "3.0.0",
     "project_name": "Vulnerable Project",
     "proposals": {
@@ -84,14 +84,14 @@
           "3.0.0"
         ],
         "description": "Jackson-databind deserialization vulnerability.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 9.8,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "rescored_score": 8.1,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAC:H",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2019-12384"
       },
       "CVE-2021-21290": {
@@ -114,14 +114,14 @@
           "3.0.0"
         ],
         "description": "Netty message conversion vulnerability.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 5.9,
         "original_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
         "rescored_score": 5.3,
         "rescored_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MUI:R",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2021-21290"
       },
       "CVE-2021-44228": {
@@ -144,14 +144,14 @@
           "3.0.0"
         ],
         "description": "Log4j JNDI remote code execution vulnerability.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 10.0,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
         "rescored_score": 9.7,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/MAV:A",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2021-44228"
       },
       "CVE-2022-42889": {
@@ -174,14 +174,14 @@
           "3.0.0"
         ],
         "description": "Apache Commons Text StringSubstitutor interpolation vulnerability (Text4Shell).",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 9.8,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "rescored_score": 9.4,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MA:L",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2022-42889"
       },
       "CVE-2023-12345": {
@@ -204,14 +204,14 @@
           "3.0.0"
         ],
         "description": "Generic medium severity vulnerability for dependencies.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 5.4,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
         "rescored_score": 4.6,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N/MUI:R",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2023-12345"
       },
       "CVE-2024-TEAM": {
@@ -234,14 +234,14 @@
           "3.0.0"
         ],
         "description": "Team mapping placeholder vulnerability.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 3.3,
         "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
         "rescored_score": 2.9,
         "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2024-TEAM"
       },
       "CVE-2025-INCOMPLETE": {
@@ -271,14 +271,14 @@
           "3.0.0"
         ],
         "description": "Incomplete assessment test case.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 7.5,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
         "rescored_score": 5.3,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/MC:L",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2025-INCOMPLETE"
       },
       "CVE-2025-INCONSISTENT": {
@@ -308,14 +308,14 @@
           "3.0.0"
         ],
         "description": "Inconsistent assessment test case.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 9.8,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "rescored_score": 8.8,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:A",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2025-INCONSISTENT"
       },
       "CVE-2025-NEW-01": {
@@ -342,14 +342,14 @@
           "3.0.0"
         ],
         "description": "Newly discovered low risk dependency issue.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 5.4,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
         "rescored_score": 4.3,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MC:N",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2025-NEW-01"
       },
       "CVE-2025-NEW-02": {
@@ -368,14 +368,14 @@
           "3.0.0"
         ],
         "description": "Missing input validation issue in subsystem.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 6.5,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N",
         "rescored_score": 5.7,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N/MUI:R",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2025-NEW-02"
       },
       "CVE-2025-NEW-03": {
@@ -393,14 +393,14 @@
           "3.0.0"
         ],
         "description": "Authentication bypass vulnerability in auth module.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 9.1,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
         "rescored_score": 8.1,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2025-NEW-03"
       },
       "CVE-2026-OPEN-PENDING": {
@@ -423,14 +423,14 @@
           "3.0.0"
         ],
         "description": "Pending review open team assessment test case.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 6.5,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
         "rescored_score": 5.4,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MAV:A",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2026-OPEN-PENDING"
       },
       "CVE-2026-PLAINTEXT-NA": {
@@ -452,14 +452,14 @@
           "3.0.0"
         ],
         "description": "Plaintext NOT_AFFECTED assessment test case.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 3.3,
         "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
         "rescored_score": 2.2,
         "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MC:N",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2026-PLAINTEXT-NA"
       },
       "CVE-2026-PLAINTEXT-NS": {
@@ -481,14 +481,14 @@
           "3.0.0"
         ],
         "description": "Plaintext NOT_SET assessment test case.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 3.3,
         "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
         "rescored_score": 2.2,
         "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MC:N",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2026-PLAINTEXT-NS"
       },
       "CVE-2026-TEAM-PARTIAL": {
@@ -511,18 +511,18 @@
           "3.0.0"
         ],
         "description": "One team assessed, another open team assessment test case.",
-        "generated_at": "2026-03-30T04:56:08.821513+00:00",
+        "generated_at": "2026-03-30T07:01:54.104826+00:00",
         "latest_version": "3.0.0",
         "original_score": 6.5,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
         "rescored_score": 5.4,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6",
+        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
         "vuln_id": "CVE-2026-TEAM-PARTIAL"
       }
     },
     "scope": "merged_versions",
-    "session_id": "09766f95-7d68-4925-9634-9bf5f226ddf6"
+    "session_id": "8707c674-5451-491a-81f3-43283437ae00"
   }
 }

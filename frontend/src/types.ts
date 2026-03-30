@@ -133,6 +133,48 @@ export interface TMRescoreAnalysisResult {
     };
 }
 
+export interface TMRescoreAnalysisProgress {
+    session_id: string;
+    status: string;
+    progress: number;
+    message: string;
+    log?: string[];
+    error?: string | null;
+    created_at?: number | null;
+    updated_at?: number | null;
+    completed_at?: number | null;
+    result?: TMRescoreAnalysisResult | null;
+}
+
+export interface TMRescoreProjectState {
+    session_id: string;
+    status: string;
+    progress: number;
+    message: string;
+    log?: string[];
+    error?: string | null;
+    scope: 'latest_only' | 'merged_versions';
+    latest_version: string;
+    analyzed_versions: string[];
+    llm_enrichment?: {
+        enabled: boolean;
+        ollama_model?: string | null;
+    };
+    created_at?: number | null;
+    updated_at?: number | null;
+    completed_at?: number | null;
+    result?: TMRescoreAnalysisResult | null;
+}
+
+export interface TMRescoreSyntheticSbomSummary {
+    scope: 'latest_only' | 'merged_versions';
+    latest_version: string;
+    analyzed_versions: string[];
+    component_count: number;
+    vulnerability_count: number;
+    strategy_note: string;
+}
+
 export interface TMRescoreProposal {
     vuln_id: string;
     description?: string;

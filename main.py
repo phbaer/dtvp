@@ -1,4 +1,5 @@
 import asyncio
+import httpx
 import json
 import logging
 import os
@@ -55,8 +56,9 @@ from tmrescore_integration import (
     TMRescoreClient,
     TMRescoreSettings,
     build_analysis_sbom,
+    build_dtvp_vulnerability_proposals,
     build_tmrescore_proposals,
-    natural_version_key,
+    get_tmrescore_generated_at,
     normalize_tmrescore_snapshot,
     sort_projects_by_version,
 )
@@ -314,6 +316,7 @@ async def search_projects(
 # Job Manager
 tasks = {}
 tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
+tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
 
 
 class TaskResponse(BaseModel):
@@ -322,6 +325,322 @@ class TaskResponse(BaseModel):
     message: str
     progress: int = 0
     result: Optional[List[dict]] = None
+
+
+def get_tmrescore_task_ttl_seconds() -> int:
+    raw_value = os.getenv("DTVP_TMRESCORE_TASK_TTL_SECONDS", "3600")
+    try:
+        return max(60, int(raw_value))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid DTVP_TMRESCORE_TASK_TTL_SECONDS=%r, falling back to 3600",
+            raw_value,
+        )
+        return 3600
+
+
+def touch_tmrescore_analysis_task(
+    task: Dict[str, Any],
+    *,
+    mark_terminal: bool = False,
+) -> None:
+    now = datetime.now().timestamp()
+    task["updated_at"] = now
+    if mark_terminal:
+        task["completed_at"] = now
+
+
+def prune_tmrescore_analysis_tasks(now: Optional[float] = None) -> None:
+    current_time = now if now is not None else datetime.now().timestamp()
+    ttl_seconds = get_tmrescore_task_ttl_seconds()
+
+    expired_session_ids = []
+    for session_id, task in tmrescore_analysis_tasks.items():
+        status = str(task.get("status") or "").lower()
+        if status not in {"completed", "failed"}:
+            continue
+        completed_at = task.get("completed_at") or task.get("updated_at") or task.get("created_at")
+        if completed_at is None:
+            continue
+        if current_time - float(completed_at) >= ttl_seconds:
+            expired_session_ids.append(session_id)
+
+    for session_id in expired_session_ids:
+        tmrescore_analysis_tasks.pop(session_id, None)
+
+
+def append_tmrescore_analysis_log(task: Dict[str, Any], message: str) -> None:
+    if not message:
+        return
+    log_entries = task.setdefault("log", [])
+    if not log_entries or log_entries[-1] != message:
+        log_entries.append(message)
+    touch_tmrescore_analysis_task(task)
+
+
+def build_tmrescore_analysis_response(
+    result: Dict[str, Any],
+    task: Dict[str, Any],
+) -> Dict[str, Any]:
+    session = task["session"]
+    session_id = result.get("session_id") or session.get("session_id")
+    return {
+        **result,
+        "session": session,
+        "scope": task["scope"],
+        "recommended_scope": "merged_versions",
+        "latest_version": task["latest_version"],
+        "analyzed_versions": task["analyzed_versions"],
+        "sbom_component_count": task["sbom_component_count"],
+        "sbom_vulnerability_count": task["sbom_vulnerability_count"],
+        "strategy_note": task["strategy_note"],
+        "llm_enrichment": task["llm_enrichment"],
+        "download_urls": {
+            "json": f"{context_path}/api/tmrescore/sessions/{session_id}/results/json",
+            "vex": f"{context_path}/api/tmrescore/sessions/{session_id}/results/vex",
+        },
+    }
+
+
+def build_tmrescore_cached_state(
+    task: Dict[str, Any],
+    *,
+    include_result: bool = False,
+) -> Dict[str, Any]:
+    status = str(task.get("status") or "running")
+    return {
+        "session_id": task["session_id"],
+        "status": status,
+        "progress": int(task.get("progress") or 0),
+        "message": task.get("message") or describe_tmrescore_progress(status, int(task.get("progress") or 0)),
+        "log": task.get("log") or [],
+        "error": task.get("error"),
+        "scope": task.get("scope"),
+        "latest_version": task.get("latest_version"),
+        "analyzed_versions": task.get("analyzed_versions") or [],
+        "llm_enrichment": task.get("llm_enrichment") or {"enabled": False, "ollama_model": None},
+        "created_at": task.get("created_at"),
+        "updated_at": task.get("updated_at"),
+        "completed_at": task.get("completed_at"),
+        "result": task.get("result") if include_result else None,
+    }
+
+
+def get_latest_tmrescore_project_task(project_name: str) -> Optional[Dict[str, Any]]:
+    matching_tasks = [
+        task
+        for task in tmrescore_analysis_tasks.values()
+        if task.get("project_name") == project_name
+    ]
+    if not matching_tasks:
+        return None
+    return max(
+        matching_tasks,
+        key=lambda task: float(task.get("updated_at") or task.get("created_at") or 0.0),
+    )
+
+
+def cache_tmrescore_project_results(
+    project_name: str,
+    session_id: str,
+    scope: str,
+    latest_version: str,
+    analyzed_versions: List[str],
+    vex_results_document: Dict[str, Any],
+    dtvp_original_proposals: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> None:
+    generated_at = get_tmrescore_generated_at(vex_results_document)
+    primary_proposals = build_tmrescore_proposals(vex_results_document)
+    dtvp_original_proposals = dtvp_original_proposals or {}
+
+    merged_proposals: Dict[str, Dict[str, Any]] = {}
+    for vuln_id, proposal in primary_proposals.items():
+        original_proposal = dtvp_original_proposals.get(vuln_id, {})
+        merged_refs = set(original_proposal.get("affected_refs") or [])
+        merged_refs.update(proposal.get("affected_refs") or [])
+        merged_proposal = dict(original_proposal)
+        for key, value in proposal.items():
+            if key == "affected_refs":
+                continue
+            if value is not None:
+                merged_proposal[key] = value
+            elif key not in merged_proposal:
+                merged_proposal[key] = value
+        merged_proposals[vuln_id] = {
+            **merged_proposal,
+            "affected_refs": sorted(ref for ref in merged_refs if ref),
+        }
+
+    persist_tmrescore_project_snapshot(project_name, {
+        "project_name": project_name,
+        "session_id": session_id,
+        "scope": scope,
+        "latest_version": latest_version,
+        "analyzed_versions": analyzed_versions,
+        "generated_at": generated_at,
+        "proposals": {
+            vuln_id: {
+                **proposal,
+                "session_id": session_id,
+                "scope": scope,
+                "latest_version": latest_version,
+                "analyzed_versions": analyzed_versions,
+                "generated_at": generated_at,
+            }
+            for vuln_id, proposal in merged_proposals.items()
+        },
+    })
+
+
+def describe_tmrescore_progress(status: str, progress: int) -> str:
+    normalized_status = (status or "running").lower()
+    if normalized_status == "completed":
+        return "TMRescore analysis completed."
+    if normalized_status == "failed":
+        return "TMRescore analysis failed."
+    if progress >= 95:
+        return "Finalizing tmrescore outputs..."
+    if progress >= 75:
+        return "Rescoring vulnerabilities against the threat model..."
+    if progress >= 45:
+        return "Correlating threat model data with the synthetic SBOM..."
+    if progress >= 20:
+        return "Uploading analysis inputs to tmrescore..."
+    return "Preparing tmrescore analysis session..."
+
+
+async def wait_for_tmrescore_completion(
+    task: Dict[str, Any],
+    tmrescore_client: TMRescoreClient,
+    max_wait_seconds: float,
+) -> None:
+    session_id = task["session_id"]
+    deadline = asyncio.get_running_loop().time() + max_wait_seconds
+
+    while True:
+        progress_payload = await tmrescore_client.get_progress(session_id)
+        status = str(progress_payload.get("status") or task.get("status") or "running")
+        progress = int(progress_payload.get("progress") or task.get("progress") or 0)
+        message = progress_payload.get("message") or describe_tmrescore_progress(status, progress)
+        normalized_status = status.lower()
+
+        task["status"] = status
+        task["progress"] = max(int(task.get("progress") or 0), min(progress, 100))
+        task["message"] = message
+        touch_tmrescore_analysis_task(task, mark_terminal=normalized_status in {"completed", "failed"})
+        append_tmrescore_analysis_log(task, message)
+
+        if normalized_status == "completed":
+            return
+        if normalized_status == "failed":
+            raise RuntimeError(progress_payload.get("error") or progress_payload.get("detail") or message)
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError(
+                f"Timed out while waiting for tmrescore analysis session {session_id} to complete"
+            )
+        await asyncio.sleep(1.5)
+
+
+async def run_tmrescore_analysis_task(
+    task: Dict[str, Any],
+    settings: TMRescoreSettings,
+    project_name: str,
+    threatmodel_bytes: bytes,
+    synthetic_sbom: Dict[str, Any],
+    dtvp_original_proposals: Dict[str, Dict[str, Any]],
+    items_csv_bytes: Optional[bytes],
+    config_bytes: Optional[bytes],
+    chain_analysis: bool,
+    prioritize: bool,
+    what_if: bool,
+    enrich: bool,
+    ollama_model: str,
+) -> None:
+    session_id = task["session_id"]
+    max_wait_seconds = max(settings.DTVP_TMRESCORE_TIMEOUT_SECONDS * 4, 900.0)
+
+    try:
+        async with TMRescoreClient(settings) as tmrescore_client:
+            task["status"] = "running"
+            task["progress"] = max(int(task.get("progress") or 0), 25)
+            task["message"] = "Uploading analysis inputs to tmrescore..."
+            touch_tmrescore_analysis_task(task)
+            append_tmrescore_analysis_log(task, task["message"])
+
+            service_result: Optional[Dict[str, Any]] = None
+            try:
+                service_result = await tmrescore_client.analyze_inventory(
+                    session_id,
+                    threatmodel_bytes=threatmodel_bytes,
+                    sbom_bytes=json.dumps(synthetic_sbom).encode("utf-8"),
+                    items_csv_bytes=items_csv_bytes,
+                    config_bytes=config_bytes,
+                    chain_analysis=chain_analysis,
+                    prioritize=prioritize,
+                    what_if=what_if,
+                    enrich=enrich,
+                    ollama_model=ollama_model if enrich else None,
+                )
+            except (httpx.ReadTimeout, httpx.TimeoutException):
+                task["message"] = "TMRescore is still processing remotely. Polling progress..."
+                append_tmrescore_analysis_log(task, task["message"])
+                await wait_for_tmrescore_completion(task, tmrescore_client, max_wait_seconds)
+            except httpx.HTTPStatusError as exc:
+                if exc.response is not None and exc.response.status_code in {502, 503, 504}:
+                    task["message"] = (
+                        f"TMRescore returned HTTP {exc.response.status_code} while still running. Polling progress..."
+                    )
+                    append_tmrescore_analysis_log(task, task["message"])
+                    await wait_for_tmrescore_completion(task, tmrescore_client, max_wait_seconds)
+                else:
+                    raise
+
+            if service_result is not None:
+                returned_status = str(service_result.get("status") or "completed")
+                if returned_status.lower() == "failed":
+                    raise RuntimeError(service_result.get("error") or "TMRescore analysis failed")
+                if returned_status.lower() != "completed":
+                    task["status"] = returned_status
+                    task["progress"] = max(int(task.get("progress") or 0), int(service_result.get("progress") or 70))
+                    task["message"] = service_result.get("message") or describe_tmrescore_progress(returned_status, task["progress"])
+                    touch_tmrescore_analysis_task(task)
+                    append_tmrescore_analysis_log(task, task["message"])
+                    await wait_for_tmrescore_completion(task, tmrescore_client, max_wait_seconds)
+
+            final_service_result = service_result or await tmrescore_client.get_results(session_id)
+            vex_results = await tmrescore_client.get_results_vex(session_id)
+
+            cache_tmrescore_project_results(
+                project_name,
+                session_id,
+                task["scope"],
+                task["latest_version"],
+                task["analyzed_versions"],
+                vex_results,
+                dtvp_original_proposals,
+            )
+
+            final_result = build_tmrescore_analysis_response(final_service_result, task)
+            task["status"] = "completed"
+            task["progress"] = 100
+            task["message"] = "TMRescore analysis completed."
+            task["result"] = final_result
+            task["error"] = None
+            touch_tmrescore_analysis_task(task, mark_terminal=True)
+            append_tmrescore_analysis_log(task, task["message"])
+    except Exception as exc:
+        logger.warning(
+            "TMRescore analysis task for %s session %s failed: %s",
+            project_name,
+            session_id,
+            exc,
+        )
+        task["status"] = "failed"
+        task["error"] = str(exc)
+        task["message"] = str(exc)
+        task["progress"] = 100
+        touch_tmrescore_analysis_task(task, mark_terminal=True)
+        append_tmrescore_analysis_log(task, f"TMRescore analysis failed: {exc}")
 
 
 def get_version_fetch_concurrency() -> int:
@@ -514,6 +833,60 @@ async def collect_tmrescore_analysis_inputs(
     return [item for item in results if item is not None]
 
 
+async def prepare_tmrescore_analysis_inventory(
+    project_name: str,
+    scope: str,
+    client: DTClient,
+) -> Dict[str, Any]:
+    if scope not in SUPPORTED_TMRESCORE_SCOPES:
+        raise HTTPException(status_code=400, detail="Unsupported tmrescore analysis scope")
+
+    try:
+        projects = await client.get_projects(project_name)
+    except Exception as e:
+        logger.error("Error fetching projects for tmrescore analysis: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Dependency-Track unavailable while preparing threat-model analysis.",
+        )
+
+    versions = [project for project in projects if project.get("name") == project_name]
+    versions = sort_projects_by_version(versions)
+
+    if not versions:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    selected_versions = versions[-1:] if scope == "latest_only" else versions
+    latest_version = versions[-1].get("version", "unknown")
+
+    analysis_inputs = await collect_tmrescore_analysis_inputs(selected_versions, client)
+    synthetic_sbom = build_analysis_sbom(
+        project_name,
+        analysis_inputs,
+        scope,
+        latest_version,
+    )
+
+    analyzed_versions = [
+        version.get("version", "unknown") for version in selected_versions
+    ]
+    strategy_note = (
+        "Merged multi-version analysis keeps historical vulnerabilities attached to the versioned components they came from."
+        if scope == "merged_versions"
+        else "Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases."
+    )
+
+    return {
+        "versions": versions,
+        "selected_versions": selected_versions,
+        "latest_version": latest_version,
+        "dtvp_original_proposals": build_dtvp_vulnerability_proposals(analysis_inputs),
+        "synthetic_sbom": synthetic_sbom,
+        "analyzed_versions": analyzed_versions,
+        "strategy_note": strategy_note,
+    }
+
+
 async def process_grouped_vulns_task(
     task_id: str, name: str, cve: Optional[str], client: DTClient
 ):
@@ -546,7 +919,6 @@ async def process_grouped_vulns_task(
 
         # Pre-load mapping once
         team_mapping = load_team_mapping()
-        total_versions = len(versions)
 
         def update_progress(completed: int, total: int, version_info: Dict[str, Any]):
             tasks[task_id]["progress"] = int((completed / total) * 90)
@@ -1047,6 +1419,52 @@ async def get_tmrescore_context(
     }
 
 
+@api_router.get("/projects/{project_name}/tmrescore/sbom")
+async def download_tmrescore_analysis_sbom(
+    project_name: str,
+    scope: str = "merged_versions",
+    client: DTClient = Depends(get_client),
+    user: str = Depends(get_current_user),
+):
+    inventory = await prepare_tmrescore_analysis_inventory(project_name, scope, client)
+    synthetic_sbom = inventory["synthetic_sbom"]
+    latest_version = inventory["latest_version"]
+    safe_project_name = "".join(
+        character if character.isalnum() or character in {"-", "_", "."} else "-"
+        for character in project_name
+    ).strip("-") or "project"
+    filename = (
+        f"{safe_project_name}-{scope}-{latest_version}-analysis-sbom.cyclonedx.json"
+    )
+
+    return Response(
+        content=json.dumps(synthetic_sbom, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@api_router.get("/projects/{project_name}/tmrescore/sbom/summary")
+async def get_tmrescore_analysis_sbom_summary(
+    project_name: str,
+    scope: str = "merged_versions",
+    client: DTClient = Depends(get_client),
+    user: str = Depends(get_current_user),
+):
+    inventory = await prepare_tmrescore_analysis_inventory(project_name, scope, client)
+    synthetic_sbom = inventory["synthetic_sbom"]
+    return {
+        "scope": scope,
+        "latest_version": inventory["latest_version"],
+        "analyzed_versions": inventory["analyzed_versions"],
+        "component_count": len(synthetic_sbom.get("components") or []),
+        "vulnerability_count": len(synthetic_sbom.get("vulnerabilities") or []),
+        "strategy_note": inventory["strategy_note"],
+    }
+
+
 @api_router.post("/projects/{project_name}/tmrescore/analyze")
 async def analyze_project_with_tmrescore(
     project_name: str,
@@ -1062,9 +1480,6 @@ async def analyze_project_with_tmrescore(
     client: DTClient = Depends(get_client),
     user: str = Depends(get_current_user),
 ):
-    if scope not in SUPPORTED_TMRESCORE_SCOPES:
-        raise HTTPException(status_code=400, detail="Unsupported tmrescore analysis scope")
-
     settings = TMRescoreSettings()
     if not settings.enabled:
         raise HTTPException(
@@ -1072,31 +1487,10 @@ async def analyze_project_with_tmrescore(
             detail="TMRescore integration is not configured. Set DTVP_TMRESCORE_URL to enable threat-model analysis.",
         )
 
-    try:
-        projects = await client.get_projects(project_name)
-    except Exception as e:
-        logger.error("Error fetching projects for tmrescore analysis: %s", e)
-        raise HTTPException(
-            status_code=503,
-            detail="Dependency-Track unavailable while preparing threat-model analysis.",
-        )
-
-    versions = [project for project in projects if project.get("name") == project_name]
-    versions = sort_projects_by_version(versions)
-
-    if not versions:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    selected_versions = versions[-1:] if scope == "latest_only" else versions
-    latest_version = versions[-1].get("version", "unknown")
-
-    analysis_inputs = await collect_tmrescore_analysis_inputs(selected_versions, client)
-    synthetic_sbom = build_analysis_sbom(
-        project_name,
-        analysis_inputs,
-        scope,
-        latest_version,
-    )
+    inventory = await prepare_tmrescore_analysis_inventory(project_name, scope, client)
+    latest_version = inventory["latest_version"]
+    synthetic_sbom = inventory["synthetic_sbom"]
+    dtvp_original_proposals = inventory["dtvp_original_proposals"]
 
     session_version_label = (
         latest_version
@@ -1107,85 +1501,62 @@ async def analyze_project_with_tmrescore(
     threatmodel_bytes = await threatmodel.read()
     items_csv_bytes = await items_csv.read() if items_csv else None
     config_bytes = await config.read() if config else None
+    prune_tmrescore_analysis_tasks()
 
     async with TMRescoreClient(settings) as tmrescore_client:
         session = await tmrescore_client.create_session(project_name, session_version_label)
-        result = await tmrescore_client.analyze_inventory(
-            session["session_id"],
-            threatmodel_bytes=threatmodel_bytes,
-            sbom_bytes=json.dumps(synthetic_sbom).encode("utf-8"),
-            items_csv_bytes=items_csv_bytes,
-            config_bytes=config_bytes,
-            chain_analysis=chain_analysis,
-            prioritize=prioritize,
-            what_if=what_if,
-            enrich=enrich,
-            ollama_model=ollama_model if enrich else None,
-        )
+        session_id = session.get("session_id")
 
-        session_id = result.get("session_id") or session.get("session_id")
-        if session_id:
-            try:
-                raw_results = await tmrescore_client.get_results_json(session_id)
-                persist_tmrescore_project_snapshot(project_name, {
-                    "project_name": project_name,
-                    "session_id": session_id,
-                    "scope": scope,
-                    "latest_version": latest_version,
-                    "analyzed_versions": [
-                        version.get("version", "unknown")
-                        for version in selected_versions
-                    ],
-                    "generated_at": raw_results.get("generated_at"),
-                    "proposals": {
-                        vuln_id: {
-                            **proposal,
-                            "session_id": session_id,
-                            "scope": scope,
-                            "latest_version": latest_version,
-                            "analyzed_versions": [
-                                version.get("version", "unknown")
-                                for version in selected_versions
-                            ],
-                            "generated_at": raw_results.get("generated_at"),
-                        }
-                        for vuln_id, proposal in build_tmrescore_proposals(raw_results).items()
-                    },
-                })
-            except Exception as exc:
-                logger.warning(
-                    "Unable to cache tmrescore proposals for %s session %s: %s",
-                    project_name,
-                    session_id,
-                    exc,
-                )
+    analyzed_versions = inventory["analyzed_versions"]
+    strategy_note = inventory["strategy_note"]
 
-    session_id = result.get("session_id") or session.get("session_id")
-    return {
-        **result,
+    tmrescore_analysis_tasks[session_id] = {
+        "session_id": session_id,
+        "project_name": project_name,
         "session": session,
         "scope": scope,
-        "recommended_scope": "merged_versions",
         "latest_version": latest_version,
-        "analyzed_versions": [
-            version.get("version", "unknown") for version in selected_versions
-        ],
+        "analyzed_versions": analyzed_versions,
         "sbom_component_count": len(synthetic_sbom.get("components") or []),
         "sbom_vulnerability_count": len(synthetic_sbom.get("vulnerabilities") or []),
-        "strategy_note": (
-            "Merged multi-version analysis keeps historical vulnerabilities attached to the versioned components they came from."
-            if scope == "merged_versions"
-            else "Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases."
-        ),
+        "strategy_note": strategy_note,
         "llm_enrichment": {
             "enabled": enrich,
             "ollama_model": ollama_model if enrich else None,
         },
-        "download_urls": {
-            "json": f"{context_path}/api/tmrescore/sessions/{session_id}/results/json",
-            "vex": f"{context_path}/api/tmrescore/sessions/{session_id}/results/vex",
-        },
+        "status": "running",
+        "progress": 10,
+        "message": "Queued tmrescore analysis.",
+        "log": ["Queued tmrescore analysis."],
+        "result": None,
+        "error": None,
+        "created_at": datetime.now().timestamp(),
+        "updated_at": datetime.now().timestamp(),
+        "completed_at": None,
     }
+
+    asyncio.create_task(
+        run_tmrescore_analysis_task(
+            tmrescore_analysis_tasks[session_id],
+            settings,
+            project_name,
+            threatmodel_bytes,
+            synthetic_sbom,
+            dtvp_original_proposals,
+            items_csv_bytes,
+            config_bytes,
+            chain_analysis,
+            prioritize,
+            what_if,
+            enrich,
+            ollama_model,
+        )
+    )
+
+    return build_tmrescore_cached_state(
+        tmrescore_analysis_tasks[session_id],
+        include_result=False,
+    )
 
 
 @api_router.get("/projects/{project_name}/tmrescore/proposals")
@@ -1203,6 +1574,82 @@ async def get_tmrescore_project_proposals(
     if normalized_cached != cached:
         persist_tmrescore_project_snapshot(project_name, normalized_cached)
     return normalized_cached
+
+
+@api_router.get("/projects/{project_name}/tmrescore/state")
+async def get_tmrescore_project_state(
+    project_name: str,
+    user: str = Depends(get_current_user),
+):
+    prune_tmrescore_analysis_tasks()
+    task = get_latest_tmrescore_project_task(project_name)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="No cached tmrescore analysis state is available for this project.",
+        )
+    include_result = str(task.get("status") or "").lower() == "completed"
+    return build_tmrescore_cached_state(task, include_result=include_result)
+
+
+@api_router.get("/tmrescore/sessions/{session_id}/progress")
+async def get_tmrescore_progress(
+    session_id: str,
+    user: str = Depends(get_current_user),
+):
+    prune_tmrescore_analysis_tasks()
+    task = tmrescore_analysis_tasks.get(session_id)
+    if task:
+        return build_tmrescore_cached_state(task, include_result=False)
+
+    settings = TMRescoreSettings()
+    if not settings.enabled:
+        raise HTTPException(status_code=503, detail="TMRescore integration is not configured")
+
+    async with TMRescoreClient(settings) as tmrescore_client:
+        payload = await tmrescore_client.get_progress(session_id)
+
+    status = str(payload.get("status") or "running")
+    progress = int(payload.get("progress") or 0)
+    message = payload.get("message") or describe_tmrescore_progress(status, progress)
+    return {
+        "session_id": session_id,
+        "status": status,
+        "progress": progress,
+        "message": message,
+        "log": [message],
+        "error": None,
+        "result": None,
+    }
+
+
+@api_router.get("/tmrescore/sessions/{session_id}/results")
+async def get_tmrescore_results(
+    session_id: str,
+    user: str = Depends(get_current_user),
+):
+    prune_tmrescore_analysis_tasks()
+    task = tmrescore_analysis_tasks.get(session_id)
+    if task:
+        if task.get("result"):
+            return task["result"]
+        status = str(task.get("status") or "running").lower()
+        if status == "failed":
+            raise HTTPException(
+                status_code=409,
+                detail=task.get("error") or "TMRescore analysis failed",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail="TMRescore analysis is not complete yet. Poll /progress until status is completed.",
+        )
+
+    settings = TMRescoreSettings()
+    if not settings.enabled:
+        raise HTTPException(status_code=503, detail="TMRescore integration is not configured")
+
+    async with TMRescoreClient(settings) as tmrescore_client:
+        return await tmrescore_client.get_results(session_id)
 
 
 @api_router.get("/tmrescore/sessions/{session_id}/results/json")

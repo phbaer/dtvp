@@ -2,9 +2,22 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ChevronLeft, ShieldCheck, Upload } from 'lucide-vue-next'
-import { getTMRescoreContext, runTMRescoreAnalysis } from '../lib/api'
+import {
+  getTMRescoreContext,
+  getTMRescoreProjectState,
+  getTMRescoreSyntheticSbomDownloadUrl,
+  getTMRescoreSyntheticSbomSummary,
+  resumeTMRescoreAnalysis,
+  runTMRescoreAnalysis,
+} from '../lib/api'
 import { getRuntimeConfig } from '../lib/env'
-import type { TMRescoreAnalysisResult, TMRescoreContext } from '../types'
+import type {
+  TMRescoreAnalysisProgress,
+  TMRescoreProjectState,
+  TMRescoreAnalysisResult,
+  TMRescoreContext,
+  TMRescoreSyntheticSbomSummary,
+} from '../types'
 
 const route = useRoute()
 const projectName = computed(() => String(route.params.name || ''))
@@ -29,12 +42,19 @@ const ollamaModel = ref('qwen2.5:7b')
 const submitting = ref(false)
 const result = ref<TMRescoreAnalysisResult | null>(null)
 const submitError = ref('')
+const syntheticSbomSummary = ref<TMRescoreSyntheticSbomSummary | null>(null)
+const syntheticSbomSummaryLoading = ref(false)
+const syntheticSbomSummaryError = ref('')
+const syntheticSbomSummaryRequestId = ref(0)
+const cachedProjectState = ref<TMRescoreProjectState | null>(null)
+const refreshingCachedState = ref(false)
 
 const contextPathRaw = getRuntimeConfig('DTVP_CONTEXT_PATH', '')
 const contextPath = contextPathRaw ? (contextPathRaw.startsWith('/') ? contextPathRaw.replace(/\/$/, '') : '/' + contextPathRaw.replace(/\/$/, '')) : ''
 const apiPrefix = `${contextPath || ''}/api`
 const refreshSignalKey = computed(() => `dtvp:tmrescore-refresh:${projectName.value}`)
-const projectReturnUrl = computed(() => `/project/${projectName.value}?refreshThreatModel=1`)
+const projectReturnUrl = computed(() => `/project/${projectName.value}`)
+const syntheticSbomDownloadUrl = computed(() => getTMRescoreSyntheticSbomDownloadUrl(projectName.value, selectedScope.value))
 
 const outputFiles = computed(() => Object.keys(result.value?.outputs || {}))
 
@@ -58,6 +78,97 @@ const clearStagedProgressTimers = () => {
   }
 }
 
+const getScopeLabel = (scope: 'latest_only' | 'merged_versions') => (
+  scope === 'merged_versions' ? 'merged multi-version' : 'latest-only'
+)
+
+const formatCachedTimestamp = (timestamp?: number | null) => {
+  if (!timestamp || Number.isNaN(timestamp)) return 'Not available'
+  return new Date(timestamp * 1000).toLocaleString()
+}
+
+const formatRelativeTimestamp = (timestamp?: number | null) => {
+  if (!timestamp || Number.isNaN(timestamp)) return 'Not available'
+  const diffSeconds = Math.round((Date.now() / 1000) - timestamp)
+  const absoluteDiff = Math.abs(diffSeconds)
+  if (absoluteDiff < 60) return `${absoluteDiff} second${absoluteDiff === 1 ? '' : 's'} ago`
+  if (absoluteDiff < 3600) {
+    const minutes = Math.round(absoluteDiff / 60)
+    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  }
+  if (absoluteDiff < 86400) {
+    const hours = Math.round(absoluteDiff / 3600)
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  }
+  const days = Math.round(absoluteDiff / 86400)
+  return `${days} day${days === 1 ? '' : 's'} ago`
+}
+
+const updateCachedProjectState = (state: Partial<TMRescoreProjectState | TMRescoreAnalysisProgress>) => {
+  if (!state.session_id) return
+  const previous = cachedProjectState.value
+  cachedProjectState.value = {
+    session_id: state.session_id,
+    status: state.status || previous?.status || 'running',
+    progress: state.progress ?? previous?.progress ?? 0,
+    message: state.message || previous?.message || '',
+    log: state.log || previous?.log || [],
+    error: state.error ?? previous?.error ?? null,
+    scope: (state as Partial<TMRescoreProjectState>).scope || previous?.scope || selectedScope.value,
+    latest_version: (state as Partial<TMRescoreProjectState>).latest_version || previous?.latest_version || context.value?.latest_version || '',
+    analyzed_versions: (state as Partial<TMRescoreProjectState>).analyzed_versions || previous?.analyzed_versions || [],
+    llm_enrichment: (state as Partial<TMRescoreProjectState>).llm_enrichment || previous?.llm_enrichment || { enabled: false, ollama_model: null },
+    created_at: state.created_at ?? previous?.created_at ?? null,
+    updated_at: state.updated_at ?? previous?.updated_at ?? null,
+    completed_at: state.completed_at ?? previous?.completed_at ?? null,
+    result: state.result ?? previous?.result ?? null,
+  }
+}
+
+const loadSyntheticSbomSummary = async (mode: 'initial' | 'refresh' = 'refresh') => {
+  if (!context.value?.enabled || !projectName.value) {
+    syntheticSbomSummary.value = null
+    syntheticSbomSummaryError.value = ''
+    syntheticSbomSummaryLoading.value = false
+    return
+  }
+
+  const requestId = syntheticSbomSummaryRequestId.value + 1
+  syntheticSbomSummaryRequestId.value = requestId
+  syntheticSbomSummaryLoading.value = true
+  syntheticSbomSummaryError.value = ''
+
+  if (mode === 'initial') {
+    setProgressState(
+      `Preparing ${getScopeLabel(selectedScope.value)} synthetic SBOM preview from Dependency-Track data...`,
+      62,
+    )
+    driftProgressTo(86)
+  }
+
+  try {
+    const summary = await getTMRescoreSyntheticSbomSummary(projectName.value, selectedScope.value)
+    if (syntheticSbomSummaryRequestId.value !== requestId) return
+    syntheticSbomSummary.value = summary
+    if (mode === 'initial') {
+      setProgressState(
+        `Prepared SBOM preview for ${summary.analyzed_versions.length} version${summary.analyzed_versions.length === 1 ? '' : 's'} with ${summary.component_count} components and ${summary.vulnerability_count} vulnerabilities.`,
+        92,
+      )
+    }
+  } catch (err: any) {
+    if (syntheticSbomSummaryRequestId.value !== requestId) return
+    syntheticSbomSummary.value = null
+    syntheticSbomSummaryError.value = err?.response?.data?.detail || err?.message || 'Failed to prepare analysis SBOM summary.'
+    if (mode === 'initial') {
+      setProgressState(syntheticSbomSummaryError.value, 100)
+    }
+  } finally {
+    if (syntheticSbomSummaryRequestId.value === requestId) {
+      syntheticSbomSummaryLoading.value = false
+    }
+  }
+}
 const appendProgressLog = (message: string) => {
   if (!message) return
   if (progressLog.value[progressLog.value.length - 1] === message) return
@@ -146,21 +257,125 @@ const handleFileChange = (event: Event, target: 'threatmodel' | 'items' | 'confi
     if (target === 'config') configFile.value = file
 }
 
+const applyAnalysisProgress = (progress: TMRescoreAnalysisProgress) => {
+  stopProgressTimer()
+  clearStagedProgressTimers()
+  updateCachedProjectState(progress)
+  progressMessage.value = progress.message || progressMessage.value
+  progressValue.value = Math.max(progressValue.value, Math.min(progress.progress || 0, 100))
+  if (progress.log && progress.log.length > 0) {
+    progressLog.value = progress.log
+  } else if (progress.message) {
+    appendProgressLog(progress.message)
+  }
+}
+
+const restoreCachedAnalysisState = async (state: TMRescoreProjectState) => {
+  cachedProjectState.value = state
+  selectedScope.value = state.scope
+  enrich.value = Boolean(state.llm_enrichment?.enabled)
+  if (state.llm_enrichment?.ollama_model) {
+    ollamaModel.value = state.llm_enrichment.ollama_model
+  }
+
+  submitError.value = ''
+  result.value = null
+  applyAnalysisProgress(state)
+
+  if (state.status === 'failed') {
+    submitError.value = state.error || state.message || 'Threat-model analysis failed.'
+    setProgressState(submitError.value, 100)
+    submitting.value = false
+    return
+  }
+
+  if (state.status === 'completed' && state.result) {
+    result.value = state.result
+    setProgressState(`Restored cached analysis result for session ${state.session_id}.`, 100)
+    submitting.value = false
+    return
+  }
+
+  submitting.value = true
+  appendProgressLog(`Restoring cached tmrescore session ${state.session_id} after page reload...`)
+  try {
+    result.value = await resumeTMRescoreAnalysis(state.session_id, state, {
+      onAnalysisProgress: (progress) => {
+        applyAnalysisProgress(progress)
+      },
+    })
+    setProgressState(`Analysis completed. ${result.value.rescored_count} of ${result.value.total_cves} CVEs were rescored.`, 100)
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem(refreshSignalKey.value, String(Date.now()))
+    }
+  } catch (err: any) {
+    submitError.value = err?.response?.data?.detail || err?.message || 'Threat-model analysis failed.'
+    setProgressState(submitError.value, 100)
+  } finally {
+    submitting.value = false
+  }
+}
+
+const refreshCachedAnalysisState = async () => {
+  if (!projectName.value || refreshingCachedState.value || submitting.value) return
+
+  refreshingCachedState.value = true
+  submitError.value = ''
+  try {
+    const latestState = await getTMRescoreProjectState(projectName.value)
+    selectedScope.value = latestState.scope
+    appendProgressLog(`Refreshed cached tmrescore session ${latestState.session_id}.`)
+    await loadSyntheticSbomSummary('refresh')
+    await restoreCachedAnalysisState(latestState)
+  } catch (err: any) {
+    submitError.value = err?.response?.data?.detail || err?.message || 'Failed to refresh cached tmrescore state.'
+    appendProgressLog(submitError.value)
+  } finally {
+    refreshingCachedState.value = false
+  }
+}
+
 const loadContext = async () => {
     loading.value = true
     error.value = ''
-  resetProgressState('Starting threat-model context load...')
-  setProgressState('Checking TMRescore backend availability...', 12)
-  driftProgressTo(72)
+  resetProgressState('Opening threat-model analysis page...')
+  setProgressState('Loading project versions, tmrescore settings, and enrichment options...', 18)
+  driftProgressTo(46)
     try {
         context.value = await getTMRescoreContext(projectName.value)
         selectedScope.value = context.value.recommended_scope
+    let cachedState: TMRescoreProjectState | null = null
+    try {
+      cachedState = await getTMRescoreProjectState(projectName.value)
+      cachedProjectState.value = cachedState
+      selectedScope.value = cachedState.scope
+      setProgressState(
+        `Found cached tmrescore session ${cachedState.session_id}. Preparing the ${getScopeLabel(selectedScope.value)} analysis preview...`,
+        52,
+      )
+    } catch (stateErr: any) {
+      if (stateErr?.response?.status !== 404) {
+        appendProgressLog(
+          stateErr?.response?.data?.detail || stateErr?.message || 'Could not restore cached tmrescore state.',
+        )
+      }
+    }
     ollamaModel.value = context.value.llm_enrichment?.default_model || 'qwen2.5:7b'
-    setProgressState(`Loaded ${context.value.versions.length} project version${context.value.versions.length === 1 ? '' : 's'} for analysis.`, 84)
+    if (!cachedState) {
+      setProgressState(`Loaded ${context.value.versions.length} project version${context.value.versions.length === 1 ? '' : 's'}. Preparing the ${getScopeLabel(selectedScope.value)} analysis preview...`, 52)
+    }
+    await loadSyntheticSbomSummary('initial')
     if (context.value.llm_enrichment?.warning) {
       appendProgressLog(context.value.llm_enrichment.warning)
     }
-    setProgressState('Threat-model analysis context is ready.', 100)
+    if (!cachedState) {
+      setProgressState('Threat-model analysis page is ready.', 100)
+    }
+    loading.value = false
+    if (cachedState) {
+      void restoreCachedAnalysisState(cachedState)
+    }
+    return
     } catch (err: any) {
     stopProgressTimer()
         error.value = err?.response?.data?.detail || err?.message || 'Failed to load threat-model analysis context.'
@@ -168,7 +383,9 @@ const loadContext = async () => {
     } finally {
     stopProgressTimer()
     clearStagedProgressTimers()
-        loading.value = false
+        if (!context.value || error.value) {
+            loading.value = false
+        }
     }
 }
 
@@ -215,6 +432,9 @@ const submit = async () => {
                 appendProgressLog('Upload complete. Waiting for tmrescore processing...')
               }
             },
+            onAnalysisProgress: (progress) => {
+              applyAnalysisProgress(progress)
+            },
         })
           stopProgressTimer()
           clearStagedProgressTimers()
@@ -236,6 +456,10 @@ onMounted(() => {
     loadContext()
 })
 
+watch(selectedScope, () => {
+  if (!context.value?.enabled) return
+  void loadSyntheticSbomSummary()
+})
       onBeforeUnmount(() => {
         stopProgressTimer()
         clearStagedProgressTimers()
@@ -398,6 +622,104 @@ onMounted(() => {
 
             <div v-if="submitError" class="rounded-xl border border-red-800/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
               {{ submitError }}
+            </div>
+
+            <div class="rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Synthetic Analysis SBOM</div>
+                  <div class="mt-1 text-sm text-gray-300">
+                    Download the generated CycloneDX input for the currently selected scope before sending it to tmrescore.
+                  </div>
+                </div>
+                <a
+                  :href="syntheticSbomDownloadUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-semibold text-gray-200 transition-colors hover:border-gray-600"
+                  data-testid="download-analysis-sbom"
+                >
+                  Download Analysis SBOM
+                </a>
+              </div>
+              <div class="mt-4 grid gap-3 md:grid-cols-3">
+                <div class="rounded-xl border border-gray-800 bg-black/20 px-4 py-3">
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Versions</div>
+                  <div v-if="syntheticSbomSummary" data-testid="analysis-sbom-summary-versions" class="mt-1 text-lg font-semibold text-white">
+                    {{ syntheticSbomSummary.analyzed_versions.length }}
+                  </div>
+                  <div v-else class="mt-1 text-sm text-gray-500">{{ syntheticSbomSummaryLoading ? 'Preparing...' : 'Unavailable' }}</div>
+                </div>
+                <div class="rounded-xl border border-gray-800 bg-black/20 px-4 py-3">
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Components</div>
+                  <div v-if="syntheticSbomSummary" data-testid="analysis-sbom-summary-components" class="mt-1 text-lg font-semibold text-white">
+                    {{ syntheticSbomSummary.component_count }}
+                  </div>
+                  <div v-else class="mt-1 text-sm text-gray-500">{{ syntheticSbomSummaryLoading ? 'Preparing...' : 'Unavailable' }}</div>
+                </div>
+                <div class="rounded-xl border border-gray-800 bg-black/20 px-4 py-3">
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Vulnerabilities</div>
+                  <div v-if="syntheticSbomSummary" data-testid="analysis-sbom-summary-vulnerabilities" class="mt-1 text-lg font-semibold text-white">
+                    {{ syntheticSbomSummary.vulnerability_count }}
+                  </div>
+                  <div v-else class="mt-1 text-sm text-gray-500">{{ syntheticSbomSummaryLoading ? 'Preparing...' : 'Unavailable' }}</div>
+                </div>
+              </div>
+              <div v-if="syntheticSbomSummary" class="mt-3 text-sm text-gray-400" data-testid="analysis-sbom-summary-note">
+                {{ syntheticSbomSummary.strategy_note }}
+              </div>
+              <div v-else-if="syntheticSbomSummaryError" class="mt-3 text-sm text-amber-200" data-testid="analysis-sbom-summary-error">
+                {{ syntheticSbomSummaryError }}
+              </div>
+              <div v-if="cachedProjectState" class="mt-4 rounded-xl border border-gray-800 bg-black/20 p-4" data-testid="cached-analysis-state-meta">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Cached Analysis State</div>
+                  <button
+                    type="button"
+                    class="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-gray-200 transition-colors hover:border-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    :disabled="refreshingCachedState || submitting"
+                    data-testid="refresh-cached-analysis-state"
+                    @click="refreshCachedAnalysisState"
+                  >
+                    {{ refreshingCachedState ? 'Refreshing...' : 'Refresh Cached State' }}
+                  </button>
+                </div>
+                <dl class="mt-3 grid gap-3 text-sm text-gray-300 md:grid-cols-2">
+                  <div>
+                    <dt class="text-gray-500">Session</dt>
+                    <dd class="font-mono text-xs text-gray-200">{{ cachedProjectState.session_id }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-gray-500">Scope</dt>
+                    <dd>{{ getScopeLabel(cachedProjectState.scope) }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-gray-500">Latest Version</dt>
+                    <dd>{{ cachedProjectState.latest_version }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-gray-500">Last Updated</dt>
+                    <dd>
+                      <div>{{ formatCachedTimestamp(cachedProjectState.updated_at) }}</div>
+                      <div class="text-xs text-gray-500">{{ formatRelativeTimestamp(cachedProjectState.updated_at) }}</div>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-gray-500">Created</dt>
+                    <dd>
+                      <div>{{ formatCachedTimestamp(cachedProjectState.created_at) }}</div>
+                      <div class="text-xs text-gray-500">{{ formatRelativeTimestamp(cachedProjectState.created_at) }}</div>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-gray-500">Completed</dt>
+                    <dd>
+                      <div>{{ formatCachedTimestamp(cachedProjectState.completed_at) }}</div>
+                      <div class="text-xs text-gray-500">{{ formatRelativeTimestamp(cachedProjectState.completed_at) }}</div>
+                    </dd>
+                  </div>
+                </dl>
+              </div>
             </div>
 
             <div

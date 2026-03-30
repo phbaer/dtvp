@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ProjectView from '../ProjectView.vue'
-import { getGroupedVulns } from '../../lib/api'
+import { getGroupedVulns, getTMRescoreProposals } from '../../lib/api'
 import { mountWithRouter } from './routerTestUtils'
 
 // Mock API
@@ -239,7 +239,6 @@ describe('ProjectView Filters', () => {
         // V3 matches Lifecycle=INCONSISTENT AND Analysis=False Positive
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
         expect(wrapper.findAll('.vuln-card')[0]?.text()).toBe('V3')
-
         // Set Lifecycle to ONLY 'Assessed'
         ;(wrapper.vm as any).lifecycleFilters = ['ASSESSED']
         await wrapper.vm.$nextTick()
@@ -268,6 +267,44 @@ describe('ProjectView Filters', () => {
         
         // Should return to REVIEWER defaults (all 4 findings)
         expect(wrapper.findAll('.vuln-card').length).toBe(4)
+    })
+
+    it('filters vulnerabilities by tmrescore proposal availability', async () => {
+        ;(getGroupedVulns as any).mockResolvedValue(mockData)
+        ;(getTMRescoreProposals as any).mockResolvedValue({
+            proposals: {
+                V2: {
+                    vuln_id: 'V2',
+                    rescored_score: 7.9,
+                    rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L',
+                },
+                V8: {
+                    vuln_id: 'V8',
+                    rescored_score: 6.1,
+                    rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MAC:H',
+                },
+            },
+        })
+
+        const wrapper = await mountProjectViewRoute()
+        await wrapper.vm.$nextTick()
+        await Promise.resolve()
+
+        ;(wrapper.vm as any).tmrescoreProposalFilter = 'WITH_PROPOSAL'
+        await wrapper.vm.$nextTick()
+
+        let cards = wrapper.findAll('.vuln-card')
+        expect(cards.length).toBe(2)
+        expect(cards.map((card: any) => card.text())).toContain('V2')
+        expect(cards.map((card: any) => card.text())).toContain('V8')
+
+        ;(wrapper.vm as any).tmrescoreProposalFilter = 'WITHOUT_PROPOSAL'
+        await wrapper.vm.$nextTick()
+
+        cards = wrapper.findAll('.vuln-card')
+        expect(cards.length).toBe(2)
+        expect(cards.map((card: any) => card.text())).toContain('V1')
+        expect(cards.map((card: any) => card.text())).toContain('V3')
     })
 
     it('shows "Pending Review" vulnerabilities regardless of filters', async () => {

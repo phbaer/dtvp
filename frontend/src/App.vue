@@ -148,7 +148,20 @@ const acknowledgeChangelog = () => {
             </div>
         </header>
         <main class="p-6 sm:p-8 max-w-7xl mx-auto w-full flex-grow">
-            <router-view></router-view>
+            <router-view v-slot="{ Component, route }">
+                <keep-alive>
+                    <component
+                        :is="Component"
+                        :key="route.path"
+                        v-if="route.path.startsWith('/project/')"
+                    />
+                </keep-alive>
+                <component
+                    :is="Component"
+                    :key="route.fullPath"
+                    v-if="!route.path.startsWith('/project/')"
+                />
+            </router-view>
         </main>
         <footer class="border-t border-gray-700 bg-gray-900">
             <div class="max-w-7xl mx-auto p-4 text-center text-xs text-gray-500 space-y-1">

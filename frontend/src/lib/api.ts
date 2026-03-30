@@ -5,9 +5,12 @@ import type {
     GroupedVuln,
     AssessmentPayload,
     Statistics,
+    TMRescoreAnalysisProgress,
     TMRescoreAnalysisResult,
+    TMRescoreProjectState,
     TMRescoreContext,
     TMRescoreProposalSnapshot,
+    TMRescoreSyntheticSbomSummary,
 } from '../types';
 import { getRuntimeConfig } from './env';
 
@@ -229,7 +232,90 @@ export interface TMRescoreAnalysisOptions {
 
 export interface TMRescoreAnalysisProgressHandlers {
     onUploadProgress?: (event: AxiosProgressEvent) => void;
+    onAnalysisProgress?: (progress: TMRescoreAnalysisProgress) => void;
+    pollIntervalMs?: number;
 }
+
+export const getTMRescoreSyntheticSbomDownloadUrl = (
+    projectName: string,
+    scope: TMRescoreAnalysisOptions['scope'],
+): string => `${API_BASE}/projects/${encodeURIComponent(projectName)}/tmrescore/sbom?scope=${encodeURIComponent(scope)}`;
+
+export const getTMRescoreSyntheticSbomSummary = async (
+    projectName: string,
+    scope: TMRescoreAnalysisOptions['scope'],
+): Promise<TMRescoreSyntheticSbomSummary> => {
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/sbom/summary`, {
+        params: { scope },
+    });
+    return res.data;
+};
+
+export const getTMRescoreProjectState = async (
+    projectName: string,
+): Promise<TMRescoreProjectState> => {
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/state`);
+    return res.data;
+};
+
+const delay = async (ms: number): Promise<void> => new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+});
+
+export const getTMRescoreAnalysisProgress = async (
+    sessionId: string,
+): Promise<TMRescoreAnalysisProgress> => {
+    const res = await api.get(`/tmrescore/sessions/${encodeURIComponent(sessionId)}/progress`);
+    return res.data;
+};
+
+export const getTMRescoreAnalysisResult = async (
+    sessionId: string,
+): Promise<TMRescoreAnalysisResult> => {
+    const res = await api.get(`/tmrescore/sessions/${encodeURIComponent(sessionId)}/results`);
+    return res.data;
+};
+
+const waitForTMRescoreAnalysisCompletion = async (
+    sessionId: string,
+    initialProgressState: TMRescoreAnalysisProgress,
+    handlers?: TMRescoreAnalysisProgressHandlers,
+): Promise<TMRescoreAnalysisResult> => {
+    if (initialProgressState.status === 'failed') {
+        throw new Error(initialProgressState.error || initialProgressState.message || 'Threat-model analysis failed.');
+    }
+
+    let progressState = initialProgressState;
+    const pollIntervalMs = handlers?.pollIntervalMs ?? 1000;
+    while (progressState.status !== 'completed') {
+        await delay(pollIntervalMs);
+        progressState = await getTMRescoreAnalysisProgress(sessionId);
+        if (handlers?.onAnalysisProgress) {
+            handlers.onAnalysisProgress(progressState);
+        }
+        if (progressState.status === 'failed') {
+            throw new Error(progressState.error || progressState.message || 'Threat-model analysis failed.');
+        }
+    }
+
+    return getTMRescoreAnalysisResult(sessionId);
+};
+
+export const resumeTMRescoreAnalysis = async (
+    sessionId: string,
+    state: TMRescoreAnalysisProgress | TMRescoreProjectState,
+    handlers?: TMRescoreAnalysisProgressHandlers,
+): Promise<TMRescoreAnalysisResult> => {
+    if (handlers?.onAnalysisProgress) {
+        handlers.onAnalysisProgress(state);
+    }
+
+    if (state.status === 'completed') {
+        return getTMRescoreAnalysisResult(sessionId);
+    }
+
+    return waitForTMRescoreAnalysisCompletion(sessionId, state, handlers);
+};
 
 export const runTMRescoreAnalysis = async (
     projectName: string,
@@ -254,7 +340,21 @@ export const runTMRescoreAnalysis = async (
     const res = await api.post(`/projects/${encodeURIComponent(projectName)}/tmrescore/analyze`, formData, {
         onUploadProgress: handlers?.onUploadProgress,
     });
-    return res.data;
+    const initialState = res.data as TMRescoreAnalysisResult | TMRescoreAnalysisProgress;
+
+    if ('download_urls' in initialState) {
+        return initialState;
+    }
+
+    if (handlers?.onAnalysisProgress) {
+        handlers.onAnalysisProgress(initialState);
+    }
+
+    if (!initialState.session_id) {
+        throw new Error('TMRescore analysis did not return a session id.');
+    }
+
+    return waitForTMRescoreAnalysisCompletion(initialState.session_id, initialState, handlers);
 };
 
 export const getTMRescoreProposals = async (projectName: string): Promise<TMRescoreProposalSnapshot> => {
