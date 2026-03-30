@@ -21,6 +21,7 @@ from tmrescore_integration import (
     build_dtvp_vulnerability_proposals,
     build_tmrescore_proposals,
     get_tmrescore_generated_at,
+    is_meaningful_tmrescore_proposal,
 )
 
 
@@ -532,6 +533,12 @@ def test_build_tmrescore_proposals_extracts_rescore_from_vex_document():
                             "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L",
                         }
                     ],
+                    "properties": [
+                        {"name": "cvss-rescorer:original_severity", "value": "CRITICAL"},
+                        {"name": "cvss-rescorer:rescored_severity", "value": "HIGH"},
+                        {"name": "cvss-rescorer:cwe_descriptions", "value": "{\"CWE-79\": \"XSS\"}"},
+                        {"name": "cvss-rescorer:evaluations", "value": "[{\"element\": \"web\", \"vector\": \"CVSS:3.1/.../MPR:L\"}]"},
+                    ],
                     "affects": [{"ref": "component-1"}],
                 }
             ],
@@ -543,7 +550,51 @@ def test_build_tmrescore_proposals_extracts_rescore_from_vex_document():
     assert proposals["CVE-2024-0001"]["rescored_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L"
     assert proposals["CVE-2024-0001"]["affected_refs"] == ["component-1"]
     assert proposals["CVE-2024-0001"]["original_score"] is None
+    assert proposals["CVE-2024-0001"]["original_severity"] == "CRITICAL"
+    assert proposals["CVE-2024-0001"]["rescored_severity"] == "HIGH"
+    assert proposals["CVE-2024-0001"]["cwe_descriptions"] == {"CWE-79": "XSS"}
+    assert proposals["CVE-2024-0001"]["evaluations"] == [{"element": "web", "vector": "CVSS:3.1/.../MPR:L"}]
     assert get_tmrescore_generated_at({"metadata": {"timestamp": "2026-03-30T00:00:00Z"}}) == "2026-03-30T00:00:00Z"
+
+
+def test_build_tmrescore_proposals_ignores_vex_entries_without_rescored_vector():
+    proposals = build_tmrescore_proposals(
+        {
+            "vulnerabilities": [
+                {
+                    "id": "CVE-2024-0002",
+                    "ratings": [{"method": "CVSSv31", "score": 7.1}],
+                    "properties": [
+                        {"name": "cvss-rescorer:original_severity", "value": "HIGH"},
+                        {"name": "cvss-rescorer:rescored_severity", "value": "MEDIUM"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert proposals == {}
+
+
+def test_is_meaningful_tmrescore_proposal_requires_actual_modifier_rescore():
+    assert is_meaningful_tmrescore_proposal(
+        {
+            "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L",
+        }
+    ) is True
+    assert is_meaningful_tmrescore_proposal(
+        {
+            "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    ) is False
+    assert is_meaningful_tmrescore_proposal(
+        {
+            "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            "rescored_vector": "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    ) is False
 
 
 def test_build_dtvp_vulnerability_proposals_extracts_original_scores_from_loaded_findings():

@@ -594,12 +594,26 @@ const getGroupDependencyRelationship = (group: GroupedVuln): 'DIRECT' | 'TRANSIT
     return 'UNKNOWN'
 }
 
+const containsTMRescoreModifiers = (vector?: string | null) => {
+    if (!vector) return false
+    return /\/(M[A-Z]{1,3}|E|RL|RC|CR|IR|AR):/.test(vector)
+}
+
+const isMeaningfulTMRescoreProposal = (group: GroupedVuln, proposal: any) => {
+    const rescoredVector = proposal?.rescored_vector || null
+    const originalVector = proposal?.original_vector || group.cvss_vector || null
+
+    if (!rescoredVector || !originalVector) return false
+    if (rescoredVector === originalVector) return false
+    return containsTMRescoreModifiers(rescoredVector)
+}
+
 const hasTMRescoreProposal = (group: GroupedVuln) => {
     const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
     const candidateIds = [group.id, ...(group.aliases || [])]
     return candidateIds.some((candidateId) => {
         const normalized = String(candidateId || '').trim().toUpperCase()
-        return normalized && Boolean(proposals[normalized])
+        return normalized && isMeaningfulTMRescoreProposal(group, proposals[normalized])
     })
 }
 

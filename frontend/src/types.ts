@@ -182,6 +182,10 @@ export interface TMRescoreProposal {
     rescored_vector: string | null;
     original_score: number | null;
     original_vector: string | null;
+    original_severity?: string | null;
+    rescored_severity?: string | null;
+    cwe_descriptions?: unknown;
+    evaluations?: unknown;
     affected_refs: string[];
     session_id: string;
     scope: 'latest_only' | 'merged_versions';

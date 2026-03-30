@@ -273,15 +273,26 @@ describe('ProjectView Filters', () => {
         ;(getGroupedVulns as any).mockResolvedValue(mockData)
         ;(getTMRescoreProposals as any).mockResolvedValue({
             proposals: {
+                V1: {
+                    vuln_id: 'V1',
+                    rescored_score: 9.8,
+                    rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                    original_score: 9.8,
+                    original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                },
                 V2: {
                     vuln_id: 'V2',
                     rescored_score: 7.9,
                     rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L',
+                    original_score: 8.5,
+                    original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
                 },
                 V8: {
                     vuln_id: 'V8',
                     rescored_score: 6.1,
                     rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MAC:H',
+                    original_score: 7.1,
+                    original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N',
                 },
             },
         })

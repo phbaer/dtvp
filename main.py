@@ -59,6 +59,7 @@ from tmrescore_integration import (
     build_dtvp_vulnerability_proposals,
     build_tmrescore_proposals,
     get_tmrescore_generated_at,
+    is_meaningful_tmrescore_proposal,
     normalize_tmrescore_snapshot,
     sort_projects_by_version,
 )
@@ -466,10 +467,12 @@ def cache_tmrescore_project_results(
                 merged_proposal[key] = value
             elif key not in merged_proposal:
                 merged_proposal[key] = value
-        merged_proposals[vuln_id] = {
+        merged_candidate = {
             **merged_proposal,
             "affected_refs": sorted(ref for ref in merged_refs if ref),
         }
+        if is_meaningful_tmrescore_proposal(merged_candidate):
+            merged_proposals[vuln_id] = merged_candidate
 
     persist_tmrescore_project_snapshot(project_name, {
         "project_name": project_name,

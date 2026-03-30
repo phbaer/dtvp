@@ -1,5 +1,6 @@
 import re
 import math
+import json
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -335,6 +336,23 @@ def normalize_tmrescore_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _contains_tmrescore_modifiers(vector: Optional[str]) -> bool:
+    if not vector:
+        return False
+    return bool(re.search(r"/(M[A-Z]{1,3}|E|RL|RC|CR|IR|AR):", vector))
+
+
+def is_meaningful_tmrescore_proposal(proposal: Dict[str, Any]) -> bool:
+    rescored_vector = proposal.get("rescored_vector") or None
+    original_vector = proposal.get("original_vector") or None
+
+    if not rescored_vector or not original_vector:
+        return False
+    if rescored_vector == original_vector:
+        return False
+    return _contains_tmrescore_modifiers(rescored_vector)
+
+
 class TMRescoreSettings(BaseSettings):
     DTVP_TMRESCORE_URL: str = Field(alias="DTVP_TMRESCORE_URL", default="")
     DTVP_TMRESCORE_TIMEOUT_SECONDS: float = Field(
@@ -490,6 +508,27 @@ def _extract_vex_rating(vulnerability: Dict[str, Any]) -> Tuple[Optional[float],
     return None, None
 
 
+def _extract_vex_properties(vulnerability: Dict[str, Any]) -> Dict[str, Any]:
+    extracted: Dict[str, Any] = {}
+    for item in vulnerability.get("properties") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        extracted[name] = item.get("value")
+    return extracted
+
+
+def _parse_vex_json_property(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
 def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     proposals: Dict[str, Dict[str, Any]] = {}
 
@@ -502,6 +541,8 @@ def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dic
         ).strip()
         if not vuln_id:
             continue
+
+        vex_properties = _extract_vex_properties(vulnerability)
 
         rescored_score = vulnerability.get("rescored_score")
         rescored_vector = vulnerability.get("rescored_vector") or None
@@ -525,7 +566,7 @@ def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dic
             or vuln_id
         )
 
-        if rescored_score is None and not rescored_vector:
+        if not rescored_vector:
             continue
 
         key = vuln_id.upper()
@@ -537,6 +578,10 @@ def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dic
             "original_vector": original_vector,
             "affected_refs": [ref for ref in affected_refs if ref],
             "description": description,
+            "original_severity": vex_properties.get("cvss-rescorer:original_severity") or None,
+            "rescored_severity": vex_properties.get("cvss-rescorer:rescored_severity") or None,
+            "cwe_descriptions": _parse_vex_json_property(vex_properties.get("cvss-rescorer:cwe_descriptions")),
+            "evaluations": _parse_vex_json_property(vex_properties.get("cvss-rescorer:evaluations")),
         })
 
         existing = proposals.get(key)

@@ -4,7 +4,7 @@
       "1.9.0",
       "1.10.0"
     ],
-    "generated_at": "2026-03-30T09:06:09.358126+00:00",
+    "generated_at": "2026-03-30T13:24:15.971951+00:00",
     "latest_version": "1.10.0",
     "project_name": "ExampleApp",
     "proposals": {
@@ -16,15 +16,19 @@
           "1.9.0",
           "1.10.0"
         ],
+        "cwe_descriptions": null,
         "description": "Mock tmrescore result generated for local testing.",
-        "generated_at": "2026-03-30T09:06:09.358126+00:00",
+        "evaluations": null,
+        "generated_at": "2026-03-30T13:24:15.971951+00:00",
         "latest_version": "1.10.0",
         "original_score": 9.8,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "rescored_score": 9.4,
+        "rescored_severity": null,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MA:L",
         "scope": "merged_versions",
-        "session_id": "0d95406d-be3c-47ea-96f6-9d0027eef9cf",
+        "session_id": "7041cd1e-1f18-4acb-8e45-566a824f6e4f",
         "vuln_id": "CVE-2024-0001"
       },
       "CVE-2024-0002": {
@@ -35,20 +39,24 @@
           "1.9.0",
           "1.10.0"
         ],
+        "cwe_descriptions": null,
         "description": "Mock tmrescore result generated for local testing.",
-        "generated_at": "2026-03-30T09:06:09.358126+00:00",
+        "evaluations": null,
+        "generated_at": "2026-03-30T13:24:15.971951+00:00",
         "latest_version": "1.10.0",
         "original_score": 5.4,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
         "rescored_score": 4.2,
+        "rescored_severity": null,
         "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MAC:H",
         "scope": "merged_versions",
-        "session_id": "0d95406d-be3c-47ea-96f6-9d0027eef9cf",
+        "session_id": "7041cd1e-1f18-4acb-8e45-566a824f6e4f",
         "vuln_id": "CVE-2024-0002"
       }
     },
     "scope": "merged_versions",
-    "session_id": "0d95406d-be3c-47ea-96f6-9d0027eef9cf"
+    "session_id": "7041cd1e-1f18-4acb-8e45-566a824f6e4f"
   },
   "Vulnerable Project": {
     "analyzed_versions": [
