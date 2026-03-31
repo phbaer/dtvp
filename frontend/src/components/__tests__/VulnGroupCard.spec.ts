@@ -201,10 +201,26 @@ describe('VulnGroupCard', () => {
                         value: {
                             'CVE-2023-1234': {
                                 vuln_id: 'CVE-2023-1234',
+                                description: 'Global policy determined the internet-exposed path is mitigated by deployment context.',
+                                details: 'Threat model found compensating controls for the internet-exposed path.',
+                                analysis: {
+                                    state: 'in_triage',
+                                    detail: 'Threat model found compensating controls for the internet-exposed path.',
+                                    response: [
+                                        {
+                                            title: 'LLM enrichment',
+                                            detail: 'Threat justification enriched via deployment context analysis.'
+                                        }
+                                    ]
+                                },
                                 rescored_score: 6.4,
                                 rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L',
                                 original_score: 9.8,
                                 original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                cwe_descriptions: {
+                                    'CWE-79': 'Cross-site Scripting',
+                                    'CWE-89': 'SQL Injection',
+                                },
                                 affected_refs: [],
                                 session_id: 'session-1',
                                 scope: 'merged_versions',
@@ -224,6 +240,15 @@ describe('VulnGroupCard', () => {
         expect(proposal.text()).toContain('Threat-Model Proposal')
         expect(proposal.text()).toContain('6.4')
         expect(proposal.text()).toContain('/MPR:L/MC:L/MI:L/MA:L')
+        expect(proposal.get('[data-testid="threat-model-proposal-detail"]').text()).toContain('Automation Detail')
+        expect(proposal.get('[data-testid="threat-model-proposal-detail"]').text()).toContain('Threat model found compensating controls for the internet-exposed path.')
+        expect(proposal.get('[data-testid="threat-model-proposal-detail"]').text()).toContain('in_triage')
+        expect(proposal.get('[data-testid="threat-model-proposal-analysis-responses"]').text()).toContain('LLM enrichment')
+        expect(proposal.get('[data-testid="threat-model-proposal-analysis-responses"]').text()).toContain('Threat justification enriched via deployment context analysis.')
+        expect(proposal.get('[data-testid="threat-model-proposal-cwes"]').text()).toContain('CWE-79')
+        expect(proposal.get('[data-testid="threat-model-proposal-cwes"]').text()).toContain('Cross-site Scripting')
+        expect(proposal.get('[data-testid="threat-model-proposal-cwes"]').text()).toContain('CWE-89')
+        expect(proposal.get('[data-testid="threat-model-proposal-cwes"]').text()).toContain('SQL Injection')
 
         await wrapper.find('[data-testid="apply-threat-model-proposal"]').trigger('click')
 
@@ -233,6 +258,128 @@ describe('VulnGroupCard', () => {
         expect(wrapper.get('[data-testid="current-vector-display"]').text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L')
         expect(wrapper.text()).toContain('Original:')
         expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
+    })
+
+    it('stores accepted tmrescore proposal under the automation team without overwriting existing assessments', async () => {
+        const groupWithExistingAssessment = {
+            ...mockGroup,
+            affected_versions: [
+                {
+                    ...mockGroup.affected_versions[0],
+                    components: [
+                        {
+                            ...mockComponents[0],
+                            analysis_details: '--- [Team: Security] [State: EXPLOITABLE] [Assessed By: analyst] [Justification: NOT_SET] ---\nExisting security assessment'
+                        }
+                    ]
+                }
+            ]
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithExistingAssessment as any },
+            global: {
+                provide: {
+                    user: { value: { username: 'tester', role: 'REVIEWER' } },
+                    tmrescoreProposals: {
+                        value: {
+                            'CVE-2023-1234': {
+                                vuln_id: 'CVE-2023-1234',
+                                details: 'Threat model found compensating controls for the internet-exposed path.',
+                                analysis: {
+                                    state: 'in_triage',
+                                    detail: 'Threat model found compensating controls for the internet-exposed path.',
+                                    response: [
+                                        {
+                                            title: 'LLM enrichment',
+                                            detail: 'Threat justification enriched via deployment context analysis.'
+                                        }
+                                    ]
+                                },
+                                rescored_score: 6.4,
+                                rescored_vector: 'CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                original_score: 9.8,
+                                original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                affected_refs: [],
+                                session_id: 'session-1',
+                                scope: 'merged_versions',
+                                latest_version: '1.0',
+                                analyzed_versions: ['1.0']
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.find('[data-testid="apply-threat-model-proposal"]').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect((wrapper.vm as any).selectedTeam).toBe('automation')
+        expect((wrapper.vm as any).state).toBe('IN_TRIAGE')
+        expect((wrapper.vm as any).details).toContain('Threat model found compensating controls for the internet-exposed path.')
+
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            team: 'automation',
+            details: expect.stringContaining('--- [Team: Security] [State: EXPLOITABLE] [Assessed By: analyst] [Justification: NOT_SET] ---')
+        }))
+
+        const payload = vi.mocked(updateAssessment).mock.calls.at(-1)?.[0]
+        expect(payload?.details).toContain('--- [Team: automation] [State: IN_TRIAGE] [Assessed By: tester]')
+        expect(payload?.details).toContain('Threat model found compensating controls for the internet-exposed path.')
+        expect(payload?.details).toContain('Existing security assessment')
+    })
+
+    it('shows a fallback message when tmrescore analysis has no detail text', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: { value: { username: 'tester', role: 'REVIEWER' } },
+                    tmrescoreProposals: {
+                        value: {
+                            'CVE-2023-1234': {
+                                vuln_id: 'CVE-2023-1234',
+                                analysis: {
+                                    state: 'under_investigation',
+                                    response: [
+                                        {
+                                            title: 'LLM enrichment',
+                                            detail: 'Only structured analysis data is available.'
+                                        }
+                                    ]
+                                },
+                                rescored_score: 6.4,
+                                rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L/MC:L/MI:L/MA:L',
+                                original_score: 9.8,
+                                original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                                affected_refs: [],
+                                session_id: 'session-1',
+                                scope: 'merged_versions',
+                                latest_version: '1.0',
+                                analyzed_versions: ['1.0']
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const proposal = wrapper.get('[data-testid="threat-model-proposal"]')
+        expect(proposal.get('[data-testid="threat-model-proposal-detail"]').text()).toContain('No detail message provided by TMRescore.')
+        expect(proposal.get('[data-testid="threat-model-proposal-detail"]').text()).toContain('under_investigation')
+        expect(proposal.get('[data-testid="threat-model-proposal-analysis-responses"]').text()).toContain('Only structured analysis data is available.')
     })
 
     it('does not show a tmrescore proposal when the vector matches the original vulnerability vector', async () => {
@@ -266,7 +413,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.find('[data-testid="threat-model-proposal"]').exists()).toBe(false)
     })
 
-    it('does not show a tmrescore proposal when the rescored vector has no modifiers', async () => {
+    it('shows a tmrescore proposal when the backend provides a changed rescored vector', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
             global: {
@@ -294,7 +441,7 @@ describe('VulnGroupCard', () => {
 
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        expect(wrapper.find('[data-testid="threat-model-proposal"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="threat-model-proposal"]').exists()).toBe(true)
     })
 
 

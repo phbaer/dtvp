@@ -3,7 +3,6 @@ import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActiva
 import { useRoute, useRouter } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMRescoreProposals } from '../lib/api'
 import { getGroupLifecycle, isPendingReview as isPendingReviewHelper, matchesFilters, getGroupTechnicalState, tagToString } from '../lib/assessment-helpers'
-import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
 
 import VulnGroupCard from '../components/VulnGroupCard.vue'
@@ -158,13 +157,7 @@ const fetchVulns = async () => {
             }
         })
         
-        // Ensure rescored_cvss is populated if rescored_vector exists
-        groups.value = data.map(g => {
-            if (!g.rescored_cvss && g.rescored_vector) {
-                g.rescored_cvss = calculateScoreFromVector(g.rescored_vector)
-            }
-            return g
-        })
+        groups.value = data
     } catch (err: any) {
         error.value = 'Failed to load vulnerabilities: ' + (err.message || err)
         console.error(err)
@@ -594,18 +587,12 @@ const getGroupDependencyRelationship = (group: GroupedVuln): 'DIRECT' | 'TRANSIT
     return 'UNKNOWN'
 }
 
-const containsTMRescoreModifiers = (vector?: string | null) => {
-    if (!vector) return false
-    return /\/(M[A-Z]{1,3}|E|RL|RC|CR|IR|AR):/.test(vector)
-}
-
 const isMeaningfulTMRescoreProposal = (group: GroupedVuln, proposal: any) => {
     const rescoredVector = proposal?.rescored_vector || null
     const originalVector = proposal?.original_vector || group.cvss_vector || null
 
-    if (!rescoredVector || !originalVector) return false
-    if (rescoredVector === originalVector) return false
-    return containsTMRescoreModifiers(rescoredVector)
+    if (!rescoredVector) return false
+    return !originalVector || rescoredVector !== originalVector
 }
 
 const hasTMRescoreProposal = (group: GroupedVuln) => {

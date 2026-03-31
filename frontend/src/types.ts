@@ -175,16 +175,32 @@ export interface TMRescoreSyntheticSbomSummary {
     strategy_note: string;
 }
 
+export interface TMRescoreProposalAnalysisResponse {
+    title?: string | null;
+    detail?: string | null;
+    [key: string]: unknown;
+}
+
+export interface TMRescoreProposalAnalysis {
+    detail?: string | null;
+    state?: string | null;
+    justification?: string | null;
+    response?: Array<TMRescoreProposalAnalysisResponse | string> | null;
+    [key: string]: unknown;
+}
+
 export interface TMRescoreProposal {
     vuln_id: string;
     description?: string;
+    details?: string | null;
+    analysis?: TMRescoreProposalAnalysis | null;
     rescored_score: number | null;
     rescored_vector: string | null;
     original_score: number | null;
     original_vector: string | null;
     original_severity?: string | null;
     rescored_severity?: string | null;
-    cwe_descriptions?: unknown;
+    cwe_descriptions?: Record<string, string> | null;
     evaluations?: unknown;
     affected_refs: string[];
     session_id: string;

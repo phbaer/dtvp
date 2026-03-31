@@ -1,7 +1,6 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getGroupedVulns } from '../../lib/api'
-import { calculateScoreFromVector } from '../../lib/cvss'
 import { useRoute } from 'vue-router'
 import { defaultAnalysisFilters, extendedAnalysisFilters, extendedLifecycleFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
@@ -10,10 +9,6 @@ vi.mock('../../lib/api', () => ({
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
-}))
-
-vi.mock('../../lib/cvss', () => ({
-    calculateScoreFromVector: vi.fn(() => 7.5)
 }))
 
 vi.mock('vue-router', () => ({
@@ -36,7 +31,7 @@ describe('ProjectView Coverage Extra Detailed', () => {
         vi.mocked(useRoute).mockReturnValue({ params: { name: 'Test' }, query: {} } as any)
     })
 
-    it('auto-calculates rescored_cvss if missing but vector exists', async () => {
+    it('preserves missing rescored_cvss if backend only provides a rescored vector', async () => {
         const mockGroups = [
             {
                 id: 'V1',
@@ -49,9 +44,9 @@ describe('ProjectView Coverage Extra Detailed', () => {
 
         const wrapper = await mountProjectView()
 
-        expect(calculateScoreFromVector).toHaveBeenCalledWith('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
         const groups = (wrapper.vm as any).groups
-        expect(groups[0].rescored_cvss).toBe(7.5)
+        expect(groups[0].rescored_vector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
+        expect(groups[0].rescored_cvss).toBeNull()
     })
 
     it('sorts by tags correctly', async () => {

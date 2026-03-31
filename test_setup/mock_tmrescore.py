@@ -15,8 +15,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tmrescore_integration import calculate_cvss_score_from_vector
-
 app = FastAPI(title="Mock TMRescore", version="0.1.0")
 
 
@@ -30,20 +28,53 @@ sessions: Dict[str, Dict[str, Any]] = {}
 
 MOCK_VECTOR_PAIRS = [
     {
+        "version": "CVSS:3.1",
         "original": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         "rescored": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L",
+        "original_score": 9.8,
+        "rescored_score": 8.8,
     },
     {
+        "version": "CVSS:3.1",
         "original": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
         "rescored": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
+        "original_score": 8.1,
+        "rescored_score": 7.2,
     },
     {
+        "version": "CVSS:3.0",
+        "original": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
+        "rescored": "CVSS:3.0/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MPR:L",
+        "original_score": 5.9,
+        "rescored_score": 4.9,
+    },
+    {
+        "version": "CVSS:2.0",
+        "original": "AV:N/AC:L/Au:N/C:P/I:P/A:P",
+        "rescored": "AV:A/AC:H/Au:S/C:P/I:P/A:P",
+        "original_score": 7.5,
+        "rescored_score": 4.6,
+    },
+    {
+        "version": "CVSS:4.0",
+        "original": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+        "rescored": "CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:P/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N",
+        "original_score": 9.3,
+        "rescored_score": 5.4,
+    },
+    {
+        "version": "CVSS:3.1",
         "original": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
         "rescored": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MPR:L",
+        "original_score": 6.5,
+        "rescored_score": 5.6,
     },
     {
+        "version": "CVSS:3.1",
         "original": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
         "rescored": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
+        "original_score": 3.3,
+        "rescored_score": 2.9,
     },
 ]
 
@@ -90,7 +121,21 @@ def _extract_rating(vulnerability: Dict[str, Any]) -> tuple[Optional[float], Opt
     return None, None
 
 
-def _synthetic_vector_pair(vulnerability: Dict[str, Any], index: int) -> Dict[str, str]:
+def _cvss_version_family(vector: Optional[str]) -> Optional[str]:
+    if not vector:
+        return None
+    if vector.startswith("CVSS:4.0/"):
+        return "CVSS:4.0"
+    if vector.startswith("CVSS:3.1/"):
+        return "CVSS:3.1"
+    if vector.startswith("CVSS:3.0/"):
+        return "CVSS:3.0"
+    if vector.startswith("CVSS:2.0/") or ("/" in vector and not vector.startswith("CVSS:")):
+        return "CVSS:2.0"
+    return None
+
+
+def _synthetic_vector_pair(vulnerability: Dict[str, Any], index: int, preferred_version: Optional[str] = None) -> Dict[str, str]:
     seed = "|".join(
         [
             str(vulnerability.get("id") or "UNKNOWN"),
@@ -98,68 +143,11 @@ def _synthetic_vector_pair(vulnerability: Dict[str, Any], index: int) -> Dict[st
             str(index),
         ]
     )
-    template_index = uuid.uuid5(uuid.NAMESPACE_URL, seed).int % len(MOCK_VECTOR_PAIRS)
-    return MOCK_VECTOR_PAIRS[template_index]
-
-
-def _parse_vector_components(vector: str) -> Dict[str, str]:
-    parts = [part for part in vector.split("/") if part]
-    if parts and parts[0].startswith("CVSS:"):
-        parts = parts[1:]
-
-    metrics: Dict[str, str] = {}
-    for part in parts:
-        if ":" not in part:
-            continue
-        key, value = part.split(":", 1)
-        metrics[key] = value
-    return metrics
-
-
-def _append_metric(vector: str, key: str, value: str) -> str:
-    return f"{vector}/{key}:{value}"
-
-
-def _build_modifier_only_rescore(
-    original_vector: Optional[str],
-    seed: str,
-) -> tuple[Optional[str], Optional[str]]:
-    if not original_vector or not original_vector.startswith(("CVSS:3.0/", "CVSS:3.1/")):
-        return None, None
-
-    metrics = _parse_vector_components(original_vector)
-    candidate_modifiers = [
-        ("MPR", "PR", {"N": "L", "L": "H"}),
-        ("MUI", "UI", {"N": "R"}),
-        ("MAV", "AV", {"N": "A", "A": "L", "L": "P"}),
-        ("MAC", "AC", {"L": "H"}),
-        ("MS", "S", {"C": "U"}),
-        ("MC", "C", {"H": "L", "L": "N"}),
-        ("MI", "I", {"H": "L", "L": "N"}),
-        ("MA", "A", {"H": "L", "L": "N"}),
-    ]
-    original_score = _score_from_vector(original_vector)
-    if original_score is None:
-        return original_vector, original_vector
-
-    start_index = uuid.uuid5(uuid.NAMESPACE_URL, seed).int % len(candidate_modifiers)
-    for offset in range(len(candidate_modifiers)):
-        modifier_key, base_key, transitions = candidate_modifiers[(start_index + offset) % len(candidate_modifiers)]
-        base_value = metrics.get(base_key)
-        modifier_value = transitions.get(base_value or "")
-        if not modifier_value:
-            continue
-
-        rescored_vector = _append_metric(original_vector, modifier_key, modifier_value)
-        rescored_score = _score_from_vector(rescored_vector)
-        if rescored_score is not None and rescored_score < original_score:
-            return original_vector, rescored_vector
-
-    return original_vector, original_vector
-
-
-def _score_from_vector(vector: Optional[str]) -> Optional[float]:
-    return calculate_cvss_score_from_vector(vector)
+    candidates = [pair for pair in MOCK_VECTOR_PAIRS if preferred_version is None or pair["version"] == preferred_version]
+    if not candidates:
+        candidates = MOCK_VECTOR_PAIRS
+    template_index = uuid.uuid5(uuid.NAMESPACE_URL, seed).int % len(candidates)
+    return candidates[template_index]
 
 
 def _enrich_sbom(sbom: Dict[str, Any]) -> Dict[str, Any]:
@@ -192,24 +180,22 @@ def _perform_analysis(
     total_reduction = 0.0
     for index, vulnerability in enumerate(vulnerabilities):
         extracted_score, extracted_vector = _extract_rating(vulnerability)
-        seed = "|".join(
-            [
-                str(vulnerability.get("id") or "UNKNOWN"),
-                str(vulnerability.get("description") or ""),
-                str(index),
-            ]
-        )
         if extracted_vector:
-            original_vector, rescored_vector = _build_modifier_only_rescore(extracted_vector, seed)
+            vector_pair = _synthetic_vector_pair(
+                vulnerability,
+                index,
+                _cvss_version_family(extracted_vector),
+            )
+            original_vector = extracted_vector
+            original_score = extracted_score
+            rescored_vector = vector_pair["rescored"]
+            rescored_score = vector_pair["rescored_score"]
         else:
             vector_pair = _synthetic_vector_pair(vulnerability, index)
             original_vector = vector_pair["original"]
+            original_score = vector_pair["original_score"]
             rescored_vector = vector_pair["rescored"]
-
-        original_score = _score_from_vector(original_vector)
-        if original_score is None and extracted_score is not None:
-            original_score = extracted_score
-        rescored_score = _score_from_vector(rescored_vector)
+            rescored_score = vector_pair["rescored_score"]
 
         if original_score is not None and rescored_score is not None:
             total_reduction += original_score - rescored_score
@@ -269,10 +255,18 @@ def _perform_analysis(
                             "title": "LLM enrichment",
                             "detail": f"Threat justification enriched via {ollama_model or 'default-model'}.",
                         }
-                    ]} if enrich else {}),
+                    ]} if enrich else {
+                        "response": [
+                            {
+                                "title": "Deterministic mock analysis",
+                                "detail": "Structured mock analysis response without a top-level detail message.",
+                            }
+                        ]
+                    }),
                 },
                 "ratings": [
                     {
+                        "source": {"name": "CVSS Re-Scorer (Environmental)"},
                         "method": "CVSSv31",
                         "score": vulnerability["rescored_score"],
                         "vector": vulnerability["rescored_vector"],
@@ -282,7 +276,7 @@ def _perform_analysis(
                 else [],
                 "affects": [{"ref": ref} for ref in vulnerability["affected_refs"] if ref],
             }
-            for vulnerability in rescored_vulnerabilities
+            for index, vulnerability in enumerate(rescored_vulnerabilities)
         ],
     }
 

@@ -67,6 +67,8 @@ const JUSTIFICATION_OPTIONS = [
     { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control', description: 'Protected by other mitigating controls.' },
 ]
 
+const AUTOMATION_TEAM = 'automation'
+
 const expanded = ref(false)
 const state = ref('NOT_SET')
 const details = ref('')
@@ -85,6 +87,7 @@ const showAuditLog = ref(false)
 const refreshCounter = ref(0)
 const formTouched = ref(false)
 const isInternalUpdate = ref(false)
+const skipSelectedTeamRefresh = ref(false)
 
 const pendingScore = ref<number | null>(null)
 const pendingVector = ref<string>('')
@@ -136,6 +139,9 @@ const allInstances = computed(() => {
 const totalTargeted = computed(() => {
     // When a team is selected, automatically target only that team's instances
     if (selectedTeam.value) {
+        if (selectedTeam.value === AUTOMATION_TEAM) {
+            return allInstances.value.length
+        }
         return allInstances.value.filter(inst => inst.tags && inst.tags.includes(selectedTeam.value)).length
     }
     return allInstances.value.length
@@ -404,19 +410,11 @@ const canEditBase = computed(() => {
     return false
 })
 
-const containsRescoreModifiers = (vector: string | null | undefined) => {
-    if (!vector) return false
-    return /\/(M[A-Z]{1,3}|E|RL|RC|CR|IR|AR):/.test(vector)
-}
-
 const isMeaningfulThreatModelProposal = (proposal: TMRescoreProposal | null) => {
     if (!proposal?.rescored_vector) return false
 
     const originalVector = proposal.original_vector || props.group.cvss_vector || null
-    if (!originalVector) return false
-    if (proposal.rescored_vector === originalVector) return false
-
-    return containsRescoreModifiers(proposal.rescored_vector)
+    return !originalVector || proposal.rescored_vector !== originalVector
 }
 
 const matchedThreatModelProposal = computed<TMRescoreProposal | null>(() => {
@@ -433,6 +431,45 @@ const matchedThreatModelProposal = computed<TMRescoreProposal | null>(() => {
     return null
 })
 
+const normalizeProposalAnalysisState = (proposal: TMRescoreProposal | null) => {
+    const rawState = String(proposal?.analysis?.state || '').trim()
+    if (!rawState) return 'NOT_SET'
+
+    const normalized = rawState.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+    return ANALYSIS_STATES.some(option => option.value === normalized) ? normalized : 'NOT_SET'
+}
+
+const buildThreatModelProposalAssessmentDetails = (proposal: TMRescoreProposal | null) => {
+    if (!proposal) return ''
+
+    const lines: string[] = []
+    const detailText = getThreatModelProposalDetails(proposal)
+    if (detailText) lines.push(detailText)
+
+    const metadata = getThreatModelProposalAnalysisMetadata(proposal)
+    if (metadata.length) {
+        lines.push(...metadata.map(([key, value]) => `${key}: ${value}`))
+    }
+
+    const responses = getThreatModelProposalAnalysisResponses(proposal)
+    if (responses.length) {
+        lines.push(
+            ...responses.map((response) => {
+                const parts = [response.title, response.detail, ...response.metadata.map(([key, value]) => `${key}: ${value}`)]
+                    .filter((part): part is string => Boolean(part && part.trim().length > 0))
+                return parts.join(' | ')
+            }).filter(Boolean)
+        )
+    }
+
+    const cwes = getThreatModelProposalCwes(proposal)
+    if (cwes.length) {
+        lines.push(...cwes.map(([cweId, cweDescription]) => `${cweId}: ${cweDescription}`))
+    }
+
+    return lines.join('\n').trim()
+}
+
 const applyThreatModelProposal = () => {
     const proposal = matchedThreatModelProposal.value
     if (!proposal) return
@@ -445,12 +482,79 @@ const applyThreatModelProposal = () => {
 
     if (proposal.rescored_score !== null && proposal.rescored_score !== undefined) {
         pendingScore.value = proposal.rescored_score
-    } else if (proposal.rescored_vector) {
-        pendingScore.value = calculateScoreFromVector(proposal.rescored_vector)
+    } else {
+        pendingScore.value = null
     }
+
+    skipSelectedTeamRefresh.value = true
+    selectedTeam.value = AUTOMATION_TEAM
+    state.value = normalizeProposalAnalysisState(proposal)
+    justification.value = 'NOT_SET'
+    details.value = buildThreatModelProposalAssessmentDetails(proposal)
 
     formTouched.value = true
     isManualBaseMode.value = true
+}
+
+const getThreatModelProposalCwes = (proposal: TMRescoreProposal | null) => {
+    const cweDescriptions = proposal?.cwe_descriptions
+    if (!cweDescriptions || typeof cweDescriptions !== 'object') return []
+
+    return Object.entries(cweDescriptions)
+        .filter(([cweId, description]) => Boolean(cweId) && typeof description === 'string' && description.trim().length > 0)
+        .sort(([left], [right]) => left.localeCompare(right, undefined, { numeric: true }))
+}
+
+const getThreatModelProposalAnalysis = (proposal: TMRescoreProposal | null) => {
+    const analysis = proposal?.analysis
+    return analysis && typeof analysis === 'object' ? analysis : null
+}
+
+const getThreatModelProposalDetails = (proposal: TMRescoreProposal | null) => {
+    const analysisDetail = getThreatModelProposalAnalysis(proposal)?.detail
+    const detailsText = analysisDetail ?? proposal?.details ?? proposal?.description
+    return typeof detailsText === 'string' && detailsText.trim().length > 0 ? detailsText : null
+}
+
+const getThreatModelProposalAnalysisResponses = (proposal: TMRescoreProposal | null) => {
+    const response = getThreatModelProposalAnalysis(proposal)?.response
+    if (!Array.isArray(response)) return []
+
+    return response
+        .map((entry) => {
+            if (typeof entry === 'string') {
+                const detail = entry.trim()
+                return detail ? { title: null, detail, metadata: [] as Array<[string, string]> } : null
+            }
+
+            if (!entry || typeof entry !== 'object') return null
+
+            const title = typeof entry.title === 'string' && entry.title.trim().length > 0 ? entry.title.trim() : null
+            const detail = typeof entry.detail === 'string' && entry.detail.trim().length > 0 ? entry.detail.trim() : null
+            const metadata = Object.entries(entry)
+                .filter(([key, value]) => key !== 'title' && key !== 'detail' && value !== null && value !== undefined && String(value).trim().length > 0)
+                .map(([key, value]) => [key, String(value)] as [string, string])
+
+            if (!title && !detail && metadata.length === 0) return null
+            return { title, detail, metadata }
+        })
+        .filter((entry): entry is { title: string | null; detail: string | null; metadata: Array<[string, string]> } => Boolean(entry))
+}
+
+const getThreatModelProposalAnalysisMetadata = (proposal: TMRescoreProposal | null) => {
+    const analysis = getThreatModelProposalAnalysis(proposal)
+    if (!analysis) return []
+
+    return Object.entries(analysis)
+        .filter(([key, value]) => key !== 'detail' && key !== 'response' && value !== null && value !== undefined)
+        .map(([key, value]) => {
+            if (typeof value === 'string') {
+                const trimmed = value.trim()
+                return trimmed ? [key, trimmed] as [string, string] : null
+            }
+            return [key, JSON.stringify(value)] as [string, string]
+        })
+        .filter((entry): entry is [string, string] => Boolean(entry && entry[1]))
 }
 
 const resetVector = () => {
@@ -821,6 +925,10 @@ const applyConsensusAssessment = () => {
 }
 
 watch(selectedTeam, () => {
+    if (skipSelectedTeamRefresh.value) {
+        skipSelectedTeamRefresh.value = false
+        return
+    }
     updateFormFromGroup()
 })
 
@@ -1008,7 +1116,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     let instances = allInstances.value
     
     // When a team is selected, automatically filter to only that team's instances
-    if (selectedTeam.value) {
+    if (selectedTeam.value && selectedTeam.value !== AUTOMATION_TEAM) {
         const team = selectedTeam.value
         instances = instances.filter(inst => inst.tags && inst.tags.includes(team))
     }
@@ -1351,6 +1459,7 @@ const normalizedTags = computed(() => {
 })
 
 const resolveTeamAlias = (name: string): string => {
+    if (name === AUTOMATION_TEAM) return 'automation'
     if (!teamMapping?.value) return name
     for (const componentName in teamMapping.value) {
         const mappingVal = teamMapping.value[componentName]
@@ -1390,6 +1499,14 @@ const assessedTeams = computed(() => {
     })
 
     return matchedTeams
+})
+
+const availableAssessmentTeams = computed(() => {
+    const teams = [...normalizedTags.value]
+    if (selectedTeam.value === AUTOMATION_TEAM || matchedThreatModelProposal.value || mergedAssessmentData.value.blocks.some(block => block.team === AUTOMATION_TEAM)) {
+        teams.push(AUTOMATION_TEAM)
+    }
+    return Array.from(new Set(teams))
 })
 
 const getVersionToComponentTooltip = (version: string, instances: any[]) => {
@@ -1859,6 +1976,42 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                                         {{ matchedThreatModelProposal.scope === 'merged_versions' ? 'Merged multi-version analysis' : 'Latest-version analysis' }}
                                         <span v-if="matchedThreatModelProposal.analyzed_versions?.length"> · {{ matchedThreatModelProposal.analyzed_versions.join(', ') }}</span>
                                     </div>
+                                    <div v-if="getThreatModelProposalAnalysis(matchedThreatModelProposal) || getThreatModelProposalDetails(matchedThreatModelProposal)" class="mt-2 text-[11px] leading-relaxed text-emerald-100/90" data-testid="threat-model-proposal-detail">
+                                        <span class="font-black uppercase tracking-[0.18em] text-emerald-300/80">Automation Detail</span>
+                                        <div class="mt-1">
+                                            {{ getThreatModelProposalDetails(matchedThreatModelProposal) || 'No detail message provided by TMRescore.' }}
+                                        </div>
+                                        <dl v-if="getThreatModelProposalAnalysisMetadata(matchedThreatModelProposal).length" class="mt-2 grid gap-1">
+                                            <div v-for="[analysisKey, analysisValue] in getThreatModelProposalAnalysisMetadata(matchedThreatModelProposal)" :key="analysisKey" class="grid gap-0.5">
+                                                <dt class="font-black uppercase tracking-[0.18em] text-emerald-300/70">{{ analysisKey }}</dt>
+                                                <dd>{{ analysisValue }}</dd>
+                                            </div>
+                                        </dl>
+                                        <div v-if="getThreatModelProposalAnalysisResponses(matchedThreatModelProposal).length" class="mt-2" data-testid="threat-model-proposal-analysis-responses">
+                                            <div class="font-black uppercase tracking-[0.18em] text-emerald-300/80">Responses</div>
+                                            <ul class="mt-1 space-y-2">
+                                                <li v-for="(response, index) in getThreatModelProposalAnalysisResponses(matchedThreatModelProposal)" :key="`${index}-${response.title || response.detail || 'response'}`">
+                                                    <div v-if="response.title" class="font-semibold text-emerald-200">{{ response.title }}</div>
+                                                    <div v-if="response.detail" class="text-emerald-100/90">{{ response.detail }}</div>
+                                                    <dl v-if="response.metadata.length" class="mt-1 grid gap-0.5 text-emerald-100/80">
+                                                        <div v-for="[metadataKey, metadataValue] in response.metadata" :key="metadataKey" class="grid gap-0.5">
+                                                            <dt class="font-black uppercase tracking-[0.18em] text-emerald-300/70">{{ metadataKey }}</dt>
+                                                            <dd>{{ metadataValue }}</dd>
+                                                        </div>
+                                                    </dl>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    <div v-if="getThreatModelProposalCwes(matchedThreatModelProposal).length" class="mt-2 text-[11px] text-emerald-100/90" data-testid="threat-model-proposal-cwes">
+                                        <div class="font-black uppercase tracking-[0.18em] text-emerald-300/80">CWEs</div>
+                                        <ul class="mt-1 space-y-1">
+                                            <li v-for="[cweId, cweDescription] in getThreatModelProposalCwes(matchedThreatModelProposal)" :key="cweId">
+                                                <span class="font-semibold text-emerald-200">{{ cweId }}</span>
+                                                <span class="text-emerald-100/80">: {{ cweDescription }}</span>
+                                            </li>
+                                        </ul>
+                                    </div>
                                 </div>
                                 <button
                                     type="button"
@@ -1930,7 +2083,7 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                             <CustomSelect
                                 :modelValue="selectedTeam"
                                 @update:modelValue="selectedTeam = $event"
-                                :options="[{ value: '', label: isReviewer ? 'Global assessment' : 'No team marker' }, ...normalizedTags.map(t => ({ value: t, label: t }))]"
+                                :options="[{ value: '', label: isReviewer ? 'Global assessment' : 'No team marker' }, ...availableAssessmentTeams.map(t => ({ value: t, label: t }))]"
                                 size="sm"
                             />
                         </div>
@@ -1939,7 +2092,7 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                     <!-- Assessment Section (Reviewer Global or Team Selected) -->
                     <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
                         <h5 class="text-xs font-bold mb-3 uppercase tracking-wide flex items-center gap-2" :class="selectedTeam ? 'text-blue-300' : 'text-purple-300'">
-                            {{ selectedTeam ? 'Team Opinion' : 'Global Baseline' }}
+                            {{ selectedTeam === AUTOMATION_TEAM ? 'Automation Proposal' : (selectedTeam ? 'Team Opinion' : 'Global Baseline') }}
                         </h5>
                         
                         <div class="space-y-3">

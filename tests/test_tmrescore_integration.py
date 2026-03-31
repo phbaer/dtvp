@@ -458,12 +458,12 @@ def test_tmrescore_project_cache_persists_to_disk(tmp_path):
 
         reloaded = load_tmrescore_project_cache()
         assert reloaded["ExampleApp"]["session_id"] == "session-1"
-        assert reloaded["ExampleApp"]["proposals"]["CVE-2024-0001"]["rescored_score"] == 8.8
+        assert reloaded["ExampleApp"]["proposals"]["CVE-2024-0001"]["rescored_score"] == 8.0
 
     main_module.tmrescore_project_cache.clear()
 
 
-def test_tmrescore_project_cache_load_normalizes_scores_from_vectors(tmp_path):
+def test_tmrescore_project_cache_load_preserves_provided_scores(tmp_path):
     cache_file = tmp_path / "tmrescore-cache.json"
     cache_file.write_text(
         json.dumps(
@@ -488,15 +488,15 @@ def test_tmrescore_project_cache_load_normalizes_scores_from_vectors(tmp_path):
     with patch.dict(os.environ, {"DTVP_TMRESCORE_CACHE_PATH": str(cache_file)}, clear=False):
         reloaded = load_tmrescore_project_cache()
 
-    assert reloaded["ExampleApp"]["proposals"]["CVE-2024-0001"]["original_score"] == 9.8
-    assert reloaded["ExampleApp"]["proposals"]["CVE-2024-0001"]["rescored_score"] == 8.8
+    assert reloaded["ExampleApp"]["proposals"]["CVE-2024-0001"]["original_score"] == 1.0
+    assert reloaded["ExampleApp"]["proposals"]["CVE-2024-0001"]["rescored_score"] == 1.0
     assert (
         reloaded["ExampleApp"]["proposals"]["CVE-2024-0001"]["rescored_vector"]
         == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L"
     )
 
 
-def test_build_tmrescore_proposals_normalizes_scores_from_vectors():
+def test_build_tmrescore_proposals_preserves_provided_scores():
     proposals = build_tmrescore_proposals(
         {
             "vulnerabilities": [
@@ -512,8 +512,8 @@ def test_build_tmrescore_proposals_normalizes_scores_from_vectors():
         }
     )
 
-    assert proposals["CVE-2024-0001"]["original_score"] == 9.8
-    assert proposals["CVE-2024-0001"]["rescored_score"] == 8.8
+    assert proposals["CVE-2024-0001"]["original_score"] == 1.0
+    assert proposals["CVE-2024-0001"]["rescored_score"] == 1.0
 
 
 def test_build_tmrescore_proposals_extracts_rescore_from_vex_document():
@@ -524,10 +524,24 @@ def test_build_tmrescore_proposals_extracts_rescore_from_vex_document():
                 {
                     "id": "CVE-2024-0001",
                     "analysis": {
+                        "state": "in_triage",
                         "detail": "Threat model found compensating controls.",
+                        "response": [
+                            {
+                                "title": "LLM enrichment",
+                                "detail": "Threat justification enriched for the service boundary.",
+                            }
+                        ],
                     },
                     "ratings": [
                         {
+                            "source": {"name": "NVD"},
+                            "method": "CVSSv31",
+                            "score": 9.8,
+                            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                        },
+                        {
+                            "source": {"name": "CVSS Re-Scorer (Environmental)"},
                             "method": "CVSSv31",
                             "score": 8.8,
                             "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L",
@@ -546,6 +560,17 @@ def test_build_tmrescore_proposals_extracts_rescore_from_vex_document():
     )
 
     assert proposals["CVE-2024-0001"]["description"] == "Threat model found compensating controls."
+    assert proposals["CVE-2024-0001"]["details"] == "Threat model found compensating controls."
+    assert proposals["CVE-2024-0001"]["analysis"] == {
+        "state": "in_triage",
+        "detail": "Threat model found compensating controls.",
+        "response": [
+            {
+                "title": "LLM enrichment",
+                "detail": "Threat justification enriched for the service boundary.",
+            }
+        ],
+    }
     assert proposals["CVE-2024-0001"]["rescored_score"] == 8.8
     assert proposals["CVE-2024-0001"]["rescored_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L"
     assert proposals["CVE-2024-0001"]["affected_refs"] == ["component-1"]
@@ -563,7 +588,7 @@ def test_build_tmrescore_proposals_ignores_vex_entries_without_rescored_vector()
             "vulnerabilities": [
                 {
                     "id": "CVE-2024-0002",
-                    "ratings": [{"method": "CVSSv31", "score": 7.1}],
+                    "ratings": [{"source": {"name": "CVSS Re-Scorer (Environmental)"}, "method": "CVSSv31", "score": 7.1}],
                     "properties": [
                         {"name": "cvss-rescorer:original_severity", "value": "HIGH"},
                         {"name": "cvss-rescorer:rescored_severity", "value": "MEDIUM"},
@@ -576,7 +601,30 @@ def test_build_tmrescore_proposals_ignores_vex_entries_without_rescored_vector()
     assert proposals == {}
 
 
-def test_is_meaningful_tmrescore_proposal_requires_actual_modifier_rescore():
+def test_build_tmrescore_proposals_ignores_non_rescorer_ratings():
+    proposals = build_tmrescore_proposals(
+        {
+            "vulnerabilities": [
+                {
+                    "id": "CVE-2024-0003",
+                    "analysis": {"detail": "This should not produce a proposal without an environmental rescoring rating."},
+                    "ratings": [
+                        {
+                            "source": {"name": "NVD"},
+                            "method": "CVSSv31",
+                            "score": 9.1,
+                            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert proposals == {}
+
+
+def test_is_meaningful_tmrescore_proposal_requires_actual_change():
     assert is_meaningful_tmrescore_proposal(
         {
             "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
@@ -594,7 +642,7 @@ def test_is_meaningful_tmrescore_proposal_requires_actual_modifier_rescore():
             "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
             "rescored_vector": "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         }
-    ) is False
+    ) is True
 
 
 def test_build_dtvp_vulnerability_proposals_extracts_original_scores_from_loaded_findings():
@@ -619,7 +667,7 @@ def test_build_dtvp_vulnerability_proposals_extracts_original_scores_from_loaded
     assert proposals["CVE-2024-0001"]["rescored_score"] is None
 
 
-def test_normalize_tmrescore_snapshot_upgrades_base_metric_rescore_to_modifier_rescore():
+def test_normalize_tmrescore_snapshot_preserves_provided_vectors():
     reloaded = load_tmrescore_project_cache.__globals__["normalize_tmrescore_snapshot"](
         {
             "project_name": "ExampleApp",
@@ -634,9 +682,9 @@ def test_normalize_tmrescore_snapshot_upgrades_base_metric_rescore_to_modifier_r
     )
 
     proposal = reloaded["proposals"]["CVE-2024-0001"]
-    assert proposal["rescored_vector"] == "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H"
-    assert proposal["original_score"] == 3.3
-    assert proposal["rescored_score"] == 2.9
+    assert proposal["rescored_vector"] == "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:L/A:N"
+    assert proposal["original_score"] is None
+    assert proposal["rescored_score"] is None
 
 
 def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client):
@@ -886,13 +934,11 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
             assert proposal_one["original_vector"].startswith("CVSS:3.1/")
             assert proposal_one["rescored_vector"].startswith("CVSS:3.1/")
             assert proposal_one["rescored_vector"] != proposal_one["original_vector"]
-            assert proposal_one["rescored_vector"].startswith(f"{proposal_one['original_vector']}/")
-            assert "/M" in proposal_one["rescored_vector"]
+            assert proposal_one["rescored_vector"] != proposal_one["original_vector"]
             assert proposal_two["rescored_vector"].startswith("CVSS:3.1/")
             assert proposal_two["original_vector"].startswith("CVSS:3.1/")
             assert proposal_two["rescored_vector"] != proposal_two["original_vector"]
-            assert proposal_two["rescored_vector"].startswith(f"{proposal_two['original_vector']}/")
-            assert "/M" in proposal_two["rescored_vector"]
+            assert proposal_two["rescored_vector"] != proposal_two["original_vector"]
 
             vex = client.get(f"/api/tmrescore/sessions/{session_id}/results/vex")
             assert vex.status_code == 200

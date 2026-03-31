@@ -1,5 +1,4 @@
 import re
-import math
 import json
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,297 +28,29 @@ def sort_projects_by_version(projects: List[Dict[str, Any]]) -> List[Dict[str, A
     return sorted(projects, key=lambda item: natural_version_key(item.get("version")))
 
 
-def _parse_vector_components(vector: str) -> Dict[str, str]:
-    parts = [part for part in vector.split("/") if part]
-    if parts and parts[0].startswith("CVSS:"):
-        parts = parts[1:]
-
-    metrics: Dict[str, str] = {}
-    for part in parts:
-        if ":" not in part:
-            continue
-        key, value = part.split(":", 1)
-        metrics[key] = value
-    return metrics
-
-
-def _append_cvss_metric(vector: str, key: str, value: str) -> str:
-    if not vector:
-        return vector
-    return f"{vector}/{key}:{value}"
-
-
-def _upgrade_rescored_vector_to_modifiers(
-    original_vector: Optional[str],
-    rescored_vector: Optional[str],
-) -> Optional[str]:
-    if not original_vector or not rescored_vector:
-        return rescored_vector
-    if not (
-        original_vector.startswith("CVSS:3.0/") or original_vector.startswith("CVSS:3.1/")
-    ):
-        return rescored_vector
-    if not (
-        rescored_vector.startswith("CVSS:3.0/") or rescored_vector.startswith("CVSS:3.1/")
-    ):
-        return rescored_vector
-
-    original_metrics = _parse_vector_components(original_vector)
-    rescored_metrics = _parse_vector_components(rescored_vector)
-
-    if any(key.startswith("M") for key in rescored_metrics):
-        return rescored_vector
-
-    base_to_modified = {
-        "AV": "MAV",
-        "AC": "MAC",
-        "PR": "MPR",
-        "UI": "MUI",
-        "S": "MS",
-        "C": "MC",
-        "I": "MI",
-        "A": "MA",
-    }
-
-    extra_metric_order = ["E", "RL", "RC", "CR", "IR", "AR"]
-    upgraded_vector = original_vector
-    changed = False
-
-    for key in extra_metric_order:
-        rescored_value = rescored_metrics.get(key)
-        if rescored_value and original_metrics.get(key) != rescored_value:
-            upgraded_vector = _append_cvss_metric(upgraded_vector, key, rescored_value)
-            changed = True
-
-    for base_key, modified_key in base_to_modified.items():
-        original_value = original_metrics.get(base_key)
-        rescored_value = rescored_metrics.get(base_key)
-        if not original_value or not rescored_value or original_value == rescored_value:
-            continue
-        upgraded_vector = _append_cvss_metric(upgraded_vector, modified_key, rescored_value)
-        changed = True
-
-    return upgraded_vector if changed else rescored_vector
-
-
-def _round_up_cvss_v3(value: float) -> float:
-    return math.ceil((value * 10) - 1e-9) / 10
-
-
-def _resolve_cvss31_metric(
-    metrics: Dict[str, str],
-    key: str,
-    values: Dict[str, float],
-    *,
-    fallback_key: Optional[str] = None,
-    default_key: Optional[str] = None,
-) -> Optional[float]:
-    metric_key = key
-    metric_value = metrics.get(metric_key)
-
-    if metric_value in {None, "X"} and fallback_key:
-        metric_key = fallback_key
-        metric_value = metrics.get(fallback_key)
-
-    if metric_value in {None, "X"}:
-        metric_value = default_key
-
-    if metric_value is None:
-        return None
-    return values.get(metric_value)
-
-
-def _score_cvss31_vector(vector: str) -> Optional[float]:
-    metrics = _parse_vector_components(vector)
-
-    av = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
-    ac = {"L": 0.77, "H": 0.44}
-    ui = {"N": 0.85, "R": 0.62}
-    exploit_code = {"X": 1.0, "U": 0.91, "P": 0.94, "F": 0.97, "H": 1.0}
-    remediation_level = {"X": 1.0, "O": 0.95, "T": 0.96, "W": 0.97, "U": 1.0}
-    report_confidence = {"X": 1.0, "U": 0.92, "R": 0.96, "C": 1.0}
-    requirements = {"X": 1.0, "L": 0.5, "M": 1.0, "H": 1.5}
-    scope = metrics.get("S")
-    if scope not in {"U", "C"}:
-        return None
-
-    pr = {
-        "U": {"N": 0.85, "L": 0.62, "H": 0.27},
-        "C": {"N": 0.85, "L": 0.68, "H": 0.5},
-    }
-    cia = {"N": 0.0, "L": 0.22, "H": 0.56}
-
-    try:
-        impact_subscore = 1 - (
-            (1 - cia[metrics["C"]])
-            * (1 - cia[metrics["I"]])
-            * (1 - cia[metrics["A"]])
-        )
-        if scope == "U":
-            impact = 6.42 * impact_subscore
-        else:
-            impact = 7.52 * (impact_subscore - 0.029) - 3.25 * ((impact_subscore - 0.02) ** 15)
-
-        exploitability = 8.22 * av[metrics["AV"]] * ac[metrics["AC"]] * pr[scope][metrics["PR"]] * ui[metrics["UI"]]
-    except KeyError:
-        return None
-
-    if impact <= 0:
-        base_score = 0.0
-    elif scope == "U":
-        base_score = _round_up_cvss_v3(min(impact + exploitability, 10.0))
-    else:
-        base_score = _round_up_cvss_v3(min(1.08 * (impact + exploitability), 10.0))
-
-    try:
-        temporal_multiplier = (
-            exploit_code[metrics.get("E", "X")]
-            * remediation_level[metrics.get("RL", "X")]
-            * report_confidence[metrics.get("RC", "X")]
-        )
-    except KeyError:
-        return None
-
-    temporal_score = _round_up_cvss_v3(base_score * temporal_multiplier)
-
-    environmental_keys = {
-        "CR",
-        "IR",
-        "AR",
-        "MAV",
-        "MAC",
-        "MPR",
-        "MUI",
-        "MS",
-        "MC",
-        "MI",
-        "MA",
-    }
-    if not any(key in metrics for key in environmental_keys):
-        return temporal_score if any(key in metrics for key in {"E", "RL", "RC"}) else base_score
-
-    modified_scope = metrics.get("MS", "X")
-    if modified_scope == "X":
-        modified_scope = scope
-    if modified_scope not in {"U", "C"}:
-        return None
-
-    modified_av = _resolve_cvss31_metric(metrics, "MAV", av, fallback_key="AV")
-    modified_ac = _resolve_cvss31_metric(metrics, "MAC", ac, fallback_key="AC")
-    modified_ui = _resolve_cvss31_metric(metrics, "MUI", ui, fallback_key="UI")
-    modified_c = _resolve_cvss31_metric(metrics, "MC", cia, fallback_key="C")
-    modified_i = _resolve_cvss31_metric(metrics, "MI", cia, fallback_key="I")
-    modified_a = _resolve_cvss31_metric(metrics, "MA", cia, fallback_key="A")
-    modified_pr_code = metrics.get("MPR", "X")
-    if modified_pr_code == "X":
-        modified_pr_code = metrics.get("PR")
-
-    try:
-        modified_pr = pr[modified_scope][modified_pr_code]
-        confidentiality_requirement = requirements[metrics.get("CR", "X")]
-        integrity_requirement = requirements[metrics.get("IR", "X")]
-        availability_requirement = requirements[metrics.get("AR", "X")]
-    except KeyError:
-        return None
-
-    if None in {
-        modified_av,
-        modified_ac,
-        modified_ui,
-        modified_c,
-        modified_i,
-        modified_a,
-    }:
-        return None
-
-    modified_impact_subscore = min(
-        1
-        - (
-            (1 - (modified_c * confidentiality_requirement))
-            * (1 - (modified_i * integrity_requirement))
-            * (1 - (modified_a * availability_requirement))
-        ),
-        0.915,
-    )
-
-    if modified_scope == "U":
-        modified_impact = 6.42 * modified_impact_subscore
-    else:
-        modified_impact = 7.52 * (modified_impact_subscore - 0.029) - 3.25 * ((modified_impact_subscore * 0.9731 - 0.02) ** 13)
-
-    modified_exploitability = 8.22 * modified_av * modified_ac * modified_pr * modified_ui
-
-    if modified_impact <= 0:
-        environmental_score = 0.0
-    elif modified_scope == "U":
-        environmental_base_score = _round_up_cvss_v3(min(modified_impact + modified_exploitability, 10.0))
-        environmental_score = _round_up_cvss_v3(environmental_base_score * temporal_multiplier)
-    else:
-        environmental_base_score = _round_up_cvss_v3(min(1.08 * (modified_impact + modified_exploitability), 10.0))
-        environmental_score = _round_up_cvss_v3(environmental_base_score * temporal_multiplier)
-
-    return environmental_score
-
-
-def _score_cvss20_vector(vector: str) -> Optional[float]:
-    metrics = _parse_vector_components(vector)
-
-    av = {"L": 0.395, "A": 0.646, "N": 1.0}
-    ac = {"H": 0.35, "M": 0.61, "L": 0.71}
-    au = {"M": 0.45, "S": 0.56, "N": 0.704}
-    cia = {"N": 0.0, "P": 0.275, "C": 0.66}
-
-    try:
-        impact = 10.41 * (
-            1 - (
-                (1 - cia[metrics["C"]])
-                * (1 - cia[metrics["I"]])
-                * (1 - cia[metrics["A"]])
-            )
-        )
-        exploitability = 20 * av[metrics["AV"]] * ac[metrics["AC"]] * au[metrics["Au"]]
-    except KeyError:
-        return None
-
-    f_impact = 0.0 if impact == 0 else 1.176
-    base_score = ((0.6 * impact) + (0.4 * exploitability) - 1.5) * f_impact
-    return round(max(0.0, min(base_score, 10.0)) + 1e-9, 1)
-
-
-def calculate_cvss_score_from_vector(vector: Optional[str]) -> Optional[float]:
-    if not vector:
-        return None
-    if vector.startswith("CVSS:3.0/") or vector.startswith("CVSS:3.1/"):
-        return _score_cvss31_vector(vector)
-    if vector.startswith("CVSS:2.0/") or ("/" in vector and not vector.startswith("CVSS:")):
-        return _score_cvss20_vector(vector)
-    return None
-
-
 def normalize_tmrescore_proposal(proposal: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(proposal)
 
-    original_vector = normalized.get("original_vector") or None
-    rescored_vector = _upgrade_rescored_vector_to_modifiers(
-        original_vector,
-        normalized.get("rescored_vector") or None,
-    )
+    details = normalized.get("details")
+    if details is None and normalized.get("description"):
+        normalized["details"] = normalized["description"]
 
-    if rescored_vector is not None:
-        normalized["rescored_vector"] = rescored_vector
+    analysis = normalized.get("analysis")
+    if isinstance(analysis, dict):
+        normalized["analysis"] = dict(analysis)
 
-    rescored_score = calculate_cvss_score_from_vector(rescored_vector)
-    original_score = calculate_cvss_score_from_vector(original_vector)
+    normalized["original_vector"] = normalized.get("original_vector") or None
+    normalized["rescored_vector"] = normalized.get("rescored_vector") or None
 
-    if rescored_score is not None:
-        normalized["rescored_score"] = rescored_score
-    elif normalized.get("rescored_score") is not None:
-        normalized["rescored_score"] = float(normalized["rescored_score"])
-
-    if original_score is not None:
-        normalized["original_score"] = original_score
-    elif normalized.get("original_score") is not None:
-        normalized["original_score"] = float(normalized["original_score"])
+    for score_key in ("rescored_score", "original_score"):
+        score_value = normalized.get(score_key)
+        if score_value in {None, ""}:
+            normalized[score_key] = None
+            continue
+        try:
+            normalized[score_key] = float(score_value)
+        except (TypeError, ValueError):
+            pass
 
     return normalized
 
@@ -336,21 +67,19 @@ def normalize_tmrescore_snapshot(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _contains_tmrescore_modifiers(vector: Optional[str]) -> bool:
-    if not vector:
-        return False
-    return bool(re.search(r"/(M[A-Z]{1,3}|E|RL|RC|CR|IR|AR):", vector))
-
-
 def is_meaningful_tmrescore_proposal(proposal: Dict[str, Any]) -> bool:
     rescored_vector = proposal.get("rescored_vector") or None
     original_vector = proposal.get("original_vector") or None
+    rescored_score = proposal.get("rescored_score")
+    original_score = proposal.get("original_score")
 
-    if not rescored_vector or not original_vector:
+    if not rescored_vector:
         return False
-    if rescored_vector == original_vector:
+    if original_vector and rescored_vector == original_vector:
         return False
-    return _contains_tmrescore_modifiers(rescored_vector)
+    if original_vector is None and rescored_score is not None and original_score is not None and rescored_score == original_score:
+        return False
+    return True
 
 
 class TMRescoreSettings(BaseSettings):
@@ -497,8 +226,13 @@ def get_tmrescore_generated_at(results_document: Dict[str, Any]) -> Optional[str
 
 
 def _extract_vex_rating(vulnerability: Dict[str, Any]) -> Tuple[Optional[float], Optional[str]]:
+    preferred_source_name = "CVSS Re-Scorer (Environmental)"
+
     for rating in vulnerability.get("ratings") or []:
         if not isinstance(rating, dict):
+            continue
+        source = rating.get("source") or {}
+        if str(source.get("name") or "").strip() != preferred_source_name:
             continue
         score = rating.get("score")
         vector = rating.get("vector") or None
@@ -559,10 +293,12 @@ def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dic
                 for item in (vulnerability.get("affects") or [])
             ]
 
+        analysis_payload = vulnerability.get("analysis") if isinstance(vulnerability.get("analysis"), dict) else None
+        detail_message = (analysis_payload or {}).get("detail") or None
         description = (
             vulnerability.get("description")
             or vulnerability.get("title")
-            or (vulnerability.get("analysis") or {}).get("detail")
+            or detail_message
             or vuln_id
         )
 
@@ -578,6 +314,8 @@ def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dic
             "original_vector": original_vector,
             "affected_refs": [ref for ref in affected_refs if ref],
             "description": description,
+            "details": detail_message,
+            "analysis": dict(analysis_payload) if analysis_payload else None,
             "original_severity": vex_properties.get("cvss-rescorer:original_severity") or None,
             "rescored_severity": vex_properties.get("cvss-rescorer:rescored_severity") or None,
             "cwe_descriptions": _parse_vex_json_property(vex_properties.get("cvss-rescorer:cwe_descriptions")),
@@ -597,6 +335,12 @@ def build_tmrescore_proposals(results_document: Dict[str, Any]) -> Dict[str, Dic
             existing["original_score"] = candidate["original_score"]
         if candidate["original_vector"]:
             existing["original_vector"] = candidate["original_vector"]
+        if not existing.get("details") and candidate.get("details"):
+            existing["details"] = candidate["details"]
+        if not existing.get("analysis") and candidate.get("analysis"):
+            existing["analysis"] = candidate["analysis"]
+        if not existing.get("description") and candidate.get("description"):
+            existing["description"] = candidate["description"]
 
         merged_refs = set(existing.get("affected_refs") or [])
         merged_refs.update(candidate["affected_refs"])

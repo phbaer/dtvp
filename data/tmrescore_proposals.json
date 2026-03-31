@@ -4,7 +4,7 @@
       "1.9.0",
       "1.10.0"
     ],
-    "generated_at": "2026-03-30T13:24:15.971951+00:00",
+    "generated_at": "2026-03-31T03:58:25.489829+00:00",
     "latest_version": "1.10.0",
     "project_name": "ExampleApp",
     "proposals": {
@@ -12,51 +12,73 @@
         "affected_refs": [
           "urn:dtvp:tmrescore:proj-1:component:comp-1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.9.0",
           "1.10.0"
         ],
         "cwe_descriptions": null,
         "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
         "evaluations": null,
-        "generated_at": "2026-03-30T13:24:15.971951+00:00",
+        "generated_at": "2026-03-31T03:58:25.489829+00:00",
         "latest_version": "1.10.0",
-        "original_score": 9.8,
+        "original_score": 8.8,
         "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "rescored_score": 9.4,
+        "rescored_score": 2.9,
         "rescored_severity": null,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MA:L",
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
         "scope": "merged_versions",
-        "session_id": "7041cd1e-1f18-4acb-8e45-566a824f6e4f",
+        "session_id": "a6e48fb8-af15-403a-bef5-e4215ec45076",
         "vuln_id": "CVE-2024-0001"
       },
       "CVE-2024-0002": {
         "affected_refs": [
           "urn:dtvp:tmrescore:proj-2:component:comp-2"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.9.0",
           "1.10.0"
         ],
         "cwe_descriptions": null,
         "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
         "evaluations": null,
-        "generated_at": "2026-03-30T13:24:15.971951+00:00",
+        "generated_at": "2026-03-31T03:58:25.489829+00:00",
         "latest_version": "1.10.0",
         "original_score": 5.4,
         "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
-        "rescored_score": 4.2,
+        "rescored_score": 2.9,
         "rescored_severity": null,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MAC:H",
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
         "scope": "merged_versions",
-        "session_id": "7041cd1e-1f18-4acb-8e45-566a824f6e4f",
+        "session_id": "a6e48fb8-af15-403a-bef5-e4215ec45076",
         "vuln_id": "CVE-2024-0002"
       }
     },
     "scope": "merged_versions",
-    "session_id": "7041cd1e-1f18-4acb-8e45-566a824f6e4f"
+    "session_id": "a6e48fb8-af15-403a-bef5-e4215ec45076"
   },
   "Vulnerable Project": {
     "analyzed_versions": [
@@ -68,20 +90,30 @@
       "2.1.0",
       "3.0.0"
     ],
-    "generated_at": "2026-03-30T07:01:54.104826+00:00",
+    "generated_at": "2026-03-31T03:58:48.499931+00:00",
     "latest_version": "3.0.0",
     "project_name": "Vulnerable Project",
     "proposals": {
       "CVE-2019-12384": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:b253b708-3012-4277-8461-893bd5cd61e2",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:b253b708-3012-4277-8461-893bd5cd61e2",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -91,27 +123,42 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Jackson-databind deserialization vulnerability.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 9.8,
+        "original_score": 8.1,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "rescored_score": 8.1,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAC:H",
+        "rescored_score": 2.9,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2019-12384"
       },
       "CVE-2021-21290": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:d253b708-3012-4277-8461-893bd5cd61e3",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:d253b708-3012-4277-8461-893bd5cd61e3",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:d253b708-3012-4277-8461-893bd5cd61e3",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:d253b708-3012-4277-8461-893bd5cd61e3",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:d253b708-3012-4277-8461-893bd5cd61e3",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:d253b708-3012-4277-8461-893bd5cd61e3",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:d253b708-3012-4277-8461-893bd5cd61e3"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:d253b708-3012-4277-8461-893bd5cd61e3",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:d253b708-3012-4277-8461-893bd5cd61e3"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -121,27 +168,42 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Netty message conversion vulnerability.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
         "original_score": 5.9,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N",
-        "rescored_score": 5.3,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MUI:R",
+        "rescored_score": 7.2,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2021-21290"
       },
       "CVE-2021-44228": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -151,27 +213,42 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Log4j JNDI remote code execution vulnerability.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
         "original_score": 10.0,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
-        "rescored_score": 9.7,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/MAV:A",
+        "rescored_score": 5.6,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2021-44228"
       },
       "CVE-2022-42889": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:e253b708-3012-4277-8461-893bd5cd61e4",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:e253b708-3012-4277-8461-893bd5cd61e4",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:e253b708-3012-4277-8461-893bd5cd61e4",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:e253b708-3012-4277-8461-893bd5cd61e4",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:e253b708-3012-4277-8461-893bd5cd61e4",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:e253b708-3012-4277-8461-893bd5cd61e4",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:e253b708-3012-4277-8461-893bd5cd61e4"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:e253b708-3012-4277-8461-893bd5cd61e4",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:e253b708-3012-4277-8461-893bd5cd61e4"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -181,27 +258,42 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Apache Commons Text StringSubstitutor interpolation vulnerability (Text4Shell).",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
         "original_score": 9.8,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "rescored_score": 9.4,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MA:L",
+        "rescored_score": 2.9,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2022-42889"
       },
       "CVE-2023-12345": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -211,27 +303,42 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Generic medium severity vulnerability for dependencies.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
         "original_score": 5.4,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N",
-        "rescored_score": 4.6,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N/MUI:R",
+        "rescored_score": 7.2,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2023-12345"
       },
       "CVE-2024-TEAM": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:7fa85f64-5717-4562-b3fc-2c963f66afb0"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:7fa85f64-5717-4562-b3fc-2c963f66afb0"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -241,34 +348,49 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Team mapping placeholder vulnerability.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 3.3,
+        "original_score": 2.5,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
-        "rescored_score": 2.9,
-        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
+        "rescored_score": 8.8,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2024-TEAM"
       },
       "CVE-2025-INCOMPLETE": {
         "affected_refs": [
-          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2",
           "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2"
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -278,34 +400,49 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Incomplete assessment test case.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
         "original_score": 7.5,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
-        "rescored_score": 5.3,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/MC:L",
+        "rescored_score": 8.8,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2025-INCOMPLETE"
       },
       "CVE-2025-INCONSISTENT": {
         "affected_refs": [
-          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:b253b708-3012-4277-8461-893bd5cd61e2",
-          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2",
           "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:b253b708-3012-4277-8461-893bd5cd61e2"
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:b253b708-3012-4277-8461-893bd5cd61e2",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -315,31 +452,46 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Inconsistent assessment test case.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
         "original_score": 9.8,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "rescored_score": 8.8,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAV:A",
+        "rescored_score": 5.6,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2025-INCONSISTENT"
       },
       "CVE-2025-NEW-01": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:root",
-          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:root",
-          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:root",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:root",
           "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:root",
+          "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:root",
+          "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:root",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:root",
           "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:root"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:root",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:root"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -349,15 +501,20 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Newly discovered low risk dependency issue.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 5.4,
+        "original_score": 3.1,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
-        "rescored_score": 4.3,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MC:N",
+        "rescored_score": 7.2,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2025-NEW-01"
       },
       "CVE-2025-NEW-02": {
@@ -366,6 +523,16 @@
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -375,15 +542,20 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Missing input validation issue in subsystem.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 6.5,
+        "original_score": 6.2,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N",
-        "rescored_score": 5.7,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N/MUI:R",
+        "rescored_score": 7.2,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2025-NEW-02"
       },
       "CVE-2025-NEW-03": {
@@ -391,6 +563,16 @@
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -400,27 +582,42 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Authentication bypass vulnerability in auth module.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 9.1,
+        "original_score": 8.4,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
-        "rescored_score": 8.1,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
+        "rescored_score": 8.8,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2025-NEW-03"
       },
       "CVE-2026-OPEN-PENDING": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -430,26 +627,41 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Pending review open team assessment test case.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 6.5,
+        "original_score": 5.8,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
-        "rescored_score": 5.4,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MAV:A",
+        "rescored_score": 5.6,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2026-OPEN-PENDING"
       },
       "CVE-2026-PLAINTEXT-NA": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1"
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -459,26 +671,41 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Plaintext NOT_AFFECTED assessment test case.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 3.3,
+        "original_score": 2.0,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
-        "rescored_score": 2.2,
-        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MC:N",
+        "rescored_score": 7.2,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2026-PLAINTEXT-NA"
       },
       "CVE-2026-PLAINTEXT-NS": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1"
+          "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -488,27 +715,42 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "Plaintext NOT_SET assessment test case.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 3.3,
+        "original_score": 2.0,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
-        "rescored_score": 2.2,
-        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MC:N",
+        "rescored_score": 7.2,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N/MPR:L",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2026-PLAINTEXT-NS"
       },
       "CVE-2026-TEAM-PARTIAL": {
         "affected_refs": [
           "urn:dtvp:tmrescore:3fa85f64-5717-4562-b3fc-2c963f66afa6:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:8fa85f64-5717-4562-b3fc-2c963f66afb1:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:9fa85f64-5717-4562-b3fc-2c963f66afb2:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:4fa85f64-5717-4562-b3fc-2c963f66afa7:component:c253b708-3012-4277-8461-893bd5cd61e1",
           "urn:dtvp:tmrescore:afa85f64-5717-4562-b3fc-2c963f66afb3:component:c253b708-3012-4277-8461-893bd5cd61e1",
-          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1"
+          "urn:dtvp:tmrescore:bfa85f64-5717-4562-b3fc-2c963f66afb4:component:c253b708-3012-4277-8461-893bd5cd61e1",
+          "urn:dtvp:tmrescore:cfa85f64-5717-4562-b3fc-2c963f66afb5:component:c253b708-3012-4277-8461-893bd5cd61e1"
         ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
         "analyzed_versions": [
           "1.0.0",
           "1.1.0",
@@ -518,19 +760,24 @@
           "2.1.0",
           "3.0.0"
         ],
-        "description": "One team assessed, another open team assessment test case.",
-        "generated_at": "2026-03-30T07:01:54.104826+00:00",
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2026-03-31T03:58:48.499931+00:00",
         "latest_version": "3.0.0",
-        "original_score": 6.5,
+        "original_score": 5.7,
+        "original_severity": null,
         "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
-        "rescored_score": 5.4,
-        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N/MPR:L",
+        "rescored_score": 2.9,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MPR:H",
         "scope": "merged_versions",
-        "session_id": "8707c674-5451-491a-81f3-43283437ae00",
+        "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d",
         "vuln_id": "CVE-2026-TEAM-PARTIAL"
       }
     },
     "scope": "merged_versions",
-    "session_id": "8707c674-5451-491a-81f3-43283437ae00"
+    "session_id": "2f3fb129-a14d-4f76-b576-63989b8e341d"
   }
 }
