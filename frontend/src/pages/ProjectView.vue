@@ -250,7 +250,6 @@ const DEPENDENCY_OPTIONS = [
 ] as const
 const versionFilterInput = ref('')
 const versionSearch = ref('')
-const versionDropdownOpen = ref(false)
 const versionSearchInput = ref<HTMLInputElement | null>(null)
 const versionFilterList = computed(() => {
     return versionFilterInput.value
@@ -295,15 +294,6 @@ const toggleVersion = (version: string) => {
 const removeVersion = (version: string) => {
     const newList = versionFilterList.value.filter(v => v.toLowerCase() !== version.toLowerCase())
     versionFilterInput.value = newList.join(', ')
-}
-
-let versionDropdownTimer: ReturnType<typeof globalThis.setTimeout> | null = null
-const closeVersionDropdown = () => {
-    versionDropdownTimer = globalThis.setTimeout(() => { versionDropdownOpen.value = false }, 150)
-}
-const openVersionDropdown = () => {
-    if (versionDropdownTimer) { clearTimeout(versionDropdownTimer); versionDropdownTimer = null }
-    versionDropdownOpen.value = true
 }
 
 
@@ -834,37 +824,43 @@ watch(() => route.params.name, () => {
                         </div>
                         <div class="flex flex-col gap-1 relative">
                             <label class="text-[9px] uppercase tracking-widest text-gray-400">Project Versions</label>
-                            <div class="relative" @focusin="openVersionDropdown" @focusout="closeVersionDropdown">
-                                <div class="flex flex-wrap items-center gap-1 bg-black/40 border border-white/10 rounded-xl px-2 min-h-[2.5rem] cursor-text focus-within:border-blue-500/50 transition-all"
-                                     @click="versionSearchInput?.focus()">
-                                    <span v-for="ver in versionFilterList" :key="ver" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium">
-                                        {{ ver }}
-                                        <button @click.stop="removeVersion(ver)" class="hover:text-white text-blue-300/70 leading-none">&times;</button>
-                                    </span>
-                                    <input
-                                        ref="versionSearchInput"
-                                        v-model="versionSearch"
-                                        type="text"
-                                        placeholder="Search versions..."
-                                        class="flex-1 min-w-[6rem] bg-transparent border-none outline-none text-sm font-medium text-gray-200 placeholder:text-gray-600 h-8 px-1"
-                                    />
-                                </div>
-                                <div v-if="versionDropdownOpen && filteredVersionOptions.length" class="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto bg-[#1e1e2e] border border-white/10 rounded-lg shadow-xl">
-                                    <button
-                                        v-for="opt in filteredVersionOptions" :key="opt"
-                                        @mousedown.prevent="toggleVersion(opt)"
-                                        :class="[
-                                            'w-full text-left px-3 py-1.5 text-sm transition-colors flex items-center justify-between',
-                                            versionFilterList.some(v => v.toLowerCase() === opt.toLowerCase())
-                                                ? 'bg-blue-500/15 text-blue-200'
-                                                : 'text-gray-300 hover:bg-white/5'
-                                        ]"
-                                    >
-                                        {{ opt }}
-                                        <span v-if="versionFilterList.some(v => v.toLowerCase() === opt.toLowerCase())" class="text-blue-400 text-xs">&#10003;</span>
-                                    </button>
-                                </div>
-                            </div>
+                            <CustomSelect modelValue="" :options="[]">
+                                <template #trigger="{ open }">
+                                    <div class="relative" @focusin="open">
+                                        <div class="flex flex-wrap items-center gap-1 bg-black/40 border border-white/10 rounded-xl px-2 min-h-[2.5rem] cursor-text focus-within:border-blue-500/50 transition-all"
+                                             @click="versionSearchInput?.focus()">
+                                            <span v-for="ver in versionFilterList" :key="ver" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium">
+                                                {{ ver }}
+                                                <button @click.stop="removeVersion(ver)" class="hover:text-white text-blue-300/70 leading-none">&times;</button>
+                                            </span>
+                                            <input
+                                                ref="versionSearchInput"
+                                                v-model="versionSearch"
+                                                type="text"
+                                                placeholder="Search versions..."
+                                                class="flex-1 min-w-[6rem] bg-transparent border-none outline-none text-sm font-medium text-gray-200 placeholder:text-gray-600 h-8 px-1"
+                                            />
+                                        </div>
+                                    </div>
+                                </template>
+                                <template #menu>
+                                    <div class="divide-y divide-white/5">
+                                        <button
+                                            v-for="opt in filteredVersionOptions" :key="opt"
+                                            @mousedown.prevent="toggleVersion(opt)"
+                                            :class="[
+                                                'w-full text-left px-3 py-1.5 text-sm transition-colors flex items-center justify-between',
+                                                versionFilterList.some(v => v.toLowerCase() === opt.toLowerCase())
+                                                    ? 'bg-blue-500/15 text-blue-200'
+                                                    : 'text-gray-300 hover:bg-white/5'
+                                            ]"
+                                        >
+                                            {{ opt }}
+                                            <span v-if="versionFilterList.some(v => v.toLowerCase() === opt.toLowerCase())" class="text-blue-400 text-xs">&#10003;</span>
+                                        </button>
+                                    </div>
+                                </template>
+                            </CustomSelect>
                         </div>
                     </div>
                 </div>
