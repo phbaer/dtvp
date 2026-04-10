@@ -3,7 +3,7 @@ import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 
 import type { GroupedVuln, AssessmentPayload } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, History } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw } from 'lucide-vue-next'
 
 import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
@@ -12,8 +12,9 @@ import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
 import CvssCalculatorV3 from './CvssCalculatorV3.vue'
 import CvssCalculatorV4 from './CvssCalculatorV4.vue'
-import DependencyChainViewer from './DependencyChainViewer.vue'
 import CustomSelect from './CustomSelect.vue'
+import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
+import VulnGroupAssessmentDetails from './VulnGroupAssessmentDetails.vue'
 const props = defineProps<{
   group: GroupedVuln
 }>()
@@ -80,7 +81,6 @@ const showCalculatorModal = ref(false)
 const showConflictModal = ref(false)
 const conflictData = ref<any>(null)
 const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Analysis Object
-const showAuditLog = ref(false)
 const refreshCounter = ref(0)
 const formTouched = ref(false)
 const isInternalUpdate = ref(false)
@@ -144,7 +144,7 @@ const displayState = computed(() => {
 })
 
 const technicalState = computed(() => {
-    return getGroupTechnicalState(props.group)
+    return localTechnicalState.value ?? getGroupTechnicalState(props.group)
 })
 
 const consensusButtonLabel = computed(() => {
@@ -152,12 +152,25 @@ const consensusButtonLabel = computed(() => {
 
 })
 
-const isAssessed = computed(() => {
-    return hasGlobalAssessment(mergedAssessmentData.value.blocks) && !isPendingReview.value
-})
-
 const isPendingReview = computed(() => {
     return isPendingReviewHelper(props.group)
+})
+
+const isAssessed = computed(() => {
+    return (
+        hasGlobalAssessment(mergedAssessmentData.value.blocks) && !isPendingReview.value
+    ) || displayState.value === 'ASSESSED_LEGACY'
+})
+
+const assessedFoldClass = computed(() => {
+    if (displayState.value === 'INCOMPLETE') return 'bg-green-600/30'
+    if (displayState.value === 'ASSESSED_LEGACY') return 'bg-sky-600'
+    return 'bg-green-600'
+})
+
+const assessedIconClass = computed(() => {
+    if (displayState.value === 'INCOMPLETE') return 'text-white/40'
+    return 'text-white'
 })
 
 const canApprove = computed(() => {
@@ -165,9 +178,11 @@ const canApprove = computed(() => {
 })
 
 const lastRescoredScore = ref<number | null>(null)
+const localTechnicalState = ref<string | null>(null)
 
 const currentDisplayScore = computed(() => {
     if (pendingScore.value !== null) return pendingScore.value
+    if (lastRescoredScore.value !== null) return lastRescoredScore.value
     return props.group.rescored_cvss ?? (props.group.cvss || props.group.cvss_score) ?? 'N/A'
 })
 
@@ -564,16 +579,6 @@ const groupedAssessments = computed(() => {
     return Object.values(groups)
 })
 
-const expandedChainComponents = ref(new Set<string>())
-
-const toggleChainForComponent = (key: string) => {
-    const s = new Set(expandedChainComponents.value)
-    if (s.has(key)) s.delete(key)
-    else s.add(key)
-    expandedChainComponents.value = s
-}
-
-const isChainExpanded = (key: string) => expandedChainComponents.value.has(key)
 
 const updateFormFromGroup = (force = true) => {
     // If not forced and user has touched the form, don't overwrite
@@ -960,6 +965,10 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     }
     
     updating.value = true
+    localTechnicalState.value = state.value || null
+    if (isReviewer.value && pendingScore.value !== null) {
+        lastRescoredScore.value = pendingScore.value
+    }
     try {
         const allBlocks: AssessmentBlock[] = []
         const teamToIndex = new Map<string, number>()
@@ -1110,13 +1119,16 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
                  }
                  emit('update:assessment', data)
                  
+                 // Track local post-update values so the UI reflects them immediately
+                 localTechnicalState.value = success.new_state ?? null
+                 lastRescoredScore.value = data.rescored_cvss ?? null
+                 
                  // Reset local state so UI reflects the new server state
                  pendingScore.value = null
                  pendingVector.value = data.rescored_vector || props.group.cvss_vector || ''
                  initialVector.value = pendingVector.value
                  initialScore.value = data.rescored_cvss ?? null
                  isManualBaseMode.value = false
-                 lastRescoredScore.value = data.rescored_cvss ?? null
              }
              showConflictModal.value = false
         }
@@ -1203,14 +1215,6 @@ const affectedComponentNames = computed(() => {
     return Array.from(names).join(', ')
 })
 
-const getDistinctSortedProjectVersions = (instances: { project_version: string }[]) => {
-    const allVersions = instances
-        .map(i => i.project_version)
-        .filter((v): v is string => !!v)
-
-    const distinct = Array.from(new Set(allVersions))
-    return sortVersions(distinct, true)
-}
 
 const sortedAffectedProjectVersions = computed(() => {
     const versions = (props.group.affected_versions || [])
@@ -1278,16 +1282,6 @@ const normalizedTags = computed(() => {
     return Array.from(result)
 })
 
-const resolveTeamAlias = (name: string): string => {
-    if (!teamMapping?.value) return name
-    for (const componentName in teamMapping.value) {
-        const mappingVal = teamMapping.value[componentName]
-        if (Array.isArray(mappingVal) && mappingVal.length > 1) {
-            if (mappingVal.slice(1).includes(name)) return mappingVal[0]
-        }
-    }
-    return name
-}
 
 const assessedTeams = computed(() => {
     const assessed = getAssessedTeams(props.group)
@@ -1320,235 +1314,79 @@ const assessedTeams = computed(() => {
     return matchedTeams
 })
 
-const getVersionToComponentTooltip = (version: string, instances: any[]) => {
-    const dataForVersion = instances.filter(i => i.project_version === version)
-    const unique = Array.from(new Set(dataForVersion.map(i => `${i.component_name}@${i.component_version}`)))
-    return unique.length ? unique.join(', ') : 'No components for this version'
-}
 
-const getStateDescription = (stateValue: string | undefined) => {
-    if (!stateValue) return ''
-    return ANALYSIS_STATES.find(s => s.value === stateValue)?.description || ''
-}
 
-const getJustificationDescription = (justValue: string | undefined) => {
-    if (!justValue) return ''
-    return JUSTIFICATION_OPTIONS.find(j => j.value === justValue)?.description || ''
-}
 
-const getComponentSummary = (instances: { component_name: string, component_version: string }[]) => {
-    const map = new Map<string, Set<string>>()
-    instances.forEach(i => {
-        if (!map.has(i.component_name)) map.set(i.component_name, new Set())
-        map.get(i.component_name)!.add(i.component_version)
-    })
-    return Array.from(map.entries()).map(([name, versions]) => ({
-        name,
-        versions: Array.from(versions).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    }))
-}
 
-const partitionByRelationship = (instances: { component_name: string, component_version: string, is_direct_dependency?: boolean | null }[]) => {
-    const direct: typeof instances = []
-    const transitive: typeof instances = []
-    const unknown: typeof instances = []
-    const seenDirect = new Set<string>()
-    const seenTransitive = new Set<string>()
-    const seenUnknown = new Set<string>()
+const _vueTemplateUsed = [
+    ChevronDown,
+    ChevronUp,
+    Shield,
+    RefreshCw,
+    AlertTriangle,
+    Calculator,
+    ExternalLink,
+    CheckCircle,
+    RotateCcw,
+    CvssCalculatorV2,
+    CvssCalculatorV3,
+    CvssCalculatorV4,
+    CustomSelect,
+    totalTargeted,
+    consensusButtonLabel,
+    switchVersion,
+    cleanRescoredVector,
+    updateCalcVector,
+    canEditBase,
+    resetVector,
+    clearVector,
+    applyConsensusAssessment,
+    handleUseServerState,
+    stateColor,
+    affectedVersionTooltip,
+]
+void _vueTemplateUsed
 
-    instances.forEach(i => {
-        const key = `${i.component_name}@${i.component_version}`
-        if (i.is_direct_dependency === true) {
-            if (!seenDirect.has(key)) { direct.push(i); seenDirect.add(key) }
-        } else if (i.is_direct_dependency === false) {
-            if (!seenTransitive.has(key)) { transitive.push(i); seenTransitive.add(key) }
-        } else {
-            if (!seenUnknown.has(key)) { unknown.push(i); seenUnknown.add(key) }
-        }
-    })
-
-    return { direct, transitive, unknown }
-}
-
-const getUniqueComponentInstances = (instances: { component_name: string, component_version: string, component_uuid: string, project_uuid: string, project_name: string, project_version: string, dependency_chains?: string[] }[]) => {
-    const seen = new Set<string>()
-    return instances.filter(i => {
-        const key = `${i.component_name}@${i.component_version}`
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-    })
-}
 </script>
 
 <template>
   <div :class="['vuln-card relative border rounded-lg overflow-hidden transition-colors', cardStyle]">
     <!-- Assessed Corner Fold -->
     <div v-if="isAssessed" class="absolute top-0 right-0 pointer-events-none z-20">
-        <div 
+        <div
             class="w-8 h-8 flex justify-end items-start p-1 uppercase"
-            :class="displayState === 'INCOMPLETE' ? 'bg-green-600/30' : 'bg-green-600'"
+            :class="assessedFoldClass"
+            :title="displayState === 'ASSESSED_LEGACY' ? 'Legacy assessed' : 'Assessed'"
             style="clip-path: polygon(100% 0, 0 0, 100% 100%)"
         >
-            <CheckCircle :size="12" :class="displayState === 'INCOMPLETE' ? 'text-white/40' : 'text-white'" />
+            <CheckCircle :size="12" :class="assessedIconClass" />
         </div>
     </div>
     <!-- Header -->
     <div 
         @click="expanded = !expanded" 
-        class="p-5 flex flex-col md:flex-row md:items-center justify-between gap-8 cursor-pointer hover:bg-white/2 transition-all relative overflow-hidden group/header"
+        class="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:bg-white/2 transition-all relative overflow-hidden group/header"
     >
-        <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-8 mb-3">
-                <!-- ID & Aliases -->
-                <div class="flex flex-col w-56 shrink-0">
-                    <span class="text-xl font-black text-yellow-400 tracking-tight leading-none group-hover/header:text-yellow-300 transition-colors">
-                        {{ group.id }}
-                    </span>
-                    <div v-if="group.aliases?.length" class="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1.5 flex gap-2 overflow-hidden">
-                        <span v-for="alias in group.aliases" :key="alias" class="whitespace-nowrap opacity-60 hover:opacity-100 transition-opacity">
-                            {{ alias }}
-                        </span>
-                    </div>
-                </div>
-                
-                <!-- Criticality -->
-                <div class="flex flex-col items-center gap-1.5 w-28 shrink-0">
-                    <span class="text-[9px] font-black text-gray-600 uppercase tracking-[0.2em] leading-none">Criticality</span>
-                    <span :class="['px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-tight border text-center w-full', severityColor]">
-                        {{ group.severity || 'UNKNOWN' }}
-                    </span>
-                </div>
-
-                <!-- CVSS Base Score -->
-                <div class="flex flex-col items-center gap-1.5 w-24 shrink-0">
-                    <span class="text-[9px] font-black text-gray-600 uppercase tracking-[0.2em] leading-none">CVSS Base</span>
-                    <div class="flex items-center gap-2">
-                        <span 
-                            v-if="isRescoredOrModified" 
-                            :class="['px-2.5 py-1 rounded-lg text-xs font-black transition-all duration-300 border', 
-                                (pendingScore !== null) 
-                                    ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' 
-                                    : 'bg-purple-500/5 text-purple-500 border-purple-500/20'
-                            ]" 
-                            data-testid="rescored-value-badge"
-                        >
-                            {{ currentDisplayScore }}
-                        </span>
-                        <span v-else class="text-lg font-black text-gray-100">
-                            {{ currentDisplayScore }}
-                        </span>
-                        <span v-if="isRescoredOrModified" class="text-[10px] text-gray-600 line-through font-bold opacity-40">
-                            {{ group.cvss || group.cvss_score }}
-                        </span>
-                    </div>
-                </div>
-
-                <!-- Team Consensus Badges -->
-                <div v-if="normalizedTags.length > 0" class="flex items-center gap-3 flex-1 ml-4 pl-6 border-l border-white/5">
-                    <div class="flex gap-2 flex-wrap">
-                        <span 
-                            v-for="tag in normalizedTags" 
-                            :key="tag" 
-                            class="px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-2 transition-all"
-                            :class="assessedTeams.has(tag) 
-                                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' 
-                                : 'bg-white/2 text-gray-600 border border-white/5'"
-                        >
-                            <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="text-blue-400" />
-                            {{ tag }}
-                        </span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="text-sm text-gray-400 line-clamp-1 font-mono pl-0.5">
-                {{ affectedComponentNames }}
-            </div>
-            
-            <!-- Vector Display in Header if expanded or explicitly shown -->
-            <div v-if="expanded && (group.rescored_vector || group.cvss_vector)" class="mt-2 flex flex-col gap-1.5">
-                <div v-if="group.rescored_vector && group.rescored_vector !== group.cvss_vector" class="font-mono text-[10px] text-purple-300 break-all bg-purple-900/20 p-1.5 rounded border border-purple-500/30 flex items-center gap-2">
-                    <span class="text-purple-400/70 uppercase font-bold shrink-0">Rescored Vector:</span>
-                    <span class="tracing-tight">
-                        <span class="font-bold rescored-bold-segment">{{ rescoredVectorSegments.bold }}</span>{{ rescoredVectorSegments.normal }}
-                    </span>
-                </div>
-                <div class="font-mono text-[10px] text-gray-500 break-all bg-gray-900/50 p-1.5 rounded border border-gray-700/50 flex items-center gap-2">
-                    <span class="text-gray-600 uppercase font-bold shrink-0">{{ group.rescored_vector ? 'Original Vector:' : 'Vector:' }}</span>
-                    <span :class="{ 'line-through opacity-50': group.rescored_vector }">{{ group.cvss_vector || 'N/A' }}</span>
-                </div>
-            </div>
-        </div>
-        
-        <div class="flex items-start gap-8 shrink-0">
-            <div class="w-28 text-right">
-                <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Analysis</div>
-                <div 
-                    :id="`state-${group.id}`"
-                    :class="['font-bold text-sm truncate analysis-state-value cursor-help', stateColor]"
-                    :title="getStateDescription(technicalState)"
-                >
-                    {{ technicalState }}
-                </div>
-                <div class="text-[9px] font-black uppercase tracking-tighter mt-1 opacity-40 px-1 border border-white/5 rounded inline-block analysis-lifecycle-value" :title="getStateDescription(displayState)">
-                    {{ displayState }}
-                </div>
-            </div>
-
-            
-            <div class="w-24 text-right">
-                    <div class="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-0.5">Affected</div>
-                    <div 
-                        class="font-bold text-sm text-gray-300"
-                        :title="affectedVersionTooltip"
-                        data-testid="affected-version-summary"
-                    >
-                        {{ group.affected_versions?.length || 0 }} Versions
-                    </div>
-
-                    <div class="mt-1">
-                        <span v-if="dependencyRelationship === 'DIRECT'" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wide text-white bg-red-600 border border-red-500">
-                            Direct
-                        </span>
-                        <span v-else-if="dependencyRelationship === 'TRANSITIVE'" class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-200 bg-purple-600/20 border border-purple-600/30">
-                            Transitive
-                        </span>
-                        <span v-else class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-700/30 border border-gray-600/30">
-                            Relation: N/A
-                        </span>
-                    </div>
-
-                    <div class="mt-1 flex flex-col items-end gap-1">
-                        <div v-if="isPendingReview">
-                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide">
-                                Pending Review
-                            </span>
-                        </div>
-                    </div>
-                
-                    <button 
-                        v-if="canApprove"
-                        @click="approveAssessment"
-                        class="mt-1 px-2 py-0.5 text-xs bg-green-700 hover:bg-green-600 text-white rounded font-bold transition-colors w-full z-10 relative"
-                    >
-                        Approve
-                    </button>
-            </div>
-
-            <div class="pt-1 flex items-center gap-2">
-                 <button 
-                    @click.stop="refreshDetails" 
-                    class="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"
-                    title="Refresh Analysis Details"
-                >
-                    <RefreshCw :size="16" :class="{ 'animate-spin': loadingDetails }" />
-                </button>
-                <component :is="expanded ? ChevronUp : ChevronDown" class="text-gray-500" :size="20" />
-            </div>
-        </div>
+        <VulnGroupCardHeader
+            :group="group"
+            :displayState="displayState"
+            :technicalState="technicalState"
+            :severityColor="severityColor"
+            :isRescoredOrModified="isRescoredOrModified"
+            :currentDisplayScore="currentDisplayScore"
+            :pendingScore="pendingScore"
+            :rescoredVectorSegments="rescoredVectorSegments"
+            :normalizedTags="normalizedTags"
+            :assessedTeams="assessedTeams"
+            :affectedComponentNames="affectedComponentNames"
+            :expanded="expanded"
+            :canApprove="canApprove"
+            :isPendingReview="isPendingReview"
+            :dependencyRelationship="dependencyRelationship"
+            @refresh-details="refreshDetails"
+            @approve-assessment="approveAssessment"
+        />
     </div>
-
             <!-- Expanded Details -->
     <div v-if="expanded" class="p-4 border-t border-gray-700 bg-gray-850">
         <div class="grid md:grid-cols-2 gap-8">
@@ -1559,201 +1397,13 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                     <div class="mt-4">
                          <h4 class="font-semibold text-gray-300 mb-4">Analysis Details & Comments</h4>
                          
-                         <div v-for="(assessment, idx) in groupedAssessments" :key="idx" 
-                              class="mb-8 last:mb-0 border-l-2 border-gray-700 pl-4 py-2 bg-gray-900/10 rounded-r-lg"
-                              data-testid="grouped-assessment">
-                             
-                             <!-- Affected Versions (inline chips) -->
-                             <div class="mb-2">
-                                 <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Affected in</span>
-                                 <div v-if="getDistinctSortedProjectVersions(assessment.instances).length === 0" class="text-xs text-gray-500 italic mt-1">
-                                     Loading versions...
-                                 </div>
-                                 <div v-else class="flex flex-wrap gap-1 mt-1">
-                                     <span
-                                         v-for="ver in getDistinctSortedProjectVersions(assessment.instances)"
-                                         :key="ver"
-                                         class="px-1.5 py-0.5 text-[10px] font-mono font-semibold bg-blue-900/30 text-blue-300 rounded border border-blue-800/30"
-                                         data-testid="assessment-version-chip"
-                                         :title="getVersionToComponentTooltip(ver, assessment.instances)">
-                                         {{ ver }}
-                                     </span>
-                                 </div>
-                             </div>
-
-                             <!-- Affected Components (compact summary) -->
-                             <div class="mb-3">
-                                 <span class="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Components</span>
-                                 <div class="flex flex-wrap gap-1.5 mt-1">
-                                     <span v-for="comp in getComponentSummary(assessment.instances)" :key="comp.name"
-                                           class="px-1.5 py-0.5 text-[10px] font-mono text-gray-300 bg-gray-800 rounded border border-gray-700"
-                                           data-testid="assessment-instance-badge">
-                                         {{ comp.name }}<span class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
-                                     </span>
-                                 </div>
-                             </div>
-
-                             <!-- Assessment Data -->
-                             <div v-if="assessment.state !== 'NOT_SET' || assessment.details || assessment.comments.length > 0" class="space-y-3">
-                                 <div v-if="assessment.state !== 'NOT_SET' || assessment.details" class="space-y-3">
-                                     <div v-for="block in parseAssessmentBlocks(assessment.details)" :key="block.team" 
-                                          class="bg-gray-800/60 rounded border border-gray-700/50 p-3">
-                                         <div class="flex justify-between items-start mb-2">
-                                             <div class="flex flex-wrap items-center gap-2">
-                                                 <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-900/40 text-blue-300 border border-blue-800/50">
-                                                     {{ block.team === 'General' ? 'Global Policy' : resolveTeamAlias(block.team) }}
-                                                 </span>
-                                                 <span v-if="block.state && block.state !== 'NOT_SET'" 
-                                                       class="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-gray-700/50 text-gray-300 border border-gray-600/50 cursor-help"
-                                                       :title="getStateDescription(block.state)">
-                                                     State: <span :class="block.state === 'NOT_AFFECTED' ? 'text-green-400' : (block.state === 'EXPLOITABLE' ? 'text-red-400' : 'text-gray-200')">{{ block.state }}</span>
-                                                 </span>
-                                                 <span v-if="block.justification && block.justification !== 'NOT_SET'" 
-                                                       class="px-2 py-0.5 rounded text-[10px] font-bold text-gray-400 border border-gray-700 bg-gray-900/30 cursor-help"
-                                                       :title="getJustificationDescription(block.justification)">
-                                                     {{ block.justification.replace(/_/g, ' ') }}
-                                                 </span>
-                                             </div>
-                                             <div class="text-[10px] text-gray-500 font-mono text-right shrink-0">
-                                                 <div v-if="block.user" class="text-gray-400">{{ block.user }}</div>
-                                                 <div v-if="block.timestamp">{{ new Date(typeof block.timestamp === 'number' ? block.timestamp : parseInt(block.timestamp)).toLocaleString() }}</div>
-                                             </div>
-                                         </div>
-                                         <div v-if="block.details && block.details.trim()" class="text-sm text-gray-300 pl-2 border-l-2 border-gray-600 whitespace-pre-wrap break-words mt-2">
-                                             {{ block.details }}
-                                         </div>
-                                     </div>
-                                 </div>
-                                 <div v-else-if="assessment.comments.length > 0" class="text-xs text-gray-500 italic opacity-50 pl-1 mb-2">
-                                     No assessment state recorded, but comments available.
-                                 </div>
-
-                                 <!-- Comments / Audit Log Section -->
-                                 <div v-if="assessment.comments.length > 0" class="mt-4">
-                                     <div class="flex items-center justify-between mb-2">
-                                         <h5 class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-600">Audit Trail ({{ assessment.comments.length }})</h5>
-                                         <button 
-                                            @click="showAuditLog = !showAuditLog"
-                                            class="text-[9px] font-black uppercase tracking-widest text-blue-500/70 hover:text-blue-400 transition-all flex items-center gap-1.5"
-                                         >
-                                            <History :size="10" />
-                                            {{ showAuditLog ? 'Collapse Trail' : 'Expand Trail' }}
-                                         </button>
-                                     </div>
-
-                                     <div v-if="showAuditLog" class="space-y-2 mt-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar bg-black/20 p-3 rounded-lg border border-white/5">
-                                         <div v-for="(c, ci) in assessment.comments" :key="ci" class="text-xs text-gray-400 italic pl-3 border-l border-gray-700 py-0.5">
-                                             {{ c.comment }} <span class="text-[10px] text-gray-600 not-italic block mt-0.5 font-bold">Assessed on {{ new Date(c.timestamp).toLocaleDateString() }}</span>
-                                         </div>
-                                     </div>
-                                 </div>
-                             </div>
-                             <div v-else class="text-xs text-gray-500 italic opacity-50 pl-1">
-                                 No assessment recorded for these versions.
-                             </div>
-
-                             <!-- Dependency Relationship & Chains Section -->
-                             <div class="mt-4 pt-2 border-t border-gray-800/50">
-                                 <div class="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2">
-                                     Dependencies
-                                 </div>
-                                 <template v-for="(rel, relIdx) in [partitionByRelationship(assessment.instances)]" :key="relIdx">
-                                     <!-- Direct dependencies -->
-                                     <template v-if="rel.direct.length > 0">
-                                         <div v-for="inst in rel.direct" :key="'d-' + inst.component_name + inst.component_version" class="mb-1">
-                                             <div class="flex items-center gap-1.5">
-                                                 <span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
-                                                 <span class="text-[10px] font-mono font-semibold text-gray-200">
-                                                     {{ inst.component_name }}<span class="text-gray-500">@{{ inst.component_version }}</span>
-                                                 </span>
-                                                 <span class="px-1 py-0 text-[8px] font-black uppercase text-red-400 bg-red-600/15 rounded border border-red-600/25">Direct</span>
-                                                 <button
-                                                     @click.stop="toggleChainForComponent('d-' + inst.component_name + inst.component_version)"
-                                                     class="ml-auto text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
-                                                     title="Show dependency chains"
-                                                 >
-                                                     <ChevronDown :size="10" :class="isChainExpanded('d-' + inst.component_name + inst.component_version) ? 'rotate-180' : ''" class="transition-transform" />
-                                                     chains
-                                                 </button>
-                                             </div>
-                                             <div v-if="isChainExpanded('d-' + inst.component_name + inst.component_version)" class="ml-4 mt-1">
-                                                 <DependencyChainViewer
-                                                     v-for="ui in getUniqueComponentInstances(assessment.instances).filter(u => u.component_name === inst.component_name && u.component_version === inst.component_version)"
-                                                     :key="'chain-d-' + ui.component_uuid"
-                                                     :project-uuid="ui.project_uuid"
-                                                     :component-uuid="ui.component_uuid"
-                                                     :project-name="ui.project_name"
-                                                     :paths="ui.dependency_chains"
-                                                 />
-                                             </div>
-                                         </div>
-                                     </template>
-                                     <!-- Transitive dependencies -->
-                                     <template v-if="rel.transitive.length > 0">
-                                         <div v-for="inst in rel.transitive" :key="'t-' + inst.component_name + inst.component_version" class="mb-1">
-                                             <div class="flex items-center gap-1.5">
-                                                 <span class="w-1.5 h-1.5 rounded-full bg-purple-500/60 shrink-0"></span>
-                                                 <span class="text-[10px] font-mono text-gray-400">
-                                                     {{ inst.component_name }}<span class="text-gray-600">@{{ inst.component_version }}</span>
-                                                 </span>
-                                                 <span class="px-1 py-0 text-[8px] font-bold uppercase text-purple-400/70 bg-purple-600/10 rounded border border-purple-600/20">Transitive</span>
-                                                 <button
-                                                     @click.stop="toggleChainForComponent('t-' + inst.component_name + inst.component_version)"
-                                                     class="ml-auto text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
-                                                     title="Show dependency chains"
-                                                 >
-                                                     <ChevronDown :size="10" :class="isChainExpanded('t-' + inst.component_name + inst.component_version) ? 'rotate-180' : ''" class="transition-transform" />
-                                                     chains
-                                                 </button>
-                                             </div>
-                                             <div v-if="isChainExpanded('t-' + inst.component_name + inst.component_version)" class="ml-4 mt-1">
-                                                 <DependencyChainViewer
-                                                     v-for="ui in getUniqueComponentInstances(assessment.instances).filter(u => u.component_name === inst.component_name && u.component_version === inst.component_version)"
-                                                     :key="'chain-t-' + ui.component_uuid"
-                                                     :project-uuid="ui.project_uuid"
-                                                     :component-uuid="ui.component_uuid"
-                                                     :project-name="ui.project_name"
-                                                     :paths="ui.dependency_chains"
-                                                 />
-                                             </div>
-                                         </div>
-                                     </template>
-                                     <!-- Unknown relationship -->
-                                     <template v-if="rel.unknown.length > 0">
-                                         <div v-for="inst in rel.unknown" :key="'u-' + inst.component_name + inst.component_version" class="mb-1">
-                                             <div class="flex items-center gap-1.5">
-                                                 <span class="w-1.5 h-1.5 rounded-full bg-gray-600 shrink-0"></span>
-                                                 <span class="text-[10px] font-mono text-gray-500">
-                                                     {{ inst.component_name }}<span class="text-gray-600">@{{ inst.component_version }}</span>
-                                                 </span>
-                                                 <span class="px-1 py-0 text-[8px] font-bold uppercase text-gray-500 bg-gray-700/20 rounded border border-gray-600/25">Unknown</span>
-                                                 <button
-                                                     @click.stop="toggleChainForComponent('u-' + inst.component_name + inst.component_version)"
-                                                     class="ml-auto text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
-                                                     title="Show dependency chains"
-                                                 >
-                                                     <ChevronDown :size="10" :class="isChainExpanded('u-' + inst.component_name + inst.component_version) ? 'rotate-180' : ''" class="transition-transform" />
-                                                     chains
-                                                 </button>
-                                             </div>
-                                             <div v-if="isChainExpanded('u-' + inst.component_name + inst.component_version)" class="ml-4 mt-1">
-                                                 <DependencyChainViewer
-                                                     v-for="ui in getUniqueComponentInstances(assessment.instances).filter(u => u.component_name === inst.component_name && u.component_version === inst.component_version)"
-                                                     :key="'chain-u-' + ui.component_uuid"
-                                                     :project-uuid="ui.project_uuid"
-                                                     :component-uuid="ui.component_uuid"
-                                                     :project-name="ui.project_name"
-                                                     :paths="ui.dependency_chains"
-                                                 />
-                                             </div>
-                                         </div>
-                                     </template>
-                                 </template>
-                             </div>
-                         </div>
-                    </div>
-            </div>
-            
+                         <VulnGroupAssessmentDetails
+                             v-for="assessment in groupedAssessments"
+                             :key="`${assessment.state}-${assessment.instances.length}`"
+                             :assessment="assessment"
+                         />
+                     </div>
+                 </div>
             <div class="bg-gray-900 p-4 rounded border border-gray-700 h-fit">
                 <h4 class="font-bold flex items-center gap-2 mb-4">
                     <Shield :size="16" class="text-blue-400"/>
@@ -1866,8 +1516,8 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                                     v-model="details" 
                                     @input="formTouched = true"
                                     placeholder="Technical details..."
-                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
-                                />
+                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-32"
+                                ></textarea>
                             </div>
                         </div>
                     </div>
@@ -1887,7 +1537,7 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                             v-model="comment"
                             placeholder="Add a comment for audit trail..."
                             class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
-                        />
+                        ></textarea>
                     </div>
                     
                     <div v-if="isReviewer" class="flex items-center gap-2">
@@ -1920,7 +1570,6 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                 </div>
             </div>
         </div>
-    </div>
 
     <!-- Grouped Calculator Modal -->
     <div v-if="showCalculatorModal && isReviewer" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
@@ -2010,6 +1659,7 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
                 </button>
             </div>
         </div>
+    </div>
     </div>
 
     <!-- Conflict Resolution Modal -->
@@ -2132,4 +1782,3 @@ const getUniqueComponentInstances = (instances: { component_name: string, compon
     );
 }
 </style>
-

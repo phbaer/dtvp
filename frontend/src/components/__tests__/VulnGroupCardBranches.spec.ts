@@ -27,7 +27,8 @@ vi.mock('lucide-vue-next', () => ({
     RefreshCw: { template: '<span />' },
     CheckCircle: { template: '<span />' },
     AlertTriangle: { template: '<span />' },
-    RotateCcw: { template: '<span />' }
+    RotateCcw: { template: '<span />' },
+    History: { template: '<span />' }
 }))
 
 describe('VulnGroupCard Branch Coverage', () => {

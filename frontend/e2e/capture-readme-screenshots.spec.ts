@@ -93,7 +93,7 @@ async function captureWithPadding(
 }
 
 async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page']) {
-    await page.setViewportSize({ width: 1180, height: 1400 })
+    await page.setViewportSize({ width: 1800, height: 1400 })
 
     await page.route('**/auth/me', async (route) => {
         await route.fulfill({
@@ -356,6 +356,39 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
                             },
                         ],
                     },
+                    {
+                        id: 'CVE-2022-5555',
+                        title: 'Fully assessed low-severity issue in logging library',
+                        description: 'A vulnerability that has been fully assessed and approved via the structured workflow.',
+                        severity: 'LOW',
+                        cvss: 3.1,
+                        cvss_score: 3.1,
+                        cvss_vector: 'CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:L',
+                        tags: ['PlatformTeam'],
+                        affected_versions: [
+                            {
+                                project_name: 'TestProject',
+                                project_version: '2.0.0',
+                                project_uuid: 'p1',
+                                components: [
+                                    {
+                                        component_name: 'logging-core',
+                                        component_version: '1.8.3',
+                                        component_uuid: 'c5',
+                                        finding_uuid: 'f5',
+                                        vulnerability_uuid: 'v3',
+                                        analysis_state: 'NOT_AFFECTED',
+                                        analysis_details: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] [Date: 1712000000000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\nLogging path not reachable in production configuration.\n\n--- [Team: PlatformTeam] [State: NOT_AFFECTED] [Assessed By: analyst] [Date: 1711500000000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\nConfirmed: logging only used in debug mode.',
+                                        tags: ['PlatformTeam'],
+                                        dependency_chains: [
+                                            'TestProject -> platform-gateway -> logging-core',
+                                        ],
+                                        is_direct_dependency: false,
+                                    },
+                                ],
+                            },
+                        ],
+                    },
                 ],
             }),
         })
@@ -369,8 +402,12 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
             component_uuid: inst.component_uuid,
             vulnerability_uuid: inst.vulnerability_uuid,
             analysis: {
-                state: inst.component_uuid === 'c1' || inst.component_uuid === 'c2' ? 'IN_TRIAGE' : 'NOT_SET',
-                analysisState: inst.component_uuid === 'c1' || inst.component_uuid === 'c2' ? 'IN_TRIAGE' : 'NOT_SET',
+                state: inst.component_uuid === 'c1' || inst.component_uuid === 'c2' ? 'IN_TRIAGE'
+                     : inst.component_uuid === 'c5' ? 'NOT_AFFECTED'
+                     : 'NOT_SET',
+                analysisState: inst.component_uuid === 'c1' || inst.component_uuid === 'c2' ? 'IN_TRIAGE'
+                             : inst.component_uuid === 'c5' ? 'NOT_AFFECTED'
+                             : 'NOT_SET',
                 isSuppressed: false,
                 analysisDetails: inst.component_uuid === 'c1'
                     ? '--- [Team: LegacyPlatformAlias] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1710000000000] [Justification: CODE_NOT_PRESENT] ---\nLegacy alias assessment block retained for compatibility.'
@@ -437,8 +474,8 @@ test.describe('Capture README screenshots', () => {
         await morePathsButton.click()
         await expect(page.getByText('gateway-facade').first()).toBeVisible({ timeout: 10000 })
 
-        const dependencySection = page.getByText('Dependencies').first().locator('..')
-        await captureWithPadding(dependencySection, '../docs/screenshots/project-view-dependencies.png')
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await captureWithPadding(card, '../docs/screenshots/project-view-dependencies.png')
     })
 
     test('capture statistics screenshot', async ({ page }) => {

@@ -224,6 +224,12 @@ cd frontend
 npm run test:unit -- --run
 ```
 
+### Frontend Unit Tests in Container (Podman)
+
+```bash
+sh scripts/run-frontend-tests-podman.sh unit
+```
+
 ### Frontend End-To-End Tests
 
 The UI tests expect the local stack to be available.
@@ -233,6 +239,24 @@ pm2 start ecosystem.config.js --update-env
 cd frontend
 npm run test:ui
 ```
+
+### Frontend UI Tests in Container (Podman)
+
+Use podman if your host OS does not support local Playwright execution:
+
+```bash
+sh scripts/run-frontend-tests-podman.sh ui
+```
+
+### Development Container
+
+This repository now includes devcontainer support in `.devcontainer/`.
+
+- Open the folder in VS Code using the Remote - Containers / Dev Containers extension.
+- The container installs Python, Node.js, `uv`, and frontend dependencies.
+- Forwarded ports: `8000` for the backend and `5173` for the frontend dev server.
+
+If you use Podman as your container runtime, make sure VS Code is configured to use the Podman socket from `podman-docker`.
 
 ## Docker Deployment
 
@@ -261,6 +285,7 @@ The image mounts `./data` into the container so local mapping and rule files per
 | :--- | :--- | :--- |
 | `DTVP_DT_API_URL` | Base URL of the Dependency-Track API | `http://localhost:8081` |
 | `DTVP_DT_API_KEY` | Dependency-Track API key | `change_me` |
+| `DTVP_DT_CACHE_PATH` | Local path for Dependency-Track cache files and pending update queue | `data/dt_cache` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |

@@ -1,8 +1,19 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, MagicMock
 from main import app, get_client, get_current_user
 from dt_client import DTClient
+import dt_cache
+
+
+@pytest.fixture(autouse=True)
+def reset_cache_manager(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "dt_cache"
+    monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
+    dt_cache.cache_manager.reset(str(cache_dir))
+    yield
 
 
 # Mock Dependency Track Client

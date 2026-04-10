@@ -13,6 +13,7 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 .coverage/
+data/dt_cache/
 
 # Virtual environments
 .venv

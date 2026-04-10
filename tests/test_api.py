@@ -37,6 +37,15 @@ def test_search_projects_no_name(client, mock_dt_client):
     assert len(data) == 1
 
 
+def test_cache_status_endpoint(client):
+    with patch('main.cache_manager.get_cache_status', return_value={"fully_cached": True, "last_refreshed_at": "2026-04-09T12:00:00Z"}):
+        response = client.get("/api/cache-status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["fully_cached"] is True
+        assert data["last_refreshed_at"] == "2026-04-09T12:00:00Z"
+
+
 @pytest.mark.asyncio
 async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
     # Configure mock for context manager usage

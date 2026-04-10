@@ -8,6 +8,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
     updateAssessment: vi.fn(),
+    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
 }))
@@ -327,6 +328,17 @@ describe('ProjectView Filters', () => {
         const openCards = wrapper.findAll('.vuln-card')
         expect(openCards.length).toBeGreaterThanOrEqual(1)
         expect(openCards.map(c => c.text())).toContain('V4')
+
+        const getCount = (text: string) => {
+            const btns = wrapper.findAll('button').filter(b => b.text().includes(text))
+            const btn = btns.find(b => b.text().trim().startsWith(text))
+            return parseInt(btn?.find('span').text() || '0')
+        }
+
+        // V1 is OPEN/NOT_SET, V4 is OPEN with pending review and FALSE_POSITIVE tech state.
+        expect(getCount('Not Set')).toBe(1)
+        expect(getCount('False Positive')).toBeGreaterThanOrEqual(1)
+
     })
 
     it('should treat plaintext assessments as valid data for filters', async () => {

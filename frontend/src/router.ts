@@ -24,7 +24,7 @@ export const router = createRouter({
 let sessionChecked = false;
 let userRole: string | undefined = undefined;
 
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, _from) => {
     // If going to login, allow it
     if (to.path === '/login') {
         return;

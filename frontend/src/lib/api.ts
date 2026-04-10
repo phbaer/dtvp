@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Project, GroupedVuln, AssessmentPayload, Statistics } from '../types';
+import type { Project, GroupedVuln, AssessmentPayload, Statistics, CacheStatus } from '../types';
 import { getRuntimeConfig } from './env';
 
 const envApiUrl = getRuntimeConfig('DTVP_API_URL', '').replace(/\/$/, '');
@@ -51,6 +51,10 @@ export const getChangelog = async (): Promise<{ content: string }> => {
     return res.data;
 };
 
+export const getCacheStatus = async (): Promise<CacheStatus> => {
+    const res = await api.get('/cache-status');
+    return res.data;
+};
 
 export interface TaskResponse {
     task_id: string;

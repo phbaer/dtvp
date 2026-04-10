@@ -6,6 +6,7 @@ import { useRoute } from 'vue-router'
 
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
+    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
 }))

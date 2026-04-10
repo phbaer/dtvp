@@ -2,8 +2,8 @@
 import { ref, onMounted, inject, watch } from 'vue'
 import { getRoles, uploadRoles, updateRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
 
-const user = inject<any>('user')
-const realRole = inject<any>('realRole')
+const user = inject<any>('user', { role: 'ANALYST' })
+const realRole = inject<any>('realRole', ref('ANALYST'))
 const activeTab = ref('mapping')
 
 // Mapping state

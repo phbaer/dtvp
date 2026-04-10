@@ -85,9 +85,9 @@ const groupedProjects = computed(() => {
 
 <template>
   <div class="mx-auto">
-    <div class="flex justify-between items-center mb-6">
-        <h2 class="text-3xl font-bold">Projects</h2>
-        <div class="flex gap-4">
+    <div class="flex flex-col gap-6 md:flex-row md:justify-between md:items-start mb-8">
+        <h2 class="text-3xl font-bold pb-4 mt-4">Projects</h2>
+        <div class="flex flex-col gap-4 sm:flex-row mt-6">
             <div class="relative w-64">
                 <span class="absolute inset-y-0 left-0 flex items-center pl-3">
                     <Search :size="20" class="text-gray-500" />
