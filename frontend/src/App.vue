@@ -97,10 +97,10 @@ const acknowledgeChangelog = () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-900 text-white font-sans w-full flex flex-col">
+  <div class="min-h-screen min-w-screen max-w-full bg-gray-900 text-white font-sans flex flex-col">
     <template v-if="$route.path !== '/login'">
         <header class="border-b border-gray-700 bg-gray-800">
-            <div class="max-w-7xl mx-auto p-4 flex justify-between items-center w-full">
+            <div class="px-6 py-3 flex justify-between items-center w-full">
                 <div class="flex items-center gap-6">
                     <h1 class="text-xl font-bold text-blue-400">
                         <router-link to="/">DTVP</router-link>
@@ -147,11 +147,11 @@ const acknowledgeChangelog = () => {
                 </div>
             </div>
         </header>
-        <main class="p-6 sm:p-8 max-w-7xl mx-auto w-full flex-grow">
+        <main class="px-6 w-full flex-grow">
             <router-view></router-view>
         </main>
-        <footer class="border-t border-gray-700 bg-gray-900">
-            <div class="max-w-7xl mx-auto p-4 text-center text-xs text-gray-500 space-y-1">
+        <footer class="border-t border-gray-700 bg-gray-800">
+            <div class="px-6 py-4 text-center text-xs text-gray-500 space-y-1">
                 <div>DTVP v{{ version }} (build {{ build }})</div>
                 <div>Author: {{ projectAuthor }}</div>
                 <div>
@@ -163,9 +163,6 @@ const acknowledgeChangelog = () => {
                     <a :href="sbomUrl + '/backend'" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download Backend SBOM</a>
                     •
                     <a :href="sbomUrl + '/frontend'" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download Frontend SBOM</a>
-                </div>
-                <div>
-                    <a :href="sbomUrl" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download CycloneDX SBOM</a>
                 </div>
             </div>
         </footer>

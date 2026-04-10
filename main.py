@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from auth import auth_settings, get_current_user
 from auth import router as auth_router
 from dt_client import DTClient, DTSettings, get_client
+from dt_cache import cache_manager, PendingUpdateExistsError
 from logic import (
     BOMAnalysisCache,
     calculate_aggregated_state,
@@ -51,7 +52,22 @@ logger.setLevel(logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting DTVP version {VERSION} (build {BUILD_COMMIT})")
-    yield
+    try:
+        await cache_manager.initialize()
+    except Exception as exc:
+        logger.warning("Cache manager failed to initialize: %s", exc)
+
+    app.state.cache_sync_task = asyncio.create_task(cache_manager.background_sync_loop())
+    try:
+        yield
+    finally:
+        task = getattr(app.state, "cache_sync_task", None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
@@ -233,7 +249,7 @@ async def search_projects(
 ):
     # DT API expects optional name filter. If absent, list all projects.
     try:
-        return await client.get_projects(name or "")
+        return await cache_manager.get_projects(client, name)
     except Exception as e:
         logger.error("Error fetching projects from Dependency-Track: %s", e)
         raise HTTPException(
@@ -242,8 +258,25 @@ async def search_projects(
         )
 
 
+@api_router.get("/cache-status")
+async def cache_status(
+    user: str = Depends(get_current_user),
+):
+    try:
+        return cache_manager.get_cache_status()
+    except Exception as e:
+        logger.error("Error fetching cache status: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to determine cache freshness at this time.",
+        )
+
+
 # Job Manager
 tasks = {}
+
+assessment_locks: Dict[tuple[str, str, str], asyncio.Lock] = {}
+assessment_lock_registry = asyncio.Lock()
 
 
 class TaskResponse(BaseModel):
@@ -252,6 +285,32 @@ class TaskResponse(BaseModel):
     message: str
     progress: int = 0
     result: Optional[List[dict]] = None
+
+
+async def _acquire_assessment_locks(
+    keys: List[tuple[str, str, str]],
+) -> tuple[bool, Optional[tuple[str, str, str]], List[asyncio.Lock]]:
+    acquired: List[asyncio.Lock] = []
+    async with assessment_lock_registry:
+        for key in keys:
+            lock = assessment_locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                assessment_locks[key] = lock
+            if lock.locked():
+                for held in acquired:
+                    held.release()
+                return False, key, []
+            await lock.acquire()
+            acquired.append(lock)
+
+    return True, None, acquired
+
+
+def _release_assessment_locks(acquired: List[asyncio.Lock]) -> None:
+    for lock in acquired:
+        if lock.locked():
+            lock.release()
 
 
 def get_version_fetch_concurrency() -> int:
@@ -305,9 +364,9 @@ async def fetch_version_snapshot(
     team_mapping: Dict[str, Any],
 ) -> tuple[Dict[str, Any], BOMAnalysisCache, Dict[str, int]]:
     findings_result, full_vulns_result, bom_result = await asyncio.gather(
-        client.get_vulnerabilities(version_info["uuid"], cve=cve),
-        client.get_project_vulnerabilities(version_info["uuid"]),
-        client.get_bom(version_info["uuid"]),
+        cache_manager.get_vulnerabilities(client, version_info["uuid"], cve=cve),
+        cache_manager.get_project_vulnerabilities(client, version_info["uuid"]),
+        cache_manager.get_bom(client, version_info["uuid"]),
         return_exceptions=True,
     )
 
@@ -394,7 +453,7 @@ async def process_grouped_vulns_task(
         logger.info("Task %s started for grouped vulnerabilities", task_id)
 
         # 1. Get all projects matching name to find versions
-        projects = await client.get_projects(name)
+        projects = await cache_manager.get_projects(client, name)
         if name:
             versions = [p for p in projects if p.get("name") == name]
         else:
@@ -514,7 +573,7 @@ async def get_statistics(
     """
     # 1. Fetch data using existing logic (matching naming in search_projects/start_group_vulns_task)
     try:
-        projects = await client.get_projects(name or "")
+        projects = await cache_manager.get_projects(client, name)
     except Exception as e:
         logger.error("Error fetching projects from Dependency-Track: %s", e)
         raise HTTPException(
@@ -669,146 +728,203 @@ async def update_assessment(
         bool(req.original_analysis),
     )
 
-    # Conflict Check (Optimistic Locking)
-    if not req.force and req.original_analysis:
-        logger.debug("Checking for conflicts...")
-        # Fetch current state
-        tasks = []
-        for instance in req.instances:
-            tasks.append(
-                client.get_analysis(
-                    project_uuid=instance["project_uuid"],
-                    component_uuid=instance["component_uuid"],
-                    vulnerability_uuid=instance["vulnerability_uuid"],
-                )
-            )
-        current_analyses = await asyncio.gather(*tasks, return_exceptions=True)
-
-        conflicts = []
-        for i, current in enumerate(current_analyses):
-            instance = req.instances[i]
-            finding_uuid = instance.get("finding_uuid")
-            original = req.original_analysis.get(finding_uuid)
-
-            if isinstance(current, Exception) or not current:
-                continue
-
-            # Compare relevant fields if original exists
-            if original:
-                # Keys in DT response: analysisState, analysisDetails, isSuppressed
-                curr_state = current.get("analysisState")
-                curr_details = current.get("analysisDetails")
-                curr_suppressed = current.get("isSuppressed")
-
-                orig_state = original.get("analysisState")
-                orig_details = original.get("analysisDetails")
-                orig_suppressed = original.get("isSuppressed")
-
-                has_conflict = False
-                if (curr_state or "") != (orig_state or ""):
-                    has_conflict = True
-                if (curr_details or "") != (orig_details or ""):
-                    has_conflict = True
-                if bool(curr_suppressed) != bool(orig_suppressed):
-                    has_conflict = True
-
-                if has_conflict:
-                    logger.warning("Conflict found for %s", finding_uuid)
-                    conflicts.append(
-                        {
-                            "finding_uuid": finding_uuid,
-                            "project_name": instance.get("project_name"),
-                            "project_version": instance.get("project_version"),
-                            "component_name": instance.get("component_name"),
-                            "component_version": instance.get("component_version"),
-                            "current": current,
-                            "original": original,
-                            "your_change": {
-                                "analysisState": req.state,
-                                "analysisDetails": req.details,
-                                "isSuppressed": req.suppressed,
-                            },
-                        }
-                    )
-
-        if conflicts:
-            return JSONResponse(
-                status_code=409,
-                content={"status": "conflict", "conflicts": conflicts},
-            )
-
-    logger.debug("Details: %s...", req.details[:100])
-
-    # Iterate and update
-    results = []
+    assessment_keys = []
     for instance in req.instances:
-        try:
-            logger.debug(
-                "Updating instance: %s (Vulnerability: %s)",
-                instance.get("finding_uuid"),
+        assessment_keys.append(
+            (
+                instance.get("project_uuid"),
+                instance.get("component_uuid"),
                 instance.get("vulnerability_uuid"),
             )
+        )
 
-            # Check Role Logic
-            role = get_user_role(user)
+    ok, conflict_key, acquired_locks = await _acquire_assessment_locks(
+        assessment_keys
+    )
+    if not ok:
+        detail = {
+            "status": "conflict",
+            "message": "Another update is already in progress for this finding.",
+            "project_uuid": conflict_key[0],
+            "component_uuid": conflict_key[1],
+            "vulnerability_uuid": conflict_key[2],
+        }
+        return JSONResponse(status_code=409, content=detail)
 
-            # Get existing details for merging
-            finding_uuid = instance.get("finding_uuid")
-            original_analysis = (
-                req.original_analysis.get(finding_uuid)
-                if req.original_analysis
-                else None
-            )
-            existing_details = (
-                original_analysis.get("analysisDetails", "")
-                if original_analysis
-                else ""
-            )
+    try:
+        # Conflict Check (Optimistic Locking)
+        if not req.force and req.original_analysis:
+            logger.debug("Checking for conflicts...")
+            # Fetch current state
+            tasks = []
+            for instance in req.instances:
+                tasks.append(
+                    client.get_analysis(
+                        project_uuid=instance["project_uuid"],
+                        component_uuid=instance["component_uuid"],
+                        vulnerability_uuid=instance["vulnerability_uuid"],
+                    )
+                )
+            current_analyses = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Use shared logic for tag processing and state aggregation
-            if req.comparison_mode == "REPLACE":
-                # In REPLACE mode, we trust the details provided by the client as the full source of truth
-                final_details_str = req.details
-                aggregated_state = calculate_aggregated_state(req.details)
-            else:
-                final_details_str, aggregated_state = process_assessment_details(
-                    req.details, user, role, req.team, req.state, existing_details
+            conflicts = []
+            for i, current in enumerate(current_analyses):
+                instance = req.instances[i]
+                finding_uuid = instance.get("finding_uuid")
+                original = req.original_analysis.get(finding_uuid)
+
+                if isinstance(current, Exception) or not current:
+                    continue
+
+                # Compare relevant fields if original exists
+                if original:
+                    # Keys in DT response: analysisState, analysisDetails, isSuppressed
+                    curr_state = current.get("analysisState")
+                    curr_details = current.get("analysisDetails")
+                    curr_suppressed = current.get("isSuppressed")
+
+                    orig_state = original.get("analysisState")
+                    orig_details = original.get("analysisDetails")
+                    orig_suppressed = original.get("isSuppressed")
+
+                    has_conflict = False
+                    if (curr_state or "") != (orig_state or ""):
+                        has_conflict = True
+                    if (curr_details or "") != (orig_details or ""):
+                        has_conflict = True
+                    if bool(curr_suppressed) != bool(orig_suppressed):
+                        has_conflict = True
+
+                    if has_conflict:
+                        logger.warning("Conflict found for %s", finding_uuid)
+                        conflicts.append(
+                            {
+                                "finding_uuid": finding_uuid,
+                                "project_name": instance.get("project_name"),
+                                "project_version": instance.get("project_version"),
+                                "component_name": instance.get("component_name"),
+                                "component_version": instance.get("component_version"),
+                                "current": current,
+                                "original": original,
+                                "your_change": {
+                                    "analysisState": req.state,
+                                    "analysisDetails": req.details,
+                                    "isSuppressed": req.suppressed,
+                                },
+                            }
+                        )
+
+            if conflicts:
+                return JSONResponse(
+                    status_code=409,
+                    content={"status": "conflict", "conflicts": conflicts},
                 )
 
-            await client.update_analysis(
-                project_uuid=instance["project_uuid"],
-                component_uuid=instance["component_uuid"],
-                vulnerability_uuid=instance["vulnerability_uuid"],
-                state=aggregated_state,
-                details=final_details_str,
-                comment=f"{req.comment}{' [Team: ' + req.team + ']' if req.team else ''} -- {user}"
-                if req.comment
-                else f"[Team: {req.team}] -- {user}"
-                if req.team
-                else f"Assessed -- {user}",
-                justification=req.justification
-                if aggregated_state == "NOT_AFFECTED"
-                else "NOT_SET",
-                suppressed=req.suppressed,
-            )
-            results.append(
-                {
-                    "status": "success",
-                    "uuid": instance["finding_uuid"],
-                    "new_state": aggregated_state,
-                    "new_details": final_details_str,
-                }
-            )
-        except Exception as e:
-            results.append(
-                {
-                    "status": "error",
-                    "uuid": instance.get("finding_uuid"),
-                    "error": str(e),
-                }
-            )
+        logger.debug("Details: %s...", req.details[:100])
 
-    return results
+        # Iterate and update
+        results = []
+        for instance in req.instances:
+            try:
+                logger.debug(
+                    "Updating instance: %s (Vulnerability: %s)",
+                    instance.get("finding_uuid"),
+                    instance.get("vulnerability_uuid"),
+                )
+
+                # Check Role Logic
+                role = get_user_role(user)
+
+                # Get existing details for merging
+                finding_uuid = instance.get("finding_uuid")
+                original_analysis = (
+                    req.original_analysis.get(finding_uuid)
+                    if req.original_analysis
+                    else None
+                )
+                existing_details = (
+                    original_analysis.get("analysisDetails", "")
+                    if original_analysis
+                    else ""
+                )
+
+                # Use shared logic for tag processing and state aggregation
+                if req.comparison_mode == "REPLACE":
+                    # In REPLACE mode, we trust the details provided by the client as the full source of truth
+                    final_details_str = req.details
+                    aggregated_state = calculate_aggregated_state(req.details)
+                else:
+                    final_details_str, aggregated_state = process_assessment_details(
+                        req.details, user, role, req.team, req.state, existing_details
+                    )
+
+                payload = {
+                    "project_uuid": instance["project_uuid"],
+                    "component_uuid": instance["component_uuid"],
+                    "vulnerability_uuid": instance["vulnerability_uuid"],
+                    "state": aggregated_state,
+                    "details": final_details_str,
+                    "comment": f"{req.comment}{' [Team: ' + req.team + ']' if req.team else ''} -- {user}"
+                    if req.comment
+                    else f"[Team: {req.team}] -- {user}"
+                    if req.team
+                    else f"Assessed -- {user}",
+                    "justification": req.justification
+                    if aggregated_state == "NOT_AFFECTED"
+                    else "NOT_SET",
+                    "suppressed": req.suppressed,
+                }
+
+                try:
+                    update_id = await cache_manager.queue_analysis_update(payload)
+                except PendingUpdateExistsError as exc:
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "status": "conflict",
+                            "message": str(exc),
+                        },
+                    )
+
+                try:
+                    await client.update_analysis(**payload)
+                    await cache_manager.remove_pending_update(update_id)
+                    results.append(
+                        {
+                            "status": "success",
+                            "uuid": instance["finding_uuid"],
+                            "new_state": aggregated_state,
+                            "new_details": final_details_str,
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Queued DT update because remote update failed: %s", e
+                    )
+                    results.append(
+                        {
+                            "status": "error",
+                            "queued": True,
+                            "uuid": instance.get("finding_uuid"),
+                            "error": str(e),
+                            "new_state": aggregated_state,
+                            "new_details": final_details_str,
+                        }
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                results.append(
+                    {
+                        "status": "error",
+                        "uuid": instance.get("finding_uuid"),
+                        "error": str(e),
+                    }
+                )
+
+        return results
+    finally:
+        _release_assessment_locks(acquired_locks)
 
 
 @api_router.get("/project/{project_uuid}/component/{component_uuid}/dependency-chains")
@@ -817,7 +933,7 @@ async def get_dependency_chains(
     component_uuid: str,
     client: DTClient = Depends(get_client),
 ):
-    bom = await client.get_bom(project_uuid)
+    bom = await cache_manager.get_bom(client, project_uuid)
     if not bom:
         return []
 

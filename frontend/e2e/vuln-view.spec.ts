@@ -21,6 +21,14 @@ test.describe('Vulnerability View and Rescoring', () => {
             });
         });
 
+        // Mock Cache Status
+        await page.route('**/api/cache-status', async (route) => {
+            await route.fulfill({
+                status: 200,
+                body: JSON.stringify({ fully_cached: true, last_refreshed_at: new Date().toISOString() }),
+            });
+        });
+
         // Mock Projects
         await page.route('**/api/projects?name=TestProject', async (route) => {
             // Return extended list immediately for search/filter

@@ -18,6 +18,7 @@ vi.mock('../../lib/api', () => ({
         major_version_counts: {},
         major_version_details: {},
     })),
+    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
 }))
@@ -345,7 +346,7 @@ describe('ProjectView.vue', () => {
         })
 
         expect(wrapper.text()).toContain('Starting global search')
-        expect(wrapper.get('h2').text()).toContain('Vulnerabilities for All Projects')
+        expect(wrapper.get('h2').text()).toBe('All Projects')
 
         await flushPromises()
 

@@ -4,10 +4,12 @@ import type { Statistics } from '../types'
 import { ShieldAlert, CheckCircle2, Info } from 'lucide-vue-next'
 import { sortVersions } from '../lib/version'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     stats: Statistics
     projectName?: string
-}>()
+}>(), {
+    projectName: ''
+})
 
 const severityColors: Record<string, string> = {
     'CRITICAL': 'bg-red-600',

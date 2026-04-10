@@ -14,7 +14,9 @@ vi.mock('lucide-vue-next', () => ({
     ShieldAlert: { template: '<span />' },
     RefreshCw: { template: '<span />' },
     CheckCircle: { template: '<span />' },
-    AlertTriangle: { template: '<span />' }
+    AlertTriangle: { template: '<span />' },
+    RotateCcw: { template: '<span />' },
+    History: { template: '<span />' }
 }))
 
 vi.mock('../../lib/api', () => ({

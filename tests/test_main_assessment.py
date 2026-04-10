@@ -125,3 +125,36 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
         assert "[Rescored Vector: CVSS:4.0" not in kwargs["details"]
         # Ensure it's still marked as pending
         assert "[Status: Pending Review]" in kwargs["details"]
+
+
+def test_update_assessment_rejects_duplicate_pending_update(override_deps, mock_client):
+    client = TestClient(app)
+    mock_client.update_analysis.side_effect = Exception("DT unavailable")
+
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "NOT_AFFECTED",
+        "details": "First update",
+    }
+
+    # First request queues the update because DT is unavailable.
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        resp = client.post("/api/assessment", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()[0]["status"] == "error"
+        assert resp.json()[0]["queued"] is True
+
+    # Second request for the same finding should be rejected with a conflict.
+    with patch("main.get_user_role", return_value="REVIEWER"):
+        resp2 = client.post("/api/assessment", json=payload)
+        assert resp2.status_code == 409
+        assert resp2.json()["status"] == "conflict"
+
+

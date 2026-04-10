@@ -26,7 +26,9 @@ vi.mock('lucide-vue-next', () => ({
     RefreshCw: { template: '<span class="icon-refresh" />' },
     AlertTriangle: { template: '<span class="icon-alert" />' },
     Calculator: { template: '<span class="icon-calc" />' },
-    ExternalLink: { template: '<span class="icon-link" />' }
+    ExternalLink: { template: '<span class="icon-link" />' },
+    RotateCcw: { template: '<span class="icon-rotate-ccw" />' },
+    History: { template: '<span class="icon-history" />' }
 }))
 
 describe('VulnGroupCard Assessment Markers', () => {
@@ -76,7 +78,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
+        const tags = wrapper.findAll('[data-testid="team-tag"]')
         expect(tags.length).toBe(2) // TeamA, TeamB
 
         // CheckCircle should not be present
@@ -100,7 +102,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
+        const tags = wrapper.findAll('[data-testid="team-tag"]')
         expect(tags.length).toBe(2)
 
         // First tag (TeamA) should have checkmark
@@ -131,7 +133,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
+        const tags = wrapper.findAll('[data-testid="team-tag"]')
         expect(tags.length).toBe(2)
 
         const teamATag = tags.find(t => t.text().includes('TeamA'))
@@ -139,6 +141,27 @@ describe('VulnGroupCard Assessment Markers', () => {
 
         expect(teamATag?.findComponent(CheckCircle).exists()).toBe(true)
         expect(teamBTag?.findComponent(CheckCircle).exists()).toBe(false)
+    })
+
+    it('shows a distinct legacy assessed fold badge for legacy assessed issues', () => {
+        const legacyGroup = JSON.parse(JSON.stringify(defaultGroup))
+        legacyGroup.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
+        legacyGroup.affected_versions[0].components[0].analysis_details = ''
+
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: legacyGroup as any
+            },
+            global: {
+                provide: {
+                    user: userMock
+                }
+            }
+        })
+
+        const fold = wrapper.find('.absolute.top-0.right-0 > div')
+        expect(fold.exists()).toBe(true)
+        expect(fold.classes()).toContain('bg-sky-600')
     })
 
     it('shows checkmark for multiple assessed teams', () => {
@@ -157,7 +180,7 @@ describe('VulnGroupCard Assessment Markers', () => {
             }
         })
 
-        const tags = wrapper.findAll('.flex-wrap .rounded-lg.font-black')
+        const tags = wrapper.findAll('[data-testid="team-tag"]')
         expect(tags.length).toBe(2)
 
         expect(tags[0]?.findComponent(CheckCircle).exists()).toBe(true)

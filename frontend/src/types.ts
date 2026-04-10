@@ -82,3 +82,8 @@ export interface Statistics {
     major_version_severity_counts?: Record<string, Record<string, number>>;
     version_severity_counts?: Record<string, Record<string, number>>;
 }
+
+export interface CacheStatus {
+    fully_cached: boolean;
+    last_refreshed_at: string | null;
+}
