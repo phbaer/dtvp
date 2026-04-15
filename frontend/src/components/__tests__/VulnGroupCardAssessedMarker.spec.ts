@@ -28,7 +28,19 @@ vi.mock('lucide-vue-next', () => ({
     Calculator: { template: '<span class="icon-calc" />' },
     ExternalLink: { template: '<span class="icon-link" />' },
     RotateCcw: { template: '<span class="icon-rotate-ccw" />' },
-    History: { template: '<span class="icon-history" />' }
+    History: { template: '<span class="icon-history" />' },
+    Package: { template: '<span class="icon-package" />' },
+    Layers: { template: '<span class="icon-layers" />' },
+    ShieldOff: { template: '<span class="icon-shield-off" />' },
+    Zap: { template: '<span class="icon-zap" />' },
+    CircleDot: { template: '<span class="icon-circle-dot" />' },
+    Search: { template: '<span class="icon-search" />' },
+    ShieldCheck: { template: '<span class="icon-shield-check" />' },
+    Bug: { template: '<span class="icon-bug" />' },
+    GitBranch: { template: '<span class="icon-git-branch" />' },
+    Eye: { template: '<span class="icon-eye" />' },
+    ClipboardCopy: { template: '<span />' },
+    Plus: { template: '<span />' }
 }))
 
 describe('VulnGroupCard Assessment Markers', () => {
@@ -54,7 +66,8 @@ describe('VulnGroupCard Assessment Markers', () => {
                         vulnerability_uuid: 'v1',
                         finding_uuid: 'f1',
                         analysis_details: '',
-                        analysis_state: 'NOT_SET'
+                        analysis_state: 'NOT_SET',
+                        tags: ['TeamA', 'TeamB']
                     }
                 ]
             }

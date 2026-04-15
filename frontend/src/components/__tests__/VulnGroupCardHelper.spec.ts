@@ -1,6 +1,37 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
+
+vi.mock('../../lib/api', () => ({
+    updateAssessment: vi.fn(),
+    getAssessmentDetails: vi.fn(() => Promise.resolve([])),
+    getDependencyChains: vi.fn().mockResolvedValue([])
+}))
+
+vi.mock('lucide-vue-next', () => ({
+    ChevronDown: { template: '<span />' },
+    ChevronUp: { template: '<span />' },
+    Shield: { template: '<span />' },
+    Calculator: { template: '<span />' },
+    ExternalLink: { template: '<span />' },
+    RefreshCw: { template: '<span />' },
+    CheckCircle: { template: '<span />' },
+    AlertTriangle: { template: '<span />' },
+    RotateCcw: { template: '<span />' },
+    History: { template: '<span />' },
+    Package: { template: '<span />' },
+    Layers: { template: '<span />' },
+    ShieldOff: { template: '<span />' },
+    Zap: { template: '<span />' },
+    CircleDot: { template: '<span />' },
+    Search: { template: '<span />' },
+    ShieldCheck: { template: '<span />' },
+    Bug: { template: '<span />' },
+    GitBranch: { template: '<span />' },
+    Eye: { template: '<span />' },
+    ClipboardCopy: { template: '<span />' },
+    Plus: { template: '<span />' }
+}))
 
 // Mock types to satisfy linting
 const createMockComponent = (uuid: string, name: string, version: string, isDirect: boolean | null) => ({
@@ -22,7 +53,7 @@ const createMockComponent = (uuid: string, name: string, version: string, isDire
 
 describe('VulnGroupCard Helper Logic', () => {
 
-    it('handles duplicate component versions without duplicating the summary text', () => {
+    it('handles duplicate component versions without duplicating the summary text', async () => {
         const groupData = {
             id: 'CVE-TEST',
             affected_versions: [
@@ -40,20 +71,22 @@ describe('VulnGroupCard Helper Logic', () => {
 
         const wrapper = mount(VulnGroupCard, {
             props: {
-                group: groupData as any, // Type assertion to bypass strict validation if needed
+                group: groupData as any,
             },
             global: {
                 stubs: {}
             }
         })
 
-        // Search text content for deduplication verification
-        const cardText = wrapper.text()
-        const matches = (cardText.match(/LibA 1.0/g) || []).length
-        expect(matches).toBe(1)
+        // Expand the card to see component names in details
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Two duplicate LibA@1.0 components should be grouped into one assessment block
+        const instanceBlocks = wrapper.findAll('[data-testid="grouped-assessment"]')
+        expect(instanceBlocks.length).toBe(1)
     })
 
-    it('handles unknown dependency relationship gracefully', () => {
+    it('handles unknown dependency relationship gracefully', async () => {
         const groupData = {
             id: 'CVE-TEST-2',
             affected_versions: [
@@ -77,8 +110,11 @@ describe('VulnGroupCard Helper Logic', () => {
             }
         })
 
-        // Should not crash and show 1 instance
+        // Expand the card to see component names in details
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        // Should not crash and show component name
         const cardText = wrapper.text()
-        expect(cardText).toContain('LibB 2.0')
+        expect(cardText).toContain('LibB')
     })
 })

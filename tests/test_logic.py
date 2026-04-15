@@ -1,6 +1,8 @@
 import logic
+from fastapi.testclient import TestClient
+from test_setup import mock_dt
 from unittest.mock import patch
-from logic import group_vulnerabilities, BOMAnalysisCache
+from logic import group_vulnerabilities, BOMAnalysisCache, sanitize_rescored_vector
 
 
 def test_group_vulnerabilities_basic():
@@ -77,6 +79,42 @@ def test_group_vulnerabilities_basic():
     assert len(g2["affected_versions"][0]["components"]) == 1
 
 
+def test_sanitize_rescored_vector_preserves_valid():
+    """Valid rescored vector (base preserved + modifiers) passes through unchanged."""
+    orig = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    rescored = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L"
+    assert sanitize_rescored_vector(orig, rescored) == rescored
+
+
+def test_sanitize_rescored_vector_corrects_changed_base():
+    """Rescored vector with altered base metrics is corrected to preserve base + extract modifiers."""
+    orig = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    bad = "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:H/A:H/MPR:H"
+    result = sanitize_rescored_vector(orig, bad)
+    assert result == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:H"
+
+
+def test_sanitize_rescored_vector_no_modifiers_returns_none():
+    """When corrected vector has no modifiers (equals original), returns None."""
+    orig = "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N"
+    bad = "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:N/I:N/A:N"
+    assert sanitize_rescored_vector(orig, bad) is None
+
+
+def test_sanitize_rescored_vector_none_inputs():
+    """None/empty inputs are handled gracefully."""
+    assert sanitize_rescored_vector(None, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H") == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    assert sanitize_rescored_vector("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", None) is None
+    assert sanitize_rescored_vector(None, None) is None
+
+
+def test_sanitize_rescored_vector_cvss2():
+    """CVSSv2 vectors (no CVSS: prefix) are handled correctly."""
+    orig = "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+    rescored = "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+    assert sanitize_rescored_vector(orig, rescored) == rescored
+
+
 def test_group_vulnerabilities_rescored():
     v1_data = {
         "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
@@ -92,7 +130,7 @@ def test_group_vulnerabilities_rescored():
                 "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
                 "analysis": {
                     "state": "NOT_SET",
-                    "analysisDetails": "[Rescored: 5.5]\n[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L]\nSome details",
+                    "analysisDetails": "[Rescored: 5.5]\n[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAC:H/MA:L]\nSome details",
                 },
             }
         ],
@@ -102,9 +140,37 @@ def test_group_vulnerabilities_rescored():
     assert len(grouped) == 1
     g = grouped[0]
     assert g["rescored_cvss"] == 5.5
-    assert g["rescored_vector"] == "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L"
+    assert g["rescored_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MAC:H/MA:L"
     assert g["cvss_score"] == 9.8
     assert g["cvss_vector"] == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+
+
+def test_group_vulnerabilities_rescored_vector_adjusted_flag():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-1",
+                    "uuid": "vuuid1",
+                    "severity": "HIGH",
+                    "cvssV3BaseScore": 9.8,
+                    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "[Rescored: 5.5]\n[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H]\nSome details",
+                },
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 1
+    g = grouped[0]
+    assert g["rescored_vector_adjusted"] is True
+    assert g["rescored_vector"] is None
 
 
 def test_group_vulnerabilities_missing_data():
@@ -280,11 +346,8 @@ def test_group_vulnerabilities_tagging():
 
         assert len(grouped) == 1
         g = grouped[0]
-        # Should have both TeamB (direct match) and TeamA (parent match)
-        assert "TeamA" in g["tags"]
-        assert "TeamB" in g["tags"]
-        assert len(g["tags"]) == 2
-
+        # Only the first team-tagged component should contribute tags to the vulnerability card.
+        assert g["tags"] == ["TeamB"]
     finally:
         logic.load_team_mapping = original_load
 
@@ -366,7 +429,7 @@ def test_tagging_bom_ref_mismatch():
 
 def test_tagging_bom_hierarchy():
     # Hierarchy: custom-app (TeamX) -> lib-core (TeamCore) -> lib-utils
-    # We are looking at lib-utils. It should inherit TeamCore and TeamX.
+    # We are looking at lib-utils. It should inherit TeamCore only because it is the first mapped ancestor.
 
     comp_name = "lib-utils"
     comp_uuid = "uuid3"
@@ -387,7 +450,56 @@ def test_tagging_bom_hierarchy():
 
     cache = BOMAnalysisCache(bom, mapping)
     tags = cache.get_tags_only(comp_uuid, comp_name)
-    assert set(tags) == {"TeamX", "TeamCore"}
+    assert tags == ["TeamCore"]
+
+
+def test_tagging_vulnerable_component_uses_first_mapped_ancestor_only():
+    # Hierarchy: TeamBComp (TeamB) -> TeamAComp (TeamA) -> VulnComp
+    # VulnComp should inherit only TeamA because it is the first mapped ancestor.
+
+    comp_name = "VulnComp"
+    comp_uuid = "uuid-vuln"
+
+    bom = {
+        "components": [
+            {"bom-ref": "b", "uuid": "uuid-b", "name": "TeamBComp"},
+            {"bom-ref": "a", "uuid": "uuid-a", "name": "TeamAComp"},
+            {"bom-ref": "vuln", "uuid": "uuid-vuln", "name": "VulnComp"},
+        ],
+        "dependencies": [
+            {"ref": "b", "dependsOn": ["a"]},
+            {"ref": "a", "dependsOn": ["vuln"]},
+        ],
+    }
+
+    mapping = {"TeamBComp": "TeamB", "TeamAComp": "TeamA"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only(comp_uuid, comp_name)
+    assert tags == ["TeamA"]
+
+
+def test_tagging_mock_service_chain_prioritizes_team_a():
+    client = TestClient(mock_dt.app)
+    response = client.get(f"/api/v1/bom/cyclonedx/project/{mock_dt.PROJECT_V2_UUID}")
+    assert response.status_code == 200
+
+    bom = response.json()
+    cache = BOMAnalysisCache(bom, {"team-a-comp": "TeamA", "team-b-comp": "TeamB"})
+    tags = cache.get_tags_only(mock_dt.COMPONENT_UUID, "log4j-core")
+    assert tags == ["TeamA"]
+
+
+def test_tagging_multiple_ancestor_paths_collects_each_first_mapping():
+    client = TestClient(mock_dt.app)
+    response = client.get(f"/api/v1/bom/cyclonedx/project/{mock_dt.PROJECT_UUID}")
+    assert response.status_code == 200
+
+    bom = response.json()
+    mapping = {k: v for k, v in logic.load_team_mapping().items() if k != "log4j-core"}
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = sorted(cache.get_tags_only(mock_dt.COMPONENT_UUID, "log4j-core"))
+    assert tags == ["InventoryTeam", "PaymentTeam"]
 
 
 def test_tagging_catch_all():
@@ -436,7 +548,7 @@ def test_tagging_deep_hierarchy_multiple_matches():
 
     cache = BOMAnalysisCache(bom, mapping)
     tags = cache.get_tags_only(comp_uuid, comp_name)
-    assert set(tags) == {"TeamA", "TeamB", "TeamC"}
+    assert tags == ["TeamC"]
 
 
 def test_build_parent_map_edge_cases():
@@ -616,6 +728,31 @@ def test_component_analysis_results_are_cached_per_component():
         assert wrapped_paths.call_count == first_path_calls
 
 
+def test_get_dependency_paths_truncates_when_too_many():
+    bom = {
+        "metadata": {"component": {"bom-ref": "root", "name": "RootProject"}},
+        "components": [
+            {"bom-ref": "root", "uuid": "root", "name": "RootProject"},
+            {"bom-ref": "a", "uuid": "uA", "name": "A"},
+            {"bom-ref": "b", "uuid": "uB", "name": "B"},
+            {"bom-ref": "vuln", "uuid": "uV", "name": "VulnComp"},
+        ],
+        "dependencies": [
+            {"ref": "root", "dependsOn": ["a", "b"]},
+            {"ref": "a", "dependsOn": ["vuln"]},
+            {"ref": "b", "dependsOn": ["vuln"]},
+            {"ref": "vuln", "dependsOn": []},
+        ],
+    }
+
+    cache = logic.BOMAnalysisCache(bom, {})
+    paths, truncated = cache.get_dependency_paths("uV", "VulnComp", max_paths=1, return_truncated=True)
+
+    assert truncated is True
+    assert len(paths) == 1
+    assert paths[0].startswith("VulnComp ->")
+
+
 def test_group_vulnerabilities_emits_dependency_chains():
     v1_data = {
         "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
@@ -628,7 +765,21 @@ def test_group_vulnerabilities_emits_dependency_chains():
         ],
     }
 
-    grouped = logic.group_vulnerabilities([v1_data])
+    project_boms = {
+        "uuid1": {
+            "metadata": {"component": {"bom-ref": "root", "name": "TestProj"}},
+            "components": [
+                {"bom-ref": "root", "uuid": "root", "name": "TestProj"},
+                {"bom-ref": "libA", "uuid": "comp1", "name": "libA"},
+            ],
+            "dependencies": [
+                {"ref": "root", "dependsOn": ["libA"]},
+                {"ref": "libA", "dependsOn": []},
+            ],
+        }
+    }
+
+    grouped = logic.group_vulnerabilities([v1_data], project_boms=project_boms)
     component = grouped[0]["affected_versions"][0]["components"][0]
 
-    assert component["dependency_chains"] == []
+    assert component["dependency_chains"] == ["libA -> TestProj"]

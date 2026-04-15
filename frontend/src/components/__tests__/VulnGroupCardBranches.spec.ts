@@ -28,7 +28,19 @@ vi.mock('lucide-vue-next', () => ({
     CheckCircle: { template: '<span />' },
     AlertTriangle: { template: '<span />' },
     RotateCcw: { template: '<span />' },
-    History: { template: '<span />' }
+    History: { template: '<span />' },
+    Package: { template: '<span />' },
+    Layers: { template: '<span />' },
+    ShieldOff: { template: '<span />' },
+    Zap: { template: '<span />' },
+    CircleDot: { template: '<span />' },
+    Search: { template: '<span />' },
+    ShieldCheck: { template: '<span />' },
+    Bug: { template: '<span />' },
+    GitBranch: { template: '<span />' },
+    Eye: { template: '<span />' },
+    ClipboardCopy: { template: '<span />' },
+    Plus: { template: '<span />' }
 }))
 
 describe('VulnGroupCard Branch Coverage', () => {

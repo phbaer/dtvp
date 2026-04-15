@@ -127,7 +127,7 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
         assert "[Status: Pending Review]" in kwargs["details"]
 
 
-def test_update_assessment_rejects_duplicate_pending_update(override_deps, mock_client):
+def test_update_assessment_replaces_duplicate_pending_update(override_deps, mock_client):
     client = TestClient(app)
     mock_client.update_analysis.side_effect = Exception("DT unavailable")
 
@@ -151,10 +151,12 @@ def test_update_assessment_rejects_duplicate_pending_update(override_deps, mock_
         assert resp.json()[0]["status"] == "error"
         assert resp.json()[0]["queued"] is True
 
-    # Second request for the same finding should be rejected with a conflict.
+    # Second request for the same finding should replace the pending update.
+    payload2 = {**payload, "details": "Second update"}
     with patch("main.get_user_role", return_value="REVIEWER"):
-        resp2 = client.post("/api/assessment", json=payload)
-        assert resp2.status_code == 409
-        assert resp2.json()["status"] == "conflict"
+        resp2 = client.post("/api/assessment", json=payload2)
+        assert resp2.status_code == 200
+        assert resp2.json()[0]["status"] == "error"
+        assert resp2.json()[0]["queued"] is True
 
 

@@ -17,6 +17,20 @@ async function login(page: any, role: 'Analyst' | 'Reviewer' = 'Analyst') {
 
 test.describe('Integration Tests (Real Backend)', () => {
     test.beforeEach(async ({ page }) => {
+        page.on('response', (response) => {
+            if (response.status() === 401) {
+                const request = response.request()
+                console.log(`[E2E 401] ${request.method()} ${response.url()}`)
+            }
+        })
+
+        page.on('requestfailed', (request) => {
+            const url = request.url()
+            if (url.includes('/auth/') || url.includes('/api/')) {
+                console.log(`[E2E REQUEST FAILED] ${request.method()} ${url} :: ${request.failure()?.errorText || 'unknown error'}`)
+            }
+        })
+
         // Bypass ChangelogModal by setting last seen version
         await page.addInitScript(() => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.4');
@@ -233,6 +247,21 @@ test.describe('Integration Tests (Real Backend)', () => {
             });
         });
 
+        await page.route('**/api/projects/*/tmrescore/proposals', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    project_name: 'Vulnerable Project',
+                    session_id: '',
+                    scope: 'merged_versions',
+                    latest_version: '2.0.0',
+                    analyzed_versions: [],
+                    proposals: {},
+                }),
+            });
+        });
+
         // Mock dependency chains for the DependencyChainViewer
         await page.route('**/api/project/*/component/*/dependency-chains', async (route) => {
             await route.fulfill({
@@ -256,7 +285,9 @@ test.describe('Integration Tests (Real Backend)', () => {
         await expect(projectLink).toBeVisible({ timeout: 15000 });
 
         // 3. Verify version 1.0.0 is present on the card
-        const projectCard = projectLink.locator('..');
+        const projectCard = page.locator('div.bg-gray-800.border.border-gray-700.rounded').filter({
+            has: projectLink,
+        }).first();
         await expect(projectCard.getByText('v1.0.0')).toBeVisible({ timeout: 10000 });
     });
 
@@ -283,20 +314,15 @@ test.describe('Integration Tests (Real Backend)', () => {
         // 3. Check for URL change
         await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/);
 
-        // 4. Ensure all filters are enabled so vulnerabilities are visible
-        // (Reset All guarantees a known state regardless of defaults)
-        const resetBtn = page.getByRole('button', { name: 'Reset All' });
-        await expect(resetBtn).toBeVisible({ timeout: 10000 });
-        await resetBtn.click();
-
+        // 4. Vulnerabilities should be visible with default reviewer filters (all lifecycle states enabled)
         // 5. Now wait for vulnerabilities to be visible
         await expect(page.getByText('CVE-2021-44228')).toBeVisible({ timeout: 30000 });
         await expect(page.getByText('CVE-2025-INCOMPLETE')).toBeVisible();
-        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCOMPLETE' }).locator('.analysis-lifecycle-value')).toHaveText(/INCOMPLETE|ASSESSED/);
+        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCOMPLETE' }).getByTestId('lifecycle-badge')).toHaveText(/Incomplete|Assessed/);
 
         // Verify INCONSISTENT mock vulnerability
         await expect(page.getByText('CVE-2025-INCONSISTENT')).toBeVisible();
-        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCONSISTENT' }).locator('.analysis-lifecycle-value')).toHaveText('INCONSISTENT');
+        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCONSISTENT' }).getByTestId('lifecycle-badge')).toHaveText('Inconsistent');
 
         // 5. Verify Dependency Chains
         // Click to expand the card first by clicking the header area

@@ -11,6 +11,71 @@ RE_SCORE = re.compile(r"\[Rescored:\s*([\d\.]+)\]")
 RE_VECTOR = re.compile(r"\[Rescored Vector:\s*([^\]]+)\]")
 RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
 
+DEFAULT_DEPENDENCY_CHAIN_LIMIT = 100
+
+# CVSS 3.x base metric keys – everything else (temporal, environmental,
+# modified-base) is considered a rescoring addition.
+_CVSS3_BASE_METRIC_KEYS = frozenset({"AV", "AC", "PR", "UI", "S", "C", "I", "A"})
+
+
+def _metric_key(token: str) -> str:
+    """Extract the metric key from a CVSS token like ``AV:N`` → ``AV``."""
+    return token.split(":")[0]
+
+
+def sanitize_rescored_vector(
+    original_vector: Optional[str], rescored_vector: Optional[str]
+) -> Optional[str]:
+    """Ensure a rescored CVSS vector preserves all base metric components from
+    the original vector, only adding non-base tokens (temporal, environmental,
+    modified-base).
+
+    If the rescored vector already has the correct base, it is returned as-is.
+    Otherwise the base components are taken from ``original_vector`` and only
+    the non-base tokens from ``rescored_vector`` are appended.
+
+    Returns ``None`` when either input is falsy or when both vectors are
+    identical (meaning no rescoring occurred).
+    """
+    if not original_vector or not rescored_vector:
+        return rescored_vector or None
+
+    # CVSS 3.0 and 3.1 are equivalent; DT uses 3.0, we always rescore in 3.1.
+    # Normalize both to 3.1 for comparison; output always uses 3.1.
+    norm_original = original_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
+    norm_rescored = rescored_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
+
+    orig_parts = norm_original.split("/")
+    rescored_parts = norm_rescored.split("/")
+
+    # Determine where metric tokens start (skip the CVSS version prefix)
+    orig_start = 1 if orig_parts[0].startswith("CVSS:") else 0
+    rescored_start = 1 if rescored_parts[0].startswith("CVSS:") else 0
+
+    orig_base = {p for p in orig_parts[orig_start:] if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS}
+    rescored_base = {p for p in rescored_parts[rescored_start:] if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS}
+
+    if orig_base == rescored_base:
+        # Base metrics already match – vector is valid as-is (always in 3.1)
+        return norm_rescored
+
+    # Reconstruct: original base (in 3.1) + only the non-base tokens from the rescored vector
+    non_base = [p for p in rescored_parts[rescored_start:] if _metric_key(p) not in _CVSS3_BASE_METRIC_KEYS]
+    if non_base:
+        corrected = "/".join(orig_parts + non_base)
+    else:
+        corrected = norm_original
+
+    if corrected == norm_original:
+        return None  # No meaningful change after correction
+
+    logger.warning(
+        "Corrected rescored vector (base metrics were altered): %s -> %s",
+        rescored_vector,
+        corrected,
+    )
+    return corrected
+
 
 def get_team_mapping_path() -> str:
     return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
@@ -202,7 +267,16 @@ class BOMAnalysisCache:
 
     def _normalize_tags(self, tag_val: Any) -> Tuple[str, ...]:
         if isinstance(tag_val, list):
-            return tuple(sorted({str(tag).strip() for tag in tag_val if tag}))
+            normalized = []
+            seen = set()
+            for tag in tag_val:
+                if not tag:
+                    continue
+                tag_str = str(tag).strip()
+                if tag_str and tag_str not in seen:
+                    normalized.append(tag_str)
+                    seen.add(tag_str)
+            return tuple(normalized)
         if tag_val:
             return (str(tag_val).strip(),)
         return ()
@@ -282,56 +356,88 @@ class BOMAnalysisCache:
 
         return False
 
-    def _get_tags_for_ref(self, ref: str, visiting: Optional[Set[str]] = None) -> Set[str]:
+    def _get_tags_for_ref(self, ref: str) -> List[str]:
         if ref in self.tags_cache:
-            return set(self.tags_cache[ref])
+            return list(self.tags_cache[ref])
 
-        if visiting is None:
-            visiting = set()
-        if ref in visiting:
-            return set()
+        direct_tags = list(self._get_direct_tags(self._get_component_name(ref)))
+        if direct_tags:
+            unique_tags = list(dict.fromkeys(tag for tag in direct_tags if tag))
+            self.tags_cache[ref] = tuple(unique_tags)
+            return unique_tags
 
-        visiting.add(ref)
-        tags = self._get_direct_tags(self._get_component_name(ref))
-        for parent_ref in self._get_parent_refs(ref):
-            tags.update(self._get_tags_for_ref(parent_ref, visiting))
-        visiting.remove(ref)
+        tags: List[str] = []
+        tag_seen: Set[str] = set()
+        seen_refs: Set[str] = {ref}
 
-        cached_tags = tuple(sorted(tags))
-        self.tags_cache[ref] = cached_tags
-        return set(cached_tags)
+        def walk(current_ref: str):
+            for parent_ref in self._get_parent_refs(current_ref):
+                if parent_ref in seen_refs:
+                    continue
+                seen_refs.add(parent_ref)
+
+                parent_name = self._get_component_name(parent_ref)
+                parent_tags = list(self._get_direct_tags(parent_name))
+                if parent_tags:
+                    for tag in parent_tags:
+                        if tag and tag not in tag_seen:
+                            tags.append(tag)
+                            tag_seen.add(tag)
+                else:
+                    walk(parent_ref)
+
+        walk(ref)
+        self.tags_cache[ref] = tuple(tags)
+        return tags
 
     def _get_dependency_paths_for_ref(
         self,
         ref: str,
         visiting: Optional[Set[str]] = None,
-    ) -> Tuple[str, ...]:
-        if ref in self.path_cache:
-            return self.path_cache[ref]
+        max_paths: Optional[int] = None,
+    ) -> Tuple[Tuple[str, ...], bool]:
+        if ref in self.path_cache and max_paths is None:
+            return self.path_cache[ref], False
 
         if visiting is None:
             visiting = set()
         if ref in visiting:
-            return ()
+            return (), False
 
         parent_refs = self._get_parent_refs(ref)
         current_name = self._get_component_name(ref)
         if not parent_refs:
             paths = (current_name,)
-            self.path_cache[ref] = paths
-            return paths
+            if max_paths is None:
+                self.path_cache[ref] = paths
+            return paths, False
 
         visiting.add(ref)
-        found_paths = set()
+        found_paths = []
+        truncated = False
         for parent_ref in parent_refs:
-            parent_paths = self._get_dependency_paths_for_ref(parent_ref, visiting)
+            parent_paths, parent_truncated = self._get_dependency_paths_for_ref(
+                parent_ref, visiting, max_paths
+            )
             for parent_path in parent_paths:
-                found_paths.add(f"{current_name} -> {parent_path}")
+                if max_paths is not None and len(found_paths) >= max_paths:
+                    truncated = True
+                    break
+                found_paths.append(f"{current_name} -> {parent_path}")
+            if parent_truncated:
+                truncated = True
+            if max_paths is not None and len(found_paths) >= max_paths:
+                truncated = True
+                break
         visiting.remove(ref)
 
-        cached_paths = tuple(sorted(found_paths))
-        self.path_cache[ref] = cached_paths
-        return cached_paths
+        unique_paths = sorted(set(found_paths))
+        if max_paths is None:
+            cached_paths = tuple(unique_paths)
+            self.path_cache[ref] = cached_paths
+            return cached_paths, False
+
+        return tuple(unique_paths[:max_paths]), truncated or len(unique_paths) > max_paths
 
     def get_target_ref(self, component_uuid: str, component_name: str) -> str:
         # 1. Match by UUID
@@ -355,17 +461,17 @@ class BOMAnalysisCache:
         if cached and cached[0] is not None:
             return list(cached[0])
 
-        found_tags = self._get_direct_tags(component_name)
+        found_tags = list(self._get_direct_tags(component_name))
 
         target_ref = self.get_target_ref(component_uuid, component_name)
 
         if target_ref:
-            found_tags.update(self._get_tags_for_ref(target_ref))
+            found_tags = self._get_tags_for_ref(target_ref)
 
         if not found_tags and "*" in self.mapping:
-            found_tags.update(self.direct_tags_by_name.get("*", ()))
+            found_tags = list(self.direct_tags_by_name.get("*", ()))
 
-        tag_list = sorted(found_tags)
+        tag_list = found_tags
         self.analysis_cache[cache_key] = (tuple(tag_list), cached[1] if cached else None)
         return tag_list
 
@@ -373,16 +479,19 @@ class BOMAnalysisCache:
         self,
         component_uuid: str,
         component_name: str,
-    ) -> List[str]:
+        max_paths: Optional[int] = None,
+        return_truncated: bool = False,
+    ):
         """
-        Returns all dependency paths.
+        Returns dependency paths, optionally limited to max_paths.
         """
         cache_key = (component_uuid or "", component_name or "")
         cached = self.analysis_cache.get(cache_key)
-        if cached and cached[1] is not None:
-            return list(cached[1])
+        if cached and cached[1] is not None and max_paths is None:
+            return list(cached[1]) if not return_truncated else (list(cached[1]), False)
 
         found_paths = set()
+        truncated = False
         target_ref = self.get_target_ref(component_uuid, component_name)
 
         start_name = component_name
@@ -392,14 +501,18 @@ class BOMAnalysisCache:
                 start_name = target_comp.get("name") or component_name
 
         if target_ref:
-            found_paths.update(self._get_dependency_paths_for_ref(target_ref))
+            paths, truncated = self._get_dependency_paths_for_ref(target_ref, max_paths=max_paths)
+            found_paths.update(paths)
             if not found_paths:
                 found_paths.add(start_name)
         else:
             found_paths.add(component_name)
 
         path_list = sorted(found_paths)
-        self.analysis_cache[cache_key] = (cached[0] if cached else None, tuple(path_list))
+        if max_paths is None:
+            self.analysis_cache[cache_key] = (cached[0] if cached else None, tuple(path_list))
+        if return_truncated:
+            return path_list, truncated
         return path_list
 
 
@@ -537,8 +650,9 @@ def group_vulnerabilities(
                     "cvss_vector": new_cvss_vector,
                     "rescored_cvss": None,
                     "rescored_vector": None,
+                    "rescored_vector_adjusted": False,
                     "affected_versions": {},
-                    "tags": set(),
+                    "tags": [],
                     "aliases": set(groups_by_root.get(root, [])) - {canonical_id},
                 }
             else:
@@ -560,7 +674,9 @@ def group_vulnerabilities(
             if processor:
                 tags = processor.get_tags_only(comp_uuid, comp_name)
 
-            groups[canonical_id]["tags"].update(tags)
+            for tag in tags:
+                if tag not in groups[canonical_id]["tags"]:
+                    groups[canonical_id]["tags"].append(tag)
 
             analysis = finding.get("analysis", {})
             details = analysis.get("analysisDetails") or ""
@@ -586,6 +702,19 @@ def group_vulnerabilities(
                     match_any_vector = RE_ANY_VECTOR.search(details)
                     if match_any_vector:
                         rescored_vector = match_any_vector.group(1).strip()
+
+            # Sanitize: ensure rescored vector preserves original base metrics
+            base_vector = groups[canonical_id].get("cvss_vector")
+            rescored_vector_adjusted = groups[canonical_id].get("rescored_vector_adjusted", False)
+            if rescored_vector and base_vector:
+                sanitized = sanitize_rescored_vector(base_vector, rescored_vector)
+                if sanitized != rescored_vector:
+                    rescored_vector_adjusted = True
+                rescored_vector = sanitized
+            groups[canonical_id]["rescored_vector_adjusted"] = (
+                groups[canonical_id].get("rescored_vector_adjusted", False)
+                or rescored_vector_adjusted
+            )
 
             # Set rescored score/vector if they were explicitly provided
             if rescored_score is not None:
@@ -620,8 +749,23 @@ def group_vulnerabilities(
                 or analysis.get("suppressed", False),
                 "is_direct_dependency": None,
                 "dependency_chains": [],
+                "dependency_chains_truncated": False,
                 "tags": tags,
             }
+
+            if proj_uuid in bom_processors and comp_uuid:
+                try:
+                    paths, truncated = bom_processors[proj_uuid].get_dependency_paths(
+                        comp_uuid,
+                        comp_name,
+                        max_paths=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
+                        return_truncated=True,
+                    )
+                    component_info["dependency_chains"] = paths
+                    component_info["dependency_chains_truncated"] = truncated
+                except Exception:
+                    component_info["dependency_chains"] = []
+                    component_info["dependency_chains_truncated"] = False
 
             aff_vers_map = groups[canonical_id]["affected_versions"]
             if proj_uuid not in aff_vers_map:
@@ -670,7 +814,6 @@ def group_vulnerabilities(
             key=lambda x: x.get("project_version") or "",
             reverse=True,
         )
-        g["tags"] = sorted(list(g["tags"]))
         g["aliases"] = sorted(list(g.get("aliases", [])))
         result.append(g)
 

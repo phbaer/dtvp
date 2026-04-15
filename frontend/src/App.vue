@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, provide, computed } from 'vue'
+import { ref, onMounted, provide, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { projectHeaderState } from './lib/projectHeaderStore'
 import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
 import ChangelogModal from './components/ChangelogModal.vue'
@@ -9,6 +11,8 @@ const build = ref('')
 const user = ref({ username: '', role: '' })
 const realRole = ref('')
 const isAnalystView = ref(false)
+const router = useRouter()
+const route = useRoute()
 
 const projectAuthor = ref('')
 const projectEmail = ref('')
@@ -90,6 +94,46 @@ const toggleView = () => {
     isAnalystView.value = !isAnalystView.value
 }
 
+const goTo = (path: string) => {
+    router.push(path)
+}
+
+const goToAllProjects = () => {
+    projectHeaderState.currentProjectName.value = null
+    projectHeaderState.isAllProjects.value = true
+    router.push('/')
+}
+
+const toggleProjectView = () => {
+    if (!projectHeaderState.isAllProjects.value) {
+        projectHeaderState.viewMode.value = projectHeaderState.viewMode.value === 'analysis' ? 'statistics' : 'analysis'
+    }
+}
+
+const headerButtonBase = 'h-8 px-3 inline-flex items-center rounded-full text-[11px] font-semibold uppercase tracking-widest border border-white/10 transition-all whitespace-nowrap'
+const headerButtonDefault = 'bg-slate-950/20 text-slate-300 hover:bg-slate-950/30 hover:text-white'
+const headerButtonActive = 'bg-white/10 text-white shadow-sm shadow-slate-900/20'
+const headerButtonContext = 'bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+const headerButtonWarning = 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+
+const currentProjectName = computed(() => projectHeaderState.currentProjectName.value)
+const isAllProjects = computed(() => projectHeaderState.isAllProjects.value)
+const showProjectHeaderButtons = computed(
+    () => {
+        const name = currentProjectName.value
+        return !!name && name.trim().length > 0 && !isAllProjects.value
+    }
+)
+
+const isActive = (path: string) => route.path === path
+
+watch(() => route.path, (path) => {
+    if (!path.startsWith('/project/')) {
+        projectHeaderState.currentProjectName.value = null
+        projectHeaderState.isAllProjects.value = true
+    }
+}, { immediate: true })
+
 const acknowledgeChangelog = () => {
     showChangelog.value = false
     localStorage.setItem('dtvp_last_seen_version', version.value)
@@ -97,19 +141,77 @@ const acknowledgeChangelog = () => {
 </script>
 
 <template>
-  <div class="min-h-screen min-w-screen max-w-full bg-gray-900 text-white font-sans flex flex-col">
+  <div class="min-h-screen w-full flex flex-col bg-slate-950/70 text-white">
     <template v-if="$route.path !== '/login'">
-        <header class="border-b border-gray-700 bg-gray-800">
-            <div class="px-6 py-3 flex justify-between items-center w-full">
-                <div class="flex items-center gap-6">
-                    <h1 class="text-xl font-bold text-blue-400">
-                        <router-link to="/">DTVP</router-link>
-                    </h1>
-                    <nav class="flex gap-4 text-sm font-medium">
-                        <router-link to="/" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Dashboard</router-link>
-                        <router-link to="/statistics" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Statistics</router-link>
-                        <router-link v-if="realRole === 'REVIEWER'" to="/settings" class="hover:text-blue-300 transition-colors" exact-active-class="text-blue-400">Settings</router-link>
-                    </nav>
+        <header class="sticky top-0 z-40 border-b border-gray-700/70 bg-gray-800/75 backdrop-blur-2xl">
+            <div class="w-full p-3 flex flex-wrap justify-between items-center gap-3">
+                <div class="flex flex-wrap items-center gap-3">
+                    <router-link
+                        to="/"
+                        class="text-lg font-black uppercase tracking-[0.3em] text-slate-100 hover:text-white transition-colors"
+                    >
+                        DTVP
+                    </router-link>
+
+                    <template v-if="showProjectHeaderButtons">
+                        <span class="inline-flex h-8 overflow-hidden rounded-full border border-white/10">
+                            <router-link
+                                to="/"
+                                @click.prevent="goToAllProjects"
+                                :class="[headerButtonBase, headerButtonDefault, 'rounded-r-none rounded-l-full']"
+                            >
+                                All Projects
+                            </router-link>
+                            <span class="h-full w-px bg-white/10"></span>
+                            <span class="px-4 h-full inline-flex items-center text-[11px] font-semibold uppercase tracking-widest transition-all whitespace-nowrap bg-blue-600 text-white">
+                                {{ currentProjectName }}
+                            </span>
+                        </span>
+                    </template>
+                    <template v-else>
+                        <router-link
+                            to="/"
+                            @click.prevent="goToAllProjects"
+                            :class="[headerButtonBase, route.path === '/' ? headerButtonActive : headerButtonDefault]"
+                        >
+                            All Projects
+                        </router-link>
+                    </template>
+
+                    <button
+                        type="button"
+                        @click="goTo('/statistics')"
+                        :class="[headerButtonBase, isActive('/statistics') ? headerButtonActive : headerButtonDefault]"
+                    >
+                        Statistics
+                    </button>
+                    <button
+                        v-if="realRole === 'REVIEWER'"
+                        type="button"
+                        @click="goTo('/settings')"
+                        :class="[headerButtonBase, isActive('/settings') ? headerButtonActive : headerButtonDefault]"
+                    >
+                        Settings
+                    </button>
+
+                    <template v-if="showProjectHeaderButtons">
+                        <span class="h-10 w-px bg-white/10"></span>
+                        <button
+                            type="button"
+                            @click="toggleProjectView"
+                            :class="[headerButtonBase, projectHeaderState.viewMode.value === 'analysis' ? headerButtonContext : headerButtonDefault]"
+                        >
+                            {{ projectHeaderState.viewMode.value === 'analysis' ? 'Project Statistics' : 'Analysis' }}
+                        </button>
+                        <button
+                            v-if="projectHeaderState.isReviewer.value && projectHeaderState.incompleteCount.value > 0"
+                            type="button"
+                            @click="projectHeaderState.bulkSyncHandler.value?.()"
+                            :class="[headerButtonBase, headerButtonWarning]"
+                        >
+                            Bulk Sync ({{ projectHeaderState.incompleteCount.value }})
+                        </button>
+                    </template>
                 </div>
                 <div class="text-sm text-gray-400 hidden sm:flex items-center gap-6">
                     <div v-if="realRole === 'REVIEWER'" class="flex items-center gap-2 mr-4 bg-gray-700/50 px-3 py-1.5 rounded-full border border-gray-600 shadow-inner">
@@ -138,7 +240,7 @@ const acknowledgeChangelog = () => {
                         </div>
                         <button 
                             @click="logout"
-                            class="bg-gray-700 hover:bg-gray-600 text-white text-[10px] px-2 py-1 rounded transition-colors cursor-pointer border border-gray-600"
+                            class="bg-gray-700 hover:bg-gray-600 text-white text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer border border-gray-600"
                         >
                             Logout
                         </button>
@@ -147,19 +249,31 @@ const acknowledgeChangelog = () => {
                 </div>
             </div>
         </header>
-        <main class="px-6 w-full flex-grow">
-            <router-view></router-view>
+        <main class="px-6 sm:px-8 pt-4 sm:pt-6 w-full flex-grow pb-28">
+            <router-view v-slot="{ Component, route }">
+                <keep-alive>
+                    <component
+                        :is="Component"
+                        :key="route.path"
+                        v-if="route.path.startsWith('/project/')"
+                    />
+                </keep-alive>
+                <component
+                    :is="Component"
+                    :key="route.fullPath"
+                    v-if="!route.path.startsWith('/project/')"
+                />
+            </router-view>
         </main>
-        <footer class="border-t border-gray-700 bg-gray-800">
-            <div class="px-6 py-4 text-center text-xs text-gray-500 space-y-1">
-                <div>DTVP v{{ version }} (build {{ build }})</div>
-                <div>Author: {{ projectAuthor }}</div>
+        <footer class="fixed bottom-0 left-0 z-40 w-full border-t border-gray-700/70 bg-gray-900/70 backdrop-blur-2xl">
+            <div class="w-full p-3 flex flex-col gap-1 text-center text-[11px] text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:text-left">
+                <div class="font-medium text-gray-300">DTVP v{{ version }} (build {{ build }})</div>
                 <div>
                     <a :href="projectUrls.main" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Main repo</a>
                     •
                     <a :href="projectUrls.github" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">GitHub</a>
                 </div>
-                <div>
+                <div class="sm:text-right">
                     <a :href="sbomUrl + '/backend'" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download Backend SBOM</a>
                     •
                     <a :href="sbomUrl + '/frontend'" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Download Frontend SBOM</a>

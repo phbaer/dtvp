@@ -8,7 +8,9 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test:unit": "vitest",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:ui:docs": "playwright test --config=playwright.manual.config.ts e2e/capture-readme-screenshots.manual.ts",
+    "test:ui:real-stack": "DTVP_E2E_REAL_STACK=true playwright test --config=playwright.manual.config.ts e2e/tmrescore-real-stack.manual.ts"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.2.2",

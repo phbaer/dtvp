@@ -254,7 +254,7 @@ watch(() => activeTab.value, (newTab) => {
 </script>
 
 <template>
-  <div v-if="realRole === 'REVIEWER'" class="mx-auto">
+  <div v-if="realRole === 'REVIEWER'" class="w-full">
     <div class="mb-8 flex flex-col gap-2">
         <router-link to="/" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
             &larr; Back to Dashboard

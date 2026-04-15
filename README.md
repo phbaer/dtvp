@@ -25,6 +25,24 @@ SBOM
 - Edit team mappings, user roles, and rescore rules from the settings screen.
 - Run against either a live Dependency-Track server or the bundled mock service.
 
+## Threat-Model Rescoring
+
+DTVP can optionally call an external tmrescore service to re-score vulnerabilities against a Microsoft Threat Modeling Tool export.
+
+- Configure the backend with `DTVP_TMRESCORE_URL` to enable the UI entry points.
+- Optionally set `DTVP_TMRESCORE_CACHE_PATH` to control where the latest per-project proposal snapshots are stored. By default DTVP writes them to `data/tmrescore_proposals.json`.
+- Open a project and use the `Threat Model` action from the dashboard or project view.
+- Upload the current `.tm7` file and optional `items.csv` / analysis config inputs.
+- If an LLM backend is configured for tmrescore, you can enable `LLM enrichment` in the Threat Model UI and optionally choose the model used for threat-justification enrichment.
+- After a successful run, the latest cached proposal set for that project is available directly inside each reviewer rescoring dialog where the vulnerability ID matches.
+- Returning to the project view after a run triggers an immediate proposal refresh so the rescoring dialog can use the new suggestions without waiting for a backend restart or a manual reload.
+
+SBOM strategy matters here:
+
+- `Latest only` is a clean single-version snapshot and uses only the newest project version.
+- `Merged multi-version SBOM` is the recommended mode for DTVP because it creates an analysis-only synthetic CycloneDX document with separate roots per version, preserving historical findings without pretending they all belong to the latest inventory.
+- DTVP intentionally does not combine the latest SBOM with vulnerabilities found only in older versions, because that would attach findings to components that may not exist in the latest release.
+
 ## Stack
 
 - Backend: Python 3.13+, FastAPI, Uvicorn, httpx
@@ -61,6 +79,7 @@ cd ..
 This is the simplest way to test the full application locally. It starts:
 
 - `mock-dt` on `http://localhost:8081`
+- `mock-tmrescore` on `http://localhost:8090`
 - `dtvp-backend` on `http://localhost:8000`
 - `dtvp-frontend` on `http://localhost:5173`
 
@@ -77,6 +96,7 @@ Then open:
 - Frontend: `http://localhost:5173`
 - Backend API version endpoint: `http://localhost:8000/api/version`
 - Mock Dependency-Track service: `http://localhost:8081`
+- Mock TMRescore service: `http://localhost:8090/ui`
 
 ### Sign In To The Mock Stack
 
@@ -104,6 +124,7 @@ Tail one service only:
 
 ```bash
 pm2 logs mock-dt
+pm2 logs mock-tmrescore
 pm2 logs dtvp-backend
 pm2 logs dtvp-frontend
 ```
@@ -111,17 +132,17 @@ pm2 logs dtvp-frontend
 Stop and remove the local stack:
 
 ```bash
-pm2 delete mock-dt dtvp-backend dtvp-frontend
+pm2 delete mock-dt mock-tmrescore dtvp-backend dtvp-frontend
 ```
 
 ## Manual Development Workflow
 
-If you want to iterate on the backend or frontend manually while keeping the mock Dependency-Track service managed by pm2, use this split workflow.
+If you want to iterate on the backend or frontend manually while keeping the mock services managed by pm2, use this split workflow.
 
-### 1. Start Only The Mock Dependency-Track Service
+### 1. Start Only The Mock Services
 
 ```bash
-pm2 start ecosystem.config.js --only mock-dt
+pm2 start ecosystem.config.js --only mock-dt,mock-tmrescore
 ```
 
 ### 2. Start The Backend
@@ -136,6 +157,7 @@ export DTVP_OIDC_CLIENT_ID=mock_id
 export DTVP_OIDC_CLIENT_SECRET=mock_secret
 export DTVP_OIDC_REDIRECT_URI=http://localhost:5173/auth/callback
 export DTVP_FRONTEND_URL=http://localhost:5173
+export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
 export DTVP_VERSION_FETCH_CONCURRENCY=4
 uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -160,7 +182,29 @@ npm run dev
 ### 4. Stop The Mock Service
 
 ```bash
-pm2 delete mock-dt
+pm2 delete mock-dt mock-tmrescore
+```
+
+## Minimal Two-Mock Container Workflow
+
+If you only want the lightweight mock services without the full pm2 stack, use the container wrappers in `test_setup`:
+
+```bash
+cd test_setup
+docker compose up
+```
+
+This starts:
+
+- mock Dependency-Track on `http://localhost:8081`
+- mock tmrescore on `http://localhost:8090/ui`
+
+Point DTVP at them with:
+
+```bash
+export DTVP_DT_API_URL=http://127.0.0.1:8081
+export DTVP_DT_API_KEY=mock_key
+export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
 ```
 
 ## Application Walkthrough
@@ -258,6 +302,14 @@ This repository now includes devcontainer support in `.devcontainer/`.
 
 If you use Podman as your container runtime, make sure VS Code is configured to use the Podman socket from `podman-docker`.
 
+To run only the real-stack threat-model Playwright flow against the pm2 mocks, use:
+
+```bash
+pm2 start ecosystem.config.js --update-env
+cd frontend
+DTVP_E2E_REAL_STACK=true npm run test:ui -- --grep "Threat-Model UI Flow"
+```
+
 ## Docker Deployment
 
 Use this when you want to run the packaged application instead of the local dev stack.
@@ -279,6 +331,25 @@ docker compose up -d
 
 The image mounts `./data` into the container so local mapping and rule files persist.
 
+### Optional: Start The Mock TMRescore In Compose
+
+If you want to test the threat-model integration in a containerized setup, enable the optional mock profile and point the backend at the mock service inside the Compose network.
+
+Add this to `.env`:
+
+```bash
+DTVP_TMRESCORE_URL=http://mock-tmrescore:8090
+```
+
+Then start with the mock profile enabled:
+
+```bash
+cp compose.yml.dist compose.yml
+docker compose --profile mock up -d
+```
+
+The mock tmrescore UI is then available on `http://localhost:8090/ui`.
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -286,6 +357,11 @@ The image mounts `./data` into the container so local mapping and rule files per
 | `DTVP_DT_API_URL` | Base URL of the Dependency-Track API | `http://localhost:8081` |
 | `DTVP_DT_API_KEY` | Dependency-Track API key | `change_me` |
 | `DTVP_DT_CACHE_PATH` | Local path for Dependency-Track cache files and pending update queue | `data/dt_cache` |
+| `DTVP_TMRESCORE_URL` | Base URL of the external or mock tmrescore service | unset |
+| `DTVP_TMRESCORE_TIMEOUT_SECONDS` | HTTP timeout for tmrescore API calls before DTVP falls back to polling `/progress` | `180` |
+| `DTVP_TMRESCORE_CACHE_PATH` | Path to the cached per-project tmrescore proposal snapshot file | `data/tmrescore_proposals.json` |
+| `DTVP_TMRESCORE_OLLAMA_MODEL` | Default Ollama model preselected for LLM enrichment in the threat-model UI | `qwen2.5:7b` |
+| `DTVP_TMRESCORE_TASK_TTL_SECONDS` | How long completed or failed tmrescore analysis tasks stay in DTVP memory for `/progress` polling | `3600` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |

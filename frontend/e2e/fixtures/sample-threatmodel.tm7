@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ThreatModel name="Sample Threat Model" version="7.1">
+  <Summary>
+    Sample TM7 fixture for local DTVP and mock-tmrescore uploads.
+    The matching sample-items.csv maps components to the TM element IDs below.
+  </Summary>
+  <Elements>
+    <Element id="TM-ELEMENT-1" name="Public Web UI" type="ExternalInteractor" />
+    <Element id="TM-ELEMENT-2" name="Web API" type="Process" />
+    <Element id="TM-ELEMENT-3" name="Worker Service" type="Process" />
+    <Element id="TM-ELEMENT-4" name="Primary Database" type="DataStore" />
+  </Elements>
+</ThreatModel>

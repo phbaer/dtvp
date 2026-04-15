@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getConsensusAssessment, getAssessedTeams, hasOpenTeamAssessment } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getConsensusAssessment, getAssessedTeams, hasOpenTeamAssessment, normalizeTags } from '../assessment-helpers';
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -18,6 +18,14 @@ describe('Assessment Helpers', () => {
             };
 
             expect(getGroupLifecycle(group, group.tags, {})).toBe('OPEN');
+        });
+
+        it('should normalize alias tags to their primary team', () => {
+            const mapping = {
+                'libA': ['PrimaryTeam', 'OldAlias', 'LegacyAlias']
+            };
+            const tags = normalizeTags(['OldAlias', 'PrimaryTeam'], mapping);
+            expect(tags).toEqual(['PrimaryTeam']);
         });
 
         it('should return ASSESSED_LEGACY when technical state exists but the format is legacy', () => {

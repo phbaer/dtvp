@@ -614,6 +614,62 @@ def get_vulns(project_uuid: str):
 def get_bom(project_uuid: str):
     project = next((p for p in mock_projects if p.uuid == project_uuid), None)
 
+    if project_uuid == PROJECT_V2_UUID:
+        # Root -> TeamBComp -> TeamAComp -> log4j-core
+        # Vulnerable component should inherit only TeamA, not the higher-level TeamB.
+        team_a_uuid = "44444444-4444-4444-4444-444444444444"
+        team_b_uuid = "55555555-5555-5555-5555-555555555555"
+
+        metadata_component = {
+            "bom-ref": project_uuid,
+            "name": project.name if project else "Unknown",
+            "version": project.version if project else "0.0.0",
+            "type": "application",
+            "uuid": project_uuid,
+        }
+
+        comp_team_b = {
+            "type": "library",
+            "name": "team-b-comp",
+            "version": "1.0.0",
+            "bom-ref": team_b_uuid,
+            "uuid": team_b_uuid,
+        }
+
+        comp_team_a = {
+            "type": "library",
+            "name": "team-a-comp",
+            "version": "1.0.0",
+            "bom-ref": team_a_uuid,
+            "uuid": team_a_uuid,
+        }
+
+        comp_log4j = {
+            "type": "library",
+            "name": "log4j-core",
+            "version": "2.14.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+            "bom-ref": COMPONENT_UUID,
+            "uuid": COMPONENT_UUID,
+        }
+
+        components = [comp_team_b, comp_team_a, comp_log4j]
+        dependencies = [
+            {"ref": project_uuid, "dependsOn": [team_b_uuid]},
+            {"ref": team_b_uuid, "dependsOn": [team_a_uuid]},
+            {"ref": team_a_uuid, "dependsOn": [COMPONENT_UUID]},
+            {"ref": COMPONENT_UUID, "dependsOn": []},
+        ]
+
+        return {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.4",
+            "version": 1,
+            "metadata": {"component": metadata_component},
+            "components": components,
+            "dependencies": dependencies,
+        }
+
     # Define intermediate components for trace
     # App -> Intermediate Lib A -> Intermediate Lib B -> log4j-core
     # We will only add this structure for the main "Vulnerable Project" (PROJECT_UUID)

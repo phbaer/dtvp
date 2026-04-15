@@ -45,7 +45,11 @@ def test_get_dependency_chains_success(mock_dt_client, mock_bom_analysis_cache):
 
     # Verify calls
     mock_client_instance.get_bom.assert_called_with("proj1")
-    mock_processor.get_dependency_paths.assert_called_with("comp1", component_name="")
+    mock_processor.get_dependency_paths.assert_called_with(
+        "comp1",
+        component_name="",
+        max_paths=100,
+    )
 
 
 def test_get_dependency_chains_no_bom(mock_dt_client):
@@ -60,3 +64,30 @@ def test_get_dependency_chains_no_bom(mock_dt_client):
     assert response.status_code == 200
     data = response.json()
     assert data == []
+
+
+def test_get_dependency_chains_limit_query(mock_dt_client, mock_bom_analysis_cache):
+    mock_client_instance = AsyncMock()
+    app.dependency_overrides[get_client] = lambda: mock_client_instance
+    app.dependency_overrides["get_current_user"] = lambda: "test_user"
+
+    mock_client_instance.get_bom.return_value = {
+        "components": [{"uuid": "comp1", "name": "comp1"}]
+    }
+
+    mock_processor = MagicMock()
+    mock_processor.get_target_ref.return_value = "ref1"
+    mock_processor.comp_map = {"ref1": {"name": "comp1"}}
+    mock_processor.get_dependency_paths.return_value = ["Root -> B -> comp1"]
+    mock_bom_analysis_cache.return_value = mock_processor
+
+    response = client.get("/api/project/proj1/component/comp1/dependency-chains?limit=10")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data == ["Root -> B -> comp1"]
+    mock_processor.get_dependency_paths.assert_called_with(
+        "comp1",
+        component_name="",
+        max_paths=10,
+    )

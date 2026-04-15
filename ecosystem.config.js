@@ -11,6 +11,16 @@ module.exports = {
             }
         },
         {
+            name: "mock-tmrescore",
+            script: "uv",
+            args: "run uvicorn mock_tmrescore:app --host 127.0.0.1 --port 8090",
+            cwd: "test_setup",
+            interpreter: "none",
+            env: {
+                PYTHONUNBUFFERED: "1"
+            }
+        },
+        {
             name: "dtvp-backend",
             script: "uv",
             args: "run uvicorn main:app --host 0.0.0.0 --port 8000",
@@ -23,6 +33,7 @@ module.exports = {
                 DTVP_OIDC_CLIENT_SECRET: "mock_secret",
                 DTVP_OIDC_REDIRECT_URI: "http://localhost:5173/auth/callback",
                 DTVP_FRONTEND_URL: "http://localhost:5173",
+                DTVP_TMRESCORE_URL: "http://127.0.0.1:8090",
                 PYTHONUNBUFFERED: "1"
             }
         },
