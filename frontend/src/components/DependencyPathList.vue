@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineComponent, type PropType, type VNodeChild, h } from 'vue'
 
 const props = defineProps<{
   paths: string[]
@@ -7,153 +7,179 @@ const props = defineProps<{
   teamMappedNames?: Map<string, string[]>
 }>()
 
+const normalizeName = (name: string): string => name.trim().toLowerCase()
+
+const normalizedTeamMappedNames = computed(() => {
+  const map = new Map<string, string[]>()
+  if (!props.teamMappedNames) return map
+
+  for (const [key, val] of props.teamMappedNames.entries()) {
+    map.set(normalizeName(key), Array.isArray(val) ? val : [val])
+  }
+  return map
+})
+
 const isTeamMapped = (name: string): boolean => {
-  return !!props.teamMappedNames?.has(name)
+  return normalizedTeamMappedNames.value.has(normalizeName(name))
 }
 
 const getTeamNames = (name: string): string => {
-  const teams = props.teamMappedNames?.get(name)
+  const teams = normalizedTeamMappedNames.value.get(normalizeName(name))
   return teams?.[0] || ''
 }
 
-interface ParsedChain {
-  parts: string[]       // all parts without project root
-  directDep: string     // first part (the direct dependency)
-  affected: string      // last part (the vulnerable component)
-  intermediates: string[] // parts between directDep and affected
+interface TreeNode {
+  name: string
+  children: Map<string, TreeNode>
+  teamNames?: string[]
+  isPrimary?: boolean
+  isVulnerable?: boolean
+  isRoot?: boolean
 }
 
-const parsedChains = computed<ParsedChain[]>(() => {
+const rootNodes = computed((): TreeNode[] => {
   if (!props.paths?.length) return []
 
-  return props.paths
-    .map(p => {
-      const parts = p.split(' -> ').map(s => s.trim())
-      const withoutRoot = parts.slice(1)
-      if (withoutRoot.length === 0) return null
+  const roots = new Map<string, TreeNode>()
 
-      return {
-        parts: withoutRoot,
-        directDep: withoutRoot[0],
-        affected: withoutRoot[withoutRoot.length - 1],
-        intermediates: withoutRoot.length > 2 ? withoutRoot.slice(1, -1) : []
-      } as ParsedChain
+  for (const path of props.paths) {
+    const rawParts = path.split(' -> ').map(s => s.trim()).filter(Boolean)
+    const parts = rawParts.filter((part, index) => {
+      if (index === 0) return true
+      return normalizeName(part) !== normalizeName(rawParts[index - 1])
     })
-    .filter((c): c is ParsedChain => c !== null)
-    .sort((a, b) => a.parts.length - b.parts.length)
-})
+    if (parts.length <= 1) continue
 
-interface ChainGroup {
-  directDep: string
-  isDirect: boolean
-  chains: ParsedChain[]
-  shortestDepth: number
-}
+    const primaryTeamIndex = parts.findIndex(part => isTeamMapped(part))
+    const rootName = parts[0]
+    const rootKey = normalizeName(rootName)
+    let root = roots.get(rootKey)
 
-const groupedChains = computed<ChainGroup[]>(() => {
-  const groups = new Map<string, ChainGroup>()
-
-  for (const chain of parsedChains.value) {
-    const key = chain.directDep
-    if (!groups.has(key)) {
-      groups.set(key, {
-        directDep: key,
-        isDirect: false,
-        chains: [],
-        shortestDepth: chain.parts.length
-      })
+    if (!root) {
+      root = {
+        name: rootName,
+        children: new Map(),
+        isVulnerable: true,
+      }
+      if (isTeamMapped(rootName)) {
+        root.teamNames = [getTeamNames(rootName)]
+      }
+      roots.set(rootKey, root)
     }
-    const group = groups.get(key)!
-    group.chains.push(chain)
-    group.shortestDepth = Math.min(group.shortestDepth, chain.parts.length)
-    if (chain.parts.length === 1) group.isDirect = true
+
+    let current = root
+    for (let index = 1; index < parts.length; index += 1) {
+      const part = parts[index]
+      const normalizedPart = normalizeName(part)
+      if (normalizedPart === normalizeName(current.name)) {
+        continue
+      }
+
+      let child = current.children.get(normalizedPart)
+
+      if (!child) {
+        child = { name: part, children: new Map() }
+        if (isTeamMapped(part)) {
+          child.teamNames = [getTeamNames(part)]
+        }
+        current.children.set(normalizedPart, child)
+      }
+      if (index === primaryTeamIndex) child.isPrimary = true
+      if (index === parts.length - 1) child.isRoot = true
+
+      current = child
+    }
   }
 
-  return Array.from(groups.values()).sort((a, b) => {
-    if (a.isDirect !== b.isDirect) return a.isDirect ? -1 : 1
-    if (a.shortestDepth !== b.shortestDepth) return a.shortestDepth - b.shortestDepth
-    return a.directDep.localeCompare(b.directDep)
-  })
+  return Array.from(roots.values())
 })
 
-const INITIAL_GROUPS = 8
-const INITIAL_CHAINS = 3
-const showAllGroups = ref(false)
-const expandedGroups = ref(new Set<string>())
+const PathNode: ReturnType<typeof defineComponent> = defineComponent({
+  name: 'PathNode',
+  props: {
+    node: {
+      type: Object as PropType<TreeNode>,
+      required: true,
+    },
+  },
+  setup(props): () => VNodeChild {
+    return () => {
+      const node = props.node
+      const labelClass = [
+        'text-[10px] font-mono',
+        node.isPrimary ? 'text-cyan-300 font-semibold' : node.teamNames ? 'text-teal-300' : 'text-gray-500',
+      ]
 
-const visibleGroups = computed(() => {
-  if (showAllGroups.value) return groupedChains.value
-  return groupedChains.value.slice(0, INITIAL_GROUPS)
+      const badges = []
+      if (node.isPrimary) {
+        badges.push(
+          h('span', { class: 'ml-1 px-1 py-0 rounded bg-cyan-600/15 text-[8px] uppercase tracking-[0.12em] text-cyan-200' }, 'primary')
+        )
+      } else if (node.teamNames) {
+        badges.push(
+          h('span', { class: 'ml-1 px-1 py-0 rounded bg-teal-600/10 text-[8px] uppercase tracking-[0.12em] text-teal-200' }, 'team')
+        )
+      }
+
+      if (node.teamNames) {
+        badges.push(
+          h('span', { class: 'ml-1 px-0.5 py-0 text-[7px] font-bold uppercase text-teal-300/80' }, node.teamNames[0])
+        )
+      }
+
+      if (node.isRoot) {
+        badges.push(
+          h('span', { class: 'ml-1 px-1 py-0 rounded bg-slate-700/40 text-[8px] uppercase tracking-[0.12em] text-slate-300' }, 'root')
+        )
+      }
+
+      const children = Array.from(node.children.values())
+
+      return h('div', {}, [
+        h('div', { class: 'flex items-center gap-1.5' }, [
+          h('span', { class: labelClass, title: node.teamNames ? 'Team: ' + node.teamNames[0] : undefined }, node.name),
+          ...badges,
+        ]),
+        children.length > 0
+          ? h('div', { class: 'relative ml-[7px] pl-[13px]' },
+              children.map((child, idx) => {
+                const isLast = idx === children.length - 1
+                return h('div', { key: child.name, class: 'relative mt-1' }, [
+                  // Vertical line segment: full-height for non-last, partial for last
+                  h('div', {
+                    class: 'absolute border-l border-gray-700/60',
+                    style: isLast
+                      ? 'left: -13px; top: 0; height: 8px;'
+                      : 'left: -13px; top: 0; bottom: 0;',
+                  }),
+                  // Horizontal connector at the label midpoint
+                  h('div', {
+                    class: 'absolute border-t border-gray-700/60',
+                    style: 'left: -13px; top: 8px; width: 10px;',
+                  }),
+                  h(PathNode, { node: child }),
+                ])
+              })
+            )
+          : null,
+      ])
+    }
+  },
 })
-
-const hiddenGroupCount = computed(() =>
-  Math.max(0, groupedChains.value.length - INITIAL_GROUPS)
-)
-
-const toggleGroup = (key: string) => {
-  const s = new Set(expandedGroups.value)
-  if (s.has(key)) s.delete(key)
-  else s.add(key)
-  expandedGroups.value = s
-}
-
-const getVisibleChains = (key: string, chains: ParsedChain[]) => {
-  if (expandedGroups.value.has(key) || chains.length <= INITIAL_CHAINS) return chains
-  return chains.slice(0, INITIAL_CHAINS)
-}
 </script>
 
 <template>
   <div class="text-xs">
-    <div v-if="parsedChains.length === 0" class="text-gray-500 italic">
+    <div v-if="rootNodes.length === 0" class="text-gray-500 italic">
       No dependency chains found.
     </div>
 
-    <div v-else class="space-y-2">
-      <div v-for="group in visibleGroups" :key="group.directDep">
-        <!-- Direct dep row -->
-        <div class="flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="group.isDirect ? 'bg-red-500' : 'bg-orange-400'"></span>
-          <span class="text-[11px] font-semibold font-mono" :class="group.isDirect ? 'text-red-300' : 'text-orange-300'">{{ group.directDep }}</span>
-          <span v-if="isTeamMapped(group.directDep)" class="px-1 py-0 text-[8px] font-bold uppercase text-teal-400 bg-teal-600/15 rounded border border-teal-600/25" :title="'Team-mapped component (' + getTeamNames(group.directDep) + ') \u2014 direct dependencies of this component are classified as direct'">{{ getTeamNames(group.directDep) }}</span>
-          <span v-if="group.isDirect" class="text-[9px] font-bold uppercase text-red-400/70">(direct)</span>
-          <span v-if="group.chains.length > 1" class="text-[9px] text-gray-600">{{ group.chains.length }} paths</span>
+    <div v-else class="space-y-3">
+      <template v-for="root in rootNodes" :key="root.name">
+        <div v-if="root.children.size" class="space-y-1">
+          <PathNode v-for="child in Array.from(root.children.values())" :key="child.name" :node="child" />
         </div>
-
-        <!-- Chain paths under this direct dep -->
-        <div v-if="!group.isDirect" class="ml-3 mt-0.5 space-y-0.5">
-          <div
-            v-for="(chain, ci) in getVisibleChains(group.directDep, group.chains)"
-            :key="ci"
-            class="flex items-center gap-0 text-[10px] font-mono text-gray-500 leading-relaxed flex-wrap"
-          >
-            <span class="text-gray-600 mx-0.5">→</span>
-            <template v-for="(mid, mi) in chain.intermediates" :key="mi">
-              <span :class="isTeamMapped(mid) ? 'text-teal-400 font-semibold' : 'text-gray-500'" :title="isTeamMapped(mid) ? 'Team: ' + getTeamNames(mid) : undefined">{{ mid }}</span>
-              <span v-if="isTeamMapped(mid)" class="px-0.5 py-0 text-[7px] font-bold uppercase text-teal-400/70 ml-0.5">{{ getTeamNames(mid) }}</span>
-              <span v-if="mi < chain.intermediates.length - 1" class="text-gray-600 mx-0.5">→</span>
-            </template>
-          </div>
-
-          <!-- Show more paths toggle -->
-          <button
-            v-if="group.chains.length > INITIAL_CHAINS"
-            @click="toggleGroup(group.directDep)"
-            class="text-[9px] text-blue-500 hover:text-blue-400 ml-2"
-          >
-            {{ expandedGroups.has(group.directDep) ? 'show less' : `+${group.chains.length - INITIAL_CHAINS} more` }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Show more groups toggle -->
-      <button
-        v-if="hiddenGroupCount > 0"
-        @click="showAllGroups = !showAllGroups"
-        class="text-[9px] text-blue-500 hover:text-blue-400 mt-1"
-      >
-        {{ showAllGroups ? 'show fewer' : `+${hiddenGroupCount} more dependencies` }}
-      </button>
+      </template>
     </div>
   </div>
 </template>

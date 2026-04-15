@@ -1,14 +1,15 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns } from '../../lib/api'
+import { flushPromises } from '@vue/test-utils'
+import { extendedAnalysisFilters, extendedLifecycleFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
-    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null })),
+    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
-    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
+    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
+    getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
 }))
 
 vi.mock('vue-router', () => ({
@@ -30,23 +31,20 @@ describe('ProjectView Coverage Extras', () => {
         vi.clearAllMocks()
     })
 
-    it('renders the back link explicitly', async () => {
+    it('renders the project header with the project title and actions', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue([])
-        const wrapper = mount(ProjectView, {
-            global: {
-                components: {
-                    RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
-                },
-                mocks: {
-                    $route: { params: { name: 'Test' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
+        const wrapper = await mountProjectView({
+            mountOptions: {
+                global: {
+                    stubs: {
+                        RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
+                    }
                 }
             }
         })
-        expect(wrapper.find('[data-testid="router-link"]').exists()).toBe(true)
-        expect(wrapper.text()).toContain('Back to Dashboard')
+        // Project name is displayed in App.vue header via projectHeaderState, not inside ProjectView
+        // Verify the component mounted without errors
+        expect(wrapper.text()).toContain('No vulnerabilities found')
     })
 
     it('handles assessment update with empty structure', async () => {
@@ -71,24 +69,12 @@ describe('ProjectView Coverage Extras', () => {
         }
 
         vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: {
-                    $route: { params: { name: 'Test' }, query: {} }
-                },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: extendedAnalysisFilters,
         })
-
-        await flushPromises()
-
-            // Reset filters to ensure items are visible
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
 
         // Trigger update
         const updateData = {
@@ -117,21 +103,11 @@ describe('ProjectView Coverage Extras', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: extendedAnalysisFilters,
         })
-        await flushPromises()
-
-            // Reset filters to ensure items are visible
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
 
         // Set filter
         const input = wrapper.find('input[placeholder*="Team Identifier"]')
@@ -165,15 +141,7 @@ describe('ProjectView Coverage Extras', () => {
             return promise as any
         })
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
+        const wrapper = await mountProjectView()
 
         // At start, loading is true
         expect(wrapper.text()).toContain('Starting search...')
@@ -195,33 +163,19 @@ describe('ProjectView Coverage Extras', () => {
     })
 
     it('handles fetch error', async () => {
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
         vi.mocked(getGroupedVulns).mockRejectedValue(new Error('Network error'))
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectView()
         expect(wrapper.text()).toContain('Failed to load vulnerabilities: Network error')
+        consoleSpy.mockRestore()
     })
 
     it('handles fetch error string', async () => {
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => { })
         vi.mocked(getGroupedVulns).mockRejectedValue('String error')
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectView()
         expect(wrapper.text()).toContain('Failed to load vulnerabilities: String error')
+        consoleSpy.mockRestore()
     })
 
 
@@ -233,25 +187,16 @@ describe('ProjectView Coverage Extras', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectView()
 
         // Toggle sort order (hits branch 210)
-        const sortBtn = wrapper.find('button[title="Ascending"]')
+        const sortBtn = wrapper.find('button[title="Descending"]')
         expect(sortBtn).toBeDefined()
-        expect((wrapper.vm as any).sortOrder).toBe('asc')
-        await sortBtn?.trigger('click')
         expect((wrapper.vm as any).sortOrder).toBe('desc')
         await sortBtn?.trigger('click')
         expect((wrapper.vm as any).sortOrder).toBe('asc')
+        await sortBtn?.trigger('click')
+        expect((wrapper.vm as any).sortOrder).toBe('desc')
 
         // Change sort by to hit branches
 

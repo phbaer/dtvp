@@ -189,6 +189,65 @@ export function constructAssessmentDetails(
 }
 
 /**
+ * Sanitizes assessment details text by:
+ * 1. Parsing all blocks
+ * 2. Deduplicating by team (keeping the latest timestamp, or longest details on tie)
+ * 3. Sorting alphabetically by team name, with "General" always first
+ * 4. Reconstructing clean text
+ *
+ * Returns the sanitized text and the aggregated state.
+ */
+export function sanitizeAssessmentDetails(
+    fullText: string
+): { text: string, aggregatedState: string, blocks: AssessmentBlock[] } {
+    if (!fullText || !fullText.trim()) {
+        return { text: '', aggregatedState: 'NOT_SET', blocks: [] };
+    }
+
+    const blocks = parseAssessmentBlocks(fullText);
+    if (blocks.length === 0) {
+        return { text: fullText.trim(), aggregatedState: 'NOT_SET', blocks: [] };
+    }
+
+    // Deduplicate: keep only the latest block per team
+    const teamMap = new Map<string, AssessmentBlock>();
+    for (const block of blocks) {
+        const key = block.team;
+        const existing = teamMap.get(key);
+        if (!existing) {
+            teamMap.set(key, block);
+        } else {
+            const existingTs = existing.timestamp || 0;
+            const newTs = block.timestamp || 0;
+            if (newTs > existingTs) {
+                teamMap.set(key, block);
+            } else if (newTs === existingTs && (block.details?.length || 0) > (existing.details?.length || 0)) {
+                teamMap.set(key, block);
+            }
+        }
+    }
+
+    // Sort: General first, then alphabetical
+    const dedupedBlocks = Array.from(teamMap.values()).sort((a, b) => {
+        if (a.team === 'General') return -1;
+        if (b.team === 'General') return 1;
+        return a.team.localeCompare(b.team);
+    });
+
+    // Extract shared tags
+    const tags: string[] = [];
+    const rescoredMatch = fullText.match(/\[Rescored:\s*[\d\.]+\]/);
+    if (rescoredMatch) tags.push(rescoredMatch[0]);
+    const vectorMatch = fullText.match(/\[Rescored Vector:\s*[^\]]+\]/);
+    if (vectorMatch) tags.push(vectorMatch[0]);
+
+    const isPending = fullText.includes('[Status: Pending Review]');
+
+    const result = constructAssessmentDetails(dedupedBlocks, tags, isPending);
+    return { ...result, blocks: dedupedBlocks };
+}
+
+/**
  * Calculates a consensus assessment from multiple blocks.
  * Used by "Sync all" (INCOMPLETE) and "Apply worst assessment" (INCONSISTENT).
  */
@@ -301,21 +360,30 @@ export function mergeTeamAssessment(
     // 1. Parse existing
     const blocks = parseAssessmentBlocks(currentFullText);
 
-    // 2. Update or Create block for this team
+    // 2. Update, Create, or Remove block for this team
     const targetIndex = blocks.findIndex(b => b.team === team);
-    const newBlock: AssessmentBlock = {
-        team: team,
-        state: newState,
-        user: user,
-        details: newDetails.trim(),
-        justification: newJustification,
-        timestamp: Date.now()
-    };
+    const isCleared = newState === 'NOT_SET' && !newDetails.trim() && (!newJustification || newJustification === 'NOT_SET');
 
-    if (targetIndex >= 0) {
-        blocks[targetIndex] = newBlock;
+    if (isCleared) {
+        // Remove the block entirely when all fields are cleared
+        if (targetIndex >= 0) {
+            blocks.splice(targetIndex, 1);
+        }
     } else {
-        blocks.push(newBlock);
+        const newBlock: AssessmentBlock = {
+            team: team,
+            state: newState,
+            user: user,
+            details: newDetails.trim(),
+            justification: newJustification,
+            timestamp: Date.now()
+        };
+
+        if (targetIndex >= 0) {
+            blocks[targetIndex] = newBlock;
+        } else {
+            blocks.push(newBlock);
+        }
     }
 
     // 3. Extract or use provided tags
@@ -525,6 +593,23 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
         return 'ASSESSED_LEGACY';
     }
 
+    // Detect conflicts from structured assessment blocks directly.
+    // This prevents lifecycle flips when raw component analysis_state values are
+    // refreshed to a single summary state (e.g. IN_TRIAGE) while team/global
+    // blocks still contain conflicting states.
+    // However, when a global assessment exists, it is authoritative — different
+    // team opinions should NOT cause INCONSISTENT.
+    if (!hasGlobal) {
+        const distinctBlockStates = Array.from(new Set(
+            blocks
+                .map(b => b.state)
+                .filter(s => s !== 'NOT_SET')
+        ));
+        if (distinctBlockStates.length > 1) {
+            return 'INCONSISTENT';
+        }
+    }
+
     if (isPendingReview(group)) return 'NEEDS_APPROVAL';
 
     const missingTeams = (requiredTeams || []).filter((t: string) => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
@@ -549,6 +634,35 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
     const uniqueNonEmpty = new Set(nonEmptyStates);
 
     if (uniqueNonEmpty.size > 1 || versionStates.includes('INCONSISTENT_VERSION')) return 'INCONSISTENT';
+
+    // Also check if analysis_details content differs across versions/components.
+    // Normalize by stripping timestamps, rescored tags, and whitespace so that
+    // only the substantive assessment text is compared.
+    // Only compare instances that have a non-NOT_SET analysis_state — unassessed
+    // instances naturally have different (empty) details and should not trigger
+    // INCONSISTENT (that's an INCOMPLETE scenario instead).
+    const normalizeDetails = (d: string) =>
+        d.replace(/\[Date:\s*[^\]]*\]/g, '')
+         .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
+         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+         .replace(/\[Status: Pending Review\]/g, '')
+         .replace(/\s+/g, ' ')
+         .trim();
+
+    const assessedDetails = allInstances
+        .filter(i => {
+            const s = (i as any).analysis_state || (i as any).analysisState || 'NOT_SET';
+            return s !== 'NOT_SET';
+        })
+        .map(i => normalizeDetails((i as any).analysis_details || (i as any).analysisDetails || ''))
+        .filter(d => d.length > 0);
+
+    if (assessedDetails.length > 1) {
+        const first = assessedDetails[0];
+        if (assessedDetails.some(d => d !== first)) {
+            return 'INCONSISTENT';
+        }
+    }
     
     // Stricter Incomplete: Also check if ANY individual component is NOT_SET
     // when others in the same group have an assessment.
@@ -649,6 +763,30 @@ export function normalizeTags(tags: Tags | undefined, teamMapping: Record<string
         result.add(foundPrimary);
     });
     return Array.from(result);
+}
+
+/**
+ * Detect the CVSS major version from a vector string.
+ * Returns '4', '3', '2', or null.
+ */
+export function getCvssMajorVersion(vector: string | null | undefined): string | null {
+    if (!vector) return null
+    const v = vector.trim()
+    if (v.startsWith('CVSS:4.')) return '4'
+    if (v.startsWith('CVSS:3.')) return '3'
+    if (v.startsWith('CVSS:2.') || /^\(?AV:[NAL]/.test(v)) return '2'
+    return null
+}
+
+/**
+ * Check if a group has mismatched CVSS vector versions
+ * (rescored vector major version differs from original).
+ */
+export function hasCvssVersionMismatch(group: GroupedVuln): boolean {
+    const origVer = getCvssMajorVersion(group.cvss_vector)
+    const rescoredVer = getCvssMajorVersion(group.rescored_vector)
+    if (!origVer || !rescoredVer) return false
+    return origVer !== rescoredVer
 }
 
 export function matchesFilters(

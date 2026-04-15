@@ -15,7 +15,19 @@ vi.mock('lucide-vue-next', () => ({
     RefreshCw: { template: '<span />' },
     AlertTriangle: { template: '<span />' },
     RotateCcw: { template: '<span />' },
-    History: { template: '<span />' }
+    History: { template: '<span />' },
+    Package: { template: '<span />' },
+    Layers: { template: '<span />' },
+    ShieldOff: { template: '<span />' },
+    Zap: { template: '<span />' },
+    CircleDot: { template: '<span />' },
+    Search: { template: '<span />' },
+    ShieldCheck: { template: '<span />' },
+    Bug: { template: '<span />' },
+    GitBranch: { template: '<span />' },
+    Eye: { template: '<span />' },
+    ClipboardCopy: { template: '<span />' },
+    Plus: { template: '<span />' }
 }))
 
 vi.mock('../../lib/api', () => ({
@@ -29,13 +41,13 @@ describe('VulnGroupCard Severity Colors', () => {
             id: 'V1',
             severity: 'MEDIUM',
             affected_versions: [],
-            cvss: 0,
-            cvss_score: 0,
+            cvss: 5.0,
+            cvss_score: 5.0,
             tags: []
         }
         const wrapper = mount(VulnGroupCard, { props: { group: mediumGroup } })
 
-        const badge = wrapper.find('.ring-1')
-        expect(badge.classes()).toContain('bg-yellow-600')
+        const polygon = wrapper.find('[data-testid="severity-badge"] polygon')
+        expect(polygon.attributes('fill')).toBe('rgba(202, 138, 4, 0.4)')
     })
 })

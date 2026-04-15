@@ -1,0 +1,4 @@
+component_name,component_version,tm_element_id,tm_element_name,notes
+library-a,1.0.0,TM-ELEMENT-2,Web API,Direct API dependency exposed on the main request path
+library-b,2.0.0,TM-ELEMENT-4,Primary Database,Persistence-layer component with database access
+worker-lib,0.9.1,TM-ELEMENT-3,Worker Service,Used by background job processing

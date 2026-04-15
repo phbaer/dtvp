@@ -6,13 +6,15 @@ import { Copy } from 'lucide-vue-next'
 export interface FilterState {
     sortBy: string
     sortOrder: 'asc' | 'desc'
-    dependencyFilter: 'ALL' | 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
+    dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
+    tmrescoreFilter: Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>
     idFilter: string
     tagFilter: string
     componentFilter: string
     versionFilterInput: string
     lifecycleFilters: string[]
     analysisFilters: string[]
+    cvssVersionMismatchOnly: boolean
 }
 
 export interface FilterOption {
@@ -28,8 +30,6 @@ const props = defineProps<{
     availableVersions: string[]
     lifecycleOptions: FilterOption[]
     analysisOptions: FilterOption[]
-    sortOptions: ReadonlyArray<{ value: string; label: string }>
-    dependencyOptions: ReadonlyArray<{ value: string; label: string }>
     copiedUrl: boolean
 }>()
 
@@ -99,7 +99,7 @@ const toggleAnalysisFilter = (val: string) => {
 </script>
 
 <template>
-    <div class="sticky top-4 self-start w-full max-w-[360px] flex-shrink-0 shadow-xl bg-white/2 border border-white/5 rounded-2xl p-5 backdrop-blur-sm space-y-5 relative">
+    <div class="w-full max-w-[360px] flex-shrink-0 shadow-xl bg-white/2 border border-white/5 rounded-2xl p-5 backdrop-blur-sm space-y-5 relative z-40">
         <button
             @click="emit('copy-filter-url')"
             class="absolute top-3 right-3 text-gray-200 hover:text-white p-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/15 transition-colors"
@@ -109,39 +109,6 @@ const toggleAnalysisFilter = (val: string) => {
             <span class="sr-only">Copy filter URL</span>
         </button>
         <span v-if="copiedUrl" class="absolute top-3 right-12 text-[10px] text-green-300">Copied!</span>
-
-        <!-- Sort & Scope -->
-        <div class="space-y-2">
-            <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Sort & Scope</label>
-            <div class="grid grid-cols-[1fr_auto] gap-2">
-                <div class="flex flex-col gap-1">
-                    <label class="text-[9px] uppercase tracking-widest text-gray-400">Sort By</label>
-                    <CustomSelect
-                        :modelValue="filters.sortBy"
-                        @update:modelValue="updateFilter('sortBy', $event)"
-                        :options="[...sortOptions]"
-                    />
-                </div>
-                <div class="flex flex-col gap-1">
-                    <label class="text-[9px] uppercase tracking-widest text-gray-400">Order</label>
-                    <button 
-                        @click="updateFilter('sortOrder', filters.sortOrder === 'asc' ? 'desc' : 'asc')"
-                        class="bg-black/40 border border-white/10 rounded-xl px-2 h-10 text-sm hover:bg-white/5 transition-colors font-medium text-blue-400 border-dashed"
-                        :title="filters.sortOrder === 'asc' ? 'Ascending' : 'Descending'"
-                    >
-                        {{ filters.sortOrder === 'asc' ? 'ASC' : 'DESC' }}
-                    </button>
-                </div>
-                <div class="col-span-2 flex flex-col gap-1">
-                    <label class="text-[9px] uppercase tracking-widest text-gray-400">Dependency</label>
-                    <CustomSelect
-                        :modelValue="filters.dependencyFilter"
-                        @update:modelValue="updateFilter('dependencyFilter', $event as FilterState['dependencyFilter'])"
-                        :options="[...dependencyOptions]"
-                    />
-                </div>
-            </div>
-        </div>
 
         <!-- Search Filters -->
         <div class="space-y-2">

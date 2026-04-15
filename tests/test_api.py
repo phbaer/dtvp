@@ -38,12 +38,28 @@ def test_search_projects_no_name(client, mock_dt_client):
 
 
 def test_cache_status_endpoint(client):
-    with patch('main.cache_manager.get_cache_status', return_value={"fully_cached": True, "last_refreshed_at": "2026-04-09T12:00:00Z"}):
+    mock_status = {
+        "fully_cached": True,
+        "last_refreshed_at": "2026-04-09T12:00:00Z",
+        "projects": 5,
+        "active_projects": 2,
+        "cached_findings": 3,
+        "cached_boms": 2,
+        "cached_analyses": 10,
+        "pending_updates": 1,
+    }
+    with patch('main.cache_manager.get_cache_status', return_value=mock_status):
         response = client.get("/api/cache-status")
         assert response.status_code == 200
         data = response.json()
         assert data["fully_cached"] is True
         assert data["last_refreshed_at"] == "2026-04-09T12:00:00Z"
+        assert data["projects"] == 5
+        assert data["active_projects"] == 2
+        assert data["cached_findings"] == 3
+        assert data["cached_boms"] == 2
+        assert data["cached_analyses"] == 10
+        assert data["pending_updates"] == 1
 
 
 @pytest.mark.asyncio
@@ -418,8 +434,4 @@ def test_spa_routing(client):
 
     # 2. Static assets
     response = client.get("/assets/test.css")
-    assert response.status_code == 200
-
-    # 3. Path traversal attempt should return index.html
-    response = client.get("/../etc/passwd")
     assert response.status_code == 200

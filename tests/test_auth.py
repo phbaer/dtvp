@@ -16,9 +16,8 @@ def use_real_auth():
 
 async def test_get_oidc_config(respx_mock):
     # Mocking httpx call via respx
-    config_url = (
-        f"{auth_settings.authority.rstrip('/')}/.well-known/openid-configuration"
-    )
+    mock_authority = "https://auth.example.com"
+    config_url = f"{mock_authority}/.well-known/openid-configuration"
     respx_mock.get(config_url).respond(
         json={
             "authorization_endpoint": "https://auth.example.com/login",
@@ -31,12 +30,13 @@ async def test_get_oidc_config(respx_mock):
 
     auth._oidc_config_cache = None
 
-    config = await get_oidc_config()
-    assert config["authorization_endpoint"] == "https://auth.example.com/login"
+    with patch.object(auth_settings, "OIDC_AUTHORITY", mock_authority):
+        config = await get_oidc_config()
+        assert config["authorization_endpoint"] == "https://auth.example.com/login"
 
-    # Test cache
-    config2 = await get_oidc_config()
-    assert config2 is config
+        # Test cache
+        config2 = await get_oidc_config()
+        assert config2 is config
 
 
 def test_login_redirect(client):

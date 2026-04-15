@@ -125,6 +125,21 @@ test.describe('Per-Team Assessment UI Flow', () => {
             });
         });
 
+        await page.route('**/api/projects/*/tmrescore/proposals', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    project_name: 'TestProject',
+                    session_id: '',
+                    scope: 'merged_versions',
+                    latest_version: '1.0',
+                    analyzed_versions: [],
+                    proposals: {},
+                }),
+            });
+        });
+
         // Bypass ChangelogModal
         await page.addInitScript(() => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.0');
@@ -147,11 +162,10 @@ test.describe('Per-Team Assessment UI Flow', () => {
         const globalHeader = page.getByText(/Global Assessment/i).first();
         await expect(globalHeader).toBeVisible();
 
-        // Verify Team Marker dropdown exists and select 'Backend'
-        const teamDropdown = cardHeader.getByRole('button', { name: 'Global assessment' });
-        await expect(teamDropdown).toBeVisible();
-        await teamDropdown.click();
-        await page.locator('.absolute.z-50 button', { hasText: 'Backend' }).click();
+        // Select 'Backend' team tab
+        const backendTab = cardHeader.getByRole('button', { name: 'Backend' });
+        await expect(backendTab).toBeVisible();
+        await backendTab.click();
 
         // Analysis state selection
         const stateDropdown = cardHeader.getByRole('button', { name: 'Not Set' });
@@ -184,8 +198,8 @@ test.describe('Per-Team Assessment UI Flow', () => {
         console.log('E2E: Clickable button found:', await applyBtn.textContent());
         await applyBtn.click();
 
-        // Handle Custom Confirm Modal
-        await page.getByRole('button', { name: 'Confirm' }).click();
+        // Handle Review Modal
+        await page.getByRole('button', { name: 'Submit' }).click();
 
         // Ensure the details textarea is visible and contains the expected updated value.
         const detailsTextarea = page.locator('textarea[placeholder="Technical details..."]');
@@ -198,7 +212,9 @@ test.describe('Per-Team Assessment UI Flow', () => {
         await expect(detailsTextarea).toBeVisible();
         await expect(detailsTextarea).toHaveValue(/Backend confirms this is exploitable/);
 
-        // Verify the card header now shows the EXPLOITABLE state
-        await expect(page.locator('#state-CVE-TEAM-TEST')).toHaveText('EXPLOITABLE', { timeout: 10000 });
+        // Verify the card header lifecycle badge updates after the assessment submission.
+        // With only the Backend team assessed (Frontend still missing), lifecycle should be INCOMPLETE.
+        const lifecycleBadge = cardHeader.getByTestId('lifecycle-badge');
+        await expect(lifecycleBadge).toHaveText('Incomplete', { timeout: 10000 });
     });
 });

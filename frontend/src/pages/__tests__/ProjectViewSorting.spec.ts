@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns } from '../../lib/api'
 import { useRoute } from 'vue-router'
+import { extendedStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
-    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null })),
+    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
-    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
+    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
+    getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
 }))
 
 vi.mock('vue-router', () => ({
@@ -57,22 +57,11 @@ describe('ProjectView.vue Sorting', () => {
         },
     ]
 
-    it('sorts by severity (default asc)', async () => {
+    it('sorts by rescored severity (default desc)', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
-            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
-        await wrapper.vm.$nextTick()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await updateProjectViewState(wrapper, { statusFilters: extendedStatusFilters })
 
         const cards = wrapper.findAll('.vuln-group-card')
         expect(cards[0]!.attributes('data-id')).toBe('CVE-2023-0002') // CRITICAL
@@ -83,26 +72,16 @@ describe('ProjectView.vue Sorting', () => {
     it('sorts by score (asc/desc)', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
-            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
-        await wrapper.vm.$nextTick()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await updateProjectViewState(wrapper, { statusFilters: extendedStatusFilters })
 
         // Change sortBy to score
         ;(wrapper.vm as any).sortBy = 'score'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
 
         let cards = wrapper.findAll('.vuln-group-card')
-        // Default sortOrder is asc, so score 5.0 -> 8.0 -> 9.8
+        // sortOrder is asc, so score 5.0 -> 8.0 -> 9.8
         expect(cards[0]!.attributes('data-id')).toBe('CVE-2023-0003')
         expect(cards[1]!.attributes('data-id')).toBe('CVE-2023-0001')
         expect(cards[2]!.attributes('data-id')).toBe('CVE-2023-0002')
@@ -119,21 +98,11 @@ describe('ProjectView.vue Sorting', () => {
     it('sorts by CVE ID', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
-            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
-        await wrapper.vm.$nextTick()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await updateProjectViewState(wrapper, { statusFilters: extendedStatusFilters })
 
         ;(wrapper.vm as any).sortBy = 'id'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
 
         const cards = wrapper.findAll('.vuln-group-card')
@@ -145,21 +114,11 @@ describe('ProjectView.vue Sorting', () => {
     it('sorts by analysis state', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
-            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED', 'EXPLOITABLE', 'IN_TRIAGE']
-        await wrapper.vm.$nextTick()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await updateProjectViewState(wrapper, { statusFilters: extendedStatusFilters })
 
         ;(wrapper.vm as any).sortBy = 'analysis'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
 
         const cards = wrapper.findAll('.vuln-group-card')
@@ -187,27 +146,16 @@ describe('ProjectView.vue Sorting', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(stableGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'TestProject' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await flushPromises()
-            ; (wrapper.vm as any).statusFilters = ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED']
-        await wrapper.vm.$nextTick()
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await updateProjectViewState(wrapper, { statusFilters: ['NOT_SET', 'INCOMPLETE', 'INCONSISTENT', 'ASSESSED'] })
 
         let cards = wrapper.findAll('.vuln-group-card')
-        // Default sort is severity check (HIGH vs HIGH) -> fall back to ID asc
+        // Default sort is rescored-severity desc (HIGH vs HIGH) -> fall back to ID asc
         expect(cards[0]!.attributes('data-id')).toBe('CVE-2023-AAA')
         expect(cards[1]!.attributes('data-id')).toBe('CVE-2023-BBB')
 
         // Toggle sort order (should still use ID asc for tie-breaker)
-        await wrapper.find('button[title="Ascending"]').trigger('click')
+        await wrapper.find('button[title="Descending"]').trigger('click')
 
         cards = wrapper.findAll('.vuln-group-card')
         // Severity desc (HIGH vs HIGH) -> tie-breaker ID asc

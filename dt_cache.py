@@ -101,9 +101,27 @@ class CacheManager:
         _atomic_write(self._projects_meta_path(), meta)
 
     def get_cache_status(self) -> Dict[str, Any]:
+        projects = self._load_project_cache(self._projects_path(), []) or []
+        pending = self._load_pending_updates()
+        active = list(self.active_project_uuids)
+
+        findings_dir = os.path.join(self.base_path, "findings")
+        boms_dir = os.path.join(self.base_path, "boms")
+        analysis_dir = os.path.join(self.base_path, "analysis")
+
+        cached_findings = len([f for f in os.listdir(findings_dir) if f.endswith(".json")]) if os.path.isdir(findings_dir) else 0
+        cached_boms = len([f for f in os.listdir(boms_dir) if f.endswith(".json")]) if os.path.isdir(boms_dir) else 0
+        cached_analyses = len([f for f in os.listdir(analysis_dir) if f.endswith(".json")]) if os.path.isdir(analysis_dir) else 0
+
         return {
             "fully_cached": self.cache_meta.get("fully_cached", False),
             "last_refreshed_at": self.cache_meta.get("last_refreshed_at"),
+            "projects": len(projects),
+            "active_projects": len(active),
+            "cached_findings": cached_findings,
+            "cached_boms": cached_boms,
+            "cached_analyses": cached_analyses,
+            "pending_updates": len(pending),
         }
 
     def _touch_cache_meta(self) -> None:
@@ -164,6 +182,7 @@ class CacheManager:
     def reset(self, base_path: str = None) -> None:
         if base_path:
             self.base_path = base_path
+        self.lock = asyncio.Lock()
         self.pending_updates = []
         self.active_project_uuids = set()
         self.project_query_cache = {}
@@ -407,12 +426,9 @@ class CacheManager:
                     finding["analysis"] = analysis
         return findings
 
-    async def queue_analysis_update(self, payload: Dict[str, Any]) -> str:
-        if self._has_pending_update(payload):
-            raise PendingUpdateExistsError(
-                "A pending update already exists for this finding."
-            )
-
+    async def queue_analysis_update(
+        self, payload: Dict[str, Any], replace: bool = False
+    ) -> str:
         update_id = str(uuid.uuid4())
         entry = {
             "id": update_id,
@@ -421,6 +437,18 @@ class CacheManager:
         }
         async with self.lock:
             pending = self._load_pending_updates()
+            if self._has_pending_update(payload):
+                if not replace:
+                    raise PendingUpdateExistsError(
+                        "A pending update already exists for this finding."
+                    )
+                # Remove old pending entry for the same key
+                key = self._pending_update_key(payload)
+                pending = [
+                    e
+                    for e in pending
+                    if self._pending_update_key(e.get("payload", {})) != key
+                ]
             pending.append(entry)
             self._save_pending_updates(pending)
             self._save_local_analysis(payload)

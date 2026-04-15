@@ -1,20 +1,26 @@
 <script setup lang="ts">
-import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { updateAssessment, getAssessmentDetails } from '../lib/api'
 
-import type { GroupedVuln, AssessmentPayload } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw } from 'lucide-vue-next'
+import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { compareVersions, sortVersions } from '../lib/version'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
 import CvssCalculatorV3 from './CvssCalculatorV3.vue'
 import CvssCalculatorV4 from './CvssCalculatorV4.vue'
+import CvssVectorDisplay from './CvssVectorDisplay.vue'
 import CustomSelect from './CustomSelect.vue'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import VulnGroupAssessmentDetails from './VulnGroupAssessmentDetails.vue'
+import CalculatorModal from './CalculatorModal.vue'
+import ConflictResolutionModal from './ConflictResolutionModal.vue'
+import GenericModal from './GenericModal.vue'
+import AssessmentReviewModal from './AssessmentReviewModal.vue'
+
 const props = defineProps<{
   group: GroupedVuln
 }>()
@@ -33,6 +39,9 @@ const handleCloseOnEscape = (e: KeyboardEvent) => {
 
 onMounted(() => {
     window.addEventListener('keydown', handleCloseOnEscape)
+    nextTick(() => {
+        if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
+    })
 })
 
 onUnmounted(() => {
@@ -42,6 +51,7 @@ onUnmounted(() => {
 const user = inject<any>('user', ref({ role: 'ANALYST' }))
 const teamMapping = inject<any>('teamMapping', ref({}))
 const rescoreRules = inject<any>('rescoreRules', ref({ transitions: [] }))
+const tmrescoreProposals = inject<any>('tmrescoreProposals', ref({}))
 
 const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
 
@@ -84,6 +94,13 @@ const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Ana
 const refreshCounter = ref(0)
 const formTouched = ref(false)
 const isInternalUpdate = ref(false)
+const showRawEdit = ref(false)
+const rawDetails = ref('')
+const rawDetailsTouched = ref(false)
+
+const headerEl = ref<HTMLElement | null>(null)
+const detailsEl = ref<HTMLElement | null>(null)
+const headerHeight = ref(48) // sensible default
 
 const pendingScore = ref<number | null>(null)
 const pendingVector = ref<string>('')
@@ -92,6 +109,15 @@ const cvssInstance = ref<any>(null)
 const isManualBaseMode = ref(false)
 const initialVector = ref('')
 const initialScore = ref<number | null>(null)
+
+const reviewModal = ref({
+    show: false,
+    blocks: [] as AssessmentBlock[],
+    aggregatedState: 'NOT_SET',
+    sanitizedText: '',
+    duplicatesRemoved: 0,
+    resolve: (_: boolean) => {}
+})
 
 const genericModal = ref({
     show: false,
@@ -116,6 +142,34 @@ const promptConfirm = (title: string, message: string, confirmOnly = false) => {
 
 const showAlert = (title: string, message: string) => promptConfirm(title, message, true)
 
+const promptReview = (rawText: string): Promise<boolean> => {
+    const parsed = parseAssessmentBlocks(rawText)
+    const sanitized = sanitizeAssessmentDetails(rawText)
+    const dupsRemoved = parsed.length - sanitized.blocks.length
+
+    reviewModal.value = {
+        show: true,
+        blocks: sanitized.blocks,
+        aggregatedState: sanitized.aggregatedState,
+        sanitizedText: sanitized.text,
+        duplicatesRemoved: dupsRemoved,
+        resolve: () => {}
+    }
+    return new Promise<boolean>((resolve) => {
+        reviewModal.value.resolve = resolve
+    })
+}
+
+const handleReviewConfirm = () => {
+    reviewModal.value.show = false
+    reviewModal.value.resolve(true)
+}
+
+const handleReviewCancel = () => {
+    reviewModal.value.show = false
+    reviewModal.value.resolve(false)
+}
+
 const handleModalResponse = (value: boolean) => {
     genericModal.value.show = false
     genericModal.value.resolve(value)
@@ -133,8 +187,10 @@ const allInstances = computed(() => {
 
 const totalTargeted = computed(() => {
     // When a team is selected, automatically target only that team's instances
+    // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
     if (selectedTeam.value) {
-        return allInstances.value.filter(inst => inst.tags && inst.tags.includes(selectedTeam.value)).length
+        const matched = allInstances.value.filter(inst => inst.tags && inst.tags.includes(selectedTeam.value)).length
+        return matched > 0 ? matched : allInstances.value.length
     }
     return allInstances.value.length
 })
@@ -144,7 +200,7 @@ const displayState = computed(() => {
 })
 
 const technicalState = computed(() => {
-    return localTechnicalState.value ?? getGroupTechnicalState(props.group)
+    return getGroupTechnicalState(props.group)
 })
 
 const consensusButtonLabel = computed(() => {
@@ -178,11 +234,126 @@ const canApprove = computed(() => {
 })
 
 const lastRescoredScore = ref<number | null>(null)
-const localTechnicalState = ref<string | null>(null)
+
+const stableRescoredScore = computed<number | null>(() => {
+    return props.group.rescored_cvss ?? null
+})
+
+const hasStableRescore = computed(() => {
+    const base = props.group.cvss ?? props.group.cvss_score
+    const rescored = stableRescoredScore.value
+    if (rescored == null || base == null) return false
+    return Math.abs(rescored - base) > 0.05
+})
+
+const matchedProposal = computed<TMRescoreProposal | null>(() => {
+    const proposals = tmrescoreProposals?.value || {}
+    const candidateIds = [props.group.id, ...(props.group.aliases || [])]
+    for (const candidateId of candidateIds) {
+        const normalized = String(candidateId || '').trim().toUpperCase()
+        if (normalized && proposals[normalized]) {
+            const proposal = proposals[normalized]
+            const rescoredVector = proposal?.rescored_vector || null
+            const originalVector = proposal?.original_vector || props.group.cvss_vector || null
+            if (rescoredVector && (!originalVector || rescoredVector !== originalVector)) {
+                return proposal
+            }
+        }
+    }
+    return null
+})
+
+const cvssVectorEntries = computed(() => {
+    const entries: { vector: string, label: string, theme: 'purple' | 'teal' | 'gray', adjusted?: boolean }[] = []
+    const proposal = matchedProposal.value
+    // Original/base — always first
+    if (props.group.cvss_vector) {
+        entries.push({
+            vector: props.group.cvss_vector,
+            label: 'Original',
+            theme: 'gray',
+        })
+    }
+    // Proposed
+    if (proposal?.rescored_vector) {
+        entries.push({
+            vector: proposal.rescored_vector,
+            label: 'Proposed',
+            theme: 'teal',
+            adjusted: !!proposal.rescored_vector_adjusted,
+        })
+    }
+    // Rescored — use pendingVector if the user is editing, otherwise the saved rescored_vector
+    const effectiveRescored = pendingVector.value || props.group.rescored_vector
+    if (effectiveRescored && effectiveRescored !== props.group.cvss_vector) {
+        entries.push({
+            vector: effectiveRescored,
+            label: 'Rescored',
+            theme: 'purple',
+            adjusted: !pendingVector.value ? !!props.group.rescored_vector_adjusted : undefined,
+        })
+    }
+    return entries
+})
+
+const copyId = () => {
+    navigator.clipboard.writeText(props.group.id)
+}
+
+const applyProposal = async () => {
+    const proposal = matchedProposal.value
+    if (!proposal || !proposal.rescored_vector) return
+
+    // Set team first — this triggers updateFormFromGroup via the selectedTeam watcher.
+    // We must wait for that reset to complete before applying proposal values.
+    selectedTeam.value = 'automation'
+    await nextTick()
+
+    pendingVector.value = proposal.rescored_vector
+    const score = calculateScoreFromVector(proposal.rescored_vector)
+    if (score !== null) pendingScore.value = score
+
+    setCvssInstanceFromVector(proposal.rescored_vector)
+
+    // Populate the analysis details from the proposal reasoning
+    const parts: string[] = []
+    parts.push('[TMRescore Proposal Applied]')
+    if (proposal.analysis?.detail) {
+        parts.push(`Reasoning: ${proposal.analysis.detail}`)
+    }
+    if (proposal.analysis?.state) {
+        parts.push(`Suggested state: ${proposal.analysis.state}`)
+    }
+    if (proposal.analysis?.justification) {
+        parts.push(`Justification: ${proposal.analysis.justification}`)
+    }
+    if (proposal.analysis?.response?.length) {
+        const responses = proposal.analysis.response
+            .map((r: any) => typeof r === 'string' ? r : r.detail || r.title || '')
+            .filter(Boolean)
+        if (responses.length > 0) {
+            parts.push(`Analysis: ${responses.join('; ')}`)
+        }
+    }
+    if (proposal.rescored_vector) {
+        parts.push(`Vector: ${proposal.rescored_vector}`)
+    }
+    if (score !== null) {
+        parts.push(`Score: ${score}`)
+    }
+    details.value = parts.join('\n')
+
+    formTouched.value = true
+
+    // Auto-submit immediately so the automation block is persisted to all
+    // instances.  This way, when the user subsequently switches to their own
+    // team and submits their assessment, the merge logic already sees the
+    // automation block from the server/cache — no second apply needed.
+    await handleUpdate(false)
+}
 
 const currentDisplayScore = computed(() => {
     if (pendingScore.value !== null) return pendingScore.value
-    if (lastRescoredScore.value !== null) return lastRescoredScore.value
     return props.group.rescored_cvss ?? (props.group.cvss || props.group.cvss_score) ?? 'N/A'
 })
 
@@ -239,7 +410,7 @@ watch([showCalculatorModal, pendingVector], () => {
     }
 })
 
-const visibleVersions = computed(() => {
+const visibleVersions = computed<Array<'4.0' | '3.1' | '3.0' | '2.0'>>(() => {
     const v = pendingVector.value || ''
     if (v.startsWith('CVSS:4.0')) return ['4.0']
     if (v.startsWith('CVSS:3.1')) return ['3.1']
@@ -593,6 +764,12 @@ const updateFormFromGroup = (force = true) => {
     try {
         pendingScore.value = props.group.rescored_cvss ?? props.group.cvss_score ?? props.group.cvss ?? null
         pendingVector.value = props.group.rescored_vector || props.group.cvss_vector || ''
+        // Keep activeVersion in sync with the actual vector version
+        const pv = pendingVector.value
+        if (pv.startsWith('CVSS:4.0')) activeVersion.value = '4.0'
+        else if (pv.startsWith('CVSS:3.0')) activeVersion.value = '3.0'
+        else if (pv.startsWith('CVSS:3.')) activeVersion.value = '3.1'
+        else if (pv.startsWith('CVSS:2.0') || (pv.includes('/') && !pv.startsWith('CVSS:'))) activeVersion.value = '2.0'
         
         const teamBlocks = mergedAssessmentData.value.blocks
         
@@ -632,7 +809,13 @@ const updateFormFromGroup = (force = true) => {
 
                     if (dtWorstCandidate) {
                         state.value = dtWorstCandidate.state
-                        details.value = dtWorstCandidate.details.replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
+                        // Parse the raw details and extract only the General block's text,
+                        // not the full structured text with all team headers.
+                        const dtParsedBlocks = parseAssessmentBlocks(dtWorstCandidate.details)
+                        const dtGeneralBlock = dtParsedBlocks.find(b => b.team === 'General')
+                        details.value = (dtGeneralBlock?.details || '')
+                            .replace(/\n\n\[Status: Pending Review\]/g, '')
+                            .replace(/\[Status: Pending Review\]/g, '')
 
                         let resolvedJustification = dtWorstCandidate.justification && dtWorstCandidate.justification !== 'NOT_SET'
                             ? dtWorstCandidate.justification
@@ -753,17 +936,94 @@ const applyConsensusAssessment = () => {
     }
 }
 
+const handleApplyAllAssessment = async (assessmentDetails: string, assessmentState: string, assessmentJustification: string) => {
+    // Always apply to global assessment regardless of current team selection.
+    // Must await nextTick so the selectedTeam watcher (updateFormFromGroup) runs
+    // before we set the form values — otherwise it overwrites them.
+    selectedTeam.value = ''
+    await nextTick()
+
+    // Parse the full structured text and extract only the General block's details.
+    const blocks = parseAssessmentBlocks(assessmentDetails)
+    const generalBlock = blocks.find(b => b.team === 'General')
+    if (generalBlock) {
+        details.value = (generalBlock.details || '').replace(/\[Status: Pending Review\]/g, '').trim()
+        state.value = generalBlock.state || assessmentState || 'NOT_SET'
+        justification.value = generalBlock.justification || assessmentJustification || 'NOT_SET'
+    } else {
+        // No structured blocks — treat as plain text
+        const cleaned = assessmentDetails
+            .replace(/---\s*\[Team:[^\n]*---\s*/g, '')
+            .replace(/\[Rescored:\s*[\d.]+\]/g, '')
+            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+            .replace(/\[Status: Pending Review\]/g, '')
+            .trim()
+        details.value = cleaned
+        state.value = assessmentState || 'NOT_SET'
+        justification.value = assessmentJustification || 'NOT_SET'
+    }
+    formTouched.value = true
+
+    // Explicitly trigger rescore — the watch(state) guard may skip it when
+    // the state value hasn't changed (same pattern as applyConsensusAssessment).
+    if (isReviewer.value) {
+        applyStateRescore(state.value)
+    }
+}
+
+const toggleRawEdit = () => {
+    showRawEdit.value = !showRawEdit.value
+    rawDetailsTouched.value = false
+    if (showRawEdit.value) {
+        rawDetails.value = mergedAssessmentData.value.fullText
+    }
+}
+
+const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
+    // Always apply to global assessment regardless of current team selection.
+    // Must await nextTick so the selectedTeam watcher (updateFormFromGroup) runs
+    // before we set the form values — otherwise it overwrites them.
+    selectedTeam.value = ''
+    await nextTick()
+
+    // Adopt the team block's assessment into the global form fields.
+    // Only copy the team's details text (not a full structured document).
+    state.value = block.state || 'NOT_SET'
+    justification.value = block.justification || 'NOT_SET'
+    details.value = (block.details || '').replace(/\[Status: Pending Review\]/g, '').trim()
+    formTouched.value = true
+}
+
 watch(selectedTeam, () => {
     updateFormFromGroup()
 })
 
 watch(() => props.group, () => updateFormFromGroup(true), { immediate: true })
 
+// Keep raw details in sync with the merged assessment data when not manually edited
+watch(() => mergedAssessmentData.value.fullText, (newText) => {
+    if (showRawEdit.value && !rawDetailsTouched.value) {
+        rawDetails.value = newText
+    }
+})
+
 
 watch(expanded, (isOpen) => {
     emit('toggle-expand', props.group.id, isOpen)
     if (isOpen) {
         refreshDetails()
+        nextTick(() => {
+            // Measure header for badge height
+            if (headerEl.value) {
+                headerHeight.value = headerEl.value.offsetHeight
+            }
+            // Scroll the expanded details into view
+            nextTick(() => {
+                if (typeof detailsEl.value?.scrollIntoView === 'function') {
+                    detailsEl.value.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                }
+            })
+        })
     }
 })
 /**
@@ -777,7 +1037,15 @@ const applyStateRescore = (targetState: string) => {
 
     if (!triggerMatch) return
 
-    const actions = triggerMatch.actions?.[activeVersion.value] || {}
+    // Derive the CVSS version from the actual pending vector, not activeVersion
+    let vectorVersion = activeVersion.value
+    const vTrim = (pendingVector.value || '').trim()
+    if (vTrim.startsWith('CVSS:4.0')) vectorVersion = '4.0'
+    else if (vTrim.startsWith('CVSS:3.0')) vectorVersion = '3.0'
+    else if (vTrim.startsWith('CVSS:3.')) vectorVersion = '3.1'
+    else if (vTrim.startsWith('CVSS:2.0') || (vTrim.includes('/') && !vTrim.startsWith('CVSS:'))) vectorVersion = '2.0'
+
+    const actions = triggerMatch.actions?.[vectorVersion] || {}
 
     // Create a fresh CVSS instance from the pending vector
     let v = pendingVector.value?.trim() || ''
@@ -941,9 +1209,11 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     let instances = allInstances.value
     
     // When a team is selected, automatically filter to only that team's instances
+    // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
     if (selectedTeam.value) {
         const team = selectedTeam.value
-        instances = instances.filter(inst => inst.tags && inst.tags.includes(team))
+        const matched = instances.filter(inst => inst.tags && inst.tags.includes(team))
+        if (matched.length > 0) instances = matched
     }
 
     if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
@@ -957,18 +1227,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         });
     }
 
-    if (!force && !await promptConfirm('Apply Assessment', `Apply this assessment?`)) {
-        if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
-            console.log('[Persistence Debug] handleUpdate cancelled by user');
-        }
-        return
-    }
-    
     updating.value = true
-    localTechnicalState.value = state.value || null
-    if (isReviewer.value && pendingScore.value !== null) {
-        lastRescoredScore.value = pendingScore.value
-    }
     try {
         const allBlocks: AssessmentBlock[] = []
         const teamToIndex = new Map<string, number>()
@@ -1069,27 +1328,65 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
 
         let mergedResult: { text: string, aggregatedState: string }
         
+         // If the reviewer edited raw text directly, use that as the final text
+         // instead of the normal per-block merge flow.
+         if (showRawEdit.value && rawDetailsTouched.value && rawDetails.value !== mergedAssessmentData.value.fullText) {
+            const sanitized = sanitizeAssessmentDetails(rawDetails.value)
+            mergedResult = { text: sanitized.text, aggregatedState: sanitized.aggregatedState }
+         } else {
          // Case: Merge with existing blocks and potentially clear/set pending flag
          // Decoupled logic: only clear pending flag if isApprove is explicitly true.
          // Otherwise, always keep it pending.
+         //
+         // Strip any embedded team headers / metadata tags from the details textarea
+         // content. This prevents duplication when the user applied a full structured
+         // assessment (via "Apply" on an assessment card) which put headers into the
+         // textarea — those headers would otherwise be wrapped inside a single team
+         // block and parsed as extra blocks on the next round-trip.
+         const userDetails = details.value
+            .replace(/---\s*\[Team:[^\n]*---\s*/g, '')
+            .replace(/\[Rescored:\s*[\d.]+\]/g, '')
+            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+            .replace(/\[Status: Pending Review\]/g, '')
+            .trim()
+
          mergedResult = mergeTeamAssessment(
             currentFullDetails,
             targetTeam,
             state.value,
-            details.value,
+            userDetails,
             currentUser,
             justification.value,
             rescoredTags,
             !isApprove // isPending = true unless approving
          )
+         }
         
-        let finalText = mergedResult.text
+        // Sanitize: deduplicate teams, sort (General first, then alphabetical)
+        const sanitized = sanitizeAssessmentDetails(mergedResult.text)
+        let finalText = sanitized.text
+        const finalState = sanitized.aggregatedState
+
+        // Show review dialog for user confirmation (skip when force=true, e.g. conflict overwrite)
+        if (!force) {
+            updating.value = false
+            const approved = await promptReview(mergedResult.text)
+            if (!approved) {
+                if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
+                    console.log('[Persistence Debug] handleUpdate cancelled by user in review');
+                }
+                return
+            }
+            updating.value = true
+            // Use the sanitized text from the review
+            finalText = sanitized.text
+        }
 
         const payload: AssessmentPayload = {
             instances: instances,
-            state: mergedResult.aggregatedState, // calculated by helper
-            details: finalText, // The FULL merged history
-            comment: comment.value, // Audit comment usually separate from details
+            state: finalState,
+            details: finalText,
+            comment: comment.value,
             justification: justification.value && justification.value !== 'NOT_SET' ? justification.value : undefined,
             suppressed: suppressed.value,
             team: selectedTeam.value || undefined, 
@@ -1119,16 +1416,13 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
                  }
                  emit('update:assessment', data)
                  
-                 // Track local post-update values so the UI reflects them immediately
-                 localTechnicalState.value = success.new_state ?? null
-                 lastRescoredScore.value = data.rescored_cvss ?? null
-                 
                  // Reset local state so UI reflects the new server state
                  pendingScore.value = null
                  pendingVector.value = data.rescored_vector || props.group.cvss_vector || ''
                  initialVector.value = pendingVector.value
                  initialScore.value = data.rescored_cvss ?? null
                  isManualBaseMode.value = false
+                 lastRescoredScore.value = data.rescored_cvss ?? null
              }
              showConflictModal.value = false
         }
@@ -1154,15 +1448,53 @@ const handleUseServerState = () => {
     showConflictModal.value = false
 }
 
-const severityColor = computed(() => {
-    switch (props.group.severity) {
-        case 'CRITICAL': return 'bg-red-600 text-white shadow-sm ring-1 ring-red-400'
-        case 'HIGH': return 'bg-orange-600 text-white shadow-sm ring-1 ring-orange-400'
-        case 'MEDIUM': return 'bg-yellow-600 text-white shadow-sm ring-1 ring-yellow-400'
-        case 'LOW': return 'bg-green-600 text-white shadow-sm ring-1 ring-green-400'
-        case 'INFO': return 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-400'
-        default: return 'bg-gray-600 text-white shadow-sm ring-1 ring-gray-400'
+const originalSeverity = computed(() => {
+    const base = props.group.cvss ?? props.group.cvss_score
+    if (base != null && !isNaN(Number(base))) return scoreSeverity(Number(base))
+    return props.group.severity || 'UNKNOWN'
+})
+
+const scoreSeverity = (score: number): string => {
+    if (score >= 9.0) return 'CRITICAL'
+    if (score >= 7.0) return 'HIGH'
+    if (score >= 4.0) return 'MEDIUM'
+    if (score >= 0.1) return 'LOW'
+    return 'INFO'
+}
+
+const rescoredSeverity = computed(() => {
+    // Use stable group data first, then fall back to pending edits
+    if (hasStableRescore.value) {
+        return scoreSeverity(stableRescoredScore.value!)
     }
+    if (!isRescoredOrModified.value) return null
+    const score = Number(currentDisplayScore.value)
+    if (isNaN(score)) return null
+    return scoreSeverity(score)
+})
+
+const hexToRgba = (hex: string, alpha: number) => {
+    const cleaned = hex.replace('#', '').trim()
+    const normalized = cleaned.length === 3
+        ? cleaned.split('').map((char) => char + char).join('')
+        : cleaned
+    if (normalized.length !== 6) return hex
+
+    const r = parseInt(normalized.slice(0, 2), 16)
+    const g = parseInt(normalized.slice(2, 4), 16)
+    const b = parseInt(normalized.slice(4, 6), 16)
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+const severityHexMap: Record<string, string> = {
+    'CRITICAL': '#dc2626', 'HIGH': '#ea580c', 'MEDIUM': '#ca8a04',
+    'LOW': '#16a34a', 'INFO': '#2563eb', 'UNKNOWN': '#4b5563'
+}
+const severityHex = computed(() => severityHexMap[originalSeverity.value] ?? '#4b5563')
+const originalSeverityFill = computed(() => hexToRgba(severityHex.value, 0.4))
+const rescoredSeverityHex = computed(() => {
+    if (!rescoredSeverity.value) return hexToRgba('#6b7280', 0.4)
+    return hexToRgba(severityHexMap[rescoredSeverity.value] ?? '#4b5563', 0.4)
 })
 
 
@@ -1170,7 +1502,7 @@ const stateColor = computed(() => {
     switch (technicalState.value) {
         case 'NOT_AFFECTED': return 'text-green-400'
         case 'EXPLOITABLE': return 'text-red-400'
-        case 'NOT_SET': return 'text-red-500/80'
+        case 'NOT_SET': return 'text-gray-400'
         case 'IN_TRIAGE': return 'text-amber-400'
         case 'FALSE_POSITIVE': return 'text-teal-400'
         case 'RESOLVED': return 'text-purple-400'
@@ -1183,21 +1515,17 @@ const stateColor = computed(() => {
 
 const cardStyle = computed(() => {
     switch (displayState.value) {
-        case 'INCOMPLETE':
-            return 'bg-amber-500/5 border-amber-500/20 hover:bg-amber-500/10'
-        case 'INCONSISTENT':
-            return 'bg-indigo-500/5 border-indigo-500/30 hover:bg-indigo-500/10 stripe-bg'
         case 'NOT_SET':
         case 'OPEN':
-            return 'bg-red-500/5 border-red-500/20 hover:bg-red-500/10'
         case 'EXPLOITABLE':
-            return 'bg-red-900/10 border-red-600/40'
-        case 'NOT_AFFECTED':
-            return 'bg-green-900/5 border-green-600/30'
+            return 'bg-gray-800-warm border-gray-700 hover:bg-gray-750'
+        case 'INCONSISTENT':
+            return 'bg-gray-800 border-gray-700 hover:bg-gray-750 stripe-bg'
         default:
             return 'bg-gray-800 border-gray-700 hover:bg-gray-750'
     }
 })
+
 
 const dependencyRelationship = computed<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>(() => {
     const flags = allInstances.value
@@ -1208,14 +1536,6 @@ const dependencyRelationship = computed<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>(() 
     if (flags.includes(false)) return 'TRANSITIVE'
     return 'UNKNOWN'
 })
-
-
-const affectedComponentNames = computed(() => {
-    const names = new Set(allInstances.value.map(c => `${c.component_name} ${c.component_version}`))
-    return Array.from(names).join(', ')
-})
-
-
 const sortedAffectedProjectVersions = computed(() => {
     const versions = (props.group.affected_versions || [])
         .map(v => v.project_version)
@@ -1243,18 +1563,49 @@ const affectedVersionTooltip = computed(() => {
     return `Affected versions: ${versions.join(', ')}\nComponent instances: ${uniqueComponents.join(', ')}`
 })
 
-const rescoredVectorSegments = computed(() => {
-    const rescored = props.group.rescored_vector
-    const original = props.group.cvss_vector
-    
-    if (!rescored || !original || !rescored.startsWith(original)) {
-        return { bold: '', normal: rescored || '' }
+const externalLinks = computed(() => {
+    const links: { label: string, url: string }[] = []
+    const id = props.group.id
+    if (id?.startsWith('CVE-')) {
+        links.push({ label: 'NVD', url: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(id)}` })
+        links.push({ label: 'MITRE', url: `https://www.cve.org/CVERecord?id=${encodeURIComponent(id)}` })
     }
-    
+    if (id?.startsWith('GHSA-')) {
+        links.push({ label: 'GitHub Advisory', url: `https://github.com/advisories/${encodeURIComponent(id)}` })
+    }
+    for (const alias of props.group.aliases || []) {
+        if (alias.startsWith('CVE-') && alias !== id) {
+            links.push({ label: `NVD (${alias})`, url: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(alias)}` })
+        }
+        if (alias.startsWith('GHSA-') && alias !== id) {
+            links.push({ label: `GitHub (${alias})`, url: `https://github.com/advisories/${encodeURIComponent(alias)}` })
+        }
+    }
+    return links
+})
+
+const instanceStats = computed(() => {
+    const instances = allInstances.value
+    const componentSet = new Set(instances.map(i => `${i.component_name}@${i.component_version}`))
+    const suppressed = instances.filter(i => i.is_suppressed).length
     return {
-        bold: original,
-        normal: rescored.slice(original.length)
+        findings: instances.length,
+        components: componentSet.size,
+        suppressed,
+        versions: sortedAffectedProjectVersions.value.length
     }
+})
+
+const uniqueComponents = computed(() => {
+    const map = new Map<string, Set<string>>()
+    for (const inst of allInstances.value) {
+        if (!map.has(inst.component_name)) map.set(inst.component_name, new Set())
+        map.get(inst.component_name)!.add(inst.component_version)
+    }
+    return Array.from(map.entries()).map(([name, vers]) => ({
+        name,
+        versions: Array.from(vers).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    }))
 })
 
 const normalizedTags = computed(() => {
@@ -1314,6 +1665,23 @@ const assessedTeams = computed(() => {
     return matchedTeams
 })
 
+const teamTabs = computed(() => {
+    const tags = [...normalizedTags.value]
+    if (!tags.includes('automation')) tags.push('automation')
+    return tags
+})
+
+const teamBlockMeta = (team: string): AssessmentBlock | undefined => {
+    return mergedAssessmentData.value.blocks.find(b => b.team === team)
+}
+
+const teamBlockStateColor = (state?: string): string => {
+    if (!state || state === 'NOT_SET') return 'bg-gray-500'
+    if (state === 'EXPLOITABLE' || state === 'IN_TRIAGE') return 'bg-red-500'
+    if (state === 'NOT_AFFECTED' || state === 'RESOLVED' || state === 'FALSE_POSITIVE') return 'bg-green-500'
+    return 'bg-yellow-500'
+}
+
 
 
 
@@ -1328,11 +1696,24 @@ const _vueTemplateUsed = [
     ExternalLink,
     CheckCircle,
     RotateCcw,
+    Package,
+    Layers,
+    ShieldOff,
+    Zap,
     CvssCalculatorV2,
     CvssCalculatorV3,
     CvssCalculatorV4,
     CustomSelect,
+    CalculatorModal,
+    ConflictResolutionModal,
+    GenericModal,
+    AssessmentReviewModal,
     totalTargeted,
+    teamTabs,
+    teamBlockMeta,
+    teamBlockStateColor,
+    toggleRawEdit,
+    rawDetails,
     consensusButtonLabel,
     switchVersion,
     cleanRescoredVector,
@@ -1344,6 +1725,18 @@ const _vueTemplateUsed = [
     handleUseServerState,
     stateColor,
     affectedVersionTooltip,
+    externalLinks,
+    instanceStats,
+    uniqueComponents,
+    technicalState,
+    matchedProposal,
+    applyProposal,
+    copyId,
+    handleApplyAllAssessment,
+    handleAdoptTeamBlock,
+    reviewModal,
+    handleReviewConfirm,
+    handleReviewCancel,
 ]
 void _vueTemplateUsed
 
@@ -1351,6 +1744,40 @@ void _vueTemplateUsed
 
 <template>
   <div :class="['vuln-card relative border rounded-lg overflow-hidden transition-colors', cardStyle]">
+    <!-- Criticality Badges — header-height only -->
+    <div
+        class="absolute top-0 left-0 z-20 pointer-events-none flex"
+        :style="{ height: headerHeight + 'px' }"
+        data-testid="criticality-badge-slot"
+    >
+        <!-- Original severity badge with chevron and shadow -->
+        <div class="relative z-20 h-full w-10 flex items-center justify-center" data-testid="severity-badge">
+            <svg class="absolute inset-0 w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 40 100">
+                <defs>
+                    <filter id="badge-chevron-shadow" x="-8" y="-8" width="56" height="116" filterUnits="userSpaceOnUse">
+                        <feDropShadow dx="3" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.45)" />
+                    </filter>
+                </defs>
+                <polygon :fill="originalSeverityFill" filter="url(#badge-chevron-shadow)" points="0,0 32,0 40,50 32,100 0,100" />
+            </svg>
+            <span class="relative z-10 text-[9px] font-black uppercase tracking-[0.22em] [writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-white">
+                {{ originalSeverity }}
+            </span>
+        </div>
+        <!-- Rescored severity badge with inward left notch and right chevron -->
+        <div class="relative z-10 h-full w-9 -ml-2 flex items-center justify-end" data-testid="rescored-severity-badge">
+            <div
+                class="absolute inset-0"
+                :style="{
+                    backgroundColor: rescoredSeverityHex,
+                    clipPath: 'polygon(0 0, 77.78% 0, 100% 50%, 77.78% 100%, 0 100%, 22.22% 50%)'
+                }"
+            ></div>
+            <span class="relative z-10 pl-3 text-[8px] font-black uppercase tracking-[0.18em] [writing-mode:vertical-rl] rotate-180 whitespace-nowrap text-white">
+                {{ rescoredSeverity || 'N/A' }}
+            </span>
+        </div>
+    </div>
     <!-- Assessed Corner Fold -->
     <div v-if="isAssessed" class="absolute top-0 right-0 pointer-events-none z-20">
         <div
@@ -1364,47 +1791,164 @@ void _vueTemplateUsed
     </div>
     <!-- Header -->
     <div 
+        ref="headerEl"
         @click="expanded = !expanded" 
-        class="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:bg-white/2 transition-all relative overflow-hidden group/header"
+        class="pl-[76px] pr-4 py-3 flex items-start cursor-pointer hover:bg-white/2 transition-all relative overflow-hidden"
     >
+
         <VulnGroupCardHeader
             :group="group"
             :displayState="displayState"
             :technicalState="technicalState"
-            :severityColor="severityColor"
-            :isRescoredOrModified="isRescoredOrModified"
+            :isRescoredOrModified="isRescoredOrModified || hasStableRescore"
             :currentDisplayScore="currentDisplayScore"
             :pendingScore="pendingScore"
-            :rescoredVectorSegments="rescoredVectorSegments"
+            :stableRescoredScore="stableRescoredScore"
+            :hasStableRescore="hasStableRescore"
             :normalizedTags="normalizedTags"
             :assessedTeams="assessedTeams"
-            :affectedComponentNames="affectedComponentNames"
+            @copy-id="copyId"
             :expanded="expanded"
             :canApprove="canApprove"
             :isPendingReview="isPendingReview"
             :dependencyRelationship="dependencyRelationship"
-            @refresh-details="refreshDetails"
             @approve-assessment="approveAssessment"
         />
     </div>
             <!-- Expanded Details -->
-    <div v-if="expanded" class="p-4 border-t border-gray-700 bg-gray-850">
+    <div v-if="expanded" ref="detailsEl" class="pl-4 pr-4 py-4 border-t border-gray-700 max-h-[80vh] overflow-y-auto">
+        <!-- Top bar: External refs + Quick stats -->
+        <div class="flex flex-wrap items-center gap-2 mb-3 text-[10px]">
+            <a
+                v-for="link in externalLinks"
+                :key="link.url"
+                :href="link.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-800/40 hover:bg-blue-900/50 hover:text-blue-200 transition-colors"
+            >
+                <ExternalLink :size="9" />
+                {{ link.label }}
+            </a>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
+                <Layers :size="9" />
+                {{ instanceStats.findings }} finding{{ instanceStats.findings !== 1 ? 's' : '' }}
+            </span>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">
+                <Package :size="9" />
+                {{ instanceStats.components }} component{{ instanceStats.components !== 1 ? 's' : '' }}
+            </span>
+            <span v-if="isReviewer && instanceStats.suppressed > 0" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/40">
+                <ShieldOff :size="9" />
+                {{ instanceStats.suppressed }} suppressed
+            </span>
+            <span v-if="dependencyRelationship !== 'UNKNOWN'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border" :class="dependencyRelationship === 'DIRECT' ? 'bg-red-900/20 text-red-400 border-red-800/40' : 'bg-gray-800 text-gray-400 border-gray-700'">
+                {{ dependencyRelationship === 'DIRECT' ? '⬤' : '◌' }}
+                {{ dependencyRelationship.toLowerCase() }} dependency
+            </span>
+            <span v-if="technicalState && technicalState !== 'NOT_SET'" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-gray-800 border-gray-700" :class="stateColor">
+                {{ technicalState.replace(/_/g, ' ') }}
+            </span>
+        </div>
+
+        <!-- Metadata: Aliases + Versions -->
+        <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500 mb-3">
+            <span v-if="isReviewer && group.aliases?.length">
+                <span class="text-gray-600 font-bold uppercase text-[10px]">Aliases</span>
+                <span class="ml-1.5">{{ group.aliases.join(', ') }}</span>
+            </span>
+            <span>
+                <span class="text-gray-600 font-bold uppercase text-[10px]">Versions</span>
+                <span class="ml-1.5">{{ sortedAffectedProjectVersions.join(', ') || 'N/A' }}</span>
+            </span>
+        </div>
+
+        <!-- CVSS Vectors + Metric Breakdown (Reviewers only) -->
+        <CvssVectorDisplay
+            v-if="isReviewer && cvssVectorEntries.length"
+            :vectors="cvssVectorEntries"
+            class="mb-4"
+        />
+
+        <!-- TMRescore Proposal (Reviewers only) -->
+        <div v-if="isReviewer && matchedProposal" class="mb-4 p-3 rounded border border-gray-700 bg-gray-850">
+            <div class="flex items-center justify-between mb-2">
+                <h5 class="text-xs font-bold uppercase tracking-wider text-teal-300 flex items-center gap-1.5">
+                    <Zap :size="12" />
+                    Threat Model Proposal
+                </h5>
+                <button
+                    v-if="isReviewer"
+                    @click="applyProposal"
+                    class="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-wide bg-teal-600/30 text-teal-200 border border-teal-500/40 hover:bg-teal-600/50 hover:text-white transition-colors cursor-pointer"
+                >
+                    <Zap :size="10" />
+                    Apply Proposal
+                </button>
+            </div>
+            <div class="text-xs">
+                <div class="flex items-center gap-3">
+                    <div class="text-teal-300 font-bold">
+                        {{ matchedProposal.rescored_score ?? 'N/A' }}
+                        <span v-if="matchedProposal.rescored_severity" class="ml-1 text-[9px] uppercase opacity-70">({{ matchedProposal.rescored_severity }})</span>
+                    </div>
+                    <div v-if="matchedProposal.original_score != null" class="text-gray-500">
+                        <span class="text-[9px] uppercase">from</span>
+                        {{ matchedProposal.original_score }}
+                        <span v-if="matchedProposal.original_severity" class="ml-1 text-[9px] uppercase opacity-70">({{ matchedProposal.original_severity }})</span>
+                    </div>
+                </div>
+            </div>
+            <div v-if="matchedProposal.analysis?.detail" class="mt-2 text-xs text-gray-400 leading-relaxed border-t border-teal-800/30 pt-2">
+                <span class="text-gray-500 uppercase text-[9px] font-bold block mb-0.5">Reasoning</span>
+                {{ matchedProposal.analysis.detail }}
+            </div>
+            <div v-if="matchedProposal.analysis?.response?.length" class="mt-2 text-xs text-gray-400 leading-relaxed border-t border-teal-800/30 pt-2">
+                <span class="text-gray-500 uppercase text-[9px] font-bold block mb-0.5">Analysis</span>
+                <ul class="list-disc list-inside space-y-0.5">
+                    <li v-for="(resp, idx) in matchedProposal.analysis.response" :key="idx">
+                        {{ typeof resp === 'string' ? resp : (resp.detail || resp.title || '') }}
+                    </li>
+                </ul>
+            </div>
+
+        </div>
+
         <div class="grid md:grid-cols-2 gap-8">
             <div>
-                    <h4 class="font-semibold mb-2 text-gray-300">Description</h4>
-                    <p class="text-sm text-gray-400 mb-4">{{ group.description || 'No description available.' }}</p>
-                    
+                    <!-- Title + Description -->
+                    <h4 v-if="group.title && group.title !== group.id" class="font-semibold text-gray-200 mb-1">{{ group.title }}</h4>
+                    <h4 v-else class="font-semibold mb-2 text-gray-300">Description</h4>
+                    <p class="text-sm text-gray-400 mb-4 leading-relaxed">{{ group.description || 'No description available.' }}</p>
+
+                    <!-- Affected Components Summary (Reviewers only) -->
+                    <div v-if="isReviewer && uniqueComponents.length > 0" class="mb-4">
+                        <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">Affected Components</h4>
+                        <div class="flex flex-wrap gap-1.5">
+                            <span
+                                v-for="comp in uniqueComponents"
+                                :key="comp.name"
+                                class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 border border-gray-700"
+                            >
+                                {{ comp.name }}<span class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
+                            </span>
+                        </div>
+                    </div>
+
                     <div class="mt-4">
-                         <h4 class="font-semibold text-gray-300 mb-4">Analysis Details & Comments</h4>
+                         <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">Analysis Details & Comments</h4>
                          
                          <VulnGroupAssessmentDetails
                              v-for="assessment in groupedAssessments"
                              :key="`${assessment.state}-${assessment.instances.length}`"
                              :assessment="assessment"
+                             :isReviewer="isReviewer"
+                             @apply-all="handleApplyAllAssessment"
+                             @adopt-team="handleAdoptTeamBlock"
                          />
                      </div>
                  </div>
-            <div class="bg-gray-900 p-4 rounded border border-gray-700 h-fit">
+            <div class="bg-gray-850 p-4 rounded border border-gray-700 h-fit">
                 <h4 class="font-bold flex items-center gap-2 mb-4">
                     <Shield :size="16" class="text-blue-400"/>
                     {{ selectedTeam ? `Team Assessment: ${selectedTeam}` : 'Global Assessment' }}
@@ -1470,28 +2014,54 @@ void _vueTemplateUsed
                         </div>
                     </div>
 
-                    <!-- Team Selection -->
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-400 mb-1">Team assessment (Marker)</label>
-                            <CustomSelect
-                                :modelValue="selectedTeam"
-                                @update:modelValue="selectedTeam = $event"
-                                :options="[{ value: '', label: isReviewer ? 'Global assessment' : 'No team marker' }, ...normalizedTags.map(t => ({ value: t, label: t }))]"
-                                size="sm"
-                            />
+                    <!-- Team Tabs -->
+                    <div>
+                        <div class="flex flex-wrap gap-0 border-b border-gray-700">
+                            <button
+                                v-if="isReviewer"
+                                @click="selectedTeam = ''"
+                                :class="[
+                                    'px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
+                                    !selectedTeam
+                                        ? 'border-purple-500 text-purple-300 bg-purple-950/20'
+                                        : 'border-transparent text-gray-500 hover:text-gray-300'
+                                ]"
+                            >
+                                Global
+                                <span v-if="teamBlockMeta('General')" class="ml-1 inline-block w-1.5 h-1.5 rounded-full" :class="teamBlockStateColor(teamBlockMeta('General')!.state)"></span>
+                            </button>
+                            <button
+                                v-for="team in teamTabs"
+                                :key="team"
+                                @click="selectedTeam = team"
+                                :class="[
+                                    'px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
+                                    selectedTeam === team
+                                        ? 'border-blue-500 text-blue-300 bg-blue-950/20'
+                                        : 'border-transparent text-gray-500 hover:text-gray-300'
+                                ]"
+                            >
+                                {{ team }}
+                                <span v-if="assessedTeams.has(team)" class="ml-1 inline-block w-1.5 h-1.5 rounded-full" :class="teamBlockStateColor(teamBlockMeta(team)?.state)"></span>
+                            </button>
+                        </div>
+
+                        <!-- Block header metadata (read-only) -->
+                        <div v-if="teamBlockMeta(selectedTeam || 'General')" class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-gray-500">
+                            <span v-if="teamBlockMeta(selectedTeam || 'General')!.user && teamBlockMeta(selectedTeam || 'General')!.user !== 'Unknown'">
+                                Assessed by <span class="text-gray-400">{{ teamBlockMeta(selectedTeam || 'General')!.user }}</span>
+                            </span>
+                            <span v-if="teamBlockMeta(selectedTeam || 'General')!.timestamp">
+                                {{ new Date(teamBlockMeta(selectedTeam || 'General')!.timestamp!).toLocaleDateString() }}
+                            </span>
                         </div>
                     </div>
 
                     <!-- Assessment Section (Reviewer Global or Team Selected) -->
                     <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
-                        <h5 class="text-xs font-bold mb-3 uppercase tracking-wide flex items-center gap-2" :class="selectedTeam ? 'text-blue-300' : 'text-purple-300'">
-                            {{ selectedTeam ? 'Team Opinion' : 'Global Baseline' }}
-                        </h5>
-                        
                         <div class="space-y-3">
                             <div>
-                                <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Analysis State</label>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
                                 <CustomSelect
                                     :modelValue="state"
                                     @update:modelValue="state = $event; formTouched = true"
@@ -1501,7 +2071,7 @@ void _vueTemplateUsed
                             </div>
 
                             <div v-if="state === 'NOT_AFFECTED'">
-                                <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Justification</label>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
                                 <CustomSelect
                                     :modelValue="justification"
                                     @update:modelValue="justification = $event"
@@ -1511,12 +2081,12 @@ void _vueTemplateUsed
                             </div>
 
                             <div>
-                                <label class="block text-xs font-semibold text-gray-400 mb-1">{{ selectedTeam ? 'Team' : 'Global' }} Analysis Details</label>
-                                <textarea 
-                                    v-model="details" 
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
+                                <textarea
+                                    v-model="details"
                                     @input="formTouched = true"
                                     placeholder="Technical details..."
-                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-32"
+                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
                                 ></textarea>
                             </div>
                         </div>
@@ -1525,9 +2095,9 @@ void _vueTemplateUsed
                     <!-- No-Team Section (Prompt for non-reviewers) -->
                     <div v-if="!selectedTeam && !isReviewer" class="p-4 rounded border border-gray-700 bg-gray-800/50 flex flex-col items-center justify-center text-center space-y-2">
                         <Shield :size="32" class="text-blue-500/50" />
-                        <h4 class="text-sm font-bold text-gray-300">Select a Team to Assess</h4>
+                        <h4 class="text-sm font-bold text-gray-300">Select a Team Tab</h4>
                         <p class="text-xs text-gray-400 max-w-xs">
-                          Global assessments are restricted to reviewers. Please select a specific team marker above to provide an assessment.
+                          Global assessments are restricted to reviewers. Select a team tab above to provide an assessment.
                         </p>
                     </div>
 
@@ -1538,6 +2108,25 @@ void _vueTemplateUsed
                             placeholder="Add a comment for audit trail..."
                             class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
                         ></textarea>
+                    </div>
+
+                    <div v-if="isReviewer">
+                        <button
+                            @click="toggleRawEdit"
+                            class="text-xs text-gray-500 hover:text-gray-300 transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                            <ChevronDown v-if="!showRawEdit" :size="12" />
+                            <ChevronUp v-else :size="12" />
+                            Raw Assessment Text
+                        </button>
+                        <div v-if="showRawEdit" class="mt-1">
+                            <textarea
+                                v-model="rawDetails"
+                                @input="rawDetailsTouched = true; formTouched = true"
+                                class="w-full p-2 rounded bg-gray-900 border border-gray-700 text-gray-300 text-xs font-mono h-32 resize-y"
+                            ></textarea>
+                            <p class="text-[10px] text-gray-600 mt-0.5">Edit the full structured assessment text. Changes here override block-level edits on submit.</p>
+                        </div>
                     </div>
                     
                     <div v-if="isReviewer" class="flex items-center gap-2">
@@ -1560,207 +2149,74 @@ void _vueTemplateUsed
                         </button>
                     </div>
 
-                    <button 
-                        @click="() => handleUpdate(false)"
-                        :disabled="updating || loadingDetails || totalTargeted === 0"
-                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
-                    >
-                        {{ updating ? 'Updating...' : 'Apply' }}
-                    </button>
+                    <div class="flex gap-2">
+                        <button 
+                            @click="() => handleUpdate(false)"
+                            :disabled="updating || loadingDetails || totalTargeted === 0"
+                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                            {{ updating ? 'Updating...' : 'Apply' }}
+                        </button>
+                        <button
+                            @click="refreshDetails"
+                            :disabled="updating || loadingDetails"
+                            class="px-3 py-2 rounded border border-gray-600 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-50 cursor-pointer"
+                            title="Reload from server (discard local changes)"
+                        >
+                            <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
+    </div>
 
     <!-- Grouped Calculator Modal -->
-    <div v-if="showCalculatorModal && isReviewer" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-        <div class="bg-gray-800 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg border border-gray-700 shadow-2xl">
-            <!-- Modal Header -->
-            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
-                <h3 class="font-bold text-lg text-gray-300">CVSS v{{ activeVersion }} Calculator</h3>
-                <div class="flex items-center gap-3">
-                    <button 
-                        @click="clearVector"
-                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-300 transition-colors"
-                        title="Clear vector to unlock all versions"
-                    >
-                        Clear
-                    </button>
-                    <button 
-                        @click="resetVector"
-                        class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-300 transition-colors"
-                        title="Reset to original CVE vector"
-                    >
-                        Reset
-                    </button>
-                    <button @click="showCalculatorModal = false" class="text-gray-400 hover:text-white text-xl font-bold cursor-pointer">✕</button>
-                </div>
-            </div>
-            
-            <!-- Version Tabs -->
-            <div class="flex border-b border-gray-700 bg-gray-850">
-                <button 
-                    v-for="v in visibleVersions" 
-                    :key="v"
-                    @click="switchVersion(v as any)"
-                    :class="[
-                        'px-4 py-2 text-sm font-bold border-r border-gray-700 transition-colors',
-                        activeVersion === v ? 'bg-gray-700 text-white' : 'bg-gray-850 text-gray-400 hover:bg-gray-800'
-                    ]"
-                >
-                    CVSS v{{ v }}
-                </button>
-            </div>
-
-            <!-- Content -->
-            <div class="flex-1 overflow-y-auto p-4 bg-gray-800">
-                <div v-if="activeVersion === '2.0'">
-                    <CvssCalculatorV2 
-                        :instance="cvssInstance" 
-                        :can-edit-base="canEditBase"
-                        @update="updateCalcVector" 
-                        @reset="resetVector"
-                    />
-                </div>
-                <div v-else-if="activeVersion === '3.1' || activeVersion === '3.0'">
-                    <CvssCalculatorV3 
-                        :instance="cvssInstance" 
-                        :can-edit-base="canEditBase" 
-                        @update="updateCalcVector" 
-                        @reset="resetVector"
-                    />
-                </div>
-                <div v-else-if="activeVersion === '4.0'">
-                    <CvssCalculatorV4 
-                        :instance="cvssInstance" 
-                        :can-edit-base="canEditBase" 
-                        @update="updateCalcVector" 
-                        @reset="resetVector"
-                    />
-                </div>
-            </div>
-
-            <!-- Footer -->
-            <div class="p-4 border-t border-gray-700 bg-gray-850">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <div class="text-xs text-gray-500 font-mono mb-1">Current Vector</div>
-                        <div class="text-sm font-mono font-bold text-white break-all mb-2">{{ pendingVector }}</div>
-                    </div>
-                    <div class="text-right ml-4">
-                         <div class="text-xs text-gray-500 uppercase">Score</div>
-                         <div class="text-2xl font-bold text-yellow-400">{{ pendingScore }}</div>
-                    </div>
-                </div>
-                <button 
-                    @click="showCalculatorModal = false"
-                    class="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded transition-colors"
-                >
-                    Done
-                </button>
-            </div>
-        </div>
-    </div>
-    </div>
+    <CalculatorModal
+      v-if="isReviewer"
+      :show="showCalculatorModal"
+      :activeVersion="activeVersion"
+      :visibleVersions="visibleVersions"
+      :canEditBase="canEditBase"
+      :pendingVector="pendingVector"
+      :pendingScore="pendingScore"
+      :cvssInstance="cvssInstance"
+      @close="showCalculatorModal = false"
+      @clear="clearVector"
+      @reset="resetVector"
+      @switch-version="switchVersion"
+      @update-vector="updateCalcVector"
+    />
 
     <!-- Conflict Resolution Modal -->
-    <div v-if="showConflictModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-        <div class="bg-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col rounded-lg border border-red-500 shadow-2xl">
-            <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
-                <h3 class="font-bold text-lg text-red-400 flex items-center gap-2">
-                    <AlertTriangle :size="20" />
-                    Conflict Detected
-                </h3>
-                <button @click="showConflictModal = false" class="text-gray-400 hover:text-white text-xl font-bold">✕</button>
-            </div>
-            
-            <div class="p-4 bg-red-900/20 border-b border-red-900/50 text-red-200 text-sm">
-                The analysis data on the server has changed since you started editing. 
-                Please review the differences below and choose how to proceed.
-            </div>
+    <ConflictResolutionModal
+      :show="showConflictModal"
+      :conflictData="conflictData"
+      @close="showConflictModal = false"
+      @use-server-state="handleUseServerState"
+      @force-overwrite="() => handleUpdate(true)"
+    />
 
-            <div class="flex-1 overflow-y-auto p-4 bg-gray-800 space-y-4">
-                <div v-for="conflict in conflictData" :key="conflict.finding_uuid" class="bg-gray-900 border border-gray-700 rounded p-4">
-                    <div class="font-bold text-gray-300 mb-2 border-b border-gray-700 pb-1">
-                        {{ conflict.project_name }} {{ conflict.project_version }} - {{ conflict.component_name }}
-                    </div>
-                    
-                    <div class="grid grid-cols-2 gap-4">
-                        <!-- Server State -->
-                        <div class="space-y-2">
-                             <h4 class="text-xs font-bold uppercase text-gray-500">Server State (New)</h4>
-                             <div class="text-sm">
-                                <span class="text-gray-400">State:</span> <span class="font-mono text-blue-300">{{ conflict.current.analysisState }}</span>
-                             </div>
-                             <div class="text-sm">
-                                <span class="text-gray-400">Suppressed:</span> <span class="font-mono text-blue-300">{{ conflict.current.isSuppressed }}</span>
-                             </div>
-                             <div class="text-sm bg-gray-800 p-2 rounded border border-gray-700 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-xs">
-                                {{ conflict.current.analysisDetails || '(No details)' }}
-                             </div>
-                        </div>
-                        
-                         <!-- Your State -->
-                        <div class="space-y-2">
-                             <h4 class="text-xs font-bold uppercase text-gray-500">Your Changes</h4>
-                             <div class="text-sm">
-                                <span class="text-gray-400">State:</span> <span class="font-mono text-green-300">{{ conflict.your_change.analysisState }}</span>
-                             </div>
-                             <div class="text-sm">
-                                <span class="text-gray-400">Suppressed:</span> <span class="font-mono text-green-300">{{ conflict.your_change.isSuppressed }}</span>
-                             </div>
-                             <div class="text-sm bg-gray-800 p-2 rounded border border-gray-700 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-xs">
-                                {{ conflict.your_change.analysisDetails || '(No details)' }}
-                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="p-4 border-t border-gray-700 bg-gray-850 flex justify-end gap-4">
-                <button 
-                    @click="handleUseServerState"
-                    class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white font-bold transition-colors"
-                >
-                    Discard My Changes (Use Server)
-                </button>
-                <button 
-                    @click="() => handleUpdate(true)"
-                    :disabled="updating"
-                    class="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-bold transition-colors disabled:opacity-50"
-                >
-                    Force Overwrite
-                </button>
-            </div>
-        </div>
-    </div>
-    <!-- Generic Modal (Alert/Confirm) -->
-    <div v-if="genericModal.show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
-        <div class="bg-gray-800 w-full max-w-md rounded-lg border border-gray-700 shadow-2xl overflow-hidden scale-in-center">
-            <div class="p-4 border-b border-gray-700 bg-gray-800 flex justify-between items-center">
-                <h3 class="font-bold text-lg text-gray-200">{{ genericModal.title }}</h3>
-                <button @click="handleModalResponse(false)" class="text-gray-400 hover:text-white transition-colors">✕</button>
-            </div>
-            <div class="p-6 bg-gray-850 text-gray-300">
-                <p class="text-sm leading-relaxed">{{ genericModal.message }}</p>
-            </div>
-            <div class="p-4 bg-gray-900 border-t border-gray-700 flex justify-end gap-3">
-                <button 
-                    v-if="!genericModal.confirmOnly"
-                    @click="handleModalResponse(false)"
-                    class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold transition-colors"
-                >
-                    Cancel
-                </button>
-                <button 
-                    @click="handleModalResponse(true)"
-                    class="px-6 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-900/20 transition-all active:scale-95"
-                >
-                    {{ genericModal.confirmOnly ? 'Close' : 'Confirm' }}
-                </button>
-            </div>
-        </div>
-    </div>
-  </div>
+    <GenericModal
+      :show="genericModal.show"
+      :title="genericModal.title"
+      :message="genericModal.message"
+      :confirmOnly="genericModal.confirmOnly"
+      @response="handleModalResponse"
+    />
+
+    <AssessmentReviewModal
+      :show="reviewModal.show"
+      :blocks="reviewModal.blocks"
+      :aggregatedState="reviewModal.aggregatedState"
+      :sanitizedText="reviewModal.sanitizedText"
+      :duplicatesRemoved="reviewModal.duplicatesRemoved"
+      :isReviewer="isReviewer"
+      :selectedTeam="selectedTeam"
+      @confirm="handleReviewConfirm"
+      @cancel="handleReviewCancel"
+    />
+</div>
 </template>
 
 <style scoped>

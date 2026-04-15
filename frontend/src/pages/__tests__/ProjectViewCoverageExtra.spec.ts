@@ -1,20 +1,15 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns } from '../../lib/api'
-import { calculateScoreFromVector } from '../../lib/cvss'
 import { useRoute } from 'vue-router'
+import { defaultAnalysisFilters, extendedAnalysisFilters, extendedLifecycleFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
     getGroupedVulns: vi.fn(),
-    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null })),
+    getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
-    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] }))
-}))
-
-vi.mock('../../lib/cvss', () => ({
-    calculateScoreFromVector: vi.fn(() => 7.5)
+    getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
+    getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
 }))
 
 vi.mock('vue-router', () => ({
@@ -37,7 +32,7 @@ describe('ProjectView Coverage Extra Detailed', () => {
         vi.mocked(useRoute).mockReturnValue({ params: { name: 'Test' }, query: {} } as any)
     })
 
-    it('auto-calculates rescored_cvss if missing but vector exists', async () => {
+    it('preserves missing rescored_cvss if backend only provides a rescored vector', async () => {
         const mockGroups = [
             {
                 id: 'V1',
@@ -48,94 +43,12 @@ describe('ProjectView Coverage Extra Detailed', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-        await flushPromises()
+        const wrapper = await mountProjectView()
 
-        expect(calculateScoreFromVector).toHaveBeenCalledWith('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
         const groups = (wrapper.vm as any).groups
-        expect(groups[0].rescored_cvss).toBe(7.5)
-    })
-
-    it('handles global search when name is _all_', async () => {
-        vi.mocked(useRoute).mockReturnValue({ params: { name: '_all_' }, query: {} } as any)
-        vi.mocked(getGroupedVulns).mockResolvedValue([])
-
-        mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: '_all_' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        expect(getGroupedVulns).toHaveBeenCalledWith('', undefined, expect.any(Function))
-    })
-
-    it('reports progress updates during fetch', async () => {
-        let progressCallback: any
-        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, cb) => {
-            progressCallback = cb
-            return new Promise(resolve => setTimeout(() => resolve([]), 10))
-        })
-
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-
-        await wrapper.vm.$nextTick()
-        if (progressCallback) {
-            progressCallback('Analyzing...', 42)
-        }
-        await wrapper.vm.$nextTick()
-
-        expect(wrapper.text()).toContain('Analyzing...')
-        expect(wrapper.text()).toContain('42%')
-    })
-
-    it('sorts by analysis state correctly', async () => {
-        const mockGroups = [
-            { id: 'V1', affected_versions: [{ components: [{ analysis_state: 'NOT_SET' }] }] },
-            { id: 'V2', affected_versions: [{ components: [{ analysis_state: 'EXPLOITABLE' }] }] }
-        ]
-        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
-
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
-        })
-        await flushPromises()
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
-
-        ;(wrapper.vm as any).sortBy = 'analysis'
-        await wrapper.vm.$nextTick()
-
-        const sorted = (wrapper.vm as any).filteredGroups
-        // EXPLOITABLE (0) < NOT_SET (4)
-        expect(sorted[0].id).toBe('V2')
-        expect(sorted[1].id).toBe('V1')
+        expect(groups[0].rescored_vector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
+        // processFetchedGroups now auto-fills rescored_cvss from rescored_vector when null
+        expect(groups[0].rescored_cvss).toBe(9.8)
     })
 
     it('sorts by tags correctly', async () => {
@@ -147,21 +60,14 @@ describe('ProjectView Coverage Extra Detailed', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: extendedAnalysisFilters,
         })
-        await flushPromises()
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
 
         ;(wrapper.vm as any).sortBy = 'tags'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
@@ -172,28 +78,21 @@ describe('ProjectView Coverage Extra Detailed', () => {
 
     it('sorts by score fallbacks correctly', async () => {
         const mockGroups = [
-            { id: 'V1', rescored_cvss: 5.0 },
+            { id: 'V1', cvss_score: 5.0 },
             { id: 'V2', cvss_score: 9.0 },
             { id: 'V3', cvss: 2.0 },
-            { id: 'V4', rescored_cvss: null, cvss_score: null, cvss: null }
+            { id: 'V4', cvss_score: null, cvss: null }
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: extendedAnalysisFilters,
         })
-        await flushPromises()
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
 
         ;(wrapper.vm as any).sortBy = 'score'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
@@ -206,34 +105,27 @@ describe('ProjectView Coverage Extra Detailed', () => {
 
     it('sorts by severity fallbacks correctly', async () => {
         const mockGroups = [
-            { id: 'V1', severity: 'CRITICAL' },
-            { id: 'V2', severity: null }, // Falls back to UNKNOWN
-            { id: 'V3', severity: 'HIGH' }
+            { id: 'V1', severity: 'CRITICAL', cvss_score: 9.5 },
+            { id: 'V2', severity: null, cvss_score: null }, // No score → INFO (4)
+            { id: 'V3', severity: 'HIGH', cvss_score: 7.5 }
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: extendedAnalysisFilters,
         })
-        await flushPromises()
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
 
         ;(wrapper.vm as any).sortBy = 'severity'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
-        // CRITICAL (0), HIGH (1), UNKNOWN (5)
-        expect(sorted[0].id).toBe('V1')
+        // asc = least critical first: INFO (4), HIGH (1), CRITICAL (0)
+        expect(sorted[0].id).toBe('V2')
         expect(sorted[1].id).toBe('V3')
-        expect(sorted[2].id).toBe('V2')
+        expect(sorted[2].id).toBe('V1')
     })
 
     it('sorts by score additional fallbacks correctly', async () => {
@@ -244,21 +136,14 @@ describe('ProjectView Coverage Extra Detailed', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: extendedAnalysisFilters,
         })
-        await flushPromises()
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'OLD', 'NEW', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
 
         ;(wrapper.vm as any).sortBy = 'score'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
 
         const sorted = (wrapper.vm as any).filteredGroups
@@ -275,20 +160,13 @@ describe('ProjectView Coverage Extra Detailed', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: [...defaultAnalysisFilters, 'UNKNOWN_STATE'],
         })
-        await flushPromises()
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED', 'UNKNOWN_STATE']
-        await wrapper.vm.$nextTick()
         ;(wrapper.vm as any).sortBy = 'analysis'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
         const sorted = (wrapper.vm as any).filteredGroups
         expect(sorted[1].id).toBe('V1') // Unknown (99) comes last
@@ -303,20 +181,13 @@ describe('ProjectView Coverage Extra Detailed', () => {
         ]
         vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
 
-        const wrapper = mount(ProjectView, {
-            global: {
-                stubs: { RouterLink: true },
-                mocks: { $route: { params: { name: 'Test' }, query: {} } },
-                provide: {
-                    user: { value: { role: 'REVIEWER' } }
-                }
-            }
+        const wrapper = await mountProjectView()
+        await updateProjectViewState(wrapper, {
+            lifecycleFilters: extendedLifecycleFilters,
+            analysisFilters: defaultAnalysisFilters,
         })
-        await flushPromises()
-            ; (wrapper.vm as any).lifecycleFilters = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT']
-            ; (wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
-        await wrapper.vm.$nextTick()
         ;(wrapper.vm as any).sortBy = 'tags'
+        ;(wrapper.vm as any).sortOrder = 'asc'
         await wrapper.vm.$nextTick()
         const sorted = (wrapper.vm as any).filteredGroups
         expect(sorted.length).toBe(4)

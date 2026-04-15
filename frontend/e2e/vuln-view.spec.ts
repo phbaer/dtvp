@@ -25,7 +25,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         await page.route('**/api/cache-status', async (route) => {
             await route.fulfill({
                 status: 200,
-                body: JSON.stringify({ fully_cached: true, last_refreshed_at: new Date().toISOString() }),
+                body: JSON.stringify({ fully_cached: true, last_refreshed_at: new Date().toISOString(), projects: 1, active_projects: 1, cached_findings: 1, cached_boms: 1, cached_analyses: 0, pending_updates: 0 }),
             });
         });
 
@@ -144,6 +144,21 @@ test.describe('Vulnerability View and Rescoring', () => {
             });
         });
 
+        await page.route('**/api/projects/*/tmrescore/proposals', async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    project_name: 'TestProject',
+                    session_id: '',
+                    scope: 'merged_versions',
+                    latest_version: '1.1',
+                    analyzed_versions: [],
+                    proposals: {},
+                }),
+            });
+        });
+
         // Bypass ChangelogModal
         await page.addInitScript(() => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.0');
@@ -169,9 +184,7 @@ test.describe('Vulnerability View and Rescoring', () => {
         await expect(page.locator('text=A bad vulnerability description.')).toBeVisible();
 
         // Select Team first (required to see rescoring fields)
-        const teamDropdown = cardHeader.getByRole('button', { name: 'Global assessment' });
-        await teamDropdown.click();
-        await page.locator('.absolute.z-50 button', { hasText: 'Security' }).click();
+        await cardHeader.getByRole('button', { name: 'Security' }).click();
 
         // Wait for the team assessment header to appear
         await expect(page.locator('text=Team Assessment: Security')).toBeVisible({ timeout: 10000 });
@@ -209,8 +222,8 @@ test.describe('Vulnerability View and Rescoring', () => {
         const applyBtn = cardHeader.getByRole('button', { name: 'Apply' });
         await applyBtn.click();
 
-        // Handle Custom Confirm Modal
-        await page.getByRole('button', { name: 'Confirm' }).click();
+        // Handle Review Modal
+        await page.getByRole('button', { name: 'Submit' }).click();
 
         // Check that card remains open and description is still visible
         await expect(page.locator('text=A bad vulnerability description.')).toBeVisible();

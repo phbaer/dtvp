@@ -84,10 +84,11 @@ const groupedProjects = computed(() => {
 </script>
 
 <template>
-  <div class="mx-auto">
-    <div class="flex flex-col gap-6 md:flex-row md:justify-between md:items-start mb-8">
+  <div class="w-full px-6 sm:px-8">
+    <div class="flex flex-col gap-6 md:justify-between md:items-start mb-8">
         <h2 class="text-3xl font-bold pb-4 mt-4">Projects</h2>
-        <div class="flex flex-col gap-4 sm:flex-row mt-6">
+        <div class="sticky top-20 z-30 bg-gray-900/95 backdrop-blur-xl border-b border-gray-800 pb-4 pt-4 sm:pt-6 -mx-6 sm:-mx-8 px-6 sm:px-8">
+            <div class="flex flex-col gap-4 sm:flex-row sm:justify-end sm:items-center">
             <div class="relative w-64">
                 <span class="absolute inset-y-0 left-0 flex items-center pl-3">
                     <Search :size="20" class="text-gray-500" />
@@ -110,6 +111,7 @@ const groupedProjects = computed(() => {
                     class="w-full pl-10 p-2 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none"
                 />
             </div>
+            </div>
         </div>
     </div>
     
@@ -125,12 +127,20 @@ const groupedProjects = computed(() => {
                     :key="p.name"
                     class="bg-gray-800 border border-gray-700 rounded p-4 flex flex-col gap-2"
                 >
-                    <router-link 
-                        :to="{ path: `/project/${p.name}`, query: cveFilter ? { id: cveFilter } : {} }"
-                        class="font-bold text-lg text-blue-400 hover:text-blue-300 hover:underline"
-                    >
-                        {{ p.name }}
-                    </router-link>
+                    <div class="flex items-start justify-between gap-3">
+                        <router-link 
+                            :to="{ path: `/project/${p.name}`, query: cveFilter ? { id: cveFilter } : {} }"
+                            class="font-bold text-lg text-blue-400 hover:text-blue-300 hover:underline"
+                        >
+                            {{ p.name }}
+                        </router-link>
+                        <router-link
+                            :to="`/project/${p.name}/tmrescore`"
+                            class="shrink-0 rounded-lg border border-blue-500/30 bg-blue-600/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-200 transition-colors hover:bg-blue-600/20"
+                        >
+                            Threat Model
+                        </router-link>
+                    </div>
                     
                     <div class="flex flex-wrap gap-2 mt-2">
                         <span 

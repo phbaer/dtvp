@@ -20,7 +20,19 @@ vi.mock('lucide-vue-next', () => ({
     CheckCircle: { template: '<span />' },
     AlertTriangle: { template: '<span />' },
     RotateCcw: { template: '<span />' },
-    History: { template: '<span />' }
+    History: { template: '<span />' },
+    Package: { template: '<span />' },
+    Layers: { template: '<span />' },
+    ShieldOff: { template: '<span />' },
+    Zap: { template: '<span />' },
+    CircleDot: { template: '<span />' },
+    Search: { template: '<span />' },
+    ShieldCheck: { template: '<span />' },
+    Bug: { template: '<span />' },
+    GitBranch: { template: '<span />' },
+    Eye: { template: '<span />' },
+    ClipboardCopy: { template: '<span />' },
+    Plus: { template: '<span />' }
 }))
 
 
@@ -40,16 +52,23 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
     it('renders tags when present', async () => {
         const taggedGroup = {
             ...mockGroup,
-            tags: ['Tag1', 'Tag2']
+            tags: ['Tag1', 'Tag2'],
+            affected_versions: [{
+                project_uuid: 'p1',
+                project_name: 'P1',
+                project_version: '1.0',
+                components: [
+                    { component_uuid: 'c1', component_name: 'C1', component_version: '1.0', tags: ['Tag1', 'Tag2'] }
+                ]
+            }]
         }
-        const wrapper = mount(VulnGroupCard, { props: { group: taggedGroup } })
+        const wrapper = mount(VulnGroupCard, { props: { group: taggedGroup as any } })
 
-        const container = wrapper.find('.border-l.border-white\\/5')
-        const tags = container.findAll('.rounded-lg.font-black')
+        const tags = wrapper.findAll('[data-testid="team-tag"]')
         expect(tags.length).toBe(2)
         if (tags.length >= 2) {
-            expect(tags[0]!.text()).toBe('Tag1')
-            expect(tags[1]!.text()).toBe('Tag2')
+            expect(tags[0]!.text()).toContain('Tag1')
+            expect(tags[1]!.text()).toContain('Tag2')
         }
     })
 

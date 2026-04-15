@@ -16,7 +16,19 @@ vi.mock('lucide-vue-next', () => ({
     CheckCircle: { template: '<span />' },
     AlertTriangle: { template: '<span />' },
     RotateCcw: { template: '<span />' },
-    History: { template: '<span />' }
+    History: { template: '<span />' },
+    Package: { template: '<span />' },
+    Layers: { template: '<span />' },
+    ShieldOff: { template: '<span />' },
+    Zap: { template: '<span />' },
+    CircleDot: { template: '<span />' },
+    Search: { template: '<span />' },
+    ShieldCheck: { template: '<span />' },
+    Bug: { template: '<span />' },
+    GitBranch: { template: '<span />' },
+    Eye: { template: '<span />' },
+    ClipboardCopy: { template: '<span />' },
+    Plus: { template: '<span />' }
 }))
 
 vi.mock('../../lib/api', () => ({
@@ -43,17 +55,18 @@ describe('Coverage Extras', () => {
         }
         const wrapper = mount(VulnGroupCard, { props: { group: infoGroup } })
 
-        const spans = wrapper.findAll('span')
-        const badge = spans.find(s => s.text() === 'INFO')
-        expect(badge?.classes()).toContain('bg-blue-600')
+        const polygon = wrapper.find('[data-testid="severity-badge"] polygon')
+        expect(polygon.attributes('fill')).toBe('rgba(37, 99, 235, 0.4)')
+        expect(wrapper.find('[data-testid="severity-badge"]').text()).toBe('INFO')
 
         const otherGroup = {
             id: 'G2', severity: 'UNKNOWN', affected_versions: [],
-            cvss: 0, cvss_score: 0, tags: []
+            tags: []
         }
         const wrapper2 = mount(VulnGroupCard, { props: { group: otherGroup } })
-        const badge2 = wrapper2.findAll('span').find(s => s.text() === 'UNKNOWN')
-        expect(badge2?.classes()).toContain('bg-gray-600')
+        const polygon2 = wrapper2.find('[data-testid="severity-badge"] polygon')
+        expect(polygon2.attributes('fill')).toBe('rgba(75, 85, 99, 0.4)')
+        expect(wrapper2.find('[data-testid="severity-badge"]').text()).toBe('UNKNOWN')
     })
 
     it('VulnGroupCard aggregates paths for same component', async () => {
@@ -101,21 +114,24 @@ describe('Coverage Extras', () => {
         }
     })
 
-    it('VulnGroupCard handles rescoredVectorSegments edge cases', async () => {
-        // Case: rescored doesn't start with original
+    it('VulnGroupCard renders CvssVectorDisplay for rescored vectors', async () => {
         const group = {
-            id: 'V1', cvss_vector: 'ABC', rescored_vector: 'XYZ',
+            id: 'V1', cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:H',
             affected_versions: [], severity: 'MEDIUM', cvss_score: 5
         } as any
-        const wrapper = mount(VulnGroupCard, { props: { group } })
-        expect((wrapper.vm as any).rescoredVectorSegments).toEqual({ bold: '', normal: 'XYZ' })
-
-        // Case: rescored is empty
-        const group2 = {
-            id: 'V1', cvss_vector: 'ABC', rescored_vector: '',
-            affected_versions: [], severity: 'MEDIUM', cvss_score: 5
-        } as any
-        const wrapper2 = mount(VulnGroupCard, { props: { group: group2 } })
-        expect((wrapper2.vm as any).rescoredVectorSegments).toEqual({ bold: '', normal: '' })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group },
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'test' } } } }
+        })
+        // Card mounts without errors; expand to reveal vector details
+        const headerEl = wrapper.find('[ref="headerEl"]').exists()
+            ? wrapper.find('[ref="headerEl"]')
+            : wrapper.find('.cursor-pointer')
+        await headerEl.trigger('click')
+        await wrapper.vm.$nextTick()
+        const html = wrapper.html()
+        // Should render the CvssVectorDisplay component with metric breakdown
+        expect(html).toContain('Exploitability')
+        expect(html).toContain('Impact')
     })
 })

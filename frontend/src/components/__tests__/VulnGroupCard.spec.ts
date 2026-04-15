@@ -77,6 +77,7 @@ describe('VulnGroupCard', () => {
         description: 'A bad vulnerability',
         severity: 'HIGH',
         cvss: 9.8,
+        cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
         tags: ['Security', 'Security'],
         affected_versions: [
             {
@@ -98,16 +99,83 @@ describe('VulnGroupCard', () => {
         })
 
         expect(wrapper.text()).toContain('CVE-2023-1234')
-        expect(wrapper.text()).toContain('HIGH')
+        expect(wrapper.text()).toContain('CRITICAL') // cvss 9.8 maps to CRITICAL via scoreSeverity
         expect(wrapper.text()).toContain('9.8')
-        expect(wrapper.text()).toContain('lib 1.0')
 
-        const versionSummary = wrapper.find('[data-testid="affected-version-summary"]')
-        expect(versionSummary.exists()).toBe(true)
-        expect(versionSummary.text()).toContain('1 Versions')
+        const instanceCount = wrapper.find('[data-testid="instance-count"]')
+        expect(instanceCount.exists()).toBe(true)
+        expect(instanceCount.text()).toContain('1×')
+
+        const lifecycleBadge = wrapper.find('[data-testid="lifecycle-badge"]')
+        expect(lifecycleBadge.exists()).toBe(true)
 
         const versionChips = wrapper.findAll('[data-testid="assessment-version-chip"]')
         expect(versionChips.length).toBe(0) // not expanded yet
+    })
+
+    it('renders the criticality badge as a fixed overlay marker', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        const severitySlot = wrapper.get('[data-testid="criticality-badge-slot"]')
+        const severityBadge = wrapper.get('[data-testid="severity-badge"]')
+
+        expect(severitySlot.classes()).toContain('absolute')
+        expect(severitySlot.classes()).toContain('top-0')
+        expect(severitySlot.classes()).toContain('left-0')
+        expect(severityBadge.classes()).toContain('w-10')
+        expect(severityBadge.classes()).toContain('h-full')
+        expect(severityBadge.text()).toContain('CRITICAL') // cvss 9.8 maps to CRITICAL
+    })
+
+    it('keeps the vulnerability id on one line without break-all wrapping', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        const primaryId = wrapper.get('[data-testid="vuln-primary-id"]')
+
+        expect(primaryId.classes()).toContain('whitespace-nowrap')
+        expect(primaryId.classes()).toContain('overflow-hidden')
+        expect(primaryId.classes()).toContain('text-ellipsis')
+        expect(primaryId.classes()).not.toContain('break-all')
+    })
+
+    it('renders the CVSS base score directly under the vulnerability id', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        const primaryId = wrapper.get('[data-testid="vuln-primary-id"]').element
+        const cvssBlock = wrapper.get('[data-testid="header-cvss-block"]').element
+        const position = primaryId.compareDocumentPosition(cvssBlock)
+
+        expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(wrapper.get('[data-testid="header-cvss-block"]').text()).toContain('9.8')
+        expect(wrapper.get('[data-testid="header-cvss-block"]').text()).not.toContain('CVSS Base')
+    })
+
+    it('shows base and rescored score as base arrow rescored', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: { ...mockGroup, rescored_cvss: 7.2 },
+            }
+        })
+
+        expect(wrapper.get('[data-testid="base-score-value"]').text()).toBe('9.8')
+        expect(wrapper.get('[data-testid="rescored-arrow"]').text()).toContain('→')
+        expect(wrapper.get('[data-testid="rescored-value-badge"]').text()).toBe('7.2')
+    })
+
+    it('shows No score when no base score is available', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: { ...mockGroup, cvss: undefined, cvss_score: undefined }
+            }
+        })
+
+        expect(wrapper.get('[data-testid="base-score-value"]').text()).toBe('—')
     })
 
     it('shows transitive dependency badge', () => {
@@ -115,7 +183,7 @@ describe('VulnGroupCard', () => {
             props: { group: mockGroup }
         })
 
-        expect(wrapper.text()).toContain('Transitive')
+        expect(wrapper.text()).toContain('Trans.')
     })
 
     it('shows sorted project versions in analysis details block', async () => {
@@ -152,7 +220,7 @@ describe('VulnGroupCard', () => {
     it('submits assessment update', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { username: 'tester' } } } }
+            global: { provide: { user: { value: { username: 'tester' } } }, stubs: { teleport: true } }
         })
 
         // Expand
@@ -175,7 +243,7 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         // Confirm in modal
-        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
         await confirmBtn?.trigger('click')
         await flushPromises()
 
@@ -190,7 +258,8 @@ describe('VulnGroupCard', () => {
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
     })
 
-
+    // TMRescore proposal UI was removed from VulnGroupCard during refactor
+    // (proposals are now handled at the ProjectView level)
 
     it('handles assessment update errors', async () => {
         // Mock API failure
@@ -199,7 +268,7 @@ describe('VulnGroupCard', () => {
 
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { username: 'tester' } } } }
+            global: { provide: { user: { value: { username: 'tester' } } }, stubs: { teleport: true } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -212,7 +281,7 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         // Modal appears, click Confirm
-        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
         await confirmBtn?.trigger('click')
         await flushPromises()
 
@@ -232,17 +301,20 @@ describe('VulnGroupCard', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: criticalGroup }
         })
-        expect(wrapper.find('span.rounded-lg').classes()).toContain('bg-red-600')
+        // Severity badge now uses SVG polygon with rgba fill instead of bg-* classes
+        const polygon = wrapper.find('[data-testid="severity-badge"] polygon')
+        expect(polygon.attributes('fill')).toContain('220, 38, 38') // #dc2626 as rgba
 
-        const lowGroup = { ...mockGroup, severity: 'LOW' }
+        const lowGroup = { ...mockGroup, severity: 'LOW', cvss: 0.5, cvss_score: 0.5 }
         const wrapper2 = mount(VulnGroupCard, {
             props: { group: lowGroup }
         })
-        expect(wrapper2.find('span.rounded-lg').classes()).toContain('bg-green-600')
+        const polygon2 = wrapper2.find('[data-testid="severity-badge"] polygon')
+        expect(polygon2.attributes('fill')).toContain('22, 163, 74') // #16a34a as rgba
 
         // Test card style branches (brighter colors)
         const unassessedWrapper = mount(VulnGroupCard, { props: { group: { ...mockGroup, severity: 'CRITICAL' } } })
-        expect(unassessedWrapper.find('.border.rounded-lg').classes()).toContain('bg-red-500/5')
+        expect(unassessedWrapper.find('.border.rounded-lg').classes()).toContain('bg-gray-800-warm')
 
         const mixedGroup = {
             ...mockGroup,
@@ -256,9 +328,11 @@ describe('VulnGroupCard', () => {
         expect(mixedWrapper.find('.border.rounded-lg').classes()).toContain('stripe-bg')
     })
 
-    it('renders vulnerability aliases', () => {
+    it('renders vulnerability aliases in expanded details', async () => {
         const aliasGroup = { ...mockGroup, aliases: ['CVE-2023-1234', 'GHSA-abcd-efgh'] }
         const wrapper = mount(VulnGroupCard, { props: { group: aliasGroup } })
+        // Aliases are only visible in expanded details
+        await wrapper.find('.cursor-pointer').trigger('click')
         expect(wrapper.text()).toContain('CVE-2023-1234')
         expect(wrapper.text()).toContain('GHSA-abcd-efgh')
     })
@@ -266,7 +340,10 @@ describe('VulnGroupCard', () => {
 
 
     it('handles user canceling confirmation', async () => {
-        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { stubs: { teleport: true } }
+        })
 
         await wrapper.find('.cursor-pointer').trigger('click')
         const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
@@ -286,7 +363,7 @@ describe('VulnGroupCard', () => {
     it('submits assessment with comment and suppression', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } }, stubs: { teleport: true } }
         })
         await wrapper.find('.cursor-pointer').trigger('click')
 
@@ -314,7 +391,7 @@ describe('VulnGroupCard', () => {
             await flushPromises()
 
             // Confirm in modal
-            const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+            const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
             await confirmBtn?.trigger('click')
             await flushPromises()
 
@@ -348,7 +425,7 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
         
         // Expand Audit Trail
-        const expandBtn = wrapper.findAll('button').find(b => b.text().includes('Expand Trail'))
+        const expandBtn = wrapper.findAll('button').find(b => b.text().includes('audit trail'))
         await expandBtn?.trigger('click')
 
         expect(wrapper.text()).toContain('Previous comment')
@@ -361,7 +438,7 @@ describe('VulnGroupCard', () => {
 
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { username: 'tester' } } } }
+            global: { provide: { user: { value: { username: 'tester' } } }, stubs: { teleport: true } }
         })
         await wrapper.find('.cursor-pointer').trigger('click')
 
@@ -374,7 +451,7 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         // Confirm
-        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
         await confirmBtn?.trigger('click')
         await flushPromises()
 
@@ -387,41 +464,13 @@ describe('VulnGroupCard', () => {
         consoleSpy.mockRestore()
     })
 
-    it('computes correct state colors', () => {
-        const makeWrapper = (state: string) => mount(VulnGroupCard, {
-            props: {
-                group: {
-                    ...mockGroup,
-                    affected_versions: [{
-                        ...mockGroup.affected_versions[0],
-                        components: [{
-                            ...mockComponents[0],
-                            analysis_state: state
-                        }]
-                    }]
-                } as any
-            }
-        })
-
-        // EXPLOITABLE -> Red
-        const wrapperExploitable = makeWrapper('EXPLOITABLE')
-        expect(wrapperExploitable.find('.analysis-state-value').classes()).toContain('text-red-400')
-
-        // NOT_AFFECTED -> Green
-        const wrapperNotAffected = makeWrapper('NOT_AFFECTED')
-        expect(wrapperNotAffected.find('.analysis-state-value').classes()).toContain('text-green-400')
-
-        // INCOMPLETE -> Amber
-        const wrapperIncomplete = makeWrapper('INCOMPLETE')
-        expect(wrapperIncomplete.find('.analysis-state-value').classes()).toContain('text-amber-500')
-
-        // INCONSISTENT -> Indigo
-        const wrapperInconsistent = makeWrapper('INCONSISTENT')
-        expect(wrapperInconsistent.find('.analysis-state-value').classes()).toContain('text-indigo-400')
-
-        // NOT_SET -> Subdued Red
-        const wrapperOther = makeWrapper('NOT_SET')
-        expect(wrapperOther.find('.analysis-state-value').classes()).toContain('text-red-500/80')
+    it('renders lifecycle badge with correct state', () => {
+        // Default mock group has NOT_SET instances with no team assessments -> lifecycle is OPEN
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        const badge = wrapper.find('[data-testid="lifecycle-badge"]')
+        expect(badge.exists()).toBe(true)
+        expect(badge.text()).toBe('Open')
+        expect(badge.classes()).toContain('text-red-400')
     })
 
 
@@ -429,7 +478,7 @@ describe('VulnGroupCard', () => {
     it('shows justification dropdown when NOT_AFFECTED is selected', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { username: 'tester' } } } }
+            global: { provide: { user: { value: { username: 'tester' } } }, stubs: { teleport: true } }
         })
         await wrapper.find('.cursor-pointer').trigger('click')
 
@@ -451,7 +500,7 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         // Interact with custom modal
-        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
         await confirmBtn?.trigger('click')
         await flushPromises()
 
@@ -466,7 +515,7 @@ describe('VulnGroupCard', () => {
         const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: mockRescoreRules } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: mockRescoreRules }, stubs: { teleport: true } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -481,7 +530,7 @@ describe('VulnGroupCard', () => {
         applyBtn?.trigger('click')
         await flushPromises()
 
-        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
         await confirmBtn?.trigger('click')
         await flushPromises()
 
@@ -610,7 +659,7 @@ describe('VulnGroupCard', () => {
         const mockRescoreRules = { value: { transitions: [{ trigger: { state: 'NOT_AFFECTED' }, actions: { '3.1': { 'MC': 'N', 'MI': 'N', 'MA': 'N' } } }] } }
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { role: 'ANALYST', username: 'tester' } }, rescoreRules: mockRescoreRules } }
+            global: { provide: { user: { value: { role: 'ANALYST', username: 'tester' } }, rescoreRules: mockRescoreRules }, stubs: { teleport: true } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -630,7 +679,7 @@ describe('VulnGroupCard', () => {
         applyBtn?.trigger('click')
         await flushPromises()
 
-        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
         await confirmBtn?.trigger('click')
         await flushPromises()
 
@@ -658,7 +707,7 @@ describe('VulnGroupCard', () => {
         }
         const wrapper = mount(VulnGroupCard, {
             props: { group: groupWithTags as any },
-            global: { provide: { user: { value: { username: 'tester' } } } }
+            global: { provide: { user: { value: { username: 'tester' } } }, stubs: { teleport: true } }
         })
 
         // Expand
@@ -695,7 +744,7 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         // Confirm in modal
-        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Confirm')
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
         await confirmBtn?.trigger('click')
         await flushPromises()
 
@@ -737,12 +786,10 @@ describe('VulnGroupCard', () => {
         // With role-based UI for Analyst:
         // - Comments/Suppression are STILL hidden
         expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(false)
-        // - Team Opinion section should be visible
-        expect(wrapper.text()).toContain('Team Opinion')
-        // - Calculator visibility depends on user role (reviewers see it in Global Baseline)
-        // Since we don't mock the user injection, isReviewer will be false
-        // So calculator should be hidden for non-reviewers when team is selected
-        expect(wrapper.text()).not.toContain('Global Baseline')
+        // - Team tab should be selected and its assessment section visible
+        expect(wrapper.text()).toContain('Security')
+        // - Global tab should not be active for non-reviewers
+        expect(wrapper.text()).toContain('Analysis State')
     })
 
     it('shows comments and suppression for reviewers', async () => {
@@ -817,12 +864,12 @@ describe('VulnGroupCard', () => {
 
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        // Should see Global Assessment & Global Baseline
+        // Should see Global Assessment section and Global tab
         expect(wrapper.text()).toContain('Global Assessment')
-        expect(wrapper.text()).toContain('Global Baseline')
+        expect(wrapper.text()).toContain('Global')
 
-        // Should show "Global assessment" for the team selector
-        expect(wrapper.text()).toContain('Global assessment')
+        // Should show the Global tab as active (team tabs are shown)
+        expect(wrapper.text()).toContain('Analysis State')
 
         // Calculator component should be present in the modal after clicking Visual Calculator
         const calcButton = wrapper.findAll('button').find(b => b.text().includes('Visual Calculator'))

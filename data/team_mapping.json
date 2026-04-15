@@ -5,10 +5,6 @@
     "Bla-Team",
     "Old-Bla-Team"
   ],
-  "log4j-core": [
-    "team-a",
-    "team-b"
-  ],
   "team-test-lib": [
     "New-Label",
     "Old-Label",
@@ -16,5 +12,7 @@
     "even older label",
     "unbelievably old label"
   ],
+  "team-a-comp": "TeamA",
+  "team-b-comp": "TeamB",
   "*": "Unassigned"
 }

@@ -12,5 +12,16 @@ services:
     networks:
       - default
 
+  mock-tmrescore:
+    image: python:3.14-slim
+    command: sh -c "pip install fastapi uvicorn && uvicorn mock_tmrescore:app --host 0.0.0.0 --port 8090"
+    working_dir: /app
+    volumes:
+      - ./mock_tmrescore.py:/app/mock_tmrescore.py:z
+    ports:
+      - "8090:8090"
+    networks:
+      - default
+
 networks:
   default:

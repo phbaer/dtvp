@@ -23,8 +23,8 @@
     "uuid": "f6781a7b-0346-4927-991c-7033580539f6",
     "vulnId": "CVE-2019-12384",
     "source": "NVD",
-    "severity": "HIGH",
-    "cvssV3BaseScore": 8.1,
+    "severity": "CRITICAL",
+    "cvssV3BaseScore": 9.8,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     "description": "Jackson-databind deserialization vulnerability.",
     "recommendation": "Upgrade jackson-databind to 2.9.9.1 or later."
@@ -44,7 +44,7 @@
     "vulnId": "CVE-2024-TEAM",
     "source": "NVD",
     "severity": "LOW",
-    "cvssV3BaseScore": 2.5,
+    "cvssV3BaseScore": 3.3,
     "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
     "description": "Team mapping placeholder vulnerability.",
     "recommendation": "Validate team association mapping rules."
@@ -54,7 +54,7 @@
     "vulnId": "CVE-2026-PLAINTEXT-NS",
     "source": "NVD",
     "severity": "LOW",
-    "cvssV3BaseScore": 2.0,
+    "cvssV3BaseScore": 3.3,
     "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
     "description": "Plaintext NOT_SET assessment test case.",
     "recommendation": "Verify assessment parsing."
@@ -64,7 +64,7 @@
     "vulnId": "CVE-2026-PLAINTEXT-NA",
     "source": "NVD",
     "severity": "LOW",
-    "cvssV3BaseScore": 2.0,
+    "cvssV3BaseScore": 3.3,
     "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N",
     "description": "Plaintext NOT_AFFECTED assessment test case.",
     "recommendation": "Verify assessment parsing."
@@ -93,8 +93,8 @@
     "uuid": "d3331a7b-0346-4927-991c-7033580539f2",
     "vulnId": "CVE-2025-NEW-01",
     "source": "NVD",
-    "severity": "LOW",
-    "cvssV3BaseScore": 3.1,
+    "severity": "MEDIUM",
+    "cvssV3BaseScore": 5.4,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
     "description": "Newly discovered low risk dependency issue.",
     "recommendation": "Monitor and apply vendor updates when available."
@@ -104,7 +104,7 @@
     "vulnId": "CVE-2025-NEW-02",
     "source": "NVD",
     "severity": "MEDIUM",
-    "cvssV3BaseScore": 6.2,
+    "cvssV3BaseScore": 6.5,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N",
     "description": "Missing input validation issue in subsystem.",
     "recommendation": "Add boundary checks and fuzz testing."
@@ -113,8 +113,8 @@
     "uuid": "d5551a7b-0346-4927-991c-7033580539f4",
     "vulnId": "CVE-2025-NEW-03",
     "source": "NVD",
-    "severity": "HIGH",
-    "cvssV3BaseScore": 8.4,
+    "severity": "CRITICAL",
+    "cvssV3BaseScore": 9.1,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
     "description": "Authentication bypass vulnerability in auth module.",
     "recommendation": "Enforce proper session validation."
@@ -124,7 +124,7 @@
     "vulnId": "CVE-2026-OPEN-PENDING",
     "source": "NVD",
     "severity": "MEDIUM",
-    "cvssV3BaseScore": 5.8,
+    "cvssV3BaseScore": 6.5,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
     "description": "Pending review open team assessment test case.",
     "recommendation": "Review team assessment and approve if verified."
@@ -134,7 +134,7 @@
     "vulnId": "CVE-2026-TEAM-PARTIAL",
     "source": "NVD",
     "severity": "MEDIUM",
-    "cvssV3BaseScore": 5.7,
+    "cvssV3BaseScore": 6.5,
     "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N",
     "description": "One team assessed, another open team assessment test case.",
     "recommendation": "Ensure second team completes assessment." 
