@@ -35,6 +35,7 @@ export interface FilterState {
     lifecycleFilters: string[]
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
+    assigneeFilter: string
 }
 
 const props = defineProps<{
@@ -280,6 +281,16 @@ const handleCopy = () => {
                                             :value="props.filters.componentFilter"
                                             @input="(event) => updateFilter('componentFilter', (event.target as HTMLInputElement).value)"
                                             placeholder="Component..."
+                                            class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
+                                        />
+                                    </div>
+                                    <div class="flex flex-col gap-1">
+                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Assignee</label>
+                                        <input
+                                            type="text"
+                                            :value="props.filters.assigneeFilter"
+                                            @input="(event) => updateFilter('assigneeFilter', (event.target as HTMLInputElement).value)"
+                                            placeholder="Username..."
                                             class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
                                         />
                                     </div>

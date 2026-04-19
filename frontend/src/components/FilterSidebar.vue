@@ -11,6 +11,7 @@ export interface FilterState {
     idFilter: string
     tagFilter: string
     componentFilter: string
+    assigneeFilter: string
     versionFilterInput: string
     lifecycleFilters: string[]
     analysisFilters: string[]
@@ -141,6 +142,16 @@ const toggleAnalysisFilter = (val: string) => {
                         @input="updateFilter('componentFilter', ($event.target as HTMLInputElement).value)"
                         type="text" 
                         placeholder="Component..." 
+                        class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
+                    />
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[9px] uppercase tracking-widest text-gray-400">Assignee</label>
+                    <input 
+                        :value="filters.assigneeFilter"
+                        @input="updateFilter('assigneeFilter', ($event.target as HTMLInputElement).value)"
+                        type="text" 
+                        placeholder="Username..." 
                         class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
                     />
                 </div>

@@ -37,7 +37,8 @@ vi.mock('../../lib/api', () => ({
     getDependencyChains: vi.fn().mockResolvedValue([
         'Comp -> Parent1 -> Project',
         'Comp -> Parent2 -> Project'
-    ])
+    ]),
+    getKnownUsers: vi.fn(() => Promise.resolve([]))
 }))
 
 describe('Coverage Extras', () => {

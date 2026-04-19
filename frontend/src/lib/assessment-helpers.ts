@@ -7,6 +7,7 @@ export interface AssessmentBlock {
     details: string;
     justification: string;
     timestamp?: number;
+    assigned?: string[];
 }
 
 export const STATE_PRIORITY: Record<string, number> = {
@@ -101,6 +102,13 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
             justification = match[5];
         }
 
+        // Extract [Assigned: ...] from the header (captured in the .*? wildcard)
+        const headerText = match[0];
+        const assignedMatch = headerText.match(/\[Assigned:\s*([^\]]+)\]/);
+        const assigned: string[] = assignedMatch
+            ? assignedMatch[1].split(',').map(u => u.trim()).filter(u => u.length > 0)
+            : [];
+
         const startOfContent = match.index + match[0].length;
 
         // Find end of content (start of next header or end of string)
@@ -115,7 +123,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         let content = rawContent
         // Cleanup all metadata from content to prevent leakage
         content = content
-            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]/g, '')
+            .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date|Assigned):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .replace(/\[Comment\]/g, '')
             .replace(/\bAssessed\s*--\s*\S+/g, '')
@@ -134,7 +142,8 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
             user,
             details: content,
             justification,
-            timestamp
+            timestamp,
+            assigned
         });
     }
 
@@ -156,7 +165,8 @@ export function constructAssessmentDetails(
     // Preserve the order in the array for generation
     for (const b of blocks) {
         const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
-        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}] ---`;
+        const assignedStr = b.assigned && b.assigned.length > 0 ? ` [Assigned: ${b.assigned.join(', ')}]` : '';
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr} ---`;
         parts.push(header);
         if (b.details) parts.push(b.details);
     }
@@ -355,14 +365,16 @@ export function mergeTeamAssessment(
     user: string,
     newJustification: string = 'NOT_SET',
     rescoredTags?: string[],
-    isPending: boolean = true
+    isPending: boolean = true,
+    newAssigned?: string[]
 ): { text: string, aggregatedState: string } {
     // 1. Parse existing
     const blocks = parseAssessmentBlocks(currentFullText);
 
     // 2. Update, Create, or Remove block for this team
     const targetIndex = blocks.findIndex(b => b.team === team);
-    const isCleared = newState === 'NOT_SET' && !newDetails.trim() && (!newJustification || newJustification === 'NOT_SET');
+    const hasAssignees = newAssigned !== undefined ? newAssigned.length > 0 : (targetIndex >= 0 && (blocks[targetIndex].assigned?.length ?? 0) > 0);
+    const isCleared = newState === 'NOT_SET' && !newDetails.trim() && (!newJustification || newJustification === 'NOT_SET') && !hasAssignees;
 
     if (isCleared) {
         // Remove the block entirely when all fields are cleared
@@ -370,13 +382,18 @@ export function mergeTeamAssessment(
             blocks.splice(targetIndex, 1);
         }
     } else {
+        // Preserve existing assigned if not explicitly provided
+        const existingAssigned = targetIndex >= 0 ? blocks[targetIndex].assigned : undefined;
+        const finalAssigned = newAssigned !== undefined ? newAssigned : (existingAssigned || []);
+
         const newBlock: AssessmentBlock = {
             team: team,
             state: newState,
             user: user,
             details: newDetails.trim(),
             justification: newJustification,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            assigned: finalAssigned
         };
 
         if (targetIndex >= 0) {
@@ -610,6 +627,38 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
         }
     }
 
+    // Check if analysis_details content differs across versions/components.
+    // This must happen BEFORE lifecycle checks (pending review, missing teams)
+    // because differing details is a fundamental inconsistency that takes priority.
+    // Normalize by stripping timestamps, assessor names, rescored tags, and
+    // whitespace so that only the substantive assessment text is compared.
+    // Only compare instances that have a non-NOT_SET analysis_state — unassessed
+    // instances naturally have different (empty) details and should not trigger
+    // INCONSISTENT (that's an INCOMPLETE scenario instead).
+    const normalizeDetails = (d: string) =>
+        d.replace(/\[Date:\s*[^\]]*\]/g, '')
+         .replace(/\[Assessed By:\s*[^\]]*\]/g, '')
+         .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
+         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+         .replace(/\[Status: Pending Review\]/g, '')
+         .replace(/\s+/g, ' ')
+         .trim();
+
+    const assessedDetails = allInstances
+        .filter(i => {
+            const s = (i as any).analysis_state || (i as any).analysisState || 'NOT_SET';
+            return s !== 'NOT_SET';
+        })
+        .map(i => normalizeDetails((i as any).analysis_details || (i as any).analysisDetails || ''))
+        .filter(d => d.length > 0);
+
+    if (assessedDetails.length > 1) {
+        const first = assessedDetails[0];
+        if (assessedDetails.some(d => d !== first)) {
+            return 'INCONSISTENT';
+        }
+    }
+
     if (isPendingReview(group)) return 'NEEDS_APPROVAL';
 
     const missingTeams = (requiredTeams || []).filter((t: string) => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
@@ -635,35 +684,6 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
 
     if (uniqueNonEmpty.size > 1 || versionStates.includes('INCONSISTENT_VERSION')) return 'INCONSISTENT';
 
-    // Also check if analysis_details content differs across versions/components.
-    // Normalize by stripping timestamps, rescored tags, and whitespace so that
-    // only the substantive assessment text is compared.
-    // Only compare instances that have a non-NOT_SET analysis_state — unassessed
-    // instances naturally have different (empty) details and should not trigger
-    // INCONSISTENT (that's an INCOMPLETE scenario instead).
-    const normalizeDetails = (d: string) =>
-        d.replace(/\[Date:\s*[^\]]*\]/g, '')
-         .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
-         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-         .replace(/\[Status: Pending Review\]/g, '')
-         .replace(/\s+/g, ' ')
-         .trim();
-
-    const assessedDetails = allInstances
-        .filter(i => {
-            const s = (i as any).analysis_state || (i as any).analysisState || 'NOT_SET';
-            return s !== 'NOT_SET';
-        })
-        .map(i => normalizeDetails((i as any).analysis_details || (i as any).analysisDetails || ''))
-        .filter(d => d.length > 0);
-
-    if (assessedDetails.length > 1) {
-        const first = assessedDetails[0];
-        if (assessedDetails.some(d => d !== first)) {
-            return 'INCONSISTENT';
-        }
-    }
-    
     // Stricter Incomplete: Also check if ANY individual component is NOT_SET
     // when others in the same group have an assessment.
     if (hasMissingComponent && hasAnyAssessment) {

@@ -24,3 +24,4 @@ frontend/coverage
 .coverage
 .python-version
 data/tmrescore_proposals.json
+test_setup/mock_dt_analysis.runtime.json

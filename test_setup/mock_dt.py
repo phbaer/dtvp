@@ -147,24 +147,59 @@ def load_vulnerability_definitions():
     return {entry["uuid"]: entry for entry in payload}
 
 
+def _seed_analysis_path() -> Path:
+    return Path(__file__).resolve().parent / "mock_dt_analysis.json"
+
+
+def _runtime_analysis_path() -> Path:
+    return Path(__file__).resolve().parent / "mock_dt_analysis.runtime.json"
+
+
 def load_mock_analysis():
-    analysis_path = Path(__file__).resolve().parent / "mock_dt_analysis.json"
-    with open(analysis_path, "r", encoding="utf-8") as f:
+    runtime_path = _runtime_analysis_path()
+    if runtime_path.exists():
+        with open(runtime_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return payload.get("mock_analysis", {})
+
+    seed_path = _seed_analysis_path()
+    if not seed_path.exists():
+        return {}
+    with open(seed_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
     return payload.get("mock_analysis", {})
 
 
-mock_vulnerabilities = load_vulnerability_definitions()
-mock_analysis = load_mock_analysis()
+def save_mock_analysis():
+    runtime_path = _runtime_analysis_path()
+    runtime_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(runtime_path, "w", encoding="utf-8") as f:
+        json.dump({"mock_analysis": mock_analysis}, f, indent=2)
 
-# Pre-populate other projects with default state
-for p in mock_projects:
-    if p.uuid == PROJECT_UUID:
-        continue
-    mock_analysis[f"{p.uuid}:{COMPONENT_UUID}:{VULN_UUID_1}"] = {
-        "analysisState": "NOT_SET",
-        "isSuppressed": False,
-    }
+
+mock_vulnerabilities = load_vulnerability_definitions()
+mock_analysis = {}
+
+
+def _analysis_key(project: str, component: str, vulnerability: str) -> str:
+    return f"{project}:{component}:{vulnerability}"
+
+
+def _initialize_default_analysis() -> None:
+    mock_analysis.clear()
+    mock_analysis.update(load_mock_analysis())
+
+    # Pre-populate other projects with default state
+    for p in mock_projects:
+        if p.uuid == PROJECT_UUID:
+            continue
+        mock_analysis[_analysis_key(p.uuid, COMPONENT_UUID, VULN_UUID_1)] = {
+            "analysisState": "NOT_SET",
+            "isSuppressed": False,
+        }
+
+
+_initialize_default_analysis()
 
 
 @app.get("/api/v1/user/me")
@@ -595,6 +630,11 @@ def get_findings(project_uuid: str):
         for vuln_uuid in [VULN_UUID_1, VULN_JACKSON_UUID, VULN_UUID_2]:
             add_vuln(vuln_uuid)
 
+    # Ensure every finding has a stable identifier for frontend conflict matching.
+    for finding in current_findings:
+        if "uuid" not in finding:
+            finding["uuid"] = finding.get("matrix")
+
     return current_findings
 
 
@@ -853,9 +893,14 @@ def get_bom(project_uuid: str):
 @app.get("/api/v1/analysis")
 def get_analysis(project: str, component: str, vulnerability: str):
     key = f"{project}:{component}:{vulnerability}"
-    if key in mock_analysis:
-        return mock_analysis[key]
-    return {}  # Or 404? DT returns 404 if finding doesn't exist, but analysis requires finding exists.
+    if key not in mock_analysis:
+        mock_analysis[key] = {
+            "analysisState": "NOT_SET",
+            "isSuppressed": False,
+            "analysisDetails": "",
+            "analysisComments": [],
+        }
+    return mock_analysis[key]
 
 
 @app.put("/api/v1/analysis")
@@ -890,7 +935,63 @@ def update_analysis(update: AnalysisUpdate):
             mock_analysis[key]["analysisDetails"] = ""
         mock_analysis[key]["analysisDetails"] += f"\n\n[Comment] {update.comment}"
 
+    save_mock_analysis()
     return mock_analysis[key]
+
+
+class MockAnalysisOverride(BaseModel):
+    project: str
+    component: str
+    vulnerability: str
+    analysisState: Optional[str] = None
+    isSuppressed: Optional[bool] = None
+    analysisDetails: Optional[str] = None
+    analysisJustification: Optional[str] = None
+    analysisComments: Optional[list] = None
+
+
+@app.get("/api/v1/mock/analysis")
+def get_mock_analysis(project: str, component: str, vulnerability: str):
+    key = _analysis_key(project, component, vulnerability)
+    if key not in mock_analysis:
+        raise HTTPException(status_code=404, detail="Mock analysis entry not found")
+    return mock_analysis[key]
+
+
+@app.post("/api/v1/mock/analysis")
+def set_mock_analysis(override: MockAnalysisOverride):
+    key = _analysis_key(override.project, override.component, override.vulnerability)
+    if key not in mock_analysis:
+        mock_analysis[key] = {
+            "analysisState": "NOT_SET",
+            "isSuppressed": False,
+            "analysisDetails": "",
+            "analysisComments": [],
+        }
+
+    if override.analysisState is not None:
+        mock_analysis[key]["analysisState"] = override.analysisState
+    if override.isSuppressed is not None:
+        mock_analysis[key]["isSuppressed"] = override.isSuppressed
+    if override.analysisDetails is not None:
+        mock_analysis[key]["analysisDetails"] = override.analysisDetails
+    if override.analysisJustification is not None:
+        mock_analysis[key]["analysisJustification"] = override.analysisJustification
+    if override.analysisComments is not None:
+        mock_analysis[key]["analysisComments"] = override.analysisComments
+
+    save_mock_analysis()
+    return mock_analysis[key]
+
+
+@app.post("/api/v1/mock/analysis/reset")
+def reset_mock_analysis():
+    runtime_path = _runtime_analysis_path()
+    if runtime_path.exists():
+        runtime_path.unlink()
+    _initialize_default_analysis()
+    save_mock_analysis()
+    return {"status": "reset"}
 
 
 @app.get("/.well-known/openid-configuration")

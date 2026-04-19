@@ -1,7 +1,7 @@
 <template>
   <teleport to="body">
-    <div v-if="show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div class="bg-gray-800 w-full max-w-4xl max-h-[90vh] flex flex-col rounded-lg border border-red-500 shadow-2xl">
+    <div v-if="show" class="fixed inset-0 z-50 bg-black/80 flex min-h-screen items-center justify-center px-4 py-6 overflow-y-auto">
+      <div class="bg-gray-800 w-full max-w-3xl max-h-[calc(100vh-3rem)] flex flex-col rounded-lg border border-red-500 shadow-2xl overflow-hidden">
         <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
           <h3 class="font-bold text-lg text-red-400 flex items-center gap-2">
             <slot name="icon">
@@ -34,7 +34,7 @@
                   <span class="font-mono text-blue-300">{{ conflict.current.isSuppressed }}</span>
                 </div>
                 <div class="text-sm bg-gray-800 p-2 rounded border border-gray-700 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-xs">
-                  {{ conflict.current.analysisDetails || '(No details)' }}
+                  {{ conflict.current.analysisDetails || conflict.current.analysis_details || '(No details)' }}
                 </div>
               </div>
 
@@ -49,7 +49,7 @@
                   <span class="font-mono text-green-300">{{ conflict.your_change.isSuppressed }}</span>
                 </div>
                 <div class="text-sm bg-gray-800 p-2 rounded border border-gray-700 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-xs">
-                  {{ conflict.your_change.analysisDetails || '(No details)' }}
+                  {{ conflict.your_change.analysisDetails || conflict.your_change.analysis_details || '(No details)' }}
                 </div>
               </div>
             </div>

@@ -20,7 +20,8 @@ vi.mock('../../lib/api', () => ({
         limit: 10,
         offset: 0
     }),
-    getAssessmentDetails: vi.fn(() => Promise.resolve([]))
+    getAssessmentDetails: vi.fn(() => Promise.resolve([])),
+    getKnownUsers: vi.fn(() => Promise.resolve([]))
 }))
 
 // Mock Icons
@@ -256,6 +257,58 @@ describe('VulnGroupCard', () => {
 
         // Should emit update:assessment
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
+    })
+
+    it('preserves existing global analysis when applying a selected team update', async () => {
+        const groupWithGlobal = {
+            ...mockGroup,
+            affected_versions: [
+                {
+                    project_name: 'App1',
+                    project_version: '1.0',
+                    project_uuid: 'p1',
+                    components: [
+                        {
+                            ...mockComponents[0],
+                            analysis_details: '--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] ---\nGlobal policy note.',
+                            analysis_state: 'IN_TRIAGE',
+                        },
+                        {
+                            ...mockComponents[0],
+                            finding_uuid: 'f2',
+                            analysis_details: '--- [Team: Security] [State: EXPLOITABLE] [Assessed By: analyst] ---\nTeam-specific issue.',
+                            analysis_state: 'EXPLOITABLE',
+                            tags: ['Security'],
+                        }
+                    ]
+                }
+            ]
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithGlobal },
+            global: { provide: { user: { value: { username: 'tester' } } }, stubs: { teleport: true } }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
+
+        ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        await wrapper.find('textarea').setValue('Updated team details')
+
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            team: 'Security',
+            details: expect.stringContaining('--- [Team: General] [State: IN_TRIAGE] [Assessed By: system]'),
+        }))
     })
 
     // TMRescore proposal UI was removed from VulnGroupCard during refactor

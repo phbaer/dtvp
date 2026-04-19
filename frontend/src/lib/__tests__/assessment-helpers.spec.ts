@@ -80,6 +80,44 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
         });
 
+        it('should return INCONSISTENT when same state but different analysis details across instances', () => {
+            const group: any = {
+                id: 'CVE-DIFF-DETAILS',
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        components: [
+                            { analysis_state: 'NOT_AFFECTED', analysis_details: '--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1000] ---\nFirst analysis' },
+                            { analysis_state: 'NOT_AFFECTED', analysis_details: '--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: bob] [Date: 2000] ---\nDifferent analysis' }
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
+        });
+
+        it('should return INCONSISTENT when same state but different analysis details across versions', () => {
+            const group: any = {
+                id: 'CVE-DIFF-DETAILS-VERSIONS',
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        components: [
+                            { analysis_state: 'NOT_AFFECTED', analysis_details: '--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 1000] ---\nAnalysis for v1' },
+                        ]
+                    },
+                    {
+                        components: [
+                            { analysis_state: 'NOT_AFFECTED', analysis_details: '--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] [Date: 2000] ---\nAnalysis for v2' },
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
+        });
+
         it('should use the same team assessment check for open team assessment and chip state', () => {
             const group: any = {
                 id: 'CVE-OPEN-TEAM',
@@ -351,6 +389,76 @@ My Policy Comment: track this carefully`
             ]
             const { text } = buildBulkSyncDetails(blocks)
             expect(text).not.toContain('[Status: Pending Review]')
+        })
+    });
+
+    describe('Assigned Users', () => {
+        it('should parse [Assigned: ...] from block headers', () => {
+            const text = '--- [Team: Security] [State: IN_TRIAGE] [Assessed By: alice] [Assigned: jane.doe, john.smith] ---\nDetails here.'
+            const blocks = parseAssessmentBlocks(text)
+            expect(blocks).toHaveLength(1)
+            expect(blocks[0].assigned).toEqual(['jane.doe', 'john.smith'])
+        })
+
+        it('should return empty array when no [Assigned] tag is present', () => {
+            const text = '--- [Team: Security] [State: IN_TRIAGE] [Assessed By: alice] ---\nDetails here.'
+            const blocks = parseAssessmentBlocks(text)
+            expect(blocks).toHaveLength(1)
+            expect(blocks[0].assigned).toEqual([])
+        })
+
+        it('should emit [Assigned: ...] tag in constructAssessmentDetails', () => {
+            const blocks = [{
+                team: 'Platform',
+                state: 'EXPLOITABLE',
+                user: 'bob',
+                details: 'Bad.',
+                justification: 'NOT_SET',
+                assigned: ['user1', 'user2']
+            }]
+            const { text } = constructAssessmentDetails(blocks, [], false)
+            expect(text).toContain('[Assigned: user1, user2]')
+        })
+
+        it('should not emit [Assigned] tag when assigned is empty', () => {
+            const blocks = [{
+                team: 'Platform',
+                state: 'EXPLOITABLE',
+                user: 'bob',
+                details: 'Bad.',
+                justification: 'NOT_SET',
+                assigned: []
+            }]
+            const { text } = constructAssessmentDetails(blocks, [], false)
+            expect(text).not.toContain('[Assigned')
+        })
+
+        it('should preserve assigned through mergeTeamAssessment when not explicitly provided', () => {
+            const existing = '--- [Team: Dev] [State: IN_TRIAGE] [Assessed By: alice] [Assigned: keeper] ---\nOld details.'
+            const { text } = mergeTeamAssessment(existing, 'Dev', 'EXPLOITABLE', 'New details.', 'bob', 'NOT_SET', undefined, true)
+            expect(text).toContain('[Assigned: keeper]')
+        })
+
+        it('should replace assigned when explicitly provided in mergeTeamAssessment', () => {
+            const existing = '--- [Team: Dev] [State: IN_TRIAGE] [Assessed By: alice] [Assigned: old.user] ---\nOld.'
+            const { text } = mergeTeamAssessment(existing, 'Dev', 'EXPLOITABLE', 'New.', 'bob', 'NOT_SET', undefined, true, ['new.user1', 'new.user2'])
+            expect(text).toContain('[Assigned: new.user1, new.user2]')
+            expect(text).not.toContain('old.user')
+        })
+
+        it('should round-trip assigned through parse → construct', () => {
+            const original = '--- [Team: Ops] [State: NOT_AFFECTED] [Assessed By: carol] [Justification: CODE_NOT_PRESENT] [Assigned: user.a, user.b] ---\nSafe.'
+            const blocks = parseAssessmentBlocks(original)
+            const { text } = constructAssessmentDetails(blocks, [], false)
+            const reparsed = parseAssessmentBlocks(text)
+            expect(reparsed[0].assigned).toEqual(['user.a', 'user.b'])
+        })
+
+        it('should not leak [Assigned: ...] into content', () => {
+            const text = '--- [Team: X] [State: IN_TRIAGE] [Assessed By: z] [Assigned: a, b] ---\nDetails.'
+            const blocks = parseAssessmentBlocks(text)
+            expect(blocks[0].details).not.toContain('[Assigned')
+            expect(blocks[0].details).toBe('Details.')
         })
     });
 });

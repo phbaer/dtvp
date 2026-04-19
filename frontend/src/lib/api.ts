@@ -144,6 +144,11 @@ export const getAssessmentDetails = async (instances: any[]) => {
     return res.data;
 };
 
+export const getKnownUsers = async (): Promise<string[]> => {
+    const res = await api.get('/known-users');
+    return res.data;
+};
+
 export const login = (username?: string) => {
     let url = AUTH_BASE + '/login';
     if (username) {

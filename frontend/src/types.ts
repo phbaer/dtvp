@@ -54,6 +54,7 @@ export interface GroupedVuln {
     rescored_vector?: string | null;
     rescored_vector_adjusted?: boolean;
     tags?: string[];
+    assignees?: string[];
     aliases?: string[];
     affected_versions: AffectedVersion[];
 }
@@ -66,6 +67,7 @@ export interface AssessmentPayload {
     justification?: string;
     suppressed: boolean;
     team?: string;
+    assigned?: string[];
     original_analysis?: Record<string, any>;
     force?: boolean;
     comparison_mode?: 'MERGE' | 'REPLACE';
