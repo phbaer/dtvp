@@ -278,6 +278,29 @@ sh scripts/run-frontend-tests-podman.sh unit
 
 The UI tests expect the local stack to be available.
 
+To capture the README screenshots and exercise the real conflict modal, run:
+
+```bash
+cd frontend
+npm run test:ui:docs
+```
+
+This will execute `frontend/e2e/capture-readme-screenshots.manual.ts` and update the screenshot assets under `docs/screenshots`.
+
+### Testing the Apply Conflict Dialog
+
+To verify the apply conflict flow manually:
+
+1. Start the backend and frontend against the mock Dependency-Track stack.
+2. Open the app in the browser and navigate to a project with a vulnerable component.
+3. In one browser session, change the assessment for a team or apply an update.
+4. In a second browser session or by forcing a server-side state change via the mock DT API, edit the same finding again and submit.
+5. The conflict dialog should appear with the server state on the left and your changes on the right.
+6. Use "Discard My Changes (Use Server)" or "Force Overwrite" to resolve the conflict.
+
+The saved conflict modal screenshot is available at `docs/screenshots/conflict-resolution.png`. If you want to regenerate it, use the Playwright capture test above.
+
+
 ```bash
 pm2 start ecosystem.config.js --update-env
 cd frontend

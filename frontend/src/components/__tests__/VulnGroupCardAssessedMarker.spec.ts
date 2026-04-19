@@ -7,7 +7,8 @@ import { CheckCircle } from 'lucide-vue-next'
 // Mock dependencies
 vi.mock('../../lib/api', () => ({
     updateAssessment: vi.fn(),
-    getAssessmentDetails: vi.fn()
+    getAssessmentDetails: vi.fn(),
+    getKnownUsers: vi.fn(() => Promise.resolve([]))
 }))
 
 vi.mock('../../lib/assessment-helpers', async (importOriginal) => {

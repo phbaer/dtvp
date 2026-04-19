@@ -5,7 +5,8 @@ import VulnGroupCard from '../VulnGroupCard.vue'
 vi.mock('../../lib/api', () => ({
     updateAssessment: vi.fn(),
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
-    getDependencyChains: vi.fn().mockResolvedValue([])
+    getDependencyChains: vi.fn().mockResolvedValue([]),
+    getKnownUsers: vi.fn(() => Promise.resolve([]))
 }))
 
 vi.mock('lucide-vue-next', () => ({

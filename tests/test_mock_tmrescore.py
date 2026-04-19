@@ -253,7 +253,7 @@ def test_mock_tmrescore_preserves_provided_vectors_without_rewriting_them():
 
 
 def test_tmrescore_proposals_preserve_base_vector_components():
-    proposals_path = Path(__file__).resolve().parents[1] / "data" / "tmrescore_proposals.json"
+    proposals_path = Path(__file__).resolve().parent / "assets" / "tmrescore_proposals.json"
     proposals_data = json.loads(proposals_path.read_text())
 
     def base_vector_components(vector: str) -> list[str]:

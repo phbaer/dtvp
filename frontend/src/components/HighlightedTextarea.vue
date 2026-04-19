@@ -44,7 +44,7 @@ const highlightedHtml = computed(() => {
     )
     // Metadata tags: [Key: Value]
     .replace(
-      /(\[(?:Team|State|Assessed By|Date|Justification|Rescored|Rescored Vector|Status|Comment):\s*[^\]]*\])/g,
+      /(\[(?:Team|State|Assessed By|Date|Justification|Rescored|Rescored Vector|Status|Comment|Assigned):\s*[^\]]*\])/g,
       '<span class="hl-tag">$1</span>'
     )
     // Status tags without colon: [Status: Pending Review]

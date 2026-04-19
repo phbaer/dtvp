@@ -32,7 +32,8 @@ vi.mock('lucide-vue-next', () => ({
 
 vi.mock('../../lib/api', () => ({
     updateAssessment: vi.fn(),
-    getAssessmentDetails: vi.fn(() => Promise.resolve([]))
+    getAssessmentDetails: vi.fn(() => Promise.resolve([])),
+    getKnownUsers: vi.fn(() => Promise.resolve([]))
 }))
 
 describe('VulnGroupCard Severity Colors', () => {

@@ -2,7 +2,7 @@
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getCacheStatus, getTMRescoreProposals } from '../lib/api'
-import { getGroupLifecycle, tagToString, hasCvssVersionMismatch } from '../lib/assessment-helpers'
+import { getGroupLifecycle, tagToString, hasCvssVersionMismatch, normalizeTags } from '../lib/assessment-helpers'
 import { classifyGroup, computeFilterCounts, computeTeamCounts, matchesFilters, getGroupTechnicalState } from '../lib/group-classifier'
 import { calculateScoreFromVector } from '../lib/cvss'
 import type { GroupedVuln, Statistics, CacheStatus, TMRescoreProposalSnapshot } from '../types'
@@ -316,6 +316,9 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
     const groupId = group.id
     group.rescored_cvss = data.rescored_cvss
     group.rescored_vector = data.rescored_vector
+    if (data.assignees !== undefined) {
+        group.assignees = data.assignees
+    }
 
     // Update all affected instances in this group by creating new array and object references for reactivity
     group.affected_versions = group.affected_versions.map((version: any) => {
@@ -404,6 +407,7 @@ const handleToggleExpand = (id: string, expanded: boolean) => {
 const tagFilter = ref('')
 const idFilter = ref('')
 const componentFilter = ref('')
+const assigneeFilter = ref('')
 const dependencyFilter = ref<Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>>(['DIRECT', 'TRANSITIVE', 'UNKNOWN'])
 const cvssVersionMismatchOnly = ref(false)
 
@@ -508,7 +512,7 @@ const sortOrder = ref<'asc' | 'desc'>('desc')
 onMounted(() => {
     const q = route.query
     const hasFilterParams = Object.entries(q).some(([k, v]) => {
-        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'sort', 'order', 'tmrescore'].includes(k)) return false;
+        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'sort', 'order', 'tmrescore'].includes(k)) return false;
         if (Array.isArray(v)) return v.length > 0;
         return v !== undefined && v !== null && v !== '';
     })
@@ -527,6 +531,7 @@ onMounted(() => {
         else if (q.cve) idFilter.value = q.cve as string
 
         if (q.component) componentFilter.value = q.component as string
+        if (q.assignee) assigneeFilter.value = q.assignee as string
         if (q.dependency) dependencyFilter.value = Array.isArray(q.dependency) ? (q.dependency as string[]).map(v => v.toUpperCase() as 'DIRECT'|'TRANSITIVE'|'UNKNOWN') : [(q.dependency as string).toUpperCase() as 'DIRECT'|'TRANSITIVE'|'UNKNOWN']
         if (q.versions) versionFilterInput.value = Array.isArray(q.versions) ? q.versions.join(',') : (q.versions as string)
         if (q.tmrescore) tmrescoreProposalFilter.value = Array.isArray(q.tmrescore) ? (q.tmrescore as string[]).map(v => v.toUpperCase() as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') : [String(q.tmrescore).toUpperCase() as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']
@@ -566,6 +571,7 @@ const resetFilters = () => {
     idFilter.value = ''
     tagFilter.value = ''
     componentFilter.value = ''
+    assigneeFilter.value = ''
     dependencyFilter.value = ['DIRECT', 'TRANSITIVE', 'UNKNOWN']
     tmrescoreProposalFilter.value = ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL']
     versionFilterInput.value = ''
@@ -578,7 +584,7 @@ const resetFilters = () => {
 // This reduces unnecessary chattiness and keeps filtering fast and responsive.
 // URL sync was removed to avoid automatic API refresh for every filter tweak.
 
-watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, cvssVersionMismatchOnly, sortBy, sortOrder], () => {
+watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, assigneeFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, cvssVersionMismatchOnly, sortBy, sortOrder], () => {
     const query = { ...route.query }
 
     if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
@@ -595,6 +601,9 @@ watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, 
 
     if (componentFilter.value) query.component = componentFilter.value
     else delete query.component
+
+    if (assigneeFilter.value) query.assignee = assigneeFilter.value
+    else delete query.assignee
 
     if (dependencyFilter.value.length > 0) query.dependency = dependencyFilter.value
     else delete query.dependency
@@ -688,10 +697,10 @@ const preFilteredGroups = computed(() => {
     const rawTagFilter = tagFilter.value.trim().toLowerCase()
     if (rawTagFilter) {
         result = result.filter(g => {
-            return g.tags?.some(t => {
-                const tagText = tagToString(t)
-                return tagText.toLowerCase().includes(rawTagFilter)
-            })
+            const rawTags = (g.tags || []).map(tagToString).filter(Boolean)
+            const normalized = teamMapping.value ? normalizeTags(g.tags || [], teamMapping.value) : []
+            const allTags = Array.from(new Set([...rawTags, ...normalized]))
+            return allTags.some(tag => tag.toLowerCase().includes(rawTagFilter))
         })
     }
 
@@ -739,6 +748,13 @@ const preFilteredGroups = computed(() => {
         )
     }
 
+    if (assigneeFilter.value) {
+        const term = assigneeFilter.value.trim().toLowerCase()
+        result = result.filter(g =>
+            (g.assignees || []).some((a: string) => a.toLowerCase().includes(term))
+        )
+    }
+
     if (cvssVersionMismatchOnly.value) {
         result = result.filter(g => hasCvssVersionMismatch(g))
     }
@@ -765,8 +781,10 @@ const filteredGroups = computed(() => {
                 break
             }
             case 'tags': {
-                const tagA = (a.tags && a.tags.length > 0) ? tagToString(a.tags[0]) : ''
-                const tagB = (b.tags && b.tags.length > 0) ? tagToString(b.tags[0]) : ''
+                const tagsA = teamMapping.value ? normalizeTags(a.tags || [], teamMapping.value) : (a.tags || []).map(tagToString).filter(Boolean)
+                const tagsB = teamMapping.value ? normalizeTags(b.tags || [], teamMapping.value) : (b.tags || []).map(tagToString).filter(Boolean)
+                const tagA = tagsA.length > 0 ? tagsA[0] : ''
+                const tagB = tagsB.length > 0 ? tagsB[0] : ''
                 comparison = tagA.localeCompare(tagB)
                 break
             }
@@ -782,6 +800,12 @@ const filteredGroups = computed(() => {
                 const rB = b.rescored_cvss ?? b.cvss_score ?? b.cvss
                 // Negate so that desc = most critical first (CRITICAL=0 is highest priority)
                 comparison = scoreSeverityOrder(rB) - scoreSeverityOrder(rA)
+                break
+            }
+            case 'rescored-severity': {
+                const rA = a.rescored_cvss ?? a.cvss_score ?? a.cvss
+                const rB = b.rescored_cvss ?? b.cvss_score ?? b.cvss
+                comparison = scoreSeverityOrder(rA) - scoreSeverityOrder(rB)
                 break
             }
             case 'score': {
@@ -926,6 +950,7 @@ const filterState = computed<FilterState>(() => ({
     idFilter: idFilter.value,
     tagFilter: tagFilter.value,
     componentFilter: componentFilter.value,
+    assigneeFilter: assigneeFilter.value,
     versionFilterInput: versionFilterInput.value,
     lifecycleFilters: lifecycleFilters.value,
     analysisFilters: analysisFilters.value,
@@ -940,6 +965,7 @@ const handleFilterUpdate = (newFilters: FilterState) => {
     idFilter.value = newFilters.idFilter
     tagFilter.value = newFilters.tagFilter
     componentFilter.value = newFilters.componentFilter
+    assigneeFilter.value = newFilters.assigneeFilter
     versionFilterInput.value = newFilters.versionFilterInput
     lifecycleFilters.value = newFilters.lifecycleFilters
     analysisFilters.value = newFilters.analysisFilters

@@ -163,6 +163,79 @@ class TestAssessmentTags(unittest.TestCase):
         self.assertNotIn("[Team: InventoryTeam]", result)
         self.assertNotIn("[Status: Pending Review]", result)
 
+    def test_assigned_users_round_trip(self):
+        """Assigned users should be preserved through parse → process → reconstruct."""
+        existing = (
+            "--- [Team: Security] [State: IN_TRIAGE] [Assessed By: alice] "
+            "[Assigned: jane.doe, john.smith] ---\n"
+            "Under investigation."
+        )
+        result, state = process_assessment_details(
+            "Still investigating.",
+            "alice",
+            "ANALYST",
+            team="Security",
+            state="IN_TRIAGE",
+            existing_details=existing,
+        )
+        self.assertIn("[Assigned: jane.doe, john.smith]", result)
+        self.assertIn("Still investigating.", result)
+
+    def test_assigned_users_update(self):
+        """Providing a new assigned list should replace the existing one."""
+        existing = (
+            "--- [Team: Platform] [State: NOT_SET] [Assessed By: bob] "
+            "[Assigned: old.user] ---\n"
+        )
+        result, _ = process_assessment_details(
+            "New details.",
+            "bob",
+            "ANALYST",
+            team="Platform",
+            state="IN_TRIAGE",
+            existing_details=existing,
+            assigned=["new.user1", "new.user2"],
+        )
+        self.assertIn("[Assigned: new.user1, new.user2]", result)
+        self.assertNotIn("old.user", result)
+
+    def test_assigned_users_empty_clears(self):
+        """Providing an empty assigned list should remove the tag."""
+        existing = (
+            "--- [Team: Ops] [State: EXPLOITABLE] [Assessed By: carol] "
+            "[Assigned: someone] ---\n"
+            "Bad."
+        )
+        result, _ = process_assessment_details(
+            "Still bad.",
+            "carol",
+            "ANALYST",
+            team="Ops",
+            state="EXPLOITABLE",
+            existing_details=existing,
+            assigned=[],
+        )
+        self.assertNotIn("[Assigned:", result)
+        self.assertIn("Still bad.", result)
+
+    def test_assigned_users_none_preserves(self):
+        """Not providing assigned (None) should preserve existing assignments."""
+        existing = (
+            "--- [Team: Dev] [State: IN_TRIAGE] [Assessed By: dan] "
+            "[Assigned: keeper] ---\n"
+            "Checking."
+        )
+        result, _ = process_assessment_details(
+            "Updated.",
+            "dan",
+            "ANALYST",
+            team="Dev",
+            state="IN_TRIAGE",
+            existing_details=existing,
+            assigned=None,
+        )
+        self.assertIn("[Assigned: keeper]", result)
+
 
 if __name__ == "__main__":
     unittest.main()

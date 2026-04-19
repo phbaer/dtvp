@@ -137,6 +137,119 @@ async def test_update_assessment_conflict():
 
 
 @pytest.mark.asyncio
+async def test_update_assessment_ignores_timestamp_differences():
+    mock_client = AsyncMock(spec=DTClient)
+
+    mock_client.get_analysis.return_value = {
+        "analysisState": "EXPLOITABLE",
+        "analysisDetails": "--- [Team: General] [State: EXPLOITABLE] [Assessed By: tester] [Date: 1710000000000] ---\nDetails\n",
+        "isSuppressed": False,
+    }
+
+    req = AssessmentRequest(
+        instances=[
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+                "project_name": "Pro",
+                "project_version": "1.0",
+                "component_name": "Comp",
+            }
+        ],
+        state="EXPLOITABLE",
+        details="My local change",
+        original_analysis={
+            "f1": {
+                "analysisState": "EXPLOITABLE",
+                "analysisDetails": "--- [Team: General] [State: EXPLOITABLE] [Assessed By: tester2] [Date: 1710001000000] ---\nDetails\n",
+                "isSuppressed": False,
+            }
+        },
+    )
+
+    results = await update_assessment(req, client=mock_client, user="test_user")
+    assert isinstance(results, list)
+    assert len(results) == 1
+    assert results[0]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_update_assessment_no_conflict_with_same_analysis_details_key():
+    mock_client = AsyncMock(spec=DTClient)
+
+    mock_client.get_analysis.return_value = {
+        "analysisState": "EXPLOITABLE",
+        "analysisDetails": "Same details",
+        "isSuppressed": False,
+    }
+
+    req = AssessmentRequest(
+        instances=[
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+                "project_name": "Pro",
+                "project_version": "1.0",
+                "component_name": "Comp",
+            }
+        ],
+        state="EXPLOITABLE",
+        details="My local change",
+        original_analysis={
+            "f1": {
+                "analysisState": "EXPLOITABLE",
+                "analysis_details": "Same details",
+                "is_suppressed": False,
+            }
+        },
+    )
+
+    results = await update_assessment(req, client=mock_client, user="test_user")
+    assert isinstance(results, list)
+    assert len(results) == 1
+    assert results[0]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_update_assessment_ignores_empty_current_analysis_if_same_baseline():
+    mock_client = AsyncMock(spec=DTClient)
+
+    mock_client.get_analysis.return_value = {}
+
+    req = AssessmentRequest(
+        instances=[
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+                "project_name": "Pro",
+                "project_version": "1.0",
+                "component_name": "Comp",
+            }
+        ],
+        state="NOT_SET",
+        details="",
+        original_analysis={
+            "f1": {
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "isSuppressed": False,
+            }
+        },
+    )
+
+    results = await update_assessment(req, client=mock_client, user="test_user")
+    assert isinstance(results, list)
+    assert len(results) == 1
+    assert results[0]["status"] == "success"
+
+
+@pytest.mark.asyncio
 async def test_update_assessment_force():
     mock_client = AsyncMock(spec=DTClient)
 

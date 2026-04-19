@@ -1,0 +1,85 @@
+{
+  "ExampleApp": {
+    "analyzed_versions": [
+      "1.9.0",
+      "1.10.0"
+    ],
+    "generated_at": "2025-01-01T00:00:00+00:00",
+    "latest_version": "1.10.0",
+    "project_name": "ExampleApp",
+    "proposals": {
+      "CVE-2024-0001": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:proj-1:component:comp-1"
+        ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
+        "analyzed_versions": [
+          "1.9.0",
+          "1.10.0"
+        ],
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2025-01-01T00:00:00+00:00",
+        "latest_version": "1.10.0",
+        "original_score": 8.8,
+        "original_severity": null,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "rescored_score": 2.9,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:H",
+        "rescored_vector_adjusted": false,
+        "scope": "merged_versions",
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "vuln_id": "CVE-2024-0001"
+      },
+      "CVE-2024-0002": {
+        "affected_refs": [
+          "urn:dtvp:tmrescore:proj-2:component:comp-2"
+        ],
+        "analysis": {
+          "detail": "Mock tmrescore result generated for local testing.",
+          "response": [
+            {
+              "detail": "Structured mock analysis response without a top-level detail message.",
+              "title": "Deterministic mock analysis"
+            }
+          ],
+          "state": "in_triage"
+        },
+        "analyzed_versions": [
+          "1.9.0",
+          "1.10.0"
+        ],
+        "cwe_descriptions": null,
+        "description": "Mock tmrescore result generated for local testing.",
+        "details": "Mock tmrescore result generated for local testing.",
+        "evaluations": null,
+        "generated_at": "2025-01-01T00:00:00+00:00",
+        "latest_version": "1.10.0",
+        "original_score": 5.4,
+        "original_severity": null,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+        "rescored_score": 2.9,
+        "rescored_severity": null,
+        "rescored_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N/MPR:H",
+        "rescored_vector_adjusted": false,
+        "scope": "merged_versions",
+        "session_id": "00000000-0000-0000-0000-000000000000",
+        "vuln_id": "CVE-2024-0002"
+      }
+    },
+    "scope": "merged_versions",
+    "session_id": "00000000-0000-0000-0000-000000000000"
+  }
+}

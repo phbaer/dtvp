@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
-import { updateAssessment, getAssessmentDetails } from '../lib/api'
+import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/api'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap } from 'lucide-vue-next'
@@ -42,6 +42,7 @@ onMounted(() => {
     nextTick(() => {
         if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
     })
+    getKnownUsers().then(users => { knownUsers.value = users }).catch(() => {})
 })
 
 onUnmounted(() => {
@@ -91,12 +92,58 @@ const showCalculatorModal = ref(false)
 const showConflictModal = ref(false)
 const conflictData = ref<any>(null)
 const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Analysis Object
+const teamDrafts = ref<Map<string, { state: string, details: string, justification: string, assigned: string[] }>>(new Map())
 const refreshCounter = ref(0)
 const formTouched = ref(false)
 const isInternalUpdate = ref(false)
 const showRawEdit = ref(false)
 const rawDetails = ref('')
 const rawDetailsTouched = ref(false)
+
+// Assignee state
+const currentAssigned = ref<string[]>([])
+const assigneeInput = ref('')
+const assigneeSuggestionsVisible = ref(false)
+const knownUsers = ref<string[]>([])
+
+const filteredUserSuggestions = computed(() => {
+    const query = assigneeInput.value.trim().toLowerCase()
+    if (!query) return knownUsers.value.filter(u => !currentAssigned.value.includes(u))
+    return knownUsers.value.filter(u =>
+        u.toLowerCase().includes(query) && !currentAssigned.value.includes(u)
+    )
+})
+
+const addAssignee = (username: string) => {
+    const trimmed = username.trim()
+    if (trimmed && !currentAssigned.value.includes(trimmed)) {
+        currentAssigned.value = [...currentAssigned.value, trimmed]
+        formTouched.value = true
+    }
+}
+
+const removeAssignee = (username: string) => {
+    currentAssigned.value = currentAssigned.value.filter(u => u !== username)
+    formTouched.value = true
+}
+
+const addAssigneeFromInput = () => {
+    if (assigneeInput.value.trim()) {
+        addAssignee(assigneeInput.value)
+        assigneeInput.value = ''
+        assigneeSuggestionsVisible.value = false
+    }
+}
+
+const selectAssigneeSuggestion = (username: string) => {
+    addAssignee(username)
+    assigneeInput.value = ''
+    assigneeSuggestionsVisible.value = false
+}
+
+const onAssigneeInput = () => {
+    assigneeSuggestionsVisible.value = true
+}
 
 const headerEl = ref<HTMLElement | null>(null)
 const detailsEl = ref<HTMLElement | null>(null)
@@ -196,7 +243,7 @@ const totalTargeted = computed(() => {
 })
 
 const displayState = computed(() => {
-    return getGroupLifecycle(props.group, props.group.tags || [], teamMapping?.value)
+    return getGroupLifecycle(props.group, normalizedTags.value, teamMapping?.value)
 })
 
 const technicalState = computed(() => {
@@ -847,6 +894,11 @@ const updateFormFromGroup = (force = true) => {
              }
         }
         
+        // Initialize assigned users from the current team block
+        const teamKey = selectedTeam.value || 'General'
+        const assignedBlock = mergedAssessmentData.value.blocks.find(b => b.team === teamKey)
+        currentAssigned.value = assignedBlock?.assigned ? [...assignedBlock.assigned] : []
+
         comment.value = ''
         
         const firstSuppressed = allInstances.value.find(i => i.is_suppressed)
@@ -856,7 +908,18 @@ const updateFormFromGroup = (force = true) => {
         initialVector.value = pendingVector.value
         initialScore.value = pendingScore.value
 
-        if (force) formTouched.value = false
+        // Restore draft if one exists for this team
+        const draftKey = selectedTeam.value || 'General'
+        const draft = teamDrafts.value.get(draftKey)
+        if (draft) {
+            state.value = draft.state
+            details.value = draft.details
+            justification.value = draft.justification
+            currentAssigned.value = [...draft.assigned]
+            formTouched.value = true
+        } else if (force) {
+            formTouched.value = false
+        }
     } finally {
         isInternalUpdate.value = false
     }
@@ -994,7 +1057,17 @@ const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
     formTouched.value = true
 }
 
-watch(selectedTeam, () => {
+watch(selectedTeam, (_newTeam, oldTeam) => {
+    // Persist current tab's form edits before switching away
+    if (oldTeam !== undefined && formTouched.value) {
+        const draftKey = oldTeam || 'General'
+        teamDrafts.value.set(draftKey, {
+            state: state.value,
+            details: details.value,
+            justification: justification.value,
+            assigned: [...currentAssigned.value]
+        })
+    }
     updateFormFromGroup()
 })
 
@@ -1206,16 +1279,6 @@ const refreshDetails = async () => {
 
 
 const handleUpdate = async (force: boolean = false, isApprove: boolean = false) => {
-    let instances = allInstances.value
-    
-    // When a team is selected, automatically filter to only that team's instances
-    // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
-    if (selectedTeam.value) {
-        const team = selectedTeam.value
-        const matched = instances.filter(inst => inst.tags && inst.tags.includes(team))
-        if (matched.length > 0) instances = matched
-    }
-
     if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
         console.log('[Persistence Debug] handleUpdate started', {
             force,
@@ -1229,12 +1292,13 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
 
     updating.value = true
     try {
+        const mergeContextInstances = allInstances.value
         const allBlocks: AssessmentBlock[] = []
         const teamToIndex = new Map<string, number>()
         const allTags = new Set<string>()
         let isPending = false
         
-        for (const inst of instances) {
+        for (const inst of mergeContextInstances) {
             let detailsToParse = inst.analysis_details || inst.analysisDetails || ''
             if (inst.finding_uuid && originalAnalysis.value[inst.finding_uuid]) {
                 const orig = originalAnalysis.value[inst.finding_uuid]
@@ -1280,12 +1344,22 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         // 2. Perform Client-Side Merge
         const targetTeam = selectedTeam.value || 'General'
         
+        // Save current form state as a draft for the active team
+        teamDrafts.value.set(targetTeam, {
+            state: state.value,
+            details: details.value,
+            justification: justification.value,
+            assigned: [...currentAssigned.value]
+        })
+        
         if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
             console.log('[Persistence Debug] handleUpdate merging details', {
                 targetTeam,
                 state: state.value,
                 details: details.value,
-                allBlocksInitialCount: allBlocks.length
+                allBlocksInitialCount: allBlocks.length,
+                teamDraftsCount: teamDrafts.value.size,
+                teamDraftKeys: [...teamDrafts.value.keys()]
             });
         }
 
@@ -1334,32 +1408,34 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             const sanitized = sanitizeAssessmentDetails(rawDetails.value)
             mergedResult = { text: sanitized.text, aggregatedState: sanitized.aggregatedState }
          } else {
-         // Case: Merge with existing blocks and potentially clear/set pending flag
-         // Decoupled logic: only clear pending flag if isApprove is explicitly true.
-         // Otherwise, always keep it pending.
-         //
-         // Strip any embedded team headers / metadata tags from the details textarea
-         // content. This prevents duplication when the user applied a full structured
-         // assessment (via "Apply" on an assessment card) which put headers into the
-         // textarea — those headers would otherwise be wrapped inside a single team
-         // block and parsed as extra blocks on the next round-trip.
-         const userDetails = details.value
-            .replace(/---\s*\[Team:[^\n]*---\s*/g, '')
-            .replace(/\[Rescored:\s*[\d.]+\]/g, '')
-            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-            .replace(/\[Status: Pending Review\]/g, '')
-            .trim()
+         // Merge ALL team drafts into the server-state base text.
+         // This ensures assessments from every team tab the user edited
+         // are included, not just the currently active tab.
+         let mergedText = currentFullDetails
+         let mergedState = ''
+         for (const [teamName, draft] of teamDrafts.value.entries()) {
+            const cleanDetails = draft.details
+                .replace(/---\s*\[Team:[^\n]*---\s*/g, '')
+                .replace(/\[Rescored:\s*[\d.]+\]/g, '')
+                .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+                .replace(/\[Status: Pending Review\]/g, '')
+                .trim()
 
-         mergedResult = mergeTeamAssessment(
-            currentFullDetails,
-            targetTeam,
-            state.value,
-            userDetails,
-            currentUser,
-            justification.value,
-            rescoredTags,
-            !isApprove // isPending = true unless approving
-         )
+            const result = mergeTeamAssessment(
+                mergedText,
+                teamName,
+                draft.state,
+                cleanDetails,
+                currentUser,
+                draft.justification,
+                teamName === targetTeam ? rescoredTags : undefined,
+                !isApprove,
+                draft.assigned
+            )
+            mergedText = result.text
+            mergedState = result.aggregatedState
+         }
+         mergedResult = { text: mergedText, aggregatedState: mergedState || 'NOT_SET' }
          }
         
         // Sanitize: deduplicate teams, sort (General first, then alphabetical)
@@ -1382,8 +1458,12 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             finalText = sanitized.text
         }
 
+        // Use originalAnalysis directly — populated by refreshDetails() with fresh DT data.
+        // Do NOT fall back to instance data as it may contain stale cache overlays.
+        const originalAnalysisForSubmission = force ? {} : { ...originalAnalysis.value }
+
         const payload: AssessmentPayload = {
-            instances: instances,
+            instances: allInstances.value,
             state: finalState,
             details: finalText,
             comment: comment.value,
@@ -1391,7 +1471,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             suppressed: suppressed.value,
             team: selectedTeam.value || undefined, 
             comparison_mode: 'REPLACE' as const,
-            original_analysis: originalAnalysis.value,
+            original_analysis: originalAnalysisForSubmission,
             force: force
         }
 
@@ -1412,7 +1492,8 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
                      rescored_vector: hasVectorChange ? (canRescore ? pendingVector.value : props.group.rescored_vector) : null,
                      analysis_state: success.new_state,
                      analysis_details: success.new_details,
-                     is_suppressed: suppressed.value
+                     is_suppressed: suppressed.value,
+                     assignees: [...currentAssigned.value]
                  }
                  emit('update:assessment', data)
                  
@@ -1425,10 +1506,22 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
                  lastRescoredScore.value = data.rescored_cvss ?? null
              }
              showConflictModal.value = false
+
+             // Update originalAnalysis to reflect the saved state so
+             // subsequent saves don't trigger false conflicts.
+             for (const inst of allInstances.value) {
+                 if (inst.finding_uuid) {
+                     originalAnalysis.value[inst.finding_uuid] = {
+                         analysisState: finalState,
+                         analysisDetails: finalText,
+                         isSuppressed: suppressed.value,
+                     }
+                 }
+             }
+             // Clear team drafts — they've been persisted to the server
+             teamDrafts.value.clear()
+             formTouched.value = false
         }
-        
-        
-        // expanded.value = false // Removed as it's confusing to close the card while the user is looking at it
     } catch (err: any) {
         if (err.response && err.response.status === 409) {
             conflictData.value = err.response.data.conflicts
@@ -1609,13 +1702,23 @@ const uniqueComponents = computed(() => {
 })
 
 const normalizedTags = computed(() => {
-    if (!props.group.tags) return []
-
-    const rawTags = props.group.tags.map(tagToString).filter(Boolean)
-    if (!teamMapping?.value) return rawTags
+    // Derive tags from actual component instances rather than the backend-
+    // aggregated group.tags.  This ensures a team tag only appears on the card
+    // when at least one displayed instance carries it.
+    const instanceTags = new Set<string>()
+    for (const inst of allInstances.value) {
+        if (inst.tags) {
+            for (const t of inst.tags) {
+                const s = tagToString(t)
+                if (s) instanceTags.add(s)
+            }
+        }
+    }
+    if (instanceTags.size === 0) return []
+    if (!teamMapping?.value) return Array.from(instanceTags)
 
     const result = new Set<string>()
-    rawTags.forEach(tag => {
+    instanceTags.forEach(tag => {
         let foundPrimary = tag
         for (const componentName in teamMapping.value) {
             const mappingVal = teamMapping.value[componentName]
@@ -1812,6 +1915,7 @@ void _vueTemplateUsed
             :canApprove="canApprove"
             :isPendingReview="isPendingReview"
             :dependencyRelationship="dependencyRelationship"
+            :assignees="group.assignees || []"
             @approve-assessment="approveAssessment"
         />
     </div>
@@ -2088,6 +2192,44 @@ void _vueTemplateUsed
                                     placeholder="Technical details..."
                                     class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
                                 ></textarea>
+                            </div>
+
+                            <!-- Assignees -->
+                            <div>
+                                <label class="block text-xs font-semibold text-gray-400 mb-1">Assigned Users</label>
+                                <div class="flex flex-wrap gap-1 mb-1.5">
+                                    <span
+                                        v-for="assignee in currentAssigned"
+                                        :key="assignee"
+                                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium"
+                                    >
+                                        {{ assignee }}
+                                        <button @click="removeAssignee(assignee)" class="hover:text-white text-blue-300/70 leading-none cursor-pointer">&times;</button>
+                                    </span>
+                                </div>
+                                <div class="relative">
+                                    <input
+                                        v-model="assigneeInput"
+                                        @input="onAssigneeInput"
+                                        @keydown.enter.prevent="addAssigneeFromInput"
+                                        @keydown.tab.prevent="addAssigneeFromInput"
+                                        type="text"
+                                        placeholder="Type username and press Enter..."
+                                        class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs"
+                                        @blur="assigneeSuggestionsVisible = false"
+                                    />
+                                    <div v-if="assigneeSuggestionsVisible && filteredUserSuggestions.length > 0"
+                                         class="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded shadow-lg max-h-32 overflow-y-auto">
+                                        <button
+                                            v-for="suggestion in filteredUserSuggestions"
+                                            :key="suggestion"
+                                            @mousedown.prevent="selectAssigneeSuggestion(suggestion)"
+                                            class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-blue-500/20 hover:text-blue-200 transition-colors cursor-pointer"
+                                        >
+                                            {{ suggestion }}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

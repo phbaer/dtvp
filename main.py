@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import tomllib
@@ -303,6 +304,7 @@ class AssessmentRequest(BaseModel):
     justification: Optional[str] = None
     suppressed: bool = False
     team: Optional[str] = None
+    assigned: Optional[List[str]] = None
     original_analysis: Optional[Dict[str, Dict[str, Any]]] = None
     force: bool = False
     comparison_mode: Optional[str] = "MERGE"
@@ -310,6 +312,19 @@ class AssessmentRequest(BaseModel):
 
 class AssessmentDetailsRequest(BaseModel):
     instances: List[dict]
+
+
+def _normalize_analysis_details(details: Optional[str]) -> str:
+    if not details:
+        return ""
+
+    normalized = re.sub(r"\[Date:\s*[^\]]*\]", "", details)
+    normalized = re.sub(r"\[Assessed By:\s*[^\]]*\]", "", normalized)
+    normalized = re.sub(r"\[Rescored:\s*[\d\.]+\]", "", normalized)
+    normalized = re.sub(r"\[Rescored Vector:\s*[^\]]+\]", "", normalized)
+    normalized = re.sub(r"\[Status: Pending Review\]", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
 
 
 @api_router.get("/projects")
@@ -1193,6 +1208,7 @@ async def get_assessment_details(
                 project_uuid=instance["project_uuid"],
                 component_uuid=instance["component_uuid"],
                 vulnerability_uuid=instance["vulnerability_uuid"],
+                refresh=True,
             )
         )
 
@@ -1271,24 +1287,59 @@ async def update_assessment(
             # Compare relevant fields if original exists
             if original:
                 # Keys in DT response: analysisState, analysisDetails, isSuppressed
-                curr_state = current.get("analysisState")
-                curr_details = current.get("analysisDetails")
-                curr_suppressed = current.get("isSuppressed")
+                curr_state = (
+                    current.get("analysisState")
+                    or current.get("analysis_state")
+                    or "NOT_SET"
+                )
+                curr_details = (
+                    current.get("analysisDetails")
+                    or current.get("analysis_details")
+                    or ""
+                )
+                curr_suppressed = (
+                    current.get("isSuppressed")
+                    if "isSuppressed" in current
+                    else current.get("is_suppressed", False)
+                )
 
-                orig_state = original.get("analysisState")
-                orig_details = original.get("analysisDetails")
-                orig_suppressed = original.get("isSuppressed")
+                orig_state = (
+                    original.get("analysisState")
+                    or original.get("analysis_state")
+                    or "NOT_SET"
+                )
+                orig_details = (
+                    original.get("analysisDetails")
+                    or original.get("analysis_details")
+                    or ""
+                )
+                orig_suppressed = (
+                    original.get("isSuppressed")
+                    if "isSuppressed" in original
+                    else original.get("is_suppressed", False)
+                )
+
+                const_curr_details = _normalize_analysis_details(curr_details)
+                const_orig_details = _normalize_analysis_details(orig_details)
 
                 has_conflict = False
                 if (curr_state or "") != (orig_state or ""):
                     has_conflict = True
-                if (curr_details or "") != (orig_details or ""):
+                if const_curr_details != const_orig_details:
                     has_conflict = True
                 if bool(curr_suppressed) != bool(orig_suppressed):
                     has_conflict = True
 
                 if has_conflict:
-                    logger.warning("Conflict found for %s", finding_uuid)
+                    logger.warning(
+                        "Conflict found for %s: state=%s→%s details_match=%s suppressed=%s→%s",
+                        finding_uuid,
+                        orig_state,
+                        curr_state,
+                        const_curr_details == const_orig_details,
+                        orig_suppressed,
+                        curr_suppressed,
+                    )
                     conflicts.append(
                         {
                             "finding_uuid": finding_uuid,
@@ -1322,16 +1373,26 @@ async def update_assessment(
         original_analysis = (
             req.original_analysis.get(finding_uuid) if req.original_analysis else None
         )
-        existing_details = (
-            original_analysis.get("analysisDetails", "") if original_analysis else ""
-        )
+        existing_details = ""
+        if original_analysis:
+            existing_details = (
+                original_analysis.get("analysisDetails")
+                or original_analysis.get("analysis_details")
+                or ""
+            )
 
         if req.comparison_mode == "REPLACE":
             final_details_str = req.details
             aggregated_state = calculate_aggregated_state(req.details)
         else:
             final_details_str, aggregated_state = process_assessment_details(
-                req.details, user, role, req.team, req.state, existing_details
+                req.details,
+                user,
+                role,
+                req.team,
+                req.state,
+                existing_details,
+                assigned=req.assigned,
             )
 
         payload = {
@@ -1940,6 +2001,15 @@ async def update_roles(
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@api_router.get("/known-users")
+async def get_known_users(user: str = Depends(get_current_user)):
+    """Return a deduplicated list of usernames from user_roles.json for assignee autocomplete."""
+    roles = load_user_roles()
+    if roles is None:
+        return []
+    return sorted(roles.keys())
 
 
 @api_router.get("/settings/rescore-rules")

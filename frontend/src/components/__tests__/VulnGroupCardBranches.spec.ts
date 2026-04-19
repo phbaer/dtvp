@@ -15,7 +15,8 @@ vi.mock('../../lib/api', () => ({
         }))
     }),
     getAssessmentDetails: vi.fn(() => Promise.resolve([])),
-    getDependencyChains: vi.fn().mockResolvedValue([])
+    getDependencyChains: vi.fn().mockResolvedValue([]),
+    getKnownUsers: vi.fn(() => Promise.resolve([]))
 }))
 
 vi.mock('lucide-vue-next', () => ({

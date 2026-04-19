@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, toRefs } from 'vue'
-import { CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package } from 'lucide-vue-next'
+import { CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
 
 const props = defineProps<{
@@ -18,6 +18,7 @@ const props = defineProps<{
   canApprove: boolean
   isPendingReview: boolean
   dependencyRelationship: 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
+  assignees: string[]
 }>()
 
 const {
@@ -35,6 +36,7 @@ const {
   canApprove,
   isPendingReview,
   dependencyRelationship,
+  assignees,
 } = toRefs(props)
 
 const emit = defineEmits<{
@@ -238,6 +240,19 @@ const componentSummary = computed(() => {
           <CheckCircle v-if="assessedTeams.has(tag)" :size="10" class="text-green-400" />
           <AlertTriangle v-else :size="9" class="text-red-400/60" />
           {{ tag }}
+        </span>
+      </div>
+
+      <!-- Assignee chips row -->
+      <div v-if="assignees.length > 0" class="flex flex-wrap items-center gap-1 mt-1">
+        <span
+          v-for="assignee in assignees"
+          :key="assignee"
+          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-500/10 text-blue-300 border-blue-500/20"
+          data-testid="assignee-chip"
+        >
+          <User :size="9" class="text-blue-400" />
+          {{ assignee }}
         </span>
       </div>
     </div>

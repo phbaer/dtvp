@@ -1,8 +1,8 @@
-from typing import List, Dict, Any, Optional, Tuple, Set
-import re
 import json
-import os
 import logging
+import os
+import re
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -52,17 +52,82 @@ def sanitize_rescored_vector(
     orig_start = 1 if orig_parts[0].startswith("CVSS:") else 0
     rescored_start = 1 if rescored_parts[0].startswith("CVSS:") else 0
 
-    orig_base = {p for p in orig_parts[orig_start:] if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS}
-    rescored_base = {p for p in rescored_parts[rescored_start:] if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS}
+    orig_base = {
+        p for p in orig_parts[orig_start:] if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS
+    }
+    rescored_base = {
+        p
+        for p in rescored_parts[rescored_start:]
+        if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS
+    }
 
     if orig_base == rescored_base:
         # Base metrics already match – vector is valid as-is (always in 3.1)
         return norm_rescored
 
     # Reconstruct: original base (in 3.1) + only the non-base tokens from the rescored vector
-    non_base = [p for p in rescored_parts[rescored_start:] if _metric_key(p) not in _CVSS3_BASE_METRIC_KEYS]
+    non_base = [
+        p
+        for p in rescored_parts[rescored_start:]
+        if _metric_key(p) not in _CVSS3_BASE_METRIC_KEYS
+    ]
     if non_base:
         corrected = "/".join(orig_parts + non_base)
+    else:
+        corrected = norm_original
+
+    if corrected == norm_original:
+        return None  # No meaningful change after correction
+
+    logger.warning(
+        "Corrected rescored vector (base metrics were altered): %s -> %s",
+        rescored_vector,
+        corrected,
+    )
+    return corrected
+
+
+def sanitize_rescored_vector(
+    original_vector: Optional[str], rescored_vector: Optional[str]
+) -> Optional[str]:
+    """Ensure a rescored CVSS vector preserves all base metric components from
+    the original vector, only adding modifier (M-prefixed) tokens.
+
+    If the rescored vector already has the correct base, it is returned as-is.
+    Otherwise the base components are taken from ``original_vector`` and only
+    the M-prefixed modifier tokens from ``rescored_vector`` are appended.
+
+    Returns ``None`` when either input is falsy or when both vectors are
+    identical (meaning no rescoring occurred).
+    """
+    if not original_vector or not rescored_vector:
+        return rescored_vector or None
+
+    # CVSS 3.0 and 3.1 are equivalent; DT uses 3.0, we always rescore in 3.1.
+    # Normalize both to 3.1 for comparison; output always uses 3.1.
+    norm_original = original_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
+    norm_rescored = rescored_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
+
+    orig_parts = norm_original.split("/")
+    rescored_parts = norm_rescored.split("/")
+
+    # Determine where metric tokens start (skip the CVSS version prefix)
+    orig_start = 1 if orig_parts[0].startswith("CVSS:") else 0
+    rescored_start = 1 if rescored_parts[0].startswith("CVSS:") else 0
+
+    orig_base = set(orig_parts[orig_start:])
+    rescored_base = {
+        p for p in rescored_parts[rescored_start:] if not p.startswith("M")
+    }
+
+    if orig_base == rescored_base:
+        # Base metrics already match – vector is valid as-is (always in 3.1)
+        return norm_rescored
+
+    # Reconstruct: original base (in 3.1) + only the modifier tokens from the rescored vector
+    modifiers = [p for p in rescored_parts[rescored_start:] if p.startswith("M")]
+    if modifiers:
+        corrected = "/".join(orig_parts + modifiers)
     else:
         corrected = norm_original
 
@@ -437,7 +502,9 @@ class BOMAnalysisCache:
             self.path_cache[ref] = cached_paths
             return cached_paths, False
 
-        return tuple(unique_paths[:max_paths]), truncated or len(unique_paths) > max_paths
+        return tuple(unique_paths[:max_paths]), truncated or len(
+            unique_paths
+        ) > max_paths
 
     def get_target_ref(self, component_uuid: str, component_name: str) -> str:
         # 1. Match by UUID
@@ -472,7 +539,10 @@ class BOMAnalysisCache:
             found_tags = list(self.direct_tags_by_name.get("*", ()))
 
         tag_list = found_tags
-        self.analysis_cache[cache_key] = (tuple(tag_list), cached[1] if cached else None)
+        self.analysis_cache[cache_key] = (
+            tuple(tag_list),
+            cached[1] if cached else None,
+        )
         return tag_list
 
     def get_dependency_paths(
@@ -501,7 +571,9 @@ class BOMAnalysisCache:
                 start_name = target_comp.get("name") or component_name
 
         if target_ref:
-            paths, truncated = self._get_dependency_paths_for_ref(target_ref, max_paths=max_paths)
+            paths, truncated = self._get_dependency_paths_for_ref(
+                target_ref, max_paths=max_paths
+            )
             found_paths.update(paths)
             if not found_paths:
                 found_paths.add(start_name)
@@ -510,7 +582,10 @@ class BOMAnalysisCache:
 
         path_list = sorted(found_paths)
         if max_paths is None:
-            self.analysis_cache[cache_key] = (cached[0] if cached else None, tuple(path_list))
+            self.analysis_cache[cache_key] = (
+                cached[0] if cached else None,
+                tuple(path_list),
+            )
         if return_truncated:
             return path_list, truncated
         return path_list
@@ -653,6 +728,7 @@ def group_vulnerabilities(
                     "rescored_vector_adjusted": False,
                     "affected_versions": {},
                     "tags": [],
+                    "assignees": [],
                     "aliases": set(groups_by_root.get(root, [])) - {canonical_id},
                 }
             else:
@@ -705,7 +781,9 @@ def group_vulnerabilities(
 
             # Sanitize: ensure rescored vector preserves original base metrics
             base_vector = groups[canonical_id].get("cvss_vector")
-            rescored_vector_adjusted = groups[canonical_id].get("rescored_vector_adjusted", False)
+            rescored_vector_adjusted = groups[canonical_id].get(
+                "rescored_vector_adjusted", False
+            )
             if rescored_vector and base_vector:
                 sanitized = sanitize_rescored_vector(base_vector, rescored_vector)
                 if sanitized != rescored_vector:
@@ -728,6 +806,17 @@ def group_vulnerabilities(
                         groups[canonical_id]["rescored_vector"] = rescored_vector
             elif rescored_vector and groups[canonical_id]["rescored_vector"] is None:
                 groups[canonical_id]["rescored_vector"] = rescored_vector
+
+            # Extract assignees from assessment blocks
+            if details:
+                _, detail_blocks = _parse_assessment_blocks(details)
+                for blk in detail_blocks:
+                    for assignee in blk.get("assigned", []):
+                        if (
+                            assignee
+                            and assignee not in groups[canonical_id]["assignees"]
+                        ):
+                            groups[canonical_id]["assignees"].append(assignee)
 
             component_info = {
                 "project_uuid": proj_uuid,
@@ -857,7 +946,9 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
     for group in grouped_vulns:
         # Group severity (unique vulnerability canonical grouping)
         sev = group.get("severity", "UNKNOWN")
-        stats["unique_severity_counts"][sev] = stats["unique_severity_counts"].get(sev, 0) + 1
+        stats["unique_severity_counts"][sev] = (
+            stats["unique_severity_counts"].get(sev, 0) + 1
+        )
 
         # Collect all instances to aggregate state and count findings
         all_instances = []
@@ -870,7 +961,9 @@ def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:
 
                 # Findings-level state distribution (each component finding)
                 fv_state = (comp.get("analysis_state") or "NOT_SET").upper()
-                stats["finding_state_counts"][fv_state] = stats["finding_state_counts"].get(fv_state, 0) + 1
+                stats["finding_state_counts"][fv_state] = (
+                    stats["finding_state_counts"].get(fv_state, 0) + 1
+                )
 
                 all_instances.append(comp)
 
@@ -949,6 +1042,13 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                 except ValueError:
                     pass
 
+            assigned_raw = parsed_tags.get("Assigned", "")
+            assigned_list = (
+                [u.strip() for u in assigned_raw.split(",") if u.strip()]
+                if assigned_raw
+                else []
+            )
+
             blocks.append(
                 {
                     "team": t_name,
@@ -957,6 +1057,7 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                     "reviewer": parsed_tags.get("Reviewed By"),
                     "rescored": rescored_val,
                     "vector": parsed_tags.get("Rescored Vector"),
+                    "assigned": assigned_list,
                     "details": content,
                 }
             )
@@ -971,6 +1072,7 @@ def process_assessment_details(
     team: Optional[str] = None,
     state: str = "NOT_SET",
     existing_details: str = "",
+    assigned: Optional[List[str]] = None,
 ) -> Tuple[str, str]:
     """
     Parses and merges assessment details, preserving multi-team blocks.
@@ -1053,6 +1155,13 @@ def process_assessment_details(
         else (target_block.get("vector") if target_block else None)
     )
 
+    # Assigned: Use new list if provided, otherwise preserve existing
+    final_assigned = (
+        assigned
+        if assigned is not None
+        else (target_block.get("assigned", []) if target_block else [])
+    )
+
     if target_block:
         target_block.update(
             {
@@ -1061,6 +1170,7 @@ def process_assessment_details(
                 "reviewer": final_reviewer,
                 "rescored": res_val,
                 "vector": res_vec,
+                "assigned": final_assigned,
                 "details": content,
             }
         )
@@ -1073,6 +1183,7 @@ def process_assessment_details(
                 "reviewer": final_reviewer,
                 "rescored": res_val,
                 "vector": res_vec,
+                "assigned": final_assigned,
                 "details": content,
             }
         )
@@ -1102,6 +1213,8 @@ def process_assessment_details(
             h_parts.append(f"[Rescored: {b['rescored']}]")
         if b.get("vector"):
             h_parts.append(f"[Rescored Vector: {b['vector']}]")
+        if b.get("assigned"):
+            h_parts.append(f"[Assigned: {', '.join(b['assigned'])}]")
 
         header = "--- " + " ".join(h_parts) + " ---"
         final_parts.append(f"{header}\n{b.get('details') or ''}")

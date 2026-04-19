@@ -1,23 +1,9 @@
 {
   "mock_analysis": {
     "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
-      "analysisState": "IN_TRIAGE",
+      "analysisState": "NOT_SET",
       "isSuppressed": false,
-      "analysisDetails": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] [Rescored: 9.1] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/MPR:H] ---\nGlobal policy: Log4j usage should be reviewed for all public-facing services.\n\n--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: inv-analyst] [Date: 1710000000000] ---\nConfirmed exploitable in inventory management service due to permissive JNDI.\n\n--- [Team: PaymentTeam] [State: NOT_AFFECTED] [Assessed By: pay-dev] [Date: 1710000060000] [Justification: VULNERABLE_CODE_NOT_IN_EXECUTION_PATH] ---\nPayment processing logic uses a custom wrapper that strips sensitive JNDI lookups.",
-      "analysisComments": [
-        {
-          "comment": "System detected Log4j vulnerability in transit.",
-          "timestamp": 1709549000000
-        },
-        {
-          "comment": "User 'admin' moved finding to triage.",
-          "timestamp": 1709550000000
-        },
-        {
-          "comment": "Confirmed by security team after internal scan.",
-          "timestamp": 1710000000000
-        }
-      ]
+      "analysisDetails": ""
     },
     "3fa85f64-5717-4562-b3fc-2c963f66afa6:c253b708-3012-4277-8461-893bd5cd61e1:e5781a7b-0346-4927-991c-7033580539f5": {
       "analysisState": "IN_TRIAGE",
@@ -122,6 +108,38 @@
       "isSuppressed": false,
       "analysisJustification": "CODE_NOT_REACHABLE",
       "analysisDetails": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: security-lead] [Date: 1710100000000] [Justification: CODE_NOT_REACHABLE] [Rescored: 7.2] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:H] ---\nJackson deserialization path not reachable in current deployment. JNDI lookups are disabled via system property."
+    },
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
+    },
+    "5fa85f64-5717-4562-b3fc-2c963f66afa8:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
+    },
+    "6fa85f64-5717-4562-b3fc-2c963f66afa9:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
+    },
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
+    },
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
+    },
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
+    },
+    "afa85f64-5717-4562-b3fc-2c963f66afb3:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
+    },
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4:c253b708-3012-4277-8461-893bd5cd61e1:d9401347-1941-4c12-8700-1c0563821017": {
+      "analysisState": "NOT_SET",
+      "isSuppressed": false
     }
   }
 }
