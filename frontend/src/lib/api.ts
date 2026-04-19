@@ -182,7 +182,7 @@ export const uploadRoles = async (file: File): Promise<{ status: string; message
     return res.data;
 };
 
-export const getTeamMapping = async (): Promise<Record<string, string>> => {
+export const getTeamMapping = async (): Promise<Record<string, string | string[]>> => {
     const res = await api.get('/settings/mapping');
     return res.data;
 };
@@ -194,7 +194,7 @@ export const uploadTeamMapping = async (file: File): Promise<{ status: string; m
     return res.data;
 };
 
-export const updateTeamMapping = async (mapping: Record<string, string>): Promise<{ status: string; message: string }> => {
+export const updateTeamMapping = async (mapping: Record<string, string | string[]>): Promise<{ status: string; message: string }> => {
     const res = await api.put('/settings/mapping', mapping);
     return res.data;
 };

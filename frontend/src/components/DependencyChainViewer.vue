@@ -3,6 +3,13 @@ import { ref, watch, computed, onMounted, inject, type Ref } from 'vue'
 import { getDependencyChains } from '../lib/api'
 import DependencyPathList from './DependencyPathList.vue'
 
+type ChainSource = {
+    projectUuid: string
+    componentUuid: string
+    projectName: string
+    paths?: string[]
+}
+
 const teamMapping = inject<Ref<Record<string, string | string[]>>>('teamMapping', ref({}))
 
 const teamMappedNames = computed(() => {
@@ -16,20 +23,39 @@ const teamMappedNames = computed(() => {
 })
 
 const props = defineProps<{
-    projectUuid: string
-    componentUuid: string
+    projectUuid?: string
+    componentUuid?: string
     projectName: string
     paths?: string[]
+    sources?: ChainSource[]
 }>()
 
 const emit = defineEmits<{
     (e: 'depth-updated', depth: number | null): void
 }>()
 
-const paths = ref<string[]>(props.paths ? [...props.paths] : [])
+const mergePaths = (pathGroups: Array<string[] | undefined>): string[] => {
+    const unique = new Set<string>()
+    pathGroups.forEach((group) => {
+        ;(group || []).forEach((path) => {
+            const normalized = path?.trim()
+            if (normalized) unique.add(normalized)
+        })
+    })
+    return Array.from(unique)
+}
+
+const initialPaths = () => {
+    if (props.sources && props.sources.length > 0) {
+        return mergePaths(props.sources.map(source => source.paths))
+    }
+    return props.paths ? [...props.paths] : []
+}
+
+const paths = ref<string[]>(initialPaths())
 const loading = ref(false)
 const error = ref('')
-const loaded = ref(!!props.paths && props.paths.length > 0)
+const loaded = ref(paths.value.length > 0)
 
 const minimalDepth = computed<number | null>(() => {
     if (!paths.value || paths.value.length === 0) return null
@@ -48,10 +74,14 @@ watch(minimalDepth, (value) => {
 }, { immediate: true })
 
 watch(
-    () => props.paths,
-    (newPaths) => {
-        if (newPaths && newPaths.length > 0) {
-            paths.value = [...newPaths]
+    () => [props.paths, props.sources] as const,
+    ([newPaths, newSources]) => {
+        const mergedSourcePaths = newSources && newSources.length > 0
+            ? mergePaths(newSources.map(source => source.paths))
+            : []
+
+        if (mergedSourcePaths.length > 0 || (newPaths && newPaths.length > 0)) {
+            paths.value = mergedSourcePaths.length > 0 ? mergedSourcePaths : [...(newPaths || [])]
             loaded.value = true
             loading.value = false
             error.value = ''
@@ -66,8 +96,21 @@ const loadChains = async () => {
     loading.value = true
     error.value = ''
     try {
-        const res = await getDependencyChains(props.projectUuid, props.componentUuid)
-        paths.value = res || []
+        if (props.sources && props.sources.length > 0) {
+            const result = await Promise.all(
+                props.sources.map(async (source) => {
+                    if (source.paths && source.paths.length > 0) return source.paths
+                    if (!source.projectUuid || !source.componentUuid) return []
+                    return getDependencyChains(source.projectUuid, source.componentUuid)
+                })
+            )
+            paths.value = mergePaths(result)
+        } else if (props.projectUuid && props.componentUuid) {
+            const res = await getDependencyChains(props.projectUuid, props.componentUuid)
+            paths.value = res || []
+        } else {
+            paths.value = []
+        }
         loaded.value = true
     } catch (e: any) {
         error.value = e.message || 'Failed to load chains'

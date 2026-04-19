@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import { getRoles, uploadRoles, updateRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
 
 const user = inject<any>('user', { role: 'ANALYST' })
@@ -11,9 +12,68 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const message = ref('')
 const error = ref('')
-const currentMapping = ref<Record<string, string> | null>(null)
+const currentMapping = ref<Record<string, string | string[]> | null>(null)
 const mappingJson = ref('')
+const mappingRows = ref<Array<{ component: string; main: string; aliases: string }>>([])
+const rawJsonError = ref('')
 const savingMapping = ref(false)
+
+const mappingToRows = (mapping: Record<string, string | string[]> | null) => {
+    if (!mapping) return []
+    return Object.entries(mapping)
+        .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+        .map(([component, value]) => {
+            if (Array.isArray(value)) {
+                return {
+                    component,
+                    main: value[0] || '',
+                    aliases: value.slice(1).join(', '),
+                }
+            }
+            return {
+                component,
+                main: value || '',
+                aliases: '',
+            }
+        })
+}
+
+const rowsToMapping = () => {
+    const mapping: Record<string, string | string[]> = {}
+    mappingRows.value.forEach((row) => {
+        if (!row.component.trim()) return
+        const component = row.component.trim()
+        const main = row.main.trim()
+        const aliases = row.aliases
+            .split(',')
+            .map((alias) => alias.trim())
+            .filter((alias) => alias)
+
+        if (!main && aliases.length === 0) {
+            return
+        }
+
+        if (aliases.length > 0) {
+            mapping[component] = [main, ...aliases]
+        } else {
+            mapping[component] = main
+        }
+    })
+    return mapping
+}
+
+const updateMappingJsonFromRows = () => {
+    mappingJson.value = JSON.stringify(rowsToMapping(), null, 2)
+}
+
+const addMappingRow = () => {
+    mappingRows.value.push({ component: '', main: '', aliases: '' })
+}
+
+const removeMappingRow = (index: number) => {
+    mappingRows.value.splice(index, 1)
+    updateMappingJsonFromRows()
+}
 
 // Roles state
 const rolesFileInput = ref<HTMLInputElement | null>(null)
@@ -36,11 +96,30 @@ const savingRescore = ref(false)
 const loadMapping = async () => {
     try {
         currentMapping.value = await getTeamMapping()
+        mappingRows.value = mappingToRows(currentMapping.value)
         mappingJson.value = JSON.stringify(currentMapping.value, null, 2)
     } catch (e) {
         console.error("Failed to load mapping", e)
     }
 }
+
+watch(mappingRows, () => {
+    updateMappingJsonFromRows()
+}, { deep: true })
+
+watch(mappingJson, (value) => {
+    try {
+        const parsed = JSON.parse(value)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            mappingRows.value = mappingToRows(parsed)
+            rawJsonError.value = ''
+        } else {
+            rawJsonError.value = 'Team mapping JSON must be an object with component keys.'
+        }
+    } catch (e: any) {
+        rawJsonError.value = e.message || 'Invalid JSON format'
+    }
+})
 
 const loadRoles = async () => {
     if (realRole?.value !== 'REVIEWER') return
@@ -290,9 +369,57 @@ watch(() => activeTab.value, (newTab) => {
         <h3 class="text-xl font-bold mb-4 text-gray-200">Team Mapping Configuration</h3>
         
         <div class="mb-6">
-             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Editor</h4>
+             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Structured Editor</h4>
              <p class="text-gray-400 mb-2 text-xs">
-                Edit the JSON below directly or upload a file.
+                Configure component mappings using the table below. Aliases are only used to recognize legacy team tags and are not shown in the vulnerability header.
+            </p>
+            <div class="space-y-2 mb-4">
+                <div v-for="(row, index) in mappingRows" :key="`${row.component}-${index}`" class="grid gap-2 md:grid-cols-[2fr_1fr_1fr_auto] items-end">
+                    <div>
+                        <label class="text-xs text-gray-400">Component</label>
+                        <input
+                            v-model="row.component"
+                            placeholder="Component name"
+                            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
+                        />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-400">Main team tag</label>
+                        <input
+                            v-model="row.main"
+                            placeholder="Primary tag"
+                            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
+                        />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-400">Aliases</label>
+                        <input
+                            v-model="row.aliases"
+                            placeholder="alias1, alias2"
+                            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        @click="removeMappingRow(index)"
+                        class="self-end flex h-10 min-w-[2.5rem] items-center justify-center rounded bg-red-600 hover:bg-red-700 text-white transition-colors"
+                        title="Remove mapping row"
+                    >
+                        <X :size="14" />
+                    </button>
+                </div>
+                <button
+                    type="button"
+                    @click="addMappingRow"
+                    class="rounded bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 transition-colors"
+                >
+                    Add component mapping
+                </button>
+            </div>
+
+             <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Raw JSON Editor</h4>
+             <p class="text-gray-400 mb-2 text-xs">
+                Edit the underlying mapping JSON directly, or use the structured editor above.
             </p>
              <div class="relative">
                 <textarea 
@@ -309,6 +436,9 @@ watch(() => activeTab.value, (newTab) => {
                         {{ savingMapping ? 'Saving...' : 'Save Changes' }}
                     </button>
                 </div>
+             </div>
+             <div v-if="rawJsonError" class="mt-2 p-3 bg-red-900/30 border border-red-800 text-red-400 rounded text-xs">
+                 {{ rawJsonError }}
              </div>
         </div>
 

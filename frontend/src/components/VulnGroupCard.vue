@@ -5,8 +5,9 @@ import { updateAssessment, getAssessmentDetails } from '../lib/api'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, STATE_PRIORITY, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
+import { getClosestAffectedTeamsForInstance, getClosestAffectedTeamsForInstances, normalizeLegacyTags } from '../lib/dependency-team-selection'
 import { compareVersions, sortVersions } from '../lib/version'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -185,18 +186,38 @@ const allInstances = computed(() => {
     return props.group.affected_versions?.flatMap(v => v.components) || []
 })
 
+const getInstanceTeamKey = (inst: any, index: number) => {
+    return inst.finding_uuid || `${inst.project_uuid || ''}:${inst.component_uuid || ''}:${index}`
+}
+
+const instanceTeams = computed(() => {
+    const map = new Map<string, string[]>()
+    allInstances.value.forEach((inst, index) => {
+        map.set(getInstanceTeamKey(inst, index), getClosestAffectedTeamsForInstance(inst as any, teamMapping?.value || {}))
+    })
+    return map
+})
+
+const effectiveTags = computed(() => {
+    const derived = getClosestAffectedTeamsForInstances(allInstances.value as any, teamMapping?.value || {})
+    if (derived.length > 0) return derived
+    return normalizeLegacyTags(props.group.tags, teamMapping?.value)
+})
+
 const totalTargeted = computed(() => {
     // When a team is selected, automatically target only that team's instances
     // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
     if (selectedTeam.value) {
-        const matched = allInstances.value.filter(inst => inst.tags && inst.tags.includes(selectedTeam.value)).length
+        const matched = allInstances.value.filter((inst, index) => {
+            return (instanceTeams.value.get(getInstanceTeamKey(inst, index)) || []).includes(selectedTeam.value)
+        }).length
         return matched > 0 ? matched : allInstances.value.length
     }
     return allInstances.value.length
 })
 
 const displayState = computed(() => {
-    return getGroupLifecycle(props.group, props.group.tags || [], teamMapping?.value)
+    return getGroupLifecycle(props.group, effectiveTags.value, teamMapping?.value)
 })
 
 const technicalState = computed(() => {
@@ -1212,7 +1233,9 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
     // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
     if (selectedTeam.value) {
         const team = selectedTeam.value
-        const matched = instances.filter(inst => inst.tags && inst.tags.includes(team))
+        const matched = instances.filter((inst, index) => {
+            return (instanceTeams.value.get(getInstanceTeamKey(inst, index)) || []).includes(team)
+        })
         if (matched.length > 0) instances = matched
     }
 
@@ -1608,30 +1631,7 @@ const uniqueComponents = computed(() => {
     }))
 })
 
-const normalizedTags = computed(() => {
-    if (!props.group.tags) return []
-
-    const rawTags = props.group.tags.map(tagToString).filter(Boolean)
-    if (!teamMapping?.value) return rawTags
-
-    const result = new Set<string>()
-    rawTags.forEach(tag => {
-        let foundPrimary = tag
-        for (const componentName in teamMapping.value) {
-            const mappingVal = teamMapping.value[componentName]
-            if (Array.isArray(mappingVal) && mappingVal.length > 1) {
-                const primary = mappingVal[0]
-                const aliases = mappingVal.slice(1)
-                if (aliases.includes(tag)) {
-                    foundPrimary = primary
-                    break
-                }
-            }
-        }
-        result.add(foundPrimary)
-    })
-    return Array.from(result)
-})
+const normalizedTags = computed(() => effectiveTags.value)
 
 
 const assessedTeams = computed(() => {

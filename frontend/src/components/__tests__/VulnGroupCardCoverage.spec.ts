@@ -72,6 +72,72 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
         }
     })
 
+    it('shows only closest tagged teams in the header tags', async () => {
+        const group = {
+            ...mockGroup,
+            tags: ['TEAM-A', 'TEAM-B'],
+            affected_versions: [{
+                project_uuid: 'p1',
+                project_name: 'P1',
+                project_version: '1.0',
+                components: [
+                    {
+                        component_uuid: 'c1',
+                        component_name: 'log4j-core',
+                        component_version: '2.0',
+                        dependency_chains: ['log4j-core -> team-a-comp -> team-b-comp -> Vulnerable Project'],
+                    }
+                ]
+            }]
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: group as any },
+            global: {
+                provide: {
+                    teamMapping: { value: { 'team-a-comp': ['TEAM-A'], 'team-b-comp': ['TEAM-B'] } }
+                }
+            }
+        })
+
+        const tags = wrapper.findAll('[data-testid="team-tag"]')
+        expect(tags.length).toBe(1)
+        expect(tags[0]!.text()).toContain('TEAM-A')
+        expect(wrapper.text()).not.toContain('TEAM-B')
+    })
+
+    it('does not include a deeper tagged component when another tagged component is closer to the source', async () => {
+        const group = {
+            ...mockGroup,
+            tags: ['TEAM-A', 'TEAM-B'],
+            affected_versions: [{
+                project_uuid: 'p1',
+                project_name: 'P1',
+                project_version: '1.0',
+                components: [
+                    {
+                        component_uuid: 'c1',
+                        component_name: 'log4j-core',
+                        component_version: '2.0',
+                        dependency_chains: ['log4j-core -> team-b-comp -> team-a-comp -> Vulnerable Project'],
+                    }
+                ]
+            }]
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: group as any },
+            global: {
+                provide: {
+                    teamMapping: { value: { 'team-a-comp': ['TEAM-A'], 'team-b-comp': ['TEAM-B'] } }
+                }
+            }
+        })
+
+        const tags = wrapper.findAll('[data-testid="team-tag"]')
+        expect(tags.length).toBe(1)
+        expect(tags[0]!.text()).toContain('TEAM-B')
+        expect(wrapper.text()).not.toContain('TEAM-A')
+    })
+
     it('merges duplicate components with the same assessment state', async () => {
         const group = {
             id: 'V1',
