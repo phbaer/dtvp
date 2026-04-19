@@ -380,6 +380,37 @@ const handleBulkUpdates = (updates: Array<{ id: string; data: any }>, onComplete
     if (onComplete) onComplete()
 }
 
+const replaceGroup = (updatedGroup: GroupedVuln) => {
+    const groupId = updatedGroup.id
+    const idx = groups.value.findIndex(g => g.id === updatedGroup.id)
+    if (idx === -1) return
+
+    groups.value[idx] = updatedGroup
+    groups.value = [...groups.value]
+
+    nextTick(() => {
+        const el = document.querySelector(`[data-group-id="${groupId.replace(/"/g, '\\"')}"]`)
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        }
+    })
+}
+
+const handleTeamMappingUpdated = async (updatedGroup?: GroupedVuln) => {
+    if (updatedGroup) {
+        replaceGroup(updatedGroup)
+    }
+
+    statsDirty.value = true
+    if (viewMode.value === 'statistics') {
+        fetchStats()
+            .then(() => { statsDirty.value = false })
+            .catch((err) => {
+                console.error('Failed to refresh statistics after team mapping update', err)
+            })
+    }
+}
+
 const showBulkModal = ref(false)
 projectHeaderState.bulkSyncHandler.value = () => {
     showBulkModal.value = true
@@ -1001,6 +1032,7 @@ watch(() => user?.role, (role) => {
                             :key="group.id"
                             :group="group"
                             :data-group-id="group.id"
+                            @update="handleTeamMappingUpdated"
                             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)"
                             @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
                         />

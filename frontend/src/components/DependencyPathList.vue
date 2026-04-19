@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { DEFAULT_REPRESENTATIVE_PATH_LIMIT, getFirstMappedTeamOnPath, getPathParts, selectRepresentativePaths } from '../lib/dependency-team-selection'
 
 const props = defineProps<{
@@ -11,7 +11,9 @@ const props = defineProps<{
 type GraphNode = {
   id: string
   name: string
-  teamName: string
+  teamNames: string[]
+  tooltip: string
+  preview: GapPreview | null
   depth: number
   x: number
   y: number
@@ -32,12 +34,30 @@ type GraphEdge = {
 type DisplayStep = {
   id: string
   name: string
-  teamName: string
+  teamNames: string[]
+  tooltip: string
+  preview: GapPreview | null
   isSource: boolean
   isRoot: boolean
   isPrimary: boolean
   isTagged: boolean
   isGap: boolean
+}
+
+type GapPreview = {
+  before: PreviewPart
+  omittedParts: PreviewPart[]
+  after: PreviewPart
+}
+
+type PreviewPart = {
+  name: string
+  teamNames: string[]
+}
+
+type HoveredPreview = GapPreview & {
+  x: number
+  y: number
 }
 
 const normalizeName = (name: string): string => name.trim().toLowerCase()
@@ -47,6 +67,8 @@ const H_PADDING = 22
 const V_PADDING = 18
 const COL_GAP = 54
 const ROW_GAP = 34
+const TOOLTIP_WIDTH = 280
+const TOOLTIP_HEIGHT = 150
 
 const normalizedTeamMappedNames = computed(() => {
   const map = new Map<string, string[]>()
@@ -58,10 +80,24 @@ const normalizedTeamMappedNames = computed(() => {
   return map
 })
 
-const getTeamNames = (name: string): string => {
+const containerRef = ref<HTMLElement | null>(null)
+const hoveredPreview = ref<HoveredPreview | null>(null)
+
+const getTeamNames = (name: string): string[] => {
   const teams = normalizedTeamMappedNames.value.get(normalizeName(name))
-  return teams?.[0] || ''
+  return teams ? [...teams] : []
 }
+
+const getTeamLabel = (teamNames: string[]): string => {
+  if (teamNames.length === 0) return ''
+  if (teamNames.length <= 2) return teamNames.join(' / ')
+  return `${teamNames.slice(0, 2).join(' / ')} +${teamNames.length - 2}`
+}
+
+const toPreviewPart = (name: string): PreviewPart => ({
+  name,
+  teamNames: getTeamNames(name),
+})
 
 const teamMappingRecord = computed(() => {
   const record: Record<string, string[]> = {}
@@ -98,6 +134,13 @@ const graphRows = computed(() => {
 
 const displayedPathCount = computed(() => graphRows.value.length)
 
+const getDisplayedTeamNames = (
+  row: { firstMapped: { index: number } | null; parts: string[] },
+  index: number,
+) => {
+  return getTeamNames(row.parts[index] || '')
+}
+
 const getDisplayStepCount = (indexes: number[]) => {
   if (indexes.length === 0) return 0
   const sorted = [...indexes].sort((left, right) => left - right)
@@ -116,27 +159,9 @@ const displayRows = computed(() => {
       keepIndexes = row.parts.map((_, index) => index)
     } else {
       const primaryIndex = row.firstMapped?.index
-      const taggedIndexes = row.parts
-        .map((part, index) => ({ part, index }))
-        .filter(({ index }) => index !== 0 && index !== row.parts.length - 1 && !!getTeamNames(row.parts[index]))
-        .map(({ index }) => index)
 
       const chosen = new Set<number>([0, row.parts.length - 1])
       if (typeof primaryIndex === 'number') chosen.add(primaryIndex)
-
-      const sortedTagged = taggedIndexes
-        .filter(index => index !== primaryIndex)
-        .sort((left, right) => {
-          const primaryDistanceLeft = Math.abs(left - (primaryIndex ?? 0))
-          const primaryDistanceRight = Math.abs(right - (primaryIndex ?? 0))
-          if (primaryDistanceLeft !== primaryDistanceRight) return primaryDistanceLeft - primaryDistanceRight
-          return left - right
-        })
-
-      sortedTagged.forEach((index) => {
-        const nextIndexes = [...chosen, index]
-        if (getDisplayStepCount(nextIndexes) <= MAX_DISPLAY_BUBBLES) chosen.add(index)
-      })
 
       const fillerIndexes: number[] = []
       for (let offset = 1; offset < row.parts.length - 1; offset += 1) {
@@ -158,24 +183,33 @@ const displayRows = computed(() => {
 
     sortedIndexes.forEach((index, position) => {
       const part = row.parts[index]
-      const teamName = getTeamNames(part)
+      const teamNames = getDisplayedTeamNames(row, index)
       steps.push({
         id: `${normalizeName(part)}:${index}`,
         name: part,
-        teamName,
+        teamNames,
+        tooltip: '',
+        preview: null,
         isSource: index === 0,
         isRoot: index === row.parts.length - 1,
         isPrimary: row.firstMapped?.index === index,
-        isTagged: !!teamName,
+        isTagged: teamNames.length > 0,
         isGap: false,
       })
 
       const nextIndex = sortedIndexes[position + 1]
       if (typeof nextIndex === 'number' && nextIndex - index > 1) {
+        const omittedParts = row.parts.slice(index + 1, nextIndex)
         steps.push({
-          id: `gap:${normalizeName(part)}:${normalizeName(row.parts[nextIndex])}`,
+          id: `gap:${normalizeName(part)}:${omittedParts.map(normalizeName).join(':')}:${normalizeName(row.parts[nextIndex])}`,
           name: '...',
-          teamName: '',
+          teamNames: [],
+          tooltip: omittedParts.join(' -> '),
+          preview: {
+            before: toPreviewPart(part),
+            omittedParts: omittedParts.map(toPreviewPart),
+            after: toPreviewPart(row.parts[nextIndex]),
+          },
           isSource: false,
           isRoot: false,
           isPrimary: false,
@@ -196,7 +230,9 @@ const graphModel = computed(() => {
   const nodeBuckets = new Map<string, {
     id: string
     name: string
-    teamName: string
+    teamNames: string[]
+    tooltip: string
+    preview: GapPreview | null
     depth: number
     positions: number[]
     isSource: boolean
@@ -209,7 +245,7 @@ const graphModel = computed(() => {
   displayRows.value.forEach((row, rowIndex) => {
     row.steps.forEach((step, partIndex) => {
       const nodeId = step.isGap ? step.id : normalizeName(step.name)
-      const teamName = step.teamName
+      const teamNames = step.teamNames
       const existing = nodeBuckets.get(nodeId)
       const isSource = step.isSource
       const isRoot = step.isRoot
@@ -219,13 +255,15 @@ const graphModel = computed(() => {
         nodeBuckets.set(nodeId, {
           id: nodeId,
           name: step.name,
-          teamName,
+          teamNames,
+          tooltip: step.tooltip,
+          preview: step.preview,
           depth: partIndex,
           positions: [rowIndex],
           isSource,
           isRoot,
           isPrimary,
-          isTagged: !!teamName,
+          isTagged: teamNames.length > 0,
         })
       } else {
         existing.depth = Math.max(existing.depth, partIndex)
@@ -233,8 +271,10 @@ const graphModel = computed(() => {
         existing.isSource = existing.isSource || isSource
         existing.isRoot = existing.isRoot || isRoot
         existing.isPrimary = existing.isPrimary || isPrimary
-        existing.isTagged = existing.isTagged || !!teamName
-        if (!existing.teamName && teamName) existing.teamName = teamName
+        existing.isTagged = existing.isTagged || teamNames.length > 0
+        if (existing.teamNames.length === 0 && teamNames.length > 0) existing.teamNames = teamNames
+        if (!existing.tooltip && step.tooltip) existing.tooltip = step.tooltip
+        if (!existing.preview && step.preview) existing.preview = step.preview
       }
 
       if (partIndex < row.steps.length - 1) {
@@ -255,13 +295,15 @@ const graphModel = computed(() => {
   const nodes: GraphNode[] = Array.from(nodeBuckets.values())
     .map((bucket) => {
       const rowCenter = bucket.positions.reduce((sum, value) => sum + value, 0) / bucket.positions.length
-      const labelLength = Math.max(bucket.name.length, bucket.teamName.length)
+      const labelLength = Math.max(bucket.name.length, getTeamLabel(bucket.teamNames).length)
       const width = Math.max(118, Math.min(190, labelLength * 7 + 34))
-      const height = bucket.teamName ? 54 : 42
+      const height = bucket.teamNames.length > 0 || bucket.isSource || bucket.isRoot ? 54 : 42
       return {
         id: bucket.id,
         name: bucket.name,
-        teamName: bucket.teamName,
+        teamNames: bucket.teamNames,
+        tooltip: bucket.tooltip,
+        preview: bucket.preview,
         depth: bucket.depth,
         x: H_PADDING + bucket.depth * (190 + COL_GAP),
         y: V_PADDING + rowCenter * (54 + ROW_GAP),
@@ -296,9 +338,40 @@ const pathSummary = computed(() => {
 
 const labelSummary = computed(() => {
   return graphModel.value.nodes
-    .map(node => [node.name, node.isSource ? 'SOURCE' : node.isRoot ? 'ROOT' : node.teamName, node.isPrimary ? 'PRIMARY' : ''].filter(Boolean).join(' | '))
+    .map(node => [node.name, node.isSource ? 'SOURCE' : node.isRoot ? 'ROOT' : getTeamLabel(node.teamNames), node.isPrimary ? 'PRIMARY' : ''].filter(Boolean).join(' | '))
     .join('\n')
 })
+
+const previewSequence = (preview: GapPreview) => {
+  return [preview.before, ...preview.omittedParts, preview.after]
+}
+
+const updatePreviewPosition = (event: MouseEvent) => {
+  if (!containerRef.value || !hoveredPreview.value) return
+
+  const bounds = containerRef.value.getBoundingClientRect()
+  const relativeX = event.clientX - bounds.left
+  const relativeY = event.clientY - bounds.top
+  hoveredPreview.value = {
+    ...hoveredPreview.value,
+    x: Math.min(Math.max(8, relativeX + 14), Math.max(8, bounds.width - TOOLTIP_WIDTH - 8)),
+    y: Math.min(Math.max(8, relativeY + 14), Math.max(8, bounds.height - TOOLTIP_HEIGHT - 8)),
+  }
+}
+
+const showPreview = (preview: GapPreview | null, event: MouseEvent) => {
+  if (!preview) return
+  hoveredPreview.value = {
+    ...preview,
+    x: 8,
+    y: 8,
+  }
+  updatePreviewPosition(event)
+}
+
+const hidePreview = () => {
+  hoveredPreview.value = null
+}
 
 const edgePath = (edge: GraphEdge) => {
   const fromNode = graphModel.value.nodeMap.get(edge.from)
@@ -316,7 +389,7 @@ const edgePath = (edge: GraphEdge) => {
 </script>
 
 <template>
-  <div class="text-xs">
+  <div ref="containerRef" class="relative text-xs">
     <div v-if="graphRows.length === 0" class="text-gray-500 italic">
       No dependency chains found.
     </div>
@@ -335,8 +408,8 @@ const edgePath = (edge: GraphEdge) => {
           aria-label="Dependency graph"
         >
           <defs>
-            <marker id="dependency-arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
+            <marker id="dependency-arrow" markerWidth="7" markerHeight="7" refX="6.5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 0 L 7 3.5 L 0 7 z" fill="#475569" />
             </marker>
           </defs>
 
@@ -353,10 +426,14 @@ const edgePath = (edge: GraphEdge) => {
 
           <g v-for="node in graphModel.nodes" :key="node.id">
             <rect
+              :data-testid="node.preview ? 'gap-node' : undefined"
               :x="node.x"
               :y="node.y"
               :width="node.width"
               :height="node.height"
+              @mouseenter="node.preview ? showPreview(node.preview, $event) : undefined"
+              @mousemove="node.preview ? updatePreviewPosition($event) : undefined"
+              @mouseleave="node.preview ? hidePreview() : undefined"
               rx="12"
               :fill="node.isSource
                 ? '#3b2f0a'
@@ -384,7 +461,7 @@ const edgePath = (edge: GraphEdge) => {
             />
             <text
               :x="node.x + node.width / 2"
-              :y="node.y + (node.teamName || node.isSource || node.isRoot ? 18 : 24)"
+              :y="node.y + (node.teamNames.length > 0 || node.isSource || node.isRoot ? 18 : 24)"
               text-anchor="middle"
               font-size="11"
               font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
@@ -393,7 +470,7 @@ const edgePath = (edge: GraphEdge) => {
               {{ node.name }}
             </text>
             <text
-              v-if="node.teamName || node.isSource || node.isRoot"
+              v-if="node.teamNames.length > 0 || node.isSource || node.isRoot"
               :x="node.x + node.width / 2"
               :y="node.y + 34"
               text-anchor="middle"
@@ -401,7 +478,7 @@ const edgePath = (edge: GraphEdge) => {
               font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
               :fill="node.isSource ? '#fcd34d' : node.isRoot ? '#7dd3fc' : node.isPrimary ? '#67e8f9' : '#5eead4'"
             >
-              {{ node.isSource ? 'SOURCE' : node.isRoot ? 'ROOT' : node.teamName }}
+              {{ node.isSource ? 'SOURCE' : node.isRoot ? 'ROOT' : getTeamLabel(node.teamNames) }}
             </text>
             <text
               v-if="node.isPrimary"
@@ -418,8 +495,33 @@ const edgePath = (edge: GraphEdge) => {
         </svg>
       </div>
 
+      <div
+        v-if="hoveredPreview"
+        data-testid="gap-preview"
+        class="pointer-events-none absolute z-20 w-[280px] rounded-lg border border-slate-700 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-sm"
+        :style="{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }"
+      >
+        <div class="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          Collapsed dependency chain
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-[10px]">
+          <template v-for="(part, index) in previewSequence(hoveredPreview)" :key="`${part}-${index}`">
+            <div
+              class="rounded-full border px-2 py-1 font-mono"
+              :class="part.teamNames.length > 0 ? 'border-teal-500/60 bg-teal-950/70 text-teal-100' : 'border-slate-600 bg-slate-900 text-slate-100'"
+            >
+              <div>{{ part.name }}</div>
+              <div v-if="part.teamNames.length > 0" class="text-[9px] text-teal-300">
+                {{ getTeamLabel(part.teamNames) }}
+              </div>
+            </div>
+            <span v-if="index < previewSequence(hoveredPreview).length - 1" class="font-mono text-slate-500">-&gt;</span>
+          </template>
+        </div>
+      </div>
+
       <div class="sr-only" data-testid="graph-source">{{ pathSummary }}</div>
-  <div class="sr-only" data-testid="graph-labels">{{ labelSummary }}</div>
+      <div class="sr-only" data-testid="graph-labels">{{ labelSummary }}</div>
     </div>
   </div>
 </template>

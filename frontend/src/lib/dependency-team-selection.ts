@@ -52,6 +52,43 @@ export const getFirstMappedTeamOnPath = (
     return null
 }
 
+const startsWithSameSequenceAt = (
+    parts: string[],
+    sequence: string[],
+    startIndex: number,
+): boolean => {
+    if (startIndex < 0 || startIndex + sequence.length > parts.length) return false
+
+    for (let index = 0; index < sequence.length; index += 1) {
+        if (normalizeName(parts[startIndex + index]) !== normalizeName(sequence[index])) {
+            return false
+        }
+    }
+
+    return true
+}
+
+const isSubsumedByEarlierMappedPath = (
+    candidate: string[],
+    other: string[],
+    teamMapping: TeamMapping | undefined,
+): boolean => {
+    const candidateMapped = getFirstMappedTeamOnPath(candidate, teamMapping)
+    const otherMapped = getFirstMappedTeamOnPath(other, teamMapping)
+    if (!candidateMapped || !otherMapped) return false
+
+    const candidateSuffix = candidate.slice(candidateMapped.index)
+    if (candidateSuffix.length === 0) return false
+
+    for (let startIndex = otherMapped.index + 1; startIndex <= other.length - candidateSuffix.length; startIndex += 1) {
+        if (startsWithSameSequenceAt(other, candidateSuffix, startIndex)) {
+            return true
+        }
+    }
+
+    return false
+}
+
 export const selectRepresentativePaths = (
     paths: string[] | undefined,
     teamMapping: TeamMapping | undefined,
@@ -99,7 +136,14 @@ export const selectRepresentativePaths = (
         ? Array.from(teamPathMap.values())
         : unmappedPaths
 
-    return selected
+    const pruned = selected.filter((parts, index, allPaths) => {
+        return !allPaths.some((otherParts, otherIndex) => {
+            if (index === otherIndex) return false
+            return isSubsumedByEarlierMappedPath(parts, otherParts, teamMapping)
+        })
+    })
+
+    return pruned
         .sort((left, right) => {
             const leftMapped = getFirstMappedTeamOnPath(left, teamMapping)
             const rightMapped = getFirstMappedTeamOnPath(right, teamMapping)
@@ -145,6 +189,13 @@ export const getClosestAffectedTeamsForInstances = (
         getClosestAffectedTeamsForInstance(inst, teamMapping).forEach(team => teams.add(team))
     })
     return Array.from(teams)
+}
+
+export const getDerivedGroupTags = (
+    group: Pick<Instance, 'component_name' | 'dependency_chains'>[] | undefined,
+    teamMapping: TeamMapping | undefined,
+): string[] => {
+    return getClosestAffectedTeamsForInstances(group || [], teamMapping)
 }
 
 export const normalizeLegacyTags = (

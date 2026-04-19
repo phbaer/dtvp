@@ -71,6 +71,7 @@ PROJECT_V1_1_UUID = "8fa85f64-5717-4562-b3fc-2c963f66afb1"
 PROJECT_V1_2_UUID = "9fa85f64-5717-4562-b3fc-2c963f66afb2"
 PROJECT_V2_1_UUID = "afa85f64-5717-4562-b3fc-2c963f66afb3"
 PROJECT_V3_UUID = "bfa85f64-5717-4562-b3fc-2c963f66afb4"
+PROJECT_DEEP_GRAPH_UUID = "dfa85f64-5717-4562-b3fc-2c963f66afb6"
 # Additional mock vulnerabilities to exercise plaintext assessment formats
 VULN_PLAINTEXT_NOT_SET_UUID = "d1111a7b-0346-4927-991c-7033580539f0"
 VULN_PLAINTEXT_NOT_AFFECTED_UUID = "d2222a7b-0346-4927-991c-7033580539f1"
@@ -131,6 +132,12 @@ mock_projects = [
         name="Vulnerable Project",
         version="3.0.0",
         uuid=PROJECT_V3_UUID,
+        classifier="APPLICATION",
+    ),
+    Project(
+        name="Graph Demo Project",
+        version="1.0.0",
+        uuid=PROJECT_DEEP_GRAPH_UUID,
         classifier="APPLICATION",
     ),
 ]
@@ -613,6 +620,134 @@ def get_vulns(project_uuid: str):
 @app.get("/api/v1/bom/cyclonedx/project/{project_uuid}")
 def get_bom(project_uuid: str):
     project = next((p for p in mock_projects if p.uuid == project_uuid), None)
+
+    if project_uuid == PROJECT_DEEP_GRAPH_UUID:
+        # Deep branching demo for the frontend dependency graph:
+        # root fans in to team-a-comp from the left and right, then team-a-comp
+        # fans out again before converging back on log4j-core.
+        team_a_uuid = "44444444-4444-4444-4444-444444444444"
+        left_pre_a_uuid = "11111111-aaaa-aaaa-aaaa-111111111111"
+        left_pre_b_uuid = "11111111-bbbb-bbbb-bbbb-111111111111"
+        right_pre_a_uuid = "22222222-aaaa-aaaa-aaaa-222222222222"
+        right_pre_b_uuid = "22222222-bbbb-bbbb-bbbb-222222222222"
+        left_post_a_uuid = "33333333-aaaa-aaaa-aaaa-333333333333"
+        left_post_b_uuid = "33333333-bbbb-bbbb-bbbb-333333333333"
+        right_post_a_uuid = "66666666-aaaa-aaaa-aaaa-666666666666"
+        right_post_b_uuid = "66666666-bbbb-bbbb-bbbb-666666666666"
+
+        metadata_component = {
+            "bom-ref": project_uuid,
+            "name": project.name if project else "Unknown",
+            "version": project.version if project else "0.0.0",
+            "type": "application",
+            "uuid": project_uuid,
+        }
+
+        components = [
+            {
+                "type": "library",
+                "name": "left-entry-lib",
+                "version": "1.0.0",
+                "bom-ref": left_pre_a_uuid,
+                "uuid": left_pre_a_uuid,
+            },
+            {
+                "type": "library",
+                "name": "left-funnel-lib",
+                "version": "1.1.0",
+                "bom-ref": left_pre_b_uuid,
+                "uuid": left_pre_b_uuid,
+            },
+            {
+                "type": "library",
+                "name": "right-entry-lib",
+                "version": "2.0.0",
+                "bom-ref": right_pre_a_uuid,
+                "uuid": right_pre_a_uuid,
+            },
+            {
+                "type": "library",
+                "name": "right-funnel-lib",
+                "version": "2.1.0",
+                "bom-ref": right_pre_b_uuid,
+                "uuid": right_pre_b_uuid,
+            },
+            {
+                "type": "library",
+                "name": "team-a-comp",
+                "version": "1.0.0",
+                "bom-ref": team_a_uuid,
+                "uuid": team_a_uuid,
+            },
+            {
+                "type": "library",
+                "name": "left-runtime-lib",
+                "version": "3.0.0",
+                "bom-ref": left_post_a_uuid,
+                "uuid": left_post_a_uuid,
+            },
+            {
+                "type": "library",
+                "name": "left-runtime-deep-lib",
+                "version": "3.1.0",
+                "bom-ref": left_post_b_uuid,
+                "uuid": left_post_b_uuid,
+            },
+            {
+                "type": "library",
+                "name": "right-runtime-lib",
+                "version": "4.0.0",
+                "bom-ref": right_post_a_uuid,
+                "uuid": right_post_a_uuid,
+            },
+            {
+                "type": "library",
+                "name": "right-runtime-deep-lib",
+                "version": "4.1.0",
+                "bom-ref": right_post_b_uuid,
+                "uuid": right_post_b_uuid,
+            },
+            {
+                "type": "library",
+                "name": "log4j-core",
+                "version": "2.14.0",
+                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+                "bom-ref": COMPONENT_UUID,
+                "uuid": COMPONENT_UUID,
+            },
+            {
+                "type": "library",
+                "name": "jackson-databind",
+                "version": "2.9.8",
+                "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+                "bom-ref": JACKSON_UUID,
+                "uuid": JACKSON_UUID,
+            },
+        ]
+
+        dependencies = [
+            {"ref": project_uuid, "dependsOn": [left_pre_a_uuid, right_pre_a_uuid, JACKSON_UUID]},
+            {"ref": left_pre_a_uuid, "dependsOn": [left_pre_b_uuid]},
+            {"ref": left_pre_b_uuid, "dependsOn": [team_a_uuid]},
+            {"ref": right_pre_a_uuid, "dependsOn": [right_pre_b_uuid]},
+            {"ref": right_pre_b_uuid, "dependsOn": [team_a_uuid]},
+            {"ref": team_a_uuid, "dependsOn": [left_post_a_uuid, right_post_a_uuid]},
+            {"ref": left_post_a_uuid, "dependsOn": [left_post_b_uuid]},
+            {"ref": left_post_b_uuid, "dependsOn": [COMPONENT_UUID]},
+            {"ref": right_post_a_uuid, "dependsOn": [right_post_b_uuid]},
+            {"ref": right_post_b_uuid, "dependsOn": [COMPONENT_UUID]},
+            {"ref": COMPONENT_UUID, "dependsOn": []},
+            {"ref": JACKSON_UUID, "dependsOn": []},
+        ]
+
+        return {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.4",
+            "version": 1,
+            "metadata": {"component": metadata_component},
+            "components": components,
+            "dependencies": dependencies,
+        }
 
     if project_uuid == PROJECT_V2_UUID:
         # Root -> TeamBComp -> TeamAComp -> log4j-core

@@ -7,7 +7,7 @@ import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, E
 
 import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, STATE_PRIORITY, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
-import { getClosestAffectedTeamsForInstance, getClosestAffectedTeamsForInstances, normalizeLegacyTags } from '../lib/dependency-team-selection'
+import { getClosestAffectedTeamsForInstance, getClosestAffectedTeamsForInstances, getDerivedGroupTags, normalizeLegacyTags } from '../lib/dependency-team-selection'
 import { compareVersions, sortVersions } from '../lib/version'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -1471,6 +1471,29 @@ const handleUseServerState = () => {
     showConflictModal.value = false
 }
 
+const buildUpdatedGroup = (): GroupedVuln => {
+    const affectedVersions = props.group.affected_versions.map(version => ({
+        ...version,
+        components: version.components.map(component => ({ ...component })),
+    }))
+
+    const derivedTags = getDerivedGroupTags(
+        affectedVersions.flatMap(version => version.components),
+        teamMapping?.value || {},
+    )
+
+    return {
+        ...props.group,
+        affected_versions: affectedVersions,
+        tags: derivedTags,
+    }
+}
+
+const handleMappingUpdated = async () => {
+    await refreshDetails()
+    emit('update', buildUpdatedGroup())
+}
+
 const originalSeverity = computed(() => {
     const base = props.group.cvss ?? props.group.cvss_score
     if (base != null && !isNaN(Number(base))) return scoreSeverity(Number(base))
@@ -1945,6 +1968,7 @@ void _vueTemplateUsed
                              :isReviewer="isReviewer"
                              @apply-all="handleApplyAllAssessment"
                              @adopt-team="handleAdoptTeamBlock"
+                             @mapping-updated="handleMappingUpdated"
                          />
                      </div>
                  </div>

@@ -1,17 +1,24 @@
 <script setup lang="ts">
-import { ref, toRefs, inject, type Ref } from 'vue'
+import { computed, ref, toRefs, inject, type Ref } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import DependencyChainViewer from './DependencyChainViewer.vue'
 import { updateTeamMapping } from '../lib/api'
-import { getClosestAffectedTeamsForInstance } from '../lib/dependency-team-selection'
+import { getClosestAffectedTeamsForInstance, getPathParts } from '../lib/dependency-team-selection'
 
 const props = defineProps<{
   instances: any[]
 }>()
 
+const emit = defineEmits<{
+  (e: 'mapping-updated'): void
+}>()
+
 const user = inject<any>('user', { role: 'ANALYST' })
 const teamMapping = inject<Ref<Record<string, string | string[]>>>('teamMapping', ref({}))
-const canEditMapping = user?.role === 'REVIEWER'
+const canEditMapping = computed(() => {
+  const currentUser = user?.value ?? user
+  return currentUser?.role === 'REVIEWER'
+})
 
 const getAssignedTeams = (inst: any) => {
   return getClosestAffectedTeamsForInstance(inst, teamMapping.value || {}).join(', ')
@@ -22,17 +29,34 @@ const tagInput = ref('')
 const savingTag = ref(false)
 const tagMessage = ref('')
 const tagError = ref('')
+const newMappingComponent = ref('')
+const newMappingTag = ref('')
+const savingNewMapping = ref(false)
+const newMappingMessage = ref('')
+const newMappingError = ref('')
 
 const { instances } = toRefs(props)
 const expandedChains = ref(new Set<string>())
+
+const normalizeName = (value: string) => value.trim().toLowerCase()
 
 const getComponentKey = (prefix: string, inst: any) => {
   const uuidPart = inst.component_uuid || inst.project_uuid || ''
   return `${prefix}-${uuidPart}-${inst.component_name}-${inst.component_version}`
 }
 
+const findMappingEntry = (componentName: string) => {
+  const targetName = normalizeName(componentName)
+  for (const [key, value] of Object.entries(teamMapping.value || {})) {
+    if (normalizeName(key) === targetName) {
+      return { key, value }
+    }
+  }
+  return null
+}
+
 const getCurrentMainTag = (componentName: string) => {
-  const existing = teamMapping.value?.[componentName]
+  const existing = findMappingEntry(componentName)?.value
   if (Array.isArray(existing)) {
     return existing[0] || ''
   }
@@ -40,9 +64,42 @@ const getCurrentMainTag = (componentName: string) => {
 }
 
 const getCurrentAliases = (componentName: string) => {
-  const existing = teamMapping.value?.[componentName]
+  const existing = findMappingEntry(componentName)?.value
   return Array.isArray(existing) ? existing.slice(1) : []
 }
+
+const vulnScopedComponents = computed(() => {
+  const seen = new Set<string>()
+  const collected: string[] = []
+
+  instances.value.forEach((inst) => {
+    if (inst.component_name) {
+      collected.push(inst.component_name)
+    }
+
+    ;(inst.dependency_chains || []).forEach((path: string) => {
+      const parts = getPathParts(path)
+      parts.forEach((part, index) => {
+        if (index === parts.length - 1) return
+        collected.push(part)
+      })
+    })
+  })
+
+  return collected
+    .filter((componentName): componentName is string => !!componentName)
+    .filter((componentName) => {
+      const key = normalizeName(componentName)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((left, right) => left.localeCompare(right))
+})
+
+const availableUnmappedComponents = computed(() => {
+  return vulnScopedComponents.value.filter(componentName => !getCurrentMainTag(componentName))
+})
 
 const beginTagEdit = (componentKey: string, componentName: string) => {
   editingComponentKey.value = componentKey
@@ -81,6 +138,7 @@ const saveComponentTeamTag = async (_componentKey: string, componentName: string
       teamMapping.value = updatedMapping
       tagMessage.value = 'Team tag saved.'
       editingComponentKey.value = null
+      emit('mapping-updated')
     } else {
       throw new Error(res.message)
     }
@@ -88,6 +146,46 @@ const saveComponentTeamTag = async (_componentKey: string, componentName: string
     tagError.value = err.message || 'Failed to save team tag.'
   } finally {
     savingTag.value = false
+  }
+}
+
+const saveNewComponentTeamTag = async () => {
+  if (!canEditMapping) return
+
+  const componentName = newMappingComponent.value.trim()
+  const teamTag = newMappingTag.value.trim()
+
+  newMappingMessage.value = ''
+  newMappingError.value = ''
+
+  if (!componentName) {
+    newMappingError.value = 'Select a component first.'
+    return
+  }
+
+  if (!teamTag) {
+    newMappingError.value = 'Enter a team tag first.'
+    return
+  }
+
+  savingNewMapping.value = true
+
+  try {
+    const updatedMapping = { ...teamMapping.value, [componentName]: teamTag }
+    const res = await updateTeamMapping(updatedMapping)
+    if (res.status === 'success') {
+      teamMapping.value = updatedMapping
+      newMappingMessage.value = 'Component team tag saved.'
+      newMappingComponent.value = ''
+      newMappingTag.value = ''
+      emit('mapping-updated')
+    } else {
+      throw new Error(res.message)
+    }
+  } catch (err: any) {
+    newMappingError.value = err.message || 'Failed to save component team tag.'
+  } finally {
+    savingNewMapping.value = false
   }
 }
 
@@ -161,6 +259,50 @@ const isChainExpanded = (id: string) => {
   <div class="mt-4 pt-2 border-t border-gray-800/50">
     <div class="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2">
       Dependencies
+    </div>
+    <div v-if="canEditMapping" class="mb-3 rounded-md border border-gray-800/70 bg-gray-900/40 p-3">
+      <div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">
+        Add Component Team Tag
+      </div>
+      <div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+        <div>
+          <label class="text-[9px] text-gray-400">Component</label>
+          <select
+            v-model="newMappingComponent"
+            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
+          >
+            <option value="">Select an unmapped component</option>
+            <option
+              v-for="componentName in availableUnmappedComponents"
+              :key="componentName"
+              :value="componentName"
+            >
+              {{ componentName }}
+            </option>
+          </select>
+        </div>
+        <div>
+          <label class="text-[9px] text-gray-400">Team tag</label>
+          <input
+            v-model="newMappingTag"
+            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
+            placeholder="Primary tag"
+          />
+        </div>
+        <button
+          type="button"
+          @click="saveNewComponentTeamTag"
+          :disabled="savingNewMapping || availableUnmappedComponents.length === 0"
+          class="rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 transition-colors"
+        >
+          Add tag
+        </button>
+      </div>
+      <div v-if="availableUnmappedComponents.length === 0" class="mt-2 text-[10px] text-gray-500 italic">
+        All components in this vulnerability already have a team tag mapping.
+      </div>
+      <div v-if="newMappingMessage" class="mt-2 text-xs text-green-300">{{ newMappingMessage }}</div>
+      <div v-if="newMappingError" class="mt-2 text-xs text-red-400">{{ newMappingError }}</div>
     </div>
     <template v-for="(rel, relIdx) in [partitionByRelationship(instances)]" :key="relIdx">
       <template v-if="rel.direct.length > 0">

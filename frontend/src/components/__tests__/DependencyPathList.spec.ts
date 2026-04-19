@@ -1,3 +1,4 @@
+import { nextTick } from 'vue'
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import DependencyPathList from '../DependencyPathList.vue'
@@ -101,9 +102,27 @@ describe('DependencyPathList', () => {
 
     const source = getGraphSource(wrapper)
     const labels = getGraphLabels(wrapper)
-    expect(labels).toContain('team-a-comp | TEAM-A | PRIMARY')
+    expect(source).toBe('log4j-core -> team-b-comp -> team-a-comp -> RootProject')
     expect(labels).toContain('team-b-comp | TEAM-B | PRIMARY')
-    expect(source.match(/team-a-comp/g)?.length).toBe(2)
+    expect(labels).toContain('team-a-comp | TEAM-A')
+    expect(labels).not.toContain('team-a-comp | TEAM-A | PRIMARY')
+  })
+
+  it('does not treat deeper mapped components on the same path as additional relevant labels', () => {
+    const paths = ['log4j-core -> team-b-comp -> team-a-comp -> RootProject']
+    const teamMappedNames = new Map<string, string[]>([
+      ['team-a-comp', ['TEAM-A']],
+      ['team-b-comp', ['TEAM-B']],
+    ])
+
+    const wrapper = mount(DependencyPathList, {
+      props: { paths, teamMappedNames },
+    })
+
+    const labels = getGraphLabels(wrapper)
+    expect(labels).toContain('team-b-comp | TEAM-B | PRIMARY')
+    expect(labels).toContain('team-a-comp | TEAM-A')
+    expect(labels).not.toContain('team-a-comp | TEAM-A | PRIMARY')
   })
 
   it('matches team mapping keys case-insensitively', () => {
@@ -131,6 +150,37 @@ describe('DependencyPathList', () => {
 
     expect(getGraphSource(wrapper)).toContain('source-lib -> hidden-a -> ... -> hidden-d -> root-app')
     expect(getGraphLabels(wrapper)).toContain('...')
+  })
+
+  it('renders a preview bubble for the collapsed ellipsis on hover', async () => {
+    const paths = ['source-lib -> hidden-a -> hidden-b -> hidden-c -> hidden-d -> root-app']
+    const wrapper = mount(DependencyPathList, { props: { paths } })
+
+    await nextTick(); await wrapper.get('[data-testid="gap-node"]').trigger('mouseenter', { clientX: 120, clientY: 80 })
+
+    const preview = wrapper.get('[data-testid="gap-preview"]')
+    expect(preview.text()).toContain('Collapsed dependency chain')
+    expect(preview.text()).toContain('hidden-a')
+    expect(preview.text()).toContain('hidden-b')
+    expect(preview.text()).toContain('hidden-c')
+    expect(preview.text()).toContain('hidden-d')
+  })
+
+  it('includes existing team tags in the collapsed ellipsis preview', async () => {
+    const paths = ['source-lib -> hidden-a -> hidden-b -> hidden-c -> hidden-d -> root-app']
+    const teamMappedNames = new Map<string, string[]>([
+      ['hidden-b', ['TEAM-B']],
+      ['hidden-c', ['TEAM-C']],
+    ])
+    const wrapper = mount(DependencyPathList, { props: { paths, teamMappedNames } })
+
+    await nextTick(); await wrapper.get('[data-testid="gap-node"]').trigger('mouseenter', { clientX: 120, clientY: 80 })
+
+    const preview = wrapper.get('[data-testid="gap-preview"]')
+    expect(preview.text()).toContain('hidden-b')
+    expect(preview.text()).toContain('TEAM-B')
+    expect(preview.text()).toContain('hidden-c')
+    expect(preview.text()).toContain('TEAM-C')
   })
 
   it('keeps short paths fully expanded when they fit within five bubbles', () => {
