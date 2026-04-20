@@ -34,8 +34,14 @@ vi.mock('vue-router', () => ({
 // Mock child component
 vi.mock('../../components/VulnGroupCard.vue', () => ({
     default: {
-        template: '<div class="vuln-group-card" data-testid="group-card"></div>',
-        props: ['group']
+        name: 'VulnGroupCard',
+        template: `
+            <div class="vuln-group-card" data-testid="group-card">
+                <button data-testid="emit-update" @click="$emit('update', group)">emit update</button>
+            </div>
+        `,
+        props: ['group'],
+        emits: ['update', 'update:assessment', 'toggle-expand']
     }
 }))
 
@@ -220,6 +226,36 @@ describe('ProjectView.vue', () => {
         await flushPromises()
 
         expect(getStatistics).toHaveBeenCalled()
+    })
+
+    it('updates only the local group on team mapping update without refetching vulnerabilities', async () => {
+        const mockGroup = {
+            id: '1',
+            title: 'Vuln 1',
+            tags: ['OldTeam'],
+            affected_versions: [
+                {
+                    components: [
+                        { component_name: 'lib-a', dependency_chains: ['lib-a -> app'] }
+                    ]
+                }
+            ]
+        }
+        vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        expect(getGroupedVulns).toHaveBeenCalledTimes(1)
+
+        const updatedGroup = {
+            ...mockGroup,
+            tags: ['NewTeam'],
+        }
+
+        await (wrapper.vm as any).handleTeamMappingUpdated(updatedGroup)
+        await flushPromises()
+
+        expect((wrapper.vm as any).groups[0].tags).toEqual(['NewTeam'])
+        expect(getGroupedVulns).toHaveBeenCalledTimes(1)
     })
 
     it('does not fetch if route param name is undefined', async () => {

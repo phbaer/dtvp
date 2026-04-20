@@ -12,6 +12,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'apply-all', details: string, state: string, justification: string): void
   (e: 'adopt-team', block: AssessmentBlock): void
+  (e: 'mapping-updated'): void
 }>()
 const showAuditLog = ref(false)
 
@@ -162,7 +163,7 @@ const parsedBlocks = computed(() => parseAssessmentBlocks(props.assessment.detai
       </div>
       <div v-else class="text-[10px] text-gray-600 italic">No assessment recorded.</div>
 
-      <VulnGroupCardDependencies :instances="props.assessment.instances" />
+      <VulnGroupCardDependencies :instances="props.assessment.instances" @mapping-updated="emit('mapping-updated')" />
     </div>
   </div>
 </template>

@@ -1,21 +1,29 @@
+import { nextTick } from 'vue'
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import DependencyPathList from '../DependencyPathList.vue'
+
+const getGraphSource = (wrapper: ReturnType<typeof mount>) => {
+  return wrapper.get('[data-testid="graph-source"]').text()
+}
+
+const getGraphLabels = (wrapper: ReturnType<typeof mount>) => {
+  return wrapper.get('[data-testid="graph-labels"]').text()
+}
 
 describe('DependencyPathList', () => {
   it('renders a compact dependency tree for shared prefixes', () => {
     const paths = ['Vuln -> Shared -> A', 'Vuln -> Shared -> B']
     const wrapper = mount(DependencyPathList, { props: { paths } })
 
-    const text = wrapper.text()
-    // Root 'Vuln' is not rendered (parent shows affected component)
-    expect(text).toContain('Shared')
-    expect(text).toContain('A')
-    expect(text).toContain('B')
-    expect(text.match(/Shared/g)?.length).toBe(1)
+    const source = getGraphSource(wrapper)
+    expect(source).toContain('Vuln -> Shared -> A')
+    expect(source).toContain('Vuln -> Shared -> B')
+    expect(source).toContain('A')
+    expect(source).toContain('B')
   })
 
-  it('marks primary team, other teams, and root correctly', () => {
+  it('renders the full dependency sequence once in the tree', () => {
     const paths = ['log4j-core -> team-a-comp -> team-b-comp -> Vulnerable Project']
     const teamMappedNames = new Map<string, string[]>([
       ['team-a-comp', ['TEAM-A']],
@@ -26,25 +34,95 @@ describe('DependencyPathList', () => {
       props: { paths, teamMappedNames },
     })
 
-    const text = wrapper.text()
-    // Root 'log4j-core' is not rendered (parent shows affected component)
-    expect(text).not.toContain('log4j-core')
-    expect(text).toContain('team-a-comp')
-    expect(text).toContain('TEAM-A')
-    expect(text).toContain('team-b-comp')
-    expect(text).toContain('TEAM-B')
-    expect(text).toContain('Vulnerable Project')
-    expect(text).toContain('root')
+    const source = getGraphSource(wrapper)
+    const labels = getGraphLabels(wrapper)
+    expect(source).toContain('log4j-core')
+    expect(labels).toContain('log4j-core | SOURCE')
+    expect(labels).toContain('team-a-comp | TEAM-A | PRIMARY')
+    expect(labels).toContain('team-b-comp | TEAM-B')
+    expect(labels).toContain('Vulnerable Project | ROOT')
   })
 
   it('renders direct leaf paths without duplicate nodes', () => {
     const paths = ['VulnComp -> RootProject']
     const wrapper = mount(DependencyPathList, { props: { paths } })
 
-    const text = wrapper.text()
-    // Root 'VulnComp' is not rendered (parent shows affected component)
-    expect(text).toContain('RootProject')
-    expect(text.match(/RootProject/g)?.length).toBe(1)
+    const source = getGraphSource(wrapper)
+    expect(source).toContain('VulnComp -> RootProject')
+  })
+
+  it('renders duplicate dependency paths only once', () => {
+    const paths = [
+      'internal-lib-b -> internal-lib-a -> Vulnerable Project',
+      'internal-lib-b -> internal-lib-a -> Vulnerable Project',
+    ]
+    const wrapper = mount(DependencyPathList, { props: { paths } })
+
+    const source = getGraphSource(wrapper)
+    expect(source).toBe('internal-lib-b -> internal-lib-a -> Vulnerable Project')
+  })
+
+  it('selects the shortest path for each affected team', () => {
+    const paths = [
+      'log4j-core -> team-a-comp -> long-lib -> Vulnerable Project',
+      'log4j-core -> team-a-comp -> Vulnerable Project',
+      'log4j-core -> team-b-comp -> other-lib -> Vulnerable Project',
+    ]
+    const teamMappedNames = new Map<string, string[]>([
+      ['team-a-comp', ['TEAM-A']],
+      ['team-b-comp', ['TEAM-B']],
+    ])
+
+    const wrapper = mount(DependencyPathList, {
+      props: { paths, teamMappedNames },
+    })
+
+    const source = getGraphSource(wrapper)
+    const labels = getGraphLabels(wrapper)
+    expect(source).not.toContain('long-lib')
+    expect(source).toContain('team-a-comp')
+    expect(source).toContain('team-b-comp')
+    expect(source).toContain('other-lib')
+    expect(labels).toContain('team-a-comp | TEAM-A | PRIMARY')
+  })
+
+  it('shows only the representative path for the closest affected team', () => {
+    const paths = [
+      'log4j-core -> team-a-comp -> RootProject',
+      'log4j-core -> team-b-comp -> team-a-comp -> RootProject',
+    ]
+    const teamMappedNames = new Map<string, string[]>([
+      ['team-a-comp', ['TEAM-A']],
+      ['team-b-comp', ['TEAM-B']],
+    ])
+
+    const wrapper = mount(DependencyPathList, {
+      props: { paths, teamMappedNames },
+    })
+
+    const source = getGraphSource(wrapper)
+    const labels = getGraphLabels(wrapper)
+    expect(source).toBe('log4j-core -> team-b-comp -> team-a-comp -> RootProject')
+    expect(labels).toContain('team-b-comp | TEAM-B | PRIMARY')
+    expect(labels).toContain('team-a-comp | TEAM-A')
+    expect(labels).not.toContain('team-a-comp | TEAM-A | PRIMARY')
+  })
+
+  it('does not treat deeper mapped components on the same path as additional relevant labels', () => {
+    const paths = ['log4j-core -> team-b-comp -> team-a-comp -> RootProject']
+    const teamMappedNames = new Map<string, string[]>([
+      ['team-a-comp', ['TEAM-A']],
+      ['team-b-comp', ['TEAM-B']],
+    ])
+
+    const wrapper = mount(DependencyPathList, {
+      props: { paths, teamMappedNames },
+    })
+
+    const labels = getGraphLabels(wrapper)
+    expect(labels).toContain('team-b-comp | TEAM-B | PRIMARY')
+    expect(labels).toContain('team-a-comp | TEAM-A')
+    expect(labels).not.toContain('team-a-comp | TEAM-A | PRIMARY')
   })
 
   it('matches team mapping keys case-insensitively', () => {
@@ -55,18 +133,62 @@ describe('DependencyPathList', () => {
       props: { paths, teamMappedNames },
     })
 
-    expect(wrapper.text()).toContain('TEAM-A')
+    expect(getGraphLabels(wrapper)).toContain('Team-A-Comp | TEAM-A | PRIMARY')
   })
 
   it('collapses consecutive duplicate nodes', () => {
     const paths = ['VulnComp -> VulnComp -> Intermediate -> Root']
     const wrapper = mount(DependencyPathList, { props: { paths } })
 
-    const text = wrapper.text()
-    // Root 'VulnComp' is not rendered; consecutive dup removed
-    expect(text).not.toContain('VulnComp')
-    expect(text).toContain('Intermediate')
-    expect(text).toContain('Root')
+    const source = getGraphSource(wrapper)
+    expect(source).toContain('VulnComp -> Intermediate -> Root')
+  })
+
+  it('replaces non-team intermediate dependencies with an ellipsis bubble', () => {
+    const paths = ['source-lib -> hidden-a -> hidden-b -> hidden-c -> hidden-d -> root-app']
+    const wrapper = mount(DependencyPathList, { props: { paths } })
+
+    expect(getGraphSource(wrapper)).toContain('source-lib -> hidden-a -> ... -> hidden-d -> root-app')
+    expect(getGraphLabels(wrapper)).toContain('...')
+  })
+
+  it('renders a preview bubble for the collapsed ellipsis on hover', async () => {
+    const paths = ['source-lib -> hidden-a -> hidden-b -> hidden-c -> hidden-d -> root-app']
+    const wrapper = mount(DependencyPathList, { props: { paths } })
+
+    await nextTick(); await wrapper.get('[data-testid="gap-node"]').trigger('mouseenter', { clientX: 120, clientY: 80 })
+
+    const preview = wrapper.get('[data-testid="gap-preview"]')
+    expect(preview.text()).toContain('Collapsed dependency chain')
+    expect(preview.text()).toContain('hidden-a')
+    expect(preview.text()).toContain('hidden-b')
+    expect(preview.text()).toContain('hidden-c')
+    expect(preview.text()).toContain('hidden-d')
+  })
+
+  it('includes existing team tags in the collapsed ellipsis preview', async () => {
+    const paths = ['source-lib -> hidden-a -> hidden-b -> hidden-c -> hidden-d -> root-app']
+    const teamMappedNames = new Map<string, string[]>([
+      ['hidden-b', ['TEAM-B']],
+      ['hidden-c', ['TEAM-C']],
+    ])
+    const wrapper = mount(DependencyPathList, { props: { paths, teamMappedNames } })
+
+    await nextTick(); await wrapper.get('[data-testid="gap-node"]').trigger('mouseenter', { clientX: 120, clientY: 80 })
+
+    const preview = wrapper.get('[data-testid="gap-preview"]')
+    expect(preview.text()).toContain('hidden-b')
+    expect(preview.text()).toContain('TEAM-B')
+    expect(preview.text()).toContain('hidden-c')
+    expect(preview.text()).toContain('TEAM-C')
+  })
+
+  it('keeps short paths fully expanded when they fit within five bubbles', () => {
+    const paths = ['source-lib -> dep-a -> dep-b -> dep-c -> root-app']
+    const wrapper = mount(DependencyPathList, { props: { paths } })
+
+    expect(getGraphSource(wrapper)).toBe('source-lib -> dep-a -> dep-b -> dep-c -> root-app')
+    expect(getGraphLabels(wrapper)).not.toContain('...')
   })
 
   it('shows empty state when no paths exist', () => {
