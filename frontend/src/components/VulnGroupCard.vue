@@ -5,8 +5,9 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/ap
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, tagToString, STATE_PRIORITY, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, STATE_PRIORITY, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
 import { calculateScoreFromVector } from '../lib/cvss'
+import { getClosestAffectedTeamsForInstance, getClosestAffectedTeamsForInstances, getDerivedGroupTags, normalizeLegacyTags, getPrimaryTeamForComponent, getFirstMappedTeamOnPath, getPathParts, selectRepresentativePaths } from '../lib/dependency-team-selection'
 import { compareVersions, sortVersions } from '../lib/version'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssCalculatorV2 from './CvssCalculatorV2.vue'
@@ -232,18 +233,38 @@ const allInstances = computed(() => {
     return props.group.affected_versions?.flatMap(v => v.components) || []
 })
 
+const getInstanceTeamKey = (inst: any, index: number) => {
+    return inst.finding_uuid || `${inst.project_uuid || ''}:${inst.component_uuid || ''}:${index}`
+}
+
+const instanceTeams = computed(() => {
+    const map = new Map<string, string[]>()
+    allInstances.value.forEach((inst, index) => {
+        map.set(getInstanceTeamKey(inst, index), getClosestAffectedTeamsForInstance(inst as any, teamMapping?.value || {}))
+    })
+    return map
+})
+
+const effectiveTags = computed(() => {
+    const derived = getClosestAffectedTeamsForInstances(allInstances.value as any, teamMapping?.value || {})
+    if (derived.length > 0) return derived
+    return normalizeLegacyTags(props.group.tags, teamMapping?.value)
+})
+
 const totalTargeted = computed(() => {
     // When a team is selected, automatically target only that team's instances
     // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
     if (selectedTeam.value) {
-        const matched = allInstances.value.filter(inst => inst.tags && inst.tags.includes(selectedTeam.value)).length
+        const matched = allInstances.value.filter((inst, index) => {
+            return (instanceTeams.value.get(getInstanceTeamKey(inst, index)) || []).includes(selectedTeam.value)
+        }).length
         return matched > 0 ? matched : allInstances.value.length
     }
     return allInstances.value.length
 })
 
 const displayState = computed(() => {
-    return getGroupLifecycle(props.group, normalizedTags.value, teamMapping?.value)
+    return getGroupLifecycle(props.group, effectiveTags.value, teamMapping?.value)
 })
 
 const technicalState = computed(() => {
@@ -608,7 +629,10 @@ const canEditBase = computed(() => {
     // If a rescore rule matches the current state, we don't allow manual editing
     // unless the user explicitly cleared/reset it.
     const rules = rescoreRules?.value?.transitions || []
-    const hasRuleMatch = rules.some((r: any) => r.trigger.state === state.value)
+    const hasRuleMatch = rules.some((r: any) => {
+        const triggerState = r?.trigger?.state ?? r?.from
+        return triggerState === state.value
+    })
     
     if (hasRuleMatch && !isManualBaseMode.value) return false
     
@@ -1106,7 +1130,10 @@ watch(expanded, (isOpen) => {
  */
 const applyStateRescore = (targetState: string) => {
     const rules = rescoreRules?.value?.transitions || []
-    const triggerMatch = rules.find((r: any) => r.trigger.state === targetState)
+    const triggerMatch = rules.find((r: any) => {
+        const triggerState = r?.trigger?.state ?? r?.from
+        return triggerState === targetState
+    })
 
     if (!triggerMatch) return
 
@@ -1279,6 +1306,18 @@ const refreshDetails = async () => {
 
 
 const handleUpdate = async (force: boolean = false, isApprove: boolean = false) => {
+    let instances = allInstances.value
+    
+    // When a team is selected, automatically filter to only that team's instances
+    // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
+    if (selectedTeam.value) {
+        const team = selectedTeam.value
+        const matched = instances.filter((inst, index) => {
+            return (instanceTeams.value.get(getInstanceTeamKey(inst, index)) || []).includes(team)
+        })
+        if (matched.length > 0) instances = matched
+    }
+
     if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
         console.log('[Persistence Debug] handleUpdate started', {
             force,
@@ -1541,6 +1580,29 @@ const handleUseServerState = () => {
     showConflictModal.value = false
 }
 
+const buildUpdatedGroup = (): GroupedVuln => {
+    const affectedVersions = props.group.affected_versions.map(version => ({
+        ...version,
+        components: version.components.map(component => ({ ...component })),
+    }))
+
+    const derivedTags = getDerivedGroupTags(
+        affectedVersions.flatMap(version => version.components),
+        teamMapping?.value || {},
+    )
+
+    return {
+        ...props.group,
+        affected_versions: affectedVersions,
+        tags: derivedTags,
+    }
+}
+
+const handleMappingUpdated = async () => {
+    await refreshDetails()
+    emit('update', buildUpdatedGroup())
+}
+
 const originalSeverity = computed(() => {
     const base = props.group.cvss ?? props.group.cvss_score
     if (base != null && !isNaN(Number(base))) return scoreSeverity(Number(base))
@@ -1701,40 +1763,82 @@ const uniqueComponents = computed(() => {
     }))
 })
 
-const normalizedTags = computed(() => {
-    // Derive tags from actual component instances rather than the backend-
-    // aggregated group.tags.  This ensures a team tag only appears on the card
-    // when at least one displayed instance carries it.
-    const instanceTags = new Set<string>()
-    for (const inst of allInstances.value) {
-        if (inst.tags) {
-            for (const t of inst.tags) {
-                const s = tagToString(t)
-                if (s) instanceTags.add(s)
-            }
+const normalizeComponentName = (value: string) => {
+    return value?.trim().toLowerCase() || ''
+}
+
+const findMappingValue = (componentName: string) => {
+    const lookup = normalizeComponentName(componentName)
+    if (!lookup || !teamMapping?.value) return undefined
+    for (const [key, value] of Object.entries(teamMapping.value)) {
+        if (normalizeComponentName(key) === lookup) {
+            return value
         }
     }
-    if (instanceTags.size === 0) return []
-    if (!teamMapping?.value) return Array.from(instanceTags)
+    return undefined
+}
 
-    const result = new Set<string>()
-    instanceTags.forEach(tag => {
-        let foundPrimary = tag
-        for (const componentName in teamMapping.value) {
-            const mappingVal = teamMapping.value[componentName]
-            if (Array.isArray(mappingVal) && mappingVal.length > 1) {
-                const primary = mappingVal[0]
-                const aliases = mappingVal.slice(1)
-                if (aliases.includes(tag)) {
-                    foundPrimary = primary
-                    break
-                }
+const affectedTaggedComponents = computed(() => {
+    const map = new Map<string, { versions: Set<string>; tag: string }>()
+    for (const version of props.group.affected_versions || []) {
+        for (const component of version.components || []) {
+            const name = component.component_name || 'Unknown'
+            const mappingVal = findMappingValue(name)
+            if (!mappingVal) continue
+            const tag = Array.isArray(mappingVal) ? mappingVal[0] : mappingVal
+            if (!tag) continue
+            if (!map.has(name)) {
+                map.set(name, { versions: new Set(), tag })
             }
+            const entry = map.get(name)!
+            if (component.component_version) entry.versions.add(component.component_version)
         }
-        result.add(foundPrimary)
-    })
-    return Array.from(result)
+    }
+    return Array.from(map.entries())
+        .map(([name, data]) => ({
+            name,
+            versions: Array.from(data.versions).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+            tag: data.tag,
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }))
 })
+
+const triggeringTaggedComponents = computed(() => {
+    const map = new Map<string, { versions: Set<string>; tag: string }>()
+    const paths = allInstances.value.flatMap(inst => inst.dependency_chains || [])
+    const selectedPaths = selectRepresentativePaths(paths, teamMapping?.value, 100)
+
+    for (const selectedPath of selectedPaths) {
+        const parts = getPathParts(selectedPath)
+        const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping?.value)
+        if (!firstMapped) continue
+        const triggerName = firstMapped.component || 'Unknown'
+        if (!map.has(triggerName)) {
+            map.set(triggerName, { versions: new Set(), tag: firstMapped.team })
+        }
+    }
+
+    for (const inst of allInstances.value) {
+        const name = inst.component_name || 'Unknown'
+        const directTag = getPrimaryTeamForComponent(name, teamMapping?.value)
+        if (!directTag) continue
+        if (!map.has(name)) {
+            map.set(name, { versions: new Set(), tag: directTag })
+        }
+        const entry = map.get(name)!
+        if (inst.component_version) entry.versions.add(inst.component_version)
+    }
+
+    return Array.from(map.entries())
+        .map(([name, data]) => ({
+            name,
+            versions: Array.from(data.versions).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+            tag: data.tag,
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }))
+})
+
+const normalizedTags = computed(() => effectiveTags.value)
 
 
 const assessedTeams = computed(() => {
@@ -2025,6 +2129,36 @@ void _vueTemplateUsed
                     <h4 v-else class="font-semibold mb-2 text-gray-300">Description</h4>
                     <p class="text-sm text-gray-400 mb-4 leading-relaxed">{{ group.description || 'No description available.' }}</p>
 
+                    <div v-if="triggeringTaggedComponents.length > 0" class="mb-4">
+                        <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">Triggering team-mapped components</h4>
+                        <div class="flex flex-wrap gap-1.5">
+                            <span
+                                v-for="comp in triggeringTaggedComponents"
+                                :key="comp.name"
+                                class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 border border-gray-700"
+                            >
+                                {{ comp.name }}
+                                <span v-if="comp.versions.length" class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
+                                <span class="ml-2 text-[10px] font-normal text-blue-300">({{ comp.tag }})</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <div v-if="affectedTaggedComponents.length > 0" class="mb-4">
+                        <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">Affected components with team tags</h4>
+                        <div class="flex flex-wrap gap-1.5">
+                            <span
+                                v-for="comp in affectedTaggedComponents"
+                                :key="comp.name"
+                                class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-gray-800 text-gray-300 border border-gray-700"
+                            >
+                                {{ comp.name }}
+                                <span v-if="comp.versions.length" class="text-gray-500">@{{ comp.versions.join(', ') }}</span>
+                                <span class="ml-2 text-[10px] font-normal text-blue-300">({{ comp.tag }})</span>
+                            </span>
+                        </div>
+                    </div>
+
                     <!-- Affected Components Summary (Reviewers only) -->
                     <div v-if="isReviewer && uniqueComponents.length > 0" class="mb-4">
                         <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">Affected Components</h4>
@@ -2049,6 +2183,7 @@ void _vueTemplateUsed
                              :isReviewer="isReviewer"
                              @apply-all="handleApplyAllAssessment"
                              @adopt-team="handleAdoptTeamBlock"
+                             @mapping-updated="handleMappingUpdated"
                          />
                      </div>
                  </div>

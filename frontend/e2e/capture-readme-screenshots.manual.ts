@@ -180,8 +180,8 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
             contentType: 'application/json',
             body: JSON.stringify({
                 transitions: [
-                    { from: 'IN_TRIAGE', to: 'RESOLVED', requiresJustification: true },
-                    { from: 'EXPLOITABLE', to: 'NOT_AFFECTED', requiresJustification: true },
+                    { trigger: { state: 'IN_TRIAGE' }, to: 'RESOLVED', requiresJustification: true },
+                    { trigger: { state: 'EXPLOITABLE' }, to: 'NOT_AFFECTED', requiresJustification: true },
                 ],
             }),
         })
@@ -195,6 +195,14 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
         })
     })
 
+    await page.route('**/api/projects/*/tmrescore/proposals', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ proposals: {} }),
+        })
+    })
+
     await page.route('**/api/statistics*', async (route) => {
         await route.fulfill({
             status: 200,
@@ -203,7 +211,7 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
         })
     })
 
-    await page.route('**/api/tasks/group-vulns*', async (route) => {
+    await page.route('**/api/tasks/group-vulns**', async (route) => {
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -212,8 +220,9 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
     })
 
     let taskPollCount = 0
-    await page.route('**/api/tasks/task-docs', async (route) => {
+    await page.route('**/api/tasks/task-docs**', async (route) => {
         taskPollCount += 1
+        console.log('mock route: task-docs attempt', taskPollCount, route.request().method(), route.request().url())
         if (taskPollCount === 1) {
             await route.fulfill({
                 status: 200,
@@ -627,7 +636,7 @@ test.describe('Capture README screenshots', () => {
         await page.goto('/project/TestProject')
         await page.waitForLoadState('networkidle')
 
-        const card = page.locator('.vuln-card').filter({ hasText: /CVE-2024-9999/ }).first()
+        const card = page.locator('.vuln-card[data-group-id="CVE-2024-9999"]')
         await expect(card).toBeVisible({ timeout: 20000 })
         const cardBox = await card.boundingBox()
         if (!cardBox) throw new Error('Expected vulnerability card bounding box')
@@ -643,10 +652,12 @@ test.describe('Capture README screenshots', () => {
 
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/project-view.png')
 
-        const morePathsButton = page.getByRole('button', { name: /^\+1 more$/ }).first()
-        await expect(morePathsButton).toBeVisible({ timeout: 10000 })
-        await morePathsButton.click()
-        await expect(page.getByText('gateway-facade').first()).toBeVisible({ timeout: 10000 })
+        const morePathsButton = page.locator('button').filter({ hasText: /^\+\d+ more$/ }).first()
+        if (await morePathsButton.count() > 0) {
+            await expect(morePathsButton).toBeVisible({ timeout: 10000 })
+            await morePathsButton.click()
+            await expect(page.getByText('gateway-facade').first()).toBeVisible({ timeout: 10000 })
+        }
 
         await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/project-view-dependencies.png')
@@ -876,69 +887,52 @@ test.describe('Capture README screenshots', () => {
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
         await page.waitForTimeout(500)
 
-        // Trigger the actual conflict modal via the Vue component state
-        await page.evaluate(() => {
-            const el = document.querySelector('[data-v-app]') || document.getElementById('app')
-            if (!el || !(el as any).__vue_app__) return
+        // Expand the inconsistent card and force a conflict via the API response.
+        const card = page.locator('.vuln-card').filter({ hasText: /CVE-2024-5003/ }).first()
+        await expect(card).toBeVisible({ timeout: 20000 })
+        const cardBox = await card.boundingBox()
+        if (!cardBox) throw new Error('Expected card bounding box')
+        await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
+        await page.waitForTimeout(1000)
 
-            // Deep DFS through the full Vue VDOM tree to find a VulnGroupCard instance.
-            // VulnGroupCard lives inside a v-for list so we need to walk dynamic children.
-            const walk = (vnode: any): any => {
-                if (!vnode) return null
-                // Check this component instance
-                if (vnode.component?.proxy?.showConflictModal !== undefined) {
-                    return vnode.component.proxy
-                }
-                // Recurse into component's rendered subtree
-                if (vnode.component?.subTree) {
-                    const found = walk(vnode.component.subTree)
-                    if (found) return found
-                }
-                // Recurse into vnode children (arrays from v-for, fragments, etc.)
-                if (Array.isArray(vnode.children)) {
-                    for (const child of vnode.children) {
-                        const found = walk(child)
-                        if (found) return found
-                    }
-                }
-                // Recurse into dynamic children (e.g. v-for key'd nodes)
-                if (vnode.dynamicChildren) {
-                    for (const child of vnode.dynamicChildren) {
-                        const found = walk(child)
-                        if (found) return found
-                    }
-                }
-                return null
-            }
-
-            const root = (el as any).__vue_app__._instance
-            const proxy = walk(root.subTree)
-            if (proxy) {
-                proxy.conflictData = [
-                    {
-                        finding_uuid: 'test-finding',
-                        project_name: 'TestProject',
-                        project_version: '2.0.0',
-                        component_name: 'api-gateway',
-                        component_version: '1.0.0',
-                        current: {
-                            analysisState: 'NOT_AFFECTED',
-                            isSuppressed: false,
-                            analysisDetails: '--- [Team: EdgeTeam] [State: NOT_AFFECTED] [Assessed By: release_manager] [Date: 1713500000000] ---\nApproved by release manager after review.'
+        await page.route('**/api/assessment', async (route) => {
+            await route.fulfill({
+                status: 409,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    conflicts: [
+                        {
+                            finding_uuid: 'test-finding',
+                            project_name: 'TestProject',
+                            project_version: '2.0.0',
+                            component_name: 'api-gateway',
+                            component_version: '1.0.0',
+                            current: {
+                                analysisState: 'NOT_AFFECTED',
+                                isSuppressed: false,
+                                analysisDetails: '--- [Team: EdgeTeam] [State: NOT_AFFECTED] [Assessed By: release_manager] [Date: 1713500000000] ---\nApproved by release manager after review.',
+                            },
+                            your_change: {
+                                analysisState: 'FALSE_POSITIVE',
+                                isSuppressed: false,
+                                analysisDetails: '--- [Team: EdgeTeam] [State: FALSE_POSITIVE] [Assessed By: analyst] [Date: 1713400000000] ---\nMarked as false positive — feature flag disabled.',
+                            },
                         },
-                        your_change: {
-                            analysisState: 'FALSE_POSITIVE',
-                            isSuppressed: false,
-                            analysisDetails: '--- [Team: EdgeTeam] [State: FALSE_POSITIVE] [Assessed By: analyst] [Date: 1713400000000] ---\nMarked as false positive — feature flag disabled.'
-                        }
-                    }
-                ]
-                proxy.showConflictModal = true
-            }
+                    ],
+                }),
+            })
         })
 
+        const applyButton = card.getByRole('button', { name: /^Apply$/ }).nth(1)
+        await expect(applyButton).toBeVisible({ timeout: 10000 })
+        await applyButton.click()
+
+        const submitButton = page.getByRole('button', { name: 'Submit' }).first()
+        await expect(submitButton).toBeVisible({ timeout: 10000 })
+        await submitButton.click()
+
         const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Conflict Detected' }).first()
-        await expect(modal).toBeVisible({ timeout: 5000 })
+        await expect(modal).toBeVisible({ timeout: 10000 })
         await captureWithPadding(modal, '../docs/screenshots/conflict-resolution.png')
     })
 })

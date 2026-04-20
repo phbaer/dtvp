@@ -1,10 +1,9 @@
 {
+  "*": "Unassigned",
   "internal-lib-b": "InventoryTeam",
   "internal-lib-c": "PaymentTeam",
-  "VPEventServer": [
-    "Bla-Team",
-    "Old-Bla-Team"
-  ],
+  "team-a-comp": "TeamA",
+  "team-b-comp": "TeamB",
   "team-test-lib": [
     "New-Label",
     "Old-Label",
@@ -12,7 +11,10 @@
     "even older label",
     "unbelievably old label"
   ],
-  "team-a-comp": "TeamA",
-  "team-b-comp": "TeamB",
-  "*": "Unassigned"
+  "VPEventServer": [
+    "Bla-Team",
+    "Old-Bla-Team"
+  ],
+  "left-runtime-lib": "bla",
+  "left-runtime-deep-lib": "deep"
 }
