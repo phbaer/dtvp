@@ -60,7 +60,7 @@ const goToThreatModel = () => {
             </div>
 
             <button
-                v-if="!isAllProjects"
+                v-if="!isAllProjects && userRole === 'REVIEWER'"
                 type="button"
                 @click="goToThreatModel"
                 class="inline-flex h-9 min-h-9 items-center justify-center leading-none px-4 rounded-full text-[11px] font-semibold uppercase tracking-widest transition-all border border-white/10 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"

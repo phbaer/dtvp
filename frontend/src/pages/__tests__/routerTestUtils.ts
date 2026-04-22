@@ -1,4 +1,5 @@
 import { mount, flushPromises, type MountingOptions, type VueWrapper } from '@vue/test-utils'
+import { ref } from 'vue'
 import { createMemoryHistory, createRouter, type RouteRecordRaw } from 'vue-router'
 
 export async function mountWithRouter<T>(
@@ -20,11 +21,16 @@ export async function mountWithRouter<T>(
     await router.isReady()
 
     const global = mountOptions.global ?? {}
+    const existingProvide = (global.provide as Record<string, unknown>) ?? {}
     const wrapper = mount(component as any, {
         ...mountOptions,
         global: {
             ...global,
             plugins: [...(global.plugins ?? []), router],
+            provide: {
+                realRole: ref('REVIEWER'),
+                ...existingProvide,
+            },
         },
     })
 

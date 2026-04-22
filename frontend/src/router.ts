@@ -14,7 +14,7 @@ const routes = [
     { path: '/', component: Dashboard },
     { path: '/settings', component: Settings, meta: { role: 'REVIEWER' } },
     { path: '/project/:name', component: ProjectView },
-    { path: '/project/:name/tmrescore', component: TMRescore },
+    { path: '/project/:name/tmrescore', component: TMRescore, meta: { role: 'REVIEWER' } },
     { path: '/statistics', component: Statistics },
 ]
 

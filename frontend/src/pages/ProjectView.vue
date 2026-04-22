@@ -74,6 +74,7 @@ onUnmounted(() => {
     if (cacheStatusRefreshTimer.value !== null) {
         window.clearInterval(cacheStatusRefreshTimer.value)
     }
+    cancelBackgroundLoad()
 })
 
 const fetchRescoreRules = async () => {
@@ -867,6 +868,130 @@ const filteredGroups = computed(() => {
     return result
 })
 
+type TimerHandle = number | ReturnType<typeof setTimeout>
+const LOAD_BATCH_SIZE = 20
+const visibleGroupCount = ref(LOAD_BATCH_SIZE)
+const loadMoreTrigger = ref<HTMLElement | null>(null)
+const loadMoreObserver = ref<IntersectionObserver | null>(null)
+const backgroundLoadHandle = ref<TimerHandle | null>(null)
+
+const visibleGroups = computed(() => {
+    return filteredGroups.value.slice(0, visibleGroupCount.value)
+})
+
+const hasMoreGroups = computed(() => {
+    return visibleGroupCount.value < filteredGroups.value.length
+})
+
+const loadMoreGroups = () => {
+    if (visibleGroupCount.value >= filteredGroups.value.length) return
+    visibleGroupCount.value = Math.min(
+        filteredGroups.value.length,
+        visibleGroupCount.value + LOAD_BATCH_SIZE,
+    )
+    if (hasMoreGroups.value) {
+        scheduleBackgroundLoad()
+    }
+}
+
+const resetVisibleGroups = () => {
+    visibleGroupCount.value = LOAD_BATCH_SIZE
+    scheduleBackgroundLoad()
+}
+
+const scheduleBackgroundLoad = () => {
+    if (backgroundLoadHandle.value !== null || !hasMoreGroups.value) return
+
+    const callback = () => {
+        backgroundLoadHandle.value = null
+        if (!hasMoreGroups.value) return
+
+        loadMoreGroups()
+    }
+
+    const globalWindow = typeof window !== 'undefined' ? (window as unknown as {
+        requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number
+        cancelIdleCallback?: (handle: number) => void
+        setTimeout: (cb: () => void, delay?: number) => number
+        clearTimeout: (handle: number) => void
+    }) : undefined
+
+    if (globalWindow?.requestIdleCallback) {
+        backgroundLoadHandle.value = globalWindow.requestIdleCallback(callback, { timeout: 1000 })
+    } else if (globalWindow) {
+        backgroundLoadHandle.value = globalWindow.setTimeout(callback, 250)
+    } else {
+        backgroundLoadHandle.value = setTimeout(callback, 250)
+    }
+}
+
+const cancelBackgroundLoad = () => {
+    if (backgroundLoadHandle.value === null) return
+
+    const globalWindow = typeof window !== 'undefined' ? (window as unknown as {
+        cancelIdleCallback?: (handle: number) => void
+        clearTimeout: (handle: number) => void
+    }) : undefined
+
+    if (globalWindow?.cancelIdleCallback) {
+        globalWindow.cancelIdleCallback(backgroundLoadHandle.value as any)
+    } else if (globalWindow) {
+        globalWindow.clearTimeout(backgroundLoadHandle.value as any)
+    } else {
+        clearTimeout(backgroundLoadHandle.value as any)
+    }
+    backgroundLoadHandle.value = null
+}
+
+const attachLoadMoreObserver = () => {
+    if (loadMoreObserver.value) {
+        loadMoreObserver.value.disconnect()
+        loadMoreObserver.value = null
+    }
+
+    if (!loadMoreTrigger.value) return
+
+    loadMoreObserver.value = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (entry.isIntersecting && hasMoreGroups.value) {
+                loadMoreGroups()
+            }
+        }
+    }, {
+        rootMargin: '400px',
+    })
+
+    loadMoreObserver.value.observe(loadMoreTrigger.value)
+}
+
+const disconnectLoadMoreObserver = () => {
+    if (loadMoreObserver.value) {
+        loadMoreObserver.value.disconnect()
+        loadMoreObserver.value = null
+    }
+}
+
+watch([
+    () => filteredGroups.value.length,
+    () => viewMode.value,
+], ([, mode]) => {
+    if (mode === 'analysis') {
+        resetVisibleGroups()
+        nextTick(() => {
+            attachLoadMoreObserver()
+        })
+    } else {
+        disconnectLoadMoreObserver()
+        cancelBackgroundLoad()
+    }
+}, { immediate: true })
+
+watch(() => filteredGroups.value, () => {
+    if (visibleGroupCount.value > filteredGroups.value.length) {
+        visibleGroupCount.value = Math.min(filteredGroups.value.length, LOAD_BATCH_SIZE)
+    }
+    scheduleBackgroundLoad()
+})
 
 const filterCounts = computed(() => {
     return computeFilterCounts(groups.value, teamMapping.value, lifecycleFilters.value)
@@ -1054,7 +1179,7 @@ watch(() => user?.role, (role) => {
                 <div class="p-3 space-y-3">
                     <div v-if="viewMode === 'analysis'" class="space-y-3">
                         <VulnGroupCard
-                            v-for="group in filteredGroups"
+                            v-for="group in visibleGroups"
                             :key="group.id"
                             :group="group"
                             :data-group-id="group.id"
@@ -1063,6 +1188,9 @@ watch(() => user?.role, (role) => {
                             @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
                         />
                         <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
+                        <div v-if="hasMoreGroups && filteredGroups.length > 0" ref="loadMoreTrigger" class="text-center py-6 text-sm text-gray-400">
+                            Loading more vulnerabilities…
+                        </div>
                     </div>
                     <div v-else class="space-y-4">
                         <div v-if="statsLoading" class="text-center py-16">

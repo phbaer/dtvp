@@ -625,6 +625,27 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
         if (distinctBlockStates.length > 1) {
             return 'INCONSISTENT';
         }
+
+        const normalizeBlockSignature = (block: AssessmentBlock) => JSON.stringify({
+            team: block.team,
+            state: block.state,
+            justification: block.justification,
+            details: block.details.replace(/\s+/g, ' ').trim()
+        });
+
+        const hasInconsistentInstanceBlocks = allInstances.some(inst => {
+            const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
+            const instanceBlocks = parseAssessmentBlocks(details);
+            const significantBlocks = instanceBlocks
+                .filter(b => b.state !== 'NOT_SET' && b.team !== 'General');
+            if (significantBlocks.length <= 1) return false;
+            const distinctSignatures = Array.from(new Set(significantBlocks.map(normalizeBlockSignature)));
+            return distinctSignatures.length > 1;
+        });
+
+        if (hasInconsistentInstanceBlocks) {
+            return 'INCONSISTENT';
+        }
     }
 
     // Check if analysis_details content differs across versions/components.
