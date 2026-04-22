@@ -118,6 +118,25 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
         });
 
+        it('should return INCONSISTENT when multiple structured assessment blocks exist within the same component details', () => {
+            const group: any = {
+                id: 'CVE-MULTI-BLOCK',
+                tags: ['team-a', 'team-b'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                analysis_state: 'NOT_AFFECTED',
+                                analysis_details: `--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] ---\nFirst analysis\n--- [Team: team-b] [State: NOT_AFFECTED] [Assessed By: bob] ---\nSecond analysis`
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
+        });
+
         it('should use the same team assessment check for open team assessment and chip state', () => {
             const group: any = {
                 id: 'CVE-OPEN-TEAM',

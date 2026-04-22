@@ -27,11 +27,15 @@ const metadataUrl = `${apiBase}/metadata`
 const showChangelog = ref(false)
 const changelogContent = ref('')
 
+const effectiveRole = computed(() =>
+    isAnalystView.value ? 'ANALYST' : realRole.value
+)
+
 provide('user', computed(() => ({
     ...user.value,
-    role: isAnalystView.value ? 'ANALYST' : user.value.role
+    role: effectiveRole.value
 })))
-provide('realRole', realRole)
+provide('realRole', effectiveRole)
 
 onMounted(async () => {
     try {

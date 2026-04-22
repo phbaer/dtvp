@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, inject, ref, watch } from 'vue'
 import { getProjects } from '../lib/api'
 import { getRuntimeConfig } from '../lib/env'
 import type { Project } from '../types'
@@ -7,6 +7,7 @@ import { Search } from 'lucide-vue-next'
 
 const query = ref(getRuntimeConfig('DTVP_DEFAULT_PROJECT_FILTER', '')) // Kept for client-side filtering
 const cveFilter = ref('') // Optional global CVE filter
+const realRole = inject<any>('realRole', ref('ANALYST'))
 const allProjects = ref<Project[]>([])
 const loading = ref(false)
 
@@ -87,30 +88,36 @@ const groupedProjects = computed(() => {
   <div class="w-full px-6 sm:px-8">
     <div class="flex flex-col gap-6 md:justify-between md:items-start mb-8">
         <h2 class="text-3xl font-bold pb-4 mt-4">Projects</h2>
-        <div class="sticky top-20 z-30 bg-gray-900/95 backdrop-blur-xl border-b border-gray-800 pb-4 pt-4 sm:pt-6 -mx-6 sm:-mx-8 px-6 sm:px-8">
-            <div class="flex flex-col gap-4 sm:flex-row sm:justify-end sm:items-center">
-            <div class="relative w-64">
-                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Search :size="20" class="text-gray-500" />
-                </span>
-                <input 
-                    type="text" 
-                    v-model="query"
-                    placeholder="Filter projects..."
-                    class="w-full pl-10 p-2 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none"
-                />
-            </div>
-            <div class="relative w-64">
-                <span class="absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Search :size="20" class="text-gray-500" />
-                </span>
-                <input 
-                    type="text" 
-                    v-model="cveFilter"
-                    placeholder="Global CVE filter..."
-                    class="w-full pl-10 p-2 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none"
-                />
-            </div>
+        <div class="sticky top-20 z-30 pb-4 pt-4 sm:pt-6 -mx-6 sm:-mx-8 px-6 sm:px-8">
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-2">
+                <div class="flex flex-col gap-2 w-full max-w-sm">
+                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Project filter</label>
+                    <div class="relative w-full">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                            <Search :size="20" class="text-gray-500" />
+                        </span>
+                        <input 
+                            type="text" 
+                            v-model="query"
+                            placeholder="Filter projects..."
+                            class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full pl-10"
+                        />
+                    </div>
+                </div>
+                <div class="flex flex-col gap-2 w-full max-w-sm">
+                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">CVE filter</label>
+                    <div class="relative w-full">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3">
+                            <Search :size="20" class="text-gray-500" />
+                        </span>
+                        <input 
+                            type="text" 
+                            v-model="cveFilter"
+                            placeholder="Global CVE filter..."
+                            class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full pl-10"
+                        />
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -135,6 +142,7 @@ const groupedProjects = computed(() => {
                             {{ p.name }}
                         </router-link>
                         <router-link
+                            v-if="realRole === 'REVIEWER'"
                             :to="`/project/${p.name}/tmrescore`"
                             class="shrink-0 rounded-lg border border-blue-500/30 bg-blue-600/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-200 transition-colors hover:bg-blue-600/20"
                         >

@@ -40,6 +40,7 @@ const handleCloseOnEscape = (e: KeyboardEvent) => {
 
 onMounted(() => {
     window.addEventListener('keydown', handleCloseOnEscape)
+    window.addEventListener('resize', handleViewportResize)
     nextTick(() => {
         if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
     })
@@ -48,6 +49,13 @@ onMounted(() => {
 
 onUnmounted(() => {
     window.removeEventListener('keydown', handleCloseOnEscape)
+    window.removeEventListener('resize', handleViewportResize)
+    if (expanded.value && openCardCount > 0) {
+        openCardCount -= 1
+        if (openCardCount === 0) {
+            unlockBodyScroll()
+        }
+    }
 })
 
 const user = inject<any>('user', ref({ role: 'ANALYST' }))
@@ -78,6 +86,34 @@ const JUSTIFICATION_OPTIONS = [
     { value: 'PROTECTED_AT_PERIMETER', label: 'Protected at Perimeter', description: 'Protected by network or perimeter security controls.' },
     { value: 'PROTECTED_BY_MITIGATING_CONTROL', label: 'Protected by Mitigating Control', description: 'Protected by other mitigating controls.' },
 ]
+
+let openCardCount = 0
+let bodyScrollLockY = 0
+
+const lockBodyScroll = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+    if (openCardCount > 0) return
+
+    bodyScrollLockY = window.scrollY || window.pageYOffset || 0
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${bodyScrollLockY}px`
+    document.body.style.left = '0'
+    document.body.style.right = '0'
+    document.body.style.width = '100%'
+    document.body.style.overflow = 'hidden'
+}
+
+const unlockBodyScroll = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+    document.body.style.position = ''
+    document.body.style.top = ''
+    document.body.style.left = ''
+    document.body.style.right = ''
+    document.body.style.width = ''
+    document.body.style.overflow = ''
+    window.scrollTo(0, bodyScrollLockY)
+}
 
 const expanded = ref(false)
 const state = ref('NOT_SET')
@@ -149,6 +185,42 @@ const onAssigneeInput = () => {
 const headerEl = ref<HTMLElement | null>(null)
 const detailsEl = ref<HTMLElement | null>(null)
 const headerHeight = ref(48) // sensible default
+const detailsMaxHeight = ref('calc(100vh - 8rem)')
+
+const getStickyHeaderOffset = () => {
+    if (typeof document === 'undefined') return 0
+    const stickyHeader = document.querySelector('header.sticky.top-0') as HTMLElement | null
+    const stickyHeight = stickyHeader?.getBoundingClientRect().height ?? 0
+    return Math.max(0, Math.round(stickyHeight + 12))
+}
+
+const alignHeaderBelowStickyTop = () => {
+    if (typeof window === 'undefined' || !headerEl.value) return
+    const targetTop = Math.max(0, window.scrollY + headerEl.value.getBoundingClientRect().top - getStickyHeaderOffset())
+    window.scrollTo({ top: targetTop, behavior: 'auto' })
+}
+
+const getFixedFooterOffset = () => {
+    if (typeof document === 'undefined') return 0
+    const fixedFooter = document.querySelector('footer.fixed.bottom-0') as HTMLElement | null
+    const footerHeight = fixedFooter?.getBoundingClientRect().height ?? 0
+    // Keep a small gap above the footer overlay.
+    return Math.max(0, Math.round(footerHeight + 8))
+}
+
+const updateExpandedDetailsMaxHeight = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined' || !detailsEl.value) return
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+    const detailsTop = detailsEl.value.getBoundingClientRect().top
+    const availableHeight = Math.floor(viewportHeight - detailsTop - getFixedFooterOffset() - 8)
+    detailsMaxHeight.value = `${Math.max(220, availableHeight)}px`
+}
+
+const handleViewportResize = () => {
+    if (expanded.value) {
+        updateExpandedDetailsMaxHeight()
+    }
+}
 
 const pendingScore = ref<number | null>(null)
 const pendingVector = ref<string>('')
@@ -1107,20 +1179,35 @@ watch(() => mergedAssessmentData.value.fullText, (newText) => {
 
 watch(expanded, (isOpen) => {
     emit('toggle-expand', props.group.id, isOpen)
+
     if (isOpen) {
+        const shouldLockAfterScroll = openCardCount === 0
+        openCardCount += 1
         refreshDetails()
         nextTick(() => {
             // Measure header for badge height
             if (headerEl.value) {
                 headerHeight.value = headerEl.value.offsetHeight
             }
-            // Scroll the expanded details into view
+            // Position the card header below the sticky app header.
             nextTick(() => {
-                if (typeof detailsEl.value?.scrollIntoView === 'function') {
-                    detailsEl.value.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                alignHeaderBelowStickyTop()
+                nextTick(() => {
+                    updateExpandedDetailsMaxHeight()
+                })
+                if (shouldLockAfterScroll) {
+                    // Lock at the final aligned position so the opened card stays fully readable.
+                    lockBodyScroll()
                 }
             })
         })
+    } else {
+        if (openCardCount > 0) {
+            openCardCount -= 1
+        }
+        if (openCardCount === 0) {
+            unlockBodyScroll()
+        }
     }
 })
 /**
@@ -1950,7 +2037,7 @@ void _vueTemplateUsed
 </script>
 
 <template>
-  <div :class="['vuln-card relative border rounded-lg overflow-hidden transition-colors', cardStyle]">
+    <div :class="['vuln-card relative border rounded-lg transition-colors', expanded ? 'overflow-visible z-40' : 'overflow-hidden', cardStyle]">
     <!-- Criticality Badges — header-height only -->
     <div
         class="absolute top-0 left-0 z-20 pointer-events-none flex"
@@ -2024,7 +2111,7 @@ void _vueTemplateUsed
         />
     </div>
             <!-- Expanded Details -->
-    <div v-if="expanded" ref="detailsEl" class="pl-4 pr-4 py-4 border-t border-gray-700 max-h-[80vh] overflow-y-auto">
+    <div v-if="expanded" ref="detailsEl" class="pl-4 pr-4 py-4 border-t border-gray-700 overflow-y-auto" :style="{ maxHeight: detailsMaxHeight }">
         <!-- Top bar: External refs + Quick stats -->
         <div class="flex flex-wrap items-center gap-2 mb-3 text-[10px]">
             <a

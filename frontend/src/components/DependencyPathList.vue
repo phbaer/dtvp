@@ -67,8 +67,8 @@ const H_PADDING = 22
 const V_PADDING = 18
 const COL_GAP = 54
 const ROW_GAP = 34
-const TOOLTIP_WIDTH = 280
-const TOOLTIP_HEIGHT = 150
+const TOOLTIP_WIDTH = 360
+const TOOLTIP_HEIGHT = 190
 
 const normalizedTeamMappedNames = computed(() => {
   const map = new Map<string, string[]>()
@@ -498,7 +498,7 @@ const edgePath = (edge: GraphEdge) => {
       <div
         v-if="hoveredPreview"
         data-testid="gap-preview"
-        class="pointer-events-none absolute z-20 w-[280px] rounded-lg border border-slate-700 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-sm"
+        class="pointer-events-none absolute z-[1000] w-[360px] max-w-[min(90vw,42rem)] rounded-lg border border-slate-700 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-sm"
         :style="{ left: `${hoveredPreview.x}px`, top: `${hoveredPreview.y}px` }"
       >
         <div class="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">

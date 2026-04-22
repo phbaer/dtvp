@@ -6,7 +6,7 @@ import tempfile
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dt_client import DTClient, DTSettings
 
@@ -57,6 +57,100 @@ def _read_json(path: str, default: Any = None) -> Any:
         return default
 
 
+def _normalize_analysis_details(details: Optional[str]) -> str:
+    if not isinstance(details, str):
+        return ""
+    return details.strip()
+
+
+def _get_analysis_details(analysis: Optional[Dict[str, Any]]) -> str:
+    if not analysis:
+        return ""
+    return _normalize_analysis_details(
+        analysis.get("analysisDetails") or analysis.get("analysis_details")
+    )
+
+
+def _get_analysis_state(analysis: Optional[Dict[str, Any]]) -> str:
+    if not analysis:
+        return "NOT_SET"
+    return (
+        analysis.get("analysisState")
+        or analysis.get("analysis_state")
+        or "NOT_SET"
+    )
+
+
+def _get_analysis_suppressed(analysis: Optional[Dict[str, Any]]) -> bool:
+    if not analysis:
+        return False
+    if "isSuppressed" in analysis:
+        return bool(analysis.get("isSuppressed"))
+    return bool(analysis.get("is_suppressed", False))
+
+
+def _has_meaningful_assessment(analysis: Optional[Dict[str, Any]]) -> bool:
+    return bool(_get_analysis_details(analysis))
+
+
+def _mark_assessment_for_review(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    details = _get_analysis_details(analysis)
+    if not details:
+        return {
+            "analysisState": _get_analysis_state(analysis),
+            "analysisDetails": "",
+            "isSuppressed": _get_analysis_suppressed(analysis),
+        }
+
+    if "[Status: Pending Review]" not in details:
+        details = f"{details}\n\n[Status: Pending Review]"
+
+    return {
+        "analysisState": _get_analysis_state(analysis),
+        "analysisDetails": details,
+        "isSuppressed": _get_analysis_suppressed(analysis),
+    }
+
+
+def _component_cache_identity(component: Dict[str, Any]) -> Optional[str]:
+    purl = (component.get("purl") or "").strip().lower()
+    if purl:
+        return re.sub(r"@[^?]+", "", purl, count=1)
+
+    name = (component.get("name") or "").strip().lower()
+    if name:
+        return name
+
+    return None
+
+
+def _vulnerability_cache_identity(vulnerability: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
+    identifiers: List[str] = []
+
+    vuln_id = (vulnerability.get("vulnId") or "").strip().upper()
+    if vuln_id:
+        identifiers.append(vuln_id)
+
+    name = (vulnerability.get("name") or "").strip().upper()
+    if name and name not in identifiers:
+        identifiers.append(name)
+
+    for alias_obj in vulnerability.get("aliases", []) or []:
+        if not isinstance(alias_obj, dict):
+            continue
+        for value in alias_obj.values():
+            if not isinstance(value, str):
+                continue
+            normalized = value.strip().upper()
+            if normalized and normalized not in identifiers:
+                identifiers.append(normalized)
+
+    if not identifiers:
+        return None
+
+    return tuple(sorted(identifiers))
+
+
 class CacheManager:
     def __init__(self, base_path: str = None, refresh_interval_seconds: int = None):
         self.base_path = base_path or get_dt_cache_path()
@@ -70,6 +164,7 @@ class CacheManager:
         self.active_project_uuids: Set[str] = set()
         self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
         self.cache_meta: Dict[str, Any] = {"fully_cached": False, "last_refreshed_at": None}
+        self._memory_cache: Dict[str, Any] = {}
         self._ensure_directories()
 
     def _ensure_directories(self) -> None:
@@ -95,10 +190,13 @@ class CacheManager:
         return os.path.join(self.base_path, "projects_meta.json")
 
     def _load_projects_meta(self) -> Dict[str, Any]:
-        return _read_json(self._projects_meta_path(), {"fully_cached": False, "last_refreshed_at": None}) or {"fully_cached": False, "last_refreshed_at": None}
+        return self._load_cache_file(
+            self._projects_meta_path(),
+            {"fully_cached": False, "last_refreshed_at": None},
+        ) or {"fully_cached": False, "last_refreshed_at": None}
 
     def _save_projects_meta(self, meta: Dict[str, Any]) -> None:
-        _atomic_write(self._projects_meta_path(), meta)
+        self._save_cache_file(self._projects_meta_path(), meta, touch_meta=False)
 
     def get_cache_status(self) -> Dict[str, Any]:
         projects = self._load_project_cache(self._projects_path(), []) or []
@@ -150,10 +248,10 @@ class CacheManager:
         return os.path.join(self.base_path, "analysis", f"{key}.json")
 
     def _load_pending_updates(self) -> List[Dict[str, Any]]:
-        return _read_json(self._pending_path(), []) or []
+        return self._load_cache_file(self._pending_path(), []) or []
 
     def _save_pending_updates(self, pending: List[Dict[str, Any]]) -> None:
-        _atomic_write(self._pending_path(), pending)
+        self._save_cache_file(self._pending_path(), pending, touch_meta=False)
 
     def _pending_update_key(self, payload: Dict[str, Any]) -> Optional[tuple[str, str, str]]:
         project_uuid = payload.get("project_uuid")
@@ -174,10 +272,12 @@ class CacheManager:
         return False
 
     def _load_active_projects(self) -> List[str]:
-        return _read_json(self._active_projects_path(), []) or []
+        return self._load_cache_file(self._active_projects_path(), []) or []
 
     def _save_active_projects(self, uuids: List[str]) -> None:
-        _atomic_write(self._active_projects_path(), sorted(set(uuids)))
+        self._save_cache_file(
+            self._active_projects_path(), sorted(set(uuids)), touch_meta=False
+        )
 
     def reset(self, base_path: str = None) -> None:
         if base_path:
@@ -187,13 +287,28 @@ class CacheManager:
         self.active_project_uuids = set()
         self.project_query_cache = {}
         self.cache_meta = {"fully_cached": False, "last_refreshed_at": None}
+        self._memory_cache = {}
         self._ensure_directories()
 
-    def _save_project_cache(self, path: str, data: Any) -> None:
+    def _load_cache_file(self, path: str, default: Any = None) -> Any:
+        if path in self._memory_cache:
+            return self._memory_cache[path]
+
+        data = _read_json(path, default)
+        self._memory_cache[path] = data
+        return data
+
+    def _save_cache_file(self, path: str, data: Any, touch_meta: bool = True) -> None:
         _atomic_write(path, data)
+        self._memory_cache[path] = data
+        if touch_meta:
+            self._touch_cache_meta()
+
+    def _save_project_cache(self, path: str, data: Any) -> None:
+        self._save_cache_file(path, data)
 
     def _load_project_cache(self, path: str, default: Any = None) -> Any:
-        return _read_json(path, default)
+        return self._load_cache_file(path, default)
 
     async def initialize(self) -> None:
         async with self.lock:
@@ -300,17 +415,26 @@ class CacheManager:
         await self.record_project_access(project_uuid)
         path = self._findings_path(project_uuid)
         findings = None
+        previous_findings = None
 
         if not refresh:
             async with self.lock:
                 findings = self._load_project_cache(path, None)
 
         if findings is None:
+            async with self.lock:
+                previous_findings = self._load_project_cache(path, None)
             findings = await client.get_vulnerabilities(project_uuid, cve=None)
+            findings = self._restore_recreated_finding_assessments(
+                project_uuid,
+                findings,
+                previous_findings or [],
+            )
+            findings = self._overlay_local_analysis(project_uuid, findings)
             async with self.lock:
                 self._save_project_cache(path, findings)
-
-        findings = self._overlay_local_analysis(project_uuid, findings)
+        else:
+            findings = self._overlay_local_analysis(project_uuid, findings)
 
         if cve:
             cve_upper = cve.upper()
@@ -377,18 +501,114 @@ class CacheManager:
     ) -> Optional[Dict[str, Any]]:
         path = self._analysis_path(project_uuid, component_uuid, vulnerability_uuid)
         analysis = None
+        cached_analysis = None
         if not refresh:
             async with self.lock:
                 analysis = self._load_project_cache(path, None)
         if analysis is None:
+            async with self.lock:
+                cached_analysis = self._load_project_cache(path, None)
             analysis = await client.get_analysis(
                 project_uuid=project_uuid,
                 component_uuid=component_uuid,
                 vulnerability_uuid=vulnerability_uuid,
             )
+            analysis = self._merge_blank_source_analysis(cached_analysis, analysis)
             async with self.lock:
                 self._save_project_cache(path, analysis)
         return analysis
+
+    def _finding_cache_identity(
+        self, finding: Dict[str, Any]
+    ) -> Optional[Tuple[str, Tuple[str, ...]]]:
+        component = finding.get("component", {}) or {}
+        vulnerability = finding.get("vulnerability", {}) or {}
+
+        component_identity = _component_cache_identity(component)
+        vulnerability_identity = _vulnerability_cache_identity(vulnerability)
+        if not component_identity or not vulnerability_identity:
+            return None
+
+        return component_identity, vulnerability_identity
+
+    def _finding_analysis_key(
+        self, project_uuid: str, finding: Dict[str, Any]
+    ) -> Optional[Tuple[str, str, str]]:
+        component_uuid = (finding.get("component", {}) or {}).get("uuid")
+        vulnerability_uuid = (finding.get("vulnerability", {}) or {}).get("uuid")
+        if not component_uuid or not vulnerability_uuid:
+            return None
+        return project_uuid, component_uuid, vulnerability_uuid
+
+    def _merge_blank_source_analysis(
+        self,
+        cached_analysis: Optional[Dict[str, Any]],
+        source_analysis: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if _get_analysis_details(source_analysis):
+            return source_analysis
+
+        if not _has_meaningful_assessment(cached_analysis):
+            return source_analysis
+
+        return _mark_assessment_for_review(cached_analysis)
+
+    def _restore_recreated_finding_assessments(
+        self,
+        project_uuid: str,
+        findings: List[Dict[str, Any]],
+        previous_findings: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if not findings or not previous_findings:
+            return findings
+
+        previous_candidates: Dict[
+            Tuple[str, Tuple[str, ...]], List[Tuple[Tuple[str, str, str], Dict[str, Any]]]
+        ] = {}
+
+        for previous_finding in previous_findings:
+            identity = self._finding_cache_identity(previous_finding)
+            analysis_key = self._finding_analysis_key(project_uuid, previous_finding)
+            if not identity or not analysis_key:
+                continue
+
+            previous_analysis = self._load_project_cache(
+                self._analysis_path(*analysis_key),
+                previous_finding.get("analysis"),
+            )
+            if not _has_meaningful_assessment(previous_analysis):
+                continue
+
+            previous_candidates.setdefault(identity, []).append(
+                (analysis_key, previous_analysis)
+            )
+
+        for finding in findings:
+            source_analysis = finding.get("analysis") or {}
+            if _get_analysis_details(source_analysis):
+                continue
+
+            identity = self._finding_cache_identity(finding)
+            analysis_key = self._finding_analysis_key(project_uuid, finding)
+            if not identity or not analysis_key:
+                continue
+
+            current_path = self._analysis_path(*analysis_key)
+            current_cached_analysis = self._load_project_cache(current_path, None)
+            if _has_meaningful_assessment(current_cached_analysis):
+                finding["analysis"] = _mark_assessment_for_review(current_cached_analysis)
+                continue
+
+            candidates = previous_candidates.get(identity, [])
+            if len(candidates) != 1:
+                continue
+
+            _, previous_analysis = candidates[0]
+            preserved_analysis = _mark_assessment_for_review(previous_analysis)
+            self._save_project_cache(current_path, preserved_analysis)
+            finding["analysis"] = preserved_analysis
+
+        return findings
 
     def _overlay_local_analysis(
         self,
@@ -497,7 +717,7 @@ class CacheManager:
             "analysisDetails": payload.get("details"),
             "isSuppressed": payload.get("suppressed", False),
         }
-        _atomic_write(
+        self._save_project_cache(
             self._analysis_path(project_uuid, component_uuid, vulnerability_uuid),
             analysis_data,
         )

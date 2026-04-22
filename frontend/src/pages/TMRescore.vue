@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ChevronLeft, ShieldCheck, Upload } from 'lucide-vue-next'
 import {
@@ -21,6 +21,8 @@ import type {
 
 const route = useRoute()
 const projectName = computed(() => String(route.params.name || ''))
+const realRole = inject<any>('realRole', ref('ANALYST'))
+const isReviewer = computed(() => realRole.value === 'REVIEWER')
 
 const context = ref<TMRescoreContext | null>(null)
 const loading = ref(true)
@@ -516,6 +518,21 @@ watch(selectedScope, () => {
           <div v-if="!context.enabled" class="rounded-xl border border-amber-700/40 bg-amber-950/30 p-4 text-sm text-amber-100">
             TMRescore is not configured on the backend. Set <span class="font-mono">DTVP_TMRESCORE_URL</span> and reload the app.
           </div>
+
+          <template v-else-if="!isReviewer">
+            <div class="rounded-2xl border border-gray-800 bg-gray-900/80 p-6 shadow-xl shadow-black/20">
+              <h3 class="text-lg font-bold text-white">Reviewer access required</h3>
+              <p class="mt-3 text-sm text-gray-400">
+                Threat Model analysis and the interactive TMRescore controls are available only to users with the reviewer role.
+              </p>
+              <router-link
+                :to="projectReturnUrl"
+                class="mt-5 inline-flex items-center justify-center rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-semibold text-gray-200 transition-colors hover:border-gray-600"
+              >
+                Return to project
+              </router-link>
+            </div>
+          </template>
 
           <form v-else class="space-y-5" @submit.prevent="submit">
             <div>

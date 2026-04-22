@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import Dashboard from '../Dashboard.vue'
 import { getProjects } from '../../lib/api'
@@ -65,6 +66,42 @@ describe('Dashboard.vue', () => {
 
         expect(wrapper.text()).toContain('v1.0')
         expect(wrapper.text()).toContain('v1.1')
+    })
+
+    it('shows Threat Model button only for reviewers', async () => {
+        vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
+
+        const wrapper = mount(Dashboard, {
+            global: {
+                provide: {
+                    realRole: ref('REVIEWER')
+                },
+                stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } }
+            }
+        })
+
+        await flushPromises()
+
+        const threatModelLink = wrapper.findAll('a').find(a => a.text() === 'Threat Model')
+        expect(threatModelLink).toBeDefined()
+    })
+
+    it('hides Threat Model button for analysts', async () => {
+        vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
+
+        const wrapper = mount(Dashboard, {
+            global: {
+                provide: {
+                    realRole: ref('ANALYST')
+                },
+                stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } }
+            }
+        })
+
+        await flushPromises()
+
+        const threatModelLink = wrapper.findAll('a').find(a => a.text() === 'Threat Model')
+        expect(threatModelLink).toBeUndefined()
     })
 
     it('filters projects via search input', async () => {
