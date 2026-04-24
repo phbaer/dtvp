@@ -171,6 +171,73 @@ async def test_refresh_project_updates_memory_and_disk_cache(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_refresh_project_marks_review_when_threadmodel_score_changes(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    project_uuid = "project-1"
+
+    old_finding = {
+        "component": {
+            "uuid": "component-old",
+            "name": "log4j-core",
+            "version": "2.16.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.16.0",
+        },
+        "vulnerability": {
+            "uuid": "vuln-old",
+            "vulnId": "CVE-2021-44228",
+            "name": "CVE-2021-44228",
+        },
+        "analysis": {
+            "analysisState": "EXPLOITABLE",
+            "analysisDetails": "[Rescored: 3.5]\nPrevious TM review.",
+            "isSuppressed": False,
+        },
+    }
+    manager._save_project_cache(manager._findings_path(project_uuid), [old_finding])
+
+    new_finding = {
+        "component": {
+            "uuid": "component-new",
+            "name": "log4j-core",
+            "version": "2.17.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
+        },
+        "vulnerability": {
+            "uuid": "vuln-new",
+            "vulnId": "CVE-2021-44228",
+            "name": "CVE-2021-44228",
+        },
+        "analysis": {
+            "analysisState": "EXPLOITABLE",
+            "analysisDetails": "[Rescored: 4.0]\nUpdated TM review.",
+            "isSuppressed": False,
+        },
+    }
+    client.get_vulnerabilities.return_value = [new_finding]
+    client.get_project_vulnerabilities.return_value = [{"uuid": "vuln-new"}]
+    client.get_bom.return_value = {"components": []}
+
+    await manager.refresh_project(project_uuid, client)
+
+    saved_findings = manager._load_project_cache(
+        manager._findings_path(project_uuid), None
+    )
+    assert len(saved_findings) == 1
+    saved_analysis = saved_findings[0]["analysis"]
+
+    assert saved_analysis["analysisState"] == "EXPLOITABLE"
+    assert "Updated TM review." in saved_analysis["analysisDetails"]
+    assert "[Status: Pending Review]" in saved_analysis["analysisDetails"]
+    assert "TM rescoring changed from 3.5 to 4.0." in saved_analysis["analysisDetails"]
+
+    persisted_analysis = manager._load_project_cache(
+        manager._analysis_path(project_uuid, "component-new", "vuln-new"), None
+    )
+    assert persisted_analysis == saved_analysis
+
+
+@pytest.mark.asyncio
 async def test_get_analysis_preserves_cached_assessment_when_dt_returns_blank_details(
     tmp_path,
 ):
@@ -274,3 +341,59 @@ async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding
         None,
     )
     assert migrated == analysis
+
+
+@pytest.mark.asyncio
+async def test_get_vulnerabilities_marks_review_when_threadmodel_score_changes(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    project_uuid = "project-1"
+
+    old_finding = {
+        "component": {
+            "uuid": "component-old",
+            "name": "log4j-core",
+            "version": "2.16.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.16.0",
+        },
+        "vulnerability": {
+            "uuid": "vuln-old",
+            "vulnId": "CVE-2021-44228",
+            "name": "CVE-2021-44228",
+        },
+        "analysis": {
+            "analysisState": "EXPLOITABLE",
+            "analysisDetails": "[Rescored: 3.5]\nPrevious TM review.",
+            "isSuppressed": False,
+        },
+    }
+    manager._save_project_cache(manager._findings_path(project_uuid), [old_finding])
+
+    new_finding = {
+        "component": {
+            "uuid": "component-new",
+            "name": "log4j-core",
+            "version": "2.17.0",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
+        },
+        "vulnerability": {
+            "uuid": "vuln-new",
+            "vulnId": "CVE-2021-44228",
+            "name": "CVE-2021-44228",
+        },
+        "analysis": {
+            "analysisState": "EXPLOITABLE",
+            "analysisDetails": "[Rescored: 4.0]\nUpdated TM review.",
+            "isSuppressed": False,
+        },
+    }
+    client.get_vulnerabilities.return_value = [new_finding]
+
+    findings = await manager.get_vulnerabilities(client, project_uuid, refresh=True)
+
+    assert len(findings) == 1
+    analysis = findings[0]["analysis"]
+    assert analysis["analysisState"] == "EXPLOITABLE"
+    assert "Updated TM review." in analysis["analysisDetails"]
+    assert "[Status: Pending Review]" in analysis["analysisDetails"]
+    assert "TM rescoring changed from 3.5 to 4.0." in analysis["analysisDetails"]

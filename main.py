@@ -362,7 +362,7 @@ def get_tmrescore_task_ttl_seconds() -> int:
     raw_value = os.getenv("DTVP_TMRESCORE_TASK_TTL_SECONDS", "3600")
     try:
         return max(60, int(raw_value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         logger.warning(
             "Invalid DTVP_TMRESCORE_TASK_TTL_SECONDS=%r, falling back to 3600",
             raw_value,
@@ -629,7 +629,7 @@ async def run_tmrescore_analysis_task(
                     enrich=enrich,
                     ollama_model=ollama_model if enrich else None,
                 )
-            except httpx.ReadTimeout, httpx.TimeoutException:
+            except (httpx.ReadTimeout, httpx.TimeoutException):
                 task["message"] = (
                     "TMRescore is still processing remotely. Polling progress..."
                 )
@@ -716,7 +716,7 @@ def get_version_fetch_concurrency() -> int:
     raw_value = os.getenv("DTVP_VERSION_FETCH_CONCURRENCY", "4")
     try:
         return max(1, int(raw_value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         logger.warning(
             "Invalid DTVP_VERSION_FETCH_CONCURRENCY=%r, falling back to 4",
             raw_value,
