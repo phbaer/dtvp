@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dt_client import DTClient, DTSettings
+from logic import RE_SCORE
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,49 @@ def _mark_assessment_for_review(analysis: Dict[str, Any]) -> Dict[str, Any]:
         "analysisDetails": details,
         "isSuppressed": _get_analysis_suppressed(analysis),
     }
+
+
+def _extract_threadmodel_score(analysis: Optional[Dict[str, Any]]) -> Optional[float]:
+    details = _get_analysis_details(analysis)
+    if not details:
+        return None
+
+    match = RE_SCORE.search(details)
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _threadmodel_score_changed(
+    previous_analysis: Optional[Dict[str, Any]],
+    current_analysis: Optional[Dict[str, Any]],
+) -> Tuple[bool, Optional[float], Optional[float]]:
+    previous_score = _extract_threadmodel_score(previous_analysis)
+    current_score = _extract_threadmodel_score(current_analysis)
+    if previous_score is None or current_score is None:
+        return False, previous_score, current_score
+    return previous_score != current_score, previous_score, current_score
+
+
+def _mark_assessment_for_review_with_threadmodel_change(
+    analysis: Dict[str, Any],
+    previous_score: Optional[float],
+    current_score: Optional[float],
+) -> Dict[str, Any]:
+    marked = _mark_assessment_for_review(analysis)
+    if previous_score is None or current_score is None or previous_score == current_score:
+        return marked
+
+    details = _get_analysis_details(marked)
+    change_note = f"TM rescoring changed from {previous_score} to {current_score}."
+    if change_note not in details:
+        details = f"{details}\n\n{change_note}"
+    marked["analysisDetails"] = details
+    return marked
 
 
 def _component_cache_identity(component: Dict[str, Any]) -> Optional[str]:
@@ -585,18 +629,43 @@ class CacheManager:
 
         for finding in findings:
             source_analysis = finding.get("analysis") or {}
-            if _get_analysis_details(source_analysis):
-                continue
-
             identity = self._finding_cache_identity(finding)
             analysis_key = self._finding_analysis_key(project_uuid, finding)
-            if not identity or not analysis_key:
+            if not analysis_key:
                 continue
 
             current_path = self._analysis_path(*analysis_key)
             current_cached_analysis = self._load_project_cache(current_path, None)
+
+            if _get_analysis_details(source_analysis):
+                previous_analysis = (
+                    current_cached_analysis
+                    if _has_meaningful_assessment(current_cached_analysis)
+                    else None
+                )
+                if previous_analysis is None and identity:
+                    candidates = previous_candidates.get(identity, [])
+                    if len(candidates) == 1:
+                        _, previous_analysis = candidates[0]
+
+                if previous_analysis:
+                    changed, previous_score, current_score = _threadmodel_score_changed(
+                        previous_analysis, source_analysis
+                    )
+                    if changed:
+                        marked = _mark_assessment_for_review_with_threadmodel_change(
+                            source_analysis, previous_score, current_score
+                        )
+                        self._save_project_cache(current_path, marked)
+                        finding["analysis"] = marked
+                        continue
+                continue
+
             if _has_meaningful_assessment(current_cached_analysis):
                 finding["analysis"] = _mark_assessment_for_review(current_cached_analysis)
+                continue
+
+            if not identity:
                 continue
 
             candidates = previous_candidates.get(identity, [])
