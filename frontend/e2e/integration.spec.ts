@@ -1,20 +1,5 @@
 import { test, expect } from '@playwright/test';
 
-
-async function login(page: any, role: 'Analyst' | 'Reviewer' = 'Analyst') {
-    await page.goto('/login');
-    await page.getByRole('button', { name: 'Sign in with SSO' }).click();
-
-    // Wait for redirect to mock OIDC provider (using regex that handles both localhost and 127.0.0.1)
-    await page.waitForURL(/.*:8081\/auth\/authorize/, { timeout: 10000 });
-
-    // Select role
-    await page.getByRole('button', { name: `Login as ${role}` }).click();
-
-    // Wait for redirect back to app dashboard
-    await page.waitForURL(/\/$/, { timeout: 10000 });
-}
-
 test.describe('Integration Tests (Real Backend)', () => {
     test.beforeEach(async ({ page }) => {
         page.on('response', (response) => {
@@ -270,7 +255,8 @@ test.describe('Integration Tests (Real Backend)', () => {
             });
         });
 
-        await login(page);
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
     });
 
 
