@@ -1,14 +1,16 @@
+from unittest.mock import mock_open, patch
+
 import pytest
-from unittest.mock import patch, mock_open
-from dtvp.main import app, get_current_user
+
+from dtvp import main
 
 
 # Override auth
 @pytest.fixture(autouse=True)
 def override_auth():
-    app.dependency_overrides[get_current_user] = lambda: "testuser"
+    main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
     yield
-    app.dependency_overrides = {}
+    main.app.dependency_overrides = {}
 
 
 def test_roles_missing_file_defaults_reviewer(client):

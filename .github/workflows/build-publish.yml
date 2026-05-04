@@ -4,9 +4,10 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
     types: [opened, synchronize, reopened, closed]
-  workflow_dispatch:
 
 jobs:
   test-backend:
@@ -107,6 +108,7 @@ jobs:
     runs-on: node
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}
+      tag: ${{ steps.get_version.outputs.TAG }}
       tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
     steps:
       - uses: actions/checkout@v6
@@ -119,20 +121,41 @@ jobs:
         run: |
           VERSION=$(uv version | awk '{print $2}')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
       - name: Check Git Tag
         id: check_tag
         run: |
-          VERSION=${{ steps.get_version.outputs.VERSION }}
-          if git tag -l | grep -q "^v${VERSION}$"; then
-            echo "Git tag v$VERSION already exists — skipping release."
+          TAG=${{ steps.get_version.outputs.TAG }}
+          if git tag -l | grep -q "^${TAG}$"; then
+            echo "Git tag ${TAG} already exists — skipping release tag creation."
             echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
           else
             echo "TAG_EXISTS=false" >> $GITHUB_OUTPUT
           fi
 
+  create-tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check-version.outputs.tag_exists == 'false'
+    needs: [check-version]
+    runs-on: node
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
+          fetch-depth: 0
+      - name: Configure Git
+        run: |
+          git config --global user.name "Gitea Actions"
+          git config --global user.email "actions@gitea.io"
+      - name: Create and push git tag
+        run: |
+          TAG=${{ needs.check-version.outputs.tag }}
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "refs/tags/$TAG"
+
   build-push-images:
-    if: github.event.action != 'closed'
+    if: github.event.action != 'closed' && (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
     needs: [test-backend, test-frontend]
     runs-on: node
     steps:
@@ -187,7 +210,12 @@ jobs:
       - name: Extract Version
         id: get_version
         run: |
-          VERSION=$(uv version | awk '{print $2}')
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION=$(uv version | awk '{print $2}')
+            VERSION="v${VERSION}"
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
       - name: Generate CHANGELOG.md for Docker
         run: |
@@ -198,10 +226,10 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
-            ${{ github.event_name == 'push' && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
-            ${{ github.event_name == 'push' && steps.get_version.outputs.VERSION && format('{0}/{1}/dtvp:v{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
-            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}-alpine', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
+            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/dtvp:dev', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
           context: .
           build-args: |
             BUILD_COMMIT=${{ github.sha }}
@@ -209,8 +237,8 @@ jobs:
             GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
 
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check-version.outputs.tag_exists == 'false'
-    needs: [check-version, build-push-images]
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-push-images]
     runs-on: node
     steps:
       - name: Checkout
@@ -233,9 +261,9 @@ jobs:
       - name: Set version
         id: version
         run: |
-          VERSION=${{ needs.check-version.outputs.version }}
+          VERSION=${GITHUB_REF#refs/tags/v}
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Generate CHANGELOG.md with git-cliff
         run: |
@@ -251,11 +279,6 @@ jobs:
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "HEREDOC" >> $GITHUB_OUTPUT
 
-      - name: Create and push git tag
-        run: |
-          git tag -a "${{ steps.version.outputs.TAG }}" -m "Release ${{ steps.version.outputs.TAG }}"
-          git push origin HEAD:main --follow-tags
-
       - name: Create Forgejo Release
         run: |
           curl -s -X POST \
@@ -270,13 +293,14 @@ jobs:
             )"
 
   delete-pr-images:
-    if: github.event.action == 'closed'
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: node
     steps:
       - name: Delete PR Image Tag
         run: |-
-          VERSION="pr-${{ github.event.pull_request.number }}-alpine"
+          VERSION="pr-${{ github.event.pull_request.number }}"
           echo "Deleting version $VERSION for dtvp"
-          curl -X DELETE \
+          curl -fsS -X DELETE \
             -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
-            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/packages/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/container/dtvp/$VERSION"
+            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/packages/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/container/dtvp/$VERSION" || true
+
