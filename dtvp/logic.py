@@ -87,61 +87,6 @@ def sanitize_rescored_vector(
     return corrected
 
 
-def sanitize_rescored_vector(
-    original_vector: Optional[str], rescored_vector: Optional[str]
-) -> Optional[str]:
-    """Ensure a rescored CVSS vector preserves all base metric components from
-    the original vector, only adding modifier (M-prefixed) tokens.
-
-    If the rescored vector already has the correct base, it is returned as-is.
-    Otherwise the base components are taken from ``original_vector`` and only
-    the M-prefixed modifier tokens from ``rescored_vector`` are appended.
-
-    Returns ``None`` when either input is falsy or when both vectors are
-    identical (meaning no rescoring occurred).
-    """
-    if not original_vector or not rescored_vector:
-        return rescored_vector or None
-
-    # CVSS 3.0 and 3.1 are equivalent; DT uses 3.0, we always rescore in 3.1.
-    # Normalize both to 3.1 for comparison; output always uses 3.1.
-    norm_original = original_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
-    norm_rescored = rescored_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
-
-    orig_parts = norm_original.split("/")
-    rescored_parts = norm_rescored.split("/")
-
-    # Determine where metric tokens start (skip the CVSS version prefix)
-    orig_start = 1 if orig_parts[0].startswith("CVSS:") else 0
-    rescored_start = 1 if rescored_parts[0].startswith("CVSS:") else 0
-
-    orig_base = set(orig_parts[orig_start:])
-    rescored_base = {
-        p for p in rescored_parts[rescored_start:] if not p.startswith("M")
-    }
-
-    if orig_base == rescored_base:
-        # Base metrics already match – vector is valid as-is (always in 3.1)
-        return norm_rescored
-
-    # Reconstruct: original base (in 3.1) + only the modifier tokens from the rescored vector
-    modifiers = [p for p in rescored_parts[rescored_start:] if p.startswith("M")]
-    if modifiers:
-        corrected = "/".join(orig_parts + modifiers)
-    else:
-        corrected = norm_original
-
-    if corrected == norm_original:
-        return None  # No meaningful change after correction
-
-    logger.warning(
-        "Corrected rescored vector (base metrics were altered): %s -> %s",
-        rescored_vector,
-        corrected,
-    )
-    return corrected
-
-
 def get_team_mapping_path() -> str:
     return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
 

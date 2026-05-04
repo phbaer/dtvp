@@ -8,8 +8,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from dt_client import DTClient, DTSettings
-from logic import RE_SCORE
+from .dt_client import DTClient, DTSettings
+from .logic import RE_SCORE
 
 logger = logging.getLogger(__name__)
 

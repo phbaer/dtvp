@@ -1,5 +1,5 @@
 import unittest
-from logic import group_vulnerabilities
+from dtvp.logic import group_vulnerabilities
 
 
 class TestAliasGrouping(unittest.TestCase):

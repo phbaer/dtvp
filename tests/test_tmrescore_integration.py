@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import httpx
-import main as main_module
+import dtvp.main as main_module
 
-from main import (
+from dtvp.main import (
     app,
     get_current_user,
     load_tmrescore_project_cache,
@@ -16,7 +16,7 @@ from main import (
     persist_tmrescore_project_snapshot,
 )
 from test_setup import mock_tmrescore
-from tmrescore_integration import (
+from dtvp.tmrescore_integration import (
     build_analysis_sbom,
     build_dtvp_vulnerability_proposals,
     build_tmrescore_proposals,
@@ -373,8 +373,7 @@ def test_tmrescore_context_endpoint_uses_remote_health_for_ollama_availability(c
         },
         clear=False,
     ):
-        with patch(
-            "main.TMRescoreClient.get_health",
+        with patch("dtvp.main.TMRescoreClient.get_health",
             new=AsyncMock(return_value={"status": "ok", "ollama_configured": False}),
         ):
             response = client.get("/api/projects/ExampleApp/tmrescore/context")
@@ -397,8 +396,7 @@ def test_tmrescore_context_endpoint_reports_remote_ollama_when_available(client,
     ]
 
     with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://tmrescore.local"}, clear=False):
-        with patch(
-            "main.TMRescoreClient.get_health",
+        with patch("dtvp.main.TMRescoreClient.get_health",
             new=AsyncMock(return_value={"status": "ok", "ollama_configured": True}),
         ):
             response = client.get("/api/projects/ExampleApp/tmrescore/context")
@@ -418,8 +416,7 @@ def test_tmrescore_context_endpoint_reports_unreachable_when_health_check_fails(
     ]
 
     with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://tmrescore.local"}, clear=False):
-        with patch(
-            "main.TMRescoreClient.get_health",
+        with patch("dtvp.main.TMRescoreClient.get_health",
             new=AsyncMock(side_effect=httpx.ConnectError("health failed")),
         ):
             response = client.get("/api/projects/ExampleApp/tmrescore/context")
@@ -736,10 +733,9 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
     )
 
     with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://tmrescore.local", "OLLAMA_HOST": "http://ollama.local:11434"}):
-        with patch("main.TMRescoreClient.create_session", new=AsyncMock(return_value={"session_id": "session-1"})):
-            with patch("main.TMRescoreClient.analyze_inventory", new=analyze_mock):
-                with patch(
-                    "main.TMRescoreClient.get_results_vex",
+        with patch("dtvp.main.TMRescoreClient.create_session", new=AsyncMock(return_value={"session_id": "session-1"})):
+            with patch("dtvp.main.TMRescoreClient.analyze_inventory", new=analyze_mock):
+                with patch("dtvp.main.TMRescoreClient.get_results_vex",
                     new=AsyncMock(return_value={"metadata": {"timestamp": "2026-03-30T00:00:00Z"}, "vulnerabilities": []}),
                 ):
                     response = client.post(
@@ -794,17 +790,15 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(client,
     )
 
     with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://tmrescore.local"}):
-        with patch("main.TMRescoreClient.create_session", new=AsyncMock(return_value={"session_id": "session-1"})):
-            with patch("main.TMRescoreClient.analyze_inventory", new=AsyncMock(side_effect=timeout_error)):
-                with patch(
-                    "main.TMRescoreClient.get_progress",
+        with patch("dtvp.main.TMRescoreClient.create_session", new=AsyncMock(return_value={"session_id": "session-1"})):
+            with patch("dtvp.main.TMRescoreClient.analyze_inventory", new=AsyncMock(side_effect=timeout_error)):
+                with patch("dtvp.main.TMRescoreClient.get_progress",
                     new=AsyncMock(side_effect=[
                         {"session_id": "session-1", "status": "running", "progress": 80},
                         {"session_id": "session-1", "status": "completed", "progress": 100},
                     ]),
                 ) as get_progress_mock:
-                    with patch(
-                        "main.TMRescoreClient.get_results",
+                    with patch("dtvp.main.TMRescoreClient.get_results",
                         new=AsyncMock(return_value={
                             "session_id": "session-1",
                             "status": "completed",
@@ -815,8 +809,7 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(client,
                             "outputs": {},
                         }),
                     ):
-                        with patch(
-                            "main.TMRescoreClient.get_results_vex",
+                        with patch("dtvp.main.TMRescoreClient.get_results_vex",
                             new=AsyncMock(return_value={"metadata": {"timestamp": "2026-03-30T00:00:00Z"}, "vulnerabilities": []}),
                         ):
                             response = client.post(
@@ -895,7 +888,7 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
         )
 
     with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://mock-tmrescore.test"}):
-        with patch("tmrescore_integration.httpx.AsyncClient", side_effect=build_mock_async_client):
+        with patch("dtvp.tmrescore_integration.httpx.AsyncClient", side_effect=build_mock_async_client):
             response = client.post(
                 "/api/projects/ExampleApp/tmrescore/analyze",
                 data={"scope": "merged_versions", "chain_analysis": "true", "prioritize": "true"},

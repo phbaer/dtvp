@@ -168,7 +168,7 @@ test.describe('Per-Team Assessment UI Flow', () => {
         await backendTab.click();
 
         // Analysis state selection
-        const stateDropdown = cardHeader.getByRole('button', { name: 'Not Set' });
+        const stateDropdown = cardHeader.locator('button#analysis-state-select');
         await expect(stateDropdown).toBeVisible();
         await stateDropdown.click();
         await page.locator('.absolute.z-50 button', { hasText: 'Exploitable' }).click();

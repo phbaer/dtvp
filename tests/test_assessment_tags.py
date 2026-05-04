@@ -1,5 +1,5 @@
 import unittest
-from logic import process_assessment_details
+from dtvp.logic import process_assessment_details
 
 
 class TestAssessmentTags(unittest.TestCase):

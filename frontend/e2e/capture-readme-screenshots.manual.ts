@@ -92,6 +92,79 @@ async function captureWithPadding(
     }
 }
 
+async function mockAnalysisQueue(
+    page: Parameters<typeof test.beforeEach>[0]['page'],
+    {
+        items,
+        results = {},
+    }: {
+        items: Array<Record<string, any>>
+        results?: Record<string, any>
+    },
+) {
+    const queueItems = items.map(item => ({ ...item }))
+
+    await page.unroute('**/api/analysis-queue')
+    await page.unroute('**/api/analysis-queue/submit')
+    await page.unroute(/\/api\/analysis-queue\/(?!submit$)[^/]+$/)
+
+    await page.route('**/api/analysis-queue', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(queueItems),
+        })
+    })
+
+    await page.route(/\/api\/analysis-queue\/(?!submit$)[^/]+$/, async (route) => {
+        const queueId = decodeURIComponent(route.request().url().split('/').pop() || '')
+        const item = queueItems.find(entry => entry.queue_id === queueId)
+        if (!item) {
+            await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'Not found' }) })
+            return
+        }
+
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                ...item,
+                result: results[queueId],
+            }),
+        })
+    })
+
+    await page.route('**/api/analysis-queue/submit', async (route) => {
+        const payload = route.request().postDataJSON()
+        const submittedItem = {
+            queue_id: `docs-analysis-${queueItems.length + 1}`,
+            vuln_id: payload.vuln_id,
+            component_name: payload.component_name,
+            cvss_vector: payload.cvss_vector,
+            user_guidance: payload.user_guidance,
+            submitted_by: 'reviewer',
+            submitted_at: '2026-05-02T12:00:00Z',
+            status: 'queued',
+            position: 1,
+        }
+        queueItems.unshift(submittedItem)
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(submittedItem),
+        })
+    })
+}
+
+async function openProjectCard(page: Parameters<typeof test>[0]['page'], groupId: string) {
+    const card = page.locator(`.vuln-card[data-group-id="${groupId}"]`)
+    await expect(card).toBeVisible({ timeout: 20000 })
+    const cardBox = await card.boundingBox()
+    if (!cardBox) throw new Error(`Expected bounding box for ${groupId}`)
+    await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
+    return card
+}
+
 async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page']) {
     await page.setViewportSize({ width: 1800, height: 1400 })
 
@@ -606,8 +679,10 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
     })
 
     await page.addInitScript(() => {
-        window.localStorage.setItem('dtvp_last_seen_version', '1.0.0')
+        globalThis.localStorage.setItem('dtvp_last_seen_version', '1.0.0')
     })
+
+    await mockAnalysisQueue(page, { items: [] })
 }
 
 test.describe('Capture README screenshots', () => {
@@ -636,11 +711,7 @@ test.describe('Capture README screenshots', () => {
         await page.goto('/project/TestProject')
         await page.waitForLoadState('networkidle')
 
-        const card = page.locator('.vuln-card[data-group-id="CVE-2024-9999"]')
-        await expect(card).toBeVisible({ timeout: 20000 })
-        const cardBox = await card.boundingBox()
-        if (!cardBox) throw new Error('Expected vulnerability card bounding box')
-        await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
+        const card = await openProjectCard(page, 'CVE-2024-9999')
 
         await expect(page.getByRole('heading', { name: 'Global Assessment' })).toBeVisible({ timeout: 10000 })
         await expect(page.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
@@ -730,11 +801,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         // Expand the NEEDS_APPROVAL card to see the assignment form
-        const card = page.locator('.vuln-card').filter({ hasText: /CVE-2024-3001/ }).first()
-        await expect(card).toBeVisible({ timeout: 20000 })
-        const cardBox = await card.boundingBox()
-        if (!cardBox) throw new Error('Expected card bounding box')
-        await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
+        const card = await openProjectCard(page, 'CVE-2024-3001')
 
         // Wait for the expanded section
         await expect(page.getByText('Assigned Users').first()).toBeVisible({ timeout: 10000 })
@@ -795,11 +862,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         // Expand the inconsistent card to show conflicting team assessments
-        const card = page.locator('.vuln-card').filter({ hasText: /CVE-2024-5003/ }).first()
-        await expect(card).toBeVisible({ timeout: 20000 })
-        const cardBox = await card.boundingBox()
-        if (!cardBox) throw new Error('Expected card bounding box')
-        await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
+        const card = await openProjectCard(page, 'CVE-2024-5003')
 
         // Wait for assessment details to load
         await page.waitForTimeout(2000)
@@ -816,11 +879,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         // Expand the rescored card to access the calculator
-        const card = page.locator('.vuln-card').filter({ hasText: /CVE-2024-6004/ }).first()
-        await expect(card).toBeVisible({ timeout: 20000 })
-        const cardBox = await card.boundingBox()
-        if (!cardBox) throw new Error('Expected card bounding box')
-        await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
+        await openProjectCard(page, 'CVE-2024-6004')
 
         // Wait for expanded state and find the calculator button
         await page.waitForTimeout(1500)
@@ -888,11 +947,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForTimeout(500)
 
         // Expand the inconsistent card and force a conflict via the API response.
-        const card = page.locator('.vuln-card').filter({ hasText: /CVE-2024-5003/ }).first()
-        await expect(card).toBeVisible({ timeout: 20000 })
-        const cardBox = await card.boundingBox()
-        if (!cardBox) throw new Error('Expected card bounding box')
-        await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
+        const card = await openProjectCard(page, 'CVE-2024-5003')
         await page.waitForTimeout(1000)
 
         await page.route('**/api/assessment', async (route) => {
@@ -931,8 +986,213 @@ test.describe('Capture README screenshots', () => {
         await expect(submitButton).toBeVisible({ timeout: 10000 })
         await submitButton.click()
 
-        const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Conflict Detected' }).first()
-        await expect(modal).toBeVisible({ timeout: 10000 })
-        await captureWithPadding(modal, '../docs/screenshots/conflict-resolution.png')
+        const modalOverlay = page.locator('.fixed.inset-0').filter({ hasText: 'Conflict Detected' }).first()
+        await expect(modalOverlay).toBeVisible({ timeout: 10000 })
+
+        const dialog = modalOverlay.locator(':scope > div').first()
+        await expect(dialog).toBeVisible({ timeout: 10000 })
+        await captureWithPadding(dialog, '../docs/screenshots/conflict-resolution.png')
+    })
+
+    test('capture code analysis running screenshot', async ({ page }) => {
+        await mockAnalysisQueue(page, {
+            items: [
+                {
+                    queue_id: 'analysis-running-latest',
+                    vuln_id: 'CVE-2024-9999',
+                    component_name: 'platform-gateway',
+                    submitted_by: 'reviewer',
+                    submitted_at: '2026-05-02T12:00:00Z',
+                    status: 'running',
+                    position: 0,
+                    progress: {
+                        percent: 72,
+                        current_step: 'semantic-validation',
+                        current_title: 'Semantic validation',
+                        current_activity: 'Tracing request entrypoints and guard conditions',
+                        completed_steps: 8,
+                        total_steps: 11,
+                        active_agents: [
+                            { step: 'source-scan', title: 'Source scan', activity: 'Controller graph complete', status: 'completed' },
+                            { step: 'semantic-validation', title: 'Semantic validation', activity: 'Reviewing inbound handlers', status: 'running' },
+                        ],
+                    },
+                },
+                {
+                    queue_id: 'analysis-queued-older',
+                    vuln_id: 'CVE-2023-1111',
+                    component_name: 'frontend-shell',
+                    submitted_by: 'analyst',
+                    submitted_at: '2026-05-02T11:55:00Z',
+                    status: 'queued',
+                    position: 2,
+                },
+            ],
+        })
+
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await expect(card.getByText('Code Analysis')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('Analyzing…')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('button', { name: 'Running…' })).toBeVisible({ timeout: 10000 })
+
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await captureWithPadding(card, '../docs/screenshots/code-analysis-running.png')
+    })
+
+    test('capture code analysis result screenshot', async ({ page }) => {
+        await mockAnalysisQueue(page, {
+            items: [
+                {
+                    queue_id: 'analysis-completed-platform',
+                    vuln_id: 'CVE-2024-9999',
+                    component_name: 'platform-gateway',
+                    submitted_by: 'reviewer',
+                    submitted_at: '2026-05-02T12:05:00Z',
+                    status: 'completed',
+                    position: 0,
+                    finished_at: '2026-05-02T12:06:30Z',
+                },
+            ],
+            results: {
+                'analysis-completed-platform': {
+                    versions_checked: ['1.0.0', '1.1.0', '2.0.0'],
+                    assessment: {
+                        affected: true,
+                        verdict: 'Affected',
+                        confidence: 'High',
+                        exposure: 'HTTP request path reachable',
+                        summary: 'platform-gateway exposes a reachable parser initialization path used by external requests.',
+                        reasoning: 'The service boot path wires the vulnerable parser into authenticated request handlers with no deployment-specific guard that removes the code path.',
+                        adjusted_cvss: {
+                            original_score: 9.8,
+                            adjusted_score: 8.6,
+                            adjusted_vector: 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H',
+                            summary: 'Privileges required reduce exploitability slightly but do not eliminate exposure.',
+                            reasons: [
+                                'Authentication is required before the vulnerable parser executes.',
+                                'The vulnerable flow remains reachable from the primary API surface.',
+                            ],
+                        },
+                    },
+                    steps: [
+                        {
+                            step: 'reachability-scan',
+                            title: 'Reachability scan',
+                            status: 'pass',
+                            evidence: ['Found parser-wrapper invocation in request bootstrap.', 'Matched vulnerable component version 2.5.0 in deployment manifest.'],
+                        },
+                        {
+                            step: 'guard-analysis',
+                            title: 'Guard analysis',
+                            status: 'warn',
+                            evidence: ['Authentication reduces anonymous exposure but the route is still reachable to standard users.'],
+                        },
+                    ],
+                },
+            },
+        })
+
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await expect(card.getByText('Code Analysis')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('platform-gateway exposes a reachable parser initialization path used by external requests.')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('Apply to Assessment (code_analysis)')).toBeVisible({ timeout: 10000 })
+
+        await card.getByRole('button', { name: /Pipeline Steps \(2\)/ }).click()
+        await expect(card.getByText('Reachability scan')).toBeVisible({ timeout: 10000 })
+
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await captureWithPadding(card, '../docs/screenshots/code-analysis-result.png')
+    })
+
+    test('capture analysis queue dropdown screenshot', async ({ page }) => {
+        await mockAnalysisQueue(page, {
+            items: [
+                {
+                    queue_id: 'analysis-older-completed',
+                    vuln_id: 'CVE-2024-4002',
+                    component_name: 'parser-wrapper',
+                    submitted_by: 'analyst',
+                    submitted_at: '2026-05-02T11:40:00Z',
+                    status: 'completed',
+                    position: 0,
+                    finished_at: '2026-05-02T11:48:00Z',
+                },
+                {
+                    queue_id: 'analysis-latest-running',
+                    vuln_id: 'CVE-2024-9999',
+                    component_name: 'platform-gateway',
+                    submitted_by: 'reviewer',
+                    submitted_at: '2026-05-02T12:15:00Z',
+                    status: 'running',
+                    position: 0,
+                    progress: {
+                        percent: 41,
+                        current_step: 'component-mapping',
+                        current_title: 'Component mapping',
+                        current_activity: 'Correlating dependency paths across affected versions',
+                        completed_steps: 4,
+                        total_steps: 10,
+                        active_agents: [
+                            { step: 'component-mapping', title: 'Component mapping', activity: 'Correlating dependency paths', status: 'running' },
+                            { step: 'version-merge', title: 'Version merge', activity: 'Waiting for upstream state', status: 'pending' },
+                        ],
+                    },
+                },
+                {
+                    queue_id: 'analysis-middle-queued',
+                    vuln_id: 'CVE-2023-1111',
+                    component_name: 'frontend-shell',
+                    submitted_by: 'security_team',
+                    submitted_at: '2026-05-02T12:00:00Z',
+                    status: 'queued',
+                    position: 1,
+                },
+            ],
+            results: {
+                'analysis-older-completed': {
+                    versions_checked: ['1.0.0', '1.1.0'],
+                    assessment: {
+                        affected: false,
+                        verdict: 'Not Affected',
+                        confidence: 'Medium',
+                        exposure: 'Job runner only',
+                        summary: 'The vulnerable parser-wrapper path is limited to a disabled batch import pipeline.',
+                        reasoning: 'No production-facing route references the affected import flow in the current deployment.',
+                    },
+                    steps: [
+                        {
+                            step: 'batch-path-check',
+                            title: 'Batch path check',
+                            status: 'pass',
+                            evidence: ['The import pipeline is disabled in production configuration.'],
+                        },
+                    ],
+                },
+            },
+        })
+
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+
+        const queueButton = page.getByTitle('Analysis Queue')
+        await expect(queueButton).toBeVisible({ timeout: 10000 })
+        await queueButton.click()
+
+        const dropdown = page.locator('.absolute.right-0.top-full.mt-2.w-96').first()
+        await expect(dropdown).toBeVisible({ timeout: 10000 })
+        const queueRows = dropdown.locator('.max-h-96 > div')
+        await expect(queueRows.first()).toContainText('CVE-2024-9999')
+        await expect(queueRows.nth(1)).toContainText('CVE-2023-1111')
+
+        await dropdown.getByText('CVE-2024-4002').click()
+        await expect(dropdown.getByText('The vulnerable parser-wrapper path is limited to a disabled batch import pipeline.')).toBeVisible({ timeout: 10000 })
+
+        await captureWithPadding(dropdown, '../docs/screenshots/analysis-queue-dropdown.png')
     })
 })

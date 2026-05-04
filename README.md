@@ -9,6 +9,8 @@ Repository links:
 - Main repo: https://git.baer.one/phbaer/dtvp/
 - GitHub mirror: https://github.com/phbaer/dtvp/
 
+The backend Python source lives under `dtvp/`, and local development uses `uv run uvicorn dtvp.main:app`.
+
 SBOM
 
 - The container includes a CycloneDX SBOM at `/sbom/dtvp-cyclonedx.json`.
@@ -159,7 +161,7 @@ export DTVP_OIDC_REDIRECT_URI=http://localhost:5173/auth/callback
 export DTVP_FRONTEND_URL=http://localhost:5173
 export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
 export DTVP_VERSION_FETCH_CONCURRENCY=4
-uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn dtvp.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 If you want to skip the mock OIDC login entirely during local backend work, set this before starting Uvicorn:
@@ -183,28 +185,6 @@ npm run dev
 
 ```bash
 pm2 delete mock-dt mock-tmrescore
-```
-
-## Minimal Two-Mock Container Workflow
-
-If you only want the lightweight mock services without the full pm2 stack, use the container wrappers in `test_setup`:
-
-```bash
-cd test_setup
-docker compose up
-```
-
-This starts:
-
-- mock Dependency-Track on `http://localhost:8081`
-- mock tmrescore on `http://localhost:8090/ui`
-
-Point DTVP at them with:
-
-```bash
-export DTVP_DT_API_URL=http://127.0.0.1:8081
-export DTVP_DT_API_KEY=mock_key
-export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
 ```
 
 ## Application Walkthrough
@@ -359,30 +339,12 @@ Fill in the real Dependency-Track and OIDC values.
 ### 2. Start The Container
 
 ```bash
-cp compose.yml.dist compose.yml
 docker compose up -d
 ```
 
 The image mounts `./data` into the container so local mapping and rule files persist.
 
-### Optional: Start The Mock TMRescore In Compose
-
-If you want to test the threat-model integration in a containerized setup, enable the optional mock profile and point the backend at the mock service inside the Compose network.
-
-Add this to `.env`:
-
-```bash
-DTVP_TMRESCORE_URL=http://mock-tmrescore:8090
-```
-
-Then start with the mock profile enabled:
-
-```bash
-cp compose.yml.dist compose.yml
-docker compose --profile mock up -d
-```
-
-The mock tmrescore UI is then available on `http://localhost:8090/ui`.
+If you need to customize the deployment, edit `compose.yml` directly.
 
 ## Environment Variables
 
@@ -396,7 +358,16 @@ The mock tmrescore UI is then available on `http://localhost:8090/ui`.
 | `DTVP_TMRESCORE_CACHE_PATH` | Path to the cached per-project tmrescore proposal snapshot file | `data/tmrescore_proposals.json` |
 | `DTVP_TMRESCORE_OLLAMA_MODEL` | Default Ollama model preselected for LLM enrichment in the threat-model UI | `qwen2.5:7b` |
 | `DTVP_TMRESCORE_TASK_TTL_SECONDS` | How long completed or failed tmrescore analysis tasks stay in DTVP memory for `/progress` polling | `3600` |
+| `DTVP_CODE_ANALYSIS_URL` | Base URL of the external or mock code analysis service | unset |
+| `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | HTTP timeout for code analysis API calls | `300` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
+
+### External Integration API Specs
+
+- TMRescore static OpenAPI spec: `openapi/tmrescore-openapi.json`
+- Code Analysis static OpenAPI spec: `openapi/code-analysis-openapi.json`
+- Expected Code Analysis API surface: defined by `code_analysis_integration.py` and the mock server at `test_setup/mock_code_analysis.py`
+- Integration API expectations are documented in `docs/integration-api-surface.md`
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback URL | derived from frontend URL and context path |

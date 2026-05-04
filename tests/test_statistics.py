@@ -1,5 +1,4 @@
-import pytest
-from logic import calculate_statistics
+from dtvp.logic import calculate_statistics
 
 def test_calculate_statistics_incomplete():
     # Scenario: All non-missing are same, but some are missing

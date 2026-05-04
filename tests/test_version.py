@@ -1,6 +1,4 @@
-import os
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 def test_get_app_version_fallback():
@@ -11,14 +9,14 @@ def test_get_app_version_fallback():
 
     with patch("importlib.metadata.version", side_effect=PackageNotFoundError):
         with patch("builtins.open", side_effect=FileNotFoundError):
-            import version
+            import dtvp.version as version
             from importlib import reload
 
             reload(version)
             assert version.get_app_version() == "0.0.0"
 
     # Restore
-    import version
+    import dtvp.version as version
     from importlib import reload
 
     reload(version)

@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
-from main import app, get_current_user, get_client
+from dtvp.main import app, get_current_user, get_client
 
 
 # Override dependencies
@@ -41,7 +41,7 @@ def test_update_assessment_appends_user(override_deps, mock_client):
     }
 
     # Mock get_user_role to return REVIEWER (so no extra pending flag)
-    with patch("main.get_user_role", return_value="REVIEWER"):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
         resp = client.post("/api/assessment", json=payload)
         assert resp.status_code == 200
         assert resp.json()[0]["status"] == "success"
@@ -79,7 +79,7 @@ def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
     }
 
     # Mock get_user_role to return ANALYST
-    with patch("main.get_user_role", return_value="ANALYST"):
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
         resp = client.post("/api/assessment", json=payload)
         assert resp.status_code == 200
 
@@ -113,7 +113,7 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
     }
 
     # Mock get_user_role to return ANALYST
-    with patch("main.get_user_role", return_value="ANALYST"):
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
         resp = client.post("/api/assessment", json=payload)
         assert resp.status_code == 200
 
@@ -145,7 +145,7 @@ def test_update_assessment_replaces_duplicate_pending_update(override_deps, mock
     }
 
     # First request queues the update because DT is unavailable.
-    with patch("main.get_user_role", return_value="REVIEWER"):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
         resp = client.post("/api/assessment", json=payload)
         assert resp.status_code == 200
         assert resp.json()[0]["status"] == "error"
@@ -153,7 +153,7 @@ def test_update_assessment_replaces_duplicate_pending_update(override_deps, mock
 
     # Second request for the same finding should replace the pending update.
     payload2 = {**payload, "details": "Second update"}
-    with patch("main.get_user_role", return_value="REVIEWER"):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
         resp2 = client.post("/api/assessment", json=payload2)
         assert resp2.status_code == 200
         assert resp2.json()[0]["status"] == "error"

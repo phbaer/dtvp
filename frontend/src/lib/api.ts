@@ -375,3 +375,183 @@ export const getTMRescoreProposals = async (projectName: string): Promise<TMResc
     return res.data;
 };
 
+// ── Code Analysis ────────────────────────────────────────────────────────────
+
+export interface CodeAnalysisAssessRequest {
+    vuln_id: string;
+    component_name: string;
+    cvss_vector?: string;
+    user_guidance?: string;
+    focus_path?: string;
+    dependency_paths?: string[][];
+    debug?: boolean;
+}
+
+export interface CodeAnalysisJobSubmitted {
+    job_id: string;
+    status: 'pending' | 'running';
+    poll_url: string;
+}
+
+export interface CodeAnalysisActiveAgentStatus {
+    step: string;
+    title: string;
+    agent: string;
+    activity: string;
+    status: string;
+}
+
+export interface CodeAnalysisJobProgress {
+    completed_steps: number;
+    total_steps: number;
+    percent: number;
+    current_step?: string;
+    current_title?: string;
+    current_agent?: string;
+    current_activity?: string;
+    last_completed_step?: string;
+    last_updated_at?: string;
+    active_agents?: CodeAnalysisActiveAgentStatus[];
+    step_statuses?: Record<string, string>;
+}
+
+export interface CodeAnalysisJobStatus {
+    job_id: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    created_at: string;
+    finished_at?: string;
+    error?: string;
+    progress?: CodeAnalysisJobProgress;
+}
+
+export interface CodeAnalysisCvssAdjustment {
+    original_score: number;
+    adjusted_score: number;
+    original_vector?: string;
+    adjusted_vector?: string;
+    version?: string;
+    reasons: string[];
+    summary: string;
+    version_context?: Record<string, any>;
+    version_affected: boolean;
+}
+
+export interface CodeAnalysisStepFindings {
+    step: string;
+    title: string;
+    status: string;
+    findings: Record<string, any>;
+    evidence: string[];
+}
+
+export interface CodeAnalysisAssessment {
+    affected: boolean;
+    verdict: string;
+    confidence: string;
+    exposure: string;
+    adjusted_cvss?: CodeAnalysisCvssAdjustment;
+    summary: string;
+    reasoning: string;
+}
+
+export interface CodeAnalysisComponentResult {
+    component: string;
+    assessment: CodeAnalysisAssessment;
+    versions_checked?: string[];
+}
+
+export interface CodeAnalysisAssessResponse {
+    assessment: CodeAnalysisAssessment;
+    steps: CodeAnalysisStepFindings[];
+    versions_checked?: string[];
+    component_results?: CodeAnalysisComponentResult[];
+}
+
+export const codeAnalysisStartAssessment = async (req: CodeAnalysisAssessRequest): Promise<CodeAnalysisJobSubmitted> => {
+    const res = await api.post('/code-analysis/assess', req);
+    return res.data;
+};
+
+export const codeAnalysisGetJobStatus = async (jobId: string): Promise<CodeAnalysisJobStatus> => {
+    const res = await api.get(`/code-analysis/jobs/${encodeURIComponent(jobId)}`);
+    return res.data;
+};
+
+export const codeAnalysisGetJobResult = async (jobId: string): Promise<CodeAnalysisAssessResponse> => {
+    const res = await api.get(`/code-analysis/jobs/${encodeURIComponent(jobId)}/result`);
+    return res.data;
+};
+
+export const codeAnalysisHealth = async (): Promise<{ status: string }> => {
+    const res = await api.get('/code-analysis/health');
+    return res.data;
+};
+
+export const codeAnalysisRunAssessment = async (
+    req: CodeAnalysisAssessRequest,
+    onProgress?: (status: CodeAnalysisJobStatus) => void,
+): Promise<CodeAnalysisAssessResponse> => {
+    const job = await codeAnalysisStartAssessment(req);
+    const jobId = job.job_id;
+
+    const poll = async (): Promise<CodeAnalysisAssessResponse> => {
+        const status = await codeAnalysisGetJobStatus(jobId);
+        if (onProgress) onProgress(status);
+
+        if (status.status === 'completed') {
+            return codeAnalysisGetJobResult(jobId);
+        }
+        if (status.status === 'failed') {
+            throw new Error(status.error || 'Code analysis failed.');
+        }
+        return new Promise((resolve, reject) => {
+            setTimeout(() => poll().then(resolve, reject), 2000);
+        });
+    };
+
+    return poll();
+};
+
+// ── Analysis Queue ───────────────────────────────────────────────────────────
+
+export interface AnalysisQueueItem {
+    queue_id: string;
+    vuln_id: string;
+    component_name: string;
+    cvss_vector?: string;
+    user_guidance?: string;
+    submitted_by: string;
+    submitted_at: string;
+    status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+    position: number;
+    job_id?: string;
+    error?: string;
+    result?: CodeAnalysisAssessResponse;
+    finished_at?: string;
+    progress?: CodeAnalysisJobProgress;
+}
+
+export const analysisQueueSubmit = async (req: {
+    vuln_id: string;
+    component_name: string;
+    cvss_vector?: string;
+    user_guidance?: string;
+}): Promise<AnalysisQueueItem> => {
+    const res = await api.post('/analysis-queue/submit', req);
+    return res.data;
+};
+
+export const analysisQueueList = async (): Promise<AnalysisQueueItem[]> => {
+    const res = await api.get('/analysis-queue');
+    return res.data;
+};
+
+export const analysisQueueGet = async (queueId: string): Promise<AnalysisQueueItem> => {
+    const res = await api.get(`/analysis-queue/${encodeURIComponent(queueId)}`);
+    return res.data;
+};
+
+export const analysisQueueCancel = async (queueId: string): Promise<{ status: string }> => {
+    const res = await api.delete(`/analysis-queue/${encodeURIComponent(queueId)}`);
+    return res.data;
+};

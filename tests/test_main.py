@@ -2,7 +2,7 @@ import pytest
 import os
 import importlib
 from fastapi.testclient import TestClient
-from main import app, get_current_user
+from dtvp.main import app, get_current_user
 
 
 @pytest.fixture(autouse=True)
@@ -33,11 +33,11 @@ def test_main_context_path_reload():
 
     with patch.dict(os.environ, {"DTVP_CONTEXT_PATH": "myctx"}):
         # We must also reload auth to pick up new env vars into AuthSettings if it's instantiated at module level
-        import auth
+        from dtvp import auth
 
         importlib.reload(auth)
 
-        import main
+        from dtvp import main
 
         importlib.reload(main)
 
@@ -62,7 +62,7 @@ def test_main_context_path_reload():
 
 
 def test_process_grouped_vulns_task_bom_failure():
-    import main
+    from dtvp import main
     from unittest.mock import AsyncMock
 
     client = AsyncMock()
@@ -86,7 +86,7 @@ def test_process_grouped_vulns_task_bom_failure():
 
 
 def test_process_grouped_vulns_task_all_projects():
-    import main
+    from dtvp import main
     from unittest.mock import AsyncMock
 
     client = AsyncMock()
@@ -118,7 +118,7 @@ def test_process_grouped_vulns_task_all_projects():
 
 
 def test_spa_traversal_logic():
-    import main
+    from dtvp import main
 
     # Ensure we have the spa route
     # If frontend/dist exists, it should be there.
@@ -149,13 +149,13 @@ def test_spa_traversal_logic():
 
 
 def test_serve_index_with_context():
-    import main
+    from dtvp import main
     from unittest.mock import patch
 
     if not os.path.exists("frontend/dist/index.html"):
         pytest.skip("frontend/dist/index.html not found")
 
-    with patch("main.context_path", "/myctx"):
+    with patch("dtvp.main.context_path", "/myctx"):
         client = TestClient(main.app)
         resp = client.get("/myctx/some-page")
         assert resp.status_code == 200
@@ -164,7 +164,7 @@ def test_serve_index_with_context():
 
 
 def test_serve_index_not_found():
-    import main
+    from dtvp import main
     from unittest.mock import patch
 
     # Mock open to fail inside serve_index
@@ -187,8 +187,8 @@ def test_upload_mapping(client):
     files = {"file": ("mapping.json", mapping_content, "application/json")}
 
     # We mock get_team_mapping_path to avoid overwriting real data/temp files
-    with patch("main.get_user_role", return_value="REVIEWER"):
-        with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        with patch("dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
             with patch(
                 "builtins.open", mock_open(read_data='{"test": "data"}')
             ) as mocked_file:
@@ -210,8 +210,8 @@ def test_upload_mapping_failure(client):
     files = {"file": ("mapping.json", mapping_content, "application/json")}
 
     # Mock open to raise exception on write or processing
-    with patch("main.get_user_role", return_value="REVIEWER"):
-        with patch("main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        with patch("dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
             with patch("builtins.open", side_effect=Exception("Disk full")):
                 response = client.post("/api/settings/mapping", files=files)
 
@@ -224,8 +224,8 @@ def test_upload_mapping_failure(client):
 def test_get_team_mapping(client):
     from unittest.mock import patch
 
-    with patch("main.get_user_role", return_value="REVIEWER"):
-        with patch("main.load_team_mapping", return_value={"test": "team"}):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        with patch("dtvp.main.load_team_mapping", return_value={"test": "team"}):
             response = client.get("/api/settings/mapping")
             assert response.status_code == 200
             assert response.json() == {"test": "team"}
@@ -234,7 +234,7 @@ def test_get_team_mapping(client):
 def test_get_team_mapping_forbidden_for_analyst(client):
     from unittest.mock import patch
 
-    with patch("main.get_user_role", return_value="ANALYST"):
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
         response = client.get("/api/settings/mapping")
         assert response.status_code == 403
         assert "Only reviewers" in response.json()["detail"]
@@ -246,21 +246,21 @@ def test_upload_mapping_forbidden_for_analyst(client):
     mapping_content = b'{"comp": "team"}'
     files = {"file": ("mapping.json", mapping_content, "application/json")}
 
-    with patch("main.get_user_role", return_value="ANALYST"):
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
         response = client.post("/api/settings/mapping", files=files)
         assert response.status_code == 403
         assert "Only reviewers" in response.json()["detail"]
 
 
 def test_serve_index_no_frontend_url():
-    import main
+    from dtvp import main
     from unittest.mock import patch
 
     if not os.path.exists("frontend/dist/index.html"):
         pytest.skip("frontend/dist/index.html not found")
 
     # Patch FRONTEND_URL to trigger line 356
-    with patch("main.auth_settings.FRONTEND_URL", None):
+    with patch("dtvp.main.auth_settings.FRONTEND_URL", None):
         client = TestClient(main.app)
         resp = client.get("/any-path")
         assert resp.status_code == 200

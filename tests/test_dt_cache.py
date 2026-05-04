@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock
-from dt_cache import CacheManager, PendingUpdateExistsError
+from dtvp.dt_cache import CacheManager, PendingUpdateExistsError
 
 
 @pytest.mark.asyncio

@@ -279,7 +279,7 @@ class DTSettings(BaseSettings):
         alias="DTVP_DT_API_KEY_FILE", default=None
     )
 
-    # Support aliases from docker-compose.yml
+    # Support aliases from the deployment compose file
     DEPENDENCY_TRACK_URL: Optional[str] = Field(default=None)
     DEPENDENCY_TRACK_API_KEY: Optional[str] = Field(default=None)
 

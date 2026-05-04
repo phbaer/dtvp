@@ -1,14 +1,16 @@
 from typing import Optional, AsyncGenerator
 import logging
-logger = logging.getLogger(__name__)
+import uuid
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from fastapi.responses import RedirectResponse
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import httpx
 from jose import jwt
-from logic import get_user_role
-from dt_client import get_client, DTClient
+from .logic import get_user_role
+from .dt_client import get_client, DTClient
+
+logger = logging.getLogger(__name__)
 
 
 class AuthSettings(BaseSettings):
@@ -28,7 +30,7 @@ class AuthSettings(BaseSettings):
     )
     CONTEXT_PATH: str = Field(alias="DTVP_CONTEXT_PATH", default="/")
 
-    # Support aliases from docker-compose.yml too
+    # Support aliases from the deployment compose file too
     ISSUER_URL: Optional[str] = Field(default=None)
     CLIENT_ID: Optional[str] = Field(default=None)
     # Development settings
