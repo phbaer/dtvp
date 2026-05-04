@@ -1,8 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
-from dtvp.main import app, get_current_user, get_client
+from dtvp import main
 
 
 # Override dependencies
@@ -15,14 +16,14 @@ def mock_client():
 
 @pytest.fixture
 def override_deps(mock_client):
-    app.dependency_overrides[get_client] = lambda: mock_client
-    app.dependency_overrides[get_current_user] = lambda: "testuser"
+    main.app.dependency_overrides[main.get_client] = lambda: mock_client
+    main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
     yield
-    app.dependency_overrides = {}
+    main.app.dependency_overrides = {}
 
 
 def test_update_assessment_appends_user(override_deps, mock_client):
-    client = TestClient(app)
+    client = TestClient(main.app)
 
     payload = {
         "instances": [
@@ -63,7 +64,7 @@ def test_update_assessment_appends_user(override_deps, mock_client):
 
 
 def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
-    client = TestClient(app)
+    client = TestClient(main.app)
 
     payload = {
         "instances": [
@@ -96,7 +97,7 @@ def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
 
 
 def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
-    client = TestClient(app)
+    client = TestClient(main.app)
 
     # Analyst tries to inject rescoring tags in details
     payload = {
@@ -127,8 +128,10 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
         assert "[Status: Pending Review]" in kwargs["details"]
 
 
-def test_update_assessment_replaces_duplicate_pending_update(override_deps, mock_client):
-    client = TestClient(app)
+def test_update_assessment_replaces_duplicate_pending_update(
+    override_deps, mock_client
+):
+    client = TestClient(main.app)
     mock_client.update_analysis.side_effect = Exception("DT unavailable")
 
     payload = {
@@ -158,5 +161,3 @@ def test_update_assessment_replaces_duplicate_pending_update(override_deps, mock
         assert resp2.status_code == 200
         assert resp2.json()[0]["status"] == "error"
         assert resp2.json()[0]["queued"] is True
-
-

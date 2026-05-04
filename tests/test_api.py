@@ -1,13 +1,15 @@
-import pytest
 import asyncio
 import os
 from unittest.mock import patch
-from dtvp.main import app, get_current_user
+
+import pytest
+
+from dtvp import main
 
 
 @pytest.fixture(autouse=True)
 def override_auth():
-    app.dependency_overrides[get_current_user] = lambda: "testuser"
+    main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
     yield
     # No need to clear here as conftest clears all overrides
 
@@ -47,7 +49,7 @@ def test_cache_status_endpoint(client):
         "cached_analyses": 10,
         "pending_updates": 1,
     }
-    with patch('dtvp.main.cache_manager.get_cache_status', return_value=mock_status):
+    with patch("dtvp.main.cache_manager.get_cache_status", return_value=mock_status):
         response = client.get("/api/cache-status")
         assert response.status_code == 200
         data = response.json()
@@ -259,6 +261,8 @@ async def test_statistics_major_version_split(client, mock_dt_client):
         assert data["unique_severity_counts"]["HIGH"] == 1
         assert data["unique_severity_counts"]["CRITICAL"] == 1
         assert data["finding_state_counts"]["NOT_SET"] == 2
+
+
 async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client):
     # Configure mock
     mock_dt_client.__aenter__.return_value = mock_dt_client
@@ -412,7 +416,7 @@ def test_spa_routing(client):
     # main.py defines it as f"{context_path}/{{path:path}}"
 
     spa_route_exists = False
-    for route in app.routes:
+    for route in main.app.routes:
         if hasattr(route, "path") and "{path:path}" in route.path:
             spa_route_exists = True
             break

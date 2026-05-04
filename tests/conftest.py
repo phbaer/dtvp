@@ -1,10 +1,10 @@
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, patch
-from dtvp.main import app, get_client
+
+from dtvp import dt_cache, main
 from dtvp.dt_client import DTClient
-from dtvp import dt_cache
 
 
 @pytest.fixture(autouse=True)
@@ -39,15 +39,17 @@ def mock_dt_client():
 @pytest.fixture
 def client(mock_dt_client):
     # Override dependencies
-    app.dependency_overrides[get_client] = lambda: mock_dt_client
+    main.app.dependency_overrides[main.get_client] = lambda: mock_dt_client
 
     # Disable background sync loop during tests to prevent race conditions
     async def _noop_sync():
         pass
 
-    with patch.object(dt_cache.cache_manager, "background_sync_loop", _noop_sync), \
-         patch.object(dt_cache.cache_manager, "initialize", _noop_sync):
-        with TestClient(app) as test_client:
+    with (
+        patch.object(dt_cache.cache_manager, "background_sync_loop", _noop_sync),
+        patch.object(dt_cache.cache_manager, "initialize", _noop_sync),
+    ):
+        with TestClient(main.app) as test_client:
             yield test_client
 
-    app.dependency_overrides.clear()
+    main.app.dependency_overrides.clear()

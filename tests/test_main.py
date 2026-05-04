@@ -1,13 +1,15 @@
-import pytest
-import os
 import importlib
+import os
+
+import pytest
 from fastapi.testclient import TestClient
-from dtvp.main import app, get_current_user
+
+from dtvp import main
 
 
 @pytest.fixture(autouse=True)
 def override_auth():
-    app.dependency_overrides[get_current_user] = lambda: "testuser"
+    main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
     yield
 
 
@@ -62,8 +64,10 @@ def test_main_context_path_reload():
 
 
 def test_process_grouped_vulns_task_bom_failure():
-    from dtvp import main
     from unittest.mock import AsyncMock
+
+    from dtvp import main
+    from dtvp.grouped_vuln_services import process_grouped_vulns_task
 
     client = AsyncMock()
     client.get_projects.return_value = [
@@ -79,15 +83,25 @@ def test_process_grouped_vulns_task_bom_failure():
 
     import asyncio
 
-    asyncio.run(main.process_grouped_vulns_task(task_id, "Test", None, client))
+    asyncio.run(
+        process_grouped_vulns_task(
+            main.grouped_vuln_service_deps,
+            task_id,
+            "Test",
+            None,
+            client,
+        )
+    )
 
     assert main.tasks[task_id]["status"] == "completed"
     assert main.tasks[task_id]["result"] == []
 
 
 def test_process_grouped_vulns_task_all_projects():
-    from dtvp import main
     from unittest.mock import AsyncMock
+
+    from dtvp import main
+    from dtvp.grouped_vuln_services import process_grouped_vulns_task
 
     client = AsyncMock()
     # Mock multiple different projects
@@ -105,7 +119,15 @@ def test_process_grouped_vulns_task_all_projects():
     import asyncio
 
     # Call with empty name (All projects request)
-    asyncio.run(main.process_grouped_vulns_task(task_id, "", None, client))
+    asyncio.run(
+        process_grouped_vulns_task(
+            main.grouped_vuln_service_deps,
+            task_id,
+            "",
+            None,
+            client,
+        )
+    )
 
     assert main.tasks[task_id]["status"] == "completed"
     # Verify that BOTH projects were processed (they would be in combined_data)
@@ -149,8 +171,9 @@ def test_spa_traversal_logic():
 
 
 def test_serve_index_with_context():
-    from dtvp import main
     from unittest.mock import patch
+
+    from dtvp import main
 
     if not os.path.exists("frontend/dist/index.html"):
         pytest.skip("frontend/dist/index.html not found")
@@ -164,8 +187,9 @@ def test_serve_index_with_context():
 
 
 def test_serve_index_not_found():
-    from dtvp import main
     from unittest.mock import patch
+
+    from dtvp import main
 
     # Mock open to fail inside serve_index
     with patch("builtins.open", side_effect=FileNotFoundError("No index")):
@@ -181,14 +205,16 @@ def test_serve_index_not_found():
 
 
 def test_upload_mapping(client):
-    from unittest.mock import patch, mock_open
+    from unittest.mock import mock_open, patch
 
     mapping_content = b'{"comp": "team"}'
     files = {"file": ("mapping.json", mapping_content, "application/json")}
 
     # We mock get_team_mapping_path to avoid overwriting real data/temp files
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-        with patch("dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+        with patch(
+            "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"
+        ):
             with patch(
                 "builtins.open", mock_open(read_data='{"test": "data"}')
             ) as mocked_file:
@@ -211,7 +237,9 @@ def test_upload_mapping_failure(client):
 
     # Mock open to raise exception on write or processing
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-        with patch("dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"):
+        with patch(
+            "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping.json"
+        ):
             with patch("builtins.open", side_effect=Exception("Disk full")):
                 response = client.post("/api/settings/mapping", files=files)
 
@@ -253,8 +281,9 @@ def test_upload_mapping_forbidden_for_analyst(client):
 
 
 def test_serve_index_no_frontend_url():
-    from dtvp import main
     from unittest.mock import patch
+
+    from dtvp import main
 
     if not os.path.exists("frontend/dist/index.html"):
         pytest.skip("frontend/dist/index.html not found")

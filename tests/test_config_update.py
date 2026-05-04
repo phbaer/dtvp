@@ -1,20 +1,23 @@
+from unittest.mock import mock_open, patch
+
 import pytest
-from dtvp.main import app, get_current_user
-from unittest.mock import patch, mock_open
+
+from dtvp import main
 
 
 # Mock auth
 @pytest.fixture(autouse=True)
 def override_auth():
-    app.dependency_overrides[get_current_user] = lambda: "testuser"
+    main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
     yield
-    app.dependency_overrides = {}
+    main.app.dependency_overrides = {}
 
 
 def test_update_team_mapping(client):
     new_mapping = {"comp1": "team1", "comp2": "team2"}
 
-    with patch("dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
+    with patch(
+        "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
     ):
         with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
             with patch("builtins.open", mock_open()) as mocked_file:
@@ -33,7 +36,8 @@ def test_update_team_mapping(client):
 def test_update_team_mapping_failure(client):
     new_mapping = {"comp": "team"}
 
-    with patch("dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
+    with patch(
+        "dtvp.main.get_team_mapping_path", return_value="/tmp/test_mapping_update.json"
     ):
         with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
             with patch("builtins.open", side_effect=Exception("Write error")):
@@ -50,7 +54,8 @@ def test_update_roles_reviewer(client):
 
     # Mock user role to be REVIEWER
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
-        with patch("dtvp.main.get_user_roles_path", return_value="/tmp/test_roles_update.json"
+        with patch(
+            "dtvp.main.get_user_roles_path", return_value="/tmp/test_roles_update.json"
         ):
             with patch("builtins.open", mock_open()) as mocked_file:
                 response = client.put("/api/settings/roles", json=new_roles)

@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -6,7 +7,6 @@ import pytest
 import dtvp.agentizer_integration as agentizer
 import dtvp.code_analysis_integration as code_analysis
 from dtvp import main
-from dtvp.main import get_current_user
 
 
 class DummyResponse:
@@ -22,9 +22,9 @@ class DummyResponse:
 
 @pytest.fixture(autouse=True)
 def override_auth():
-    main.app.dependency_overrides[get_current_user] = lambda: "testuser"
+    main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
     yield
-    main.app.dependency_overrides.pop(get_current_user, None)
+    main.app.dependency_overrides.pop(main.get_current_user, None)
 
 
 @pytest.fixture(autouse=True)
@@ -248,3 +248,72 @@ def test_analysis_queue_cancel_running_returns_conflict(client):
 def test_analysis_queue_cancel_missing_returns_404(client):
     response = client.delete("/api/analysis-queue/unknown")
     assert response.status_code == 404
+
+
+def test_analysis_queue_prune_finished_removes_expired_terminal_items():
+    expired = main.analysis_queue.submit(
+        vuln_id="CVE-2024-3000",
+        component_name="libExpired",
+        submitted_by="testuser",
+    )
+
+    fresh = main.analysis_queue.submit(
+        vuln_id="CVE-2024-3001",
+        component_name="libFresh",
+        submitted_by="testuser",
+    )
+
+    running = main.analysis_queue.submit(
+        vuln_id="CVE-2024-3002",
+        component_name="libRunning",
+        submitted_by="testuser",
+    )
+    running.status = "running"
+
+    cancelled = main.analysis_queue.submit(
+        vuln_id="CVE-2024-3003",
+        component_name="libCancelled",
+        submitted_by="testuser",
+    )
+
+    expired.status = "completed"
+    expired.finished_at = datetime.fromtimestamp(1000, UTC).isoformat()
+
+    fresh.status = "failed"
+    fresh.finished_at = datetime.fromtimestamp(4500, UTC).isoformat()
+
+    cancelled.status = "cancelled"
+    cancelled.finished_at = datetime.fromtimestamp(1200, UTC).isoformat()
+
+    with patch.dict(
+        os.environ, {"DTVP_ANALYSIS_QUEUE_TTL_SECONDS": "3600"}, clear=False
+    ):
+        removed = main.analysis_queue.prune_finished(now=5000)
+
+    assert removed == 2
+    assert expired.queue_id not in main.analysis_queue._items
+    assert cancelled.queue_id not in main.analysis_queue._items
+    assert main.analysis_queue._items[fresh.queue_id] is fresh
+    assert main.analysis_queue._items[running.queue_id] is running
+
+
+def test_analysis_queue_list_prunes_expired_finished_items(client):
+    item = main.analysis_queue.submit(
+        vuln_id="CVE-2024-3004",
+        component_name="libPruned",
+        submitted_by="testuser",
+    )
+    item.status = "completed"
+    item.finished_at = datetime.fromtimestamp(1000, UTC).isoformat()
+
+    with patch.dict(
+        os.environ, {"DTVP_ANALYSIS_QUEUE_TTL_SECONDS": "3600"}, clear=False
+    ):
+        with patch("dtvp.main.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime.fromtimestamp(5000, UTC)
+            mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+            response = client.get("/api/analysis-queue")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert main.analysis_queue.get(item.queue_id) is None
