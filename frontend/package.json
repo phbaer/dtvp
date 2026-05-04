@@ -16,10 +16,10 @@
     "@tailwindcss/postcss": "^4.2.4",
     "ae-cvss-calculator": "^1.0.12",
     "autoprefixer": "^10.5.0",
-    "axios": "^1.15.2",
+    "axios": "^1.16.0",
     "lucide-vue-next": "^1.0.0",
-    "marked": "^18.0.2",
-    "postcss": "^8.5.12",
+    "marked": "^18.0.3",
+    "postcss": "^8.5.13",
     "vue": "^3.5.33",
     "vue-router": "^5.0.6"
   },

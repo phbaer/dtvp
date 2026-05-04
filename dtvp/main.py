@@ -8,7 +8,7 @@ import socket
 import tomllib
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -35,11 +35,12 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from auth import auth_settings, get_current_user
-from auth import router as auth_router
-from dt_cache import cache_manager
-from dt_client import DTClient, DTSettings, get_client
-from logic import (
+from .auth import auth_settings, get_current_user
+from .auth import router as auth_router
+from .code_analysis_integration import CodeAnalysisClient, CodeAnalysisSettings
+from .dt_cache import cache_manager
+from .dt_client import DTClient, DTSettings, get_client
+from .logic import (
     DEFAULT_DEPENDENCY_CHAIN_LIMIT,
     BOMAnalysisCache,
     calculate_aggregated_state,
@@ -54,7 +55,7 @@ from logic import (
     load_user_roles,
     process_assessment_details,
 )
-from tmrescore_integration import (
+from .tmrescore_integration import (
     SUPPORTED_TMRESCORE_SCOPES,
     TMRescoreClient,
     TMRescoreSettings,
@@ -66,7 +67,7 @@ from tmrescore_integration import (
     normalize_tmrescore_snapshot,
     sort_projects_by_version,
 )
-from version import BUILD_COMMIT, VERSION
+from .version import BUILD_COMMIT, VERSION
 
 logger = logging.getLogger("dtvp")
 logger.setLevel(logging.INFO)
@@ -124,13 +125,21 @@ def persist_tmrescore_project_snapshot(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    analysis_queue.reset_runtime_state()
     logger.info(f"Starting DTVP version {VERSION} (build {BUILD_COMMIT})")
     tmrescore_project_cache.clear()
     tmrescore_project_cache.update(load_tmrescore_project_cache())
     await cache_manager.initialize()
     sync_task = asyncio.create_task(cache_manager.background_sync_loop())
+    queue_task = asyncio.create_task(analysis_queue.worker())
     yield
+    analysis_queue.shutdown()
+    queue_task.cancel()
     sync_task.cancel()
+    try:
+        await queue_task
+    except asyncio.CancelledError:
+        pass
     try:
         await sync_task
     except asyncio.CancelledError:
@@ -362,7 +371,7 @@ def get_tmrescore_task_ttl_seconds() -> int:
     raw_value = os.getenv("DTVP_TMRESCORE_TASK_TTL_SECONDS", "3600")
     try:
         return max(60, int(raw_value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.warning(
             "Invalid DTVP_TMRESCORE_TASK_TTL_SECONDS=%r, falling back to 3600",
             raw_value,
@@ -629,7 +638,7 @@ async def run_tmrescore_analysis_task(
                     enrich=enrich,
                     ollama_model=ollama_model if enrich else None,
                 )
-            except (httpx.ReadTimeout, httpx.TimeoutException):
+            except httpx.ReadTimeout, httpx.TimeoutException:
                 task["message"] = (
                     "TMRescore is still processing remotely. Polling progress..."
                 )
@@ -716,7 +725,7 @@ def get_version_fetch_concurrency() -> int:
     raw_value = os.getenv("DTVP_VERSION_FETCH_CONCURRENCY", "4")
     try:
         return max(1, int(raw_value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.warning(
             "Invalid DTVP_VERSION_FETCH_CONCURRENCY=%r, falling back to 4",
             raw_value,
@@ -2082,6 +2091,310 @@ async def update_rescore_rules(
         return {"status": "error", "message": str(e)}
 
 
+# ── Analysis Queue (global, one-at-a-time) ───────────────────────────────────
+
+
+class AnalysisQueueItem(BaseModel):
+    queue_id: str
+    vuln_id: str
+    component_name: str
+    cvss_vector: Optional[str] = None
+    user_guidance: Optional[str] = None
+    submitted_by: str
+    submitted_at: str
+    status: str = "queued"  # queued | running | completed | failed
+    position: int = 0
+    job_id: Optional[str] = None
+    error: Optional[str] = None
+    result: Optional[dict] = None
+    finished_at: Optional[str] = None
+    progress: Optional[dict] = None
+
+
+class AnalysisQueue:
+    def __init__(self):
+        self._items: Dict[str, AnalysisQueueItem] = {}
+        self._order: List[str] = []
+        self._event = asyncio.Event()
+        self._running = True
+        self._lock = asyncio.Lock()
+
+    def reset_runtime_state(self):
+        self._event = asyncio.Event()
+        self._lock = asyncio.Lock()
+        self._running = True
+
+    def _reindex(self):
+        pos = 1
+        for qid in self._order:
+            item = self._items.get(qid)
+            if item and item.status == "queued":
+                item.position = pos
+                pos += 1
+            elif item:
+                item.position = 0
+
+    def submit(
+        self,
+        vuln_id: str,
+        component_name: str,
+        submitted_by: str,
+        cvss_vector: Optional[str] = None,
+        user_guidance: Optional[str] = None,
+    ) -> AnalysisQueueItem:
+        queue_id = str(uuid.uuid4())
+        item = AnalysisQueueItem(
+            queue_id=queue_id,
+            vuln_id=vuln_id,
+            component_name=component_name,
+            cvss_vector=cvss_vector,
+            user_guidance=user_guidance,
+            submitted_by=submitted_by,
+            submitted_at=datetime.now(UTC).isoformat(),
+        )
+        self._items[queue_id] = item
+        self._order.append(queue_id)
+        self._reindex()
+        self._event.set()
+        return item
+
+    def get(self, queue_id: str) -> Optional[AnalysisQueueItem]:
+        return self._items.get(queue_id)
+
+    def list_all(self) -> List[AnalysisQueueItem]:
+        return [self._items[qid] for qid in self._order if qid in self._items]
+
+    def cancel(self, queue_id: str) -> bool:
+        item = self._items.get(queue_id)
+        if not item or item.status not in ("queued",):
+            return False
+        item.status = "cancelled"
+        item.finished_at = datetime.now(UTC).isoformat()
+        self._order = [qid for qid in self._order if qid != queue_id]
+        self._reindex()
+        return True
+
+    def remove_finished(self, queue_id: str) -> bool:
+        item = self._items.get(queue_id)
+        if not item or item.status in ("queued", "running"):
+            return False
+        self._order = [qid for qid in self._order if qid != queue_id]
+        del self._items[queue_id]
+        return True
+
+    def shutdown(self):
+        self._running = False
+        self._event.set()
+
+    async def worker(self):
+        logger.info("Analysis queue worker started")
+        while self._running:
+            # Find next queued item
+            next_item: Optional[AnalysisQueueItem] = None
+            for qid in self._order:
+                item = self._items.get(qid)
+                if item and item.status == "queued":
+                    next_item = item
+                    break
+
+            if not next_item:
+                self._event.clear()
+                await self._event.wait()
+                continue
+
+            next_item.status = "running"
+            next_item.position = 0
+            self._reindex()
+            logger.info(
+                f"Analysis queue: running {next_item.queue_id} "
+                f"(vuln={next_item.vuln_id}, component={next_item.component_name})"
+            )
+
+            try:
+                settings = CodeAnalysisSettings()
+                if not settings.enabled:
+                    raise Exception("Code analysis integration is not configured.")
+
+                async with CodeAnalysisClient(settings) as client:
+                    job = await client.start_assessment(
+                        vuln_id=next_item.vuln_id,
+                        component_name=next_item.component_name,
+                        cvss_vector=next_item.cvss_vector,
+                    )
+                    next_item.job_id = job.get("job_id")
+
+                    # Poll until done
+                    while True:
+                        await asyncio.sleep(2)
+                        status = await client.get_job_status(next_item.job_id)
+                        s = status.get("status", "")
+                        # Relay progress information from the code analysis service
+                        if "progress" in status:
+                            next_item.progress = status["progress"]
+                        if s == "completed":
+                            result = await client.get_job_result(next_item.job_id)
+                            next_item.result = result
+                            next_item.status = "completed"
+                            next_item.finished_at = datetime.now(UTC).isoformat()
+                            break
+                        elif s == "failed":
+                            next_item.status = "failed"
+                            next_item.error = status.get("error", "Analysis failed")
+                            next_item.finished_at = datetime.now(UTC).isoformat()
+                            break
+            except Exception as e:
+                logger.exception(f"Analysis queue item {next_item.queue_id} failed")
+                next_item.status = "failed"
+                next_item.error = str(e)
+                next_item.finished_at = datetime.now(UTC).isoformat()
+
+
+analysis_queue = AnalysisQueue()
+
+
+# ── Code Analysis endpoints ──────────────────────────────────────────────────
+
+
+class CodeAnalysisAssessRequest(BaseModel):
+    vuln_id: str
+    component_name: str
+    cvss_vector: Optional[str] = None
+    user_guidance: Optional[str] = None
+    focus_path: Optional[str] = None
+    dependency_paths: Optional[List[List[str]]] = None
+    debug: bool = False
+
+
+@api_router.post("/code-analysis/assess")
+async def code_analysis_start_assessment(
+    req: CodeAnalysisAssessRequest,
+    user: str = Depends(get_current_user),
+):
+    settings = CodeAnalysisSettings()
+    if not settings.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Code analysis integration is not configured. Set DTVP_CODE_ANALYSIS_URL to enable code analysis.",
+        )
+    async with CodeAnalysisClient(settings) as client:
+        return await client.start_assessment(
+            vuln_id=req.vuln_id,
+            component_name=req.component_name,
+            cvss_vector=req.cvss_vector,
+            user_guidance=req.user_guidance,
+            focus_path=req.focus_path,
+            dependency_paths=req.dependency_paths,
+            debug=req.debug,
+        )
+
+
+@api_router.get("/code-analysis/jobs/{job_id}")
+async def code_analysis_get_job_status(
+    job_id: str,
+    user: str = Depends(get_current_user),
+):
+    settings = CodeAnalysisSettings()
+    if not settings.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Code analysis integration is not configured.",
+        )
+    async with CodeAnalysisClient(settings) as client:
+        return await client.get_job_status(job_id)
+
+
+@api_router.get("/code-analysis/jobs/{job_id}/result")
+async def code_analysis_get_job_result(
+    job_id: str,
+    user: str = Depends(get_current_user),
+):
+    settings = CodeAnalysisSettings()
+    if not settings.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Code analysis integration is not configured.",
+        )
+    async with CodeAnalysisClient(settings) as client:
+        return await client.get_job_result(job_id)
+
+
+@api_router.get("/code-analysis/health")
+async def code_analysis_health(
+    user: str = Depends(get_current_user),
+):
+    settings = CodeAnalysisSettings()
+    if not settings.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Code analysis integration is not configured.",
+        )
+    async with CodeAnalysisClient(settings) as client:
+        return await client.health()
+
+
+# ── Analysis Queue endpoints ─────────────────────────────────────────────────
+
+
+class QueueSubmitRequest(BaseModel):
+    vuln_id: str
+    component_name: str
+    cvss_vector: Optional[str] = None
+    user_guidance: Optional[str] = None
+
+
+@api_router.post("/analysis-queue/submit")
+async def queue_submit(
+    req: QueueSubmitRequest,
+    user: str = Depends(get_current_user),
+):
+    item = analysis_queue.submit(
+        vuln_id=req.vuln_id,
+        component_name=req.component_name,
+        submitted_by=user,
+        cvss_vector=req.cvss_vector,
+        user_guidance=req.user_guidance,
+    )
+    return item.model_dump(exclude={"result"})
+
+
+@api_router.get("/analysis-queue")
+async def queue_list(
+    user: str = Depends(get_current_user),
+):
+    items = analysis_queue.list_all()
+    return [item.model_dump(exclude={"result"}) for item in items]
+
+
+@api_router.get("/analysis-queue/{queue_id}")
+async def queue_get(
+    queue_id: str,
+    user: str = Depends(get_current_user),
+):
+    item = analysis_queue.get(queue_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Queue item not found.")
+    return item.model_dump()
+
+
+@api_router.delete("/analysis-queue/{queue_id}")
+async def queue_cancel(
+    queue_id: str,
+    user: str = Depends(get_current_user),
+):
+    item = analysis_queue.get(queue_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Queue item not found.")
+
+    if item.status in ("queued",):
+        analysis_queue.cancel(queue_id)
+        return {"status": "cancelled"}
+    elif item.status in ("completed", "failed", "cancelled"):
+        analysis_queue.remove_finished(queue_id)
+        return {"status": "removed"}
+    else:
+        raise HTTPException(status_code=409, detail="Cannot cancel a running analysis.")
+
+
 app.include_router(api_router, prefix=context_path)
 
 # Serve Frontend if it exists (for production)
@@ -2151,4 +2464,4 @@ if os.path.isdir("frontend/dist"):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("dtvp.main:app", host="0.0.0.0", port=8000, reload=True)

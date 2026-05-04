@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from main import app, get_client
+from dtvp.main import app, get_client
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -8,13 +8,13 @@ client = TestClient(app)
 
 @pytest.fixture
 def mock_dt_client():
-    with patch("main.get_client") as mock:
+    with patch("dtvp.main.get_client") as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_bom_analysis_cache():
-    with patch("main.BOMAnalysisCache") as mock:
+    with patch("dtvp.main.BOMAnalysisCache") as mock:
         yield mock
 
 

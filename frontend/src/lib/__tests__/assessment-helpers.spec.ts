@@ -137,6 +137,34 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
         });
 
+        it('should not return INCONSISTENT when every version repeats the same multi-team assessment blocks', () => {
+            const sharedDetails = `--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] ---\nApproved by team A\n--- [Team: team-b] [State: IN_TRIAGE] [Assessed By: bob] ---\nAwaiting team B follow-up`;
+            const group: any = {
+                id: 'CVE-MULTI-BLOCK-REPEATED',
+                tags: ['team-a', 'team-b'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                analysis_state: 'IN_TRIAGE',
+                                analysis_details: sharedDetails
+                            }
+                        ]
+                    },
+                    {
+                        components: [
+                            {
+                                analysis_state: 'IN_TRIAGE',
+                                analysis_details: sharedDetails
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
+        });
+
         it('should use the same team assessment check for open team assessment and chip state', () => {
             const group: any = {
                 id: 'CVE-OPEN-TEAM',

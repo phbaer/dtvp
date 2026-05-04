@@ -183,7 +183,7 @@
                     "File uploads"
                 ],
                 "summary": "Upload CycloneDX SBOM",
-                "description": "Upload a CycloneDX SBOM in JSON format.\n\nComponents should carry ``vp:threatModelElementIds`` properties or\nthe pipeline will attempt name-based matching to the threat model.\nIf the SBOM includes a ``vulnerabilities`` section, a separate CVE\nfile upload is optional.",
+                "description": "Upload a CycloneDX SBOM in JSON format.\n\nComponents should carry ``threatModelElementIds`` properties or\nthe pipeline will attempt name-based matching to the threat model.\nIf the SBOM includes a ``vulnerabilities`` section, a separate CVE\nfile upload is optional.",
                 "operationId": "upload_sbom_api_v1_sessions__session_id__files_sbom_put",
                 "parameters": [
                     {
@@ -234,7 +234,7 @@
                     "File uploads"
                 ],
                 "summary": "Upload CVE data (optional)",
-                "description": "Upload a CVE data file (.json or .csv).\n\nOptional when the CycloneDX SBOM already contains a\n``vulnerabilities`` section.  Accepted formats:\n\n- **JSON** — ``{\"cves\": [{\"cve_id\", \"cvss_vector\", ...}]}``\n\n- **CSV** — exported from a vulnerability work-list (e.g. GE\n  Healthcare ViewPoint format).",
+                "description": "Upload a CVE data file (.json or .csv).\n\nOptional when the CycloneDX SBOM already contains a\n``vulnerabilities`` section.  Accepted formats:\n\n- **JSON** — ``{\"cves\": [{\"cve_id\", \"cvss_vector\", ...}]}``\n\n- **CSV** — exported from a vulnerability work-list.  Expected\n  columns: ``cve_id``, ``cvss_vector``, ``base_score``, ``severity``\n  (additional columns are ignored).",
                 "operationId": "upload_cves_api_v1_sessions__session_id__files_cves_put",
                 "parameters": [
                     {
@@ -356,6 +356,7 @@
                             "schema": {
                                 "type": "object",
                                 "additionalProperties": true,
+                                "description": "Analysis configuration as a JSON object",
                                 "title": "Config"
                             }
                         }
@@ -500,7 +501,7 @@
                     "Analysis"
                 ],
                 "summary": "Upload & analyse in one step (inventory mode)",
-                "description": "One-shot analysis: upload a TM7 threat model and a CycloneDX SBOM\n(with embedded ``vulnerabilities``, as exported by Dependency Track),\nand receive the re-scored results.\n\nThe SBOM components are automatically enriched with\n``vp:threatModelElementIds`` properties linking each component to\nthe matching threat-model elements.  The enriched SBOM is available\nas an output file after analysis completes.\n\nIf no analysis configuration is provided, sensible defaults (name-\nbased component-to-element matching, standard rescoring rules) are\nused.",
+                "description": "One-shot analysis: upload a TM7 threat model and a CycloneDX SBOM\n(with embedded ``vulnerabilities``), and receive the re-scored\nresults.\n\nThe SBOM components are automatically enriched with\n``threatModelElementIds`` properties linking each component to the\nmatching threat-model elements.  The enriched SBOM is available as\nan output file after analysis completes.\n\nIf no analysis configuration is provided, sensible defaults (name-\nbased component-to-element matching, standard rescoring rules) are\nused.",
                 "operationId": "analyze_inventory_api_v1_sessions__session_id__inventory_post",
                 "parameters": [
                     {
@@ -935,16 +936,19 @@
                     "chain_analysis": {
                         "type": "boolean",
                         "title": "Chain Analysis",
+                        "description": "Run attack-chain analysis across linked components.",
                         "default": true
                     },
                     "prioritize": {
                         "type": "boolean",
                         "title": "Prioritize",
+                        "description": "Generate a priority-ranked vulnerability report.",
                         "default": true
                     },
                     "what_if": {
                         "type": "boolean",
                         "title": "What If",
+                        "description": "Run hypothetical what-if scenarios.",
                         "default": false
                     },
                     "enrich": {
@@ -972,7 +976,8 @@
                     "file": {
                         "type": "string",
                         "contentMediaType": "application/octet-stream",
-                        "title": "File"
+                        "title": "File",
+                        "description": "Analysis configuration in YAML format (.yaml)"
                     }
                 },
                 "type": "object",
@@ -986,7 +991,8 @@
                     "file": {
                         "type": "string",
                         "contentMediaType": "application/octet-stream",
-                        "title": "File"
+                        "title": "File",
+                        "description": "CVE data file (.json or .csv)"
                     }
                 },
                 "type": "object",
@@ -1000,7 +1006,8 @@
                     "file": {
                         "type": "string",
                         "contentMediaType": "application/octet-stream",
-                        "title": "File"
+                        "title": "File",
+                        "description": "CSV mapping components to threat-model elements (.csv)"
                     }
                 },
                 "type": "object",
@@ -1014,7 +1021,8 @@
                     "file": {
                         "type": "string",
                         "contentMediaType": "application/octet-stream",
-                        "title": "File"
+                        "title": "File",
+                        "description": "CycloneDX SBOM in JSON format (.cdx.json)"
                     }
                 },
                 "type": "object",
@@ -1028,7 +1036,8 @@
                     "file": {
                         "type": "string",
                         "contentMediaType": "application/octet-stream",
-                        "title": "File"
+                        "title": "File",
+                        "description": "Microsoft Threat Model file (.tm7)"
                     }
                 },
                 "type": "object",
@@ -1064,7 +1073,7 @@
                         "maxLength": 128,
                         "minLength": 1,
                         "title": "Application Version",
-                        "description": "Version string (e.g. '6.15.5')"
+                        "description": "Version string (e.g. '1.0.0')"
                     },
                     "session_id": {
                         "anyOf": [
@@ -1092,52 +1101,63 @@
                 "properties": {
                     "session_id": {
                         "type": "string",
-                        "title": "Session Id"
+                        "title": "Session Id",
+                        "description": "Unique session identifier."
                     },
                     "application_name": {
                         "type": "string",
-                        "title": "Application Name"
+                        "title": "Application Name",
+                        "description": "Name of the application under analysis."
                     },
                     "application_version": {
                         "type": "string",
-                        "title": "Application Version"
+                        "title": "Application Version",
+                        "description": "Version string of the application."
                     },
                     "project_id": {
                         "type": "string",
-                        "title": "Project Id"
+                        "title": "Project Id",
+                        "description": "Stable hash derived from application name and version."
                     },
                     "created_at": {
                         "type": "string",
-                        "title": "Created At"
+                        "title": "Created At",
+                        "description": "ISO 8601 timestamp of session creation (UTC)."
                     },
                     "has_threat_model": {
                         "type": "boolean",
                         "title": "Has Threat Model",
+                        "description": "Whether a threat model (.tm7) has been uploaded.",
                         "default": false
                     },
                     "has_sbom": {
                         "type": "boolean",
                         "title": "Has Sbom",
+                        "description": "Whether a CycloneDX SBOM has been uploaded.",
                         "default": false
                     },
                     "has_cves": {
                         "type": "boolean",
                         "title": "Has Cves",
+                        "description": "Whether a CVE data file has been uploaded.",
                         "default": false
                     },
                     "has_items_csv": {
                         "type": "boolean",
                         "title": "Has Items Csv",
+                        "description": "Whether an items.csv mapping file has been uploaded.",
                         "default": false
                     },
                     "has_analysis_config": {
                         "type": "boolean",
                         "title": "Has Analysis Config",
+                        "description": "Whether an analysis configuration has been set.",
                         "default": false
                     },
                     "status": {
                         "type": "string",
                         "title": "Status",
+                        "description": "Current session status: created, ready, running, completed, or failed.",
                         "default": "created"
                     }
                 },

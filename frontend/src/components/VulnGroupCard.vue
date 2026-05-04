@@ -5,14 +5,16 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/ap
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, mergeTeamAssessment, constructAssessmentDetails, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, STATE_PRIORITY, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
+import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
+import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
+import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
+import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
+import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
 import { calculateScoreFromVector } from '../lib/cvss'
-import { getClosestAffectedTeamsForInstance, getClosestAffectedTeamsForInstances, getDerivedGroupTags, normalizeLegacyTags, getPrimaryTeamForComponent, getFirstMappedTeamOnPath, getPathParts, selectRepresentativePaths } from '../lib/dependency-team-selection'
-import { compareVersions, sortVersions } from '../lib/version'
+import { getDerivedGroupTags } from '../lib/dependency-team-selection'
+import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
-import CvssCalculatorV2 from './CvssCalculatorV2.vue'
-import CvssCalculatorV3 from './CvssCalculatorV3.vue'
-import CvssCalculatorV4 from './CvssCalculatorV4.vue'
 import CvssVectorDisplay from './CvssVectorDisplay.vue'
 import CustomSelect from './CustomSelect.vue'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
@@ -21,6 +23,8 @@ import CalculatorModal from './CalculatorModal.vue'
 import ConflictResolutionModal from './ConflictResolutionModal.vue'
 import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
+import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
+import type { CodeAnalysisAssessResponse } from '../lib/api'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -39,8 +43,8 @@ const handleCloseOnEscape = (e: KeyboardEvent) => {
 }
 
 onMounted(() => {
-    window.addEventListener('keydown', handleCloseOnEscape)
-    window.addEventListener('resize', handleViewportResize)
+    globalThis.addEventListener('keydown', handleCloseOnEscape)
+    globalThis.addEventListener('resize', handleViewportResize)
     nextTick(() => {
         if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
     })
@@ -48,8 +52,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    window.removeEventListener('keydown', handleCloseOnEscape)
-    window.removeEventListener('resize', handleViewportResize)
+    globalThis.removeEventListener('keydown', handleCloseOnEscape)
+    globalThis.removeEventListener('resize', handleViewportResize)
     if (expanded.value && openCardCount > 0) {
         openCardCount -= 1
         if (openCardCount === 0) {
@@ -90,11 +94,13 @@ const JUSTIFICATION_OPTIONS = [
 let openCardCount = 0
 let bodyScrollLockY = 0
 
+const isDebugPersistenceEnabled = () => globalThis.localStorage?.getItem?.('dtvp_debug_persistence') === 'true'
+
 const lockBodyScroll = () => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return
+    if (globalThis.window === undefined || typeof document === 'undefined') return
     if (openCardCount > 0) return
 
-    bodyScrollLockY = window.scrollY || window.pageYOffset || 0
+    bodyScrollLockY = globalThis.scrollY || globalThis.pageYOffset || 0
     document.body.style.position = 'fixed'
     document.body.style.top = `-${bodyScrollLockY}px`
     document.body.style.left = '0'
@@ -104,7 +110,7 @@ const lockBodyScroll = () => {
 }
 
 const unlockBodyScroll = () => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return
+    if (globalThis.window === undefined || typeof document === 'undefined') return
 
     document.body.style.position = ''
     document.body.style.top = ''
@@ -112,7 +118,7 @@ const unlockBodyScroll = () => {
     document.body.style.right = ''
     document.body.style.width = ''
     document.body.style.overflow = ''
-    window.scrollTo(0, bodyScrollLockY)
+    globalThis.scrollTo(0, bodyScrollLockY)
 }
 
 const expanded = ref(false)
@@ -132,6 +138,7 @@ const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Ana
 const teamDrafts = ref<Map<string, { state: string, details: string, justification: string, assigned: string[] }>>(new Map())
 const refreshCounter = ref(0)
 const formTouched = ref(false)
+
 const isInternalUpdate = ref(false)
 const showRawEdit = ref(false)
 const rawDetails = ref('')
@@ -195,9 +202,9 @@ const getStickyHeaderOffset = () => {
 }
 
 const alignHeaderBelowStickyTop = () => {
-    if (typeof window === 'undefined' || !headerEl.value) return
-    const targetTop = Math.max(0, window.scrollY + headerEl.value.getBoundingClientRect().top - getStickyHeaderOffset())
-    window.scrollTo({ top: targetTop, behavior: 'auto' })
+    if (globalThis.window === undefined || !headerEl.value) return
+    const targetTop = Math.max(0, globalThis.scrollY + headerEl.value.getBoundingClientRect().top - getStickyHeaderOffset())
+    globalThis.scrollTo({ top: targetTop, behavior: 'auto' })
 }
 
 const getFixedFooterOffset = () => {
@@ -209,8 +216,8 @@ const getFixedFooterOffset = () => {
 }
 
 const updateExpandedDetailsMaxHeight = () => {
-    if (typeof window === 'undefined' || typeof document === 'undefined' || !detailsEl.value) return
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+    if (globalThis.window === undefined || typeof document === 'undefined' || !detailsEl.value) return
+    const viewportHeight = globalThis.innerHeight || document.documentElement.clientHeight
     const detailsTop = detailsEl.value.getBoundingClientRect().top
     const availableHeight = Math.floor(viewportHeight - detailsTop - getFixedFooterOffset() - 8)
     detailsMaxHeight.value = `${Math.max(220, availableHeight)}px`
@@ -224,7 +231,7 @@ const handleViewportResize = () => {
 
 const pendingScore = ref<number | null>(null)
 const pendingVector = ref<string>('')
-const activeVersion = ref<'4.0' | '3.1' | '3.0' | '2.0'>('3.1')
+const activeVersion = ref<CvssVersion>('3.1')
 const cvssInstance = ref<any>(null)
 const isManualBaseMode = ref(false)
 const initialVector = ref('')
@@ -299,29 +306,16 @@ const isReviewer = computed(() => {
     return user?.value?.role === 'REVIEWER'
 })
 
-const allInstances = computed(() => {
-    // Force reactivity on refresh
-    refreshCounter.value
-    return props.group.affected_versions?.flatMap(v => v.components) || []
+const dependencyInfo = useVulnDependencyInfo({
+    group: computed(() => props.group),
+    teamMapping,
+    refreshCounter,
 })
 
-const getInstanceTeamKey = (inst: any, index: number) => {
-    return inst.finding_uuid || `${inst.project_uuid || ''}:${inst.component_uuid || ''}:${index}`
-}
-
-const instanceTeams = computed(() => {
-    const map = new Map<string, string[]>()
-    allInstances.value.forEach((inst, index) => {
-        map.set(getInstanceTeamKey(inst, index), getClosestAffectedTeamsForInstance(inst as any, teamMapping?.value || {}))
-    })
-    return map
-})
-
-const effectiveTags = computed(() => {
-    const derived = getClosestAffectedTeamsForInstances(allInstances.value as any, teamMapping?.value || {})
-    if (derived.length > 0) return derived
-    return normalizeLegacyTags(props.group.tags, teamMapping?.value)
-})
+const allInstances = dependencyInfo.allInstances
+const getInstanceTeamKey = dependencyInfo.getInstanceTeamKey
+const instanceTeams = dependencyInfo.instanceTeams
+const effectiveTags = dependencyInfo.effectiveTags
 
 const totalTargeted = computed(() => {
     // When a team is selected, automatically target only that team's instances
@@ -426,11 +420,12 @@ const cvssVectorEntries = computed(() => {
     // Rescored — use pendingVector if the user is editing, otherwise the saved rescored_vector
     const effectiveRescored = pendingVector.value || props.group.rescored_vector
     if (effectiveRescored && effectiveRescored !== props.group.cvss_vector) {
+        const adjusted = pendingVector.value ? undefined : Boolean(props.group.rescored_vector_adjusted)
         entries.push({
             vector: effectiveRescored,
             label: 'Rescored',
             theme: 'purple',
-            adjusted: !pendingVector.value ? !!props.group.rescored_vector_adjusted : undefined,
+            adjusted,
         })
     }
     return entries
@@ -489,6 +484,39 @@ const applyProposal = async () => {
     // instances.  This way, when the user subsequently switches to their own
     // team and submits their assessment, the merge logic already sees the
     // automation block from the server/cache — no second apply needed.
+    await handleUpdate(false)
+}
+
+const handleCodeAnalysisResult = async (result: CodeAnalysisAssessResponse, components: string[]) => {
+    const prepared = prepareCodeAnalysisResult(
+        result,
+        components,
+        triggeringTaggedComponents.value,
+        currentAssigned.value,
+    )
+
+    for (const draft of prepared.teamDrafts) {
+        teamDrafts.value.set(draft.team, {
+            state: draft.state,
+            details: draft.details,
+            justification: draft.justification,
+            assigned: draft.assigned,
+        })
+    }
+
+    selectedTeam.value = prepared.firstTeam ?? ''
+    state.value = prepared.targetState
+    justification.value = prepared.targetJustification
+    details.value = prepared.detailsText
+
+    if (prepared.adjustedVector) {
+        pendingVector.value = prepared.adjustedVector
+    }
+    if (prepared.adjustedScore != null) {
+        pendingScore.value = prepared.adjustedScore
+    }
+
+    formTouched.value = true
     await handleUpdate(false)
 }
 
@@ -576,68 +604,7 @@ const resetToDefault = (ver: string) => {
 
 const normalizeRescoredVector = () => {
     if (!cvssInstance.value) return
-
-    const instance = cvssInstance.value
-
-    const getComponentSafe = (name: string) => {
-        if (typeof instance.getComponentByStringOpt === 'function') {
-            return instance.getComponentByStringOpt(name)
-        }
-        try {
-            return instance.getComponent(name)
-        } catch {
-            return null
-        }
-    }
-
-    const modifiedPairs: [string, string][] = [
-        ['MAV', 'AV'], ['MAC', 'AC'], ['MAT', 'AT'], ['MPR', 'PR'], ['MUI', 'UI'],
-        ['MVC', 'VC'], ['MVI', 'VI'], ['MVA', 'VA'], ['MSC', 'SC'], ['MSI', 'SI'], ['MSA', 'SA'],
-        // CVSS 3.x environmental modified integrity/confidentiality/availability
-        ['MC', 'C'], ['MI', 'I'], ['MA', 'A']
-    ]
-
-    for (const [mod, base] of modifiedPairs) {
-        const modComp = getComponentSafe(mod)
-        const baseComp = getComponentSafe(base)
-        if (!modComp || !baseComp) continue
-
-        const modVal = modComp.shortName
-        const baseVal = baseComp.shortName
-
-        if (modVal === 'X' || baseVal === 'X') continue
-        if (modVal === baseVal) {
-            instance.applyComponentString(mod, 'X')
-        }
-    }
-
-    const requirementMap: Record<string, string[]> = {
-        CR: ['C', 'VC'],
-        IR: ['I', 'VI'],
-        AR: ['A', 'VA']
-    }
-
-    for (const [req, bases] of Object.entries(requirementMap)) {
-        const reqComp = getComponentSafe(req)
-        if (!reqComp) continue
-
-        const reqVal = reqComp.shortName
-        if (reqVal === 'X') continue
-
-        let baseComp = null
-        for (const baseName of bases) {
-            baseComp = getComponentSafe(baseName)
-            if (baseComp) break
-        }
-
-        if (!baseComp) continue
-        const baseVal = baseComp.shortName
-        if (baseVal === 'X') continue
-
-        if (reqVal === baseVal) {
-            instance.applyComponentString(req, 'X')
-        }
-    }
+    pendingVector.value = normalizeCvssVectorInstance(cvssInstance.value)
 }
 
 const setCvssInstanceFromVector = (vector: string) => {
@@ -689,7 +656,6 @@ const updateCalcVector = (componentShortName: string, value: string) => {
     try {
         cvssInstance.value.applyComponentString(componentShortName, value)
         updateVectorString()
-        cvssInstance.value = cvssInstance.value 
     } catch (e) {
         console.error(e)
     }
@@ -756,64 +722,14 @@ watch(pendingVector, (newVector) => {
 })
 
 const mergedAssessmentData = computed(() => {
-    // Force reactivity when details are refreshed
-    refreshCounter.value 
-    
-    const allBlocks: AssessmentBlock[] = []
-    const teamToIndex = new Map<string, number>()
-    const allTags = new Set<string>()
-    let isPendingValue = false
-    
-    for (const inst of allInstances.value) {
-        const instDetails = (inst as any).analysis_details || (inst as any).analysisDetails || ''
-        if (!instDetails) continue
-        
-        if ((inst as any).analysis_details?.includes('[Status: Pending Review]') || (inst as any).analysisDetails?.includes('[Status: Pending Review]')) {
-            isPendingValue = true
-        }
-
-        const blocks = parseAssessmentBlocks(instDetails)
-        for (const block of blocks) {
-            const teamName = block.team
-            const existingIndex = teamToIndex.get(teamName)
-            
-            if (existingIndex === undefined) {
-                teamToIndex.set(teamName, allBlocks.length)
-                allBlocks.push(block)
-            } else {
-                const existingBlock = allBlocks[existingIndex]
-                if (existingBlock) {
-                    const currentTimestamp = (existingBlock.timestamp as number) || 0
-                    const newTimestamp = (block.timestamp as number) || 0
-                    
-                    if (newTimestamp > currentTimestamp) {
-                        allBlocks[existingIndex] = block
-                    } else if (newTimestamp === currentTimestamp) {
-                        if ((block.details?.length || 0) > (existingBlock.details?.length || 0)) {
-                            allBlocks[existingIndex] = block
-                        }
-                    }
-                }
-            }
-        }
-        
-        const rescoredMatch = instDetails.match(/\[Rescored:\s*[\d\.]+\]/);
-        if (rescoredMatch) allTags.add(rescoredMatch[0]);
-
-    }
-    
-    return {
-        blocks: allBlocks,
-        fullText: allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPendingValue).text : '',
-        isPending: isPendingValue
-    }
+    return buildMergedAssessmentData(allInstances.value, refreshCounter.value)
 })
 
 // [Persistence Debug] Watch state and details for changes
 watch(state, (val, old) => {
     if (!isInternalUpdate.value && val !== old) {
         formTouched.value = true
-        if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
+        if (isDebugPersistenceEnabled()) {
             console.log('[Persistence Debug] state touched by user:', val);
         }
     }
@@ -821,11 +737,23 @@ watch(state, (val, old) => {
 watch(details, (val, old) => {
     if (!isInternalUpdate.value && val !== old) {
         formTouched.value = true
-        if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
+        if (isDebugPersistenceEnabled()) {
             console.log('[Persistence Debug] details touched by user:', val.slice(0, 50) + '...');
         }
     }
 })
+
+const appendUniqueComments = (targetComments: any[], sourceComments: any[]) => {
+    for (const comment of sourceComments || []) {
+        const isDuplicate = targetComments.some(existingComment => (
+            existingComment.comment === comment.comment &&
+            existingComment.timestamp === comment.timestamp
+        ))
+        if (!isDuplicate) {
+            targetComments.push(comment)
+        }
+    }
+}
 
 const groupedAssessments = computed(() => {
     const groups = {} as Record<string, {
@@ -854,7 +782,7 @@ const groupedAssessments = computed(() => {
             // Group by state, details, and suppression — different details get separate boxes
             const key = `${stateVal}|${detailsVal}|${suppressedVal}`
             
-            if (!Object.prototype.hasOwnProperty.call(groups, key)) {
+            if (!Object.hasOwn(groups, key)) {
                 groups[key] = {
                     state: stateVal,
                     details: detailsVal,
@@ -865,17 +793,7 @@ const groupedAssessments = computed(() => {
             }
             
             const groupItem = groups[key];
-            
-            // Add unique comments
-            (c.analysis_comments || []).forEach((comm: any) => {
-                const isDuplicate = groupItem.comments.some((gc: any) => 
-                    gc.comment === comm.comment && 
-                    gc.timestamp === comm.timestamp
-                )
-                if (!isDuplicate) {
-                    groupItem.comments.push(comm)
-                }
-            })
+            appendUniqueComments(groupItem.comments, c.analysis_comments || [])
 
             groupItem.instances.push({
                 project_name: v.project_name || '',
@@ -897,7 +815,7 @@ const groupedAssessments = computed(() => {
 const updateFormFromGroup = (force = true) => {
     // If not forced and user has touched the form, don't overwrite
     if (!force && formTouched.value) {
-        if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
+        if (isDebugPersistenceEnabled()) {
             console.log('[Persistence Debug] updateFormFromGroup blocked by formTouched');
         }
         return
@@ -914,81 +832,16 @@ const updateFormFromGroup = (force = true) => {
         else if (pv.startsWith('CVSS:3.')) activeVersion.value = '3.1'
         else if (pv.startsWith('CVSS:2.0') || (pv.includes('/') && !pv.startsWith('CVSS:'))) activeVersion.value = '2.0'
         
-        const teamBlocks = mergedAssessmentData.value.blocks
-        
-        if (selectedTeam.value) { // Team view
-            const teamName = selectedTeam.value
-            const myBlock = teamBlocks.find(b => b.team === teamName)
-            
-            state.value = myBlock?.state || 'NOT_SET'
-            // Strip the status tag from the details shown in the textarea
-            details.value = (myBlock?.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-            justification.value = myBlock?.justification || 'NOT_SET'
-        } else {
-             // No team selected - if Reviewer, show General block
-             if (isReviewer.value) {
-                const generalBlock = teamBlocks.find(b => b.team === 'General')
-                if (generalBlock && generalBlock.state !== 'NOT_SET') {
-                    state.value = generalBlock.state || 'NOT_SET'
-                    details.value = (generalBlock.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-                    justification.value = generalBlock.justification || 'NOT_SET'
-                } else {
-                    const dtCandidates = allInstances.value
-                        .map(i => {
-                            const rawState = i.analysis_state || i.analysisState || 'NOT_SET'
-                            const rawDetails = (i as any).analysis_details || (i as any).analysisDetails || ''
-                            const rawJust = (i as any).justification || (i as any).analysisJustification
-                            const parsedJust = parseJustificationFromText(rawDetails)
-                            return {
-                                state: rawState,
-                                justification: rawJust || parsedJust || 'NOT_SET',
-                                details: rawDetails
-                            }
-                        })
-                        .filter(i => i.state && i.state !== 'NOT_SET')
+        const formValues = resolveAssessmentFormValues({
+            selectedTeam: selectedTeam.value,
+            isReviewer: isReviewer.value,
+            teamBlocks: mergedAssessmentData.value.blocks,
+            instances: allInstances.value,
+        })
 
-                    const dtWorstCandidate = dtCandidates
-                        .sort((a, b) => (STATE_PRIORITY[a.state] ?? 10) - (STATE_PRIORITY[b.state] ?? 10))[0]
-
-                    if (dtWorstCandidate) {
-                        state.value = dtWorstCandidate.state
-                        // Parse the raw details and extract only the General block's text,
-                        // not the full structured text with all team headers.
-                        const dtParsedBlocks = parseAssessmentBlocks(dtWorstCandidate.details)
-                        const dtGeneralBlock = dtParsedBlocks.find(b => b.team === 'General')
-                        details.value = (dtGeneralBlock?.details || '')
-                            .replace(/\n\n\[Status: Pending Review\]/g, '')
-                            .replace(/\[Status: Pending Review\]/g, '')
-
-                        let resolvedJustification = dtWorstCandidate.justification && dtWorstCandidate.justification !== 'NOT_SET'
-                            ? dtWorstCandidate.justification
-                            : undefined
-
-                        if (!resolvedJustification) {
-                            resolvedJustification = dtCandidates.find(c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET')?.justification
-                        }
-
-                        if (!resolvedJustification) {
-                            resolvedJustification = parseJustificationFromText(dtWorstCandidate.details)
-                        }
-
-                        justification.value = resolvedJustification || 'NOT_SET'
-                    } else if (generalBlock) {
-                        state.value = generalBlock.state || 'NOT_SET'
-                        details.value = (generalBlock.details || '').replace(/\n\n\[Status: Pending Review\]/g, '').replace(/\[Status: Pending Review\]/g, '')
-                        justification.value = generalBlock.justification || 'NOT_SET'
-                    } else {
-                        state.value = 'NOT_SET'
-                        details.value = ''
-                        justification.value = 'NOT_SET'
-                    }
-                }
-             } else {
-                state.value = 'NOT_SET'
-                details.value = ''
-                justification.value = 'NOT_SET'
-             }
-        }
+        state.value = formValues.state
+        details.value = formValues.details
+        justification.value = formValues.justification
         
         // Initialize assigned users from the current team block
         const teamKey = selectedTeam.value || 'General'
@@ -998,7 +851,7 @@ const updateFormFromGroup = (force = true) => {
         comment.value = ''
         
         const firstSuppressed = allInstances.value.find(i => i.is_suppressed)
-        suppressed.value = firstSuppressed ? true : false
+        suppressed.value = Boolean(firstSuppressed)
 
         // Set initial values for "touched" check
         initialVector.value = pendingVector.value
@@ -1029,59 +882,7 @@ const applyConsensusAssessment = () => {
         return
     }
 
-    // Derive the authoritative Dependency Track state (worst state across instances)
-    const dtCandidates = allInstances.value
-        .map(i => {
-            const rawState = i.analysis_state || i.analysisState || 'NOT_SET'
-            const rawDetails = (i as any).analysis_details || (i as any).analysisDetails || ''
-            const rawJustification = (i as any).justification || (i as any).analysisJustification
-            const parsedJustification = parseJustificationFromText(rawDetails)
-
-            return {
-                state: rawState,
-                justification: rawJustification || parsedJustification || 'NOT_SET',
-                details: rawDetails
-            }
-        })
-        .filter(i => i.state && i.state !== 'NOT_SET')
-
-    const dtWorstCandidate = dtCandidates
-        .sort((a, b) => (STATE_PRIORITY[a.state] ?? 10) - (STATE_PRIORITY[b.state] ?? 10))[0]
-
-    const dtStates = dtCandidates.map(i => i.state)
-    let dtJustification = dtWorstCandidate ? dtWorstCandidate.justification : undefined
-
-    // If DT provides a state but no explicit justification, try to extract it from the structured details
-    // or from another same-state DT candidate, then fallback to parsing from the block.
-    if (dtWorstCandidate && (!dtJustification || dtJustification === 'NOT_SET')) {
-        const sameStateCandidateJustification = dtCandidates.find(
-            c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET'
-        )?.justification
-
-        if (sameStateCandidateJustification) {
-            dtJustification = sameStateCandidateJustification
-        } else {
-            const blocks = parseAssessmentBlocks(dtWorstCandidate.details)
-            const matching = blocks.find(
-                b => b.state === dtWorstCandidate.state && b.justification && b.justification !== 'NOT_SET'
-            )
-            if (matching) {
-                dtJustification = matching.justification
-            } else {
-                const parsed = parseJustificationFromText(dtWorstCandidate.details)
-                if (parsed) dtJustification = parsed
-            }
-
-            if ((!dtJustification || dtJustification === 'NOT_SET') && dtCandidates) {
-                const fallbackCandidate = dtCandidates.find(
-                    c => c.state === dtWorstCandidate.state && c.justification && c.justification !== 'NOT_SET'
-                )
-                if (fallbackCandidate) {
-                    dtJustification = fallbackCandidate.justification
-                }
-            }
-        }
-    }
+    const { dtStates, dtJustification } = resolveDependencyTrackConsensusInput(allInstances.value)
 
     const consensus = getConsensusAssessment(allBlocks, displayState.value as string, dtStates, dtJustification)
     state.value = consensus.state
@@ -1106,18 +907,11 @@ const handleApplyAllAssessment = async (assessmentDetails: string, assessmentSta
     const blocks = parseAssessmentBlocks(assessmentDetails)
     const generalBlock = blocks.find(b => b.team === 'General')
     if (generalBlock) {
-        details.value = (generalBlock.details || '').replace(/\[Status: Pending Review\]/g, '').trim()
+        details.value = stripPendingReviewStatus(generalBlock.details || '').trim()
         state.value = generalBlock.state || assessmentState || 'NOT_SET'
         justification.value = generalBlock.justification || assessmentJustification || 'NOT_SET'
     } else {
-        // No structured blocks — treat as plain text
-        const cleaned = assessmentDetails
-            .replace(/---\s*\[Team:[^\n]*---\s*/g, '')
-            .replace(/\[Rescored:\s*[\d.]+\]/g, '')
-            .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-            .replace(/\[Status: Pending Review\]/g, '')
-            .trim()
-        details.value = cleaned
+        details.value = cleanStructuredAssessmentDetails(assessmentDetails)
         state.value = assessmentState || 'NOT_SET'
         justification.value = assessmentJustification || 'NOT_SET'
     }
@@ -1149,7 +943,7 @@ const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
     // Only copy the team's details text (not a full structured document).
     state.value = block.state || 'NOT_SET'
     justification.value = block.justification || 'NOT_SET'
-    details.value = (block.details || '').replace(/\[Status: Pending Review\]/g, '').trim()
+    details.value = stripPendingReviewStatus(block.details || '').trim()
     formTouched.value = true
 }
 
@@ -1217,96 +1011,18 @@ watch(expanded, (isOpen) => {
  */
 const applyStateRescore = (targetState: string) => {
     const rules = rescoreRules?.value?.transitions || []
-    const triggerMatch = rules.find((r: any) => {
-        const triggerState = r?.trigger?.state ?? r?.from
-        return triggerState === targetState
+    const result = buildRescoredVectorForState({
+        rules,
+        targetState,
+        currentVector: pendingVector.value,
+        fallbackVersion: activeVersion.value,
     })
 
-    if (!triggerMatch) return
+    if (!result) return
 
-    // Derive the CVSS version from the actual pending vector, not activeVersion
-    let vectorVersion = activeVersion.value
-    const vTrim = (pendingVector.value || '').trim()
-    if (vTrim.startsWith('CVSS:4.0')) vectorVersion = '4.0'
-    else if (vTrim.startsWith('CVSS:3.0')) vectorVersion = '3.0'
-    else if (vTrim.startsWith('CVSS:3.')) vectorVersion = '3.1'
-    else if (vTrim.startsWith('CVSS:2.0') || (vTrim.includes('/') && !vTrim.startsWith('CVSS:'))) vectorVersion = '2.0'
-
-    const actions = triggerMatch.actions?.[vectorVersion] || {}
-
-    // Create a fresh CVSS instance from the pending vector
-    let v = pendingVector.value?.trim() || ''
-    try {
-        if (v.startsWith('CVSS:4.0')) {
-            cvssInstance.value = new Cvss4P0(v)
-        } else if (v.startsWith('CVSS:3.')) {
-            if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
-            cvssInstance.value = new Cvss3P1(v)
-        } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
-            cvssInstance.value = new Cvss2(v)
-        } else {
-            if (activeVersion.value === '4.0') {
-                cvssInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N')
-            } else if (activeVersion.value === '2.0') {
-                cvssInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N')
-            } else {
-                cvssInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N')
-                activeVersion.value = '3.1'
-            }
-        }
-    } catch {}
-
-    // Apply each configured modifier
-    for (const [key, val] of Object.entries(actions)) {
-        try {
-            const vectorParts = (pendingVector.value || '').split('/')
-            const isV4 = pendingVector.value && pendingVector.value.startsWith('CVSS:4.0');
-
-            const isModifiedMetric = key.startsWith('M') && key.length > 1;
-            const isRequirementMetric = key === 'CR' || key === 'IR' || key === 'AR';
-
-            let baseKey = key;
-            if (isModifiedMetric) {
-                baseKey = key.slice(1);
-            } else if (isRequirementMetric) {
-                baseKey = isV4 ? 'V' + key.charAt(0) : key.charAt(0);
-            }
-
-            const basePart = vectorParts.find(part => part.startsWith(`${baseKey}:`));
-            const baseValue = basePart ? basePart.split(':')[1] : null;
-            const isDefined = baseValue && baseValue !== 'X';
-
-            if (isModifiedMetric) {
-                const isSameAsBase = baseValue === val;
-                if (isDefined && !isSameAsBase) {
-                    cvssInstance.value.applyComponentString(key, val as string)
-                }
-            } else if (isRequirementMetric) {
-                const modKey = 'M' + baseKey;
-                const modValFromActions = (actions as Record<string, unknown>)[modKey] as string | undefined;
-
-                let currentModVal = null;
-                if (modValFromActions !== undefined) {
-                    currentModVal = modValFromActions;
-                } else {
-                    const currentModPart = vectorParts.find(part => part.startsWith(`${modKey}:`));
-                    currentModVal = currentModPart ? currentModPart.split(':')[1] : null;
-                }
-
-                const finalModVal = (currentModVal && currentModVal !== 'X') ? currentModVal : baseValue;
-                const isSameAsBase = baseValue === finalModVal;
-
-                if (isDefined && !isSameAsBase) {
-                    cvssInstance.value.applyComponentString(key, val as string)
-                }
-            } else {
-                cvssInstance.value.applyComponentString(key, val as string)
-            }
-        } catch (e) {
-            console.error("Failed to apply component string:", key, val, e)
-        }
-    }
-    updateVectorString()
+    activeVersion.value = result.version
+    pendingVector.value = result.vector
+    setCvssInstanceFromVector(result.vector)
 }
 
 watch(state, (newState, oldState) => {
@@ -1393,19 +1109,7 @@ const refreshDetails = async () => {
 
 
 const handleUpdate = async (force: boolean = false, isApprove: boolean = false) => {
-    let instances = allInstances.value
-    
-    // When a team is selected, automatically filter to only that team's instances
-    // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
-    if (selectedTeam.value) {
-        const team = selectedTeam.value
-        const matched = instances.filter((inst, index) => {
-            return (instanceTeams.value.get(getInstanceTeamKey(inst, index)) || []).includes(team)
-        })
-        if (matched.length > 0) instances = matched
-    }
-
-    if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
+    if (isDebugPersistenceEnabled()) {
         console.log('[Persistence Debug] handleUpdate started', {
             force,
             isApprove,
@@ -1418,72 +1122,41 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
 
     updating.value = true
     try {
-        const mergeContextInstances = allInstances.value
-        const allBlocks: AssessmentBlock[] = []
-        const teamToIndex = new Map<string, number>()
-        const allTags = new Set<string>()
-        let isPending = false
-        
-        for (const inst of mergeContextInstances) {
-            let detailsToParse = inst.analysis_details || inst.analysisDetails || ''
-            if (inst.finding_uuid && originalAnalysis.value[inst.finding_uuid]) {
-                const orig = originalAnalysis.value[inst.finding_uuid]
-                detailsToParse = orig.analysisDetails || orig.analysis_details || ''
-            }
-            if (!detailsToParse) continue
-            
-            if (detailsToParse.includes('[Status: Pending Review]')) isPending = true
-            
-            const blocks = parseAssessmentBlocks(detailsToParse)
-            for (const block of blocks) {
-                const teamName = block.team
-                const existingIndex = teamToIndex.get(teamName)
-                
-                if (existingIndex === undefined) {
-                    teamToIndex.set(teamName, allBlocks.length)
-                    allBlocks.push(block)
-                } else {
-                    const existingBlock = allBlocks[existingIndex]
-                    if (existingBlock) {
-                        const currentTimestamp = existingBlock.timestamp || 0
-                        const newTimestamp = block.timestamp || 0
-                        
-                        if (newTimestamp > currentTimestamp) {
-                            allBlocks[existingIndex] = block
-                        } else if (newTimestamp === currentTimestamp) {
-                            if ((block.details?.length || 0) > (existingBlock.details?.length || 0)) {
-                                allBlocks[existingIndex] = block
-                            }
-                        }
-                    }
-                }
-            }
-            const rescoredMatch = detailsToParse.match(/\[Rescored:\s*[\d\.]+\]/);
-            if (rescoredMatch) allTags.add(rescoredMatch[0]);
-
-            const vectorMatch = detailsToParse.match(/\[Rescored Vector:\s*[^\]]+\]/);
-            if (vectorMatch) allTags.add(vectorMatch[0]);
-        }
-        
-        const currentFullDetails = allBlocks.length > 0 ? constructAssessmentDetails(allBlocks, Array.from(allTags), isPending).text : ''
-
-        // 2. Perform Client-Side Merge
-        const targetTeam = selectedTeam.value || 'General'
-        
-        // Save current form state as a draft for the active team
-        teamDrafts.value.set(targetTeam, {
+        const currentUser = user.value?.username || 'unknown'
+        const preparedSubmission = prepareAssessmentSubmission({
+            allInstances: allInstances.value,
+            originalAnalysis: originalAnalysis.value,
+            selectedTeam: selectedTeam.value,
             state: state.value,
             details: details.value,
             justification: justification.value,
-            assigned: [...currentAssigned.value]
+            currentAssigned: currentAssigned.value,
+            teamDrafts: teamDrafts.value,
+            isReviewer: isReviewer.value,
+            pendingVector: pendingVector.value,
+            pendingScore: pendingScore.value,
+            initialVector: initialVector.value,
+            initialScore: initialScore.value,
+            originalVector: props.group.cvss_vector || '',
+            originalScore: props.group.cvss_score ?? props.group.cvss ?? null,
+            currentUser,
+            isApprove,
+            showRawEdit: showRawEdit.value,
+            rawDetailsTouched: rawDetailsTouched.value,
+            rawDetails: rawDetails.value,
+            mergedAssessmentFullText: mergedAssessmentData.value.fullText,
+            comment: comment.value,
+            suppressed: suppressed.value,
+            force,
         })
+        const targetTeam = preparedSubmission.targetTeam
+        teamDrafts.value = preparedSubmission.nextDrafts
         
-        if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
+        if (isDebugPersistenceEnabled()) {
             console.log('[Persistence Debug] handleUpdate merging details', {
                 targetTeam,
                 state: state.value,
                 details: details.value,
-                allBlocksInitialCount: allBlocks.length,
                 teamDraftsCount: teamDrafts.value.size,
                 teamDraftKeys: [...teamDrafts.value.keys()]
             });
@@ -1493,169 +1166,24 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
              await showAlert('Input Required', "Please select a team to assess.")
              return
         }
+        const finalState = preparedSubmission.finalState
 
-        const currentUser = user.value?.username || 'unknown'
-        
-        // Prepare rescored tags if any (only for Reviewers)
-        let rescoredTags: string[] | undefined = undefined
-        const canRescore = isReviewer.value;
-        
-        if (canRescore) {
-            // Check if touched in this session
-            const touched = pendingVector.value !== initialVector.value || pendingScore.value !== initialScore.value;
-
-            if (touched) {
-                // If it now matches the ORIGINAL (DT) vector, we explicitly clear it
-                const matchesOriginal = pendingVector.value === props.group.cvss_vector && 
-                                       (pendingScore.value === (props.group.cvss_score ?? props.group.cvss));
-                
-                if (matchesOriginal) {
-                    rescoredTags = [] // Forces removal of existing tags
-                } else {
-                    rescoredTags = []
-                    if (pendingScore.value !== null && pendingScore.value !== undefined) {
-                        rescoredTags.push(`[Rescored: ${pendingScore.value}]`)
-                    }
-                    if (pendingVector.value) {
-                        rescoredTags.push(`[Rescored Vector: ${pendingVector.value}]`)
-                    }
-                }
-            } else {
-                // Not touched - leave as undefined so helper preserves existing tags from details
-                rescoredTags = undefined
-            }
+        if (!await confirmAssessmentReview(force, preparedSubmission.reviewText)) {
+            return
         }
 
-        let mergedResult: { text: string, aggregatedState: string }
-        
-         // If the reviewer edited raw text directly, use that as the final text
-         // instead of the normal per-block merge flow.
-         if (showRawEdit.value && rawDetailsTouched.value && rawDetails.value !== mergedAssessmentData.value.fullText) {
-            const sanitized = sanitizeAssessmentDetails(rawDetails.value)
-            mergedResult = { text: sanitized.text, aggregatedState: sanitized.aggregatedState }
-         } else {
-         // Merge ALL team drafts into the server-state base text.
-         // This ensures assessments from every team tab the user edited
-         // are included, not just the currently active tab.
-         let mergedText = currentFullDetails
-         let mergedState = ''
-         for (const [teamName, draft] of teamDrafts.value.entries()) {
-            const cleanDetails = draft.details
-                .replace(/---\s*\[Team:[^\n]*---\s*/g, '')
-                .replace(/\[Rescored:\s*[\d.]+\]/g, '')
-                .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-                .replace(/\[Status: Pending Review\]/g, '')
-                .trim()
-
-            const result = mergeTeamAssessment(
-                mergedText,
-                teamName,
-                draft.state,
-                cleanDetails,
-                currentUser,
-                draft.justification,
-                teamName === targetTeam ? rescoredTags : undefined,
-                !isApprove,
-                draft.assigned
-            )
-            mergedText = result.text
-            mergedState = result.aggregatedState
-         }
-         mergedResult = { text: mergedText, aggregatedState: mergedState || 'NOT_SET' }
-         }
-        
-        // Sanitize: deduplicate teams, sort (General first, then alphabetical)
-        const sanitized = sanitizeAssessmentDetails(mergedResult.text)
-        let finalText = sanitized.text
-        const finalState = sanitized.aggregatedState
-
-        // Show review dialog for user confirmation (skip when force=true, e.g. conflict overwrite)
-        if (!force) {
-            updating.value = false
-            const approved = await promptReview(mergedResult.text)
-            if (!approved) {
-                if (window.localStorage?.getItem?.('dtvp_debug_persistence') === 'true') {
-                    console.log('[Persistence Debug] handleUpdate cancelled by user in review');
-                }
-                return
-            }
-            updating.value = true
-            // Use the sanitized text from the review
-            finalText = sanitized.text
-        }
-
-        // Use originalAnalysis directly — populated by refreshDetails() with fresh DT data.
-        // Do NOT fall back to instance data as it may contain stale cache overlays.
-        const originalAnalysisForSubmission = force ? {} : { ...originalAnalysis.value }
-
+        const finalText = preparedSubmission.finalText
         const payload: AssessmentPayload = {
-            instances: allInstances.value,
-            state: finalState,
+            ...preparedSubmission.payload,
             details: finalText,
-            comment: comment.value,
-            justification: justification.value && justification.value !== 'NOT_SET' ? justification.value : undefined,
-            suppressed: suppressed.value,
-            team: selectedTeam.value || undefined, 
-            comparison_mode: 'REPLACE' as const,
-            original_analysis: originalAnalysisForSubmission,
-            force: force
+            state: finalState,
         }
 
         const results = await updateAssessment(payload)
 
-        const errors = results.filter((r: any) => r.status === 'error')
-        if (errors.length > 0) {
-             console.error('Update completed with errors:', errors)
-             await showAlert('Update Partial', `Assessment updated with ${errors.length} errors. Check console for details.`)
-        } else {
-             const success = results.find((r: any) => r.status === 'success')
-             if (success) {
-                 const canRescore = isReviewer.value;
-                 const hasVectorChange = canRescore ? (pendingVector.value !== props.group.cvss_vector) : !!props.group.rescored_vector;
-                 
-                 const data = {
-                     rescored_cvss: hasVectorChange ? (canRescore ? pendingScore.value : props.group.rescored_cvss) : null,
-                     rescored_vector: hasVectorChange ? (canRescore ? pendingVector.value : props.group.rescored_vector) : null,
-                     analysis_state: success.new_state,
-                     analysis_details: success.new_details,
-                     is_suppressed: suppressed.value,
-                     assignees: [...currentAssigned.value]
-                 }
-                 emit('update:assessment', data)
-                 
-                 // Reset local state so UI reflects the new server state
-                 pendingScore.value = null
-                 pendingVector.value = data.rescored_vector || props.group.cvss_vector || ''
-                 initialVector.value = pendingVector.value
-                 initialScore.value = data.rescored_cvss ?? null
-                 isManualBaseMode.value = false
-                 lastRescoredScore.value = data.rescored_cvss ?? null
-             }
-             showConflictModal.value = false
-
-             // Update originalAnalysis to reflect the saved state so
-             // subsequent saves don't trigger false conflicts.
-             for (const inst of allInstances.value) {
-                 if (inst.finding_uuid) {
-                     originalAnalysis.value[inst.finding_uuid] = {
-                         analysisState: finalState,
-                         analysisDetails: finalText,
-                         isSuppressed: suppressed.value,
-                     }
-                 }
-             }
-             // Clear team drafts — they've been persisted to the server
-             teamDrafts.value.clear()
-             formTouched.value = false
-        }
+        await handleAssessmentUpdateResults(results, finalState, finalText)
     } catch (err: any) {
-        if (err.response && err.response.status === 409) {
-            conflictData.value = err.response.data.conflicts
-            showConflictModal.value = true
-        } else {
-            await showAlert('Error', 'Failed to update assessment')
-            console.error(err)
-        }
+        await handleAssessmentUpdateError(err)
     } finally {
         updating.value = false
     }
@@ -1692,14 +1220,14 @@ const handleMappingUpdated = async () => {
 
 const originalSeverity = computed(() => {
     const base = props.group.cvss ?? props.group.cvss_score
-    if (base != null && !isNaN(Number(base))) return scoreSeverity(Number(base))
+    if (base != null && !Number.isNaN(Number(base))) return scoreSeverity(Number(base))
     return props.group.severity || 'UNKNOWN'
 })
 
 const scoreSeverity = (score: number): string => {
-    if (score >= 9.0) return 'CRITICAL'
-    if (score >= 7.0) return 'HIGH'
-    if (score >= 4.0) return 'MEDIUM'
+    if (score >= 9) return 'CRITICAL'
+    if (score >= 7) return 'HIGH'
+    if (score >= 4) return 'MEDIUM'
     if (score >= 0.1) return 'LOW'
     return 'INFO'
 }
@@ -1711,7 +1239,7 @@ const rescoredSeverity = computed(() => {
     }
     if (!isRescoredOrModified.value) return null
     const score = Number(currentDisplayScore.value)
-    if (isNaN(score)) return null
+    if (Number.isNaN(score)) return null
     return scoreSeverity(score)
 })
 
@@ -1722,9 +1250,9 @@ const hexToRgba = (hex: string, alpha: number) => {
         : cleaned
     if (normalized.length !== 6) return hex
 
-    const r = parseInt(normalized.slice(0, 2), 16)
-    const g = parseInt(normalized.slice(2, 4), 16)
-    const b = parseInt(normalized.slice(4, 6), 16)
+    const r = Number.parseInt(normalized.slice(0, 2), 16)
+    const g = Number.parseInt(normalized.slice(2, 4), 16)
+    const b = Number.parseInt(normalized.slice(4, 6), 16)
     return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
@@ -1769,52 +1297,22 @@ const cardStyle = computed(() => {
 })
 
 
-const dependencyRelationship = computed<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>(() => {
-    const flags = allInstances.value
-        .map(inst => inst.is_direct_dependency)
-        .filter((value): value is boolean => typeof value === 'boolean')
-
-    if (flags.includes(true)) return 'DIRECT'
-    if (flags.includes(false)) return 'TRANSITIVE'
-    return 'UNKNOWN'
-})
-const sortedAffectedProjectVersions = computed(() => {
-    const versions = (props.group.affected_versions || [])
-        .map(v => v.project_version)
-        .filter((version): version is string => !!version)
-
-    const uniqueVersions = Array.from(new Set(versions))
-    return sortVersions(uniqueVersions, true)
-})
-
-const affectedVersionTooltip = computed(() => {
-    const versions = sortedAffectedProjectVersions.value
-    if (!versions.length) return 'No affected project versions'
-
-    const components = props.group.affected_versions
-        .flatMap(v => v.components.map(c => `${v.project_version} → ${c.component_name}@${c.component_version}`))
-
-    const uniqueComponents = Array.from(new Set(components)).sort((a, b) => {
-        const [vA] = a.split('→').map(s => s.trim())
-        const [vB] = b.split('→').map(s => s.trim())
-        const compareProjectVersion = compareVersions(vA, vB)
-        if (compareProjectVersion !== 0) return compareProjectVersion
-        return a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
-    })
-
-    return `Affected versions: ${versions.join(', ')}\nComponent instances: ${uniqueComponents.join(', ')}`
-})
+const dependencyRelationship = dependencyInfo.dependencyRelationship
+const sortedAffectedProjectVersions = dependencyInfo.sortedAffectedProjectVersions
 
 const externalLinks = computed(() => {
-    const links: { label: string, url: string }[] = []
     const id = props.group.id
-    if (id?.startsWith('CVE-')) {
-        links.push({ label: 'NVD', url: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(id)}` })
-        links.push({ label: 'MITRE', url: `https://www.cve.org/CVERecord?id=${encodeURIComponent(id)}` })
-    }
-    if (id?.startsWith('GHSA-')) {
-        links.push({ label: 'GitHub Advisory', url: `https://github.com/advisories/${encodeURIComponent(id)}` })
-    }
+    const links: { label: string, url: string }[] = [
+        ...(id?.startsWith('CVE-')
+            ? [
+                { label: 'NVD', url: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(id)}` },
+                { label: 'MITRE', url: `https://www.cve.org/CVERecord?id=${encodeURIComponent(id)}` },
+            ]
+            : []),
+        ...(id?.startsWith('GHSA-')
+            ? [{ label: 'GitHub Advisory', url: `https://github.com/advisories/${encodeURIComponent(id)}` }]
+            : []),
+    ]
     for (const alias of props.group.aliases || []) {
         if (alias.startsWith('CVE-') && alias !== id) {
             links.push({ label: `NVD (${alias})`, url: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(alias)}` })
@@ -1838,126 +1336,111 @@ const instanceStats = computed(() => {
     }
 })
 
-const uniqueComponents = computed(() => {
-    const map = new Map<string, Set<string>>()
-    for (const inst of allInstances.value) {
-        if (!map.has(inst.component_name)) map.set(inst.component_name, new Set())
-        map.get(inst.component_name)!.add(inst.component_version)
-    }
-    return Array.from(map.entries()).map(([name, vers]) => ({
-        name,
-        versions: Array.from(vers).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    }))
-})
+const uniqueComponents = dependencyInfo.uniqueComponents
+const affectedTaggedComponents = dependencyInfo.affectedTaggedComponents
+const triggeringTaggedComponents = dependencyInfo.triggeringTaggedComponents
+const normalizedTags = dependencyInfo.normalizedTags
 
-const normalizeComponentName = (value: string) => {
-    return value?.trim().toLowerCase() || ''
+const hasAssessedAliasForTag = (tag: string, assessed: Set<string>) => {
+    if (!teamMapping?.value) {
+        return false
+    }
+
+    for (const mappingVal of Object.values(teamMapping.value)) {
+        if (!Array.isArray(mappingVal) || mappingVal.length <= 1 || mappingVal[0] !== tag) {
+            continue
+        }
+
+        return mappingVal.slice(1).some(alias => assessed.has(alias))
+    }
+
+    return false
 }
-
-const findMappingValue = (componentName: string) => {
-    const lookup = normalizeComponentName(componentName)
-    if (!lookup || !teamMapping?.value) return undefined
-    for (const [key, value] of Object.entries(teamMapping.value)) {
-        if (normalizeComponentName(key) === lookup) {
-            return value
-        }
-    }
-    return undefined
-}
-
-const affectedTaggedComponents = computed(() => {
-    const map = new Map<string, { versions: Set<string>; tag: string }>()
-    for (const version of props.group.affected_versions || []) {
-        for (const component of version.components || []) {
-            const name = component.component_name || 'Unknown'
-            const mappingVal = findMappingValue(name)
-            if (!mappingVal) continue
-            const tag = Array.isArray(mappingVal) ? mappingVal[0] : mappingVal
-            if (!tag) continue
-            if (!map.has(name)) {
-                map.set(name, { versions: new Set(), tag })
-            }
-            const entry = map.get(name)!
-            if (component.component_version) entry.versions.add(component.component_version)
-        }
-    }
-    return Array.from(map.entries())
-        .map(([name, data]) => ({
-            name,
-            versions: Array.from(data.versions).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
-            tag: data.tag,
-        }))
-        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }))
-})
-
-const triggeringTaggedComponents = computed(() => {
-    const map = new Map<string, { versions: Set<string>; tag: string }>()
-    const paths = allInstances.value.flatMap(inst => inst.dependency_chains || [])
-    const selectedPaths = selectRepresentativePaths(paths, teamMapping?.value, 100)
-
-    for (const selectedPath of selectedPaths) {
-        const parts = getPathParts(selectedPath)
-        const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping?.value)
-        if (!firstMapped) continue
-        const triggerName = firstMapped.component || 'Unknown'
-        if (!map.has(triggerName)) {
-            map.set(triggerName, { versions: new Set(), tag: firstMapped.team })
-        }
-    }
-
-    for (const inst of allInstances.value) {
-        const name = inst.component_name || 'Unknown'
-        const directTag = getPrimaryTeamForComponent(name, teamMapping?.value)
-        if (!directTag) continue
-        if (!map.has(name)) {
-            map.set(name, { versions: new Set(), tag: directTag })
-        }
-        const entry = map.get(name)!
-        if (inst.component_version) entry.versions.add(inst.component_version)
-    }
-
-    return Array.from(map.entries())
-        .map(([name, data]) => ({
-            name,
-            versions: Array.from(data.versions).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
-            tag: data.tag,
-        }))
-        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }))
-})
-
-const normalizedTags = computed(() => effectiveTags.value)
-
 
 const assessedTeams = computed(() => {
     const assessed = getAssessedTeams(props.group)
     const matchedTeams = new Set<string>()
 
-    normalizedTags.value.forEach(tag => {
+    for (const tag of normalizedTags.value) {
         // A primary tag is assessed if it OR any of its aliases are assessed
-        if (assessed.has(tag)) {
+        if (assessed.has(tag) || hasAssessedAliasForTag(tag, assessed)) {
             matchedTeams.add(tag)
-            return
         }
-
-        if (teamMapping?.value) {
-            for (const componentName in teamMapping.value) {
-                const mappingVal = teamMapping.value[componentName]
-                if (Array.isArray(mappingVal) && mappingVal.length > 1) {
-                    const primary = mappingVal[0]
-                    if (primary === tag) {
-                        const aliases = mappingVal.slice(1)
-                        if (aliases.some(alias => assessed.has(alias))) {
-                            matchedTeams.add(tag)
-                            break
-                        }
-                    }
-                }
-            }
-        }
-    })
+    }
 
     return matchedTeams
 })
+
+const applySuccessfulAssessmentUpdate = (success: any, finalState: string, finalText: string) => {
+    const savedResult = buildSavedAssessmentResultState({
+        success,
+        isReviewer: isReviewer.value,
+        pendingVector: pendingVector.value,
+        pendingScore: pendingScore.value,
+        baseVector: props.group.cvss_vector,
+        existingRescoredVector: props.group.rescored_vector,
+        existingRescoredCvss: props.group.rescored_cvss,
+        suppressed: suppressed.value,
+        currentAssigned: currentAssigned.value,
+    })
+    emit('update:assessment', savedResult.emittedAssessment)
+
+    pendingScore.value = null
+    pendingVector.value = savedResult.nextPendingVector
+    initialVector.value = savedResult.nextInitialVector
+    initialScore.value = savedResult.nextInitialScore
+    isManualBaseMode.value = false
+    lastRescoredScore.value = savedResult.nextLastRescoredScore
+    showConflictModal.value = false
+
+    Object.assign(originalAnalysis.value, buildSavedOriginalAnalysis({
+        allInstances: allInstances.value,
+        finalState,
+        finalText,
+        suppressed: suppressed.value,
+    }))
+    teamDrafts.value.clear()
+    formTouched.value = false
+}
+
+const handleAssessmentUpdateResults = async (results: any[], finalState: string, finalText: string) => {
+    const errors = results.filter((r: any) => r.status === 'error')
+    if (errors.length > 0) {
+        console.error('Update completed with errors:', errors)
+        await showAlert('Update Partial', `Assessment updated with ${errors.length} errors. Check console for details.`)
+        return
+    }
+
+    const success = results.find((r: any) => r.status === 'success')
+    if (success) {
+        applySuccessfulAssessmentUpdate(success, finalState, finalText)
+    }
+}
+
+const confirmAssessmentReview = async (force: boolean, reviewText: string) => {
+    if (force) {
+        return true
+    }
+
+    updating.value = false
+    const approved = await promptReview(reviewText)
+    if (!approved && isDebugPersistenceEnabled()) {
+        console.log('[Persistence Debug] handleUpdate cancelled by user in review');
+    }
+    updating.value = approved
+    return approved
+}
+
+const handleAssessmentUpdateError = async (err: any) => {
+    if (err.response?.status === 409) {
+        conflictData.value = err.response.data.conflicts
+        showConflictModal.value = true
+        return
+    }
+
+    await showAlert('Error', 'Failed to update assessment')
+    console.error(err)
+}
 
 const teamTabs = computed(() => {
     const tags = [...normalizedTags.value]
@@ -1975,64 +1458,6 @@ const teamBlockStateColor = (state?: string): string => {
     if (state === 'NOT_AFFECTED' || state === 'RESOLVED' || state === 'FALSE_POSITIVE') return 'bg-green-500'
     return 'bg-yellow-500'
 }
-
-
-
-
-
-const _vueTemplateUsed = [
-    ChevronDown,
-    ChevronUp,
-    Shield,
-    RefreshCw,
-    AlertTriangle,
-    Calculator,
-    ExternalLink,
-    CheckCircle,
-    RotateCcw,
-    Package,
-    Layers,
-    ShieldOff,
-    Zap,
-    CvssCalculatorV2,
-    CvssCalculatorV3,
-    CvssCalculatorV4,
-    CustomSelect,
-    CalculatorModal,
-    ConflictResolutionModal,
-    GenericModal,
-    AssessmentReviewModal,
-    totalTargeted,
-    teamTabs,
-    teamBlockMeta,
-    teamBlockStateColor,
-    toggleRawEdit,
-    rawDetails,
-    consensusButtonLabel,
-    switchVersion,
-    cleanRescoredVector,
-    updateCalcVector,
-    canEditBase,
-    resetVector,
-    clearVector,
-    applyConsensusAssessment,
-    handleUseServerState,
-    stateColor,
-    affectedVersionTooltip,
-    externalLinks,
-    instanceStats,
-    uniqueComponents,
-    technicalState,
-    matchedProposal,
-    applyProposal,
-    copyId,
-    handleApplyAllAssessment,
-    handleAdoptTeamBlock,
-    reviewModal,
-    handleReviewConfirm,
-    handleReviewCancel,
-]
-void _vueTemplateUsed
 
 </script>
 
@@ -2209,6 +1634,15 @@ void _vueTemplateUsed
 
         </div>
 
+        <!-- Code Analysis Panel -->
+        <CodeAnalysisPanel
+            :vulnId="group.id"
+            :cvssVector="group.cvss_vector"
+            :componentNames="triggeringTaggedComponents.map(c => c.name)"
+            @apply-result="handleCodeAnalysisResult"
+            class="mb-4"
+        />
+
         <div class="grid md:grid-cols-2 gap-8">
             <div>
                     <!-- Title + Description -->
@@ -2289,7 +1723,7 @@ void _vueTemplateUsed
                         </h5>
                         
                         <div class="mb-2">
-                            <label class="block text-xs font-semibold text-gray-500 mb-1 flex justify-between">
+                            <label for="cvss-vector-input" class="block text-xs font-semibold text-gray-500 mb-1 flex justify-between">
                                 <span>Vector String</span>
                                 <div class="flex items-center gap-2">
                                     <button 
@@ -2312,6 +1746,7 @@ void _vueTemplateUsed
                                 </div>
                             </label>
                             <input 
+                                id="cvss-vector-input"
                                 v-model="pendingVector"
                                 type="text" 
                                 placeholder="CVSS:4.0/AV:N/..."
@@ -2324,9 +1759,10 @@ void _vueTemplateUsed
                         </div>
                         
                         <div class="flex items-center justify-between">
-                            <label class="block text-xs font-semibold text-gray-500">Score</label>
+                            <label for="cvss-score-input" class="block text-xs font-semibold text-gray-500">Score</label>
                             <div class="flex gap-2">
                                 <input 
+                                    id="cvss-score-input"
                                     v-model="pendingScore"
                                     type="number" 
                                     :readonly="!canEditBase"
@@ -2387,8 +1823,10 @@ void _vueTemplateUsed
                     <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
                         <div class="space-y-3">
                             <div>
-                                <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
+                                <label id="analysis-state-label" for="analysis-state-select" class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
                                 <CustomSelect
+                                    id="analysis-state-select"
+                                    aria-labelledby="analysis-state-label"
                                     :modelValue="state"
                                     @update:modelValue="state = $event; formTouched = true"
                                     :options="ANALYSIS_STATES"
@@ -2397,8 +1835,10 @@ void _vueTemplateUsed
                             </div>
 
                             <div v-if="state === 'NOT_AFFECTED'">
-                                <label class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
+                                <label id="justification-label" for="justification-select" class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
                                 <CustomSelect
+                                    id="justification-select"
+                                    aria-labelledby="justification-label"
                                     :modelValue="justification"
                                     @update:modelValue="justification = $event"
                                     :options="JUSTIFICATION_OPTIONS"
@@ -2407,8 +1847,9 @@ void _vueTemplateUsed
                             </div>
 
                             <div>
-                                <label class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
+                                <label for="analysis-details-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
                                 <textarea
+                                    id="analysis-details-textarea"
                                     v-model="details"
                                     @input="formTouched = true"
                                     placeholder="Technical details..."
@@ -2418,7 +1859,7 @@ void _vueTemplateUsed
 
                             <!-- Assignees -->
                             <div>
-                                <label class="block text-xs font-semibold text-gray-400 mb-1">Assigned Users</label>
+                                <label for="assigned-users-input" class="block text-xs font-semibold text-gray-400 mb-1">Assigned Users</label>
                                 <div class="flex flex-wrap gap-1 mb-1.5">
                                     <span
                                         v-for="assignee in currentAssigned"
@@ -2431,6 +1872,7 @@ void _vueTemplateUsed
                                 </div>
                                 <div class="relative">
                                     <input
+                                        id="assigned-users-input"
                                         v-model="assigneeInput"
                                         @input="onAssigneeInput"
                                         @keydown.enter.prevent="addAssigneeFromInput"
@@ -2466,8 +1908,9 @@ void _vueTemplateUsed
                     </div>
 
                     <div v-if="isReviewer">
-                        <label class="block text-xs font-semibold text-gray-400 mb-1">Comment</label>
+                        <label for="assessment-comment-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Comment</label>
                         <textarea 
+                            id="assessment-comment-textarea"
                             v-model="comment"
                             placeholder="Add a comment for audit trail..."
                             class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"

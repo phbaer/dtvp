@@ -1,9 +1,8 @@
 import pytest
 import asyncio
 import os
-from unittest.mock import AsyncMock, patch
-from httpx import AsyncClient
-from main import app, get_current_user
+from unittest.mock import patch
+from dtvp.main import app, get_current_user
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +47,7 @@ def test_cache_status_endpoint(client):
         "cached_analyses": 10,
         "pending_updates": 1,
     }
-    with patch('main.cache_manager.get_cache_status', return_value=mock_status):
+    with patch('dtvp.main.cache_manager.get_cache_status', return_value=mock_status):
         response = client.get("/api/cache-status")
         assert response.status_code == 200
         data = response.json()
@@ -103,7 +102,7 @@ async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
     mock_dt_client.get_bom.return_value = {}
 
     # Patch DTClient in main to return our mock when instantiated
-    with patch("main.DTClient", return_value=mock_dt_client):
+    with patch("dtvp.main.DTClient", return_value=mock_dt_client):
         # 1. Start Task
         response = client.post("/api/tasks/group-vulns?name=TestApp")
         assert response.status_code == 200
@@ -160,7 +159,7 @@ async def test_get_grouped_vulns_no_projects(client, mock_dt_client):
     mock_dt_client.__aexit__.return_value = None
     mock_dt_client.get_projects.return_value = []
 
-    with patch("main.DTClient", return_value=mock_dt_client):
+    with patch("dtvp.main.DTClient", return_value=mock_dt_client):
         # Start task
         response = client.post("/api/tasks/group-vulns?name=NonExistent")
         assert response.status_code == 200
@@ -185,7 +184,7 @@ async def test_get_grouped_vulns_task_failure(client, mock_dt_client):
     mock_dt_client.__aexit__.return_value = None
     mock_dt_client.get_projects.side_effect = Exception("DT API Down")
 
-    with patch("main.DTClient", return_value=mock_dt_client):
+    with patch("dtvp.main.DTClient", return_value=mock_dt_client):
         response = client.post("/api/tasks/group-vulns?name=ErrorApp")
         task_id = response.json()["task_id"]
 
@@ -242,7 +241,7 @@ async def test_statistics_major_version_split(client, mock_dt_client):
     mock_dt_client.get_project_vulnerabilities.return_value = []
     mock_dt_client.get_bom.return_value = {}
 
-    with patch("main.DTClient", return_value=mock_dt_client):
+    with patch("dtvp.main.DTClient", return_value=mock_dt_client):
         response = client.get("/api/statistics?name=TestApp")
         assert response.status_code == 200
         data = response.json()
@@ -294,7 +293,7 @@ async def test_grouped_vulnerabilities_with_vector_merge(client, mock_dt_client)
     # Mock get_bom
     mock_dt_client.get_bom.return_value = {}
 
-    with patch("main.DTClient", return_value=mock_dt_client):
+    with patch("dtvp.main.DTClient", return_value=mock_dt_client):
         # Start Task
         response = client.post("/api/tasks/group-vulns?name=TestProj")
         assert response.status_code == 200
@@ -365,7 +364,7 @@ def test_assessment_update(client, mock_dt_client):
         "suppressed": True,
     }
 
-    with patch("main.get_user_role", return_value="REVIEWER"):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
         response = client.post("/api/assessment", json=payload)
         assert response.status_code == 200
         results = response.json()

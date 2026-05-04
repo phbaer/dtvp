@@ -5,7 +5,6 @@ build/
 dist/
 wheels/
 *.egg-info
-compose.yml
 .env
 *.txt
 test-results/

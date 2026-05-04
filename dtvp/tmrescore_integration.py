@@ -7,7 +7,7 @@ import httpx
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from logic import sanitize_rescored_vector
+from .logic import sanitize_rescored_vector
 
 
 SUPPORTED_TMRESCORE_SCOPES = {"latest_only", "merged_versions"}

@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount, useAttrs } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
+
+defineOptions({
+    inheritAttrs: false,
+})
 
 export interface SelectOption {
     value: string
@@ -21,6 +25,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
     'update:modelValue': [value: string]
 }>()
+
+const attrs = useAttrs()
 
 const isOpen = ref(false)
 const triggerRef = ref<HTMLElement | null>(null)
@@ -94,22 +100,19 @@ const btnClass = computed(() =>
         ? 'px-2.5 h-8 text-xs'
         : 'px-3 h-10 text-sm'
 )
+const shouldKeepMenuOpen = (target: Node | null) => {
+    return Boolean(target && (triggerRef.value?.contains(target) || menuRef.value?.contains(target)))
+}
 
 const handleDocumentPointerDown = (event: MouseEvent) => {
     const target = event.target as Node | null
-    if (target && (triggerRef.value?.contains(target) || menuRef.value?.contains(target))) {
+    if (shouldKeepMenuOpen(target)) {
         return
     }
     close()
 }
 
-const handleDocumentFocusIn = (event: FocusEvent) => {
-    const target = event.target as Node | null
-    if (target && (triggerRef.value?.contains(target) || menuRef.value?.contains(target))) {
-        return
-    }
-    close()
-}
+const handleDocumentFocusIn = handleDocumentPointerDown as (event: FocusEvent) => void
 
 const handleDocumentKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
@@ -155,6 +158,7 @@ onBeforeUnmount(() => {
     <div ref="triggerRef" class="relative" tabindex="-1">
         <slot name="trigger" :toggle="toggle" :open="open" :isOpen="isOpen">
             <button
+                v-bind="attrs"
                 type="button"
                 @click="toggle"
                 :aria-expanded="isOpen"

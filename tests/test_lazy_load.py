@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock
-from main import (
+from dtvp.main import (
     get_assessment_details,
     AssessmentDetailsRequest,
     update_assessment,

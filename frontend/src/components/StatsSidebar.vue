@@ -69,6 +69,8 @@ const emit = defineEmits<{
 
 const activeTab = ref<'scope-search' | 'statistics'>('scope-search')
 const copiedStats = ref(false)
+const versionSearch = ref('')
+const versionSearchInput = ref<HTMLInputElement | null>(null)
 
 const versionFilterList = computed(() => {
     return props.filters.versionFilterInput
@@ -78,7 +80,7 @@ const versionFilterList = computed(() => {
 })
 
 const filteredVersionOptions = computed(() => {
-    const query = props.filters.versionFilterInput.trim().toLowerCase()
+    const query = versionSearch.value.trim().toLowerCase()
     return props.availableVersions.filter(ver => {
         if (query && !ver.toLowerCase().includes(query)) return false
         return true
@@ -100,6 +102,7 @@ const toggleVersion = (version: string) => {
     } else {
         newInput = list.length ? `${list.join(', ')}, ${version}` : version
     }
+    versionSearch.value = ''
     updateFilter('versionFilterInput', newInput)
 }
 
@@ -299,15 +302,16 @@ const handleCopy = () => {
                                         <CustomSelect modelValue="" :options="[]">
                                             <template #trigger="{ open }">
                                                 <div class="relative" @focusin="open">
-                                                    <div class="flex flex-wrap items-center gap-1 bg-black/40 border border-white/10 rounded-xl px-2 min-h-[2.5rem] cursor-text focus-within:border-blue-500/50 transition-all">
+                                                    <div class="flex flex-wrap items-center gap-1 bg-black/40 border border-white/10 rounded-xl px-2 min-h-[2.5rem] cursor-text focus-within:border-blue-500/50 transition-all"
+                                                         @click="versionSearchInput?.focus()">
                                                         <span v-for="ver in versionFilterList" :key="ver" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium">
                                                             {{ ver }}
                                                             <button @click.stop="removeVersion(ver)" class="hover:text-white text-blue-300/70 leading-none">&times;</button>
                                                         </span>
                                                         <input
+                                                            ref="versionSearchInput"
+                                                            v-model="versionSearch"
                                                             type="text"
-                                                            :value="props.filters.versionFilterInput"
-                                                            @input="(event) => updateFilter('versionFilterInput', (event.target as HTMLInputElement).value)"
                                                             placeholder="Search versions..."
                                                             class="flex-1 min-w-[5rem] bg-transparent border-none outline-none text-sm font-medium text-gray-200 placeholder:text-gray-600 h-8 px-1"
                                                         />

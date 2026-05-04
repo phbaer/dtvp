@@ -2,20 +2,6 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Integration Tests (Real Backend)', () => {
     test.beforeEach(async ({ page }) => {
-        page.on('response', (response) => {
-            if (response.status() === 401) {
-                const request = response.request()
-                console.log(`[E2E 401] ${request.method()} ${response.url()}`)
-            }
-        })
-
-        page.on('requestfailed', (request) => {
-            const url = request.url()
-            if (url.includes('/auth/') || url.includes('/api/')) {
-                console.log(`[E2E REQUEST FAILED] ${request.method()} ${url} :: ${request.failure()?.errorText || 'unknown error'}`)
-            }
-        })
-
         // Bypass ChangelogModal by setting last seen version
         await page.addInitScript(() => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.4');

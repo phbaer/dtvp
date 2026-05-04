@@ -1,11 +1,10 @@
-import os
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock, patch
-from main import app, get_client, get_current_user
-from dt_client import DTClient
-import dt_cache
+from unittest.mock import AsyncMock, patch
+from dtvp.main import app, get_client
+from dtvp.dt_client import DTClient
+from dtvp import dt_cache
 
 
 @pytest.fixture(autouse=True)

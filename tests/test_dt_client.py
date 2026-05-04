@@ -1,5 +1,5 @@
 import pytest
-from dt_client import DTClient, DTSettings, get_client
+from dtvp.dt_client import DTClient, DTSettings, get_client
 from unittest.mock import patch
 import respx
 import httpx
@@ -211,7 +211,7 @@ def test_settings_properties():
 async def test_get_client():
     from unittest.mock import MagicMock
 
-    with patch("dt_client.DTSettings") as mock_settings_cls:
+    with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
@@ -230,7 +230,7 @@ async def test_get_client():
 async def test_get_client_forwarding():
     from unittest.mock import MagicMock
 
-    with patch("dt_client.DTSettings") as mock_settings_cls:
+    with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
@@ -289,3 +289,27 @@ async def test_get_bom_success(respx_mock):
 
     bom = await dt_client.get_bom("u1")
     assert bom["bomFormat"] == "CycloneDX"
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_profile_raises(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/user/me").respond(status_code=401)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await dt_client.get_current_user_profile()
+
+
+@pytest.mark.asyncio
+async def test_get_projects_http_error(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/project").respond(status_code=500)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await dt_client.get_projects(name="P")
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_http_error(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/analysis").respond(status_code=500)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await dt_client.get_analysis("p1", "c1", "v1")

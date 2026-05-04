@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, mock_open
-from main import app, get_current_user
+from dtvp.main import app, get_current_user
 
 
 # Override auth

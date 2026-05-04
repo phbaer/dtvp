@@ -1,69 +1,43 @@
-# Test Setup for VPDT
+# Test Setup for DTVP
 
-This directory contains small local test services used by DTVP development.
+This directory contains the mock service implementations used by the local pm2 development stack.
 
-- `mock_dt.py` provides the in-memory Dependency-Track API used by the pm2 workflow.
-- `mock_tmrescore.py` provides the in-memory tmrescore API used by the threat-model integration.
-- `docker-compose.yml` is a small container wrapper around both mocks.
+- `mock_dt.py` provides the in-memory Dependency-Track API.
+- `mock_tmrescore.py` provides the in-memory tmrescore API.
+- `mock_code_analysis.py` provides locally hosted service mocks for analysis integrations.
 
-## Prerequisites
+## Run the Local Mock Stack
 
-- Docker or Podman
-- Docker Compose or podman-compose
+The recommended local workflow is to start the mock services via `pm2` using the repository-wide `ecosystem.config.js`:
 
-## Mock Dependency-Track Container
+```bash
+pm2 start ecosystem.config.js --update-env
+```
 
-1.  Start the environment:
-    ```bash
-    cd test_setup
-    podman-compose up
-    ```
-        This starts:
-        - mock Dependency-Track on port `8081`
-        - mock tmrescore on port `8090`
+The mock services are available at:
 
-2.  Access the mock APIs:
-    - Dependency-Track API: [http://localhost:8081](http://localhost:8081)
-    - TMRescore API/UI: [http://localhost:8090/ui](http://localhost:8090/ui)
+- Dependency-Track API: `http://127.0.0.1:8081`
+- TMRescore API/UI: `http://127.0.0.1:8090`
+- Code Analysis API: `http://127.0.0.1:8095`
 
-3.  Configure DTVP:
-    - `DTVP_DT_API_KEY=mock_key`
-    - `DTVP_DT_API_URL=http://localhost:8081`
-    - `DTVP_TMRESCORE_URL=http://localhost:8090`
+To stop the stack:
 
-4.  Stop the environment:
-    ```bash
-    podman-compose down -v
-    ```
+```bash
+pm2 delete mock-dt mock-tmrescore mock-code-analysis
+```
 
-## Files
+## Direct Startup
 
-- `docker-compose.yml`: Defines the services.
-- `mock_dt.py`: In-memory Dependency-Track mock.
-- `mock_tmrescore.py`: In-memory tmrescore mock.
-
-## Mock TMRescore
-
-The tmrescore mock is primarily intended for the pm2-based local stack, but it can also be run directly:
+If you want to run an individual mock service directly without `pm2`, use `uv` from the `test_setup` directory, for example:
 
 ```bash
 cd test_setup
-uv run uvicorn mock_tmrescore:app --host 127.0.0.1 --port 8090
+uv run uvicorn mock_dt:app --host 127.0.0.1 --port 8081
 ```
 
-Useful endpoints:
+## Files
 
-- `GET /health`
-- `GET /ui`
-- `POST /api/v1/sessions`
-- `POST /api/v1/sessions/{session_id}/inventory`
-- `GET /api/v1/sessions/{session_id}/results/json`
-- `GET /api/v1/sessions/{session_id}/results/vex`
-- `GET /api/v1/sessions/{session_id}/outputs/{filename}`
-
-Minimal example flow:
-
-1. Create a session with an application name and version.
-2. Upload a TM7 file and CycloneDX SBOM to the inventory endpoint.
-3. Read the returned analysis result.
-4. Download the generated mock artifacts from the outputs endpoints.
+- `mock_dt.py`: In-memory Dependency-Track mock.
+- `mock_tmrescore.py`: In-memory tmrescore mock.
+- `mock_agentizer.py`: In-memory agentizer mock.
+- `mock_code_analysis.py`: In-memory code analysis mock.

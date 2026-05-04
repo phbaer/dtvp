@@ -1,21 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Login from './pages/Login.vue'
-import Dashboard from './pages/Dashboard.vue'
-import ProjectView from './pages/ProjectView.vue'
-import Settings from './pages/Settings.vue'
-import Statistics from './pages/Statistics.vue'
-import TMRescore from './pages/TMRescore.vue'
 
 import { getUserInfo } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
 
 const routes = [
-    { path: '/login', component: Login },
-    { path: '/', component: Dashboard },
-    { path: '/settings', component: Settings, meta: { role: 'REVIEWER' } },
-    { path: '/project/:name', component: ProjectView },
-    { path: '/project/:name/tmrescore', component: TMRescore, meta: { role: 'REVIEWER' } },
-    { path: '/statistics', component: Statistics },
+    { path: '/login', component: () => import('./pages/Login.vue') },
+    { path: '/', component: () => import('./pages/Dashboard.vue') },
+    { path: '/settings', component: () => import('./pages/Settings.vue'), meta: { role: 'REVIEWER' } },
+    { path: '/project/:name', component: () => import('./pages/ProjectView.vue') },
+    { path: '/project/:name/tmrescore', component: () => import('./pages/TMRescore.vue'), meta: { role: 'REVIEWER' } },
+    { path: '/statistics', component: () => import('./pages/Statistics.vue') },
 ]
 
 export const router = createRouter({

@@ -3,7 +3,6 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Vulnerability View and Rescoring', () => {
     test.beforeEach(async ({ page }) => {
-        page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
         // Mock Session
         await page.route('**/auth/me', async (route) => {
             await route.fulfill({

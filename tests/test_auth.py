@@ -1,16 +1,16 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 from jose import jwt
-from auth import auth_settings, get_oidc_config
-from main import app, get_current_user
+from dtvp.auth import auth_settings, get_oidc_config
+from dtvp.main import app, get_current_user
 
 
 @pytest.fixture(autouse=True)
 def use_real_auth():
     if get_current_user in app.dependency_overrides:
         del app.dependency_overrides[get_current_user]
-    with patch("auth.auth_settings.DEV_DISABLE_AUTH", False):
+    with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", False):
         yield
 
 
@@ -26,7 +26,7 @@ async def test_get_oidc_config(respx_mock):
     )
 
     # Clear cache if any
-    import auth
+    from dtvp import auth
 
     auth._oidc_config_cache = None
 
@@ -40,7 +40,7 @@ async def test_get_oidc_config(respx_mock):
 
 
 def test_login_redirect(client):
-    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+    with patch("dtvp.auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
         mock_config.return_value = {
             "authorization_endpoint": "https://auth.example.com/login"
         }
@@ -52,7 +52,7 @@ def test_login_redirect(client):
 
 @pytest.mark.asyncio
 async def test_callback_success(client, respx_mock):
-    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+    with patch("dtvp.auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
         mock_config.return_value = {"token_endpoint": "https://auth.example.com/token"}
 
         # Mock token response
@@ -75,7 +75,7 @@ async def test_callback_success(client, respx_mock):
 
 @pytest.mark.asyncio
 async def test_callback_failure(client, respx_mock):
-    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+    with patch("dtvp.auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
         mock_config.return_value = {"token_endpoint": "https://auth.example.com/token"}
 
         # Mock token response failure
@@ -86,7 +86,7 @@ async def test_callback_failure(client, respx_mock):
 
 
 def test_me_endpoint(client):
-    with patch("auth.auth_settings.DEV_DISABLE_AUTH", new=False):
+    with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", new=False):
         # Success case
         token = jwt.encode(
             {"sub": "testuser"}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
@@ -110,7 +110,7 @@ def test_me_endpoint(client):
 
 
 def test_redirect_uri_calculation():
-    from auth import AuthSettings
+    from dtvp.auth import AuthSettings
 
     # Test fallback calculation
     settings = AuthSettings(
@@ -127,10 +127,10 @@ def test_redirect_uri_calculation():
 
 @pytest.mark.asyncio
 async def test_get_oidc_config_no_authority():
-    import auth
+    from dtvp import auth
 
     auth._oidc_config_cache = None
-    with patch("auth.auth_settings") as mock_settings:
+    with patch("dtvp.auth.auth_settings") as mock_settings:
         mock_settings.authority = ""
         with pytest.raises(HTTPException) as exc:
             await get_oidc_config()
@@ -141,7 +141,7 @@ async def test_get_oidc_config_no_authority():
 @pytest.mark.asyncio
 async def test_callback_claim_error(client, respx_mock):
     # Mock config and token response
-    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+    with patch("dtvp.auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
         mock_config.return_value = {"token_endpoint": "https://auth.example.com/token"}
 
         respx_mock.post("https://auth.example.com/token").respond(
@@ -163,7 +163,7 @@ async def test_callback_claim_error(client, respx_mock):
 
 @pytest.mark.asyncio
 async def test_callback_context_path_slashes(client, respx_mock):
-    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+    with patch("dtvp.auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
         mock_config.return_value = {"token_endpoint": "https://auth.example.com/token"}
 
         respx_mock.post("https://auth.example.com/token").respond(
@@ -171,7 +171,7 @@ async def test_callback_context_path_slashes(client, respx_mock):
         )
 
         # Mock settings to have path without slash
-        with patch("auth.auth_settings.CONTEXT_PATH", new="mycontext"):
+        with patch("dtvp.auth.auth_settings.CONTEXT_PATH", new="mycontext"):
             response = client.get("/auth/callback?code=code", follow_redirects=False)
             assert response.status_code == 307
             assert "/mycontext" in response.headers["location"]
@@ -180,7 +180,7 @@ async def test_callback_context_path_slashes(client, respx_mock):
 @pytest.mark.asyncio
 async def test_callback_claim_priority(client, respx_mock):
     # Mock config and token response
-    with patch("auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
+    with patch("dtvp.auth.get_oidc_config", new_callable=AsyncMock) as mock_config:
         mock_config.return_value = {"token_endpoint": "https://auth.example.com/token"}
 
         # Mock token response with all claims
@@ -210,3 +210,52 @@ async def test_callback_claim_priority(client, respx_mock):
             cookie, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"]
         )
         assert payload["sub"] == "sub_user"
+
+
+def test_logout_redirects_to_login(client):
+    response = client.get("/auth/logout", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/login")
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_dev_disable_auth():
+    from dtvp.auth import get_current_user
+
+    class DummyRequest:
+        cookies = {}
+        headers = {}
+
+    with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", new=True):
+        user = await get_current_user(DummyRequest(), client_gen=AsyncMock())
+        assert user == "devuser"
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_auto_login_with_dt_profile():
+    from dtvp.auth import get_current_user
+
+    class DummyRequest:
+        cookies = {"session_token": ""}
+        headers = {"Authorization": "Bearer test-token"}
+
+    async def fake_client_gen():
+        class FakeClient:
+            def __init__(self):
+                self.headers = {"Authorization": "Bearer test-token"}
+                self.client = MagicMock(cookies={"session_token": "cookie-value"})
+
+            async def get_current_user_profile(self):
+                return {"username": "dt_user"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
+
+        yield FakeClient()
+
+    with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", new=False):
+        user = await get_current_user(DummyRequest(), client_gen=fake_client_gen())
+        assert user == "dt_user"

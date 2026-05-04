@@ -7,7 +7,7 @@
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "main:app",
+                "dtvp.main:app",
                 "--reload"
             ],
             "jinja": true

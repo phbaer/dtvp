@@ -37,7 +37,7 @@ test.describe('Threat-Model UI Flow (Real Stack)', () => {
         await page.getByTestId('run-tmrescore-analysis').click()
 
         await expect(page.getByRole('heading', { name: 'Analysis Result' })).toBeVisible({ timeout: 20000 })
-        await expect(page.getByText('Merged multi-version analysis keeps historical vulnerabilities attached', { exact: false })).toBeVisible()
+        await expect(page.getByTestId('analysis-sbom-summary-note')).toContainText('Merged multi-version analysis keeps historical vulnerabilities attached')
         await expect(page.getByText('enriched-sbom.json')).toBeVisible()
         await expect(page.getByText('rescored-report.json')).toBeVisible()
         await expect(page.getByText('summary.txt')).toBeVisible()

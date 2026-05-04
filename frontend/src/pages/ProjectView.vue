@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
+import { ref, watch, computed, inject, provide, onMounted, onActivated, nextTick, triggerRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getCacheStatus, getTMRescoreProposals } from '../lib/api'
+import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMRescoreProposals } from '../lib/api'
 import { getGroupLifecycle, tagToString, hasCvssVersionMismatch, normalizeTags } from '../lib/assessment-helpers'
 import { classifyGroup, computeFilterCounts, computeTeamCounts, matchesFilters, getGroupTechnicalState } from '../lib/group-classifier'
 import { calculateScoreFromVector } from '../lib/cvss'
-import type { GroupedVuln, Statistics, CacheStatus, TMRescoreProposalSnapshot } from '../types'
+import { useCacheStatus } from '../lib/useCacheStatus'
+import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
+import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
 import { projectHeaderState } from '../lib/projectHeaderStore'
 
 import VulnGroupCard from '../components/VulnGroupCard.vue'
@@ -31,13 +33,14 @@ const stats = ref<Statistics | null>(null)
 const statsLoading = ref(false)
 const statsError = ref('')
 const statsDirty = ref(false)
-const cacheStatus = ref<CacheStatus | null>(null)
-const cacheStatusLoading = ref(false)
-const cacheStatusError = ref('')
-const now = ref<number>(Date.now())
-const cacheStatusTimer = ref<number | null>(null)
-const cacheStatusRefreshTimer = ref<number | null>(null)
-const cacheStatusRefreshInProgress = ref(false)
+const {
+    cacheStatus,
+    cacheStatusText,
+    cacheStatusState,
+    cacheStatusLabel,
+    cacheStatusAge,
+    refreshCacheStatus: fetchCacheStatus,
+} = useCacheStatus()
 
 const teamMapping = ref<Record<string, string | string[]>>({})
 provide('teamMapping', teamMapping)
@@ -67,16 +70,6 @@ const fetchTeamMapping = async () => {
     }
 }
 
-onUnmounted(() => {
-    if (cacheStatusTimer.value !== null) {
-        window.clearInterval(cacheStatusTimer.value)
-    }
-    if (cacheStatusRefreshTimer.value !== null) {
-        window.clearInterval(cacheStatusRefreshTimer.value)
-    }
-    cancelBackgroundLoad()
-})
-
 const fetchRescoreRules = async () => {
     try {
         rescoreRules.value = await getRescoreRules()
@@ -85,90 +78,17 @@ const fetchRescoreRules = async () => {
     }
 }
 
-const cacheLastRefreshedDate = computed(() => {
-    if (!cacheStatus.value?.last_refreshed_at) return null
-    const date = new Date(cacheStatus.value.last_refreshed_at)
-    return Number.isNaN(date.getTime()) ? null : date
-})
-
-const cacheAgeSeconds = computed(() => {
-    if (!cacheLastRefreshedDate.value) return null
-    return Math.max(0, Math.floor((now.value - cacheLastRefreshedDate.value.getTime()) / 1000))
-})
-
-const cacheAgeLabel = computed(() => {
-    if (cacheAgeSeconds.value === null) return ''
-    if (cacheAgeSeconds.value < 60) {
-        return '< 1 min ago'
-    }
-    const minutes = Math.floor(cacheAgeSeconds.value / 60)
-    if (minutes < 60) {
-        return `${minutes}m ago`
-    }
-    const hours = Math.floor(minutes / 60)
-    return `${hours}h ago`
-})
-
-const cacheStatusText = computed(() => {
-    if (cacheStatusLoading.value && !cacheStatus.value) {
-        return 'Loading…'
-    }
-    if (!cacheStatus.value) {
-        return cacheStatusError.value || 'Unknown'
-    }
-
-    const age = cacheAgeLabel.value ? `updated ${cacheAgeLabel.value}` : 'updated Unknown'
-    const statusLabel = cacheStatus.value.fully_cached ? 'Cache in sync' : 'Partially cached'
-    return `${statusLabel}\n${age}`
-})
-
-const cacheStatusState = computed<'cached' | 'partial' | 'unknown' | 'loading'>(() => {
-    if (cacheStatusLoading.value && !cacheStatus.value) return 'loading'
-    if (cacheStatusError.value || !cacheStatus.value) return 'unknown'
-    return cacheStatus.value.fully_cached ? 'cached' : 'partial'
-})
-
-const cacheStatusLabel = computed(() => {
-    if (cacheStatusLoading.value && !cacheStatus.value) return 'Loading…'
-    if (!cacheStatus.value) return cacheStatusError.value || 'Cache out of sync'
-    return cacheStatus.value.fully_cached ? 'Cache in sync' : 'Partially cached'
-})
-
-const cacheStatusAge = computed(() => {
-    if (!cacheStatus.value) {
-        return cacheStatusLoading.value ? '' : (cacheStatusError.value || '')
-    }
-    return cacheAgeLabel.value ? `updated ${cacheAgeLabel.value}` : 'updated Unknown'
-})
-
-const fetchCacheStatus = async () => {
-    if (cacheStatusRefreshInProgress.value) return
-    cacheStatusRefreshInProgress.value = true
-
-    const showLoading = !cacheStatus.value
-    if (showLoading) cacheStatusLoading.value = true
-    cacheStatusError.value = ''
-    try {
-        cacheStatus.value = await getCacheStatus()
-    } catch (err: any) {
-        cacheStatusError.value = 'Unable to load cache freshness'
-        console.error('Failed to fetch cache status:', err)
-    } finally {
-        if (showLoading) cacheStatusLoading.value = false
-        cacheStatusRefreshInProgress.value = false
-    }
-}
-
 const consumeThreatModelRefreshSignal = () => {
     const name = route.params.name as string
-    if (!name || name === '_all_' || typeof window === 'undefined' || !window.sessionStorage) {
+    const sessionStorage = globalThis.window?.sessionStorage
+    if (!name || name === '_all_' || !sessionStorage) {
         return false
     }
 
     const key = `dtvp:tmrescore-refresh:${name}`
-    const hasSignal = !!window.sessionStorage.getItem(key)
+    const hasSignal = !!sessionStorage.getItem(key)
     if (hasSignal) {
-        window.sessionStorage.removeItem(key)
+        sessionStorage.removeItem(key)
     }
     return hasSignal
 }
@@ -202,14 +122,6 @@ const fetchTMRescoreProposals = async () => {
 onMounted(() => {
     fetchTeamMapping()
     fetchRescoreRules()
-    fetchCacheStatus()
-
-    cacheStatusTimer.value = window.setInterval(() => {
-        now.value = Date.now()
-    }, 1000)
-    cacheStatusRefreshTimer.value = window.setInterval(() => {
-        fetchCacheStatus().catch(() => {})
-    }, 5000)
 })
 
 onActivated(() => {
@@ -235,15 +147,14 @@ const processFetchedGroups = async (data: GroupedVuln[]): Promise<GroupedVuln[]>
 
     for (let start = 0; start < total; start += batchSize) {
         const batch = data.slice(start, start + batchSize).map(g => {
-            // Always recalculate scores from vectors using the standard CVSS library
-            if (g.cvss_vector) {
+            if (g.cvss_vector && g.cvss_score == null && g.cvss == null) {
                 const computed = calculateScoreFromVector(g.cvss_vector)
                 if (computed !== null) {
                     g.cvss_score = computed
-                    if (!g.cvss) g.cvss = computed
+                    if (g.cvss == null) g.cvss = computed
                 }
             }
-            if (g.rescored_vector) {
+            if (g.rescored_vector && g.rescored_cvss == null) {
                 const computed = calculateScoreFromVector(g.rescored_vector)
                 if (computed !== null) g.rescored_cvss = computed
             }
@@ -337,12 +248,12 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
         }
     })
     
-    // Force top-level reactivity by replacing the group object itself with a new reference
+    // Force top-level reactivity by replacing only the changed group
     const idx = groups.value.findIndex((g: any) => g.id === group.id)
     if (idx !== -1) {
         groups.value[idx] = { ...group }
     }
-    groups.value = [...groups.value]
+    triggerRef(groups)
 
     // After Vue re-renders with new sort order, scroll the updated card back into view
     nextTick(() => {
@@ -794,13 +705,14 @@ const preFilteredGroups = computed(() => {
     return result
 })
 
-const filteredGroups = computed(() => {
-    let result = preFilteredGroups.value
-
-    result = result.filter(g => {
-        return matchesFilters(g, lifecycleFilters.value, analysisFilters.value, teamMapping.value)
+const matchingGroups = computed(() => {
+    return preFilteredGroups.value.filter(group => {
+        return matchesFilters(group, lifecycleFilters.value, analysisFilters.value, teamMapping.value)
     })
+})
 
+const sortedGroups = computed(() => {
+    const result = [...matchingGroups.value]
 
     result.sort((a, b) => {
         let comparison = 0
@@ -834,12 +746,6 @@ const filteredGroups = computed(() => {
                 comparison = scoreSeverityOrder(rB) - scoreSeverityOrder(rA)
                 break
             }
-            case 'rescored-severity': {
-                const rA = a.rescored_cvss ?? a.cvss_score ?? a.cvss
-                const rB = b.rescored_cvss ?? b.cvss_score ?? b.cvss
-                comparison = scoreSeverityOrder(rA) - scoreSeverityOrder(rB)
-                break
-            }
             case 'score': {
                 const scoreA = a.cvss_score ?? a.cvss ?? 0
                 const scoreB = b.cvss_score ?? b.cvss ?? 0
@@ -868,130 +774,21 @@ const filteredGroups = computed(() => {
     return result
 })
 
-type TimerHandle = number | ReturnType<typeof setTimeout>
-const LOAD_BATCH_SIZE = 20
-const visibleGroupCount = ref(LOAD_BATCH_SIZE)
-const loadMoreTrigger = ref<HTMLElement | null>(null)
-const loadMoreObserver = ref<IntersectionObserver | null>(null)
-const backgroundLoadHandle = ref<TimerHandle | null>(null)
+const filteredGroups = sortedGroups
 
-const visibleGroups = computed(() => {
-    return filteredGroups.value.slice(0, visibleGroupCount.value)
+defineExpose({ filteredGroups })
+
+const {
+    visibleItems: visibleGroups,
+    hasMoreItems: hasMoreGroups,
+    loadMoreTrigger,
+} = useVisibleGroupWindow({
+    items: sortedGroups,
+    isActive: computed(() => viewMode.value === 'analysis'),
+    batchSize: 20,
 })
 
-const hasMoreGroups = computed(() => {
-    return visibleGroupCount.value < filteredGroups.value.length
-})
-
-const loadMoreGroups = () => {
-    if (visibleGroupCount.value >= filteredGroups.value.length) return
-    visibleGroupCount.value = Math.min(
-        filteredGroups.value.length,
-        visibleGroupCount.value + LOAD_BATCH_SIZE,
-    )
-    if (hasMoreGroups.value) {
-        scheduleBackgroundLoad()
-    }
-}
-
-const resetVisibleGroups = () => {
-    visibleGroupCount.value = LOAD_BATCH_SIZE
-    scheduleBackgroundLoad()
-}
-
-const scheduleBackgroundLoad = () => {
-    if (backgroundLoadHandle.value !== null || !hasMoreGroups.value) return
-
-    const callback = () => {
-        backgroundLoadHandle.value = null
-        if (!hasMoreGroups.value) return
-
-        loadMoreGroups()
-    }
-
-    const globalWindow = typeof window !== 'undefined' ? (window as unknown as {
-        requestIdleCallback?: (cb: () => void, options?: { timeout?: number }) => number
-        cancelIdleCallback?: (handle: number) => void
-        setTimeout: (cb: () => void, delay?: number) => number
-        clearTimeout: (handle: number) => void
-    }) : undefined
-
-    if (globalWindow?.requestIdleCallback) {
-        backgroundLoadHandle.value = globalWindow.requestIdleCallback(callback, { timeout: 1000 })
-    } else if (globalWindow) {
-        backgroundLoadHandle.value = globalWindow.setTimeout(callback, 250)
-    } else {
-        backgroundLoadHandle.value = setTimeout(callback, 250)
-    }
-}
-
-const cancelBackgroundLoad = () => {
-    if (backgroundLoadHandle.value === null) return
-
-    const globalWindow = typeof window !== 'undefined' ? (window as unknown as {
-        cancelIdleCallback?: (handle: number) => void
-        clearTimeout: (handle: number) => void
-    }) : undefined
-
-    if (globalWindow?.cancelIdleCallback) {
-        globalWindow.cancelIdleCallback(backgroundLoadHandle.value as any)
-    } else if (globalWindow) {
-        globalWindow.clearTimeout(backgroundLoadHandle.value as any)
-    } else {
-        clearTimeout(backgroundLoadHandle.value as any)
-    }
-    backgroundLoadHandle.value = null
-}
-
-const attachLoadMoreObserver = () => {
-    if (loadMoreObserver.value) {
-        loadMoreObserver.value.disconnect()
-        loadMoreObserver.value = null
-    }
-
-    if (!loadMoreTrigger.value) return
-
-    loadMoreObserver.value = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            if (entry.isIntersecting && hasMoreGroups.value) {
-                loadMoreGroups()
-            }
-        }
-    }, {
-        rootMargin: '400px',
-    })
-
-    loadMoreObserver.value.observe(loadMoreTrigger.value)
-}
-
-const disconnectLoadMoreObserver = () => {
-    if (loadMoreObserver.value) {
-        loadMoreObserver.value.disconnect()
-        loadMoreObserver.value = null
-    }
-}
-
-watch([
-    () => filteredGroups.value.length,
-    () => viewMode.value,
-], ([, mode]) => {
-    if (mode === 'analysis') {
-        resetVisibleGroups()
-        nextTick(() => {
-            attachLoadMoreObserver()
-        })
-    } else {
-        disconnectLoadMoreObserver()
-        cancelBackgroundLoad()
-    }
-}, { immediate: true })
-
-watch(() => filteredGroups.value, () => {
-    if (visibleGroupCount.value > filteredGroups.value.length) {
-        visibleGroupCount.value = Math.min(filteredGroups.value.length, LOAD_BATCH_SIZE)
-    }
-    scheduleBackgroundLoad()
-})
+void loadMoreTrigger
 
 const filterCounts = computed(() => {
     return computeFilterCounts(groups.value, teamMapping.value, lifecycleFilters.value)
@@ -1055,7 +852,7 @@ const dependencyFilterCounts = computed(() => {
 
 const dependencyRelationshipCounts = computed(() => {
     const counts = { direct: 0, transitive: 0, unknown: 0 }
-    filteredGroups.value.forEach(g => {
+    matchingGroups.value.forEach(g => {
         const relationship = getGroupDependencyRelationship(g).toLowerCase() as 'direct' | 'transitive' | 'unknown'
         counts[relationship]++
     })
@@ -1187,8 +984,8 @@ watch(() => user?.role, (role) => {
                             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)"
                             @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
                         />
-                        <div v-if="filteredGroups.length === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
-                        <div v-if="hasMoreGroups && filteredGroups.length > 0" ref="loadMoreTrigger" class="text-center py-6 text-sm text-gray-400">
+                        <div v-if="sortedGroups.length === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
+                        <div v-if="hasMoreGroups && sortedGroups.length > 0" ref="loadMoreTrigger" class="text-center py-6 text-sm text-gray-400">
                             Loading more vulnerabilities…
                         </div>
                     </div>
@@ -1214,7 +1011,7 @@ watch(() => user?.role, (role) => {
                 :lifecycleOptions="LIFECYCLE_OPTIONS"
                 :analysisOptions="ANALYSIS_OPTIONS"
                 :copiedUrl="copiedUrl"
-                :filteredCount="filteredGroups.length"
+                :filteredCount="sortedGroups.length"
                 :dependencyCounts="dependencyRelationshipCounts"
                 :dependencyFilterCounts="dependencyFilterCounts"
                 :tmrescoreCounts="tmrescoreProposalCounts"

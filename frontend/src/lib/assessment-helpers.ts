@@ -19,6 +19,122 @@ export const STATE_PRIORITY: Record<string, number> = {
     "NOT_SET": 5,
 };
 
+const MAX_PARSE_CACHE_ENTRIES = 1000;
+
+const cloneAssessmentBlock = (block: AssessmentBlock): AssessmentBlock => ({
+    ...block,
+    assigned: block.assigned ? [...block.assigned] : [],
+});
+
+const cloneAssessmentBlocks = (blocks: readonly AssessmentBlock[]): AssessmentBlock[] => {
+    return blocks.map(cloneAssessmentBlock);
+};
+
+const setBoundedCacheEntry = <T>(cache: Map<string, T>, key: string, value: T, maxEntries: number) => {
+    if (cache.has(key)) {
+        cache.delete(key);
+    }
+    cache.set(key, value);
+    if (cache.size > maxEntries) {
+        const oldestKey = cache.keys().next().value;
+        if (oldestKey !== undefined) {
+            cache.delete(oldestKey);
+        }
+    }
+};
+
+const parsedAssessmentBlocksCache = new Map<string, readonly AssessmentBlock[]>();
+
+interface GroupAssessmentSummary {
+    allInstances: Array<Record<string, any>>;
+    componentStates: string[];
+    blocks: AssessmentBlock[];
+    assessedTeams: Set<string>;
+    hasAnyAssessment: boolean;
+    hasMissingComponent: boolean;
+    hasGlobalAssessment: boolean;
+    isPendingReview: boolean;
+    technicalState: string;
+}
+
+const groupAssessmentSummaryCache = new WeakMap<GroupedVuln, { signature: string; summary: GroupAssessmentSummary }>();
+
+const getInstanceAssessmentState = (instance: Record<string, any>): string => {
+    return instance.analysis_state || instance.analysisState || 'NOT_SET';
+};
+
+const getInstanceAssessmentDetails = (instance: Record<string, any>): string => {
+    return instance.analysis_details || instance.analysisDetails || '';
+};
+
+const buildGroupAssessmentSignature = (group: GroupedVuln): string => {
+    const parts: string[] = [];
+    for (const version of group.affected_versions || []) {
+        for (const component of version.components || []) {
+            const state = getInstanceAssessmentState(component as Record<string, any>);
+            const details = getInstanceAssessmentDetails(component as Record<string, any>);
+            parts.push(`${state.length}:${state}|${details.length}:${details}`);
+        }
+    }
+    return parts.join('||');
+};
+
+const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary => {
+    const allInstances = (group.affected_versions || []).flatMap(v => v.components || []) as Array<Record<string, any>>;
+    const componentStates = allInstances.map(getInstanceAssessmentState);
+    const blocks: AssessmentBlock[] = [];
+
+    for (const instance of allInstances) {
+        const details = getInstanceAssessmentDetails(instance);
+        if (!details) continue;
+        blocks.push(...parseAssessmentBlocks(details));
+    }
+
+    const assessedTeams = new Set<string>();
+    for (const block of blocks) {
+        if (block.team && block.team !== 'General' && block.state && block.state !== 'NOT_SET') {
+            assessedTeams.add(block.team);
+        }
+    }
+
+    const teamStates = blocks
+        .filter(block => block.team !== 'General' && block.state !== 'NOT_SET')
+        .map(block => block.state)
+        .sort((left, right) => (STATE_PRIORITY[left] ?? 10) - (STATE_PRIORITY[right] ?? 10));
+
+    const rawStates = Array.from(new Set(componentStates.filter(state => state !== 'NOT_SET')))
+        .sort((left, right) => (STATE_PRIORITY[left] ?? 10) - (STATE_PRIORITY[right] ?? 10));
+
+    const globalState = blocks.find(block => block.team === 'General')?.state;
+    const technicalState = globalState && globalState !== 'NOT_SET'
+        ? globalState
+        : teamStates[0] || rawStates[0] || 'NOT_SET';
+
+    return {
+        allInstances,
+        componentStates,
+        blocks,
+        assessedTeams,
+        hasAnyAssessment: componentStates.some(state => state !== 'NOT_SET'),
+        hasMissingComponent: componentStates.includes('NOT_SET'),
+        hasGlobalAssessment: blocks.some(block => block.team === 'General' && block.state !== 'NOT_SET'),
+        isPendingReview: allInstances.some(instance => getInstanceAssessmentDetails(instance).includes('[Status: Pending Review]')),
+        technicalState,
+    };
+};
+
+const getGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary => {
+    const signature = buildGroupAssessmentSignature(group);
+    const cached = groupAssessmentSummaryCache.get(group);
+    if (cached?.signature === signature) {
+        return cached.summary;
+    }
+
+    const summary = buildGroupAssessmentSummary(group);
+    groupAssessmentSummaryCache.set(group, { signature, summary });
+    return summary;
+};
+
 export function tagToString(tag: TagValue | undefined | null): string {
     if (tag == null) return '';
     if (typeof tag === 'string') return tag;
@@ -33,6 +149,11 @@ export function tagToString(tag: TagValue | undefined | null): string {
 export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
     const blocks: AssessmentBlock[] = [];
     if (!fullText) return blocks;
+
+    const cached = parsedAssessmentBlocksCache.get(fullText);
+    if (cached) {
+        return cloneAssessmentBlocks(cached);
+    }
 
     // Split by team headers: --- [Team: Name] [State: State] ... ---
     const firstHeaderIndex = fullText.indexOf('--- [Team:');
@@ -147,6 +268,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         });
     }
 
+    setBoundedCacheEntry(parsedAssessmentBlocksCache, fullText, cloneAssessmentBlocks(blocks), MAX_PARSE_CACHE_ENTRIES);
     return blocks;
 }
 
@@ -502,76 +624,47 @@ export function hasGlobalAssessment(blocks: AssessmentBlock[]): boolean {
 }
 
 export function isPendingReview(group: GroupedVuln): boolean {
-    return (group.affected_versions || []).some(v => 
-        (v.components || []).some(c => {
-            const details = (c as any).analysis_details || (c as any).analysisDetails || '';
-            return details.includes('[Status: Pending Review]');
-        })
-    );
+    return getGroupAssessmentSummary(group).isPendingReview;
 }
 
 export function getAssessedTeams(group: GroupedVuln): Set<string> {
-    const allInstances = (group.affected_versions || []).flatMap(v => v.components || []);
-    const allBlocks: AssessmentBlock[] = [];
-    allInstances.forEach(inst => {
-        const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
-        if (details) {
-            allBlocks.push(...parseAssessmentBlocks(details));
-        }
-    });
-
-    const assessed = new Set<string>();
-    allBlocks.forEach(block => {
-        if (block.team && block.team !== 'General' && block.state && block.state !== 'NOT_SET') {
-            assessed.add(block.team);
-        }
-    });
-
-    return assessed;
+    return new Set(getGroupAssessmentSummary(group).assessedTeams);
 }
 
-export function hasOpenTeamAssessment(group: GroupedVuln, requiredTeamsOrTags?: Tags | undefined, teamMapping?: Record<string, string | string[]>): boolean {
+const hasOpenTeamAssessmentFromSummary = (
+    summary: GroupAssessmentSummary,
+    requiredTeamsOrTags?: Tags | undefined,
+    teamMapping?: Record<string, string | string[]>,
+): boolean => {
     const requiredTeams = teamMapping
         ? normalizeTags(requiredTeamsOrTags, teamMapping)
         : (requiredTeamsOrTags || []).map(tagToString).filter(Boolean);
 
-    const assessedTeams = getAssessedTeams(group);
-
     if (requiredTeams.length > 0) {
-        const missingAssessment = requiredTeams.some(team => !assessedTeams.has(team));
+        const missingAssessment = requiredTeams.some(team => !summary.assessedTeams.has(team));
         if (missingAssessment) return true;
     }
 
-    const allInstances = (group.affected_versions || []).flatMap(v => v.components || []);
+    if (summary.hasMissingComponent) return true;
 
-    // A NOT_SET technical state on any component is an open team assessment.
-    const hasNotSetState = allInstances.some(i =>
-        ((i as any).analysis_state || (i as any).analysisState || 'NOT_SET') === 'NOT_SET'
-    );
-    if (hasNotSetState) return true;
-
-    // If structured blocks exist, look for a team (non-General) block that remains NOT_SET.
-    const allBlocks: AssessmentBlock[] = [];
-    allInstances.forEach(inst => {
-        const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
-        if (details) {
-            allBlocks.push(...parseAssessmentBlocks(details));
-        }
-    });
-
-    return allBlocks.some(b => b.team !== 'General' && b.state === 'NOT_SET');
+    return summary.blocks.some(block => block.team !== 'General' && block.state === 'NOT_SET');
 }
 
-export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags | undefined, teamMapping?: Record<string, string | string[]>): string {
+export function hasOpenTeamAssessment(group: GroupedVuln, requiredTeamsOrTags?: Tags | undefined, teamMapping?: Record<string, string | string[]>): boolean {
+    return hasOpenTeamAssessmentFromSummary(getGroupAssessmentSummary(group), requiredTeamsOrTags, teamMapping);
+}
+
+const getGroupLifecycleFromSummary = (
+    group: GroupedVuln,
+    summary: GroupAssessmentSummary,
+    requiredTeamsOrTags: Tags | undefined,
+    teamMapping?: Record<string, string | string[]>,
+): string => {
     const requiredTeams = teamMapping
         ? normalizeTags(requiredTeamsOrTags, teamMapping)
         : (requiredTeamsOrTags || []).map(tagToString).filter(Boolean);
-    const allInstances = (group.affected_versions || []).flatMap(v => v.components || []);
+    const { allInstances, componentStates: allCompStates, hasAnyAssessment, hasMissingComponent, blocks, hasGlobalAssessment: hasGlobal, isPendingReview } = summary;
     if (allInstances.length === 0) return 'OPEN';
-
-    const allCompStates = allInstances.map(i => (i as any).analysis_state || (i as any).analysisState || 'NOT_SET');
-    const hasMissingComponent = allCompStates.includes('NOT_SET');
-    const hasAnyAssessment = allCompStates.some(s => s !== 'NOT_SET');
 
     // If multiple distinct technical states exist across components and there is
     // no structured block information, treat as INCONSISTENT.
@@ -579,17 +672,6 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
     if (distinctNonMissingStates.length > 1) {
         return 'INCONSISTENT';
     }
-
-    const allBlocks: AssessmentBlock[] = [];
-    allInstances.forEach(inst => {
-        const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
-        if (details) {
-            allBlocks.push(...parseAssessmentBlocks(details));
-        }
-    });
-
-    const blocks = allBlocks;
-    const hasGlobal = hasGlobalAssessment(blocks);
 
     // If there are no structured assessment blocks but the system has a technical
     // state (analysis_state) set, it was likely assessed via a legacy workflow.
@@ -617,15 +699,6 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
     // However, when a global assessment exists, it is authoritative — different
     // team opinions should NOT cause INCONSISTENT.
     if (!hasGlobal) {
-        const distinctBlockStates = Array.from(new Set(
-            blocks
-                .map(b => b.state)
-                .filter(s => s !== 'NOT_SET')
-        ));
-        if (distinctBlockStates.length > 1) {
-            return 'INCONSISTENT';
-        }
-
         const normalizeBlockSignature = (block: AssessmentBlock) => JSON.stringify({
             team: block.team,
             state: block.state,
@@ -633,8 +706,22 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
             details: block.details.replace(/\s+/g, ' ').trim()
         });
 
+        const instanceBlockSignatures = allInstances
+            .map(inst => {
+                const details = getInstanceAssessmentDetails(inst);
+                const instanceBlocks = parseAssessmentBlocks(details);
+                const significantBlocks = instanceBlocks
+                    .filter(b => b.state !== 'NOT_SET' && b.team !== 'General');
+                if (significantBlocks.length === 0) return '';
+
+                const distinctSignatures = Array.from(new Set(significantBlocks.map(normalizeBlockSignature)))
+                    .sort((left, right) => left.localeCompare(right));
+                return distinctSignatures.join('||');
+            })
+            .filter(Boolean);
+
         const hasInconsistentInstanceBlocks = allInstances.some(inst => {
-            const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
+            const details = getInstanceAssessmentDetails(inst);
             const instanceBlocks = parseAssessmentBlocks(details);
             const significantBlocks = instanceBlocks
                 .filter(b => b.state !== 'NOT_SET' && b.team !== 'General');
@@ -643,7 +730,11 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
             return distinctSignatures.length > 1;
         });
 
-        if (hasInconsistentInstanceBlocks) {
+        if (new Set(instanceBlockSignatures).size > 1) {
+            return 'INCONSISTENT';
+        }
+
+        if (hasInconsistentInstanceBlocks && instanceBlockSignatures.length <= 1) {
             return 'INCONSISTENT';
         }
     }
@@ -666,11 +757,8 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
          .trim();
 
     const assessedDetails = allInstances
-        .filter(i => {
-            const s = (i as any).analysis_state || (i as any).analysisState || 'NOT_SET';
-            return s !== 'NOT_SET';
-        })
-        .map(i => normalizeDetails((i as any).analysis_details || (i as any).analysisDetails || ''))
+        .filter(i => getInstanceAssessmentState(i) !== 'NOT_SET')
+        .map(i => normalizeDetails(getInstanceAssessmentDetails(i)))
         .filter(d => d.length > 0);
 
     if (assessedDetails.length > 1) {
@@ -680,7 +768,7 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
         }
     }
 
-    if (isPendingReview(group)) return 'NEEDS_APPROVAL';
+    if (isPendingReview) return 'NEEDS_APPROVAL';
 
     const missingTeams = (requiredTeams || []).filter((t: string) => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
     // OPEN should only mean nothing is assessed yet. If a technical state exists but
@@ -691,7 +779,7 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
 
     // Incomplete / Inconsistent logic based on VERSIONS
     const versionStates = (group.affected_versions || []).map(v => {
-        const states = Array.from(new Set((v.components || []).map(c => (c as any).analysis_state || (c as any).analysisState || 'NOT_SET')));
+        const states = Array.from(new Set((v.components || []).map(c => getInstanceAssessmentState(c as Record<string, any>))));
         if (states.length === 0) return 'NOT_SET';
         if (states.length === 1) return states[0];
         const nonMissing = states.filter(s => s !== 'NOT_SET');
@@ -718,7 +806,7 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
 
     if (hasGlobal) return 'ASSESSED';
 
-    // Fallback: if we have components but no global, it's either INCONSISTENT, INCOMPLETE, 
+    // Fallback: if we have components but no global, it's either INCONSISTENT, INCOMPLETE,
     // or if we specifically lack global and a team, it's OPEN.
     if (allInstances.length > 0 && !hasGlobal) {
         // If we reached here, it means missingTeams was 0 and versionStates was consistent.
@@ -728,8 +816,12 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
         // Let's call it INCOMPLETE (as it lacks the global version of the truth).
         return hasAnyAssessment ? 'INCOMPLETE' : 'OPEN';
     }
-    
+
     return 'OPEN';
+}
+
+export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags | undefined, teamMapping?: Record<string, string | string[]>): string {
+    return getGroupLifecycleFromSummary(group, getGroupAssessmentSummary(group), requiredTeamsOrTags, teamMapping);
 }
 
 /**
@@ -737,46 +829,7 @@ export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags 
  * Logic: Global Assessment State -> Worst Team Assessment State fallback.
  */
 export function getGroupTechnicalState(group: GroupedVuln): string {
-    const allInstances = (group.affected_versions || []).flatMap(v => v.components || []);
-    if (allInstances.length === 0) return 'NOT_SET';
-
-    // Parse all assessment blocks across all instances (versions/components).
-    // This ensures we correctly capture the "worst" state even when a group is
-    // represented by multiple components or versions with different states.
-    const blocks: AssessmentBlock[] = [];
-    allInstances.forEach(inst => {
-        const details = (inst as any).analysis_details || (inst as any).analysisDetails || '';
-        if (details) {
-            blocks.push(...parseAssessmentBlocks(details));
-        }
-    });
-
-    // 1. Global Precedence
-    const globalState = blocks.find(b => b.team === 'General')?.state;
-    if (globalState && globalState !== 'NOT_SET') return globalState;
-
-    // 2. Worst Team State (across all blocks)
-    const teamStates = blocks
-        .filter(b => b.team !== 'General' && b.state !== 'NOT_SET')
-        .map(b => b.state);
-
-    if (teamStates.length > 0) {
-        teamStates.sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10));
-        return teamStates[0];
-    }
-
-    // 3. Last Fallback: Worst of the raw component analysis_states (handles mock data without details)
-    const rawStates = allInstances
-        .map(i => (i as any).analysis_state || (i as any).analysisState || 'NOT_SET')
-        .filter(s => s !== 'NOT_SET');
-
-    if (rawStates.length > 0) {
-        const uniqueRaw = Array.from(new Set(rawStates));
-        uniqueRaw.sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10));
-        return uniqueRaw[0];
-    }
-
-    return 'NOT_SET';
+    return getGroupAssessmentSummary(group).technicalState;
 }
 
 
@@ -838,12 +891,13 @@ export function matchesFilters(
 ): boolean {
     if (lifecycleFilters.length === 0 || analysisFilters.length === 0) return false;
 
+    const summary = getGroupAssessmentSummary(group);
     const tags = normalizeTags(group.tags, teamMapping);
-    const state = getGroupLifecycle(group, tags, teamMapping);
-    const isPending = isPendingReview(group);
+    const state = getGroupLifecycleFromSummary(group, summary, tags, teamMapping);
+    const isPending = summary.isPendingReview;
 
     // 1. Lifecycle Match
-    const openPendingWithOpenTeam = isPending && hasOpenTeamAssessment(group, tags, teamMapping);
+    const openPendingWithOpenTeam = isPending && hasOpenTeamAssessmentFromSummary(summary, tags, teamMapping);
 
     const lifecycleMatch = (lifecycleFilters.includes('OPEN') && (state === 'OPEN' || openPendingWithOpenTeam)) ||
                            (lifecycleFilters.includes('ASSESSED') && state === 'ASSESSED') ||
@@ -858,7 +912,7 @@ export function matchesFilters(
     // A group matches if:
     // - It is OPEN (no technical state yet, so it matches any analysis filter that includes NOT_SET)
     // - OR its overall technical state matches one of the filters
-    const techState = getGroupTechnicalState(group);
+    const techState = summary.technicalState;
     if (techState === 'NOT_SET') {
         return analysisFilters.includes('NOT_SET');
     }

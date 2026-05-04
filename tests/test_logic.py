@@ -1,8 +1,8 @@
-import logic
+import dtvp.logic as logic
 from fastapi.testclient import TestClient
 from test_setup import mock_dt
 from unittest.mock import patch
-from logic import group_vulnerabilities, BOMAnalysisCache, sanitize_rescored_vector
+from dtvp.logic import group_vulnerabilities, BOMAnalysisCache, sanitize_rescored_vector
 
 
 def test_group_vulnerabilities_basic():
@@ -173,6 +173,32 @@ def test_group_vulnerabilities_rescored_vector_adjusted_flag():
     assert g["rescored_vector"] is None
 
 
+def test_group_vulnerabilities_rescored_equal_to_base():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-EQUAL",
+                    "uuid": "vuuid1",
+                    "severity": "HIGH",
+                    "cvssV3BaseScore": 9.8,
+                },
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {
+                    "state": "NOT_SET",
+                    "analysisDetails": "[Rescored: 9.8]\nSome details",
+                },
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+    assert len(grouped) == 1
+    g = grouped[0]
+    assert g["rescored_cvss"] == 9.8
+
+
 def test_group_vulnerabilities_missing_data():
     # Test with missing vulnerability details
     v1_data = {
@@ -216,6 +242,46 @@ def test_group_vulnerabilities_missing_id():
 
     grouped = group_vulnerabilities([v1_data])
     assert len(grouped) == 0
+
+
+def test_group_vulnerabilities_sorting_fallback():
+    # Scenario: Two aliased vulns, neither is CVE or GHSA.
+    # Should fall back to lexicographical sorting (priority 2).
+    f1 = {
+        "vulnerability": {
+            "vulnId": "BDSA-2023-0001",
+            "source": "BDSA",
+            "aliases": [{"bdsaId": "BDSA-2023-0001", "other": "Z-CUSTOM-1"}],
+            "title": "Vuln BDSA",
+            "severity": "HIGH",
+        },
+        "component": {"name": "libA", "version": "1.0", "uuid": "c1"},
+        "analysis": {"state": "NOT_SET"},
+    }
+
+    f2 = {
+        "vulnerability": {
+            "vulnId": "Z-CUSTOM-1",
+            "source": "INTERNAL",
+            "aliases": [{"bdsaId": "BDSA-2023-0001", "other": "Z-CUSTOM-1"}],
+            "title": "Vuln Custom",
+            "severity": "HIGH",
+        },
+        "component": {"name": "libA", "version": "1.0", "uuid": "c1"},
+        "analysis": {"state": "NOT_SET"},
+    }
+
+    data = [
+        {
+            "version": {"name": "Proj", "version": "1.0", "uuid": "p1"},
+            "vulnerabilities": [f1, f2],
+        }
+    ]
+
+    groups = group_vulnerabilities(data)
+
+    assert len(groups) == 1
+    assert groups[0]["id"] == "BDSA-2023-0001"
 
 
 def test_group_vulnerabilities_invalid_rescored_score():
@@ -665,7 +731,6 @@ def test_is_direct_dependency_classification():
 
 
 def test_group_vulnerabilities_cache_hit():
-    import logic
 
     # Test to ensure that multiple vulnerabilities for the same component use the cache
     v1_data = {
