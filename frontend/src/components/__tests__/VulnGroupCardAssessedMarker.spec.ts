@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
 import { CheckCircle } from 'lucide-vue-next'
+import { analysisQueueStore } from '../../lib/analysisQueueStore'
 
 // Mock dependencies
 vi.mock('../../lib/api', () => ({
@@ -80,7 +81,12 @@ describe('VulnGroupCard Assessment Markers', () => {
         role: 'USER'
     }
 
+    const resetAnalysisQueue = () => {
+        analysisQueueStore.items.value = []
+    }
+
     it('does not show checkmark when no assessment exists', () => {
+        resetAnalysisQueue()
         const wrapper = mount(VulnGroupCard, {
             props: {
                 group: defaultGroup as any
@@ -100,6 +106,7 @@ describe('VulnGroupCard Assessment Markers', () => {
     })
 
     it('shows checkmark for assessed team', () => {
+        resetAnalysisQueue()
         // Modify group to have assessment for TeamA
         const assessedGroup = JSON.parse(JSON.stringify(defaultGroup))
         assessedGroup.affected_versions[0].components[0].analysis_details =
@@ -131,6 +138,7 @@ describe('VulnGroupCard Assessment Markers', () => {
     })
 
     it('in partial team assessment, shows green check for assessed team only', () => {
+        resetAnalysisQueue()
         const partialGroup = JSON.parse(JSON.stringify(defaultGroup))
         partialGroup.affected_versions[0].components[0].analysis_details =
             '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: analyst] ---\n' +
@@ -158,6 +166,7 @@ describe('VulnGroupCard Assessment Markers', () => {
     })
 
     it('shows a distinct legacy assessed fold badge for legacy assessed issues', () => {
+        resetAnalysisQueue()
         const legacyGroup = JSON.parse(JSON.stringify(defaultGroup))
         legacyGroup.affected_versions[0].components[0].analysis_state = 'NOT_AFFECTED'
         legacyGroup.affected_versions[0].components[0].analysis_details = ''
@@ -179,6 +188,7 @@ describe('VulnGroupCard Assessment Markers', () => {
     })
 
     it('shows checkmark for multiple assessed teams', () => {
+        resetAnalysisQueue()
         const assessedGroup = JSON.parse(JSON.stringify(defaultGroup))
         assessedGroup.affected_versions[0].components[0].analysis_details =
             '--- [Team: TeamA] [State: NOT_AFFECTED] --- \n\n --- [Team: TeamB] [State: IN_TRIAGE] ---'
@@ -199,5 +209,70 @@ describe('VulnGroupCard Assessment Markers', () => {
 
         expect(tags[0]?.findComponent(CheckCircle).exists()).toBe(true)
         expect(tags[1]?.findComponent(CheckCircle).exists()).toBe(true)
+    })
+
+    it('shows code analysis badge states for unavailable, available, and used', () => {
+        resetAnalysisQueue()
+
+        const unavailableWrapper = mount(VulnGroupCard, {
+            props: {
+                group: defaultGroup as any,
+            },
+            global: {
+                provide: {
+                    user: userMock,
+                },
+            },
+        })
+
+        const unavailableBadge = unavailableWrapper.get('[data-testid="code-analysis-status-badge"]')
+        expect(unavailableBadge.text()).toContain('Auto')
+        expect(unavailableBadge.find('.icon-shield-off').exists()).toBe(true)
+
+        analysisQueueStore.items.value = [
+            {
+                queue_id: 'queue-available',
+                vuln_id: 'VULN-123',
+                component_name: 'Lib A',
+                submitted_by: 'tester',
+                submitted_at: new Date().toISOString(),
+                status: 'completed',
+                position: 0,
+            } as any,
+        ]
+
+        const availableWrapper = mount(VulnGroupCard, {
+            props: {
+                group: defaultGroup as any,
+            },
+            global: {
+                provide: {
+                    user: userMock,
+                },
+            },
+        })
+
+        const availableBadge = availableWrapper.get('[data-testid="code-analysis-status-badge"]')
+        expect(availableBadge.text()).toContain('Auto')
+        expect(availableBadge.find('.icon-shield-check').exists()).toBe(true)
+
+        const usedGroup = JSON.parse(JSON.stringify(defaultGroup))
+        usedGroup.affected_versions[0].components[0].analysis_details =
+            '--- [Team: TeamA] [State: NOT_AFFECTED] [Assessed By: user] ---\n[Code Analysis]\nVerdict: not affected (high confidence)'
+
+        const usedWrapper = mount(VulnGroupCard, {
+            props: {
+                group: usedGroup as any,
+            },
+            global: {
+                provide: {
+                    user: userMock,
+                },
+            },
+        })
+
+        const usedBadge = usedWrapper.get('[data-testid="code-analysis-status-badge"]')
+        expect(usedBadge.text()).toContain('Auto')
+        expect(usedBadge.find('.icon-check-circle').exists()).toBe(true)
     })
 })

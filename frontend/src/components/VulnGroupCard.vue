@@ -12,6 +12,7 @@ import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
 import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
 import { calculateScoreFromVector } from '../lib/cvss'
+import { getGroupCodeAnalysisStatus } from '../lib/codeAnalysisStatus'
 import { getDerivedGroupTags } from '../lib/dependency-team-selection'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
@@ -365,6 +366,10 @@ const assessedIconClass = computed(() => {
 
 const canApprove = computed(() => {
     return user?.value?.role === 'REVIEWER' && isPendingReview.value
+})
+
+const codeAnalysisStatus = computed(() => {
+    return getGroupCodeAnalysisStatus(props.group)
 })
 
 const lastRescoredScore = ref<number | null>(null)
@@ -1532,6 +1537,7 @@ const teamBlockStateColor = (state?: string): string => {
             :isPendingReview="isPendingReview"
             :dependencyRelationship="dependencyRelationship"
             :assignees="group.assignees || []"
+            :codeAnalysisStatus="codeAnalysisStatus"
             @approve-assessment="approveAssessment"
         />
     </div>

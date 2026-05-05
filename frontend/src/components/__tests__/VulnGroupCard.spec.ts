@@ -524,6 +524,8 @@ describe('VulnGroupCard', () => {
         expect(badge.exists()).toBe(true)
         expect(badge.text()).toBe('Open')
         expect(badge.classes()).toContain('text-red-400')
+        expect(badge.classes()).toContain('rounded')
+        expect(badge.classes()).not.toContain('rounded-l')
     })
 
 

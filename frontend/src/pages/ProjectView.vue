@@ -7,6 +7,7 @@ import { classifyGroup, computeFilterCounts, computeTeamCounts, matchesFilters, 
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
+import { getGroupCodeAnalysisStatus, hasCodeAnalysisAvailable as hasStoredCodeAnalysisAvailable, isCodeAnalysisUsedInAssessment } from '../lib/codeAnalysisStatus'
 import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
 import { projectHeaderState } from '../lib/projectHeaderStore'
 
@@ -352,6 +353,8 @@ const idFilter = ref('')
 const componentFilter = ref('')
 const assigneeFilter = ref('')
 const dependencyFilter = ref<Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>>(['DIRECT', 'TRANSITIVE', 'UNKNOWN'])
+const codeAnalysisAvailableOnly = ref(false)
+const codeAnalysisUsedOnly = ref(false)
 const cvssVersionMismatchOnly = ref(false)
 
 const SORT_OPTIONS = [
@@ -455,7 +458,7 @@ const sortOrder = ref<'asc' | 'desc'>('desc')
 onMounted(() => {
     const q = route.query
     const hasFilterParams = Object.entries(q).some(([k, v]) => {
-        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'sort', 'order', 'tmrescore'].includes(k)) return false;
+        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'dependency', 'versions', 'sort', 'order', 'tmrescore', 'code_analysis_available', 'code_analysis_used', 'cvss_mismatch'].includes(k)) return false;
         if (Array.isArray(v)) return v.length > 0;
         return v !== undefined && v !== null && v !== '';
     })
@@ -478,6 +481,8 @@ onMounted(() => {
         if (q.dependency) dependencyFilter.value = Array.isArray(q.dependency) ? (q.dependency as string[]).map(v => v.toUpperCase() as 'DIRECT'|'TRANSITIVE'|'UNKNOWN') : [(q.dependency as string).toUpperCase() as 'DIRECT'|'TRANSITIVE'|'UNKNOWN']
         if (q.versions) versionFilterInput.value = Array.isArray(q.versions) ? q.versions.join(',') : (q.versions as string)
         if (q.tmrescore) tmrescoreProposalFilter.value = Array.isArray(q.tmrescore) ? (q.tmrescore as string[]).map(v => v.toUpperCase() as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') : [String(q.tmrescore).toUpperCase() as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']
+        if (q.code_analysis_available === 'true') codeAnalysisAvailableOnly.value = true
+        if (q.code_analysis_used === 'true') codeAnalysisUsedOnly.value = true
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
         if (q.sort) sortBy.value = q.sort as string
         if (q.order) sortOrder.value = q.order as 'asc' | 'desc'
@@ -517,6 +522,8 @@ const resetFilters = () => {
     assigneeFilter.value = ''
     dependencyFilter.value = ['DIRECT', 'TRANSITIVE', 'UNKNOWN']
     tmrescoreProposalFilter.value = ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL']
+    codeAnalysisAvailableOnly.value = false
+    codeAnalysisUsedOnly.value = false
     versionFilterInput.value = ''
     cvssVersionMismatchOnly.value = false
     sortBy.value = 'rescored-severity'
@@ -527,7 +534,7 @@ const resetFilters = () => {
 // This reduces unnecessary chattiness and keeps filtering fast and responsive.
 // URL sync was removed to avoid automatic API refresh for every filter tweak.
 
-watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, assigneeFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, cvssVersionMismatchOnly, sortBy, sortOrder], () => {
+watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, assigneeFilter, dependencyFilter, tmrescoreProposalFilter, codeAnalysisAvailableOnly, codeAnalysisUsedOnly, versionFilterInput, cvssVersionMismatchOnly, sortBy, sortOrder], () => {
     const query = { ...route.query }
 
     if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
@@ -556,6 +563,12 @@ watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, 
 
     if (tmrescoreProposalFilter.value.length > 0) query.tmrescore = tmrescoreProposalFilter.value
     else delete query.tmrescore
+
+    if (codeAnalysisAvailableOnly.value) query.code_analysis_available = 'true'
+    else delete query.code_analysis_available
+
+    if (codeAnalysisUsedOnly.value) query.code_analysis_used = 'true'
+    else delete query.code_analysis_used
 
     if (cvssVersionMismatchOnly.value) query.cvss_mismatch = 'true'
     else delete query.cvss_mismatch
@@ -633,6 +646,14 @@ const hasTMRescoreProposal = (group: GroupedVuln) => {
     })
 }
 
+const hasCodeAnalysisAvailable = (group: GroupedVuln) => {
+    return hasStoredCodeAnalysisAvailable(group)
+}
+
+const hasCodeAnalysisUsedInAssessmentForGroup = (group: GroupedVuln) => {
+    return isCodeAnalysisUsedInAssessment(group)
+}
+
 // Groups after applying all non-lifecycle/non-analysis filters (used for filter counts)
 const preFilteredGroups = computed(() => {
     let result = [...groups.value]
@@ -666,6 +687,14 @@ const preFilteredGroups = computed(() => {
             const matchesWithout = tmrescoreProposalFilter.value.includes('WITHOUT_PROPOSAL') && !hasProposal
             return matchesWith || matchesWithout
         })
+    }
+
+    if (codeAnalysisAvailableOnly.value) {
+        result = result.filter(g => hasCodeAnalysisAvailable(g))
+    }
+
+    if (codeAnalysisUsedOnly.value) {
+        result = result.filter(g => hasCodeAnalysisUsedInAssessmentForGroup(g))
     }
 
     if (versionFilterList.value.length > 0) {
@@ -878,6 +907,21 @@ const tmrescoreProposalCounts = computed(() => {
     return counts
 })
 
+const codeAnalysisCounts = computed(() => {
+    const counts: Record<'available' | 'used', number> = {
+        available: 0,
+        used: 0,
+    }
+
+    groupsAfterLifecycleAndDependency.value.forEach(g => {
+        const status = getGroupCodeAnalysisStatus(g)
+        if (status === 'available' || status === 'used-in-assessment') counts.available++
+        if (status === 'used-in-assessment') counts.used++
+    })
+
+    return counts
+})
+
 const analysisCounts = computed(() => {
     const counts: Record<string, number> = {
         EXPLOITABLE: 0,
@@ -900,6 +944,8 @@ const filterState = computed<FilterState>(() => ({
     sortOrder: sortOrder.value,
     dependencyFilter: dependencyFilter.value,
     tmrescoreFilter: tmrescoreProposalFilter.value,
+    codeAnalysisAvailableOnly: codeAnalysisAvailableOnly.value,
+    codeAnalysisUsedOnly: codeAnalysisUsedOnly.value,
     idFilter: idFilter.value,
     tagFilter: tagFilter.value,
     componentFilter: componentFilter.value,
@@ -915,6 +961,8 @@ const handleFilterUpdate = (newFilters: FilterState) => {
     sortOrder.value = newFilters.sortOrder
     dependencyFilter.value = newFilters.dependencyFilter
     tmrescoreProposalFilter.value = newFilters.tmrescoreFilter
+    codeAnalysisAvailableOnly.value = newFilters.codeAnalysisAvailableOnly
+    codeAnalysisUsedOnly.value = newFilters.codeAnalysisUsedOnly
     idFilter.value = newFilters.idFilter
     tagFilter.value = newFilters.tagFilter
     componentFilter.value = newFilters.componentFilter
@@ -1015,6 +1063,7 @@ watch(() => user?.role, (role) => {
                 :dependencyCounts="dependencyRelationshipCounts"
                 :dependencyFilterCounts="dependencyFilterCounts"
                 :tmrescoreCounts="tmrescoreProposalCounts"
+                :codeAnalysisCounts="codeAnalysisCounts"
                 :analysisCounts="analysisCounts"
                 :teamTagList="teamTagList"
                 :cacheStatusState="cacheStatusState"

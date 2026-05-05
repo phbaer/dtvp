@@ -2,6 +2,7 @@
 import { computed, toRefs } from 'vue'
 import { CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
+import type { GroupCodeAnalysisStatus } from '../lib/codeAnalysisStatus'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -19,6 +20,7 @@ const props = defineProps<{
   isPendingReview: boolean
   dependencyRelationship: 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
   assignees: string[]
+  codeAnalysisStatus: GroupCodeAnalysisStatus
 }>()
 
 const {
@@ -37,6 +39,7 @@ const {
   isPendingReview,
   dependencyRelationship,
   assignees,
+  codeAnalysisStatus,
 } = toRefs(props)
 
 const emit = defineEmits<{
@@ -106,6 +109,12 @@ const analysisStateLabel = computed(() => {
   }
 })
 
+const lifecycleBadgeShapeClass = computed(() => {
+  return analysisStateLabel.value
+    ? 'rounded-l border-y border-l'
+    : 'rounded border'
+})
+
 const lifecycleTooltip = computed(() => {
   switch (displayState.value) {
     case 'OPEN':
@@ -147,6 +156,32 @@ const componentSummary = computed(() => {
   if (arr.length === 2) return arr.join(', ')
   return `${arr[0]}, ${arr[1]} +${arr.length - 2}`
 })
+
+const codeAnalysisBadgeClass = computed(() => {
+  switch (codeAnalysisStatus.value) {
+    case 'used-in-assessment':
+      return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20'
+    case 'available':
+      return 'bg-cyan-500/15 text-cyan-300 border-cyan-500/20'
+    default:
+      return 'bg-gray-500/10 text-gray-500 border-gray-500/20'
+  }
+})
+
+const codeAnalysisLabel = computed(() => {
+  return 'Auto'
+})
+
+const codeAnalysisTooltip = computed(() => {
+  switch (codeAnalysisStatus.value) {
+    case 'used-in-assessment':
+      return 'Automatic code analysis was used in at least one saved assessment.'
+    case 'available':
+      return 'A completed automatic code analysis result exists for this vulnerability, but it is not present in the saved assessment text.'
+    default:
+      return 'No completed automatic code analysis result is currently available for this vulnerability.'
+  }
+})
 </script>
 
 <template>
@@ -162,57 +197,6 @@ const componentSummary = computed(() => {
           <Package :size="9" class="shrink-0 text-gray-600" />
           {{ componentSummary }}
         </span>
-      </div>
-
-      <!-- Status row: lifecycle | analysis state | meta -->
-      <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
-        <!-- Lifecycle group -->
-        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l text-[10px] font-bold uppercase tracking-wide border-y border-l shrink-0', lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
-          <CircleDot :size="9" />
-          {{ lifecycleLabel }}
-        </span>
-        <!-- Analysis state (joined to lifecycle visually) -->
-        <span v-if="analysisStateLabel" :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase tracking-wide border-y border-r -ml-1.5 shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
-          <Bug v-if="technicalState === 'EXPLOITABLE'" :size="9" />
-          <Search v-else-if="technicalState === 'IN_TRIAGE'" :size="9" />
-          <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
-          <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
-          {{ analysisStateLabel }}
-        </span>
-        <!-- Close lifecycle pill if no analysis state -->
-        <span v-else class="-ml-1.5"></span>
-
-        <span class="w-px h-3.5 bg-gray-700 mx-0.5 shrink-0"></span>
-
-        <!-- Meta badges -->
-        <span v-if="dependencyRelationship !== 'UNKNOWN'"
-          :class="['inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0',
-            dependencyRelationship === 'DIRECT' ? 'bg-orange-500/10 text-orange-400/70 border-orange-500/20' : 'bg-gray-500/10 text-gray-500 border-gray-500/20']"
-          data-testid="dep-badge"
-          :title="dependencyRelationship === 'DIRECT' ? 'Direct dependency — used directly by the project' : 'Transitive dependency — pulled in indirectly through another package'"
-        >
-          <GitBranch :size="9" />
-          {{ dependencyRelationship === 'DIRECT' ? 'Direct' : 'Trans.' }}
-        </span>
-
-        <span class="inline-flex items-center gap-1 text-[10px] text-gray-600 shrink-0 tabular-nums" data-testid="instance-count" :title="`${instanceCount} affected component instance${instanceCount !== 1 ? 's' : ''} across all project versions`">
-          <Layers :size="9" />
-          {{ instanceCount }}&times;
-        </span>
-
-        <span v-if="isPendingReview && !canApprove" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
-          <Eye :size="9" />
-          Review
-        </span>
-
-        <button v-if="canApprove" @click.stop="emit('approve-assessment', $event)"
-          class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer ml-auto"
-          data-testid="approve-btn"
-          title="Approve this assessment and remove the pending review status"
-        >
-          <CheckCircle :size="9" />
-          Approve
-        </button>
       </div>
 
       <!-- Score row -->
@@ -257,7 +241,75 @@ const componentSummary = computed(() => {
       </div>
     </div>
 
-    <!-- Expand indicator -->
-    <component :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0 mt-0.5" />
+    <div class="shrink-0 flex items-start gap-2 mt-0.5">
+      <div class="flex flex-col items-end gap-1.5 min-w-[18rem]">
+        <div class="min-h-[24px] flex items-start justify-end w-full">
+          <button v-if="canApprove" @click.stop="emit('approve-assessment', $event)"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer"
+            data-testid="approve-btn"
+            title="Approve this assessment and remove the pending review status"
+          >
+            <CheckCircle :size="9" />
+            Approve
+          </button>
+        </div>
+
+        <div class="flex flex-col items-end gap-1 w-full" data-testid="status-rail">
+          <div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 min-h-[22px] w-full">
+            <div class="inline-flex items-center shrink-0">
+              <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shrink-0', lifecycleBadgeShapeClass, lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
+                <CircleDot :size="9" />
+                {{ lifecycleLabel }}
+              </span>
+              <span v-if="analysisStateLabel" :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase tracking-wide border-y border-r shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
+                <Bug v-if="technicalState === 'EXPLOITABLE'" :size="9" />
+                <Search v-else-if="technicalState === 'IN_TRIAGE'" :size="9" />
+                <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
+                <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
+                {{ analysisStateLabel }}
+              </span>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-end gap-1 shrink min-w-[12rem] border-l border-gray-700/70 pl-2">
+              <span
+                :class="['inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0', codeAnalysisBadgeClass]"
+                data-testid="code-analysis-status-badge"
+                :title="codeAnalysisTooltip"
+              >
+                <CheckCircle v-if="codeAnalysisStatus === 'used-in-assessment'" :size="9" />
+                <ShieldCheck v-else-if="codeAnalysisStatus === 'available'" :size="9" />
+                <ShieldOff v-else :size="9" />
+                {{ codeAnalysisLabel }}
+              </span>
+
+              <span v-if="dependencyRelationship !== 'UNKNOWN'"
+                :class="['inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0',
+                  dependencyRelationship === 'DIRECT' ? 'bg-orange-500/10 text-orange-400/70 border-orange-500/20' : 'bg-gray-500/10 text-gray-500 border-gray-500/20']"
+                data-testid="dep-badge"
+                :title="dependencyRelationship === 'DIRECT' ? 'Direct dependency — used directly by the project' : 'Transitive dependency — pulled in indirectly through another package'"
+              >
+                <GitBranch :size="9" />
+                {{ dependencyRelationship === 'DIRECT' ? 'Direct' : 'Trans.' }}
+              </span>
+              <span v-else class="invisible inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0">
+                Placeholder
+              </span>
+
+              <span class="inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0 bg-slate-500/10 text-slate-300 border-slate-500/20 tabular-nums" data-testid="instance-count" :title="`${instanceCount} affected component instance${instanceCount !== 1 ? 's' : ''} across all project versions`">
+                <Layers :size="9" />
+                {{ instanceCount }}&times;
+              </span>
+
+              <span v-if="isPendingReview && !canApprove" class="inline-flex min-w-[5rem] items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
+                <Eye :size="9" />
+                Review
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <component :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0 mt-0.5" />
+    </div>
   </div>
 </template>

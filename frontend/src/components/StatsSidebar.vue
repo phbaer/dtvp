@@ -28,6 +28,8 @@ export interface FilterState {
     sortOrder: 'asc' | 'desc'
     dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
     tmrescoreFilter: Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>
+    codeAnalysisAvailableOnly: boolean
+    codeAnalysisUsedOnly: boolean
     idFilter: string
     tagFilter: string
     componentFilter: string
@@ -49,6 +51,7 @@ const props = defineProps<{
     dependencyCounts: DependencyCounts
     dependencyFilterCounts: DependencyCounts
     tmrescoreCounts: Record<string, number>
+    codeAnalysisCounts: Record<'available' | 'used', number>
     analysisCounts: Record<string, number>
     teamTagList: TeamEntry[]
     cacheStatusState: 'cached' | 'partial' | 'unknown' | 'loading'
@@ -120,6 +123,14 @@ const toggleTmrescoreFilter = (value: 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') => {
     if (idx >= 0) current.splice(idx, 1)
     else current.push(value)
     updateFilter('tmrescoreFilter', current as FilterState['tmrescoreFilter'])
+}
+
+const toggleCodeAnalysisAvailableOnly = () => {
+    updateFilter('codeAnalysisAvailableOnly', !props.filters.codeAnalysisAvailableOnly)
+}
+
+const toggleCodeAnalysisUsedOnly = () => {
+    updateFilter('codeAnalysisUsedOnly', !props.filters.codeAnalysisUsedOnly)
 }
 
 const removeVersion = (version: string) => {
@@ -408,6 +419,40 @@ const handleCopy = () => {
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.tmrescoreFilter.includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') ? 'text-white' : 'text-gray-500'">
                                                 {{ props.tmrescoreCounts[opt.value] || 0 }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Code Analysis</label>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button
+                                            @click="toggleCodeAnalysisAvailableOnly"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                props.filters.codeAnalysisAvailableOnly
+                                                    ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/20'
+                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+                                            ]"
+                                        >
+                                            Available
+                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.codeAnalysisAvailableOnly ? 'text-white' : 'text-gray-500'">
+                                                {{ props.codeAnalysisCounts.available || 0 }}
+                                            </span>
+                                        </button>
+                                        <button
+                                            @click="toggleCodeAnalysisUsedOnly"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                props.filters.codeAnalysisUsedOnly
+                                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20'
+                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+                                            ]"
+                                        >
+                                            Used In Assessment
+                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.codeAnalysisUsedOnly ? 'text-white' : 'text-gray-500'">
+                                                {{ props.codeAnalysisCounts.used || 0 }}
                                             </span>
                                         </button>
                                     </div>

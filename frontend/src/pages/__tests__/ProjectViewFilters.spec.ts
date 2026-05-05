@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns, getTMRescoreProposals } from '../../lib/api'
+import { analysisQueueStore } from '../../lib/analysisQueueStore'
 import { mountWithRouter } from './routerTestUtils'
 
 // Mock API
@@ -26,6 +27,7 @@ describe('ProjectView Filters', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
+        analysisQueueStore.items.value = []
         const routes = [
                 { path: '/', component: { template: '<div />' } },
                 { path: '/statistics', component: { template: '<div />' } },
@@ -318,6 +320,96 @@ describe('ProjectView Filters', () => {
         expect(cards.length).toBe(2)
         expect(cards.map((card: any) => card.text())).toContain('V1')
         expect(cards.map((card: any) => card.text())).toContain('V3')
+    })
+
+    it('filters vulnerabilities by code analysis availability and assessment usage', async () => {
+        analysisQueueStore.items.value = [
+            {
+                queue_id: 'queue-1',
+                vuln_id: 'V11',
+                component_name: 'CompD',
+                submitted_by: 'tester',
+                submitted_at: new Date().toISOString(),
+                status: 'completed',
+                position: 0,
+            } as any,
+        ]
+        ;(getGroupedVulns as any).mockResolvedValue([
+            {
+                id: 'V11',
+                severity: 'MEDIUM',
+                cvss_score: 5.4,
+                tags: ['team-d'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                component_name: 'CompD',
+                                component_version: '1.2.3',
+                                analysis_state: 'NOT_AFFECTED',
+                                analysis_details: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\nManual reviewer note without automatic marker',
+                                dependency_chains: ['service-api -> CompD'],
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                id: 'V12',
+                severity: 'MEDIUM',
+                cvss_score: 5.1,
+                tags: ['team-z'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                component_name: 'CompZ',
+                                component_version: '4.5.6',
+                                analysis_state: 'NOT_AFFECTED',
+                                analysis_details: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\n[Code Analysis]\nVerdict: not affected (high confidence)',
+                                dependency_chains: ['service-api -> CompZ'],
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                id: 'V13',
+                severity: 'LOW',
+                cvss_score: 2.0,
+                tags: ['team-x'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                component_name: 'CompX',
+                                component_version: '0.1.0',
+                                analysis_state: 'NOT_SET',
+                                analysis_details: '',
+                            },
+                        ],
+                    },
+                ],
+            },
+        ])
+
+        const wrapper = await mountProjectViewRoute()
+
+        ;(wrapper.vm as any).codeAnalysisAvailableOnly = true
+        await wrapper.vm.$nextTick()
+
+        let cards = wrapper.findAll('.vuln-card')
+        expect(cards.length).toBe(2)
+        expect(cards.map((card: any) => card.text())).toContain('V11')
+        expect(cards.map((card: any) => card.text())).toContain('V12')
+
+        ;(wrapper.vm as any).codeAnalysisAvailableOnly = false
+        ;(wrapper.vm as any).codeAnalysisUsedOnly = true
+        await wrapper.vm.$nextTick()
+
+        cards = wrapper.findAll('.vuln-card')
+        expect(cards.length).toBe(1)
+        expect(cards[0]?.text()).toBe('V12')
     })
 
     it('shows "Pending Review" vulnerabilities regardless of filters', async () => {

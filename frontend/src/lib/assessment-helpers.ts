@@ -44,6 +44,7 @@ const setBoundedCacheEntry = <T>(cache: Map<string, T>, key: string, value: T, m
 };
 
 const parsedAssessmentBlocksCache = new Map<string, readonly AssessmentBlock[]>();
+const CODE_ANALYSIS_MARKER = '[Code Analysis]';
 
 interface GroupAssessmentSummary {
     allInstances: Array<Record<string, any>>;
@@ -822,6 +823,15 @@ const getGroupLifecycleFromSummary = (
 
 export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags | undefined, teamMapping?: Record<string, string | string[]>): string {
     return getGroupLifecycleFromSummary(group, getGroupAssessmentSummary(group), requiredTeamsOrTags, teamMapping);
+}
+
+export function hasCodeAnalysisInAssessmentText(text: string | null | undefined): boolean {
+    return typeof text === 'string' && text.includes(CODE_ANALYSIS_MARKER);
+}
+
+export function isCodeAnalysisUsedInAssessment(group: GroupedVuln): boolean {
+    const allInstances = (group.affected_versions || []).flatMap(version => version.components || []) as Array<Record<string, any>>;
+    return allInstances.some(instance => hasCodeAnalysisInAssessmentText(getInstanceAssessmentDetails(instance)));
 }
 
 /**

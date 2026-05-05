@@ -19,6 +19,12 @@ interface TaggedComponentInfo {
     tag: string
 }
 
+export interface TriggeringTaggedComponentInfo {
+    name: string
+    versions: string[]
+    tag: string
+}
+
 interface UseVulnDependencyInfoOptions {
     group: ComputedRef<GroupedVuln> | Ref<GroupedVuln>
     teamMapping: Ref<Record<string, string | string[]>>
@@ -41,6 +47,50 @@ const sortTaggedComponents = (items: Map<string, { versions: Set<string>; tag: s
             tag: data.tag,
         }))
         .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }))
+}
+
+export function getTriggeringTaggedComponentsForGroup(
+    group: GroupedVuln,
+    mapping: Record<string, string | string[]>,
+): TriggeringTaggedComponentInfo[] {
+    const allInstances = (group.affected_versions || []).flatMap(version => version.components || [])
+    const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
+    const paths = allInstances.flatMap(instance => instance.dependency_chains || [])
+    const selectedPaths = selectRepresentativePaths(paths, mapping, 100)
+
+    for (const selectedPath of selectedPaths) {
+        const parts = getPathParts(selectedPath)
+        const firstMapped = getFirstMappedTeamOnPath(parts, mapping)
+        if (!firstMapped) continue
+
+        const triggerName = firstMapped.component || 'Unknown'
+        if (!taggedComponents.has(triggerName)) {
+            taggedComponents.set(triggerName, { versions: new Set(), tag: firstMapped.team })
+        }
+    }
+
+    for (const instance of allInstances) {
+        const name = instance.component_name || 'Unknown'
+        const directTag = getPrimaryTeamForComponent(name, mapping)
+        if (!directTag) continue
+
+        if (!taggedComponents.has(name)) {
+            taggedComponents.set(name, { versions: new Set(), tag: directTag })
+        }
+
+        if (instance.component_version) {
+            taggedComponents.get(name)?.versions.add(instance.component_version)
+        }
+    }
+
+    return sortTaggedComponents(taggedComponents)
+}
+
+export function hasCodeAnalysisAvailableForGroup(
+    group: GroupedVuln,
+    mapping: Record<string, string | string[]>,
+): boolean {
+    return getTriggeringTaggedComponentsForGroup(group, mapping).length > 0
 }
 
 export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: UseVulnDependencyInfoOptions) {
@@ -141,36 +191,7 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
     })
 
     const triggeringTaggedComponents = computed(() => {
-        const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
-        const paths = allInstances.value.flatMap(instance => instance.dependency_chains || [])
-        const selectedPaths = selectRepresentativePaths(paths, teamMapping.value, 100)
-
-        for (const selectedPath of selectedPaths) {
-            const parts = getPathParts(selectedPath)
-            const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping.value)
-            if (!firstMapped) continue
-
-            const triggerName = firstMapped.component || 'Unknown'
-            if (!taggedComponents.has(triggerName)) {
-                taggedComponents.set(triggerName, { versions: new Set(), tag: firstMapped.team })
-            }
-        }
-
-        for (const instance of allInstances.value) {
-            const name = instance.component_name || 'Unknown'
-            const directTag = getPrimaryTeamForComponent(name, teamMapping.value)
-            if (!directTag) continue
-
-            if (!taggedComponents.has(name)) {
-                taggedComponents.set(name, { versions: new Set(), tag: directTag })
-            }
-
-            if (instance.component_version) {
-                taggedComponents.get(name)?.versions.add(instance.component_version)
-            }
-        }
-
-        return sortTaggedComponents(taggedComponents)
+        return getTriggeringTaggedComponentsForGroup(group.value, teamMapping.value)
     })
 
     const normalizedTags = computed(() => effectiveTags.value)
