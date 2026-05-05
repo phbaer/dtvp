@@ -185,22 +185,14 @@ const codeAnalysisTooltip = computed(() => {
 </script>
 
 <template>
-  <div class="flex items-start gap-3 min-w-0 flex-1">
-    <div class="flex-1 min-w-0">
-      <!-- Primary row: ID + component context -->
-      <div class="flex items-center gap-2 flex-wrap">
-        <span data-testid="vuln-primary-id" class="min-w-0 shrink overflow-hidden text-ellipsis whitespace-nowrap text-base font-black text-yellow-400 tracking-tight leading-none cursor-pointer hover:underline" title="Click to copy ID" @click.stop="emit('copy-id')">
-          {{ group.id }}
-        </span>
+  <div class="grid min-w-0 flex-1 items-start gap-x-3" style="grid-template-columns: auto 1fr auto auto auto" data-testid="header-grid">
+    <!-- Column 1: Vuln ID + score + components -->
+    <div class="flex min-w-0 flex-col items-start self-start overflow-hidden">
+      <span data-testid="vuln-primary-id" class="block w-48 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-base font-black text-yellow-400 tracking-tight leading-none cursor-pointer hover:underline" title="Click to copy ID" @click.stop="emit('copy-id')">
+        {{ group.id }}
+      </span>
 
-        <span v-if="componentSummary" class="inline-flex items-center gap-1 text-[10px] text-gray-500 font-medium truncate max-w-[20rem]" :title="componentSummary">
-          <Package :size="9" class="shrink-0 text-gray-600" />
-          {{ componentSummary }}
-        </span>
-      </div>
-
-      <!-- Score row -->
-      <div class="flex items-center gap-1.5 mt-1" data-testid="header-cvss-block" title="CVSS base score">
+      <div class="mt-1 flex items-start gap-1.5" data-testid="header-cvss-block" title="CVSS base score">
         <span class="text-sm font-black text-gray-100 tabular-nums" data-testid="base-score-value">{{ baseScoreDisplay }}</span>
         <template v-if="isRescoredOrModified">
           <span class="text-[10px] text-gray-600" data-testid="rescored-arrow">&rarr;</span>
@@ -210,12 +202,19 @@ const codeAnalysisTooltip = computed(() => {
         </template>
       </div>
 
-      <!-- Team tags row -->
-      <div v-if="normalizedTags.length > 0" class="flex flex-wrap items-center gap-1 mt-1.5">
+      <div v-if="componentSummary" class="mt-1 inline-flex max-w-[20rem] items-start gap-1 truncate text-[10px] font-medium text-gray-500" :title="componentSummary">
+        <Package :size="9" class="shrink-0 text-gray-600" />
+        {{ componentSummary }}
+      </div>
+    </div>
+
+    <!-- Column 2: Team tags -->
+    <div class="flex min-w-0 flex-col items-start self-start overflow-hidden">
+      <div v-if="normalizedTags.length > 0" class="flex flex-wrap items-center gap-1 min-w-0">
         <span
           v-for="tag in normalizedTags"
           :key="tag"
-          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-tight transition-all border"
+          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-tight transition-all border shrink-0"
           :class="assessedTeams.has(tag)
             ? 'bg-green-500/10 text-green-400 border-green-500/20'
             : 'bg-red-500/8 text-red-400/70 border-red-500/15'"
@@ -227,7 +226,7 @@ const codeAnalysisTooltip = computed(() => {
         </span>
       </div>
 
-      <!-- Assignee chips row -->
+      <!-- Assignee chips -->
       <div v-if="assignees.length > 0" class="flex flex-wrap items-center gap-1 mt-1">
         <span
           v-for="assignee in assignees"
@@ -241,75 +240,64 @@ const codeAnalysisTooltip = computed(() => {
       </div>
     </div>
 
-    <div class="shrink-0 flex items-start gap-2 mt-0.5">
-      <div class="flex flex-col items-end gap-1.5 min-w-[18rem]">
-        <div class="min-h-[24px] flex items-start justify-end w-full">
-          <button v-if="canApprove" @click.stop="emit('approve-assessment', $event)"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer"
-            data-testid="approve-btn"
-            title="Approve this assessment and remove the pending review status"
-          >
-            <CheckCircle :size="9" />
-            Approve
-          </button>
-        </div>
-
-        <div class="flex flex-col items-end gap-1 w-full" data-testid="status-rail">
-          <div class="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 min-h-[22px] w-full">
-            <div class="inline-flex items-center shrink-0">
-              <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shrink-0', lifecycleBadgeShapeClass, lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
-                <CircleDot :size="9" />
-                {{ lifecycleLabel }}
-              </span>
-              <span v-if="analysisStateLabel" :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase tracking-wide border-y border-r shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
-                <Bug v-if="technicalState === 'EXPLOITABLE'" :size="9" />
-                <Search v-else-if="technicalState === 'IN_TRIAGE'" :size="9" />
-                <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
-                <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
-                {{ analysisStateLabel }}
-              </span>
-            </div>
-
-            <div class="flex flex-wrap items-center justify-end gap-1 shrink min-w-[12rem] border-l border-gray-700/70 pl-2">
-              <span
-                :class="['inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0', codeAnalysisBadgeClass]"
-                data-testid="code-analysis-status-badge"
-                :title="codeAnalysisTooltip"
-              >
-                <CheckCircle v-if="codeAnalysisStatus === 'used-in-assessment'" :size="9" />
-                <ShieldCheck v-else-if="codeAnalysisStatus === 'available'" :size="9" />
-                <ShieldOff v-else :size="9" />
-                {{ codeAnalysisLabel }}
-              </span>
-
-              <span v-if="dependencyRelationship !== 'UNKNOWN'"
-                :class="['inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0',
-                  dependencyRelationship === 'DIRECT' ? 'bg-orange-500/10 text-orange-400/70 border-orange-500/20' : 'bg-gray-500/10 text-gray-500 border-gray-500/20']"
-                data-testid="dep-badge"
-                :title="dependencyRelationship === 'DIRECT' ? 'Direct dependency — used directly by the project' : 'Transitive dependency — pulled in indirectly through another package'"
-              >
-                <GitBranch :size="9" />
-                {{ dependencyRelationship === 'DIRECT' ? 'Direct' : 'Trans.' }}
-              </span>
-              <span v-else class="invisible inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0">
-                Placeholder
-              </span>
-
-              <span class="inline-flex min-w-[5rem] items-center justify-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0 bg-slate-500/10 text-slate-300 border-slate-500/20 tabular-nums" data-testid="instance-count" :title="`${instanceCount} affected component instance${instanceCount !== 1 ? 's' : ''} across all project versions`">
-                <Layers :size="9" />
-                {{ instanceCount }}&times;
-              </span>
-
-              <span v-if="isPendingReview && !canApprove" class="inline-flex min-w-[5rem] items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
-                <Eye :size="9" />
-                Review
-              </span>
-            </div>
-          </div>
-        </div>
+    <!-- Column 3: Lifecycle/assessment -->
+    <div class="flex min-w-0 items-start self-start overflow-hidden" data-testid="status-rail">
+      <div class="inline-flex w-[13rem] items-center shrink-0">
+        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shrink-0', lifecycleBadgeShapeClass, lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
+          <CircleDot :size="9" />
+          {{ lifecycleLabel }}
+        </span>
+        <span v-if="analysisStateLabel" :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase tracking-wide border-y border-r shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
+          <Bug v-if="technicalState === 'EXPLOITABLE'" :size="9" />
+          <Search v-else-if="technicalState === 'IN_TRIAGE'" :size="9" />
+          <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
+          <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
+          {{ analysisStateLabel }}
+        </span>
       </div>
+    </div>
 
-      <component :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0 mt-0.5" />
+    <!-- Column 4: Status chips (icon-only) -->
+    <div class="flex min-w-0 flex-wrap items-start gap-1 self-start overflow-hidden" data-testid="status-chips">
+      <span
+        :class="['inline-flex h-5 w-5 items-center justify-center rounded border shrink-0', codeAnalysisBadgeClass]"
+        data-testid="code-analysis-status-badge"
+        :title="codeAnalysisTooltip"
+      >
+        <CheckCircle v-if="codeAnalysisStatus === 'used-in-assessment'" :size="10" />
+        <ShieldCheck v-else-if="codeAnalysisStatus === 'available'" :size="10" />
+        <ShieldOff v-else :size="10" />
+      </span>
+
+      <span v-if="dependencyRelationship !== 'UNKNOWN'"
+        :class="['inline-flex h-5 w-5 items-center justify-center rounded border shrink-0',
+          dependencyRelationship === 'DIRECT' ? 'bg-orange-500/10 text-orange-400/70 border-orange-500/20' : 'bg-gray-500/10 text-gray-500 border-gray-500/20']"
+        data-testid="dep-badge"
+        :title="dependencyRelationship === 'DIRECT' ? 'Direct dependency — used directly by the project' : 'Transitive dependency — pulled in indirectly through another package'"
+      >
+        <GitBranch :size="10" />
+      </span>
+
+      <span class="inline-flex h-5 min-w-5 items-center justify-center rounded border shrink-0 bg-slate-500/10 text-slate-300 border-slate-500/20 px-1 text-[9px] font-bold tabular-nums" data-testid="instance-count" :title="`${instanceCount} affected component instance${instanceCount !== 1 ? 's' : ''} across all project versions`">
+        {{ instanceCount }}
+      </span>
+
+      <span v-if="isPendingReview && !canApprove" class="inline-flex h-5 w-5 items-center justify-center rounded bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
+        <Eye :size="10" />
+      </span>
+    </div>
+
+    <!-- Column 4: Chevron + approve button -->
+    <div class="mt-0.5 flex shrink-0 self-stretch flex-col items-end justify-between">
+      <component :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0" />
+        <button v-if="canApprove" @click.stop="emit('approve-assessment', $event)"
+          class="inline-flex h-6 w-6 items-center justify-center rounded border border-green-500/30 bg-green-600/20 text-green-400 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer"
+          data-testid="approve-btn"
+          title="Approve this assessment and remove the pending review status"
+          aria-label="Approve assessment"
+        >
+          <CheckCircle :size="11" />
+        </button>
     </div>
   </div>
 </template>

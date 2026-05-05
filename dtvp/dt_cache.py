@@ -1,14 +1,15 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import tempfile
 import uuid
-import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .dt_client import DTClient, DTSettings
+from .knowledge_store import knowledge_store
 from .logic import RE_SCORE
 
 logger = logging.getLogger(__name__)
@@ -75,11 +76,7 @@ def _get_analysis_details(analysis: Optional[Dict[str, Any]]) -> str:
 def _get_analysis_state(analysis: Optional[Dict[str, Any]]) -> str:
     if not analysis:
         return "NOT_SET"
-    return (
-        analysis.get("analysisState")
-        or analysis.get("analysis_state")
-        or "NOT_SET"
-    )
+    return analysis.get("analysisState") or analysis.get("analysis_state") or "NOT_SET"
 
 
 def _get_analysis_suppressed(analysis: Optional[Dict[str, Any]]) -> bool:
@@ -145,7 +142,11 @@ def _mark_assessment_for_review_with_threadmodel_change(
     current_score: Optional[float],
 ) -> Dict[str, Any]:
     marked = _mark_assessment_for_review(analysis)
-    if previous_score is None or current_score is None or previous_score == current_score:
+    if (
+        previous_score is None
+        or current_score is None
+        or previous_score == current_score
+    ):
         return marked
 
     details = _get_analysis_details(marked)
@@ -168,7 +169,9 @@ def _component_cache_identity(component: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _vulnerability_cache_identity(vulnerability: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
+def _vulnerability_cache_identity(
+    vulnerability: Dict[str, Any],
+) -> Optional[Tuple[str, ...]]:
     identifiers: List[str] = []
 
     vuln_id = (vulnerability.get("vulnId") or "").strip().upper()
@@ -207,7 +210,10 @@ class CacheManager:
         self.pending_updates: List[Dict[str, Any]] = []
         self.active_project_uuids: Set[str] = set()
         self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
-        self.cache_meta: Dict[str, Any] = {"fully_cached": False, "last_refreshed_at": None}
+        self.cache_meta: Dict[str, Any] = {
+            "fully_cached": False,
+            "last_refreshed_at": None,
+        }
         self._memory_cache: Dict[str, Any] = {}
         self._ensure_directories()
 
@@ -251,9 +257,21 @@ class CacheManager:
         boms_dir = os.path.join(self.base_path, "boms")
         analysis_dir = os.path.join(self.base_path, "analysis")
 
-        cached_findings = len([f for f in os.listdir(findings_dir) if f.endswith(".json")]) if os.path.isdir(findings_dir) else 0
-        cached_boms = len([f for f in os.listdir(boms_dir) if f.endswith(".json")]) if os.path.isdir(boms_dir) else 0
-        cached_analyses = len([f for f in os.listdir(analysis_dir) if f.endswith(".json")]) if os.path.isdir(analysis_dir) else 0
+        cached_findings = (
+            len([f for f in os.listdir(findings_dir) if f.endswith(".json")])
+            if os.path.isdir(findings_dir)
+            else 0
+        )
+        cached_boms = (
+            len([f for f in os.listdir(boms_dir) if f.endswith(".json")])
+            if os.path.isdir(boms_dir)
+            else 0
+        )
+        cached_analyses = (
+            len([f for f in os.listdir(analysis_dir) if f.endswith(".json")])
+            if os.path.isdir(analysis_dir)
+            else 0
+        )
 
         return {
             "fully_cached": self.cache_meta.get("fully_cached", False),
@@ -278,7 +296,9 @@ class CacheManager:
         )
 
     def _bom_path(self, project_uuid: str) -> str:
-        return os.path.join(self.base_path, "boms", f"{_safe_filename(project_uuid)}.json")
+        return os.path.join(
+            self.base_path, "boms", f"{_safe_filename(project_uuid)}.json"
+        )
 
     def _analysis_path(
         self,
@@ -287,9 +307,56 @@ class CacheManager:
         vulnerability_uuid: str,
     ) -> str:
         key = "__".join(
-            [_safe_filename(project_uuid), _safe_filename(component_uuid), _safe_filename(vulnerability_uuid)]
+            [
+                _safe_filename(project_uuid),
+                _safe_filename(component_uuid),
+                _safe_filename(vulnerability_uuid),
+            ]
         )
         return os.path.join(self.base_path, "analysis", f"{key}.json")
+
+    def _lookup_cached_finding(
+        self,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> Optional[Dict[str, Any]]:
+        findings = self._load_project_cache(self._findings_path(project_uuid), []) or []
+        for finding in findings:
+            component = finding.get("component") or {}
+            vulnerability = finding.get("vulnerability") or {}
+            if (
+                component.get("uuid") == component_uuid
+                and vulnerability.get("uuid") == vulnerability_uuid
+            ):
+                return finding
+        return None
+
+    def _persist_analysis_to_knowledge_store(
+        self,
+        payload: Dict[str, Any],
+        *,
+        component: Optional[Dict[str, Any]] = None,
+        vulnerability: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        project_uuid = payload.get("project_uuid")
+        component_uuid = payload.get("component_uuid")
+        vulnerability_uuid = payload.get("vulnerability_uuid")
+
+        cached_finding = None
+        if project_uuid and component_uuid and vulnerability_uuid:
+            cached_finding = self._lookup_cached_finding(
+                str(project_uuid),
+                str(component_uuid),
+                str(vulnerability_uuid),
+            )
+
+        knowledge_store.persist_assessment(
+            payload=payload,
+            component=component or ((cached_finding or {}).get("component") or {}),
+            vulnerability=vulnerability
+            or ((cached_finding or {}).get("vulnerability") or {}),
+        )
 
     def _load_pending_updates(self) -> List[Dict[str, Any]]:
         return self._load_cache_file(self._pending_path(), []) or []
@@ -297,7 +364,9 @@ class CacheManager:
     def _save_pending_updates(self, pending: List[Dict[str, Any]]) -> None:
         self._save_cache_file(self._pending_path(), pending, touch_meta=False)
 
-    def _pending_update_key(self, payload: Dict[str, Any]) -> Optional[tuple[str, str, str]]:
+    def _pending_update_key(
+        self, payload: Dict[str, Any]
+    ) -> Optional[tuple[str, str, str]]:
         project_uuid = payload.get("project_uuid")
         component_uuid = payload.get("component_uuid")
         vulnerability_uuid = payload.get("vulnerability_uuid")
@@ -371,7 +440,9 @@ class CacheManager:
         settings = DTSettings()
         while True:
             try:
-                async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+                async with DTClient(
+                    settings.api_url, api_key=settings.api_key
+                ) as client:
                     await self.flush_pending_updates(client)
                     await self._refresh_project_list(client)
                     await self._refresh_active_projects(client)
@@ -485,7 +556,10 @@ class CacheManager:
             filtered = []
             for finding in findings:
                 vuln = finding.get("vulnerability", {})
-                if cve_upper in (vuln.get("vulnId") or "").upper() or cve_upper in (vuln.get("name") or "").upper():
+                if (
+                    cve_upper in (vuln.get("vulnId") or "").upper()
+                    or cve_upper in (vuln.get("name") or "").upper()
+                ):
                     filtered.append(finding)
                 else:
                     for alias_obj in vuln.get("aliases", []):
@@ -557,7 +631,26 @@ class CacheManager:
                 component_uuid=component_uuid,
                 vulnerability_uuid=vulnerability_uuid,
             )
-            analysis = self._merge_blank_source_analysis(cached_analysis, analysis)
+            if _get_analysis_details(analysis):
+                self._persist_analysis_to_knowledge_store(
+                    {
+                        "project_uuid": project_uuid,
+                        "component_uuid": component_uuid,
+                        "vulnerability_uuid": vulnerability_uuid,
+                        "state": _get_analysis_state(analysis),
+                        "details": _get_analysis_details(analysis),
+                        "suppressed": _get_analysis_suppressed(analysis),
+                    }
+                )
+            store_analysis = knowledge_store.get_assessment_by_triplet(
+                project_uuid=project_uuid,
+                component_uuid=component_uuid,
+                vulnerability_uuid=vulnerability_uuid,
+            )
+            analysis = self._merge_blank_source_analysis(
+                store_analysis or cached_analysis,
+                analysis,
+            )
             async with self.lock:
                 self._save_project_cache(path, analysis)
         return analysis
@@ -607,7 +700,8 @@ class CacheManager:
             return findings
 
         previous_candidates: Dict[
-            Tuple[str, Tuple[str, ...]], List[Tuple[Tuple[str, str, str], Dict[str, Any]]]
+            Tuple[str, Tuple[str, ...]],
+            List[Tuple[Tuple[str, str, str], Dict[str, Any]]],
         ] = {}
 
         for previous_finding in previous_findings:
@@ -636,10 +730,28 @@ class CacheManager:
 
             current_path = self._analysis_path(*analysis_key)
             current_cached_analysis = self._load_project_cache(current_path, None)
+            store_analysis = knowledge_store.get_assessment_for_finding(
+                component=(finding.get("component") or {}),
+                vulnerability=(finding.get("vulnerability") or {}),
+            )
 
             if _get_analysis_details(source_analysis):
+                self._persist_analysis_to_knowledge_store(
+                    {
+                        "project_uuid": project_uuid,
+                        "component_uuid": analysis_key[1],
+                        "vulnerability_uuid": analysis_key[2],
+                        "state": _get_analysis_state(source_analysis),
+                        "details": _get_analysis_details(source_analysis),
+                        "suppressed": _get_analysis_suppressed(source_analysis),
+                    },
+                    component=(finding.get("component") or {}),
+                    vulnerability=(finding.get("vulnerability") or {}),
+                )
                 previous_analysis = (
-                    current_cached_analysis
+                    store_analysis
+                    if _has_meaningful_assessment(store_analysis)
+                    else current_cached_analysis
                     if _has_meaningful_assessment(current_cached_analysis)
                     else None
                 )
@@ -662,7 +774,27 @@ class CacheManager:
                 continue
 
             if _has_meaningful_assessment(current_cached_analysis):
-                finding["analysis"] = _mark_assessment_for_review(current_cached_analysis)
+                finding["analysis"] = _mark_assessment_for_review(
+                    current_cached_analysis
+                )
+                continue
+
+            if _has_meaningful_assessment(store_analysis):
+                preserved_from_store = _mark_assessment_for_review(store_analysis)
+                self._save_project_cache(current_path, preserved_from_store)
+                self._persist_analysis_to_knowledge_store(
+                    {
+                        "project_uuid": project_uuid,
+                        "component_uuid": analysis_key[1],
+                        "vulnerability_uuid": analysis_key[2],
+                        "state": _get_analysis_state(preserved_from_store),
+                        "details": _get_analysis_details(preserved_from_store),
+                        "suppressed": _get_analysis_suppressed(preserved_from_store),
+                    },
+                    component=(finding.get("component") or {}),
+                    vulnerability=(finding.get("vulnerability") or {}),
+                )
+                finding["analysis"] = preserved_from_store
                 continue
 
             if not identity:
@@ -675,6 +807,18 @@ class CacheManager:
             _, previous_analysis = candidates[0]
             preserved_analysis = _mark_assessment_for_review(previous_analysis)
             self._save_project_cache(current_path, preserved_analysis)
+            self._persist_analysis_to_knowledge_store(
+                {
+                    "project_uuid": project_uuid,
+                    "component_uuid": analysis_key[1],
+                    "vulnerability_uuid": analysis_key[2],
+                    "state": _get_analysis_state(preserved_analysis),
+                    "details": _get_analysis_details(preserved_analysis),
+                    "suppressed": _get_analysis_suppressed(preserved_analysis),
+                },
+                component=(finding.get("component") or {}),
+                vulnerability=(finding.get("vulnerability") or {}),
+            )
             finding["analysis"] = preserved_analysis
 
         return findings
@@ -698,6 +842,11 @@ class CacheManager:
                     self._analysis_path(project_uuid, comp_uuid, vuln_uuid), None
                 )
                 if analysis is None:
+                    analysis = knowledge_store.get_assessment_for_finding(
+                        component=component,
+                        vulnerability=vulnerability,
+                    )
+                if analysis is None:
                     for pending_update in pending:
                         payload = pending_update.get("payload", {})
                         if (
@@ -712,6 +861,18 @@ class CacheManager:
                             }
                             break
                 if analysis is not None:
+                    self._persist_analysis_to_knowledge_store(
+                        {
+                            "project_uuid": project_uuid,
+                            "component_uuid": comp_uuid,
+                            "vulnerability_uuid": vuln_uuid,
+                            "state": _get_analysis_state(analysis),
+                            "details": _get_analysis_details(analysis),
+                            "suppressed": _get_analysis_suppressed(analysis),
+                        },
+                        component=component,
+                        vulnerability=vulnerability,
+                    )
                     finding["analysis"] = analysis
         return findings
 
@@ -790,6 +951,7 @@ class CacheManager:
             self._analysis_path(project_uuid, component_uuid, vulnerability_uuid),
             analysis_data,
         )
+        self._persist_analysis_to_knowledge_store(payload)
 
 
 cache_manager = CacheManager()

@@ -7,6 +7,7 @@ import pytest
 import dtvp.agentizer_integration as agentizer
 import dtvp.code_analysis_integration as code_analysis
 from dtvp import main
+from dtvp.knowledge_store import knowledge_store
 
 
 class DummyResponse:
@@ -38,6 +39,14 @@ def reset_analysis_queue():
     main.analysis_queue._order.clear()
     main.analysis_queue._event.clear()
     main.analysis_queue._running = True
+
+
+@pytest.fixture(autouse=True)
+def isolate_knowledge_store(tmp_path):
+    original_base_path = knowledge_store.base_path
+    knowledge_store.base_path = str(tmp_path / "knowledge")
+    yield
+    knowledge_store.base_path = original_base_path
 
 
 @pytest.fixture(autouse=True)
@@ -317,3 +326,49 @@ def test_analysis_queue_list_prunes_expired_finished_items(client):
     assert response.status_code == 200
     assert response.json() == []
     assert main.analysis_queue.get(item.queue_id) is None
+
+
+def test_analysis_queue_persists_completed_items_across_runtime_reset(tmp_path):
+    main.analysis_queue._items.clear()
+    main.analysis_queue._order.clear()
+
+    item = main.analysis_queue.submit(
+        vuln_id="CVE-2024-4000",
+        component_name="libPersisted",
+        submitted_by="testuser",
+    )
+    item.status = "completed"
+    item.result = {"assessment": {"verdict": "not affected"}}
+    item.finished_at = datetime.now(UTC).isoformat()
+    main.analysis_queue._persist_state()
+
+    main.analysis_queue._items.clear()
+    main.analysis_queue._order.clear()
+    main.analysis_queue.load_persisted_state()
+
+    restored = main.analysis_queue.get(item.queue_id)
+    assert restored is not None
+    assert restored.status == "completed"
+    assert restored.result == {"assessment": {"verdict": "not affected"}}
+
+
+def test_analysis_queue_rehydrates_running_items_as_interrupted_failures(tmp_path):
+    main.analysis_queue._items.clear()
+    main.analysis_queue._order.clear()
+
+    item = main.analysis_queue.submit(
+        vuln_id="CVE-2024-4001",
+        component_name="libInterrupted",
+        submitted_by="testuser",
+    )
+    item.status = "running"
+    main.analysis_queue._persist_state()
+
+    main.analysis_queue._items.clear()
+    main.analysis_queue._order.clear()
+    main.analysis_queue.load_persisted_state()
+
+    restored = main.analysis_queue.get(item.queue_id)
+    assert restored is not None
+    assert restored.status == "failed"
+    assert "service restart" in (restored.error or "").lower()

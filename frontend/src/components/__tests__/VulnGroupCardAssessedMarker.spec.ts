@@ -226,8 +226,7 @@ describe('VulnGroupCard Assessment Markers', () => {
         })
 
         const unavailableBadge = unavailableWrapper.get('[data-testid="code-analysis-status-badge"]')
-        expect(unavailableBadge.text()).toContain('Auto')
-        expect(unavailableBadge.find('.icon-shield-off').exists()).toBe(true)
+        expect(unavailableBadge.attributes('title')).toContain('No completed automatic code analysis')
 
         analysisQueueStore.items.value = [
             {
@@ -253,8 +252,7 @@ describe('VulnGroupCard Assessment Markers', () => {
         })
 
         const availableBadge = availableWrapper.get('[data-testid="code-analysis-status-badge"]')
-        expect(availableBadge.text()).toContain('Auto')
-        expect(availableBadge.find('.icon-shield-check').exists()).toBe(true)
+        expect(availableBadge.attributes('title')).toContain('completed automatic code analysis result exists')
 
         const usedGroup = JSON.parse(JSON.stringify(defaultGroup))
         usedGroup.affected_versions[0].components[0].analysis_details =
@@ -272,7 +270,6 @@ describe('VulnGroupCard Assessment Markers', () => {
         })
 
         const usedBadge = usedWrapper.get('[data-testid="code-analysis-status-badge"]')
-        expect(usedBadge.text()).toContain('Auto')
-        expect(usedBadge.find('.icon-check-circle').exists()).toBe(true)
+        expect(usedBadge.attributes('title')).toContain('used in at least one saved assessment')
     })
 })

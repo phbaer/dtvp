@@ -105,7 +105,7 @@ describe('VulnGroupCard', () => {
 
         const instanceCount = wrapper.find('[data-testid="instance-count"]')
         expect(instanceCount.exists()).toBe(true)
-        expect(instanceCount.text()).toContain('1×')
+        expect(instanceCount.text()).toContain('1')
 
         const lifecycleBadge = wrapper.find('[data-testid="lifecycle-badge"]')
         expect(lifecycleBadge.exists()).toBe(true)
@@ -157,6 +157,36 @@ describe('VulnGroupCard', () => {
         expect(wrapper.get('[data-testid="header-cvss-block"]').text()).not.toContain('CVSS Base')
     })
 
+    it('uses a 4-column grid layout with top-aligned content', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        const grid = wrapper.get('[data-testid="header-grid"]')
+        expect(grid.classes()).toContain('grid')
+        expect(grid.classes()).toContain('items-start')
+
+        const scoreBlock = wrapper.get('[data-testid="header-cvss-block"]')
+        expect(scoreBlock.classes()).toContain('items-start')
+    })
+
+    it('separates lifecycle and status chips into distinct grid columns', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        expect(wrapper.get('[data-testid="lifecycle-badge"]').element.parentElement?.className).toContain('w-[13rem]')
+        expect(wrapper.get('[data-testid="status-chips"]').classes()).toContain('flex-wrap')
+    })
+
+    it('keeps a minimum card width before the layout starts compressing further', () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        expect(wrapper.classes()).toContain('min-w-[64rem]')
+    })
+
     it('shows base and rescored score as base arrow rescored', () => {
         const wrapper = mount(VulnGroupCard, {
             props: {
@@ -184,7 +214,8 @@ describe('VulnGroupCard', () => {
             props: { group: mockGroup }
         })
 
-        expect(wrapper.text()).toContain('Trans.')
+        const depBadge = wrapper.get('[data-testid="dep-badge"]')
+        expect(depBadge.attributes('title')).toContain('Transitive')
     })
 
     it('shows sorted project versions in analysis details block', async () => {

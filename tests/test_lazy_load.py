@@ -5,6 +5,15 @@ from fastapi.testclient import TestClient
 
 from dtvp import main
 from dtvp.dt_client import DTClient
+from dtvp.knowledge_store import knowledge_store
+
+
+@pytest.fixture(autouse=True)
+def isolate_knowledge_store(tmp_path):
+    original_base_path = knowledge_store.base_path
+    knowledge_store.base_path = str(tmp_path / "knowledge")
+    yield
+    knowledge_store.base_path = original_base_path
 
 
 @pytest.fixture

@@ -47,7 +47,13 @@ onMounted(() => {
     globalThis.addEventListener('keydown', handleCloseOnEscape)
     globalThis.addEventListener('resize', handleViewportResize)
     nextTick(() => {
-        if (headerEl.value) headerHeight.value = headerEl.value.offsetHeight
+        syncHeaderHeight()
+        if (typeof ResizeObserver !== 'undefined' && headerEl.value) {
+            headerResizeObserver = new ResizeObserver(() => {
+                syncHeaderHeight()
+            })
+            headerResizeObserver.observe(headerEl.value)
+        }
     })
     getKnownUsers().then(users => { knownUsers.value = users }).catch(() => {})
 })
@@ -55,6 +61,8 @@ onMounted(() => {
 onUnmounted(() => {
     globalThis.removeEventListener('keydown', handleCloseOnEscape)
     globalThis.removeEventListener('resize', handleViewportResize)
+    headerResizeObserver?.disconnect()
+    headerResizeObserver = null
     if (expanded.value && openCardCount > 0) {
         openCardCount -= 1
         if (openCardCount === 0) {
@@ -194,6 +202,13 @@ const headerEl = ref<HTMLElement | null>(null)
 const detailsEl = ref<HTMLElement | null>(null)
 const headerHeight = ref(48) // sensible default
 const detailsMaxHeight = ref('calc(100vh - 8rem)')
+let headerResizeObserver: ResizeObserver | null = null
+
+const syncHeaderHeight = () => {
+    if (headerEl.value) {
+        headerHeight.value = headerEl.value.offsetHeight
+    }
+}
 
 const getStickyHeaderOffset = () => {
     if (typeof document === 'undefined') return 0
@@ -985,9 +1000,7 @@ watch(expanded, (isOpen) => {
         refreshDetails()
         nextTick(() => {
             // Measure header for badge height
-            if (headerEl.value) {
-                headerHeight.value = headerEl.value.offsetHeight
-            }
+            syncHeaderHeight()
             // Position the card header below the sticky app header.
             nextTick(() => {
                 alignHeaderBelowStickyTop()
@@ -1467,7 +1480,7 @@ const teamBlockStateColor = (state?: string): string => {
 </script>
 
 <template>
-    <div :class="['vuln-card relative border rounded-lg transition-colors', expanded ? 'overflow-visible z-40' : 'overflow-hidden', cardStyle]">
+    <div :class="['vuln-card relative min-w-[64rem] border rounded-lg transition-colors', expanded ? 'overflow-visible z-40' : 'overflow-hidden', cardStyle]">
     <!-- Criticality Badges — header-height only -->
     <div
         class="absolute top-0 left-0 z-20 pointer-events-none flex"

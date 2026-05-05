@@ -1,6 +1,17 @@
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
+
 from dtvp.dt_cache import CacheManager, PendingUpdateExistsError
+from dtvp.knowledge_store import knowledge_store
+
+
+@pytest.fixture(autouse=True)
+def isolate_knowledge_store(tmp_path):
+    original_base_path = knowledge_store.base_path
+    knowledge_store.base_path = str(tmp_path / "knowledge")
+    yield
+    knowledge_store.base_path = original_base_path
 
 
 @pytest.mark.asyncio
@@ -273,7 +284,9 @@ async def test_get_analysis_preserves_cached_assessment_when_dt_returns_blank_de
 
 
 @pytest.mark.asyncio
-async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding(tmp_path):
+async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding(
+    tmp_path,
+):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
     project_uuid = "project-1"
@@ -344,7 +357,9 @@ async def test_get_vulnerabilities_preserves_assessment_for_recreated_dt_finding
 
 
 @pytest.mark.asyncio
-async def test_get_vulnerabilities_marks_review_when_threadmodel_score_changes(tmp_path):
+async def test_get_vulnerabilities_marks_review_when_threadmodel_score_changes(
+    tmp_path,
+):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
     project_uuid = "project-1"
@@ -397,3 +412,107 @@ async def test_get_vulnerabilities_marks_review_when_threadmodel_score_changes(t
     assert "Updated TM review." in analysis["analysisDetails"]
     assert "[Status: Pending Review]" in analysis["analysisDetails"]
     assert "TM rescoring changed from 3.5 to 4.0." in analysis["analysisDetails"]
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_uses_knowledge_store_before_local_cache(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path / "cache"))
+    client = AsyncMock()
+    client.get_analysis.return_value = {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": False,
+    }
+
+    manager._save_project_cache(
+        manager._analysis_path("project-1", "component-1", "vuln-1"),
+        {
+            "analysisState": "EXPLOITABLE",
+            "analysisDetails": "Stale cache copy.",
+            "isSuppressed": False,
+        },
+    )
+    knowledge_store.persist_assessment(
+        payload={
+            "project_uuid": "project-1",
+            "component_uuid": "component-1",
+            "vulnerability_uuid": "vuln-1",
+            "state": "NOT_AFFECTED",
+            "details": "Shared durable assessment.",
+            "suppressed": False,
+        },
+        component={"uuid": "component-1", "name": "log4j-core"},
+        vulnerability={
+            "uuid": "vuln-1",
+            "vulnId": "GHSA-jfh8-c2jp-5v3q",
+            "aliases": [{"cve": "CVE-2021-44228"}],
+        },
+    )
+
+    analysis = await manager.get_analysis(
+        client,
+        project_uuid="project-1",
+        component_uuid="component-1",
+        vulnerability_uuid="vuln-1",
+        refresh=True,
+    )
+
+    assert analysis["analysisState"] == "NOT_AFFECTED"
+    assert "Shared durable assessment." in analysis["analysisDetails"]
+
+
+@pytest.mark.asyncio
+async def test_recreated_finding_uses_alias_shared_knowledge_store_assessment(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path / "cache"))
+    client = AsyncMock()
+    project_uuid = "project-1"
+
+    knowledge_store.persist_assessment(
+        payload={
+            "project_uuid": project_uuid,
+            "component_uuid": "component-new",
+            "vulnerability_uuid": "vuln-new",
+            "state": "NOT_AFFECTED",
+            "details": "Alias-shared durable assessment.",
+            "suppressed": False,
+        },
+        component={
+            "uuid": "component-new",
+            "name": "log4j-core",
+            "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
+        },
+        vulnerability={
+            "uuid": "vuln-new",
+            "vulnId": "GHSA-jfh8-c2jp-5v3q",
+            "aliases": [{"cve": "CVE-2021-44228"}],
+        },
+    )
+
+    client.get_vulnerabilities.return_value = [
+        {
+            "component": {
+                "uuid": "component-new",
+                "name": "log4j-core",
+                "version": "2.17.0",
+                "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
+            },
+            "vulnerability": {
+                "uuid": "vuln-newer",
+                "vulnId": "CVE-2021-44228",
+                "name": "CVE-2021-44228",
+                "aliases": [{"ghsa": "GHSA-jfh8-c2jp-5v3q"}],
+            },
+            "analysis": {
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "isSuppressed": False,
+            },
+        }
+    ]
+
+    findings = await manager.get_vulnerabilities(client, project_uuid, refresh=True)
+
+    assert findings[0]["analysis"]["analysisState"] == "NOT_AFFECTED"
+    assert (
+        "Alias-shared durable assessment." in findings[0]["analysis"]["analysisDetails"]
+    )

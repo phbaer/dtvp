@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, watch } from 'vue'
 import { X } from 'lucide-vue-next'
-import { getRoles, uploadRoles, updateRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
+import { getCacheStatus, getRoles, uploadRoles, updateRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
+import type { CacheStatus } from '../types'
 
 const user = inject<any>('user', { role: 'ANALYST' })
 const realRole = inject<any>('realRole', ref('ANALYST'))
 const activeTab = ref('mapping')
+const cacheStatus = ref<CacheStatus | null>(null)
+const cacheStatusError = ref('')
 
 // Mapping state
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -100,6 +103,17 @@ const loadMapping = async () => {
         mappingJson.value = JSON.stringify(currentMapping.value, null, 2)
     } catch (e) {
         console.error("Failed to load mapping", e)
+    }
+}
+
+const loadCacheStatus = async () => {
+    if (realRole?.value !== 'REVIEWER') return
+    cacheStatusError.value = ''
+    try {
+        cacheStatus.value = await getCacheStatus()
+    } catch (e) {
+        console.error('Failed to load cache status', e)
+        cacheStatusError.value = 'Unable to load runtime status.'
     }
 }
 
@@ -307,6 +321,7 @@ const saveRescoreRules = async () => {
 onMounted(() => {
     // Load data once we know the real permission of the user
     if (realRole?.value === 'REVIEWER') {
+        loadCacheStatus()
         loadMapping()
         loadRoles()
         loadRescoreRules()
@@ -316,6 +331,7 @@ onMounted(() => {
 // In case user info loads after the component mounts, reload when role becomes REVIEWER
 watch(realRole, (role) => {
     if (role === 'REVIEWER') {
+        loadCacheStatus()
         loadMapping()
         loadRoles()
         loadRescoreRules()
@@ -339,6 +355,100 @@ watch(() => activeTab.value, (newTab) => {
             &larr; Back to Dashboard
         </router-link>
         <h2 class="text-3xl font-bold">Settings</h2>
+    </div>
+
+    <div class="mb-6 rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-lg">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <h3 class="text-lg font-bold text-gray-100">Runtime Status</h3>
+                <p class="mt-1 text-xs text-gray-400">Durable assessment and analysis persistence health.</p>
+            </div>
+            <button
+                type="button"
+                @click="loadCacheStatus"
+                class="rounded bg-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-200 transition-colors hover:bg-gray-600"
+            >
+                Refresh
+            </button>
+        </div>
+
+        <div v-if="cacheStatus" class="mt-4 grid gap-4 lg:grid-cols-2">
+            <div class="rounded border border-gray-700 bg-gray-900/60 p-4">
+                <div class="mb-3 flex items-center justify-between">
+                    <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Cache</span>
+                    <span :class="['rounded px-2 py-0.5 text-[10px] font-semibold uppercase', cacheStatus.fully_cached ? 'bg-green-900/30 text-green-300' : 'bg-amber-900/30 text-amber-300']">
+                        {{ cacheStatus.fully_cached ? 'In Sync' : 'Partial' }}
+                    </span>
+                </div>
+                <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                        <dt class="text-gray-500">Projects</dt>
+                        <dd class="font-semibold text-gray-200">{{ cacheStatus.projects }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-gray-500">Active Projects</dt>
+                        <dd class="font-semibold text-gray-200">{{ cacheStatus.active_projects }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-gray-500">Cached Findings</dt>
+                        <dd class="font-semibold text-gray-200">{{ cacheStatus.cached_findings }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-gray-500">Cached Analyses</dt>
+                        <dd class="font-semibold text-gray-200">{{ cacheStatus.cached_analyses }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-gray-500">Pending Updates</dt>
+                        <dd :class="['font-semibold', cacheStatus.pending_updates > 0 ? 'text-amber-300' : 'text-gray-200']">{{ cacheStatus.pending_updates }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-gray-500">Last Refreshed</dt>
+                        <dd class="font-semibold text-gray-200">{{ cacheStatus.last_refreshed_at || 'Unknown' }}</dd>
+                    </div>
+                </dl>
+            </div>
+
+            <div class="rounded border border-gray-700 bg-gray-900/60 p-4">
+                <div class="mb-3 flex items-center justify-between">
+                    <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Knowledge Store</span>
+                    <span class="rounded bg-cyan-900/30 px-2 py-0.5 text-[10px] font-semibold uppercase text-cyan-300">Persistent</span>
+                </div>
+                <template v-if="cacheStatus.knowledge_store">
+                    <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                        <div>
+                            <dt class="text-gray-500">Assessment Records</dt>
+                            <dd class="font-semibold text-gray-200">{{ cacheStatus.knowledge_store.assessment_records }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Triplet Index Entries</dt>
+                            <dd class="font-semibold text-gray-200">{{ cacheStatus.knowledge_store.assessment_triplet_index_entries }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Analysis Queue Items</dt>
+                            <dd class="font-semibold text-gray-200">{{ cacheStatus.knowledge_store.code_analysis_queue_items }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Queue Status Mix</dt>
+                            <dd class="font-semibold text-gray-200">
+                                <span v-if="Object.keys(cacheStatus.knowledge_store.code_analysis_queue_status_counts).length === 0">None</span>
+                                <span v-else>
+                                    {{ Object.entries(cacheStatus.knowledge_store.code_analysis_queue_status_counts).map(([status, count]) => `${status}: ${count}`).join(', ') }}
+                                </span>
+                            </dd>
+                        </div>
+                    </dl>
+                    <div class="mt-3 rounded bg-gray-950/60 px-3 py-2 text-[11px] text-gray-400">
+                        <span class="font-semibold text-gray-300">Path:</span>
+                        <span class="ml-2 break-all">{{ cacheStatus.knowledge_store.path }}</span>
+                    </div>
+                </template>
+                <p v-else class="text-xs text-gray-500">Knowledge store status not available.</p>
+            </div>
+        </div>
+
+        <div v-else-if="cacheStatusError" class="mt-4 rounded border border-red-800 bg-red-900/20 p-3 text-xs text-red-300">
+            {{ cacheStatusError }}
+        </div>
     </div>
 
     <!-- Tabs -->

@@ -5,6 +5,7 @@ import * as api from '../../lib/api'
 import { ref, computed } from 'vue'
 
 vi.mock('../../lib/api', () => ({
+    getCacheStatus: vi.fn(),
     getRoles: vi.fn(),
     uploadRoles: vi.fn(),
     getTeamMapping: vi.fn(),
@@ -20,6 +21,26 @@ describe('Settings.vue', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.mocked(api.getCacheStatus).mockResolvedValue({
+            fully_cached: true,
+            last_refreshed_at: '2026-05-05T12:00:00Z',
+            projects: 4,
+            active_projects: 2,
+            cached_findings: 8,
+            cached_boms: 2,
+            cached_analyses: 6,
+            pending_updates: 1,
+            knowledge_store: {
+                path: '/tmp/knowledge',
+                assessment_records: 7,
+                assessment_triplet_index_entries: 9,
+                code_analysis_queue_items: 3,
+                code_analysis_queue_status_counts: {
+                    completed: 2,
+                    failed: 1,
+                },
+            },
+        })
         vi.mocked(api.getTeamMapping).mockResolvedValue({ 'comp': 'team' })
         vi.mocked(api.getRoles).mockResolvedValue({ 'user': 'REVIEWER' })
         vi.mocked(api.getRescoreRules).mockResolvedValue({ transitions: [] })
@@ -41,6 +62,27 @@ describe('Settings.vue', () => {
         const tabs = wrapper.findAll('button')
         const rescoreTab = tabs.find(t => t.text().includes('Rescore Rules'))
         expect(rescoreTab?.exists()).toBe(true)
+    })
+
+    it('shows knowledge store runtime status for reviewers', async () => {
+        const wrapper = mount(Settings, {
+            global: {
+                provide: {
+                    user: mockUser,
+                    realRole: computed(() => mockUser.value.role)
+                },
+                stubs: ['router-link']
+            }
+        })
+
+        await wrapper.vm.$nextTick()
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.text()).toContain('Runtime Status')
+        expect(wrapper.text()).toContain('Knowledge Store')
+        expect(wrapper.text()).toContain('Assessment Records')
+        expect(wrapper.text()).toContain('/tmp/knowledge')
+        expect(wrapper.text()).toContain('completed: 2')
     })
 
     it('loads and displays rescore rules in the editor', async () => {

@@ -58,6 +58,15 @@ const activeQueueItems = computed(() => {
     )
 })
 
+const isInterruptedFailure = (item: AnalysisQueueItem) =>
+    item.status === 'failed' && (item.error || '').toLowerCase().includes('service restart')
+
+const interruptedQueueItems = computed(() => {
+    return analysisQueueStore.items.value.filter(
+        i => i.vuln_id === props.vulnId && isInterruptedFailure(i)
+    )
+})
+
 const queueStatus = computed(() => {
     if (activeQueueItems.value.length === 0) return 'idle'
     if (activeQueueItems.value.some(i => i.status === 'running')) return 'running'
@@ -333,8 +342,8 @@ watch(selectedComponent, () => {
             </div>
         </div>
 
-        <!-- Active queue items for this vuln -->
-        <div v-if="activeQueueItems.length > 0 || completedQueueItems.length > 0" class="space-y-1">
+        <!-- Active and restored queue items for this vuln -->
+        <div v-if="activeQueueItems.length > 0 || completedQueueItems.length > 0 || interruptedQueueItems.length > 0" class="space-y-1">
             <div
                 v-for="qi in activeQueueItems"
                 :key="qi.queue_id"
@@ -358,6 +367,18 @@ watch(selectedComponent, () => {
                 >
                     Cancel
                 </button>
+            </div>
+            <div
+                v-for="qi in interruptedQueueItems"
+                :key="qi.queue_id"
+                class="flex items-center justify-between px-2 py-1 rounded text-[10px] bg-amber-900/20 border border-amber-700/30"
+            >
+                <div class="flex items-center gap-2">
+                    <AlertTriangle :size="10" class="text-amber-400" />
+                    <span class="text-gray-300 font-mono">{{ qi.component_name }}</span>
+                    <span class="uppercase font-semibold text-amber-400">interrupted</span>
+                </div>
+                <span class="text-[9px] text-amber-300 uppercase font-semibold">Rerun analysis</span>
             </div>
             <!-- Completed queue items -->
             <div
@@ -420,9 +441,15 @@ watch(selectedComponent, () => {
         </div>
 
         <!-- Error -->
-        <div v-if="error" class="flex items-start gap-2 p-2 rounded bg-red-900/20 border border-red-700/40 text-xs text-red-300">
-            <XCircle :size="14" class="shrink-0 mt-0.5" />
-            <span>{{ error }}</span>
+        <div
+            v-if="error"
+            class="flex items-start gap-2 p-2 rounded border text-xs"
+            :class="error.toLowerCase().includes('service restart')
+                ? 'bg-amber-900/20 border-amber-700/40 text-amber-200'
+                : 'bg-red-900/20 border-red-700/40 text-red-300'"
+        >
+            <component :is="error.toLowerCase().includes('service restart') ? AlertTriangle : XCircle" :size="14" class="shrink-0 mt-0.5" />
+            <span>{{ error.toLowerCase().includes('service restart') ? 'A previous analysis was interrupted by backend restart. Run it again to refresh the result.' : error }}</span>
         </div>
 
         <!-- Result -->

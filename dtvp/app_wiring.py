@@ -25,6 +25,7 @@ from .grouped_vuln_services import (
 from .grouped_vuln_services import (
     process_grouped_vulns_task as process_grouped_vulns_task_impl,
 )
+from .knowledge_store import knowledge_store
 from .logic import calculate_statistics, group_vulnerabilities, load_team_mapping
 from .settings_routes import SettingsRouteDeps
 from .startup_services import StartupServiceDeps
@@ -410,7 +411,10 @@ def build_app_info_route_deps(
         version=version,
         build_commit=build_commit,
         load_pyproject_metadata=load_pyproject_metadata,
-        get_cache_status=lambda: cache_manager.get_cache_status(),
+        get_cache_status=lambda: {
+            **cache_manager.get_cache_status(),
+            "knowledge_store": knowledge_store.get_status(),
+        },
         load_changelog_content=load_changelog_content,
         get_sbom_path=get_sbom_path,
         read_text=read_text,

@@ -95,6 +95,13 @@ export interface CacheStatus {
     cached_boms: number;
     cached_analyses: number;
     pending_updates: number;
+    knowledge_store?: {
+        path: string;
+        assessment_records: number;
+        assessment_triplet_index_entries: number;
+        code_analysis_queue_items: number;
+        code_analysis_queue_status_counts: Record<string, number>;
+    };
 }
 
 export interface TMRescoreScopeOption {

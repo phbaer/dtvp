@@ -1020,7 +1020,7 @@ watch(() => user?.role, (role) => {
                 </div>
             </div>
             <div v-else-if="error" class="text-red-500 text-center py-10">{{ error }}</div>
-            <div v-else class="shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden">
+            <div v-else class="shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-x-auto overflow-y-hidden">
                 <div class="p-3 space-y-3">
                     <div v-if="viewMode === 'analysis'" class="space-y-3">
                         <VulnGroupCard

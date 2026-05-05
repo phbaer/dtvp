@@ -67,6 +67,9 @@ const statusColor = (status: string) => {
     return 'text-yellow-400'
 }
 
+const isInterruptedFailure = (error?: string | null) =>
+    (error || '').toLowerCase().includes('service restart')
+
 onMounted(() => {
     analysisQueueStore.startPolling()
 })
@@ -154,7 +157,8 @@ onUnmounted(() => {
                                         'text-yellow-300 bg-yellow-900/30': item.status === 'queued',
                                         'text-blue-300 bg-blue-900/30': item.status === 'running',
                                         'text-green-300 bg-green-900/30': item.status === 'completed',
-                                        'text-red-300 bg-red-900/30': item.status === 'failed',
+                                        'text-amber-300 bg-amber-900/30': item.status === 'failed' && isInterruptedFailure(item.error),
+                                        'text-red-300 bg-red-900/30': item.status === 'failed' && !isInterruptedFailure(item.error),
                                         'text-gray-400 bg-gray-800': item.status === 'cancelled',
                                     }"
                                 >
@@ -185,7 +189,8 @@ onUnmounted(() => {
                             </div>
                         </div>
                         <div v-if="item.error" class="mt-1 text-[10px] text-red-400 truncate">
-                            {{ item.error }}
+                            <span v-if="isInterruptedFailure(item.error)" class="text-amber-300">Interrupted after restart. Rerun required.</span>
+                            <span v-else>{{ item.error }}</span>
                         </div>
                         <!-- Progress display for running items -->
                         <div v-if="item.status === 'running' && item.progress" class="mt-1.5 space-y-1">

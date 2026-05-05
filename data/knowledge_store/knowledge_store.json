@@ -1,0 +1,1201 @@
+{
+  "version": 1,
+  "assessments": {
+    "component-new__CVE-2021-44228": {
+      "primary_key": "component-new__CVE-2021-44228",
+      "component_uuid": "component-new",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.17.0",
+      "canonical_vulnerability_id": "CVE-2021-44228",
+      "vulnerability_aliases": [
+        "CVE-2021-44228"
+      ],
+      "vulnerability_uuid": "vuln-new",
+      "analysis": {
+        "analysisState": "EXPLOITABLE",
+        "analysisDetails": "[Rescored: 4.0]\nUpdated TM review.",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T03:17:46.077705+00:00",
+      "triplets": [
+        {
+          "project_uuid": "project-1",
+          "component_uuid": "component-new",
+          "vulnerability_uuid": "vuln-new"
+        }
+      ]
+    },
+    "c1__UUID_v1": {
+      "primary_key": "c1__UUID_v1",
+      "component_uuid": "c1",
+      "component_identity": "",
+      "component_name": null,
+      "component_purl": null,
+      "canonical_vulnerability_id": "UUID:v1",
+      "vulnerability_aliases": [
+        "UUID:v1"
+      ],
+      "vulnerability_uuid": "v1",
+      "analysis": {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: testuser] [Reviewed By: testuser] ---\nSecond update",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:16:53.633003+00:00",
+      "triplets": [
+        {
+          "project_uuid": "p1",
+          "component_uuid": "c1",
+          "vulnerability_uuid": "v1"
+        }
+      ]
+    },
+    "c2__UUID_v2": {
+      "primary_key": "c2__UUID_v2",
+      "component_uuid": "c2",
+      "component_identity": "",
+      "component_name": null,
+      "component_purl": null,
+      "canonical_vulnerability_id": "UUID:v2",
+      "vulnerability_aliases": [
+        "UUID:v2"
+      ],
+      "vulnerability_uuid": "v2",
+      "analysis": {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "Some details",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T03:19:12.664959+00:00",
+      "triplets": [
+        {
+          "project_uuid": "p2",
+          "component_uuid": "c2",
+          "vulnerability_uuid": "v2"
+        }
+      ]
+    },
+    "cuuid__UUID_vuuid": {
+      "primary_key": "cuuid__UUID_vuuid",
+      "component_uuid": "cuuid",
+      "component_identity": "",
+      "component_name": null,
+      "component_purl": null,
+      "canonical_vulnerability_id": "UUID:vuuid",
+      "vulnerability_aliases": [
+        "UUID:vuuid"
+      ],
+      "vulnerability_uuid": "vuuid",
+      "analysis": {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: testuser] [Reviewed By: testuser] ---\nVerified as false positive",
+        "isSuppressed": true
+      },
+      "updated_at": "2026-05-05T15:16:50.613756+00:00",
+      "triplets": [
+        {
+          "project_uuid": "puuid",
+          "component_uuid": "cuuid",
+          "vulnerability_uuid": "vuuid"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2021-44228",
+      "vulnerability_aliases": [
+        "CVE-2021-44228"
+      ],
+      "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017",
+      "analysis": {
+        "analysisState": "IN_TRIAGE",
+        "analysisDetails": "[Rescored: 7] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/E:H]\n\n--- [Team: General] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1777702214958] [Justification: NOT_SET] ---\n\nGlobal policy: Log4j usage should be reviewed for all public-facing services.\n\n--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702230798] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (Medium confidence)\nExposure: transitive\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Not Affected \u2014 Dependency is present but vulnerable code path is not reachable.\n[team-a-comp] Not Affected \u2014 Dependency is present but vulnerable code path is not reachable.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 7 \u2192 7\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/E:H\nCVSS Summary: 7.0 \u2192 7.0 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [FAIL] [internal-lib-c] Analyze code reachability of vulnerable API\n    - No imports of the vulnerable API found in application code\n  [FAIL] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM found no exploitable code path in application context\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [FAIL] [team-a-comp] Analyze code reachability of vulnerable API\n    - No imports of the vulnerable API found in application code\n  [FAIL] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM found no exploitable code path in application context\n\n--- [Team: PaymentTeam] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702232196] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (Medium confidence)\nExposure: transitive\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Not Affected \u2014 Dependency is present but vulnerable code path is not reachable.\n[team-a-comp] Not Affected \u2014 Dependency is present but vulnerable code path is not reachable.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 7 \u2192 7\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/E:H\nCVSS Summary: 7.0 \u2192 7.0 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [FAIL] [internal-lib-c] Analyze code reachability of vulnerable API\n    - No imports of the vulnerable API found in application code\n  [FAIL] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM found no exploitable code path in application context\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [FAIL] [team-a-comp] Analyze code reachability of vulnerable API\n    - No imports of the vulnerable API found in application code\n  [FAIL] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM found no exploitable code path in application context\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702234665] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (Medium confidence)\nExposure: transitive\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Not Affected \u2014 Dependency is present but vulnerable code path is not reachable.\n[team-a-comp] Not Affected \u2014 Dependency is present but vulnerable code path is not reachable.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 7 \u2192 7\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/E:H\nCVSS Summary: 7.0 \u2192 7.0 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [FAIL] [internal-lib-c] Analyze code reachability of vulnerable API\n    - No imports of the vulnerable API found in application code\n  [FAIL] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM found no exploitable code path in application context\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [FAIL] [team-a-comp] Analyze code reachability of vulnerable API\n    - No imports of the vulnerable API found in application code\n  [FAIL] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM found no exploitable code path in application context\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.494019+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        },
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d9401347-1941-4c12-8700-1c0563821017"
+        }
+      ]
+    },
+    "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384": {
+      "primary_key": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+      "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+      "component_identity": "pkg:maven/com.fasterxml.jackson.core/jackson-databind",
+      "component_name": "jackson-databind",
+      "component_purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+      "canonical_vulnerability_id": "CVE-2019-12384",
+      "vulnerability_aliases": [
+        "CVE-2019-12384"
+      ],
+      "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6",
+      "analysis": {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "--- [Team: General] [State: NOT_AFFECTED] [Assessed By: security-lead] [Date: 1710100000000] [Justification: CODE_NOT_REACHABLE] [Rescored: 7.2] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:H] ---\nJackson deserialization path not reachable in current deployment. JNDI lookups are disabled via system property.\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.495469+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        },
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f6"
+        }
+      ]
+    },
+    "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM": {
+      "primary_key": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+      "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+      "component_identity": "pkg:maven/org.example/team-test-lib",
+      "component_name": "team-test-lib",
+      "component_purl": "pkg:maven/org.example/team-test-lib@1.0.0",
+      "canonical_vulnerability_id": "CVE-2024-TEAM",
+      "vulnerability_aliases": [
+        "CVE-2024-TEAM"
+      ],
+      "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8",
+      "analysis": {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "--- [Team: Old-Label] [State: NOT_AFFECTED] [Assessed By: mock] [Justification: CODE_NOT_PRESENT] [Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N/MC:N/MI:N] ---\nThis was assessed using the old label.\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.496882+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "7fa85f64-5717-4562-b3fc-2c963f66afb0",
+          "vulnerability_uuid": "f6781a7b-0346-4927-991c-7033580539f8"
+        }
+      ]
+    },
+    "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889": {
+      "primary_key": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+      "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+      "component_identity": "pkg:maven/org.apache.commons/commons-text",
+      "component_name": "commons-text",
+      "component_purl": "pkg:maven/org.apache.commons/commons-text@1.9",
+      "canonical_vulnerability_id": "CVE-2022-42889",
+      "vulnerability_aliases": [
+        "CVE-2022-42889"
+      ],
+      "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc",
+      "analysis": {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.498274+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        },
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "e253b708-3012-4277-8461-893bd5cd61e4",
+          "vulnerability_uuid": "e1111a7b-0346-4927-991c-7033580539fc"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2026-OPEN-PENDING",
+      "vulnerability_aliases": [
+        "CVE-2026-OPEN-PENDING"
+      ],
+      "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa",
+      "analysis": {
+        "analysisState": "IN_TRIAGE",
+        "analysisDetails": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1776246543744] [Justification: NOT_SET] ---\n\nPlease review this finding; pending security approval.\n\n--- [Team: team-a] [State: NOT_SET] [Assessed By: internal-test] [Justification: NOT_SET] ---\n\nPlease review this finding; pending security approval.\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.499534+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        },
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d7777a7b-0346-4927-991c-7033580539fa"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2026-TEAM-PARTIAL",
+      "vulnerability_aliases": [
+        "CVE-2026-TEAM-PARTIAL"
+      ],
+      "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb",
+      "analysis": {
+        "analysisState": "IN_TRIAGE",
+        "analysisDetails": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1776246557311] [Justification: NOT_SET] ---\n\nPending team-b input.\n\n--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: reviewer] [Justification: NOT_SET] ---\n\n--- [Team: team-b] [State: NOT_SET] [Assessed By: reviewer] [Justification: NOT_SET] ---\n\nPending team-b input.\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.500789+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        },
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d8888a7b-0346-4927-991c-7033580539fb"
+        }
+      ]
+    },
+    "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290": {
+      "primary_key": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+      "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+      "component_identity": "pkg:maven/io.netty/netty-common",
+      "component_name": "netty-common",
+      "component_purl": "pkg:maven/io.netty/netty-common@4.1.42.Final",
+      "canonical_vulnerability_id": "CVE-2021-21290",
+      "vulnerability_aliases": [
+        "CVE-2021-21290"
+      ],
+      "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7",
+      "analysis": {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "Default not set assessment; no structured blocks present.",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.502024+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+          "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+          "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+          "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+          "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+          "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+          "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "d253b708-3012-4277-8461-893bd5cd61e3",
+          "vulnerability_uuid": "a7781a7b-0346-4927-991c-7033580539f7"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2025-INCOMPLETE",
+      "vulnerability_aliases": [
+        "CVE-2025-INCOMPLETE"
+      ],
+      "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8",
+      "analysis": {
+        "analysisState": "FALSE_POSITIVE",
+        "analysisDetails": "[Rescored: 0] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/CR:L/MAV:L/MAC:H/MPR:H/MUI:R/MC:N]\n\n--- [Team: General] [State: FALSE_POSITIVE] [Assessed By: reviewer] [Date: 1776246572566] [Justification: NOT_SET] ---\n\nBaseline: This component does not use the vulnerable function.\n\n--- [Team: ComplianceTeam] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] [Justification: NOT_SET] ---\n\nConfirmed: No usage found in current deployment context.\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.503245+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        }
+      ]
+    },
+    "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE": {
+      "primary_key": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+      "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+      "component_identity": "pkg:maven/com.fasterxml.jackson.core/jackson-databind",
+      "component_name": "jackson-databind",
+      "component_purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+      "canonical_vulnerability_id": "CVE-2025-INCOMPLETE",
+      "vulnerability_aliases": [
+        "CVE-2025-INCOMPLETE"
+      ],
+      "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8",
+      "analysis": {
+        "analysisState": "FALSE_POSITIVE",
+        "analysisDetails": "[Rescored: 0] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N/CR:L/MAV:L/MAC:H/MPR:H/MUI:R/MC:N]\n\n--- [Team: General] [State: FALSE_POSITIVE] [Assessed By: reviewer] [Date: 1776246572566] [Justification: NOT_SET] ---\n\nBaseline: This component does not use the vulnerable function.\n\n--- [Team: ComplianceTeam] [State: FALSE_POSITIVE] [Assessed By: analyst1] [Date: 1710000000000] [Justification: NOT_SET] ---\n\nConfirmed: No usage found in current deployment context.\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.504483+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "b8881a7b-0346-4927-991c-7033580539f8"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2025-INCONSISTENT",
+      "vulnerability_aliases": [
+        "CVE-2025-INCONSISTENT"
+      ],
+      "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9",
+      "analysis": {
+        "analysisState": "IN_TRIAGE",
+        "analysisDetails": "[Rescored: 6.2] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H]\n\n--- [Team: General] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1776246532087] [Justification: NOT_SET] ---\n\nPlease review team assessments for conflict resolution.\n\n--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702571915] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (High confidence)\nExposure: direct\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[team-a-comp] Affected \u2014 Direct dependency with reachable vulnerable code path.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 6.2 \u2192 6.2\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H\nCVSS Summary: 6.2 \u2192 6.2 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-c] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [team-a-comp] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n\n--- [Team: PaymentTeam] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702571915] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (High confidence)\nExposure: direct\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[team-a-comp] Affected \u2014 Direct dependency with reachable vulnerable code path.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 6.2 \u2192 6.2\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H\nCVSS Summary: 6.2 \u2192 6.2 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-c] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [team-a-comp] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702571916] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (High confidence)\nExposure: direct\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[team-a-comp] Affected \u2014 Direct dependency with reachable vulnerable code path.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 6.2 \u2192 6.2\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H\nCVSS Summary: 6.2 \u2192 6.2 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-c] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [team-a-comp] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.505695+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        }
+      ]
+    },
+    "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT": {
+      "primary_key": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+      "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+      "component_identity": "pkg:maven/com.fasterxml.jackson.core/jackson-databind",
+      "component_name": "jackson-databind",
+      "component_purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.9.8",
+      "canonical_vulnerability_id": "CVE-2025-INCONSISTENT",
+      "vulnerability_aliases": [
+        "CVE-2025-INCONSISTENT"
+      ],
+      "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9",
+      "analysis": {
+        "analysisState": "IN_TRIAGE",
+        "analysisDetails": "[Rescored: 6.2] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H]\n\n--- [Team: General] [State: IN_TRIAGE] [Assessed By: reviewer] [Date: 1776246532087] [Justification: NOT_SET] ---\n\nPlease review team assessments for conflict resolution.\n\n--- [Team: InventoryTeam] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702571915] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (High confidence)\nExposure: direct\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[team-a-comp] Affected \u2014 Direct dependency with reachable vulnerable code path.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 6.2 \u2192 6.2\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H\nCVSS Summary: 6.2 \u2192 6.2 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-c] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [team-a-comp] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n\n--- [Team: PaymentTeam] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702571915] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (High confidence)\nExposure: direct\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[team-a-comp] Affected \u2014 Direct dependency with reachable vulnerable code path.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 6.2 \u2192 6.2\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H\nCVSS Summary: 6.2 \u2192 6.2 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-c] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [team-a-comp] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n\n--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: reviewer] [Date: 1777702571916] [Justification: NOT_SET] ---\n\n[Agentyzer Code Analysis]\nVerdict: Affected (High confidence)\nExposure: direct\n\nSummary: [internal-lib-b] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[internal-lib-c] Affected \u2014 Direct dependency with reachable vulnerable code path.\n[team-a-comp] Affected \u2014 Direct dependency with reachable vulnerable code path.\n\nReasoning: The dependency internal-lib-b is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\n\nCVSS: 6.2 \u2192 6.2\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:H\nCVSS Summary: 6.2 \u2192 6.2 (confirmed reachable)\nCVSS Reasons: version 2.0.0 (lock file) confirmed in affected range; LLM confirmed exploitable code path \u2192 E:A\n\nPipeline Steps:\n  [PASS] [internal-lib-b] Scan dependency manifests and lock files\n    - Found internal-lib-b in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-b] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-b] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-b] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [internal-lib-c] Scan dependency manifests and lock files\n    - Found internal-lib-c in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [internal-lib-c] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [internal-lib-c] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [internal-lib-c] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n  [PASS] [team-a-comp] Scan dependency manifests and lock files\n    - Found team-a-comp in lock file\n    - Locked version resolved to 2.0.0\n  [PASS] [team-a-comp] Check version against advisory affected ranges\n    - Version 2.0.0 is within the affected range (introduced=0, fixed=3.0.6)\n    - Source: lock file\n  [PASS] [team-a-comp] Analyze code reachability of vulnerable API\n    - Vulnerable API werkzeug.utils.safe_join is imported in app/routes.py:12\n    - Call chain: app.main \u2192 werkzeug.serving.run_simple\n  [PASS] [team-a-comp] LLM-assisted exploitability analysis\n    - LLM confirmed exploitable code path \u2192 E:A\n    - HTTP request handlers invoke vulnerable function directly\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.506865+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "b253b708-3012-4277-8461-893bd5cd61e2",
+          "vulnerability_uuid": "c9991a7b-0346-4927-991c-7033580539f9"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2023-12345",
+      "vulnerability_aliases": [
+        "CVE-2023-12345"
+      ],
+      "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5",
+      "analysis": {
+        "analysisState": "IN_TRIAGE",
+        "analysisDetails": "--- [Team: General] [State: IN_TRIAGE] [Assessed By: system] [Date: 1709550000000] ---\nInitial automated triage flag.\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.508061+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        },
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "e5781a7b-0346-4927-991c-7033580539f5"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-01": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-01",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/com.example/misc-lib",
+      "component_name": "misc-lib",
+      "component_purl": "pkg:maven/com.example/misc-lib@1.0.0",
+      "canonical_vulnerability_id": "CVE-2025-NEW-01",
+      "vulnerability_aliases": [
+        "CVE-2025-NEW-01"
+      ],
+      "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2",
+      "analysis": {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.509222+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-02": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-02",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/com.example/misc-lib",
+      "component_name": "misc-lib",
+      "component_purl": "pkg:maven/com.example/misc-lib@1.0.0",
+      "canonical_vulnerability_id": "CVE-2025-NEW-02",
+      "vulnerability_aliases": [
+        "CVE-2025-NEW-02"
+      ],
+      "vulnerability_uuid": "d4441a7b-0346-4927-991c-7033580539f3",
+      "analysis": {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.510388+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d4441a7b-0346-4927-991c-7033580539f3"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d4441a7b-0346-4927-991c-7033580539f3"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d4441a7b-0346-4927-991c-7033580539f3"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-03": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-03",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/com.example/misc-lib",
+      "component_name": "misc-lib",
+      "component_purl": "pkg:maven/com.example/misc-lib@1.0.0",
+      "canonical_vulnerability_id": "CVE-2025-NEW-03",
+      "vulnerability_aliases": [
+        "CVE-2025-NEW-03"
+      ],
+      "vulnerability_uuid": "d5551a7b-0346-4927-991c-7033580539f4",
+      "analysis": {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "[Rescored: 2.6] [Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N]\n\n--- [Team: InventoryTeam] [State: NOT_AFFECTED] [Assessed By: reviewer] [Date: 1777900103162] [Justification: CODE_NOT_PRESENT] ---\n\n[Code Analysis]\nVerdict: Not Affected (Medium confidence)\nExposure: none\nJustification: CODE_NOT_PRESENT\n\nSummary: Combined analysis for 2 components. internal-lib-b: Not Affected; internal-lib-c: Not Affected\n\nReasoning: Global result merged from the latest completed analysis for each selected component.\n\n\n\nCVSS: 5.1 \u2192 2.6\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N\nCVSS Summary: 5.1 \u2192 2.6 (not reachable)\nCVSS Reasons: Vulnerable code path is not reachable from application entry points\n\nComponents:\n[Component: internal-lib-b]\nVerdict: Not Affected (Medium confidence)\nExposure: none\nSummary: Dependency is present but vulnerable code path is not reachable.\nReasoning: The dependency internal-lib-b is present but the vulnerable API surface is not imported or invoked anywhere in the application code.\n\n[Component: internal-lib-c]\nVerdict: Not Affected (High confidence)\nExposure: none\nSummary: Dependency is present but vulnerable code path is not reachable.\nReasoning: The dependency internal-lib-c is present but the vulnerable API surface is not imported or invoked anywhere in the application code.\n\n--- [Team: PaymentTeam] [State: NOT_AFFECTED] [Assessed By: reviewer] [Date: 1777900103162] [Justification: CODE_NOT_PRESENT] ---\n\n[Code Analysis]\nVerdict: Not Affected (Medium confidence)\nExposure: none\nJustification: CODE_NOT_PRESENT\n\nSummary: Combined analysis for 2 components. internal-lib-b: Not Affected; internal-lib-c: Not Affected\n\nReasoning: Global result merged from the latest completed analysis for each selected component.\n\n\n\nCVSS: 5.1 \u2192 2.6\nAdjusted Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N\nCVSS Summary: 5.1 \u2192 2.6 (not reachable)\nCVSS Reasons: Vulnerable code path is not reachable from application entry points\n\nComponents:\n[Component: internal-lib-c]\nVerdict: Not Affected (High confidence)\nExposure: none\nSummary: Dependency is present but vulnerable code path is not reachable.\nReasoning: The dependency internal-lib-c is present but the vulnerable API surface is not imported or invoked anywhere in the application code.\n\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.511569+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d5551a7b-0346-4927-991c-7033580539f4"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d5551a7b-0346-4927-991c-7033580539f4"
+        }
+      ]
+    },
+    "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01": {
+      "primary_key": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01",
+      "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+      "component_identity": "pkg:maven/org.example/utility-lib",
+      "component_name": "utility-lib",
+      "component_purl": "pkg:maven/org.example/utility-lib@3.1.2",
+      "canonical_vulnerability_id": "CVE-2025-NEW-01",
+      "vulnerability_aliases": [
+        "CVE-2025-NEW-01"
+      ],
+      "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2",
+      "analysis": {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.512744+00:00",
+      "triplets": [
+        {
+          "project_uuid": "bfa85f64-5717-4562-b3fc-2c963f66afb4",
+          "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "accd5b70-8888-4277-8461-893bd5cd6200",
+          "vulnerability_uuid": "d3331a7b-0346-4927-991c-7033580539f2"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2026-PLAINTEXT-NS",
+      "vulnerability_aliases": [
+        "CVE-2026-PLAINTEXT-NS"
+      ],
+      "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0",
+      "analysis": {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "This is a plaintext NOT_SET assessment.\nNo structured team state blocks are present.\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.449025+00:00",
+      "triplets": [
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d1111a7b-0346-4927-991c-7033580539f0"
+        }
+      ]
+    },
+    "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA": {
+      "primary_key": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+      "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+      "component_identity": "pkg:maven/org.apache.logging.log4j/log4j-core",
+      "component_name": "log4j-core",
+      "component_purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.0",
+      "canonical_vulnerability_id": "CVE-2026-PLAINTEXT-NA",
+      "vulnerability_aliases": [
+        "CVE-2026-PLAINTEXT-NA"
+      ],
+      "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1",
+      "analysis": {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "This is a plaintext NOT_AFFECTED assessment.\nSystem says it does not apply in our context.\n\n[Status: Pending Review]",
+        "isSuppressed": false
+      },
+      "updated_at": "2026-05-05T15:26:00.450147+00:00",
+      "triplets": [
+        {
+          "project_uuid": "dfa85f64-5717-4562-b3fc-2c963f66afb6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1"
+        },
+        {
+          "project_uuid": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1"
+        },
+        {
+          "project_uuid": "afa85f64-5717-4562-b3fc-2c963f66afb3",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1"
+        },
+        {
+          "project_uuid": "8fa85f64-5717-4562-b3fc-2c963f66afb1",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1"
+        },
+        {
+          "project_uuid": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1"
+        },
+        {
+          "project_uuid": "9fa85f64-5717-4562-b3fc-2c963f66afb2",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1"
+        },
+        {
+          "project_uuid": "cfa85f64-5717-4562-b3fc-2c963f66afb5",
+          "component_uuid": "c253b708-3012-4277-8461-893bd5cd61e1",
+          "vulnerability_uuid": "d2222a7b-0346-4927-991c-7033580539f1"
+        }
+      ]
+    }
+  },
+  "assessment_triplet_index": {
+    "project-1__component-new__vuln-new": "component-new__CVE-2021-44228",
+    "p1__c1__v1": "c1__UUID_v1",
+    "p2__c2__v2": "c2__UUID_v2",
+    "puuid__cuuid__vuuid": "cuuid__UUID_vuuid",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__d253b708-3012-4277-8461-893bd5cd61e3__a7781a7b-0346-4927-991c-7033580539f7": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__b8881a7b-0346-4927-991c-7033580539f8": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__b253b708-3012-4277-8461-893bd5cd61e2__b8881a7b-0346-4927-991c-7033580539f8": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__c9991a7b-0346-4927-991c-7033580539f9": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__b253b708-3012-4277-8461-893bd5cd61e2__c9991a7b-0346-4927-991c-7033580539f9": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__d3331a7b-0346-4927-991c-7033580539f2": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-01",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__d4441a7b-0346-4927-991c-7033580539f3": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-02",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__c253b708-3012-4277-8461-893bd5cd61e1__d5551a7b-0346-4927-991c-7033580539f4": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-03",
+    "bfa85f64-5717-4562-b3fc-2c963f66afb4__accd5b70-8888-4277-8461-893bd5cd6200__d3331a7b-0346-4927-991c-7033580539f2": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__c253b708-3012-4277-8461-893bd5cd61e1__d1111a7b-0346-4927-991c-7033580539f0": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__c253b708-3012-4277-8461-893bd5cd61e1__d2222a7b-0346-4927-991c-7033580539f1": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "dfa85f64-5717-4562-b3fc-2c963f66afb6__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__d1111a7b-0346-4927-991c-7033580539f0": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__d2222a7b-0346-4927-991c-7033580539f1": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__b8881a7b-0346-4927-991c-7033580539f8": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__c9991a7b-0346-4927-991c-7033580539f9": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__d253b708-3012-4277-8461-893bd5cd61e3__a7781a7b-0346-4927-991c-7033580539f7": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__b253b708-3012-4277-8461-893bd5cd61e2__b8881a7b-0346-4927-991c-7033580539f8": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__b253b708-3012-4277-8461-893bd5cd61e2__c9991a7b-0346-4927-991c-7033580539f9": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+    "3fa85f64-5717-4562-b3fc-2c963f66afa6__accd5b70-8888-4277-8461-893bd5cd6200__d3331a7b-0346-4927-991c-7033580539f2": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d1111a7b-0346-4927-991c-7033580539f0": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d2222a7b-0346-4927-991c-7033580539f1": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__d253b708-3012-4277-8461-893bd5cd61e3__a7781a7b-0346-4927-991c-7033580539f7": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__b8881a7b-0346-4927-991c-7033580539f8": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__b253b708-3012-4277-8461-893bd5cd61e2__b8881a7b-0346-4927-991c-7033580539f8": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__c9991a7b-0346-4927-991c-7033580539f9": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__b253b708-3012-4277-8461-893bd5cd61e2__c9991a7b-0346-4927-991c-7033580539f9": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d3331a7b-0346-4927-991c-7033580539f2": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-01",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d4441a7b-0346-4927-991c-7033580539f3": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-02",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__c253b708-3012-4277-8461-893bd5cd61e1__d5551a7b-0346-4927-991c-7033580539f4": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-03",
+    "afa85f64-5717-4562-b3fc-2c963f66afb3__accd5b70-8888-4277-8461-893bd5cd6200__d3331a7b-0346-4927-991c-7033580539f2": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__d1111a7b-0346-4927-991c-7033580539f0": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__d2222a7b-0346-4927-991c-7033580539f1": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__d253b708-3012-4277-8461-893bd5cd61e3__a7781a7b-0346-4927-991c-7033580539f7": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__b8881a7b-0346-4927-991c-7033580539f8": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__b253b708-3012-4277-8461-893bd5cd61e2__b8881a7b-0346-4927-991c-7033580539f8": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__c253b708-3012-4277-8461-893bd5cd61e1__c9991a7b-0346-4927-991c-7033580539f9": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__b253b708-3012-4277-8461-893bd5cd61e2__c9991a7b-0346-4927-991c-7033580539f9": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+    "8fa85f64-5717-4562-b3fc-2c963f66afb1__accd5b70-8888-4277-8461-893bd5cd6200__d3331a7b-0346-4927-991c-7033580539f2": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__d1111a7b-0346-4927-991c-7033580539f0": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__d2222a7b-0346-4927-991c-7033580539f1": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__b8881a7b-0346-4927-991c-7033580539f8": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__d253b708-3012-4277-8461-893bd5cd61e3__a7781a7b-0346-4927-991c-7033580539f7": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__b253b708-3012-4277-8461-893bd5cd61e2__b8881a7b-0346-4927-991c-7033580539f8": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__c9991a7b-0346-4927-991c-7033580539f9": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__b253b708-3012-4277-8461-893bd5cd61e2__c9991a7b-0346-4927-991c-7033580539f9": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__d3331a7b-0346-4927-991c-7033580539f2": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-01",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__c253b708-3012-4277-8461-893bd5cd61e1__d4441a7b-0346-4927-991c-7033580539f3": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-02",
+    "4fa85f64-5717-4562-b3fc-2c963f66afa7__accd5b70-8888-4277-8461-893bd5cd6200__d3331a7b-0346-4927-991c-7033580539f2": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__d1111a7b-0346-4927-991c-7033580539f0": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__d2222a7b-0346-4927-991c-7033580539f1": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__d253b708-3012-4277-8461-893bd5cd61e3__a7781a7b-0346-4927-991c-7033580539f7": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__b8881a7b-0346-4927-991c-7033580539f8": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__b253b708-3012-4277-8461-893bd5cd61e2__b8881a7b-0346-4927-991c-7033580539f8": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__c253b708-3012-4277-8461-893bd5cd61e1__c9991a7b-0346-4927-991c-7033580539f9": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__b253b708-3012-4277-8461-893bd5cd61e2__c9991a7b-0346-4927-991c-7033580539f9": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+    "9fa85f64-5717-4562-b3fc-2c963f66afb2__accd5b70-8888-4277-8461-893bd5cd6200__d3331a7b-0346-4927-991c-7033580539f2": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__e5781a7b-0346-4927-991c-7033580539f5": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2023-12345",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__d1111a7b-0346-4927-991c-7033580539f0": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NS",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__d2222a7b-0346-4927-991c-7033580539f1": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-PLAINTEXT-NA",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__b253b708-3012-4277-8461-893bd5cd61e2__f6781a7b-0346-4927-991c-7033580539f6": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2019-12384",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__7fa85f64-5717-4562-b3fc-2c963f66afb0__f6781a7b-0346-4927-991c-7033580539f8": "7fa85f64-5717-4562-b3fc-2c963f66afb0__CVE-2024-TEAM",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__d9401347-1941-4c12-8700-1c0563821017": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2021-44228",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__e253b708-3012-4277-8461-893bd5cd61e4__e1111a7b-0346-4927-991c-7033580539fc": "e253b708-3012-4277-8461-893bd5cd61e4__CVE-2022-42889",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__d7777a7b-0346-4927-991c-7033580539fa": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-OPEN-PENDING",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__d8888a7b-0346-4927-991c-7033580539fb": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2026-TEAM-PARTIAL",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__d253b708-3012-4277-8461-893bd5cd61e3__a7781a7b-0346-4927-991c-7033580539f7": "d253b708-3012-4277-8461-893bd5cd61e3__CVE-2021-21290",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__b8881a7b-0346-4927-991c-7033580539f8": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCOMPLETE",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__b253b708-3012-4277-8461-893bd5cd61e2__b8881a7b-0346-4927-991c-7033580539f8": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCOMPLETE",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__c9991a7b-0346-4927-991c-7033580539f9": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-INCONSISTENT",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__b253b708-3012-4277-8461-893bd5cd61e2__c9991a7b-0346-4927-991c-7033580539f9": "b253b708-3012-4277-8461-893bd5cd61e2__CVE-2025-INCONSISTENT",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__c253b708-3012-4277-8461-893bd5cd61e1__d3331a7b-0346-4927-991c-7033580539f2": "c253b708-3012-4277-8461-893bd5cd61e1__CVE-2025-NEW-01",
+    "cfa85f64-5717-4562-b3fc-2c963f66afb5__accd5b70-8888-4277-8461-893bd5cd6200__d3331a7b-0346-4927-991c-7033580539f2": "accd5b70-8888-4277-8461-893bd5cd6200__CVE-2025-NEW-01"
+  },
+  "code_analysis_queue": {
+    "items": {},
+    "order": []
+  }
+}

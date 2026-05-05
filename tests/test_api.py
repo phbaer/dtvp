@@ -61,6 +61,8 @@ def test_cache_status_endpoint(client):
         assert data["cached_boms"] == 2
         assert data["cached_analyses"] == 10
         assert data["pending_updates"] == 1
+        assert "knowledge_store" in data
+        assert "assessment_records" in data["knowledge_store"]
 
 
 @pytest.mark.asyncio

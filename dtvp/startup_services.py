@@ -40,6 +40,8 @@ def create_tracked_task(
 async def start_application_runtime(
     deps: StartupServiceDeps,
 ) -> StartupRuntimeTasks:
+    if hasattr(deps.analysis_queue, "load_persisted_state"):
+        deps.analysis_queue.load_persisted_state()
     deps.analysis_queue.reset_runtime_state()
     deps.logger.info(
         "Starting DTVP version %s (build %s)",
@@ -49,6 +51,7 @@ async def start_application_runtime(
     deps.tmrescore_project_cache.clear()
     deps.tmrescore_project_cache.update(deps.load_tmrescore_project_cache())
     await deps.initialize_cache_manager()
+    deps.analysis_queue.prune_finished()
     return StartupRuntimeTasks(
         sync_task=deps.create_task(deps.run_background_sync_loop()),
         queue_task=deps.create_task(deps.run_analysis_queue_worker()),

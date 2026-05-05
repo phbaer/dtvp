@@ -5,6 +5,8 @@ from typing import Any, Callable, Optional
 
 from pydantic import BaseModel
 
+from .knowledge_store import knowledge_store
+
 
 class AnalysisQueueItem(BaseModel):
     queue_id: str
@@ -60,15 +62,49 @@ class AnalysisQueue:
     def _reindex(self):
         self._deps.reindex_queue_items(self._items, self._order)
 
+    def _persist_state(self) -> None:
+        knowledge_store.save_code_analysis_queue_state(
+            items=self._items,
+            order=self._order,
+        )
+
+    def load_persisted_state(self) -> None:
+        snapshot = knowledge_store.load_code_analysis_queue_state()
+        items = {}
+        for queue_id, item_data in (snapshot.get("items") or {}).items():
+            if not isinstance(item_data, dict):
+                continue
+            item = AnalysisQueueItem.model_validate(item_data)
+            if item.status in ("queued", "running"):
+                item.status = "failed"
+                item.error = (
+                    item.error
+                    or "Analysis interrupted by service restart. Please rerun the analysis."
+                )
+                item.finished_at = item.finished_at or self._deps.utc_now().isoformat()
+                item.position = 0
+            items[queue_id] = item
+        order = [
+            queue_id for queue_id in (snapshot.get("order") or []) if queue_id in items
+        ]
+        missing = [queue_id for queue_id in items if queue_id not in order]
+        self._items = items
+        self._order = order + missing
+        self._reindex()
+        self._persist_state()
+
     def prune_finished(self, now: Optional[float] = None) -> int:
         current_time = now if now is not None else self._deps.utc_now().timestamp()
-        return self._deps.prune_finished_queue_items(
+        removed = self._deps.prune_finished_queue_items(
             self._items,
             self._order,
             current_time=current_time,
             ttl_seconds=self._deps.get_analysis_queue_ttl_seconds(),
             parse_timestamp=self._deps.parse_iso_timestamp,
         )
+        if removed:
+            self._persist_state()
+        return removed
 
     def submit(
         self,
@@ -92,6 +128,7 @@ class AnalysisQueue:
         self._items[queue_id] = item
         self._order.append(queue_id)
         self._reindex()
+        self._persist_state()
         self._event.set()
         return item
 
@@ -111,6 +148,7 @@ class AnalysisQueue:
         item.finished_at = self._deps.utc_now().isoformat()
         self._order = [qid for qid in self._order if qid != queue_id]
         self._reindex()
+        self._persist_state()
         return True
 
     def remove_finished(self, queue_id: str) -> bool:
@@ -119,6 +157,7 @@ class AnalysisQueue:
             return False
         self._order = [qid for qid in self._order if qid != queue_id]
         del self._items[queue_id]
+        self._persist_state()
         return True
 
     def shutdown(self):
@@ -160,6 +199,7 @@ class AnalysisQueue:
         item.error = error
         item.finished_at = self._deps.utc_now().isoformat()
         self.prune_finished()
+        self._persist_state()
 
     async def _process_item(self, item: AnalysisQueueItem) -> None:
         await self._deps.process_analysis_queue_item(
