@@ -175,7 +175,7 @@ const codeAnalysisTooltip = computed(() => {
 </script>
 
 <template>
-  <div class="grid min-w-0 flex-1 items-start gap-x-3" style="grid-template-columns: 12rem minmax(12rem, 1fr) 8rem 8rem auto 1.5rem" data-testid="header-grid">
+  <div class="grid min-w-0 flex-1 items-start gap-x-3" style="grid-template-columns: 12rem minmax(min-content, 1fr) 8rem 8rem 6rem 1.5rem" data-testid="header-grid">
     <!-- Column 1: Vuln ID + score + components -->
     <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden">
       <span data-testid="vuln-primary-id" class="block w-48 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-base font-black text-yellow-400 tracking-tight leading-none cursor-pointer hover:underline" title="Click to copy ID" @click.stop="emit('copy-id')">
@@ -199,7 +199,8 @@ const codeAnalysisTooltip = computed(() => {
     </div>
 
     <!-- Column 2: Team tags -->
-    <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden" data-testid="team-column">
+    <div class="flex w-full min-w-0 flex-col items-start self-start" data-testid="team-column">
+      <span class="mb-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-gray-600" data-testid="team-column-label">Teams</span>
       <div v-if="normalizedTags.length > 0" class="flex flex-wrap items-center gap-1 min-w-0">
         <span
           v-for="tag in normalizedTags"
@@ -232,6 +233,7 @@ const codeAnalysisTooltip = computed(() => {
 
     <!-- Column 3: Lifecycle -->
     <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden text-left" data-testid="lifecycle-column">
+      <span class="mb-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-gray-600" data-testid="lifecycle-column-label">Lifecycle</span>
       <div class="flex flex-wrap items-center gap-1 min-w-0" data-testid="lifecycle-column-inner">
         <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shrink-0 rounded border', lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
           <CircleDot :size="9" />
@@ -242,6 +244,7 @@ const codeAnalysisTooltip = computed(() => {
 
     <!-- Column 4: Assessment -->
     <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden text-left" data-testid="analysis-column">
+      <span class="mb-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-gray-600" data-testid="analysis-column-label">Assessment</span>
       <div class="flex flex-wrap items-center gap-1 min-w-0" data-testid="analysis-column-inner">
         <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wide shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
           <span class="inline-flex h-[9px] w-[9px] shrink-0 items-center justify-center" data-testid="analysis-state-icon-slot">
@@ -258,6 +261,7 @@ const codeAnalysisTooltip = computed(() => {
 
     <!-- Column 5: Status chips (icon-only) -->
     <div class="flex min-w-0 flex-wrap items-start gap-1 self-start overflow-hidden" data-testid="status-chips">
+      <span class="w-full text-[9px] font-semibold uppercase tracking-[0.18em] text-gray-600" data-testid="status-chips-label">Signals</span>
       <span
         :class="['inline-flex h-5 w-5 items-center justify-center rounded border shrink-0', codeAnalysisBadgeClass]"
         data-testid="code-analysis-status-badge"

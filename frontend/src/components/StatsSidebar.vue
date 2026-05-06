@@ -198,7 +198,7 @@ const handleCopy = () => {
 </script>
 
 <template>
-    <div class="w-full max-w-[440px] flex-shrink-0 space-y-3 z-40">
+    <div class="w-full max-w-[440px] min-w-0 space-y-3 z-40">
         <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden">
             <div class="flex items-center gap-2 px-3 py-3">
                 <button
@@ -527,13 +527,13 @@ const handleCopy = () => {
 
                     <div v-if="props.teamTagList.length > 0" class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-4 backdrop-blur-sm">
                         <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Per Team</div>
-                        <div class="overflow-y-auto max-h-[20rem]">
-                            <table class="min-w-full table-auto text-left text-[10px] text-gray-300 border-separate border-spacing-0">
+                        <div class="w-full overflow-x-hidden overflow-y-auto max-h-[20rem]">
+                            <table class="w-full table-fixed text-left text-[10px] text-gray-300 border-separate border-spacing-0">
                                 <thead class="border-b border-white/10 sticky top-0 bg-white/5">
                                     <tr class="text-gray-400 uppercase text-[9px] tracking-widest">
                                         <th class="px-2 py-1">Team</th>
-                                        <th class="px-2 py-1 text-right">Open</th>
-                                        <th class="px-2 py-1 text-right">Assessed</th>
+                                        <th class="px-2 py-1 text-right w-10">Open</th>
+                                        <th class="px-2 py-1 text-right w-14">Assessed</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -542,7 +542,7 @@ const handleCopy = () => {
                                         :key="entry.team"
                                         class="border-t border-white/5"
                                     >
-                                        <td class="px-2 py-0.5 text-[10px] text-gray-200">{{ entry.team }}</td>
+                                        <td class="px-2 py-0.5 text-[10px] text-gray-200 break-all">{{ entry.team }}</td>
                                         <td class="px-2 py-0.5 text-right text-[10px] text-orange-200">{{ entry.open }}</td>
                                         <td class="px-2 py-0.5 text-right text-[10px] text-cyan-200">{{ entry.assessed }}</td>
                                     </tr>

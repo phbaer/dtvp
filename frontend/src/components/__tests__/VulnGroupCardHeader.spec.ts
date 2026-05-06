@@ -92,7 +92,7 @@ describe('VulnGroupCardHeader', () => {
         const grid = wrapper.get('[data-testid="header-grid"]')
         expect(grid.classes()).toContain('grid')
         expect(grid.classes()).toContain('items-start')
-        expect(grid.attributes('style')).toContain('grid-template-columns: 12rem minmax(12rem, 1fr) 8rem 8rem auto 1.5rem')
+        expect(grid.attributes('style')).toContain('grid-template-columns: 12rem minmax(min-content, 1fr) 8rem 8rem 6rem 1.5rem')
 
         const scoreBlock = wrapper.get('[data-testid="header-cvss-block"]')
         expect(scoreBlock.classes()).toContain('items-start')

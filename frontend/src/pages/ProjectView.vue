@@ -993,8 +993,8 @@ watch(() => user?.role, (role) => {
 
 <template>
   <div class="overflow-x-visible min-h-0">
-    <div class="grid min-w-full w-full gap-y-10 pt-2.5 lg:pt-0 lg:gap-x-4 pb-8">
-        <div class="flex-1 min-w-[20rem] max-w-full w-full pl-0 lg:pl-0 lg:-ml-2 lg:pr-[425px]">
+        <div class="grid min-w-full w-full gap-y-10 pt-2.5 pb-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)] lg:gap-x-4 lg:pt-0" data-testid="project-view-layout">
+                <div class="flex-1 min-w-[20rem] max-w-full w-full pl-0 lg:pl-0 lg:-ml-2" data-testid="project-view-content-column">
             <div class="hidden"></div>
             <div v-if="loading" class="text-center py-10">
                 <div class="mb-2 text-xl font-semibold">{{ loadingMessage }}</div>
@@ -1012,7 +1012,7 @@ watch(() => user?.role, (role) => {
             <div v-else-if="error" class="text-red-500 text-center py-10">{{ error }}</div>
             <div v-else class="shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-x-auto overflow-y-hidden">
                 <div class="p-3 space-y-3">
-                    <div v-if="viewMode === 'analysis'" class="space-y-3">
+                    <div v-if="viewMode === 'analysis'" class="min-w-0 space-y-3" data-testid="vuln-list-area">
                         <VulnGroupCard
                             v-for="group in visibleGroups"
                             :key="group.id"
@@ -1041,7 +1041,7 @@ watch(() => user?.role, (role) => {
             </div>
         </div>
 
-        <div class="hidden lg:block lg:fixed lg:top-24 lg:right-0 lg:w-[440px] lg:pr-4 lg:max-h-[calc(100vh-10rem)] overflow-y-auto">
+        <div class="hidden lg:block lg:sticky lg:top-24 lg:self-start lg:min-w-0 lg:max-w-[440px] lg:max-h-[calc(100vh-10rem)] lg:overflow-y-auto" data-testid="project-view-sidebar-column">
             <StatsSidebar
                 :filters="filterState"
                 :filterCounts="filterCounts"
