@@ -1101,7 +1101,7 @@ test.describe('Capture README screenshots', () => {
         const card = await openProjectCard(page, 'CVE-2024-9999')
         await expect(card.getByText('Code Analysis')).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('platform-gateway exposes a reachable parser initialization path used by external requests.')).toBeVisible({ timeout: 10000 })
-        await expect(card.getByText('Apply to Assessment (code_analysis)')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('Apply to Assessment')).toBeVisible({ timeout: 10000 })
 
         await card.getByRole('button', { name: /Pipeline Steps \(2\)/ }).click()
         await expect(card.getByText('Reachability scan')).toBeVisible({ timeout: 10000 })
