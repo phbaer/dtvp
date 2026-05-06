@@ -101,11 +101,15 @@ describe('ProjectView.vue', () => {
         const sidebarColumn = wrapper.get('[data-testid="project-view-sidebar-column"]')
         const vulnListArea = wrapper.get('[data-testid="vuln-list-area"]')
 
-        expect(layout.classes()).toContain('lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]')
+        expect(layout.classes()).toContain('flex-wrap')
+        expect(contentColumn.classes()).toContain('min-w-min')
+        expect(contentColumn.classes()).toContain('lg:flex-1')
         expect(contentColumn.classes()).not.toContain('lg:pr-[425px]')
         expect(sidebarColumn.classes()).toContain('lg:sticky')
+        expect(sidebarColumn.classes()).toContain('lg:shrink-0')
+        expect(sidebarColumn.classes()).toContain('lg:min-w-min')
         expect(sidebarColumn.classes()).not.toContain('lg:fixed')
-        expect(vulnListArea.classes()).toContain('min-w-0')
+        expect(vulnListArea.classes()).toContain('min-w-min')
     })
 
     it('filters by direct dependency and versions', async () => {

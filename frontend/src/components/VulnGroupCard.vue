@@ -1480,7 +1480,7 @@ const teamBlockStateColor = (state?: string): string => {
 </script>
 
 <template>
-    <div :class="['vuln-card relative min-w-0 border rounded-lg transition-colors', expanded ? 'overflow-visible z-40' : 'overflow-hidden', cardStyle]">
+    <div :class="['vuln-card relative min-w-min border rounded-lg transition-colors', expanded ? 'overflow-visible z-40' : 'overflow-hidden', cardStyle]">
     <!-- Criticality Badges — header-height only -->
     <div
         class="absolute top-0 left-0 z-20 pointer-events-none flex"

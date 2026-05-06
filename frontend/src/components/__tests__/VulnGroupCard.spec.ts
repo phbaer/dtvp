@@ -187,7 +187,7 @@ describe('VulnGroupCard', () => {
             props: { group: mockGroup }
         })
 
-        expect(wrapper.classes()).toContain('min-w-0')
+        expect(wrapper.classes()).toContain('min-w-min')
     })
 
     it('shows base and rescored score as base arrow rescored', () => {
