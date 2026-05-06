@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, toRefs } from 'vue'
-import { CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
+import { CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
 import type { GroupCodeAnalysisStatus } from '../lib/codeAnalysisStatus'
 
@@ -94,7 +94,7 @@ const analysisStateClass = computed(() => {
     case 'FALSE_POSITIVE': return 'bg-teal-500/15 text-teal-400 border-teal-500/30'
     case 'RESOLVED': return 'bg-purple-500/15 text-purple-400 border-purple-500/30'
     case 'NOT_AFFECTED': return 'bg-green-500/15 text-green-400 border-green-500/30'
-    default: return ''
+    default: return 'bg-slate-500/10 text-slate-300 border-slate-500/20'
   }
 })
 
@@ -105,14 +105,8 @@ const analysisStateLabel = computed(() => {
     case 'FALSE_POSITIVE': return 'False Positive'
     case 'RESOLVED': return 'Resolved'
     case 'NOT_AFFECTED': return 'Not Affected'
-    default: return ''
+    default: return 'Not Set'
   }
-})
-
-const lifecycleBadgeShapeClass = computed(() => {
-  return analysisStateLabel.value
-    ? 'rounded-l border-y border-l'
-    : 'rounded border'
 })
 
 const lifecycleTooltip = computed(() => {
@@ -135,7 +129,7 @@ const analysisStateTooltip = computed(() => {
     case 'FALSE_POSITIVE': return 'Analysis: False Positive — this finding does not apply'
     case 'RESOLVED': return 'Analysis: Resolved — the vulnerability has been mitigated'
     case 'NOT_AFFECTED': return 'Analysis: Not Affected — the component is not impacted'
-    default: return ''
+    default: return 'Analysis: Not Set — no technical analysis has been recorded yet'
   }
 })
 
@@ -168,10 +162,6 @@ const codeAnalysisBadgeClass = computed(() => {
   }
 })
 
-const codeAnalysisLabel = computed(() => {
-  return 'Auto'
-})
-
 const codeAnalysisTooltip = computed(() => {
   switch (codeAnalysisStatus.value) {
     case 'used-in-assessment':
@@ -185,9 +175,9 @@ const codeAnalysisTooltip = computed(() => {
 </script>
 
 <template>
-  <div class="grid min-w-0 flex-1 items-start gap-x-3" style="grid-template-columns: auto 1fr auto auto auto" data-testid="header-grid">
+  <div class="grid min-w-0 flex-1 items-start gap-x-3" style="grid-template-columns: 12rem minmax(12rem, 1fr) 8rem 8rem auto 1.5rem" data-testid="header-grid">
     <!-- Column 1: Vuln ID + score + components -->
-    <div class="flex min-w-0 flex-col items-start self-start overflow-hidden">
+    <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden">
       <span data-testid="vuln-primary-id" class="block w-48 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-base font-black text-yellow-400 tracking-tight leading-none cursor-pointer hover:underline" title="Click to copy ID" @click.stop="emit('copy-id')">
         {{ group.id }}
       </span>
@@ -209,7 +199,7 @@ const codeAnalysisTooltip = computed(() => {
     </div>
 
     <!-- Column 2: Team tags -->
-    <div class="flex min-w-0 flex-col items-start self-start overflow-hidden">
+    <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden" data-testid="team-column">
       <div v-if="normalizedTags.length > 0" class="flex flex-wrap items-center gap-1 min-w-0">
         <span
           v-for="tag in normalizedTags"
@@ -240,24 +230,33 @@ const codeAnalysisTooltip = computed(() => {
       </div>
     </div>
 
-    <!-- Column 3: Lifecycle/assessment -->
-    <div class="flex min-w-0 items-start self-start overflow-hidden" data-testid="status-rail">
-      <div class="inline-flex w-[13rem] items-center shrink-0">
-        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shrink-0', lifecycleBadgeShapeClass, lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
+    <!-- Column 3: Lifecycle -->
+    <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden text-left" data-testid="lifecycle-column">
+      <div class="flex flex-wrap items-center gap-1 min-w-0" data-testid="lifecycle-column-inner">
+        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide shrink-0 rounded border', lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
           <CircleDot :size="9" />
           {{ lifecycleLabel }}
         </span>
-        <span v-if="analysisStateLabel" :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase tracking-wide border-y border-r shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
-          <Bug v-if="technicalState === 'EXPLOITABLE'" :size="9" />
-          <Search v-else-if="technicalState === 'IN_TRIAGE'" :size="9" />
-          <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
-          <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
+      </div>
+    </div>
+
+    <!-- Column 4: Assessment -->
+    <div class="flex w-full min-w-0 flex-col items-start self-start overflow-hidden text-left" data-testid="analysis-column">
+      <div class="flex flex-wrap items-center gap-1 min-w-0" data-testid="analysis-column-inner">
+        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wide shrink-0', analysisStateClass]" data-testid="analysis-state-badge" :title="analysisStateTooltip">
+          <span class="inline-flex h-[9px] w-[9px] shrink-0 items-center justify-center" data-testid="analysis-state-icon-slot">
+            <Bug v-if="technicalState === 'EXPLOITABLE'" :size="9" />
+            <Search v-else-if="technicalState === 'IN_TRIAGE'" :size="9" />
+            <ShieldOff v-else-if="technicalState === 'FALSE_POSITIVE'" :size="9" />
+            <ShieldCheck v-else-if="technicalState === 'NOT_AFFECTED' || technicalState === 'RESOLVED'" :size="9" />
+            <span v-else class="block h-2 w-2 rounded-full bg-slate-400/70"></span>
+          </span>
           {{ analysisStateLabel }}
         </span>
       </div>
     </div>
 
-    <!-- Column 4: Status chips (icon-only) -->
+    <!-- Column 5: Status chips (icon-only) -->
     <div class="flex min-w-0 flex-wrap items-start gap-1 self-start overflow-hidden" data-testid="status-chips">
       <span
         :class="['inline-flex h-5 w-5 items-center justify-center rounded border shrink-0', codeAnalysisBadgeClass]"
@@ -287,8 +286,8 @@ const codeAnalysisTooltip = computed(() => {
       </span>
     </div>
 
-    <!-- Column 4: Chevron + approve button -->
-    <div class="mt-0.5 flex shrink-0 self-stretch flex-col items-end justify-between">
+    <!-- Column 6: Chevron + approve button -->
+    <div class="mt-0.5 flex w-6 shrink-0 self-stretch flex-col items-end justify-between" data-testid="header-actions-column">
       <component :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0" />
         <button v-if="canApprove" @click.stop="emit('approve-assessment', $event)"
           class="inline-flex h-6 w-6 items-center justify-center rounded border border-green-500/30 bg-green-600/20 text-green-400 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer"

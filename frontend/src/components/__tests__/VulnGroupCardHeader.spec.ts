@@ -92,19 +92,50 @@ describe('VulnGroupCardHeader', () => {
         const grid = wrapper.get('[data-testid="header-grid"]')
         expect(grid.classes()).toContain('grid')
         expect(grid.classes()).toContain('items-start')
+        expect(grid.attributes('style')).toContain('grid-template-columns: 12rem minmax(12rem, 1fr) 8rem 8rem auto 1.5rem')
 
         const scoreBlock = wrapper.get('[data-testid="header-cvss-block"]')
         expect(scoreBlock.classes()).toContain('items-start')
     })
 
-    it('separates lifecycle and status chips into distinct grid columns', () => {
+    it('splits lifecycle and assessment into separate left-aligned columns', () => {
         const wrapper = mountHeader()
 
-        const statusRail = wrapper.get('[data-testid="status-rail"]')
+        const lifecycleColumn = wrapper.get('[data-testid="lifecycle-column"]')
+        const analysisColumn = wrapper.get('[data-testid="analysis-column"]')
         const statusChips = wrapper.get('[data-testid="status-chips"]')
 
-        expect(wrapper.get('[data-testid="lifecycle-badge"]').element.parentElement?.className).toContain('w-[13rem]')
+        expect(lifecycleColumn.classes()).toContain('flex-col')
+        expect(lifecycleColumn.classes()).toContain('items-start')
+        expect(analysisColumn.classes()).toContain('flex-col')
+        expect(analysisColumn.classes()).toContain('items-start')
         expect(statusChips.classes()).toContain('flex-wrap')
+    })
+
+    it('shows a placeholder analysis chip for open lifecycle rows', () => {
+        const wrapper = mountHeader({ technicalState: 'NOT_SET', displayState: 'OPEN' })
+
+        expect(wrapper.get('[data-testid="analysis-state-badge"]').text()).toContain('Not Set')
+        expect(wrapper.get('[data-testid="analysis-state-icon-slot"]').classes()).toContain('w-[9px]')
+
+        const lifecycleColumnClassName = wrapper.get('[data-testid="lifecycle-column"]').attributes('class')
+        const analysisColumnClassName = wrapper.get('[data-testid="analysis-column"]').attributes('class')
+        expect(lifecycleColumnClassName).toContain('items-start')
+        expect(lifecycleColumnClassName).toContain('text-left')
+        expect(analysisColumnClassName).toContain('items-start')
+        expect(analysisColumnClassName).toContain('text-left')
+    })
+
+    it('renders lifecycle and analysis as separate rounded chips', () => {
+        const wrapper = mountHeader()
+
+        expect(wrapper.get('[data-testid="lifecycle-column-inner"]').classes()).toContain('flex-wrap')
+        expect(wrapper.get('[data-testid="analysis-column-inner"]').classes()).toContain('flex-wrap')
+        expect(wrapper.get('[data-testid="lifecycle-badge"]').classes()).toContain('rounded')
+        expect(wrapper.get('[data-testid="lifecycle-badge"]').classes()).not.toContain('rounded-l')
+        expect(wrapper.get('[data-testid="analysis-state-badge"]').classes()).toContain('rounded')
+        expect(wrapper.get('[data-testid="analysis-state-badge"]').classes()).not.toContain('rounded-r')
+        expect(wrapper.get('[data-testid="analysis-state-icon-slot"]').classes()).toContain('w-[9px]')
     })
 
     it('renders icon-only status chips', () => {

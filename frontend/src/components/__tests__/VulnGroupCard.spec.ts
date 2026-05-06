@@ -170,12 +170,15 @@ describe('VulnGroupCard', () => {
         expect(scoreBlock.classes()).toContain('items-start')
     })
 
-    it('separates lifecycle and status chips into distinct grid columns', () => {
+    it('splits lifecycle and assessment into separate left-aligned columns', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
         })
 
-        expect(wrapper.get('[data-testid="lifecycle-badge"]').element.parentElement?.className).toContain('w-[13rem]')
+        expect(wrapper.get('[data-testid="lifecycle-column"]').classes()).toContain('flex-col')
+        expect(wrapper.get('[data-testid="lifecycle-column"]').classes()).toContain('items-start')
+        expect(wrapper.get('[data-testid="analysis-column"]').classes()).toContain('flex-col')
+        expect(wrapper.get('[data-testid="analysis-column"]').classes()).toContain('items-start')
         expect(wrapper.get('[data-testid="status-chips"]').classes()).toContain('flex-wrap')
     })
 

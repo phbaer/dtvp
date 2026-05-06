@@ -5,7 +5,6 @@ import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMR
 import { getGroupLifecycle, tagToString, hasCvssVersionMismatch, normalizeTags } from '../lib/assessment-helpers'
 import { classifyGroup, computeFilterCounts, computeTeamCounts, matchesFilters, getGroupTechnicalState } from '../lib/group-classifier'
 import { calculateScoreFromVector } from '../lib/cvss'
-import { useCacheStatus } from '../lib/useCacheStatus'
 import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
 import { getGroupCodeAnalysisStatus, hasCodeAnalysisAvailable as hasStoredCodeAnalysisAvailable, isCodeAnalysisUsedInAssessment } from '../lib/codeAnalysisStatus'
 import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
@@ -34,14 +33,6 @@ const stats = ref<Statistics | null>(null)
 const statsLoading = ref(false)
 const statsError = ref('')
 const statsDirty = ref(false)
-const {
-    cacheStatus,
-    cacheStatusText,
-    cacheStatusState,
-    cacheStatusLabel,
-    cacheStatusAge,
-    refreshCacheStatus: fetchCacheStatus,
-} = useCacheStatus()
 
 const teamMapping = ref<Record<string, string | string[]>>({})
 provide('teamMapping', teamMapping)
@@ -195,7 +186,6 @@ const fetchVulns = async () => {
         })
 
         groups.value = await processFetchedGroups(rawData)
-        await fetchCacheStatus()
     } catch (err: any) {
         error.value = 'Failed to load vulnerabilities: ' + (err.message || err)
         console.error(err)
@@ -1066,11 +1056,6 @@ watch(() => user?.role, (role) => {
                 :codeAnalysisCounts="codeAnalysisCounts"
                 :analysisCounts="analysisCounts"
                 :teamTagList="teamTagList"
-                :cacheStatusState="cacheStatusState"
-                :cacheStatusLabel="cacheStatusLabel"
-                :cacheStatusAge="cacheStatusAge"
-                :cacheStatusTooltip="cacheStatusText"
-                :cacheStatusDetail="cacheStatus"
                 :sortOptions="SORT_OPTIONS"
                 :dependencyOptions="DEPENDENCY_OPTIONS"
                 :tmrescoreOptions="TMRESCORE_FILTER_OPTIONS"

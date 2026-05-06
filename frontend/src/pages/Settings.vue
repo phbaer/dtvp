@@ -394,6 +394,10 @@ watch(() => activeTab.value, (newTab) => {
                         <dd class="font-semibold text-gray-200">{{ cacheStatus.cached_findings }}</dd>
                     </div>
                     <div>
+                        <dt class="text-gray-500">Cached BOMs</dt>
+                        <dd class="font-semibold text-gray-200">{{ cacheStatus.cached_boms }}</dd>
+                    </div>
+                    <div>
                         <dt class="text-gray-500">Cached Analyses</dt>
                         <dd class="font-semibold text-gray-200">{{ cacheStatus.cached_analyses }}</dd>
                     </div>

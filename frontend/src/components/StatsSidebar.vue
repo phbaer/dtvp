@@ -2,7 +2,6 @@
 import { ref, computed } from 'vue'
 import { LayoutList, Copy } from 'lucide-vue-next'
 import CustomSelect from './CustomSelect.vue'
-import type { CacheStatus } from '../types'
 
 export interface TeamEntry {
     team: string
@@ -54,11 +53,6 @@ const props = defineProps<{
     codeAnalysisCounts: Record<'available' | 'used', number>
     analysisCounts: Record<string, number>
     teamTagList: TeamEntry[]
-    cacheStatusState: 'cached' | 'partial' | 'unknown' | 'loading'
-    cacheStatusLabel: string
-    cacheStatusAge: string
-    cacheStatusTooltip: string
-    cacheStatusDetail: CacheStatus | null
     sortOptions: ReadonlyArray<{ value: string; label: string }>
     dependencyOptions: ReadonlyArray<{ value: string; label: string }>
     tmrescoreOptions: ReadonlyArray<{ value: string; label: string }>
@@ -557,59 +551,7 @@ const handleCopy = () => {
                         </div>
                     </div>
 
-                    <div
-                        class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-4 backdrop-blur-sm"
-                        :title="props.cacheStatusTooltip"
-                    >
-                        <div class="text-[10px] font-medium uppercase tracking-widest text-gray-500 mb-2">Cache Status</div>
-                        <div
-                            class="flex items-center gap-3 px-3 py-1.5 rounded-lg border"
-                            :class="[
-                                props.cacheStatusState === 'cached' ? 'bg-emerald-500/10 border-emerald-300/20 text-emerald-200' :
-                                props.cacheStatusState === 'partial' ? 'bg-amber-500/10 border-amber-300/20 text-amber-200' :
-                                props.cacheStatusState === 'loading' ? 'bg-sky-500/10 border-sky-300/20 text-sky-200' :
-                                'bg-gray-500/10 border-white/10 text-gray-300'
-                            ]"
-                        >
-                            <span :class="[
-                                'inline-flex h-2.5 w-2.5 rounded-full',
-                                props.cacheStatusState === 'cached' ? 'bg-emerald-400' :
-                                props.cacheStatusState === 'partial' ? 'bg-amber-400' :
-                                props.cacheStatusState === 'loading' ? 'bg-sky-400' :
-                                'bg-slate-400'
-                            ]"></span>
-                            <div class="flex flex-col gap-0.5 truncate">
-                                <span class="text-[10px] font-black uppercase tracking-widest truncate">{{ props.cacheStatusLabel }}</span>
-                                <span class="text-[10px] text-gray-400 truncate">{{ props.cacheStatusAge }}</span>
-                            </div>
-                        </div>
-                        <div v-if="props.cacheStatusDetail" class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[10px]">
-                            <div class="flex justify-between">
-                                <span class="text-gray-500">Projects</span>
-                                <span class="text-gray-300 font-medium tabular-nums">{{ props.cacheStatusDetail.projects }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-500">Active</span>
-                                <span class="text-gray-300 font-medium tabular-nums">{{ props.cacheStatusDetail.active_projects }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-500">Findings</span>
-                                <span class="text-gray-300 font-medium tabular-nums">{{ props.cacheStatusDetail.cached_findings }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-500">BOMs</span>
-                                <span class="text-gray-300 font-medium tabular-nums">{{ props.cacheStatusDetail.cached_boms }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-500">Analyses</span>
-                                <span class="text-gray-300 font-medium tabular-nums">{{ props.cacheStatusDetail.cached_analyses }}</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-500">Pending</span>
-                                <span :class="['font-medium tabular-nums', props.cacheStatusDetail.pending_updates > 0 ? 'text-amber-300' : 'text-gray-300']">{{ props.cacheStatusDetail.pending_updates }}</span>
-                            </div>
-                        </div>
-                    </div>
+
                 </div>
             </div>
         </div>
