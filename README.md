@@ -360,7 +360,7 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_TMRESCORE_TASK_TTL_SECONDS` | How long completed or failed tmrescore analysis tasks stay in DTVP memory for `/progress` polling | `3600` |
 | `DTVP_CODE_ANALYSIS_URL` | Base URL of the external or mock code analysis service | unset |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | HTTP timeout for code analysis API calls | `300` |
-| `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
+| `DTVP_OIDC_AUTHORITY` | OIDC authority URL. A full discovery URL is also accepted. `AUTH_OIDC_ISSUER` is supported as an alias. | unset |
 
 ### External Integration API Specs
 

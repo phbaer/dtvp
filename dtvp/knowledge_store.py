@@ -153,8 +153,18 @@ def assessment_triplet_key(
 
 class KnowledgeStore:
     def __init__(self, base_path: Optional[str] = None):
-        self.base_path = base_path or get_knowledge_store_path()
+        self._base_path = base_path or get_knowledge_store_path()
         self._lock = RLock()
+        self._cached_state: Optional[Dict[str, Any]] = None
+
+    @property
+    def base_path(self) -> str:
+        return self._base_path
+
+    @base_path.setter
+    def base_path(self, value: str) -> None:
+        self._base_path = value
+        self._cached_state = None
 
     def _store_path(self) -> str:
         return os.path.join(self.base_path, "knowledge_store.json")
@@ -168,9 +178,11 @@ class KnowledgeStore:
         }
 
     def _load_state(self) -> Dict[str, Any]:
+        if self._cached_state is not None:
+            return self._cached_state
         state = _read_json(self._store_path(), self._empty_state())
         if not isinstance(state, dict):
-            return self._empty_state()
+            state = self._empty_state()
         merged = self._empty_state()
         merged.update(state)
         if not isinstance(merged.get("assessments"), dict):
@@ -184,9 +196,11 @@ class KnowledgeStore:
             "items": queue_state.get("items") or {},
             "order": queue_state.get("order") or [],
         }
+        self._cached_state = merged
         return merged
 
     def _save_state(self, state: Dict[str, Any]) -> None:
+        self._cached_state = state
         _atomic_write(self._store_path(), state)
 
     def get_status(self) -> Dict[str, Any]:

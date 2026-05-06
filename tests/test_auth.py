@@ -1,7 +1,10 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import pytest
 from fastapi import HTTPException
 from jose import jwt
+
 from dtvp.auth import auth_settings, get_oidc_config
 from dtvp.main import app, get_current_user
 
@@ -125,6 +128,25 @@ def test_redirect_uri_calculation():
     assert settings.redirect_uri == "http://custom/callback"
 
 
+def test_oidc_discovery_url_calculation():
+    from dtvp.auth import AuthSettings
+
+    settings = AuthSettings(DTVP_OIDC_AUTHORITY="https://issuer.example.com")
+    assert (
+        settings.oidc_discovery_url
+        == "https://issuer.example.com/.well-known/openid-configuration"
+    )
+
+    settings = AuthSettings(
+        DTVP_OIDC_AUTHORITY=None,
+        AUTH_OIDC_ISSUER="https://issuer.example.com/fss/.well-known/openid-configuration"
+    )
+    assert (
+        settings.oidc_discovery_url
+        == "https://issuer.example.com/fss/.well-known/openid-configuration"
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_oidc_config_no_authority():
     from dtvp import auth
@@ -136,6 +158,65 @@ async def test_get_oidc_config_no_authority():
             await get_oidc_config()
         assert exc.value.status_code == 500
         assert exc.value.detail == "OIDC Authority not configured"
+
+
+@pytest.mark.asyncio
+async def test_get_oidc_config_timeout_returns_502(respx_mock):
+    from dtvp import auth
+
+    mock_authority = "https://auth.example.com"
+    config_url = f"{mock_authority}/.well-known/openid-configuration"
+    auth._oidc_config_cache = None
+    respx_mock.get(config_url).mock(side_effect=httpx.ReadTimeout("timed out"))
+
+    with patch.object(auth_settings, "OIDC_AUTHORITY", mock_authority):
+        with pytest.raises(HTTPException) as exc:
+            await get_oidc_config()
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "OIDC provider discovery timed out"
+
+
+@pytest.mark.asyncio
+async def test_get_oidc_config_request_error_returns_502(respx_mock):
+    from dtvp import auth
+
+    mock_authority = "https://auth.example.com"
+    config_url = f"{mock_authority}/.well-known/openid-configuration"
+    auth._oidc_config_cache = None
+    respx_mock.get(config_url).mock(
+        side_effect=httpx.ConnectError("connect failed")
+    )
+
+    with patch.object(auth_settings, "OIDC_AUTHORITY", mock_authority):
+        with pytest.raises(HTTPException) as exc:
+            await get_oidc_config()
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "OIDC provider is unavailable"
+
+
+@pytest.mark.asyncio
+async def test_get_oidc_config_uses_full_discovery_url_from_auth_oidc_issuer(
+    respx_mock,
+):
+    from dtvp import auth
+
+    discovery_url = "https://issuer.example.com/fss/.well-known/openid-configuration"
+    auth._oidc_config_cache = None
+    respx_mock.get(discovery_url).respond(
+        json={
+            "authorization_endpoint": "https://issuer.example.com/login",
+            "token_endpoint": "https://issuer.example.com/token",
+        }
+    )
+
+    with patch.object(auth_settings, "OIDC_AUTHORITY", None), patch.object(
+        auth_settings, "AUTH_OIDC_ISSUER", discovery_url
+    ):
+        config = await get_oidc_config()
+
+    assert config["authorization_endpoint"] == "https://issuer.example.com/login"
 
 
 @pytest.mark.asyncio

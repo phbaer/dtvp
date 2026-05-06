@@ -841,11 +841,13 @@ class CacheManager:
                 analysis = self._load_project_cache(
                     self._analysis_path(project_uuid, comp_uuid, vuln_uuid), None
                 )
+                from_store = False
                 if analysis is None:
                     analysis = knowledge_store.get_assessment_for_finding(
                         component=component,
                         vulnerability=vulnerability,
                     )
+                    from_store = analysis is not None
                 if analysis is None:
                     for pending_update in pending:
                         payload = pending_update.get("payload", {})
@@ -861,18 +863,19 @@ class CacheManager:
                             }
                             break
                 if analysis is not None:
-                    self._persist_analysis_to_knowledge_store(
-                        {
-                            "project_uuid": project_uuid,
-                            "component_uuid": comp_uuid,
-                            "vulnerability_uuid": vuln_uuid,
-                            "state": _get_analysis_state(analysis),
-                            "details": _get_analysis_details(analysis),
-                            "suppressed": _get_analysis_suppressed(analysis),
-                        },
-                        component=component,
-                        vulnerability=vulnerability,
-                    )
+                    if not from_store and _get_analysis_details(analysis):
+                        self._persist_analysis_to_knowledge_store(
+                            {
+                                "project_uuid": project_uuid,
+                                "component_uuid": comp_uuid,
+                                "vulnerability_uuid": vuln_uuid,
+                                "state": _get_analysis_state(analysis),
+                                "details": _get_analysis_details(analysis),
+                                "suppressed": _get_analysis_suppressed(analysis),
+                            },
+                            component=component,
+                            vulnerability=vulnerability,
+                        )
                     finding["analysis"] = analysis
         return findings
 

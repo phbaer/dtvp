@@ -1,14 +1,16 @@
-from typing import Optional, AsyncGenerator
 import logging
 import uuid
-from fastapi import APIRouter, HTTPException, Request, Response, Depends
+from typing import AsyncGenerator, Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from jose import jwt
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import httpx
-from jose import jwt
+
+from .dt_client import DTClient, get_client
 from .logic import get_user_role
-from .dt_client import get_client, DTClient
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,7 @@ class AuthSettings(BaseSettings):
         alias="DTVP_OIDC_CLIENT_SECRET", default=None
     )
     OIDC_AUTHORITY: Optional[str] = Field(alias="DTVP_OIDC_AUTHORITY", default=None)
+    AUTH_OIDC_ISSUER: Optional[str] = Field(default=None)
     OIDC_REDIRECT_URI: Optional[str] = Field(
         alias="DTVP_OIDC_REDIRECT_URI", default=None
     )
@@ -35,6 +38,9 @@ class AuthSettings(BaseSettings):
     CLIENT_ID: Optional[str] = Field(default=None)
     # Development settings
     DEV_DISABLE_AUTH: bool = Field(alias="DTVP_DEV_DISABLE_AUTH", default=False)
+    OIDC_REQUEST_TIMEOUT_SECONDS: float = Field(
+        alias="DTVP_OIDC_REQUEST_TIMEOUT_SECONDS", default=5.0
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -42,8 +48,15 @@ class AuthSettings(BaseSettings):
 
     @property
     def authority(self) -> str:
-        # Priority: DTVP_OIDC_AUTHORITY > ISSUER_URL > default None
-        return self.OIDC_AUTHORITY or self.ISSUER_URL or ""
+        # Priority: DTVP_OIDC_AUTHORITY > AUTH_OIDC_ISSUER > ISSUER_URL > default None
+        return self.OIDC_AUTHORITY or self.AUTH_OIDC_ISSUER or self.ISSUER_URL or ""
+
+    @property
+    def oidc_discovery_url(self) -> str:
+        authority = self.authority.strip()
+        if authority.endswith("/.well-known/openid-configuration"):
+            return authority
+        return f"{authority.rstrip('/')}/.well-known/openid-configuration" if authority else ""
 
     @property
     def client_id(self) -> str:
@@ -83,14 +96,42 @@ async def get_oidc_config():
 
     authority = auth_settings.authority
     if not authority:
+        logger.warning(
+            "OIDC login requested but no authority is configured. Checked DTVP_OIDC_AUTHORITY, AUTH_OIDC_ISSUER, and ISSUER_URL."
+        )
         raise HTTPException(status_code=500, detail="OIDC Authority not configured")
 
-    config_url = f"{authority.rstrip('/')}/.well-known/openid-configuration"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(config_url)
-        resp.raise_for_status()
-        _oidc_config_cache = resp.json()
-        return _oidc_config_cache
+    config_url = auth_settings.oidc_discovery_url
+    timeout = httpx.Timeout(auth_settings.OIDC_REQUEST_TIMEOUT_SECONDS)
+    try:
+        logger.info("Fetching OIDC discovery document from %s", config_url)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(config_url)
+            resp.raise_for_status()
+            _oidc_config_cache = resp.json()
+            return _oidc_config_cache
+    except httpx.TimeoutException as exc:
+        logger.warning("OIDC discovery timed out for %s", config_url)
+        raise HTTPException(
+            status_code=502,
+            detail="OIDC provider discovery timed out",
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "OIDC discovery failed for %s with status %s",
+            config_url,
+            exc.response.status_code,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="OIDC provider discovery failed",
+        ) from exc
+    except httpx.RequestError as exc:
+        logger.warning("OIDC discovery request failed for %s: %s", config_url, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="OIDC provider is unavailable",
+        ) from exc
 
 
 @router.get("/login")
