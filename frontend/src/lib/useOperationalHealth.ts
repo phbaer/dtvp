@@ -7,6 +7,7 @@ interface WarningSummary {
     target: string
     text: string
     severity: 'ok' | 'warning' | 'critical'
+    remediation: string
 }
 
 const severityOrder: Record<WarningSummary['severity'], number> = {
@@ -70,6 +71,7 @@ const warningSummaries = computed<WarningSummary[]>(() => {
                 target: warningTargets[typedKey],
                 text: buildWarningSummary(typedKey, typedCheck),
                 severity: typedCheck.severity,
+                remediation: typedCheck.remediation ?? '',
             }
         })
         .sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity])

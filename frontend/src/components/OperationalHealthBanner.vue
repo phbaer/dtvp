@@ -63,10 +63,13 @@ const {
                             :key="warning.key"
                             :to="{ path: '/settings', hash: warning.target }"
                             :data-warning-target="warning.target"
-                            class="rounded-full border bg-slate-950/40 px-3 py-1.5 text-xs transition-colors hover:bg-slate-950/60"
+                            class="block rounded-xl border bg-slate-950/40 px-3 py-2 text-xs transition-colors hover:bg-slate-950/60"
                             :class="overallSeverity === 'critical' ? 'border-red-400/30 text-red-100' : 'border-amber-400/30 text-amber-100'"
                         >
-                            {{ warning.text }}
+                            <span class="block">{{ warning.text }}</span>
+                            <span v-if="warning.remediation" :class="['mt-1 block text-[11px]', overallSeverity === 'critical' ? 'text-red-100/75' : 'text-amber-100/75']">
+                                Action: {{ warning.remediation }}
+                            </span>
                         </router-link>
                     </div>
                 </div>

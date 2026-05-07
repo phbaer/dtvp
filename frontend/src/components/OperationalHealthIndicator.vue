@@ -100,7 +100,10 @@ const indicatorIcon = computed(() => {
                         :data-warning-target="warning.target"
                         class="pointer-events-auto block rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-2 leading-relaxed transition-colors hover:border-amber-400/30 hover:bg-amber-500/10"
                     >
-                        {{ warning.text }}
+                        <span class="block">{{ warning.text }}</span>
+                        <span v-if="warning.remediation" class="mt-1 block text-[11px] text-gray-400">
+                            Action: {{ warning.remediation }}
+                        </span>
                     </router-link>
                 </li>
             </ul>

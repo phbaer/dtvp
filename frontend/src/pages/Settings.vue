@@ -51,6 +51,7 @@ const healthChecks = computed(() => {
             threshold: `warn at ${checks.pending_updates_backlog.count_threshold ?? 0} items or ${formatAge(checks.pending_updates_backlog.age_threshold_seconds)}`,
             status: checks.pending_updates_backlog.status,
             severity: checks.pending_updates_backlog.severity,
+            remediation: checks.pending_updates_backlog.remediation ?? '',
         },
         {
             key: 'knowledge_store_write_backlog',
@@ -59,6 +60,7 @@ const healthChecks = computed(() => {
             threshold: `warn at ${checks.knowledge_store_write_backlog.count_threshold ?? 0} items or ${formatAge(checks.knowledge_store_write_backlog.age_threshold_seconds)}`,
             status: checks.knowledge_store_write_backlog.status,
             severity: checks.knowledge_store_write_backlog.severity,
+            remediation: checks.knowledge_store_write_backlog.remediation ?? '',
         },
         {
             key: 'knowledge_store_orphans',
@@ -67,6 +69,7 @@ const healthChecks = computed(() => {
             threshold: `warn at ${checks.knowledge_store_orphans.count_threshold ?? 0} records`,
             status: checks.knowledge_store_orphans.status,
             severity: checks.knowledge_store_orphans.severity,
+            remediation: checks.knowledge_store_orphans.remediation ?? '',
         },
         {
             key: 'knowledge_store_maintenance_freshness',
@@ -77,6 +80,7 @@ const healthChecks = computed(() => {
             threshold: `warn after ${formatAge(checks.knowledge_store_maintenance_freshness.age_threshold_seconds)}`,
             status: checks.knowledge_store_maintenance_freshness.status,
             severity: checks.knowledge_store_maintenance_freshness.severity,
+            remediation: checks.knowledge_store_maintenance_freshness.remediation ?? '',
         },
     ].sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity])
 })
@@ -568,6 +572,7 @@ watch(() => activeTab.value, (newTab) => {
                     </div>
                     <p class="mt-3 text-sm text-gray-200">{{ check.detail }}</p>
                     <p class="mt-2 text-[11px] text-gray-500">{{ check.threshold }}</p>
+                    <p v-if="check.remediation" class="mt-2 text-[11px] text-gray-400">Action: {{ check.remediation }}</p>
                 </div>
             </div>
         </div>

@@ -65,6 +65,7 @@ def _build_backlog_check(
     oldest_age_seconds: Any,
     count_threshold: int,
     age_threshold_seconds: int,
+    remediation: str,
 ) -> dict[str, Any]:
     backlog_count = int(count or 0)
     backlog_age = None if oldest_age_seconds is None else float(oldest_age_seconds)
@@ -86,6 +87,7 @@ def _build_backlog_check(
         "name": name,
         "status": "warning" if is_warning else "ok",
         "severity": "critical" if is_critical else ("warning" if is_warning else "ok"),
+        "remediation": remediation,
         "count": backlog_count,
         "count_threshold": count_threshold,
         "oldest_age_seconds": backlog_age,
@@ -98,6 +100,7 @@ def _build_threshold_check(
     name: str,
     count: int,
     count_threshold: int,
+    remediation: str,
 ) -> dict[str, Any]:
     is_warning = count >= count_threshold
     is_critical = is_warning and count_threshold > 0 and count >= count_threshold * 3
@@ -105,6 +108,7 @@ def _build_threshold_check(
         "name": name,
         "status": "warning" if is_warning else "ok",
         "severity": "critical" if is_critical else ("warning" if is_warning else "ok"),
+        "remediation": remediation,
         "count": count,
         "count_threshold": count_threshold,
     }
@@ -115,6 +119,7 @@ def _build_maintenance_freshness_check(
     last_maintenance_at: str | None,
     age_seconds: float | None,
     age_threshold_seconds: int,
+    remediation: str,
 ) -> dict[str, Any]:
     is_warning = age_seconds is None or age_seconds >= age_threshold_seconds
     is_critical = age_seconds is None or (
@@ -126,6 +131,7 @@ def _build_maintenance_freshness_check(
         "name": "knowledge_store_maintenance_freshness",
         "status": "warning" if is_warning else "ok",
         "severity": "critical" if is_critical else ("warning" if is_warning else "ok"),
+        "remediation": remediation,
         "last_maintenance_at": last_maintenance_at,
         "age_seconds": age_seconds,
         "age_threshold_seconds": age_threshold_seconds,
@@ -156,6 +162,7 @@ def build_operational_health_summary(
             oldest_age_seconds=cache_status.get("pending_updates_oldest_age_seconds"),
             count_threshold=get_pending_update_warning_threshold(),
             age_threshold_seconds=get_pending_update_warning_age_seconds(),
+            remediation="Let the pending Dependency-Track updates drain, or reduce incoming churn if the backlog keeps growing.",
         ),
         "knowledge_store_write_backlog": _build_backlog_check(
             name="knowledge_store_write_backlog",
@@ -165,16 +172,19 @@ def build_operational_health_summary(
             ),
             count_threshold=get_knowledge_store_write_queue_warning_threshold(),
             age_threshold_seconds=get_knowledge_store_write_queue_warning_age_seconds(),
+            remediation="Check the knowledge-store writer and local disk health, then allow queued writes to flush.",
         ),
         "knowledge_store_orphans": _build_threshold_check(
             name="knowledge_store_orphans",
             count=orphaned_assessment_records,
             count_threshold=orphan_threshold,
+            remediation="Run knowledge-store maintenance and verify active project synchronization removed stale retained assessments.",
         ),
         "knowledge_store_maintenance_freshness": _build_maintenance_freshness_check(
             last_maintenance_at=last_maintenance_at,
             age_seconds=maintenance_age_seconds,
             age_threshold_seconds=maintenance_threshold,
+            remediation="Run knowledge-store maintenance and confirm the maintenance loop can complete successfully.",
         ),
     }
     overall_status = (

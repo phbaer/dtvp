@@ -61,6 +61,9 @@ SBOM strategy matters here:
 - The recommended production setting is `DTVP_KNOWLEDGE_STORE_BACKEND=sqlite`.
 - By default, DTVP enforces a single-instance startup lock at `data/dtvp.instance.lock`. Override this with `DTVP_SINGLE_INSTANCE_LOCK_PATH` or disable enforcement with `DTVP_ENFORCE_SINGLE_INSTANCE=false` only if you understand the coordination risks.
 - For lightweight operational checks, use `/api/operational-health` for a derived summary of cache backlog, knowledge-store write backlog, orphan accumulation, and maintenance freshness. The raw metrics remain available at `/api/cache-status` and `/api/knowledge-store-status`.
+- `/api/operational-health` returns top-level `status`, `severity`, and `checked_at` fields plus a `checks` object keyed by check name.
+- Each check includes `name`, `status`, `severity`, and `remediation`. Depending on the check type it also includes threshold and live metric fields such as `count`, `count_threshold`, `oldest_age_seconds`, `age_seconds`, `age_threshold_seconds`, and `last_maintenance_at`.
+- External consumers can treat `remediation` as stable operator guidance for what to do next when a warning is active, instead of inferring actions from the check name alone.
 
 ## Prerequisites
 

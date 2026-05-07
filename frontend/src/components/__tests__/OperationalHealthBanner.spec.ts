@@ -35,12 +35,13 @@ describe('OperationalHealthBanner', () => {
                         name: 'pending_updates_backlog',
                         status: 'warning',
                         severity: 'critical',
+                        remediation: 'Let the pending Dependency-Track updates drain.',
                         count: 3,
                         oldest_age_seconds: 412,
                     },
-                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
-                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'warning', severity: 'warning', count: 1 },
-                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
+                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'warning', severity: 'warning', remediation: 'Run maintenance.', count: 1 },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
                 },
             } as any)
             .mockResolvedValueOnce({
@@ -52,12 +53,13 @@ describe('OperationalHealthBanner', () => {
                         name: 'pending_updates_backlog',
                         status: 'warning',
                         severity: 'critical',
+                        remediation: 'Let the pending Dependency-Track updates drain.',
                         count: 3,
                         oldest_age_seconds: 430,
                     },
-                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
-                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'warning', severity: 'warning', count: 1 },
-                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
+                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'warning', severity: 'warning', remediation: 'Run maintenance.', count: 1 },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
                 },
             } as any)
 
@@ -83,6 +85,7 @@ describe('OperationalHealthBanner', () => {
         expect(banner.text()).toContain('2 active')
         expect(banner.text()).toContain('1 critical')
         expect(banner.text()).toContain('checked 1m ago')
+        expect(banner.text()).toContain('Action: Let the pending Dependency-Track updates drain.')
         expect(banner.classes()).toContain('bg-red-500/10')
         const links = wrapper.findAll('[data-warning-target]')
         expect(links).toHaveLength(2)
@@ -103,17 +106,19 @@ describe('OperationalHealthBanner', () => {
                         name: 'pending_updates_backlog',
                         status: 'warning',
                         severity: 'warning',
+                        remediation: 'Let the pending Dependency-Track updates drain.',
                         count: 3,
                         oldest_age_seconds: 412,
                     },
-                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
                     knowledge_store_orphans: {
                         name: 'knowledge_store_orphans',
                         status: 'warning',
                         severity: 'critical',
+                        remediation: 'Run maintenance.',
                         count: 1,
                     },
-                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
                 },
             } as any)
             .mockResolvedValueOnce({
@@ -125,17 +130,19 @@ describe('OperationalHealthBanner', () => {
                         name: 'pending_updates_backlog',
                         status: 'warning',
                         severity: 'warning',
+                        remediation: 'Let the pending Dependency-Track updates drain.',
                         count: 3,
                         oldest_age_seconds: 430,
                     },
-                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
                     knowledge_store_orphans: {
                         name: 'knowledge_store_orphans',
                         status: 'warning',
                         severity: 'critical',
+                        remediation: 'Run maintenance.',
                         count: 1,
                     },
-                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
                 },
             } as any)
 
@@ -168,10 +175,10 @@ describe('OperationalHealthBanner', () => {
                 severity: 'warning',
                 checked_at: '2026-05-07T10:05:00+00:00',
                 checks: {
-                    pending_updates_backlog: { name: 'pending_updates_backlog', status: 'warning', severity: 'warning', count: 1, oldest_age_seconds: 61 },
-                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
-                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'ok', severity: 'ok' },
-                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                    pending_updates_backlog: { name: 'pending_updates_backlog', status: 'warning', severity: 'warning', remediation: 'Let the pending Dependency-Track updates drain.', count: 1, oldest_age_seconds: 61 },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
+                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
                 },
             } as any)
             .mockResolvedValueOnce({
@@ -179,10 +186,10 @@ describe('OperationalHealthBanner', () => {
                 severity: 'warning',
                 checked_at: '2026-05-07T10:05:30+00:00',
                 checks: {
-                    pending_updates_backlog: { name: 'pending_updates_backlog', status: 'warning', severity: 'warning', count: 1, oldest_age_seconds: 91 },
-                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
-                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'ok', severity: 'ok' },
-                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                    pending_updates_backlog: { name: 'pending_updates_backlog', status: 'warning', severity: 'warning', remediation: 'Let the pending Dependency-Track updates drain.', count: 1, oldest_age_seconds: 91 },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
+                    knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
                 },
             } as any)
 

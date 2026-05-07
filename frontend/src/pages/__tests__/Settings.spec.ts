@@ -58,6 +58,7 @@ describe('Settings.vue', () => {
                     name: 'pending_updates_backlog',
                     status: 'warning',
                     severity: 'warning',
+                    remediation: 'Let the pending Dependency-Track updates drain.',
                     count: 1,
                     count_threshold: 1,
                     oldest_age_seconds: 45,
@@ -67,6 +68,7 @@ describe('Settings.vue', () => {
                     name: 'knowledge_store_write_backlog',
                     status: 'ok',
                     severity: 'ok',
+                    remediation: 'Check the writer.',
                     count: 2,
                     count_threshold: 100,
                     oldest_age_seconds: 15,
@@ -76,6 +78,7 @@ describe('Settings.vue', () => {
                     name: 'knowledge_store_orphans',
                     status: 'warning',
                     severity: 'critical',
+                    remediation: 'Run maintenance.',
                     count: 1,
                     count_threshold: 1,
                 },
@@ -83,6 +86,7 @@ describe('Settings.vue', () => {
                     name: 'knowledge_store_maintenance_freshness',
                     status: 'ok',
                     severity: 'ok',
+                    remediation: 'Confirm maintenance can complete successfully.',
                     last_maintenance_at: '2026-05-07T10:00:00+00:00',
                     age_seconds: 300,
                     age_threshold_seconds: 7200,
@@ -135,6 +139,7 @@ describe('Settings.vue', () => {
         expect(wrapper.text()).toContain('Needs Attention')
         expect(wrapper.text()).toContain('critical')
         expect(wrapper.text()).toContain('Orphaned Assessments')
+        expect(wrapper.text()).toContain('Action: Run maintenance.')
     })
 
     it('loads and displays rescore rules in the editor', async () => {

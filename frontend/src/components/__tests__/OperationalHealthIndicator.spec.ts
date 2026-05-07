@@ -34,12 +34,13 @@ describe('OperationalHealthIndicator', () => {
                         name: 'pending_updates_backlog',
                         status: 'warning',
                         severity: 'critical',
+                        remediation: 'Let the pending Dependency-Track updates drain.',
                         count: 3,
                         oldest_age_seconds: 412,
                     },
-                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
-                knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'warning', severity: 'warning' },
-                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
+                knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'warning', severity: 'warning', remediation: 'Run maintenance.' },
+                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
             },
         } as any)
 
@@ -71,6 +72,7 @@ describe('OperationalHealthIndicator', () => {
         expect(panel.text()).toContain('Critical Warnings')
         expect(panel.text()).toContain('checked 1m ago')
         expect(panel.text()).toContain('Pending DT updates backlog: 3 queued, oldest 412s.')
+        expect(panel.text()).toContain('Action: Let the pending Dependency-Track updates drain.')
         expect(panel.text()).toContain('Orphaned retained assessments: 0 records detected.')
         const warningLinks = wrapper.findAll('[data-warning-target]')
         expect(warningLinks).toHaveLength(2)
@@ -92,17 +94,19 @@ describe('OperationalHealthIndicator', () => {
                     name: 'pending_updates_backlog',
                     status: 'warning',
                     severity: 'warning',
+                    remediation: 'Let the pending Dependency-Track updates drain.',
                     count: 3,
                     oldest_age_seconds: 412,
                 },
-                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
+                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
                 knowledge_store_orphans: {
                     name: 'knowledge_store_orphans',
                     status: 'warning',
                     severity: 'critical',
+                    remediation: 'Run maintenance.',
                     count: 2,
                 },
-                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
             },
         } as any)
 
@@ -153,10 +157,10 @@ describe('OperationalHealthIndicator', () => {
             severity: 'ok',
             checked_at: '2026-05-07T10:05:00+00:00',
             checks: {
-                pending_updates_backlog: { name: 'pending_updates_backlog', status: 'ok', severity: 'ok' },
-                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
-                knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'ok', severity: 'ok' },
-                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                pending_updates_backlog: { name: 'pending_updates_backlog', status: 'ok', severity: 'ok', remediation: 'Let the pending Dependency-Track updates drain.' },
+                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok', remediation: 'Check the writer.' },
+                knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
+                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok', remediation: 'Run maintenance.' },
             },
         } as any)
 

@@ -115,6 +115,7 @@ export interface OperationalHealthCheck {
     name: string;
     status: 'ok' | 'warning';
     severity: 'ok' | 'warning' | 'critical';
+    remediation?: string;
     count?: number;
     count_threshold?: number;
     oldest_age_seconds?: number | null;

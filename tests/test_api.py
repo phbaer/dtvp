@@ -120,9 +120,17 @@ def test_operational_health_endpoint_reports_warning_state(client):
     assert data["severity"] == "critical"
     assert data["checks"]["pending_updates_backlog"]["status"] == "warning"
     assert data["checks"]["pending_updates_backlog"]["severity"] == "warning"
+    assert (
+        data["checks"]["pending_updates_backlog"]["remediation"]
+        == "Let the pending Dependency-Track updates drain, or reduce incoming churn if the backlog keeps growing."
+    )
     assert data["checks"]["pending_updates_backlog"]["count"] == 2
     assert data["checks"]["knowledge_store_orphans"]["status"] == "warning"
     assert data["checks"]["knowledge_store_orphans"]["severity"] == "critical"
+    assert (
+        data["checks"]["knowledge_store_orphans"]["remediation"]
+        == "Run knowledge-store maintenance and verify active project synchronization removed stale retained assessments."
+    )
     assert data["checks"]["knowledge_store_orphans"]["count"] == 3
     assert (
         data["checks"]["knowledge_store_maintenance_freshness"]["status"] == "warning"
@@ -130,6 +138,10 @@ def test_operational_health_endpoint_reports_warning_state(client):
     assert (
         data["checks"]["knowledge_store_maintenance_freshness"]["severity"]
         == "critical"
+    )
+    assert (
+        data["checks"]["knowledge_store_maintenance_freshness"]["remediation"]
+        == "Run knowledge-store maintenance and confirm the maintenance loop can complete successfully."
     )
 
 
@@ -159,12 +171,16 @@ def test_operational_health_endpoint_reports_ok_state(client):
     assert data["severity"] == "ok"
     assert data["checks"]["pending_updates_backlog"]["status"] == "ok"
     assert data["checks"]["pending_updates_backlog"]["severity"] == "ok"
+    assert "remediation" in data["checks"]["pending_updates_backlog"]
     assert data["checks"]["knowledge_store_write_backlog"]["status"] == "ok"
     assert data["checks"]["knowledge_store_write_backlog"]["severity"] == "ok"
+    assert "remediation" in data["checks"]["knowledge_store_write_backlog"]
     assert data["checks"]["knowledge_store_orphans"]["status"] == "ok"
     assert data["checks"]["knowledge_store_orphans"]["severity"] == "ok"
+    assert "remediation" in data["checks"]["knowledge_store_orphans"]
     assert data["checks"]["knowledge_store_maintenance_freshness"]["status"] == "ok"
     assert data["checks"]["knowledge_store_maintenance_freshness"]["severity"] == "ok"
+    assert "remediation" in data["checks"]["knowledge_store_maintenance_freshness"]
 
 
 def test_operational_health_endpoint_reports_noncritical_warning_state(client):
