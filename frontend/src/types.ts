@@ -114,6 +114,7 @@ export interface KnowledgeStoreStatus {
 export interface OperationalHealthCheck {
     name: string;
     status: 'ok' | 'warning';
+    severity: 'ok' | 'warning' | 'critical';
     count?: number;
     count_threshold?: number;
     oldest_age_seconds?: number | null;
@@ -124,6 +125,7 @@ export interface OperationalHealthCheck {
 
 export interface OperationalHealthSummary {
     status: 'ok' | 'warning';
+    severity: 'ok' | 'warning' | 'critical';
     checked_at: string;
     checks: {
         pending_updates_backlog: OperationalHealthCheck;

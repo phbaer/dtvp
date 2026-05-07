@@ -51,11 +51,13 @@ describe('Settings.vue', () => {
         })
         vi.mocked(api.getOperationalHealth).mockResolvedValue({
             status: 'warning',
+            severity: 'critical',
             checked_at: '2026-05-07T10:05:00+00:00',
             checks: {
                 pending_updates_backlog: {
                     name: 'pending_updates_backlog',
                     status: 'warning',
+                    severity: 'warning',
                     count: 1,
                     count_threshold: 1,
                     oldest_age_seconds: 45,
@@ -64,6 +66,7 @@ describe('Settings.vue', () => {
                 knowledge_store_write_backlog: {
                     name: 'knowledge_store_write_backlog',
                     status: 'ok',
+                    severity: 'ok',
                     count: 2,
                     count_threshold: 100,
                     oldest_age_seconds: 15,
@@ -72,12 +75,14 @@ describe('Settings.vue', () => {
                 knowledge_store_orphans: {
                     name: 'knowledge_store_orphans',
                     status: 'warning',
+                    severity: 'critical',
                     count: 1,
                     count_threshold: 1,
                 },
                 knowledge_store_maintenance_freshness: {
                     name: 'knowledge_store_maintenance_freshness',
                     status: 'ok',
+                    severity: 'ok',
                     last_maintenance_at: '2026-05-07T10:00:00+00:00',
                     age_seconds: 300,
                     age_threshold_seconds: 7200,

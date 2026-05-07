@@ -71,12 +71,63 @@ def _build_backlog_check(
     is_warning = backlog_count >= count_threshold or (
         backlog_age is not None and backlog_age >= age_threshold_seconds
     )
+    is_critical = False
+    if is_warning and count_threshold > 0 and backlog_count >= count_threshold * 3:
+        is_critical = True
+    if (
+        is_warning
+        and not is_critical
+        and age_threshold_seconds > 0
+        and backlog_age is not None
+        and backlog_age >= age_threshold_seconds * 3
+    ):
+        is_critical = True
     return {
         "name": name,
         "status": "warning" if is_warning else "ok",
+        "severity": "critical" if is_critical else ("warning" if is_warning else "ok"),
         "count": backlog_count,
         "count_threshold": count_threshold,
         "oldest_age_seconds": backlog_age,
+        "age_threshold_seconds": age_threshold_seconds,
+    }
+
+
+def _build_threshold_check(
+    *,
+    name: str,
+    count: int,
+    count_threshold: int,
+) -> dict[str, Any]:
+    is_warning = count >= count_threshold
+    is_critical = is_warning and count_threshold > 0 and count >= count_threshold * 3
+    return {
+        "name": name,
+        "status": "warning" if is_warning else "ok",
+        "severity": "critical" if is_critical else ("warning" if is_warning else "ok"),
+        "count": count,
+        "count_threshold": count_threshold,
+    }
+
+
+def _build_maintenance_freshness_check(
+    *,
+    last_maintenance_at: str | None,
+    age_seconds: float | None,
+    age_threshold_seconds: int,
+) -> dict[str, Any]:
+    is_warning = age_seconds is None or age_seconds >= age_threshold_seconds
+    is_critical = age_seconds is None or (
+        age_threshold_seconds > 0
+        and age_seconds is not None
+        and age_seconds >= age_threshold_seconds * 3
+    )
+    return {
+        "name": "knowledge_store_maintenance_freshness",
+        "status": "warning" if is_warning else "ok",
+        "severity": "critical" if is_critical else ("warning" if is_warning else "ok"),
+        "last_maintenance_at": last_maintenance_at,
+        "age_seconds": age_seconds,
         "age_threshold_seconds": age_threshold_seconds,
     }
 
@@ -115,34 +166,26 @@ def build_operational_health_summary(
             count_threshold=get_knowledge_store_write_queue_warning_threshold(),
             age_threshold_seconds=get_knowledge_store_write_queue_warning_age_seconds(),
         ),
-        "knowledge_store_orphans": {
-            "name": "knowledge_store_orphans",
-            "status": (
-                "warning" if orphaned_assessment_records >= orphan_threshold else "ok"
-            ),
-            "count": orphaned_assessment_records,
-            "count_threshold": orphan_threshold,
-        },
-        "knowledge_store_maintenance_freshness": {
-            "name": "knowledge_store_maintenance_freshness",
-            "status": (
-                "warning"
-                if maintenance_age_seconds is None
-                or maintenance_age_seconds >= maintenance_threshold
-                else "ok"
-            ),
-            "last_maintenance_at": last_maintenance_at,
-            "age_seconds": maintenance_age_seconds,
-            "age_threshold_seconds": maintenance_threshold,
-        },
+        "knowledge_store_orphans": _build_threshold_check(
+            name="knowledge_store_orphans",
+            count=orphaned_assessment_records,
+            count_threshold=orphan_threshold,
+        ),
+        "knowledge_store_maintenance_freshness": _build_maintenance_freshness_check(
+            last_maintenance_at=last_maintenance_at,
+            age_seconds=maintenance_age_seconds,
+            age_threshold_seconds=maintenance_threshold,
+        ),
     }
-    overall_status = (
-        "warning"
-        if any(check["status"] == "warning" for check in checks.values())
-        else "ok"
-    )
+    overall_status = "warning" if any(check["status"] == "warning" for check in checks.values()) else "ok"
+    overall_severity = "ok"
+    if any(check["severity"] == "critical" for check in checks.values()):
+        overall_severity = "critical"
+    elif overall_status == "warning":
+        overall_severity = "warning"
     return {
         "status": overall_status,
+        "severity": overall_severity,
         "checked_at": now.isoformat(),
         "checks": checks,
     }

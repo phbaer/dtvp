@@ -9,14 +9,19 @@ const isReviewer = computed(() => realRole?.value === 'REVIEWER')
 
 const {
     warningCount,
+    criticalWarningCount,
     warningSummaries,
     indicatorState,
+    overallSeverity,
     indicatorLabel,
     checkedAtAgeLabel,
     indicatorTitle,
 } = useOperationalHealth(isReviewer)
 
 const indicatorClass = computed(() => {
+    if (overallSeverity.value === 'critical') {
+        return 'bg-red-500/10 text-red-300 border-red-500/30 hover:bg-red-500/20'
+    }
     if (indicatorState.value === 'warning') {
         return 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
     }
@@ -52,8 +57,17 @@ const indicatorIcon = computed(() => {
                 {{ checkedAtAgeLabel }}
             </span>
             <span
+                v-if="overallSeverity === 'critical' && criticalWarningCount > 0"
+                class="hidden xl:inline rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider"
+            >
+                {{ criticalWarningCount }} critical
+            </span>
+            <span
                 v-if="indicatorState === 'warning' && warningCount > 0"
-                class="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-1"
+                :class="[
+                    'absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[9px] font-bold text-white px-1',
+                    overallSeverity === 'critical' ? 'bg-red-500' : 'bg-amber-500',
+                ]"
             >
                 {{ warningCount }}
             </span>
@@ -63,10 +77,14 @@ const indicatorIcon = computed(() => {
             v-if="warningSummaries.length > 0"
             data-testid="operational-health-panel"
             class="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden min-w-[320px] rounded-xl border border-amber-500/20 bg-gray-950/95 p-3 text-xs text-gray-200 shadow-2xl group-hover:block group-focus-within:block"
+            :class="overallSeverity === 'critical' ? 'border-red-500/20' : 'border-amber-500/20'"
         >
-            <div class="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-amber-300">
+            <div
+                class="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest"
+                :class="overallSeverity === 'critical' ? 'text-red-300' : 'text-amber-300'"
+            >
                 <AlertTriangle :size="12" />
-                Active Warnings
+                {{ overallSeverity === 'critical' ? 'Critical Warnings' : 'Active Warnings' }}
             </div>
             <div class="mb-3 text-[11px] text-gray-500">
                 {{ checkedAtAgeLabel }}

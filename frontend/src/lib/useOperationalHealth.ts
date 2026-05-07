@@ -79,6 +79,16 @@ const indicatorState = computed<'idle' | 'healthy' | 'warning' | 'error'>(() => 
     return 'idle'
 })
 
+const overallSeverity = computed<'ok' | 'warning' | 'critical'>(() => {
+    return operationalHealth.value?.severity ?? 'ok'
+})
+
+const criticalWarningCount = computed(() => {
+    return warningSummaries.value.filter(
+        (warning) => operationalHealth.value?.checks[warning.key].severity === 'critical'
+    ).length
+})
+
 const indicatorLabel = computed(() => {
     if (indicatorState.value === 'warning') {
         return `${warningCount.value} warning${warningCount.value === 1 ? '' : 's'}`
@@ -157,7 +167,10 @@ const ensurePolling = () => {
     if (pollTimer.value !== null) return
     pollTimer.value = globalThis.setInterval(() => {
         now.value = Date.now()
-        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        if (
+            typeof document === 'undefined'
+            || document.visibilityState !== 'hidden'
+        ) {
             void refreshOperationalHealth()
         }
     }, 30_000)
@@ -218,9 +231,11 @@ export function useOperationalHealth(isEnabled: ComputedRef<boolean>) {
         loading,
         loadError,
         warningCount,
+        criticalWarningCount,
         warningSummaries,
         firstWarningSummary,
         indicatorState,
+        overallSeverity,
         indicatorLabel,
         checkedAtAgeLabel,
         indicatorTitle,
