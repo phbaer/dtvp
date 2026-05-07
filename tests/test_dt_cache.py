@@ -114,6 +114,50 @@ async def test_save_local_analysis_updates_cache_metadata(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_save_local_analysis_flushes_to_knowledge_store_in_background(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    payload = {
+        "project_uuid": "project-1",
+        "component_uuid": "component-1",
+        "vulnerability_uuid": "vuln-1",
+        "state": "NOT_AFFECTED",
+        "details": "Queued durable assessment.",
+        "suppressed": False,
+    }
+
+    manager._save_project_cache(
+        manager._findings_path("project-1"),
+        [
+            {
+                "component": {"uuid": "component-1", "name": "log4j-core"},
+                "vulnerability": {"uuid": "vuln-1", "vulnId": "CVE-2021-44228"},
+            }
+        ],
+    )
+    manager._save_local_analysis(payload)
+
+    assert (
+        knowledge_store.get_assessment_by_triplet(
+            project_uuid="project-1",
+            component_uuid="component-1",
+            vulnerability_uuid="vuln-1",
+        )
+        is None
+    )
+
+    assert manager.flush_queued_knowledge_store_writes() == 1
+    assert knowledge_store.get_assessment_by_triplet(
+        project_uuid="project-1",
+        component_uuid="component-1",
+        vulnerability_uuid="vuln-1",
+    ) == {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "Queued durable assessment.",
+        "isSuppressed": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_queue_duplicate_pending_update_rejected(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()

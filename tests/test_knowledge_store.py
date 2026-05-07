@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from dtvp.knowledge_store import KnowledgeStore, get_knowledge_store_backend
@@ -96,3 +97,44 @@ def test_sqlite_backend_bootstraps_from_existing_json_store(tmp_path):
             "analysisDetails": "Migrated from json",
             "isSuppressed": True,
         }
+
+
+def test_sqlite_backend_purges_assessments_after_project_retention_expires(tmp_path):
+    store = KnowledgeStore(base_path=str(tmp_path / "knowledge"))
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    payload = {
+        "project_uuid": "project-3",
+        "component_uuid": "component-3",
+        "vulnerability_uuid": "vuln-3",
+        "state": "EXPLOITABLE",
+        "details": "Should be purged after retention",
+        "suppressed": False,
+    }
+
+    with patch.dict("os.environ", {"DTVP_KNOWLEDGE_STORE_BACKEND": "sqlite"}):
+        store.persist_assessment(
+            payload=payload,
+            component={"uuid": "component-3", "name": "package-c"},
+            vulnerability={"uuid": "vuln-3", "vulnId": "CVE-2026-0003"},
+        )
+
+        store.synchronize_active_projects(
+            ["project-3"],
+            grace_period_days=1,
+            now=now,
+        )
+        assert store.purge_expired_knowledge(now=now + timedelta(hours=12)) == 0
+
+        store.synchronize_active_projects([], grace_period_days=1, now=now)
+        assert store.purge_expired_knowledge(now=now + timedelta(hours=12)) == 0
+        assert store.purge_expired_knowledge(now=now + timedelta(days=2)) == 1
+
+        assert (
+            store.get_assessment_by_triplet(
+                project_uuid="project-3",
+                component_uuid="component-3",
+                vulnerability_uuid="vuln-3",
+            )
+            is None
+        )

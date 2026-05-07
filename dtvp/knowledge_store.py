@@ -6,7 +6,7 @@ import sqlite3
 import tempfile
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import RLock
 from typing import Any, Dict, Iterable, Optional
 
@@ -158,6 +158,25 @@ def assessment_triplet_key(
     )
 
 
+def _build_finding_lookup_request(
+    component: Optional[Dict[str, Any]],
+    vulnerability: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    component_data = component or {}
+    vulnerability_data = vulnerability or {}
+    component_uuid = str(component_data.get("uuid") or "").strip()
+    canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+    aliases = sorted(set(collect_vulnerability_aliases(vulnerability_data)))
+    if canonical_vulnerability_id and canonical_vulnerability_id not in aliases:
+        aliases.append(canonical_vulnerability_id)
+    return {
+        "component_uuid": component_uuid,
+        "canonical_vulnerability_id": canonical_vulnerability_id,
+        "component_identity": _normalize_component_identity(component_data),
+        "aliases": aliases,
+    }
+
+
 def _serialize_queue_items(items: Dict[str, Any]) -> Dict[str, Any]:
     serialized: Dict[str, Any] = {}
     for queue_id, item in items.items():
@@ -234,6 +253,24 @@ class KnowledgeStoreBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def initialize(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def synchronize_active_projects(
+        self,
+        project_uuids: Iterable[str],
+        *,
+        grace_period_days: int,
+        now: Optional[datetime] = None,
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def purge_expired_knowledge(self, *, now: Optional[datetime] = None) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
     def persist_assessment(
         self,
         *,
@@ -260,6 +297,14 @@ class KnowledgeStoreBackend(ABC):
         component: Optional[Dict[str, Any]],
         vulnerability: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_assessments_for_findings(
+        self,
+        *,
+        findings: Iterable[tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]],
+    ) -> list[Optional[Dict[str, Any]]]:
         raise NotImplementedError
 
     @abstractmethod
@@ -333,10 +378,28 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
             "store_type": "json",
             "path": self.base_path,
             "assessment_records": len(state.get("assessments", {})),
-            "assessment_triplet_index_entries": len(state.get("assessment_triplet_index", {})),
+            "assessment_triplet_index_entries": len(
+                state.get("assessment_triplet_index", {})
+            ),
             "code_analysis_queue_items": len(queue_items),
             "code_analysis_queue_status_counts": terminal_status_counts,
         }
+
+    def initialize(self) -> None:
+        with self._lock:
+            self._load_state()
+
+    def synchronize_active_projects(
+        self,
+        project_uuids: Iterable[str],
+        *,
+        grace_period_days: int,
+        now: Optional[datetime] = None,
+    ) -> None:
+        return None
+
+    def purge_expired_knowledge(self, *, now: Optional[datetime] = None) -> int:
+        return 0
 
     def persist_assessment(
         self,
@@ -400,32 +463,53 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
         component: Optional[Dict[str, Any]],
         vulnerability: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        component_data = component or {}
-        vulnerability_data = vulnerability or {}
-        component_uuid = str(component_data.get("uuid") or "").strip()
-        canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+        results = self.get_assessments_for_findings(findings=[(component, vulnerability)])
+        return results[0] if results else None
 
+    def get_assessments_for_findings(
+        self,
+        *,
+        findings: Iterable[tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]],
+    ) -> list[Optional[Dict[str, Any]]]:
+        requests = [
+            _build_finding_lookup_request(component, vulnerability)
+            for component, vulnerability in findings
+        ]
         with self._lock:
             state = self._load_state()
-            if component_uuid and canonical_vulnerability_id:
-                primary_key = assessment_primary_key(component_uuid, canonical_vulnerability_id)
-                record = state["assessments"].get(primary_key)
-                if isinstance(record, dict):
-                    return record.get("analysis")
-
-            component_identity = _normalize_component_identity(component_data)
-            aliases = set(collect_vulnerability_aliases(vulnerability_data))
-            if canonical_vulnerability_id:
-                aliases.add(canonical_vulnerability_id)
+            alias_matches: Dict[tuple[str, str], Dict[str, Any]] = {}
             for record in state["assessments"].values():
                 if not isinstance(record, dict):
                     continue
-                if component_identity and component_identity != record.get("component_identity"):
-                    continue
-                if aliases and not aliases.intersection(set(record.get("vulnerability_aliases", []))):
-                    continue
-                return record.get("analysis")
-        return None
+                component_identity = str(record.get("component_identity") or "")
+                for alias in record.get("vulnerability_aliases", []) or []:
+                    if isinstance(alias, str) and alias:
+                        alias_matches.setdefault(
+                            (component_identity, alias),
+                            record.get("analysis"),
+                        )
+
+            results: list[Optional[Dict[str, Any]]] = []
+            for request in requests:
+                component_uuid = request["component_uuid"]
+                canonical_vulnerability_id = request["canonical_vulnerability_id"]
+                if component_uuid and canonical_vulnerability_id:
+                    primary_key = assessment_primary_key(
+                        component_uuid, canonical_vulnerability_id
+                    )
+                    record = state["assessments"].get(primary_key)
+                    if isinstance(record, dict):
+                        results.append(record.get("analysis"))
+                        continue
+
+                component_identity = request["component_identity"]
+                matched = None
+                for alias in request["aliases"]:
+                    matched = alias_matches.get((component_identity, alias))
+                    if matched is not None:
+                        break
+                results.append(matched)
+            return results
 
     def save_code_analysis_queue_state(
         self,
@@ -536,12 +620,25 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
                         payload_json TEXT NOT NULL,
                         position INTEGER NOT NULL
                     );
+
+                    CREATE TABLE IF NOT EXISTS project_reachability (
+                        project_uuid TEXT PRIMARY KEY,
+                        is_active INTEGER NOT NULL,
+                        last_seen_at TEXT,
+                        purge_after TEXT
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_project_reachability_active
+                    ON project_reachability(is_active, purge_after);
                     """
                 )
                 row = connection.execute("SELECT COUNT(*) AS count FROM assessments").fetchone()
                 if row is not None and row["count"] == 0:
                     self._bootstrap_from_json(connection)
             self._initialized = True
+
+    def initialize(self) -> None:
+        self._ensure_initialized()
 
     def _bootstrap_from_json(self, connection: sqlite3.Connection) -> None:
         state = _read_json(self._json_store_path(), None)
@@ -650,6 +747,9 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
             assessment_records = connection.execute("SELECT COUNT(*) AS count FROM assessments").fetchone()["count"]
             triplet_entries = connection.execute("SELECT COUNT(*) AS count FROM assessment_triplets").fetchone()["count"]
             queue_rows = connection.execute("SELECT payload_json FROM queue_items ORDER BY position ASC").fetchall()
+            orphaned_records = connection.execute(
+                "SELECT COUNT(*) AS count FROM project_reachability WHERE is_active = 0"
+            ).fetchone()["count"]
         terminal_status_counts: Dict[str, int] = {}
         for row in queue_rows:
             payload = json.loads(row["payload_json"])
@@ -661,9 +761,103 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
             "database_path": self._db_path(),
             "assessment_records": assessment_records,
             "assessment_triplet_index_entries": triplet_entries,
+            "orphaned_project_records": orphaned_records,
             "code_analysis_queue_items": len(queue_rows),
             "code_analysis_queue_status_counts": terminal_status_counts,
         }
+
+    def synchronize_active_projects(
+        self,
+        project_uuids: Iterable[str],
+        *,
+        grace_period_days: int,
+        now: Optional[datetime] = None,
+    ) -> None:
+        self._ensure_initialized()
+        active_project_ids = sorted(
+            {
+                str(project_uuid).strip()
+                for project_uuid in project_uuids
+                if str(project_uuid).strip()
+            }
+        )
+        timestamp = (now or datetime.now(timezone.utc)).isoformat()
+        purge_after = ((now or datetime.now(timezone.utc)) + timedelta(days=grace_period_days)).isoformat()
+        with self._connection() as connection:
+            if active_project_ids:
+                connection.executemany(
+                    """
+                    INSERT INTO project_reachability (project_uuid, is_active, last_seen_at, purge_after)
+                    VALUES (?, 1, ?, NULL)
+                    ON CONFLICT(project_uuid) DO UPDATE SET
+                        is_active = 1,
+                        last_seen_at = excluded.last_seen_at,
+                        purge_after = NULL
+                    """,
+                    [(project_uuid, timestamp) for project_uuid in active_project_ids],
+                )
+
+            if active_project_ids:
+                placeholders = ",".join("?" for _ in active_project_ids)
+                connection.execute(
+                    f"""
+                    UPDATE project_reachability
+                    SET is_active = 0,
+                        purge_after = COALESCE(purge_after, ?)
+                    WHERE is_active = 1
+                      AND project_uuid NOT IN ({placeholders})
+                    """,
+                    (purge_after, *active_project_ids),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE project_reachability
+                    SET is_active = 0,
+                        purge_after = COALESCE(purge_after, ?)
+                    WHERE is_active = 1
+                    """,
+                    (purge_after,),
+                )
+
+    def purge_expired_knowledge(self, *, now: Optional[datetime] = None) -> int:
+        self._ensure_initialized()
+        cutoff = (now or datetime.now(timezone.utc)).isoformat()
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT assessments.primary_key
+                FROM assessments
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM assessment_triplets
+                    WHERE assessment_triplets.primary_key = assessments.primary_key
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM assessment_triplets
+                    LEFT JOIN project_reachability
+                        ON project_reachability.project_uuid = assessment_triplets.project_uuid
+                    WHERE assessment_triplets.primary_key = assessments.primary_key
+                      AND (
+                        project_reachability.project_uuid IS NULL
+                        OR project_reachability.is_active = 1
+                        OR project_reachability.purge_after IS NULL
+                        OR project_reachability.purge_after > ?
+                      )
+                )
+                """,
+                (cutoff,),
+            ).fetchall()
+            primary_keys = [row["primary_key"] for row in rows]
+            if not primary_keys:
+                return 0
+            placeholders = ",".join("?" for _ in primary_keys)
+            connection.execute(
+                f"DELETE FROM assessments WHERE primary_key IN ({placeholders})",
+                primary_keys,
+            )
+            return len(primary_keys)
 
     def persist_assessment(
         self,
@@ -750,42 +944,97 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
         component: Optional[Dict[str, Any]],
         vulnerability: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
+        results = self.get_assessments_for_findings(findings=[(component, vulnerability)])
+        return results[0] if results else None
+
+    def get_assessments_for_findings(
+        self,
+        *,
+        findings: Iterable[tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]],
+    ) -> list[Optional[Dict[str, Any]]]:
         self._ensure_initialized()
-        component_data = component or {}
-        vulnerability_data = vulnerability or {}
-        component_uuid = str(component_data.get("uuid") or "").strip()
-        canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
-        if component_uuid and canonical_vulnerability_id:
-            primary_key = assessment_primary_key(component_uuid, canonical_vulnerability_id)
-            with self._connection() as connection:
-                row = connection.execute(
-                    "SELECT analysis_json FROM assessments WHERE primary_key = ?",
-                    (primary_key,),
-                ).fetchone()
-            if row is not None:
-                return json.loads(row["analysis_json"])
+        requests = [
+            _build_finding_lookup_request(component, vulnerability)
+            for component, vulnerability in findings
+        ]
+        if not requests:
+            return []
 
-        component_identity = _normalize_component_identity(component_data)
-        aliases = sorted(set(collect_vulnerability_aliases(vulnerability_data)))
-        if canonical_vulnerability_id and canonical_vulnerability_id not in aliases:
-            aliases.append(canonical_vulnerability_id)
-        if not component_identity or not aliases:
-            return None
-
-        placeholders = ",".join("?" for _ in aliases)
-        query = f"""
-            SELECT DISTINCT assessments.analysis_json
-            FROM assessments
-            JOIN assessment_aliases ON assessment_aliases.primary_key = assessments.primary_key
-            WHERE assessments.component_identity = ?
-              AND assessment_aliases.alias IN ({placeholders})
-            LIMIT 1
-        """
+        results: list[Optional[Dict[str, Any]]] = [None] * len(requests)
         with self._connection() as connection:
-            row = connection.execute(query, (component_identity, *aliases)).fetchone()
-        if row is None:
-            return None
-        return json.loads(row["analysis_json"])
+            primary_keys = sorted(
+                {
+                    assessment_primary_key(
+                        request["component_uuid"],
+                        request["canonical_vulnerability_id"],
+                    )
+                    for request in requests
+                    if request["component_uuid"]
+                    and request["canonical_vulnerability_id"]
+                }
+            )
+            primary_key_matches: Dict[str, Dict[str, Any]] = {}
+            if primary_keys:
+                placeholders = ",".join("?" for _ in primary_keys)
+                rows = connection.execute(
+                    f"SELECT primary_key, analysis_json FROM assessments WHERE primary_key IN ({placeholders})",
+                    primary_keys,
+                ).fetchall()
+                primary_key_matches = {
+                    row["primary_key"]: json.loads(row["analysis_json"])
+                    for row in rows
+                }
+
+            alias_values: list[tuple[int, str, str]] = []
+            for index, request in enumerate(requests):
+                component_uuid = request["component_uuid"]
+                canonical_vulnerability_id = request["canonical_vulnerability_id"]
+                if component_uuid and canonical_vulnerability_id:
+                    primary_key = assessment_primary_key(
+                        component_uuid, canonical_vulnerability_id
+                    )
+                    matched = primary_key_matches.get(primary_key)
+                    if matched is not None:
+                        results[index] = matched
+                        continue
+
+                if not request["component_identity"]:
+                    continue
+                for alias in request["aliases"]:
+                    alias_values.append((index, request["component_identity"], alias))
+
+            if alias_values:
+                placeholders = ", ".join("(?, ?, ?)" for _ in alias_values)
+                query = f"""
+                    WITH requested(request_index, component_identity, alias) AS (
+                        VALUES {placeholders}
+                    ),
+                    ranked_matches AS (
+                        SELECT
+                            requested.request_index,
+                            assessments.analysis_json,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY requested.request_index
+                                ORDER BY assessments.updated_at DESC
+                            ) AS row_number
+                        FROM requested
+                        JOIN assessment_aliases
+                            ON assessment_aliases.alias = requested.alias
+                        JOIN assessments
+                            ON assessments.primary_key = assessment_aliases.primary_key
+                        WHERE assessments.component_identity = requested.component_identity
+                    )
+                    SELECT request_index, analysis_json
+                    FROM ranked_matches
+                    WHERE row_number = 1
+                """
+                parameters = [value for triplet in alias_values for value in triplet]
+                rows = connection.execute(query, parameters).fetchall()
+                for row in rows:
+                    request_index = int(row["request_index"])
+                    if results[request_index] is None:
+                        results[request_index] = json.loads(row["analysis_json"])
+        return results
 
     def save_code_analysis_queue_state(
         self,
@@ -850,6 +1099,25 @@ class KnowledgeStore:
     def get_status(self) -> Dict[str, Any]:
         return self._resolve_backend().get_status()
 
+    def initialize(self) -> None:
+        self._resolve_backend().initialize()
+
+    def synchronize_active_projects(
+        self,
+        project_uuids: Iterable[str],
+        *,
+        grace_period_days: int,
+        now: Optional[datetime] = None,
+    ) -> None:
+        self._resolve_backend().synchronize_active_projects(
+            project_uuids,
+            grace_period_days=grace_period_days,
+            now=now,
+        )
+
+    def purge_expired_knowledge(self, *, now: Optional[datetime] = None) -> int:
+        return self._resolve_backend().purge_expired_knowledge(now=now)
+
     def persist_assessment(
         self,
         *,
@@ -886,6 +1154,13 @@ class KnowledgeStore:
             component=component,
             vulnerability=vulnerability,
         )
+
+    def get_assessments_for_findings(
+        self,
+        *,
+        findings: Iterable[tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]],
+    ) -> list[Optional[Dict[str, Any]]]:
+        return self._resolve_backend().get_assessments_for_findings(findings=findings)
 
     def save_code_analysis_queue_state(
         self,

@@ -199,17 +199,30 @@ def _vulnerability_cache_identity(
 
 
 class CacheManager:
-    def __init__(self, base_path: str = None, refresh_interval_seconds: int = None):
+    def __init__(
+        self,
+        base_path: str = None,
+        refresh_interval_seconds: int = None,
+        knowledge_store_flush_interval_seconds: int = None,
+    ):
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
             int(os.getenv("DTVP_DT_CACHE_REFRESH_SECONDS", "60"))
             if refresh_interval_seconds is None
             else refresh_interval_seconds
         )
+        self.knowledge_store_flush_interval_seconds = (
+            int(os.getenv("DTVP_KNOWLEDGE_STORE_WRITE_FLUSH_INTERVAL_SECONDS", "1"))
+            if knowledge_store_flush_interval_seconds is None
+            else knowledge_store_flush_interval_seconds
+        )
         self.lock = asyncio.Lock()
         self.pending_updates: List[Dict[str, Any]] = []
         self.active_project_uuids: Set[str] = set()
         self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._queued_knowledge_store_writes: Dict[
+            Tuple[str, str, str], Dict[str, Any]
+        ] = {}
         self.cache_meta: Dict[str, Any] = {
             "fully_cached": False,
             "last_refreshed_at": None,
@@ -339,6 +352,22 @@ class CacheManager:
         component: Optional[Dict[str, Any]] = None,
         vulnerability: Optional[Dict[str, Any]] = None,
     ) -> None:
+        key = self._pending_update_key(payload)
+        if not key:
+            return
+        self._queued_knowledge_store_writes[key] = {
+            "payload": dict(payload),
+            "component": dict(component or {}),
+            "vulnerability": dict(vulnerability or {}),
+        }
+
+    def _flush_analysis_to_knowledge_store(
+        self,
+        payload: Dict[str, Any],
+        *,
+        component: Optional[Dict[str, Any]] = None,
+        vulnerability: Optional[Dict[str, Any]] = None,
+    ) -> None:
         project_uuid = payload.get("project_uuid")
         component_uuid = payload.get("component_uuid")
         vulnerability_uuid = payload.get("vulnerability_uuid")
@@ -357,6 +386,39 @@ class CacheManager:
             vulnerability=vulnerability
             or ((cached_finding or {}).get("vulnerability") or {}),
         )
+
+    def flush_queued_knowledge_store_writes(self) -> int:
+        queued_items = list(self._queued_knowledge_store_writes.items())
+        if not queued_items:
+            return 0
+
+        self._queued_knowledge_store_writes = {}
+        flushed = 0
+        for key, entry in queued_items:
+            try:
+                self._flush_analysis_to_knowledge_store(
+                    entry.get("payload", {}),
+                    component=entry.get("component") or {},
+                    vulnerability=entry.get("vulnerability") or {},
+                )
+                flushed += 1
+            except Exception as exc:
+                logger.warning(
+                    "Failed to flush knowledge-store write %s: %s",
+                    key,
+                    exc,
+                )
+                self._queued_knowledge_store_writes[key] = entry
+        return flushed
+
+    async def background_knowledge_store_write_loop(self) -> None:
+        try:
+            while True:
+                self.flush_queued_knowledge_store_writes()
+                await asyncio.sleep(self.knowledge_store_flush_interval_seconds)
+        except asyncio.CancelledError:
+            self.flush_queued_knowledge_store_writes()
+            raise
 
     def _load_pending_updates(self) -> List[Dict[str, Any]]:
         return self._load_cache_file(self._pending_path(), []) or []
@@ -399,6 +461,7 @@ class CacheManager:
         self.pending_updates = []
         self.active_project_uuids = set()
         self.project_query_cache = {}
+        self._queued_knowledge_store_writes = {}
         self.cache_meta = {"fully_cached": False, "last_refreshed_at": None}
         self._memory_cache = {}
         self._ensure_directories()
@@ -721,7 +784,17 @@ class CacheManager:
                 (analysis_key, previous_analysis)
             )
 
-        for finding in findings:
+        store_analyses = knowledge_store.get_assessments_for_findings(
+            findings=[
+                (
+                    finding.get("component") or {},
+                    finding.get("vulnerability") or {},
+                )
+                for finding in findings
+            ]
+        )
+
+        for index, finding in enumerate(findings):
             source_analysis = finding.get("analysis") or {}
             identity = self._finding_cache_identity(finding)
             analysis_key = self._finding_analysis_key(project_uuid, finding)
@@ -730,10 +803,7 @@ class CacheManager:
 
             current_path = self._analysis_path(*analysis_key)
             current_cached_analysis = self._load_project_cache(current_path, None)
-            store_analysis = knowledge_store.get_assessment_for_finding(
-                component=(finding.get("component") or {}),
-                vulnerability=(finding.get("vulnerability") or {}),
-            )
+            store_analysis = store_analyses[index] if index < len(store_analyses) else None
 
             if _get_analysis_details(source_analysis):
                 self._persist_analysis_to_knowledge_store(
@@ -832,21 +902,44 @@ class CacheManager:
             return findings
 
         pending = self._load_pending_updates()
-        for finding in findings:
+        store_lookup_indices: List[int] = []
+        store_lookup_findings: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+        current_cached_analyses: Dict[int, Optional[Dict[str, Any]]] = {}
+
+        for index, finding in enumerate(findings):
+            component = finding.get("component", {})
+            vulnerability = finding.get("vulnerability", {})
+            comp_uuid = component.get("uuid")
+            vuln_uuid = vulnerability.get("uuid")
+            if not comp_uuid or not vuln_uuid:
+                continue
+            analysis = self._load_project_cache(
+                self._analysis_path(project_uuid, comp_uuid, vuln_uuid), None
+            )
+            current_cached_analyses[index] = analysis
+            if analysis is None:
+                store_lookup_indices.append(index)
+                store_lookup_findings.append((component, vulnerability))
+
+        store_lookup_results = knowledge_store.get_assessments_for_findings(
+            findings=store_lookup_findings
+        )
+        store_analyses_by_index = {
+            finding_index: store_lookup_results[result_index]
+            for result_index, finding_index in enumerate(store_lookup_indices)
+            if result_index < len(store_lookup_results)
+        }
+
+        for finding_index, finding in enumerate(findings):
             component = finding.get("component", {})
             vulnerability = finding.get("vulnerability", {})
             comp_uuid = component.get("uuid")
             vuln_uuid = vulnerability.get("uuid")
             if comp_uuid and vuln_uuid:
-                analysis = self._load_project_cache(
-                    self._analysis_path(project_uuid, comp_uuid, vuln_uuid), None
-                )
+                analysis = current_cached_analyses.get(finding_index)
                 from_store = False
                 if analysis is None:
-                    analysis = knowledge_store.get_assessment_for_finding(
-                        component=component,
-                        vulnerability=vulnerability,
-                    )
+                    analysis = store_analyses_by_index.get(finding_index)
                     from_store = analysis is not None
                 if analysis is None:
                     for pending_update in pending:

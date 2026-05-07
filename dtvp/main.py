@@ -63,6 +63,7 @@ from .app_wiring import (
     build_tmrescore_route_deps,
     build_tmrescore_task_service_deps,
 )
+from .knowledge_store import knowledge_store
 from .auth import auth_settings, get_current_user
 from .auth import router as auth_router
 from .code_analysis_integration import CodeAnalysisClient, CodeAnalysisSettings
@@ -404,8 +405,28 @@ startup_service_deps = build_startup_service_deps(
     load_tmrescore_project_cache=lambda: load_tmrescore_project_cache_impl(
         tmrescore_cache_service_deps
     ),
+    initialize_knowledge_store=lambda: knowledge_store.initialize(),
+    get_active_project_uuids=lambda: sorted(cache_manager.active_project_uuids),
+    synchronize_knowledge_store_projects=lambda project_uuids, grace_period_days: knowledge_store.synchronize_active_projects(
+        project_uuids,
+        grace_period_days=grace_period_days,
+    ),
+    purge_expired_knowledge_store=lambda: knowledge_store.purge_expired_knowledge(),
+    get_knowledge_store_retention_days=lambda: get_env_int_with_floor(
+        "DTVP_KNOWLEDGE_STORE_RETENTION_DAYS",
+        default=30,
+        minimum=1,
+        logger=logger,
+    ),
+    get_knowledge_store_maintenance_interval_seconds=lambda: get_env_int_with_floor(
+        "DTVP_KNOWLEDGE_STORE_MAINTENANCE_INTERVAL_SECONDS",
+        default=3600,
+        minimum=60,
+        logger=logger,
+    ),
     initialize_cache_manager=lambda: cache_manager.initialize(),
     run_background_sync_loop=lambda: cache_manager.background_sync_loop(),
+    run_knowledge_store_write_loop=lambda: cache_manager.background_knowledge_store_write_loop(),
 )
 
 
