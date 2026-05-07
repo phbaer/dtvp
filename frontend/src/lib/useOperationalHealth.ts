@@ -6,6 +6,13 @@ interface WarningSummary {
     key: keyof OperationalHealthSummary['checks']
     target: string
     text: string
+    severity: 'ok' | 'warning' | 'critical'
+}
+
+const severityOrder: Record<WarningSummary['severity'], number> = {
+    critical: 0,
+    warning: 1,
+    ok: 2,
 }
 
 const warningDescriptions: Record<keyof OperationalHealthSummary['checks'], string> = {
@@ -55,14 +62,17 @@ const warningSummaries = computed<WarningSummary[]>(() => {
     if (!operationalHealth.value) return []
     return Object.entries(operationalHealth.value.checks)
         .filter(([, check]) => check.status === 'warning')
-        .map(([key, check]) => ({
-            key: key as keyof OperationalHealthSummary['checks'],
-            target: warningTargets[key as keyof OperationalHealthSummary['checks']],
-            text: buildWarningSummary(
-                key as keyof OperationalHealthSummary['checks'],
-                check as OperationalHealthSummary['checks'][keyof OperationalHealthSummary['checks']]
-            ),
-        }))
+        .map(([key, check]) => {
+            const typedKey = key as keyof OperationalHealthSummary['checks']
+            const typedCheck = check as OperationalHealthSummary['checks'][keyof OperationalHealthSummary['checks']]
+            return {
+                key: typedKey,
+                target: warningTargets[typedKey],
+                text: buildWarningSummary(typedKey, typedCheck),
+                severity: typedCheck.severity,
+            }
+        })
+        .sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity])
 })
 
 const warningFingerprint = computed(() => warningSummaries.value.map((warning) => warning.key).join('|'))

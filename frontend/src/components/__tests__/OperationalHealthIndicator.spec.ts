@@ -81,6 +81,51 @@ describe('OperationalHealthIndicator', () => {
         wrapper.unmount()
     })
 
+    it('lists critical warnings first in the details panel', async () => {
+        vi.useFakeTimers()
+        vi.mocked(getOperationalHealth).mockResolvedValue({
+            status: 'warning',
+            severity: 'critical',
+            checked_at: '2026-05-07T10:05:00+00:00',
+            checks: {
+                pending_updates_backlog: {
+                    name: 'pending_updates_backlog',
+                    status: 'warning',
+                    severity: 'warning',
+                    count: 3,
+                    oldest_age_seconds: 412,
+                },
+                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
+                knowledge_store_orphans: {
+                    name: 'knowledge_store_orphans',
+                    status: 'warning',
+                    severity: 'critical',
+                    count: 2,
+                },
+                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+            },
+        } as any)
+
+        const wrapper = mount(OperationalHealthIndicator, {
+            global: {
+                provide: {
+                    realRole: computed(() => 'REVIEWER'),
+                },
+                stubs: {
+                    'router-link': routerLinkStub,
+                },
+            },
+        })
+
+        await flushPromises()
+
+        const warningLinks = wrapper.findAll('[data-warning-target]')
+        expect(warningLinks[0]?.attributes('data-warning-target')).toBe('#knowledge-store-status')
+        expect(warningLinks[1]?.attributes('data-warning-target')).toBe('#cache-status')
+
+        wrapper.unmount()
+    })
+
     it('stays hidden for analysts', async () => {
         const wrapper = mount(OperationalHealthIndicator, {
             global: {

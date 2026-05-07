@@ -65,4 +65,50 @@ describe('useOperationalHealth', () => {
 
         wrapper.unmount()
     })
+
+    it('sorts critical warnings ahead of noncritical warnings', async () => {
+        const api = await import('../api')
+        vi.mocked(api.getOperationalHealth).mockResolvedValue({
+            status: 'warning',
+            severity: 'critical',
+            checked_at: '2026-05-07T10:05:00+00:00',
+            checks: {
+                pending_updates_backlog: {
+                    name: 'pending_updates_backlog',
+                    status: 'warning',
+                    severity: 'warning',
+                    count: 1,
+                    oldest_age_seconds: 61,
+                },
+                knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
+                knowledge_store_orphans: {
+                    name: 'knowledge_store_orphans',
+                    status: 'warning',
+                    severity: 'critical',
+                    count: 4,
+                },
+                knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+            },
+        } as any)
+
+        const Harness = defineComponent({
+            setup() {
+                return useOperationalHealth(computed(() => true))
+            },
+            template: `
+                <div>
+                    <span data-testid="first">{{ warningSummaries[0]?.key }}</span>
+                    <span data-testid="second">{{ warningSummaries[1]?.key }}</span>
+                </div>
+            `,
+        })
+
+        const wrapper = mount(Harness)
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="first"]').text()).toBe('knowledge_store_orphans')
+        expect(wrapper.get('[data-testid="second"]').text()).toBe('pending_updates_backlog')
+
+        wrapper.unmount()
+    })
 })

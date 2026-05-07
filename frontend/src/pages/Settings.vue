@@ -12,11 +12,24 @@ const knowledgeStoreStatus = ref<KnowledgeStoreStatus | null>(null)
 const operationalHealth = ref<OperationalHealthSummary | null>(null)
 const cacheStatusError = ref('')
 
-const healthTone = (status: 'ok' | 'warning') => (
-    status === 'warning'
-        ? 'bg-amber-900/30 text-amber-300 border-amber-700/60'
-        : 'bg-emerald-900/30 text-emerald-300 border-emerald-700/60'
+const healthTone = (severity: 'ok' | 'warning' | 'critical') => (
+    severity === 'critical'
+        ? 'bg-red-900/30 text-red-300 border-red-700/60'
+        : severity === 'warning'
+            ? 'bg-amber-900/30 text-amber-300 border-amber-700/60'
+            : 'bg-emerald-900/30 text-emerald-300 border-emerald-700/60'
 )
+
+const severityOrder: Record<'ok' | 'warning' | 'critical', number> = {
+    critical: 0,
+    warning: 1,
+    ok: 2,
+}
+
+const severityLabel = (severity: 'ok' | 'warning' | 'critical') => {
+    if (severity === 'ok') return 'OK'
+    return severity
+}
 
 const formatAge = (value?: number | null) => {
     if (value === undefined || value === null) return 'n/a'
@@ -37,6 +50,7 @@ const healthChecks = computed(() => {
             detail: `${checks.pending_updates_backlog.count ?? 0} queued, oldest ${formatAge(checks.pending_updates_backlog.oldest_age_seconds)}`,
             threshold: `warn at ${checks.pending_updates_backlog.count_threshold ?? 0} items or ${formatAge(checks.pending_updates_backlog.age_threshold_seconds)}`,
             status: checks.pending_updates_backlog.status,
+            severity: checks.pending_updates_backlog.severity,
         },
         {
             key: 'knowledge_store_write_backlog',
@@ -44,6 +58,7 @@ const healthChecks = computed(() => {
             detail: `${checks.knowledge_store_write_backlog.count ?? 0} queued, oldest ${formatAge(checks.knowledge_store_write_backlog.oldest_age_seconds)}`,
             threshold: `warn at ${checks.knowledge_store_write_backlog.count_threshold ?? 0} items or ${formatAge(checks.knowledge_store_write_backlog.age_threshold_seconds)}`,
             status: checks.knowledge_store_write_backlog.status,
+            severity: checks.knowledge_store_write_backlog.severity,
         },
         {
             key: 'knowledge_store_orphans',
@@ -51,6 +66,7 @@ const healthChecks = computed(() => {
             detail: `${checks.knowledge_store_orphans.count ?? 0} records detected`,
             threshold: `warn at ${checks.knowledge_store_orphans.count_threshold ?? 0} records`,
             status: checks.knowledge_store_orphans.status,
+            severity: checks.knowledge_store_orphans.severity,
         },
         {
             key: 'knowledge_store_maintenance_freshness',
@@ -60,8 +76,9 @@ const healthChecks = computed(() => {
                 : 'no successful maintenance run recorded',
             threshold: `warn after ${formatAge(checks.knowledge_store_maintenance_freshness.age_threshold_seconds)}`,
             status: checks.knowledge_store_maintenance_freshness.status,
+            severity: checks.knowledge_store_maintenance_freshness.severity,
         },
-    ]
+    ].sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity])
 })
 
 // Mapping state
@@ -537,7 +554,7 @@ watch(() => activeTab.value, (newTab) => {
                     <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Operational Health</span>
                     <p class="mt-1 text-xs text-gray-500">Derived from the same warning thresholds used by backend backlog and maintenance monitoring.</p>
                 </div>
-                <span :class="['rounded border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider', healthTone(operationalHealth.status)]">
+                <span :class="['rounded border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider', healthTone(operationalHealth.severity)]">
                     {{ operationalHealth.status === 'warning' ? 'Needs Attention' : 'Healthy' }}
                 </span>
             </div>
@@ -545,8 +562,8 @@ watch(() => activeTab.value, (newTab) => {
                 <div v-for="check in healthChecks" :key="check.key" class="rounded border border-gray-800 bg-gray-950/60 p-3">
                     <div class="flex items-center justify-between gap-3">
                         <h4 class="text-sm font-semibold text-gray-100">{{ check.label }}</h4>
-                        <span :class="['rounded border px-2 py-0.5 text-[10px] font-semibold uppercase', healthTone(check.status)]">
-                            {{ check.status }}
+                        <span :class="['rounded border px-2 py-0.5 text-[10px] font-semibold uppercase', healthTone(check.severity)]">
+                            {{ severityLabel(check.severity) }}
                         </span>
                     </div>
                     <p class="mt-3 text-sm text-gray-200">{{ check.detail }}</p>

@@ -177,7 +177,11 @@ def build_operational_health_summary(
             age_threshold_seconds=maintenance_threshold,
         ),
     }
-    overall_status = "warning" if any(check["status"] == "warning" for check in checks.values()) else "ok"
+    overall_status = (
+        "warning"
+        if any(check["status"] == "warning" for check in checks.values())
+        else "ok"
+    )
     overall_severity = "ok"
     if any(check["severity"] == "critical" for check in checks.values()):
         overall_severity = "critical"

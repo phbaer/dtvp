@@ -92,6 +92,75 @@ describe('OperationalHealthBanner', () => {
         wrapper.unmount()
     })
 
+    it('orders critical warning links before warning-level links', async () => {
+        vi.mocked(getOperationalHealth)
+            .mockResolvedValueOnce({
+                status: 'warning',
+                severity: 'critical',
+                checked_at: '2026-05-07T10:05:00+00:00',
+                checks: {
+                    pending_updates_backlog: {
+                        name: 'pending_updates_backlog',
+                        status: 'warning',
+                        severity: 'warning',
+                        count: 3,
+                        oldest_age_seconds: 412,
+                    },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
+                    knowledge_store_orphans: {
+                        name: 'knowledge_store_orphans',
+                        status: 'warning',
+                        severity: 'critical',
+                        count: 1,
+                    },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                },
+            } as any)
+            .mockResolvedValueOnce({
+                status: 'warning',
+                severity: 'critical',
+                checked_at: '2026-05-07T10:05:30+00:00',
+                checks: {
+                    pending_updates_backlog: {
+                        name: 'pending_updates_backlog',
+                        status: 'warning',
+                        severity: 'warning',
+                        count: 3,
+                        oldest_age_seconds: 430,
+                    },
+                    knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok', severity: 'ok' },
+                    knowledge_store_orphans: {
+                        name: 'knowledge_store_orphans',
+                        status: 'warning',
+                        severity: 'critical',
+                        count: 1,
+                    },
+                    knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok', severity: 'ok' },
+                },
+            } as any)
+
+        const wrapper = mount(OperationalHealthBanner, {
+            global: {
+                provide: {
+                    realRole: computed(() => 'REVIEWER'),
+                },
+                stubs: {
+                    'router-link': routerLinkStub,
+                },
+            },
+        })
+
+        await flushPromises()
+        await vi.advanceTimersByTimeAsync(30_000)
+        await flushPromises()
+
+        const links = wrapper.findAll('[data-warning-target]')
+        expect(links[0]?.attributes('data-warning-target')).toBe('#knowledge-store-status')
+        expect(links[1]?.attributes('data-warning-target')).toBe('#cache-status')
+
+        wrapper.unmount()
+    })
+
     it('can be dismissed for the current warning set', async () => {
         vi.mocked(getOperationalHealth)
             .mockResolvedValueOnce({

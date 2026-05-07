@@ -133,6 +133,7 @@ describe('Settings.vue', () => {
         expect(wrapper.text()).toContain('completed: 2')
         expect(wrapper.text()).toContain('Operational Health')
         expect(wrapper.text()).toContain('Needs Attention')
+        expect(wrapper.text()).toContain('critical')
         expect(wrapper.text()).toContain('Orphaned Assessments')
     })
 
