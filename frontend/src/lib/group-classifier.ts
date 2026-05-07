@@ -13,7 +13,6 @@ import {
     hasOpenTeamAssessment,
     getGroupTechnicalState,
     normalizeTags,
-    matchesFilters,
 } from './assessment-helpers'
 
 export interface GroupClassification {
@@ -28,26 +27,43 @@ export interface GroupClassification {
     technicalState: string
 }
 
+type TeamMapping = Record<string, any>
+
+interface CachedClassificationEntry {
+    teamMapping: TeamMapping
+    classification: GroupClassification
+}
+
+const classificationCache = new WeakMap<GroupedVuln, CachedClassificationEntry>()
+
 /**
  * Single authoritative classification of a vulnerability group.
  * Both filter counts and team statistics MUST use this function.
  */
 export function classifyGroup(
     group: GroupedVuln,
-    teamMapping: Record<string, any>
+    teamMapping: TeamMapping
 ): GroupClassification {
+    const cached = classificationCache.get(group)
+    if (cached && cached.teamMapping === teamMapping) {
+        return cached.classification
+    }
+
     const tags = group.tags || []
     const lifecycle = getGroupLifecycle(group, tags, teamMapping)
     const isPending = isPendingReview(group)
     const openPendingWithOpenTeam = isPending && hasOpenTeamAssessment(group, tags, teamMapping)
     const isOpen = lifecycle === 'OPEN' || openPendingWithOpenTeam
 
-    return {
+    const classification = {
         lifecycle,
         isPending,
         isOpen,
         technicalState: getGroupTechnicalState(group),
     }
+
+    classificationCache.set(group, { teamMapping, classification })
+    return classification
 }
 
 export interface FilterCounts {
@@ -126,7 +142,7 @@ export interface TeamCounts {
  */
 export function computeTeamCounts(
     groups: GroupedVuln[],
-    teamMapping: Record<string, any>
+    teamMapping: TeamMapping
 ): Record<string, TeamCounts> {
     const counts: Record<string, TeamCounts> = {}
 
@@ -149,4 +165,30 @@ export function computeTeamCounts(
     return counts
 }
 
-export { matchesFilters, normalizeTags, getGroupTechnicalState }
+export function matchesFilters(
+    group: GroupedVuln,
+    lifecycleFilters: string[],
+    analysisFilters: string[],
+    teamMapping: TeamMapping
+): boolean {
+    if (lifecycleFilters.length === 0 || analysisFilters.length === 0) return false
+
+    const classification = classifyGroup(group, teamMapping)
+    const lifecycleMatch =
+        (lifecycleFilters.includes('OPEN') && classification.isOpen) ||
+        (lifecycleFilters.includes('ASSESSED') && classification.lifecycle === 'ASSESSED') ||
+        (lifecycleFilters.includes('ASSESSED_LEGACY') && classification.lifecycle === 'ASSESSED_LEGACY') ||
+        (lifecycleFilters.includes('INCOMPLETE') && classification.lifecycle === 'INCOMPLETE') ||
+        (lifecycleFilters.includes('INCONSISTENT') && classification.lifecycle === 'INCONSISTENT') ||
+        (lifecycleFilters.includes('NEEDS_APPROVAL') && classification.isPending)
+
+    if (!lifecycleMatch) return false
+
+    if (classification.technicalState === 'NOT_SET') {
+        return analysisFilters.includes('NOT_SET')
+    }
+
+    return analysisFilters.includes(classification.technicalState)
+}
+
+export { normalizeTags, getGroupTechnicalState }

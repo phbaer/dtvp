@@ -767,6 +767,8 @@ class CacheManager:
 
     async def record_project_access(self, project_uuid: str) -> None:
         async with self.lock:
+            if project_uuid in self.active_project_uuids:
+                return
             self.active_project_uuids.add(project_uuid)
             self._save_active_projects(list(self.active_project_uuids))
 
@@ -835,11 +837,19 @@ class CacheManager:
                 findings,
                 previous_findings or [],
             )
-            findings = self._overlay_local_analysis(project_uuid, findings)
+            findings = self._overlay_local_analysis(
+                project_uuid,
+                findings,
+                allow_store_lookup=True,
+            )
             async with self.lock:
                 self._save_project_cache(path, findings)
         else:
-            findings = self._overlay_local_analysis(project_uuid, findings)
+            findings = self._overlay_local_analysis(
+                project_uuid,
+                findings,
+                allow_store_lookup=False,
+            )
 
         if cve:
             cve_upper = cve.upper()
@@ -937,6 +947,121 @@ class CacheManager:
             async with self.lock:
                 self._save_project_cache(path, analysis)
         return analysis
+
+    async def get_analyses_batch(
+        self,
+        client: DTClient,
+        instances: List[Dict[str, Any]],
+    ) -> List[Optional[Dict[str, Any]] | BaseException]:
+        results: List[Optional[Dict[str, Any]] | BaseException] = [None] * len(instances)
+        pending = self._load_pending_updates()
+        dt_lookup_indices: List[int] = []
+
+        async with self.lock:
+            for index, instance in enumerate(instances):
+                project_uuid = instance.get("project_uuid")
+                component_uuid = instance.get("component_uuid")
+                vulnerability_uuid = instance.get("vulnerability_uuid")
+                if not (project_uuid and component_uuid and vulnerability_uuid):
+                    continue
+
+                cached = self._load_project_cache(
+                    self._analysis_path(project_uuid, component_uuid, vulnerability_uuid),
+                    None,
+                )
+                if cached is not None:
+                    results[index] = cached
+
+        for index, instance in enumerate(instances):
+            if results[index] is not None:
+                continue
+
+            project_uuid = instance.get("project_uuid")
+            component_uuid = instance.get("component_uuid")
+            vulnerability_uuid = instance.get("vulnerability_uuid")
+            if not (project_uuid and component_uuid and vulnerability_uuid):
+                continue
+
+            pending_analysis = None
+            for pending_update in pending:
+                payload = pending_update.get("payload", {})
+                if (
+                    payload.get("project_uuid") == project_uuid
+                    and payload.get("component_uuid") == component_uuid
+                    and payload.get("vulnerability_uuid") == vulnerability_uuid
+                ):
+                    pending_analysis = {
+                        "analysisState": payload.get("state"),
+                        "analysisDetails": payload.get("details"),
+                        "isSuppressed": payload.get("suppressed", False),
+                    }
+                    break
+
+            if pending_analysis is not None:
+                results[index] = pending_analysis
+                continue
+
+            store_analysis = knowledge_store.get_assessment_by_triplet(
+                project_uuid=project_uuid,
+                component_uuid=component_uuid,
+                vulnerability_uuid=vulnerability_uuid,
+            )
+            if store_analysis is not None:
+                async with self.lock:
+                    self._save_project_cache(
+                        self._analysis_path(project_uuid, component_uuid, vulnerability_uuid),
+                        store_analysis,
+                    )
+                results[index] = store_analysis
+                continue
+
+            dt_lookup_indices.append(index)
+
+        if not dt_lookup_indices:
+            return results
+
+        fetched = await asyncio.gather(
+            *[
+                client.get_analysis(
+                    project_uuid=instances[index]["project_uuid"],
+                    component_uuid=instances[index]["component_uuid"],
+                    vulnerability_uuid=instances[index]["vulnerability_uuid"],
+                )
+                for index in dt_lookup_indices
+            ],
+            return_exceptions=True,
+        )
+
+        for result_index, instance_index in enumerate(dt_lookup_indices):
+            fetched_analysis = fetched[result_index]
+            if isinstance(fetched_analysis, Exception):
+                results[instance_index] = fetched_analysis
+                continue
+
+            instance = instances[instance_index]
+            merged_analysis = self._merge_blank_source_analysis(None, fetched_analysis)
+            if _get_analysis_details(fetched_analysis):
+                self._persist_analysis_to_knowledge_store(
+                    _build_assessment_persistence_payload(
+                        project_uuid=instance["project_uuid"],
+                        component_uuid=instance["component_uuid"],
+                        vulnerability_uuid=instance["vulnerability_uuid"],
+                        analysis=fetched_analysis,
+                    )
+                )
+
+            async with self.lock:
+                self._save_project_cache(
+                    self._analysis_path(
+                        instance["project_uuid"],
+                        instance["component_uuid"],
+                        instance["vulnerability_uuid"],
+                    ),
+                    merged_analysis,
+                )
+            results[instance_index] = merged_analysis
+
+        return results
 
     def _finding_cache_identity(
         self, finding: Dict[str, Any]
@@ -1113,6 +1238,8 @@ class CacheManager:
         self,
         project_uuid: str,
         findings: List[Dict[str, Any]],
+        *,
+        allow_store_lookup: bool,
     ) -> List[Dict[str, Any]]:
         if not findings:
             return findings
@@ -1137,14 +1264,16 @@ class CacheManager:
                 store_lookup_indices.append(index)
                 store_lookup_findings.append((component, vulnerability))
 
-        store_lookup_results = knowledge_store.get_assessments_for_findings(
-            findings=store_lookup_findings
-        )
-        store_analyses_by_index = {
-            finding_index: store_lookup_results[result_index]
-            for result_index, finding_index in enumerate(store_lookup_indices)
-            if result_index < len(store_lookup_results)
-        }
+        store_analyses_by_index: Dict[int, Optional[Dict[str, Any]]] = {}
+        if allow_store_lookup and store_lookup_findings:
+            store_lookup_results = knowledge_store.get_assessments_for_findings(
+                findings=store_lookup_findings
+            )
+            store_analyses_by_index = {
+                finding_index: store_lookup_results[result_index]
+                for result_index, finding_index in enumerate(store_lookup_indices)
+                if result_index < len(store_lookup_results)
+            }
 
         for finding_index, finding in enumerate(findings):
             component = finding.get("component", {})

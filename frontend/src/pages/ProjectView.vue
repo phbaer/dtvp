@@ -2,11 +2,11 @@
 import { ref, watch, computed, inject, provide, onMounted, onActivated, nextTick, triggerRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMRescoreProposals } from '../lib/api'
-import { getGroupLifecycle, tagToString, hasCvssVersionMismatch, normalizeTags } from '../lib/assessment-helpers'
-import { classifyGroup, computeFilterCounts, computeTeamCounts, matchesFilters, getGroupTechnicalState } from '../lib/group-classifier'
+import { tagToString, hasCvssVersionMismatch, normalizeTags } from '../lib/assessment-helpers'
+import { classifyGroup, computeFilterCounts, computeTeamCounts, matchesFilters } from '../lib/group-classifier'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
-import { getGroupCodeAnalysisStatus, hasCodeAnalysisAvailable as hasStoredCodeAnalysisAvailable, isCodeAnalysisUsedInAssessment } from '../lib/codeAnalysisStatus'
+import { getGroupCodeAnalysisStatus } from '../lib/codeAnalysisStatus'
 import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
 import { projectHeaderState } from '../lib/projectHeaderStore'
 
@@ -45,7 +45,7 @@ provide('tmrescoreProposals', computed(() => tmrescoreProposalSnapshot.value?.pr
 
 const showBulkApproveModal = ref(false)
 const needsApprovalGroups = computed(() => {
-    return groups.value.filter(g => getDisplayState(g) === 'NEEDS_APPROVAL')
+    return groups.value.filter(g => classifyGroup(g, teamMapping.value).isPending)
 })
 
 const tmrescoreProposalFilter = ref<Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>>(['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'])
@@ -322,7 +322,7 @@ projectHeaderState.bulkSyncHandler.value = () => {
     showBulkModal.value = true
 }
 const incompleteGroups = computed(() => {
-    return groups.value.filter(g => getDisplayState(g) === 'INCOMPLETE')
+    return groups.value.filter(g => classifyGroup(g, teamMapping.value).lifecycle === 'INCOMPLETE')
 })
 
 const handleBulkApproveModalUpdates = (updates: Array<{ id: string; data: any }>) => {
@@ -606,10 +606,6 @@ const ANALYSIS_STATE_ORDER: Record<string, number> = {
 }
 
 
-const getDisplayState = (group: GroupedVuln): string => {
-    return getGroupLifecycle(group, group.tags || [], teamMapping.value)
-}
-
 const getGroupDependencyRelationship = (group: GroupedVuln): 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN' => {
     const directFlags = (group.affected_versions || [])
         .flatMap(v => (v.components || []).map(c => c.is_direct_dependency))
@@ -627,21 +623,55 @@ const isMeaningfulTMRescoreProposal = (group: GroupedVuln, proposal: any) => {
     return !originalVector || rescoredVector !== originalVector
 }
 
-const hasTMRescoreProposal = (group: GroupedVuln) => {
+type GroupDerivedState = {
+    searchableTags: string[]
+    normalizedTags: string[]
+    dependencyRelationship: 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
+    hasProposal: boolean
+    codeAnalysisStatus: ReturnType<typeof getGroupCodeAnalysisStatus>
+    availableVersions: string[]
+    hasCvssVersionMismatch: boolean
+}
+
+const groupDerivedState = computed(() => {
     const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
-    const candidateIds = [group.id, ...(group.aliases || [])]
-    return candidateIds.some((candidateId) => {
-        const normalized = String(candidateId || '').trim().toUpperCase()
-        return normalized && isMeaningfulTMRescoreProposal(group, proposals[normalized])
+    const derived = new Map<GroupedVuln, GroupDerivedState>()
+
+    groups.value.forEach((group) => {
+        const rawTags = (group.tags || []).map(tagToString).filter(Boolean)
+        const normalizedTags = teamMapping.value ? normalizeTags(group.tags || [], teamMapping.value) : []
+        const candidateIds = [group.id, ...(group.aliases || [])]
+        const hasProposal = candidateIds.some((candidateId) => {
+            const normalized = String(candidateId || '').trim().toUpperCase()
+            return normalized && isMeaningfulTMRescoreProposal(group, proposals[normalized])
+        })
+
+        derived.set(group, {
+            searchableTags: Array.from(new Set([...rawTags, ...normalizedTags])),
+            normalizedTags,
+            dependencyRelationship: getGroupDependencyRelationship(group),
+            hasProposal,
+            codeAnalysisStatus: getGroupCodeAnalysisStatus(group),
+            availableVersions: (group.affected_versions || [])
+                .map((version: any) => version.project_version)
+                .filter((value: any): value is string => typeof value === 'string' && value.length > 0),
+            hasCvssVersionMismatch: hasCvssVersionMismatch(group),
+        })
     })
-}
 
-const hasCodeAnalysisAvailable = (group: GroupedVuln) => {
-    return hasStoredCodeAnalysisAvailable(group)
-}
+    return derived
+})
 
-const hasCodeAnalysisUsedInAssessmentForGroup = (group: GroupedVuln) => {
-    return isCodeAnalysisUsedInAssessment(group)
+const getGroupDerivedState = (group: GroupedVuln): GroupDerivedState => {
+    return groupDerivedState.value.get(group) || {
+        searchableTags: [],
+        normalizedTags: [],
+        dependencyRelationship: 'UNKNOWN',
+        hasProposal: false,
+        codeAnalysisStatus: getGroupCodeAnalysisStatus(group),
+        availableVersions: [],
+        hasCvssVersionMismatch: false,
+    }
 }
 
 // Groups after applying all non-lifecycle/non-analysis filters (used for filter counts)
@@ -651,10 +681,7 @@ const preFilteredGroups = computed(() => {
     const rawTagFilter = tagFilter.value.trim().toLowerCase()
     if (rawTagFilter) {
         result = result.filter(g => {
-            const rawTags = (g.tags || []).map(tagToString).filter(Boolean)
-            const normalized = teamMapping.value ? normalizeTags(g.tags || [], teamMapping.value) : []
-            const allTags = Array.from(new Set([...rawTags, ...normalized]))
-            return allTags.some(tag => tag.toLowerCase().includes(rawTagFilter))
+            return getGroupDerivedState(g).searchableTags.some(tag => tag.toLowerCase().includes(rawTagFilter))
         })
     }
 
@@ -667,12 +694,12 @@ const preFilteredGroups = computed(() => {
     }
 
     if (dependencyFilter.value.length > 0) {
-        result = result.filter(g => dependencyFilter.value.includes(getGroupDependencyRelationship(g)))
+        result = result.filter(g => dependencyFilter.value.includes(getGroupDerivedState(g).dependencyRelationship))
     }
 
     if (tmrescoreProposalFilter.value.length > 0) {
         result = result.filter(g => {
-            const hasProposal = hasTMRescoreProposal(g)
+            const hasProposal = getGroupDerivedState(g).hasProposal
             const matchesWith = tmrescoreProposalFilter.value.includes('WITH_PROPOSAL') && hasProposal
             const matchesWithout = tmrescoreProposalFilter.value.includes('WITHOUT_PROPOSAL') && !hasProposal
             return matchesWith || matchesWithout
@@ -680,16 +707,19 @@ const preFilteredGroups = computed(() => {
     }
 
     if (codeAnalysisAvailableOnly.value) {
-        result = result.filter(g => hasCodeAnalysisAvailable(g))
+        result = result.filter(g => {
+            const status = getGroupDerivedState(g).codeAnalysisStatus
+            return status === 'available' || status === 'used-in-assessment'
+        })
     }
 
     if (codeAnalysisUsedOnly.value) {
-        result = result.filter(g => hasCodeAnalysisUsedInAssessmentForGroup(g))
+        result = result.filter(g => getGroupDerivedState(g).codeAnalysisStatus === 'used-in-assessment')
     }
 
     if (versionFilterList.value.length > 0) {
         result = result.filter(g => {
-            const available = (g.affected_versions || []).map((v: any) => v.project_version).filter((x: any) => !!x)
+            const available = getGroupDerivedState(g).availableVersions
             return versionFilterList.value.some(v => available.includes(v))
         })
     }
@@ -718,7 +748,7 @@ const preFilteredGroups = computed(() => {
     }
 
     if (cvssVersionMismatchOnly.value) {
-        result = result.filter(g => hasCvssVersionMismatch(g))
+        result = result.filter(g => getGroupDerivedState(g).hasCvssVersionMismatch)
     }
 
     return result
@@ -738,14 +768,18 @@ const sortedGroups = computed(() => {
         
         switch (sortBy.value) {
             case 'analysis': {
-                const stateA = getGroupTechnicalState(a)
-                const stateB = getGroupTechnicalState(b)
+                const stateA = classifyGroup(a, teamMapping.value).technicalState
+                const stateB = classifyGroup(b, teamMapping.value).technicalState
                 comparison = (ANALYSIS_STATE_ORDER[stateA] ?? 99) - (ANALYSIS_STATE_ORDER[stateB] ?? 99)
                 break
             }
             case 'tags': {
-                const tagsA = teamMapping.value ? normalizeTags(a.tags || [], teamMapping.value) : (a.tags || []).map(tagToString).filter(Boolean)
-                const tagsB = teamMapping.value ? normalizeTags(b.tags || [], teamMapping.value) : (b.tags || []).map(tagToString).filter(Boolean)
+                const tagsA = getGroupDerivedState(a).normalizedTags.length > 0
+                    ? getGroupDerivedState(a).normalizedTags
+                    : getGroupDerivedState(a).searchableTags
+                const tagsB = getGroupDerivedState(b).normalizedTags.length > 0
+                    ? getGroupDerivedState(b).normalizedTags
+                    : getGroupDerivedState(b).searchableTags
                 const tagA = tagsA.length > 0 ? tagsA[0] : ''
                 const tagB = tagsB.length > 0 ? tagsB[0] : ''
                 comparison = tagA.localeCompare(tagB)
@@ -814,7 +848,7 @@ const filterCounts = computed(() => {
 })
 
 const cvssVersionMismatchCount = computed(() => {
-    return groups.value.filter(g => hasCvssVersionMismatch(g)).length
+    return groups.value.filter(g => getGroupDerivedState(g).hasCvssVersionMismatch).length
 })
 
 const teamTagCounts = computed(() => {
@@ -842,19 +876,14 @@ const groupsAfterLifecycle = computed(() => {
 
 const groupsAfterLifecycleAndDependency = computed(() => {
     if (dependencyFilter.value.length === 0) return groupsAfterLifecycle.value
-    return groupsAfterLifecycle.value.filter(g => dependencyFilter.value.includes(getGroupDependencyRelationship(g)))
+    return groupsAfterLifecycle.value.filter(g => dependencyFilter.value.includes(getGroupDerivedState(g).dependencyRelationship))
 })
 
 const groupsBeforeAnalysis = computed(() => {
     if (tmrescoreProposalFilter.value.length === 0) return groupsAfterLifecycleAndDependency.value
 
-    const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
     return groupsAfterLifecycleAndDependency.value.filter(g => {
-        const candidateIds = [g.id, ...(g.aliases || [])]
-        const hasProposal = candidateIds.some((candidateId) => {
-            const normalized = String(candidateId || '').trim().toUpperCase()
-            return normalized && isMeaningfulTMRescoreProposal(g, proposals[normalized])
-        })
+        const hasProposal = getGroupDerivedState(g).hasProposal
         const matchesWith = tmrescoreProposalFilter.value.includes('WITH_PROPOSAL') && hasProposal
         const matchesWithout = tmrescoreProposalFilter.value.includes('WITHOUT_PROPOSAL') && !hasProposal
         return matchesWith || matchesWithout
@@ -863,7 +892,7 @@ const groupsBeforeAnalysis = computed(() => {
 const dependencyFilterCounts = computed(() => {
     const counts = { direct: 0, transitive: 0, unknown: 0 }
     groupsAfterLifecycle.value.forEach(g => {
-        const relationship = getGroupDependencyRelationship(g).toLowerCase() as 'direct' | 'transitive' | 'unknown'
+        const relationship = getGroupDerivedState(g).dependencyRelationship.toLowerCase() as 'direct' | 'transitive' | 'unknown'
         counts[relationship]++
     })
     return counts
@@ -872,7 +901,7 @@ const dependencyFilterCounts = computed(() => {
 const dependencyRelationshipCounts = computed(() => {
     const counts = { direct: 0, transitive: 0, unknown: 0 }
     matchingGroups.value.forEach(g => {
-        const relationship = getGroupDependencyRelationship(g).toLowerCase() as 'direct' | 'transitive' | 'unknown'
+        const relationship = getGroupDerivedState(g).dependencyRelationship.toLowerCase() as 'direct' | 'transitive' | 'unknown'
         counts[relationship]++
     })
     return counts
@@ -884,12 +913,7 @@ const tmrescoreProposalCounts = computed(() => {
         WITHOUT_PROPOSAL: 0,
     }
     groupsAfterLifecycleAndDependency.value.forEach(g => {
-        const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
-        const candidateIds = [g.id, ...(g.aliases || [])]
-        const hasProposal = candidateIds.some((candidateId) => {
-            const normalized = String(candidateId || '').trim().toUpperCase()
-            return normalized && isMeaningfulTMRescoreProposal(g, proposals[normalized])
-        })
+        const hasProposal = getGroupDerivedState(g).hasProposal
 
         if (hasProposal) counts.WITH_PROPOSAL++
         else counts.WITHOUT_PROPOSAL++
@@ -904,7 +928,7 @@ const codeAnalysisCounts = computed(() => {
     }
 
     groupsAfterLifecycleAndDependency.value.forEach(g => {
-        const status = getGroupCodeAnalysisStatus(g)
+        const status = getGroupDerivedState(g).codeAnalysisStatus
         if (status === 'available' || status === 'used-in-assessment') counts.available++
         if (status === 'used-in-assessment') counts.used++
     })
@@ -923,7 +947,7 @@ const analysisCounts = computed(() => {
         NEEDS_APPROVAL: 0,
     }
     groupsBeforeAnalysis.value.forEach(g => {
-        const state = getGroupTechnicalState(g)
+        const state = classifyGroup(g, teamMapping.value).technicalState
         counts[state] = (counts[state] || 0) + 1
     })
     return counts
@@ -1023,7 +1047,7 @@ watch(() => user?.role, (role) => {
                             @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
                         />
                         <div v-if="sortedGroups.length === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
-                        <div v-if="hasMoreGroups && sortedGroups.length > 0" ref="loadMoreTrigger" class="text-center py-6 text-sm text-gray-400">
+                        <div v-else-if="hasMoreGroups" ref="loadMoreTrigger" class="py-6 text-center text-sm text-gray-400">
                             Loading more vulnerabilities…
                         </div>
                     </div>

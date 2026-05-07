@@ -162,6 +162,15 @@ def test_operational_health_endpoint_reports_ok_state(client):
             "dtvp.app_wiring.knowledge_store.get_status",
             return_value=knowledge_store_status,
         ),
+        patch.dict(
+            os.environ,
+            {
+                "DTVP_KNOWLEDGE_STORE_MAINTENANCE_WARNING_AGE_SECONDS": str(
+                    7 * 24 * 60 * 60
+                ),
+            },
+            clear=False,
+        ),
     ):
         response = client.get("/api/operational-health")
 
@@ -205,6 +214,9 @@ def test_operational_health_endpoint_reports_noncritical_warning_state(client):
             {
                 "DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_THRESHOLD": "5",
                 "DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_AGE_SECONDS": "60",
+                "DTVP_KNOWLEDGE_STORE_MAINTENANCE_WARNING_AGE_SECONDS": str(
+                    7 * 24 * 60 * 60
+                ),
             },
             clear=False,
         ),

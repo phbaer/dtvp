@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -269,17 +268,9 @@ def _register_assessment_routes(
             len(req.instances),
             user,
         )
-        analysis_tasks = [
-            deps.cache_manager.get_analysis(
-                client,
-                project_uuid=instance["project_uuid"],
-                component_uuid=instance["component_uuid"],
-                vulnerability_uuid=instance["vulnerability_uuid"],
-                refresh=True,
-            )
-            for instance in req.instances
-        ]
-        gathered_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+        gathered_results = await deps.cache_manager.get_analyses_batch(
+            client, req.instances
+        )
 
         results = []
         for instance, result in zip(req.instances, gathered_results):

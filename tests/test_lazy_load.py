@@ -105,6 +105,41 @@ def test_get_assessment_details_partial_failure(api_client, mock_client):
     assert results[1]["error"] == "DB Error"
 
 
+def test_get_assessment_details_uses_cached_analysis_without_dt_lookup(
+    api_client, mock_client
+):
+    main.cache_manager._save_local_analysis(
+        {
+            "project_uuid": "p1",
+            "component_uuid": "c1",
+            "vulnerability_uuid": "v1",
+            "state": "NOT_AFFECTED",
+            "details": "Cached details",
+            "suppressed": False,
+        }
+    )
+
+    response = api_client.post(
+        "/api/assessments/details",
+        json={
+            "instances": [
+                {
+                    "project_uuid": "p1",
+                    "component_uuid": "c1",
+                    "vulnerability_uuid": "v1",
+                    "finding_uuid": "f1",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    results = response.json()
+    assert results[0]["analysis"]["analysisState"] == "NOT_AFFECTED"
+    assert results[0]["analysis"]["analysisDetails"] == "Cached details"
+    mock_client.get_analysis.assert_not_called()
+
+
 def test_update_assessment_conflict(api_client, mock_client):
     mock_client.get_analysis.return_value = {
         "analysisState": "EXPLOITABLE",

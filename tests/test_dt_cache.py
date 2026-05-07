@@ -76,6 +76,19 @@ async def test_get_vulnerabilities_caches_results(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_record_project_access_does_not_rewrite_active_projects_for_existing_project(
+    tmp_path,
+):
+    manager = CacheManager(base_path=str(tmp_path))
+
+    with patch.object(manager, "_save_active_projects") as save_active_projects:
+        await manager.record_project_access("uuid1")
+        await manager.record_project_access("uuid1")
+
+    assert save_active_projects.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_queue_and_flush_pending_updates(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
@@ -709,6 +722,59 @@ async def test_get_vulnerabilities_hydrates_analysis_cache_from_knowledge_store(
         "analysisDetails": "Shared durable assessment.",
         "isSuppressed": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_get_vulnerabilities_warm_cache_does_not_requery_knowledge_store(
+    tmp_path,
+):
+    manager = CacheManager(base_path=str(tmp_path / "cache"))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [
+        {
+            "component": {"uuid": "component-1", "name": "log4j-core"},
+            "vulnerability": {
+                "uuid": "vuln-1",
+                "vulnId": "GHSA-jfh8-c2jp-5v3q",
+                "aliases": [{"cve": "CVE-2021-44228"}],
+            },
+            "analysis": {
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "isSuppressed": False,
+            },
+        }
+    ]
+
+    knowledge_store.persist_assessment(
+        payload={
+            "project_uuid": "project-1",
+            "component_uuid": "component-1",
+            "vulnerability_uuid": "vuln-1",
+            "state": "NOT_AFFECTED",
+            "details": "Shared durable assessment.",
+            "suppressed": False,
+        },
+        component={"uuid": "component-1", "name": "log4j-core"},
+        vulnerability={
+            "uuid": "vuln-1",
+            "vulnId": "GHSA-jfh8-c2jp-5v3q",
+            "aliases": [{"cve": "CVE-2021-44228"}],
+        },
+    )
+
+    await manager.get_vulnerabilities(client, project_uuid="project-1", refresh=True)
+
+    with patch.object(knowledge_store, "get_assessments_for_findings") as store_lookup:
+        findings = await manager.get_vulnerabilities(
+            client,
+            project_uuid="project-1",
+            refresh=False,
+        )
+
+    assert findings[0]["analysis"]["analysisState"] == "NOT_AFFECTED"
+    assert "Shared durable assessment." in findings[0]["analysis"]["analysisDetails"]
+    store_lookup.assert_not_called()
 
 
 @pytest.mark.asyncio
