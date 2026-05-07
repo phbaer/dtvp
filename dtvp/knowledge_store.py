@@ -201,7 +201,9 @@ def _build_assessment_record(
     vulnerability_data = vulnerability or {}
     canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
     if not canonical_vulnerability_id:
-        fallback_vulnerability_uuid = str(payload.get("vulnerability_uuid") or "").strip()
+        fallback_vulnerability_uuid = str(
+            payload.get("vulnerability_uuid") or ""
+        ).strip()
         if not fallback_vulnerability_uuid:
             return None
         canonical_vulnerability_id = f"UUID:{fallback_vulnerability_uuid}"
@@ -211,7 +213,9 @@ def _build_assessment_record(
     if canonical_vulnerability_id not in aliases:
         aliases.append(canonical_vulnerability_id)
 
-    merged_aliases = sorted({*(existing or {}).get("vulnerability_aliases", []), *aliases})
+    merged_aliases = sorted(
+        {*(existing or {}).get("vulnerability_aliases", []), *aliases}
+    )
     triplets = list((existing or {}).get("triplets", []))
     project_uuid = str(payload.get("project_uuid") or "").strip()
     vulnerability_uuid = str(payload.get("vulnerability_uuid") or "").strip()
@@ -225,12 +229,16 @@ def _build_assessment_record(
             triplets.append(triplet)
 
     return {
-        "primary_key": assessment_primary_key(component_uuid, canonical_vulnerability_id),
+        "primary_key": assessment_primary_key(
+            component_uuid, canonical_vulnerability_id
+        ),
         "component_uuid": component_uuid,
         "component_identity": _normalize_component_identity(component_data)
         or (existing or {}).get("component_identity", ""),
-        "component_name": component_data.get("name") or (existing or {}).get("component_name"),
-        "component_purl": component_data.get("purl") or (existing or {}).get("component_purl"),
+        "component_name": component_data.get("name")
+        or (existing or {}).get("component_name"),
+        "component_purl": component_data.get("purl")
+        or (existing or {}).get("component_purl"),
         "canonical_vulnerability_id": canonical_vulnerability_id,
         "vulnerability_aliases": merged_aliases,
         "vulnerability_uuid": payload.get("vulnerability_uuid"),
@@ -413,7 +421,9 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
             existing = None
             component_uuid = str(payload.get("component_uuid") or "").strip()
             vulnerability_data = vulnerability or {}
-            canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+            canonical_vulnerability_id = select_canonical_vulnerability_id(
+                vulnerability_data
+            )
             if component_uuid and canonical_vulnerability_id:
                 existing = state["assessments"].get(
                     assessment_primary_key(component_uuid, canonical_vulnerability_id)
@@ -463,7 +473,9 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
         component: Optional[Dict[str, Any]],
         vulnerability: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        results = self.get_assessments_for_findings(findings=[(component, vulnerability)])
+        results = self.get_assessments_for_findings(
+            findings=[(component, vulnerability)]
+        )
         return results[0] if results else None
 
     def get_assessments_for_findings(
@@ -632,7 +644,9 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
                     ON project_reachability(is_active, purge_after);
                     """
                 )
-                row = connection.execute("SELECT COUNT(*) AS count FROM assessments").fetchone()
+                row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM assessments"
+                ).fetchone()
                 if row is not None and row["count"] == 0:
                     self._bootstrap_from_json(connection)
             self._initialized = True
@@ -654,7 +668,9 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
             order=queue_state.get("order") or [],
         )
 
-    def _upsert_record(self, connection: sqlite3.Connection, record: Dict[str, Any]) -> None:
+    def _upsert_record(
+        self, connection: sqlite3.Connection, record: Dict[str, Any]
+    ) -> None:
         connection.execute(
             """
             INSERT INTO assessments (
@@ -684,7 +700,10 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
                 record.get("updated_at") or datetime.now(timezone.utc).isoformat(),
             ),
         )
-        connection.execute("DELETE FROM assessment_aliases WHERE primary_key = ?", (record["primary_key"],))
+        connection.execute(
+            "DELETE FROM assessment_aliases WHERE primary_key = ?",
+            (record["primary_key"],),
+        )
         aliases = [
             (record["primary_key"], alias)
             for alias in record.get("vulnerability_aliases", []) or []
@@ -710,7 +729,9 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
                 ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
-                    assessment_triplet_key(project_uuid, component_uuid, vulnerability_uuid),
+                    assessment_triplet_key(
+                        project_uuid, component_uuid, vulnerability_uuid
+                    ),
                     record["primary_key"],
                     project_uuid,
                     component_uuid,
@@ -744,9 +765,15 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
     def get_status(self) -> Dict[str, Any]:
         self._ensure_initialized()
         with self._connection() as connection:
-            assessment_records = connection.execute("SELECT COUNT(*) AS count FROM assessments").fetchone()["count"]
-            triplet_entries = connection.execute("SELECT COUNT(*) AS count FROM assessment_triplets").fetchone()["count"]
-            queue_rows = connection.execute("SELECT payload_json FROM queue_items ORDER BY position ASC").fetchall()
+            assessment_records = connection.execute(
+                "SELECT COUNT(*) AS count FROM assessments"
+            ).fetchone()["count"]
+            triplet_entries = connection.execute(
+                "SELECT COUNT(*) AS count FROM assessment_triplets"
+            ).fetchone()["count"]
+            queue_rows = connection.execute(
+                "SELECT payload_json FROM queue_items ORDER BY position ASC"
+            ).fetchall()
             orphaned_records = connection.execute(
                 "SELECT COUNT(*) AS count FROM project_reachability WHERE is_active = 0"
             ).fetchone()["count"]
@@ -782,7 +809,9 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
             }
         )
         timestamp = (now or datetime.now(timezone.utc)).isoformat()
-        purge_after = ((now or datetime.now(timezone.utc)) + timedelta(days=grace_period_days)).isoformat()
+        purge_after = (
+            (now or datetime.now(timezone.utc)) + timedelta(days=grace_period_days)
+        ).isoformat()
         with self._connection() as connection:
             if active_project_ids:
                 connection.executemany(
@@ -870,9 +899,13 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
         component_uuid = str(payload.get("component_uuid") or "").strip()
         vulnerability_data = vulnerability or {}
         existing = None
-        canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+        canonical_vulnerability_id = select_canonical_vulnerability_id(
+            vulnerability_data
+        )
         if component_uuid and canonical_vulnerability_id:
-            primary_key = assessment_primary_key(component_uuid, canonical_vulnerability_id)
+            primary_key = assessment_primary_key(
+                component_uuid, canonical_vulnerability_id
+            )
             with self._connection() as connection:
                 assessment_row = connection.execute(
                     "SELECT * FROM assessments WHERE primary_key = ?",
@@ -932,7 +965,11 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
                 JOIN assessments ON assessments.primary_key = assessment_triplets.primary_key
                 WHERE assessment_triplets.triplet_key = ?
                 """,
-                (assessment_triplet_key(project_uuid, component_uuid, vulnerability_uuid),),
+                (
+                    assessment_triplet_key(
+                        project_uuid, component_uuid, vulnerability_uuid
+                    ),
+                ),
             ).fetchone()
         if row is None:
             return None
@@ -944,7 +981,9 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
         component: Optional[Dict[str, Any]],
         vulnerability: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        results = self.get_assessments_for_findings(findings=[(component, vulnerability)])
+        results = self.get_assessments_for_findings(
+            findings=[(component, vulnerability)]
+        )
         return results[0] if results else None
 
     def get_assessments_for_findings(
@@ -981,8 +1020,7 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
                     primary_keys,
                 ).fetchall()
                 primary_key_matches = {
-                    row["primary_key"]: json.loads(row["analysis_json"])
-                    for row in rows
+                    row["primary_key"]: json.loads(row["analysis_json"]) for row in rows
                 }
 
             alias_values: list[tuple[int, str, str]] = []

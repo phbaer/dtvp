@@ -66,10 +66,14 @@ async def start_application_runtime(
     perform_knowledge_store_maintenance(deps)
     return StartupRuntimeTasks(
         sync_task=deps.create_task(deps.run_background_sync_loop()),
-        knowledge_store_write_task=deps.create_task(deps.run_knowledge_store_write_loop()),
+        knowledge_store_write_task=deps.create_task(
+            deps.run_knowledge_store_write_loop()
+        ),
         queue_task=deps.create_task(deps.run_analysis_queue_worker()),
         queue_cleanup_task=deps.create_task(deps.run_analysis_queue_cleanup_loop()),
-        knowledge_store_task=deps.create_task(run_knowledge_store_maintenance_loop(deps)),
+        knowledge_store_task=deps.create_task(
+            run_knowledge_store_maintenance_loop(deps)
+        ),
     )
 
 
@@ -80,7 +84,9 @@ def perform_knowledge_store_maintenance(deps: StartupServiceDeps) -> int:
     )
     purged_records = deps.purge_expired_knowledge_store()
     if purged_records:
-        deps.logger.info("Purged %s expired knowledge-store assessments", purged_records)
+        deps.logger.info(
+            "Purged %s expired knowledge-store assessments", purged_records
+        )
     return purged_records
 
 

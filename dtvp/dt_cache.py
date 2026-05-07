@@ -19,6 +19,36 @@ class PendingUpdateExistsError(Exception):
     pass
 
 
+class KnowledgeStoreWriteBuffer:
+    def __init__(self) -> None:
+        self._entries: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+
+    def enqueue(
+        self,
+        key: Tuple[str, str, str],
+        *,
+        payload: Dict[str, Any],
+        component: Optional[Dict[str, Any]] = None,
+        vulnerability: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self._entries[key] = {
+            "payload": dict(payload),
+            "component": dict(component or {}),
+            "vulnerability": dict(vulnerability or {}),
+        }
+
+    def drain(self) -> List[Tuple[Tuple[str, str, str], Dict[str, Any]]]:
+        drained = list(self._entries.items())
+        self._entries = {}
+        return drained
+
+    def requeue(self, key: Tuple[str, str, str], entry: Dict[str, Any]) -> None:
+        self._entries[key] = entry
+
+    def reset(self) -> None:
+        self._entries = {}
+
+
 def get_dt_cache_path() -> str:
     return os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
 
@@ -220,9 +250,7 @@ class CacheManager:
         self.pending_updates: List[Dict[str, Any]] = []
         self.active_project_uuids: Set[str] = set()
         self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
-        self._queued_knowledge_store_writes: Dict[
-            Tuple[str, str, str], Dict[str, Any]
-        ] = {}
+        self._knowledge_store_write_buffer = KnowledgeStoreWriteBuffer()
         self.cache_meta: Dict[str, Any] = {
             "fully_cached": False,
             "last_refreshed_at": None,
@@ -355,11 +383,12 @@ class CacheManager:
         key = self._pending_update_key(payload)
         if not key:
             return
-        self._queued_knowledge_store_writes[key] = {
-            "payload": dict(payload),
-            "component": dict(component or {}),
-            "vulnerability": dict(vulnerability or {}),
-        }
+        self._knowledge_store_write_buffer.enqueue(
+            key,
+            payload=payload,
+            component=component,
+            vulnerability=vulnerability,
+        )
 
     def _flush_analysis_to_knowledge_store(
         self,
@@ -388,11 +417,10 @@ class CacheManager:
         )
 
     def flush_queued_knowledge_store_writes(self) -> int:
-        queued_items = list(self._queued_knowledge_store_writes.items())
+        queued_items = self._knowledge_store_write_buffer.drain()
         if not queued_items:
             return 0
 
-        self._queued_knowledge_store_writes = {}
         flushed = 0
         for key, entry in queued_items:
             try:
@@ -408,7 +436,7 @@ class CacheManager:
                     key,
                     exc,
                 )
-                self._queued_knowledge_store_writes[key] = entry
+                self._knowledge_store_write_buffer.requeue(key, entry)
         return flushed
 
     async def background_knowledge_store_write_loop(self) -> None:
@@ -461,7 +489,7 @@ class CacheManager:
         self.pending_updates = []
         self.active_project_uuids = set()
         self.project_query_cache = {}
-        self._queued_knowledge_store_writes = {}
+        self._knowledge_store_write_buffer.reset()
         self.cache_meta = {"fully_cached": False, "last_refreshed_at": None}
         self._memory_cache = {}
         self._ensure_directories()
@@ -803,7 +831,9 @@ class CacheManager:
 
             current_path = self._analysis_path(*analysis_key)
             current_cached_analysis = self._load_project_cache(current_path, None)
-            store_analysis = store_analyses[index] if index < len(store_analyses) else None
+            store_analysis = (
+                store_analyses[index] if index < len(store_analyses) else None
+            )
 
             if _get_analysis_details(source_analysis):
                 self._persist_analysis_to_knowledge_store(
