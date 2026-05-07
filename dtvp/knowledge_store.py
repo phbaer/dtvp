@@ -2,7 +2,10 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import tempfile
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Any, Dict, Iterable, Optional
@@ -12,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 def get_knowledge_store_path() -> str:
     return os.getenv("DTVP_KNOWLEDGE_STORE_PATH", "data/knowledge_store")
+
+
+def get_knowledge_store_backend() -> str:
+    return os.getenv("DTVP_KNOWLEDGE_STORE_BACKEND", "json").strip().lower()
 
 
 def _safe_filename(value: str) -> str:
@@ -70,30 +77,30 @@ def _normalize_vulnerability_id(value: Any) -> str:
     return normalized
 
 
+def _collect_string_aliases(raw: Any) -> list[str]:
+    if isinstance(raw, str):
+        return [raw]
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, str)]
+    return []
+
+
 def _iter_alias_values(aliases: Any) -> Iterable[str]:
-    if not aliases:
-        return []
-    values: list[str] = []
     if isinstance(aliases, list):
+        values: list[str] = []
         for alias in aliases:
-            if isinstance(alias, str):
-                values.append(alias)
-                continue
             if isinstance(alias, dict):
                 for raw in alias.values():
-                    if isinstance(raw, str):
-                        values.append(raw)
-                    elif isinstance(raw, list):
-                        values.extend(
-                            str(item) for item in raw if isinstance(item, str)
-                        )
-    elif isinstance(aliases, dict):
+                    values.extend(_collect_string_aliases(raw))
+                continue
+            values.extend(_collect_string_aliases(alias))
+        return values
+    if isinstance(aliases, dict):
+        values: list[str] = []
         for raw in aliases.values():
-            if isinstance(raw, str):
-                values.append(raw)
-            elif isinstance(raw, list):
-                values.extend(str(item) for item in raw if isinstance(item, str))
-    return values
+            values.extend(_collect_string_aliases(raw))
+        return values
+    return []
 
 
 def collect_vulnerability_aliases(vulnerability: Dict[str, Any]) -> list[str]:
@@ -125,7 +132,7 @@ def select_canonical_vulnerability_id(vulnerability: Dict[str, Any]) -> str:
             return (1, identifier)
         return (2, identifier)
 
-    return sorted(aliases, key=_priority)[0]
+    return min(aliases, key=_priority)
 
 
 def assessment_primary_key(component_uuid: str, canonical_vulnerability_id: str) -> str:
@@ -151,20 +158,129 @@ def assessment_triplet_key(
     )
 
 
-class KnowledgeStore:
-    def __init__(self, base_path: Optional[str] = None):
-        self._base_path = base_path or get_knowledge_store_path()
+def _serialize_queue_items(items: Dict[str, Any]) -> Dict[str, Any]:
+    serialized: Dict[str, Any] = {}
+    for queue_id, item in items.items():
+        if hasattr(item, "model_dump"):
+            serialized[queue_id] = item.model_dump()
+        elif isinstance(item, dict):
+            serialized[queue_id] = dict(item)
+    return serialized
+
+
+def _build_assessment_record(
+    *,
+    payload: Dict[str, Any],
+    component: Optional[Dict[str, Any]],
+    vulnerability: Optional[Dict[str, Any]],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    component_uuid = str(payload.get("component_uuid") or "").strip()
+    if not component_uuid:
+        return None
+
+    vulnerability_data = vulnerability or {}
+    canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+    if not canonical_vulnerability_id:
+        fallback_vulnerability_uuid = str(payload.get("vulnerability_uuid") or "").strip()
+        if not fallback_vulnerability_uuid:
+            return None
+        canonical_vulnerability_id = f"UUID:{fallback_vulnerability_uuid}"
+
+    component_data = component or {}
+    aliases = collect_vulnerability_aliases(vulnerability_data)
+    if canonical_vulnerability_id not in aliases:
+        aliases.append(canonical_vulnerability_id)
+
+    merged_aliases = sorted({*(existing or {}).get("vulnerability_aliases", []), *aliases})
+    triplets = list((existing or {}).get("triplets", []))
+    project_uuid = str(payload.get("project_uuid") or "").strip()
+    vulnerability_uuid = str(payload.get("vulnerability_uuid") or "").strip()
+    if project_uuid and vulnerability_uuid:
+        triplet = {
+            "project_uuid": project_uuid,
+            "component_uuid": component_uuid,
+            "vulnerability_uuid": vulnerability_uuid,
+        }
+        if triplet not in triplets:
+            triplets.append(triplet)
+
+    return {
+        "primary_key": assessment_primary_key(component_uuid, canonical_vulnerability_id),
+        "component_uuid": component_uuid,
+        "component_identity": _normalize_component_identity(component_data)
+        or (existing or {}).get("component_identity", ""),
+        "component_name": component_data.get("name") or (existing or {}).get("component_name"),
+        "component_purl": component_data.get("purl") or (existing or {}).get("component_purl"),
+        "canonical_vulnerability_id": canonical_vulnerability_id,
+        "vulnerability_aliases": merged_aliases,
+        "vulnerability_uuid": payload.get("vulnerability_uuid"),
+        "analysis": {
+            "analysisState": payload.get("state") or "NOT_SET",
+            "analysisDetails": payload.get("details") or "",
+            "isSuppressed": bool(payload.get("suppressed", False)),
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "triplets": triplets,
+    }
+
+
+class KnowledgeStoreBackend(ABC):
+    def __init__(self, base_path: str):
+        self.base_path = base_path
+
+    @abstractmethod
+    def get_status(self) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def persist_assessment(
+        self,
+        *,
+        payload: Dict[str, Any],
+        component: Optional[Dict[str, Any]] = None,
+        vulnerability: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_assessment_by_triplet(
+        self,
+        *,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_assessment_for_finding(
+        self,
+        *,
+        component: Optional[Dict[str, Any]],
+        vulnerability: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_code_analysis_queue_state(
+        self,
+        *,
+        items: Dict[str, Any],
+        order: list[str],
+    ) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def load_code_analysis_queue_state(self) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
+class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
+    def __init__(self, base_path: str):
+        super().__init__(base_path)
         self._lock = RLock()
         self._cached_state: Optional[Dict[str, Any]] = None
-
-    @property
-    def base_path(self) -> str:
-        return self._base_path
-
-    @base_path.setter
-    def base_path(self, value: str) -> None:
-        self._base_path = value
-        self._cached_state = None
 
     def _store_path(self) -> str:
         return os.path.join(self.base_path, "knowledge_store.json")
@@ -214,11 +330,10 @@ class KnowledgeStore:
             status = str(item.get("status") or "unknown")
             terminal_status_counts[status] = terminal_status_counts.get(status, 0) + 1
         return {
+            "store_type": "json",
             "path": self.base_path,
             "assessment_records": len(state.get("assessments", {})),
-            "assessment_triplet_index_entries": len(
-                state.get("assessment_triplet_index", {})
-            ),
+            "assessment_triplet_index_entries": len(state.get("assessment_triplet_index", {})),
             "code_analysis_queue_items": len(queue_items),
             "code_analysis_queue_status_counts": terminal_status_counts,
         }
@@ -230,93 +345,33 @@ class KnowledgeStore:
         component: Optional[Dict[str, Any]] = None,
         vulnerability: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        component_uuid = str(payload.get("component_uuid") or "").strip()
-        if not component_uuid:
-            return None
-
-        vulnerability_data = vulnerability or {}
-        canonical_vulnerability_id = select_canonical_vulnerability_id(
-            vulnerability_data
-        )
-        if not canonical_vulnerability_id:
-            fallback_vulnerability_uuid = str(
-                payload.get("vulnerability_uuid") or ""
-            ).strip()
-            if not fallback_vulnerability_uuid:
-                return None
-            canonical_vulnerability_id = f"UUID:{fallback_vulnerability_uuid}"
-
-        primary_key = assessment_primary_key(component_uuid, canonical_vulnerability_id)
-        analysis = {
-            "analysisState": payload.get("state") or "NOT_SET",
-            "analysisDetails": payload.get("details") or "",
-            "isSuppressed": bool(payload.get("suppressed", False)),
-        }
-
-        component_data = component or {}
-        alias_set = collect_vulnerability_aliases(vulnerability_data)
-        if canonical_vulnerability_id not in alias_set:
-            alias_set.append(canonical_vulnerability_id)
-
-        record = {
-            "primary_key": primary_key,
-            "component_uuid": component_uuid,
-            "component_identity": _normalize_component_identity(component_data),
-            "component_name": component_data.get("name"),
-            "component_purl": component_data.get("purl"),
-            "canonical_vulnerability_id": canonical_vulnerability_id,
-            "vulnerability_aliases": sorted(alias_set),
-            "vulnerability_uuid": payload.get("vulnerability_uuid"),
-            "analysis": analysis,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        project_uuid = str(payload.get("project_uuid") or "").strip()
-        vulnerability_uuid = str(payload.get("vulnerability_uuid") or "").strip()
-
         with self._lock:
             state = self._load_state()
-            existing = state["assessments"].get(primary_key) or {}
-            merged_aliases = sorted(
-                {
-                    *existing.get("vulnerability_aliases", []),
-                    *record["vulnerability_aliases"],
-                }
+            existing = None
+            component_uuid = str(payload.get("component_uuid") or "").strip()
+            vulnerability_data = vulnerability or {}
+            canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+            if component_uuid and canonical_vulnerability_id:
+                existing = state["assessments"].get(
+                    assessment_primary_key(component_uuid, canonical_vulnerability_id)
+                )
+            record = _build_assessment_record(
+                payload=payload,
+                component=component,
+                vulnerability=vulnerability,
+                existing=existing,
             )
-            existing_triplets = (
-                existing.get("triplets", [])
-                if isinstance(existing.get("triplets"), list)
-                else []
-            )
-            triplets = list(existing_triplets)
-
-            if project_uuid and vulnerability_uuid:
-                triplet = {
-                    "project_uuid": project_uuid,
-                    "component_uuid": component_uuid,
-                    "vulnerability_uuid": vulnerability_uuid,
-                }
-                if triplet not in triplets:
-                    triplets.append(triplet)
+            if not record:
+                return None
+            for triplet in record.get("triplets", []):
                 state["assessment_triplet_index"][
                     assessment_triplet_key(
-                        project_uuid, component_uuid, vulnerability_uuid
+                        triplet["project_uuid"],
+                        triplet["component_uuid"],
+                        triplet["vulnerability_uuid"],
                     )
-                ] = primary_key
-
-            record.update(
-                {
-                    "component_identity": record["component_identity"]
-                    or existing.get("component_identity", ""),
-                    "component_name": record["component_name"]
-                    or existing.get("component_name"),
-                    "component_purl": record["component_purl"]
-                    or existing.get("component_purl"),
-                    "vulnerability_aliases": merged_aliases,
-                    "triplets": triplets,
-                }
-            )
-            state["assessments"][primary_key] = record
+                ] = record["primary_key"]
+            state["assessments"][record["primary_key"]] = record
             self._save_state(state)
             return record
 
@@ -348,16 +403,12 @@ class KnowledgeStore:
         component_data = component or {}
         vulnerability_data = vulnerability or {}
         component_uuid = str(component_data.get("uuid") or "").strip()
-        canonical_vulnerability_id = select_canonical_vulnerability_id(
-            vulnerability_data
-        )
+        canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
 
         with self._lock:
             state = self._load_state()
             if component_uuid and canonical_vulnerability_id:
-                primary_key = assessment_primary_key(
-                    component_uuid, canonical_vulnerability_id
-                )
+                primary_key = assessment_primary_key(component_uuid, canonical_vulnerability_id)
                 record = state["assessments"].get(primary_key)
                 if isinstance(record, dict):
                     return record.get("analysis")
@@ -369,13 +420,9 @@ class KnowledgeStore:
             for record in state["assessments"].values():
                 if not isinstance(record, dict):
                     continue
-                if component_identity and component_identity != record.get(
-                    "component_identity"
-                ):
+                if component_identity and component_identity != record.get("component_identity"):
                     continue
-                if aliases and not aliases.intersection(
-                    set(record.get("vulnerability_aliases", []))
-                ):
+                if aliases and not aliases.intersection(set(record.get("vulnerability_aliases", []))):
                     continue
                 return record.get("analysis")
         return None
@@ -386,17 +433,10 @@ class KnowledgeStore:
         items: Dict[str, Any],
         order: list[str],
     ) -> None:
-        serialized_items = {}
-        for queue_id, item in items.items():
-            if hasattr(item, "model_dump"):
-                serialized_items[queue_id] = item.model_dump()
-            elif isinstance(item, dict):
-                serialized_items[queue_id] = dict(item)
-
         with self._lock:
             state = self._load_state()
             state["code_analysis_queue"] = {
-                "items": serialized_items,
+                "items": _serialize_queue_items(items),
                 "order": list(order),
             }
             self._save_state(state)
@@ -411,6 +451,452 @@ class KnowledgeStore:
                 "items": dict(items),
                 "order": [queue_id for queue_id in order if queue_id in items],
             }
+
+
+class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
+    def __init__(self, base_path: str):
+        super().__init__(base_path)
+        self._lock = RLock()
+        self._initialized = False
+
+    def _db_path(self) -> str:
+        return os.path.join(self.base_path, "knowledge_store.db")
+
+    def _json_store_path(self) -> str:
+        return os.path.join(self.base_path, "knowledge_store.json")
+
+    def _connect(self) -> sqlite3.Connection:
+        os.makedirs(self.base_path, exist_ok=True)
+        connection = sqlite3.connect(self._db_path(), timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout=30000")
+        return connection
+
+    @contextmanager
+    def _connection(self) -> Iterable[sqlite3.Connection]:
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _ensure_initialized(self) -> None:
+        with self._lock:
+            if self._initialized:
+                return
+            with self._connection() as connection:
+                connection.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS assessments (
+                        primary_key TEXT PRIMARY KEY,
+                        component_uuid TEXT NOT NULL,
+                        component_identity TEXT,
+                        component_name TEXT,
+                        component_purl TEXT,
+                        canonical_vulnerability_id TEXT NOT NULL,
+                        vulnerability_uuid TEXT,
+                        analysis_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS assessment_aliases (
+                        primary_key TEXT NOT NULL,
+                        alias TEXT NOT NULL,
+                        PRIMARY KEY (primary_key, alias),
+                        FOREIGN KEY (primary_key) REFERENCES assessments(primary_key) ON DELETE CASCADE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS assessment_triplets (
+                        triplet_key TEXT PRIMARY KEY,
+                        primary_key TEXT NOT NULL,
+                        project_uuid TEXT NOT NULL,
+                        component_uuid TEXT NOT NULL,
+                        vulnerability_uuid TEXT NOT NULL,
+                        FOREIGN KEY (primary_key) REFERENCES assessments(primary_key) ON DELETE CASCADE
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_assessments_component_identity
+                    ON assessments(component_identity);
+
+                    CREATE INDEX IF NOT EXISTS idx_assessment_aliases_alias
+                    ON assessment_aliases(alias);
+
+                    CREATE INDEX IF NOT EXISTS idx_assessment_triplets_primary_key
+                    ON assessment_triplets(primary_key);
+
+                    CREATE TABLE IF NOT EXISTS queue_items (
+                        queue_id TEXT PRIMARY KEY,
+                        payload_json TEXT NOT NULL,
+                        position INTEGER NOT NULL
+                    );
+                    """
+                )
+                row = connection.execute("SELECT COUNT(*) AS count FROM assessments").fetchone()
+                if row is not None and row["count"] == 0:
+                    self._bootstrap_from_json(connection)
+            self._initialized = True
+
+    def _bootstrap_from_json(self, connection: sqlite3.Connection) -> None:
+        state = _read_json(self._json_store_path(), None)
+        if not isinstance(state, dict):
+            return
+        for record in (state.get("assessments") or {}).values():
+            if isinstance(record, dict):
+                self._upsert_record(connection, record)
+        queue_state = state.get("code_analysis_queue") or {}
+        self._replace_queue_state(
+            connection,
+            items=queue_state.get("items") or {},
+            order=queue_state.get("order") or [],
+        )
+
+    def _upsert_record(self, connection: sqlite3.Connection, record: Dict[str, Any]) -> None:
+        connection.execute(
+            """
+            INSERT INTO assessments (
+                primary_key, component_uuid, component_identity, component_name,
+                component_purl, canonical_vulnerability_id, vulnerability_uuid,
+                analysis_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(primary_key) DO UPDATE SET
+                component_uuid=excluded.component_uuid,
+                component_identity=excluded.component_identity,
+                component_name=excluded.component_name,
+                component_purl=excluded.component_purl,
+                canonical_vulnerability_id=excluded.canonical_vulnerability_id,
+                vulnerability_uuid=excluded.vulnerability_uuid,
+                analysis_json=excluded.analysis_json,
+                updated_at=excluded.updated_at
+            """,
+            (
+                record["primary_key"],
+                record["component_uuid"],
+                record.get("component_identity") or "",
+                record.get("component_name"),
+                record.get("component_purl"),
+                record.get("canonical_vulnerability_id") or "",
+                record.get("vulnerability_uuid"),
+                json.dumps(record.get("analysis") or {}),
+                record.get("updated_at") or datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.execute("DELETE FROM assessment_aliases WHERE primary_key = ?", (record["primary_key"],))
+        aliases = [
+            (record["primary_key"], alias)
+            for alias in record.get("vulnerability_aliases", []) or []
+            if isinstance(alias, str) and alias
+        ]
+        if aliases:
+            connection.executemany(
+                "INSERT OR IGNORE INTO assessment_aliases (primary_key, alias) VALUES (?, ?)",
+                aliases,
+            )
+        for triplet in record.get("triplets", []) or []:
+            if not isinstance(triplet, dict):
+                continue
+            project_uuid = str(triplet.get("project_uuid") or "").strip()
+            component_uuid = str(triplet.get("component_uuid") or "").strip()
+            vulnerability_uuid = str(triplet.get("vulnerability_uuid") or "").strip()
+            if not (project_uuid and component_uuid and vulnerability_uuid):
+                continue
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO assessment_triplets (
+                    triplet_key, primary_key, project_uuid, component_uuid, vulnerability_uuid
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    assessment_triplet_key(project_uuid, component_uuid, vulnerability_uuid),
+                    record["primary_key"],
+                    project_uuid,
+                    component_uuid,
+                    vulnerability_uuid,
+                ),
+            )
+
+    def _replace_queue_state(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        items: Dict[str, Any],
+        order: list[str],
+    ) -> None:
+        connection.execute("DELETE FROM queue_items")
+        rows: list[tuple[str, str, int]] = []
+        ordered_ids = [queue_id for queue_id in order if queue_id in items]
+        seen = set(ordered_ids)
+        for position, queue_id in enumerate(ordered_ids):
+            rows.append((queue_id, json.dumps(items[queue_id]), position))
+        for queue_id in items:
+            if queue_id in seen:
+                continue
+            rows.append((queue_id, json.dumps(items[queue_id]), len(rows)))
+        if rows:
+            connection.executemany(
+                "INSERT INTO queue_items (queue_id, payload_json, position) VALUES (?, ?, ?)",
+                rows,
+            )
+
+    def get_status(self) -> Dict[str, Any]:
+        self._ensure_initialized()
+        with self._connection() as connection:
+            assessment_records = connection.execute("SELECT COUNT(*) AS count FROM assessments").fetchone()["count"]
+            triplet_entries = connection.execute("SELECT COUNT(*) AS count FROM assessment_triplets").fetchone()["count"]
+            queue_rows = connection.execute("SELECT payload_json FROM queue_items ORDER BY position ASC").fetchall()
+        terminal_status_counts: Dict[str, int] = {}
+        for row in queue_rows:
+            payload = json.loads(row["payload_json"])
+            status = str(payload.get("status") or "unknown")
+            terminal_status_counts[status] = terminal_status_counts.get(status, 0) + 1
+        return {
+            "store_type": "sqlite",
+            "path": self.base_path,
+            "database_path": self._db_path(),
+            "assessment_records": assessment_records,
+            "assessment_triplet_index_entries": triplet_entries,
+            "code_analysis_queue_items": len(queue_rows),
+            "code_analysis_queue_status_counts": terminal_status_counts,
+        }
+
+    def persist_assessment(
+        self,
+        *,
+        payload: Dict[str, Any],
+        component: Optional[Dict[str, Any]] = None,
+        vulnerability: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        self._ensure_initialized()
+        component_uuid = str(payload.get("component_uuid") or "").strip()
+        vulnerability_data = vulnerability or {}
+        existing = None
+        canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+        if component_uuid and canonical_vulnerability_id:
+            primary_key = assessment_primary_key(component_uuid, canonical_vulnerability_id)
+            with self._connection() as connection:
+                assessment_row = connection.execute(
+                    "SELECT * FROM assessments WHERE primary_key = ?",
+                    (primary_key,),
+                ).fetchone()
+                if assessment_row is not None:
+                    aliases = [
+                        row["alias"]
+                        for row in connection.execute(
+                            "SELECT alias FROM assessment_aliases WHERE primary_key = ?",
+                            (primary_key,),
+                        ).fetchall()
+                    ]
+                    triplets = [
+                        {
+                            "project_uuid": row["project_uuid"],
+                            "component_uuid": row["component_uuid"],
+                            "vulnerability_uuid": row["vulnerability_uuid"],
+                        }
+                        for row in connection.execute(
+                            "SELECT project_uuid, component_uuid, vulnerability_uuid FROM assessment_triplets WHERE primary_key = ?",
+                            (primary_key,),
+                        ).fetchall()
+                    ]
+                    existing = {
+                        "component_identity": assessment_row["component_identity"],
+                        "component_name": assessment_row["component_name"],
+                        "component_purl": assessment_row["component_purl"],
+                        "vulnerability_aliases": aliases,
+                        "triplets": triplets,
+                    }
+        record = _build_assessment_record(
+            payload=payload,
+            component=component,
+            vulnerability=vulnerability,
+            existing=existing,
+        )
+        if not record:
+            return None
+        with self._connection() as connection:
+            self._upsert_record(connection, record)
+        return record
+
+    def get_assessment_by_triplet(
+        self,
+        *,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> Optional[Dict[str, Any]]:
+        self._ensure_initialized()
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT assessments.analysis_json
+                FROM assessment_triplets
+                JOIN assessments ON assessments.primary_key = assessment_triplets.primary_key
+                WHERE assessment_triplets.triplet_key = ?
+                """,
+                (assessment_triplet_key(project_uuid, component_uuid, vulnerability_uuid),),
+            ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row["analysis_json"])
+
+    def get_assessment_for_finding(
+        self,
+        *,
+        component: Optional[Dict[str, Any]],
+        vulnerability: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        self._ensure_initialized()
+        component_data = component or {}
+        vulnerability_data = vulnerability or {}
+        component_uuid = str(component_data.get("uuid") or "").strip()
+        canonical_vulnerability_id = select_canonical_vulnerability_id(vulnerability_data)
+        if component_uuid and canonical_vulnerability_id:
+            primary_key = assessment_primary_key(component_uuid, canonical_vulnerability_id)
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT analysis_json FROM assessments WHERE primary_key = ?",
+                    (primary_key,),
+                ).fetchone()
+            if row is not None:
+                return json.loads(row["analysis_json"])
+
+        component_identity = _normalize_component_identity(component_data)
+        aliases = sorted(set(collect_vulnerability_aliases(vulnerability_data)))
+        if canonical_vulnerability_id and canonical_vulnerability_id not in aliases:
+            aliases.append(canonical_vulnerability_id)
+        if not component_identity or not aliases:
+            return None
+
+        placeholders = ",".join("?" for _ in aliases)
+        query = f"""
+            SELECT DISTINCT assessments.analysis_json
+            FROM assessments
+            JOIN assessment_aliases ON assessment_aliases.primary_key = assessments.primary_key
+            WHERE assessments.component_identity = ?
+              AND assessment_aliases.alias IN ({placeholders})
+            LIMIT 1
+        """
+        with self._connection() as connection:
+            row = connection.execute(query, (component_identity, *aliases)).fetchone()
+        if row is None:
+            return None
+        return json.loads(row["analysis_json"])
+
+    def save_code_analysis_queue_state(
+        self,
+        *,
+        items: Dict[str, Any],
+        order: list[str],
+    ) -> None:
+        self._ensure_initialized()
+        with self._connection() as connection:
+            self._replace_queue_state(
+                connection,
+                items=_serialize_queue_items(items),
+                order=list(order),
+            )
+
+    def load_code_analysis_queue_state(self) -> Dict[str, Any]:
+        self._ensure_initialized()
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT queue_id, payload_json FROM queue_items ORDER BY position ASC"
+            ).fetchall()
+        return {
+            "items": {row["queue_id"]: json.loads(row["payload_json"]) for row in rows},
+            "order": [row["queue_id"] for row in rows],
+        }
+
+
+class KnowledgeStore:
+    def __init__(self, base_path: Optional[str] = None):
+        self._base_path = base_path or get_knowledge_store_path()
+        self._lock = RLock()
+        self._backend: Optional[KnowledgeStoreBackend] = None
+        self._backend_name: Optional[str] = None
+
+    @property
+    def base_path(self) -> str:
+        return self._base_path
+
+    @base_path.setter
+    def base_path(self, value: str) -> None:
+        self._base_path = value
+        self._reset_backend()
+
+    def _reset_backend(self) -> None:
+        with self._lock:
+            self._backend = None
+            self._backend_name = None
+
+    def _resolve_backend(self) -> KnowledgeStoreBackend:
+        backend_name = get_knowledge_store_backend()
+        with self._lock:
+            if self._backend is not None and self._backend_name == backend_name:
+                return self._backend
+            if backend_name == "sqlite":
+                self._backend = SqliteKnowledgeStoreBackend(self.base_path)
+                self._backend_name = "sqlite"
+            else:
+                self._backend = JsonKnowledgeStoreBackend(self.base_path)
+                self._backend_name = "json"
+            return self._backend
+
+    def get_status(self) -> Dict[str, Any]:
+        return self._resolve_backend().get_status()
+
+    def persist_assessment(
+        self,
+        *,
+        payload: Dict[str, Any],
+        component: Optional[Dict[str, Any]] = None,
+        vulnerability: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return self._resolve_backend().persist_assessment(
+            payload=payload,
+            component=component,
+            vulnerability=vulnerability,
+        )
+
+    def get_assessment_by_triplet(
+        self,
+        *,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> Optional[Dict[str, Any]]:
+        return self._resolve_backend().get_assessment_by_triplet(
+            project_uuid=project_uuid,
+            component_uuid=component_uuid,
+            vulnerability_uuid=vulnerability_uuid,
+        )
+
+    def get_assessment_for_finding(
+        self,
+        *,
+        component: Optional[Dict[str, Any]],
+        vulnerability: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        return self._resolve_backend().get_assessment_for_finding(
+            component=component,
+            vulnerability=vulnerability,
+        )
+
+    def save_code_analysis_queue_state(
+        self,
+        *,
+        items: Dict[str, Any],
+        order: list[str],
+    ) -> None:
+        self._resolve_backend().save_code_analysis_queue_state(items=items, order=order)
+
+    def load_code_analysis_queue_state(self) -> Dict[str, Any]:
+        return self._resolve_backend().load_code_analysis_queue_state()
 
 
 knowledge_store = KnowledgeStore()

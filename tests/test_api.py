@@ -61,8 +61,20 @@ def test_cache_status_endpoint(client):
         assert data["cached_boms"] == 2
         assert data["cached_analyses"] == 10
         assert data["pending_updates"] == 1
-        assert "knowledge_store" in data
-        assert "assessment_records" in data["knowledge_store"]
+
+
+def test_knowledge_store_status_endpoint(client):
+    mock_status = {
+        "path": "data/knowledge_store",
+        "assessment_records": 5,
+        "assessment_triplet_index_entries": 8,
+        "code_analysis_queue_items": 1,
+        "code_analysis_queue_status_counts": {"queued": 1},
+    }
+    with patch("dtvp.app_wiring.knowledge_store.get_status", return_value=mock_status):
+        response = client.get("/api/knowledge-store-status")
+        assert response.status_code == 200
+        assert response.json() == mock_status
 
 
 @pytest.mark.asyncio

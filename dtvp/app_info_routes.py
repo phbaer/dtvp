@@ -12,6 +12,7 @@ class AppInfoRouteDeps:
     build_commit: str
     load_pyproject_metadata: Callable[[], Optional[dict[str, Any]]]
     get_cache_status: Callable[[], dict[str, Any]]
+    get_knowledge_store_status: Callable[[], dict[str, Any]]
     load_changelog_content: Callable[[], str]
     get_sbom_path: Callable[[str], Optional[str]]
     read_text: Callable[[str], str]
@@ -46,6 +47,10 @@ def create_app_info_router(
     @router.get("/cache-status")
     def get_cache_status():
         return deps.get_cache_status()
+
+    @router.get("/knowledge-store-status")
+    def get_knowledge_store_status():
+        return deps.get_knowledge_store_status()
 
     @router.get("/changelog")
     def get_changelog():
