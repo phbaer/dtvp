@@ -6,6 +6,7 @@ import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
 import ChangelogModal from './components/ChangelogModal.vue'
 import AnalysisQueueIndicator from './components/AnalysisQueueIndicator.vue'
+import OperationalHealthIndicator from './components/OperationalHealthIndicator.vue'
 
 const version = ref('')
 const build = ref('')
@@ -200,6 +201,7 @@ const acknowledgeChangelog = () => {
                     </button>
 
                     <AnalysisQueueIndicator />
+                    <OperationalHealthIndicator />
 
                     <template v-if="showProjectHeaderButtons">
                         <span class="h-10 w-px bg-white/10"></span>

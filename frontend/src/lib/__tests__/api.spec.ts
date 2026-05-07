@@ -9,6 +9,8 @@ import {
     getDependencyChains,
     getChangelog,
     getCacheStatus,
+    getKnowledgeStoreStatus,
+    getOperationalHealth,
     getTMRescoreContext,
     getTMRescoreProjectState,
     getTMRescoreSyntheticSbomDownloadUrl,
@@ -81,6 +83,26 @@ describe('api.ts', () => {
         const result = await getCacheStatus()
 
         expect(mocks.get).toHaveBeenCalledWith('/cache-status')
+        expect(result).toEqual(mockData)
+    })
+
+    it('getKnowledgeStoreStatus calls /knowledge-store-status', async () => {
+        const mockData = { assessment_records: 5 }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getKnowledgeStoreStatus()
+
+        expect(mocks.get).toHaveBeenCalledWith('/knowledge-store-status')
+        expect(result).toEqual(mockData)
+    })
+
+    it('getOperationalHealth calls /operational-health', async () => {
+        const mockData = { status: 'ok' }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getOperationalHealth()
+
+        expect(mocks.get).toHaveBeenCalledWith('/operational-health')
         expect(result).toEqual(mockData)
     })
 
