@@ -7,6 +7,7 @@ import { getRuntimeConfig } from './lib/env'
 import ChangelogModal from './components/ChangelogModal.vue'
 import AnalysisQueueIndicator from './components/AnalysisQueueIndicator.vue'
 import OperationalHealthIndicator from './components/OperationalHealthIndicator.vue'
+import OperationalHealthBanner from './components/OperationalHealthBanner.vue'
 
 const version = ref('')
 const build = ref('')
@@ -258,6 +259,7 @@ const acknowledgeChangelog = () => {
                 </div>
             </div>
         </header>
+        <OperationalHealthBanner />
         <main class="px-6 sm:px-8 pt-4 sm:pt-6 w-full flex-grow pb-28">
             <router-view v-slot="{ Component, route }">
                 <keep-alive>

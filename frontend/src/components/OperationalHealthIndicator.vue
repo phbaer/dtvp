@@ -1,128 +1,20 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { AlertTriangle, CheckCircle2, HeartPulse } from 'lucide-vue-next'
-import { getOperationalHealth } from '../lib/api'
-import type { OperationalHealthSummary } from '../types'
+import { useOperationalHealth } from '../lib/useOperationalHealth'
 
 const realRole = inject<any>('realRole', ref('ANALYST'))
 
-const operationalHealth = ref<OperationalHealthSummary | null>(null)
-const loading = ref(false)
-const loadError = ref(false)
-const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
-const refreshInProgress = ref(false)
-const now = ref(Date.now())
+const isReviewer = computed(() => realRole?.value === 'REVIEWER')
 
-const warningCount = computed(() => {
-    if (!operationalHealth.value) return 0
-    return Object.values(operationalHealth.value.checks).filter(
-        (check) => check.status === 'warning'
-    ).length
-})
-
-const warningDescriptions: Record<keyof OperationalHealthSummary['checks'], string> = {
-    pending_updates_backlog: 'Pending DT updates backlog',
-    knowledge_store_write_backlog: 'Knowledge-store write backlog',
-    knowledge_store_orphans: 'Orphaned retained assessments',
-    knowledge_store_maintenance_freshness: 'Knowledge-store maintenance freshness',
-}
-
-const warningTargets: Record<keyof OperationalHealthSummary['checks'], string> = {
-    pending_updates_backlog: '#cache-status',
-    knowledge_store_write_backlog: '#cache-status',
-    knowledge_store_orphans: '#knowledge-store-status',
-    knowledge_store_maintenance_freshness: '#operational-health',
-}
-
-const buildWarningSummary = (
-    key: keyof OperationalHealthSummary['checks'],
-    check: OperationalHealthSummary['checks'][keyof OperationalHealthSummary['checks']]
-) => {
-    const label = warningDescriptions[key]
-    if (key === 'pending_updates_backlog' || key === 'knowledge_store_write_backlog') {
-        const count = check.count ?? 0
-        const oldestAge = check.oldest_age_seconds ?? 0
-        return `${label}: ${count} queued, oldest ${Math.round(oldestAge)}s.`
-    }
-    if (key === 'knowledge_store_orphans') {
-        return `${label}: ${check.count ?? 0} records detected.`
-    }
-    if (check.last_maintenance_at) {
-        return `${label}: last run ${check.last_maintenance_at}.`
-    }
-    return `${label}: no successful maintenance run recorded.`
-}
-
-const warningSummaries = computed(() => {
-    if (!operationalHealth.value) return []
-    return Object.entries(operationalHealth.value.checks)
-        .filter(([, check]) => check.status === 'warning')
-        .map(([key, check]) => ({
-            key,
-            target: warningTargets[key as keyof OperationalHealthSummary['checks']],
-            text: buildWarningSummary(
-                key as keyof OperationalHealthSummary['checks'],
-                check as OperationalHealthSummary['checks'][keyof OperationalHealthSummary['checks']]
-            ),
-        }))
-})
-
-const firstWarningSummary = computed(() => {
-    return warningSummaries.value[0]?.text ?? ''
-})
-
-const indicatorState = computed<'idle' | 'healthy' | 'warning' | 'error'>(() => {
-    if (loading.value && !operationalHealth.value) return 'idle'
-    if (loadError.value) return 'error'
-    if (operationalHealth.value?.status === 'warning') return 'warning'
-    if (operationalHealth.value?.status === 'ok') return 'healthy'
-    return 'idle'
-})
-
-const indicatorLabel = computed(() => {
-    if (indicatorState.value === 'warning') {
-        return `${warningCount.value} warning${warningCount.value === 1 ? '' : 's'}`
-    }
-    if (indicatorState.value === 'healthy') return 'Healthy'
-    if (indicatorState.value === 'error') return 'Unknown'
-    return 'Checking'
-})
-
-const checkedAtDate = computed(() => {
-    if (!operationalHealth.value?.checked_at) return null
-    const parsed = new Date(operationalHealth.value.checked_at)
-    return Number.isNaN(parsed.getTime()) ? null : parsed
-})
-
-const checkedAtAgeLabel = computed(() => {
-    if (!checkedAtDate.value) return 'freshness unknown'
-    const ageSeconds = Math.max(
-        0,
-        Math.floor((now.value - checkedAtDate.value.getTime()) / 1000)
-    )
-    if (ageSeconds < 60) {
-        return `checked ${ageSeconds}s ago`
-    }
-    const minutes = Math.floor(ageSeconds / 60)
-    if (minutes < 60) {
-        return `checked ${minutes}m ago`
-    }
-    const hours = Math.floor(minutes / 60)
-    return `checked ${hours}h ago`
-})
-
-const indicatorTitle = computed(() => {
-    if (indicatorState.value === 'warning') {
-        return `Operational health has ${warningCount.value} warning${warningCount.value === 1 ? '' : 's'}. ${checkedAtAgeLabel.value}. ${firstWarningSummary.value} Open Settings for details.`
-    }
-    if (indicatorState.value === 'healthy') {
-        return `Operational health is healthy, ${checkedAtAgeLabel.value}. Open Settings for details.`
-    }
-    if (indicatorState.value === 'error') {
-        return 'Operational health is unavailable. Open Settings to retry.'
-    }
-    return 'Checking operational health.'
-})
+const {
+    warningCount,
+    warningSummaries,
+    indicatorState,
+    indicatorLabel,
+    checkedAtAgeLabel,
+    indicatorTitle,
+} = useOperationalHealth(isReviewer)
 
 const indicatorClass = computed(() => {
     if (indicatorState.value === 'warning') {
@@ -141,61 +33,6 @@ const indicatorIcon = computed(() => {
     if (indicatorState.value === 'warning') return AlertTriangle
     if (indicatorState.value === 'healthy') return CheckCircle2
     return HeartPulse
-})
-
-const refreshOperationalHealth = async () => {
-    if (realRole?.value !== 'REVIEWER' || refreshInProgress.value) return
-
-    refreshInProgress.value = true
-    if (!operationalHealth.value) loading.value = true
-    loadError.value = false
-    try {
-        operationalHealth.value = await getOperationalHealth()
-    } catch (error) {
-        console.error('Failed to fetch operational health', error)
-        loadError.value = true
-    } finally {
-        loading.value = false
-        refreshInProgress.value = false
-    }
-}
-
-const startPolling = () => {
-    if (pollTimer.value !== null) return
-    pollTimer.value = globalThis.setInterval(() => {
-        now.value = Date.now()
-        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-            void refreshOperationalHealth()
-        }
-    }, 30_000)
-}
-
-const stopPolling = () => {
-    if (pollTimer.value !== null) {
-        globalThis.clearInterval(pollTimer.value)
-        pollTimer.value = null
-    }
-}
-
-onMounted(() => {
-    now.value = Date.now()
-    if (realRole?.value === 'REVIEWER') {
-        void refreshOperationalHealth()
-        startPolling()
-    }
-})
-
-onUnmounted(() => {
-    stopPolling()
-})
-
-watch(realRole, (role) => {
-    if (role === 'REVIEWER') {
-        void refreshOperationalHealth()
-        startPolling()
-        return
-    }
-    stopPolling()
 })
 </script>
 

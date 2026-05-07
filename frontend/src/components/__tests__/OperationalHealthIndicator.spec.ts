@@ -73,6 +73,8 @@ describe('OperationalHealthIndicator', () => {
         expect(warningLinks[0]?.attributes('data-warning-target')).toBe('#cache-status')
         expect(warningLinks[0]?.attributes('data-to')).toContain('"hash":"#cache-status"')
         expect(warningLinks[1]?.attributes('data-warning-target')).toBe('#knowledge-store-status')
+
+        wrapper.unmount()
     })
 
     it('stays hidden for analysts', async () => {
@@ -91,6 +93,8 @@ describe('OperationalHealthIndicator', () => {
 
         expect(getOperationalHealth).not.toHaveBeenCalled()
         expect(wrapper.find('[data-testid="operational-health-indicator"]').exists()).toBe(false)
+
+        wrapper.unmount()
     })
 
     it('starts polling when the role becomes reviewer', async () => {
@@ -107,7 +111,7 @@ describe('OperationalHealthIndicator', () => {
         } as any)
 
         const role = ref('ANALYST')
-        mount(OperationalHealthIndicator, {
+        const wrapper = mount(OperationalHealthIndicator, {
             global: {
                 provide: {
                     realRole: role,
@@ -126,6 +130,9 @@ describe('OperationalHealthIndicator', () => {
         expect(getOperationalHealth).toHaveBeenCalledTimes(1)
 
         await vi.advanceTimersByTimeAsync(30_000)
+        await flushPromises()
         expect(getOperationalHealth).toHaveBeenCalledTimes(2)
+
+        wrapper.unmount()
     })
 })
