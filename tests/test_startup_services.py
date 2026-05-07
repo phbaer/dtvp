@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from dtvp.startup_services import (
+    KnowledgeStoreRuntimeDeps,
     StartupServiceDeps,
     start_application_runtime,
     stop_application_runtime,
@@ -50,15 +51,17 @@ async def test_start_application_runtime_initializes_knowledge_store_and_runs_ma
         analysis_queue=analysis_queue,
         tmrescore_project_cache={},
         load_tmrescore_project_cache=lambda: {},
-        initialize_knowledge_store=initialize_knowledge_store,
-        get_active_project_uuids=lambda: ["project-1", "project-2"],
-        synchronize_knowledge_store_projects=synchronize_projects,
-        purge_expired_knowledge_store=purge_expired_knowledge_store,
-        get_knowledge_store_retention_days=lambda: 14,
-        get_knowledge_store_maintenance_interval_seconds=lambda: 3600,
+        knowledge_store_runtime=KnowledgeStoreRuntimeDeps(
+            initialize_knowledge_store=initialize_knowledge_store,
+            get_active_project_uuids=lambda: ["project-1", "project-2"],
+            synchronize_knowledge_store_projects=synchronize_projects,
+            purge_expired_knowledge_store=purge_expired_knowledge_store,
+            get_knowledge_store_retention_days=lambda: 14,
+            get_knowledge_store_maintenance_interval_seconds=lambda: 3600,
+            run_knowledge_store_write_loop=_block_forever,
+        ),
         initialize_cache_manager=initialize_cache_manager,
         run_background_sync_loop=_block_forever,
-        run_knowledge_store_write_loop=_block_forever,
         run_analysis_queue_worker=_block_forever,
         run_analysis_queue_cleanup_loop=_block_forever,
         create_task=asyncio.create_task,

@@ -187,6 +187,23 @@ def _mark_assessment_for_review_with_threadmodel_change(
     return marked
 
 
+def _build_assessment_persistence_payload(
+    *,
+    project_uuid: str,
+    component_uuid: str,
+    vulnerability_uuid: str,
+    analysis: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "project_uuid": project_uuid,
+        "component_uuid": component_uuid,
+        "vulnerability_uuid": vulnerability_uuid,
+        "state": _get_analysis_state(analysis),
+        "details": _get_analysis_details(analysis),
+        "suppressed": _get_analysis_suppressed(analysis),
+    }
+
+
 def _component_cache_identity(component: Dict[str, Any]) -> Optional[str]:
     purl = (component.get("purl") or "").strip().lower()
     if purl:
@@ -724,22 +741,15 @@ class CacheManager:
             )
             if _get_analysis_details(analysis):
                 self._persist_analysis_to_knowledge_store(
-                    {
-                        "project_uuid": project_uuid,
-                        "component_uuid": component_uuid,
-                        "vulnerability_uuid": vulnerability_uuid,
-                        "state": _get_analysis_state(analysis),
-                        "details": _get_analysis_details(analysis),
-                        "suppressed": _get_analysis_suppressed(analysis),
-                    }
+                    _build_assessment_persistence_payload(
+                        project_uuid=project_uuid,
+                        component_uuid=component_uuid,
+                        vulnerability_uuid=vulnerability_uuid,
+                        analysis=analysis,
+                    )
                 )
-            store_analysis = knowledge_store.get_assessment_by_triplet(
-                project_uuid=project_uuid,
-                component_uuid=component_uuid,
-                vulnerability_uuid=vulnerability_uuid,
-            )
             analysis = self._merge_blank_source_analysis(
-                store_analysis or cached_analysis,
+                cached_analysis,
                 analysis,
             )
             async with self.lock:
@@ -837,14 +847,12 @@ class CacheManager:
 
             if _get_analysis_details(source_analysis):
                 self._persist_analysis_to_knowledge_store(
-                    {
-                        "project_uuid": project_uuid,
-                        "component_uuid": analysis_key[1],
-                        "vulnerability_uuid": analysis_key[2],
-                        "state": _get_analysis_state(source_analysis),
-                        "details": _get_analysis_details(source_analysis),
-                        "suppressed": _get_analysis_suppressed(source_analysis),
-                    },
+                    _build_assessment_persistence_payload(
+                        project_uuid=project_uuid,
+                        component_uuid=analysis_key[1],
+                        vulnerability_uuid=analysis_key[2],
+                        analysis=source_analysis,
+                    ),
                     component=(finding.get("component") or {}),
                     vulnerability=(finding.get("vulnerability") or {}),
                 )
@@ -883,14 +891,12 @@ class CacheManager:
                 preserved_from_store = _mark_assessment_for_review(store_analysis)
                 self._save_project_cache(current_path, preserved_from_store)
                 self._persist_analysis_to_knowledge_store(
-                    {
-                        "project_uuid": project_uuid,
-                        "component_uuid": analysis_key[1],
-                        "vulnerability_uuid": analysis_key[2],
-                        "state": _get_analysis_state(preserved_from_store),
-                        "details": _get_analysis_details(preserved_from_store),
-                        "suppressed": _get_analysis_suppressed(preserved_from_store),
-                    },
+                    _build_assessment_persistence_payload(
+                        project_uuid=project_uuid,
+                        component_uuid=analysis_key[1],
+                        vulnerability_uuid=analysis_key[2],
+                        analysis=preserved_from_store,
+                    ),
                     component=(finding.get("component") or {}),
                     vulnerability=(finding.get("vulnerability") or {}),
                 )
@@ -908,14 +914,12 @@ class CacheManager:
             preserved_analysis = _mark_assessment_for_review(previous_analysis)
             self._save_project_cache(current_path, preserved_analysis)
             self._persist_analysis_to_knowledge_store(
-                {
-                    "project_uuid": project_uuid,
-                    "component_uuid": analysis_key[1],
-                    "vulnerability_uuid": analysis_key[2],
-                    "state": _get_analysis_state(preserved_analysis),
-                    "details": _get_analysis_details(preserved_analysis),
-                    "suppressed": _get_analysis_suppressed(preserved_analysis),
-                },
+                _build_assessment_persistence_payload(
+                    project_uuid=project_uuid,
+                    component_uuid=analysis_key[1],
+                    vulnerability_uuid=analysis_key[2],
+                    analysis=preserved_analysis,
+                ),
                 component=(finding.get("component") or {}),
                 vulnerability=(finding.get("vulnerability") or {}),
             )
@@ -966,6 +970,7 @@ class CacheManager:
             comp_uuid = component.get("uuid")
             vuln_uuid = vulnerability.get("uuid")
             if comp_uuid and vuln_uuid:
+                analysis_path = self._analysis_path(project_uuid, comp_uuid, vuln_uuid)
                 analysis = current_cached_analyses.get(finding_index)
                 from_store = False
                 if analysis is None:
@@ -986,16 +991,16 @@ class CacheManager:
                             }
                             break
                 if analysis is not None:
+                    if from_store:
+                        self._save_project_cache(analysis_path, analysis)
                     if not from_store and _get_analysis_details(analysis):
                         self._persist_analysis_to_knowledge_store(
-                            {
-                                "project_uuid": project_uuid,
-                                "component_uuid": comp_uuid,
-                                "vulnerability_uuid": vuln_uuid,
-                                "state": _get_analysis_state(analysis),
-                                "details": _get_analysis_details(analysis),
-                                "suppressed": _get_analysis_suppressed(analysis),
-                            },
+                            _build_assessment_persistence_payload(
+                                project_uuid=project_uuid,
+                                component_uuid=comp_uuid,
+                                vulnerability_uuid=vuln_uuid,
+                                analysis=analysis,
+                            ),
                             component=component,
                             vulnerability=vulnerability,
                         )

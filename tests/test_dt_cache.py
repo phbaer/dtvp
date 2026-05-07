@@ -459,23 +459,27 @@ async def test_get_vulnerabilities_marks_review_when_threadmodel_score_changes(
 
 
 @pytest.mark.asyncio
-async def test_get_analysis_uses_knowledge_store_before_local_cache(tmp_path):
+async def test_get_vulnerabilities_hydrates_analysis_cache_from_knowledge_store(
+    tmp_path,
+):
     manager = CacheManager(base_path=str(tmp_path / "cache"))
     client = AsyncMock()
-    client.get_analysis.return_value = {
-        "analysisState": "NOT_SET",
-        "analysisDetails": "",
-        "isSuppressed": False,
-    }
-
-    manager._save_project_cache(
-        manager._analysis_path("project-1", "component-1", "vuln-1"),
+    client.get_vulnerabilities.return_value = [
         {
-            "analysisState": "EXPLOITABLE",
-            "analysisDetails": "Stale cache copy.",
-            "isSuppressed": False,
-        },
-    )
+            "component": {"uuid": "component-1", "name": "log4j-core"},
+            "vulnerability": {
+                "uuid": "vuln-1",
+                "vulnId": "GHSA-jfh8-c2jp-5v3q",
+                "aliases": [{"cve": "CVE-2021-44228"}],
+            },
+            "analysis": {
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "isSuppressed": False,
+            },
+        }
+    ]
+
     knowledge_store.persist_assessment(
         payload={
             "project_uuid": "project-1",
@@ -492,6 +496,71 @@ async def test_get_analysis_uses_knowledge_store_before_local_cache(tmp_path):
             "aliases": [{"cve": "CVE-2021-44228"}],
         },
     )
+
+    findings = await manager.get_vulnerabilities(
+        client,
+        project_uuid="project-1",
+        refresh=True,
+    )
+
+    assert findings[0]["analysis"]["analysisState"] == "NOT_AFFECTED"
+    assert "Shared durable assessment." in findings[0]["analysis"]["analysisDetails"]
+
+    assert manager._load_project_cache(
+        manager._analysis_path("project-1", "component-1", "vuln-1"),
+        None,
+    ) == {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": "Shared durable assessment.",
+        "isSuppressed": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_uses_hydrated_local_cache_when_dt_returns_blank_details(
+    tmp_path,
+):
+    manager = CacheManager(base_path=str(tmp_path / "cache"))
+    client = AsyncMock()
+    client.get_vulnerabilities.return_value = [
+        {
+            "component": {"uuid": "component-1", "name": "log4j-core"},
+            "vulnerability": {
+                "uuid": "vuln-1",
+                "vulnId": "GHSA-jfh8-c2jp-5v3q",
+                "aliases": [{"cve": "CVE-2021-44228"}],
+            },
+            "analysis": {
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "isSuppressed": False,
+            },
+        }
+    ]
+    client.get_analysis.return_value = {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": False,
+    }
+
+    knowledge_store.persist_assessment(
+        payload={
+            "project_uuid": "project-1",
+            "component_uuid": "component-1",
+            "vulnerability_uuid": "vuln-1",
+            "state": "NOT_AFFECTED",
+            "details": "Shared durable assessment.",
+            "suppressed": False,
+        },
+        component={"uuid": "component-1", "name": "log4j-core"},
+        vulnerability={
+            "uuid": "vuln-1",
+            "vulnId": "GHSA-jfh8-c2jp-5v3q",
+            "aliases": [{"cve": "CVE-2021-44228"}],
+        },
+    )
+
+    await manager.get_vulnerabilities(client, project_uuid="project-1", refresh=True)
 
     analysis = await manager.get_analysis(
         client,

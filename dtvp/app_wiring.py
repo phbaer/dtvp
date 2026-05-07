@@ -28,7 +28,7 @@ from .grouped_vuln_services import (
 from .knowledge_store import knowledge_store
 from .logic import calculate_statistics, group_vulnerabilities, load_team_mapping
 from .settings_routes import SettingsRouteDeps
-from .startup_services import StartupServiceDeps
+from .startup_services import KnowledgeStoreRuntimeDeps, StartupServiceDeps
 from .startup_services import create_tracked_task as create_tracked_task_impl
 from .tmrescore_cache_services import TMRescoreCacheServiceDeps
 from .tmrescore_cache_services import (
@@ -538,15 +538,17 @@ def build_startup_service_deps(
         analysis_queue=analysis_queue,
         tmrescore_project_cache=tmrescore_project_cache,
         load_tmrescore_project_cache=load_tmrescore_project_cache,
-        initialize_knowledge_store=initialize_knowledge_store,
-        get_active_project_uuids=get_active_project_uuids,
-        synchronize_knowledge_store_projects=synchronize_knowledge_store_projects,
-        purge_expired_knowledge_store=purge_expired_knowledge_store,
-        get_knowledge_store_retention_days=get_knowledge_store_retention_days,
-        get_knowledge_store_maintenance_interval_seconds=get_knowledge_store_maintenance_interval_seconds,
+        knowledge_store_runtime=KnowledgeStoreRuntimeDeps(
+            initialize_knowledge_store=initialize_knowledge_store,
+            get_active_project_uuids=get_active_project_uuids,
+            synchronize_knowledge_store_projects=synchronize_knowledge_store_projects,
+            purge_expired_knowledge_store=purge_expired_knowledge_store,
+            get_knowledge_store_retention_days=get_knowledge_store_retention_days,
+            get_knowledge_store_maintenance_interval_seconds=get_knowledge_store_maintenance_interval_seconds,
+            run_knowledge_store_write_loop=run_knowledge_store_write_loop,
+        ),
         initialize_cache_manager=initialize_cache_manager,
         run_background_sync_loop=run_background_sync_loop,
-        run_knowledge_store_write_loop=run_knowledge_store_write_loop,
         run_analysis_queue_worker=lambda: analysis_queue.worker(),
         run_analysis_queue_cleanup_loop=lambda: analysis_queue.cleanup_loop(),
         create_task=asyncio.create_task,
