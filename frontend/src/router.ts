@@ -15,6 +15,19 @@ const routes = [
 export const router = createRouter({
     history: createWebHistory(getRuntimeConfig('DTVP_CONTEXT_PATH', '/')),
     routes,
+    scrollBehavior(to, _from, savedPosition) {
+        if (savedPosition) {
+            return savedPosition
+        }
+        if (to.hash) {
+            return {
+                el: to.hash,
+                top: 96,
+                behavior: 'smooth',
+            }
+        }
+        return { top: 0 }
+    },
 })
 
 let sessionChecked = false;

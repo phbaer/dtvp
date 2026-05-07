@@ -418,7 +418,7 @@ watch(() => activeTab.value, (newTab) => {
         <h2 class="text-3xl font-bold">Settings</h2>
     </div>
 
-    <div class="mb-6 rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-lg">
+    <div id="runtime-status" class="mb-6 rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-lg scroll-mt-24">
         <div class="flex items-center justify-between gap-4">
             <div>
                 <h3 class="text-lg font-bold text-gray-100">Runtime Status</h3>
@@ -434,7 +434,7 @@ watch(() => activeTab.value, (newTab) => {
         </div>
 
         <div v-if="cacheStatus" class="mt-4 grid gap-4 lg:grid-cols-2">
-            <div class="rounded border border-gray-700 bg-gray-900/60 p-4">
+            <div id="cache-status" class="rounded border border-gray-700 bg-gray-900/60 p-4 scroll-mt-24">
                 <div class="mb-3 flex items-center justify-between">
                     <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Cache</span>
                     <span :class="['rounded px-2 py-0.5 text-[10px] font-semibold uppercase', cacheStatus.fully_cached ? 'bg-green-900/30 text-green-300' : 'bg-amber-900/30 text-amber-300']">
@@ -485,7 +485,7 @@ watch(() => activeTab.value, (newTab) => {
                 </dl>
             </div>
 
-            <div class="rounded border border-gray-700 bg-gray-900/60 p-4">
+            <div id="knowledge-store-status" class="rounded border border-gray-700 bg-gray-900/60 p-4 scroll-mt-24">
                 <div class="mb-3 flex items-center justify-between">
                     <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Knowledge Store</span>
                     <span class="rounded bg-cyan-900/30 px-2 py-0.5 text-[10px] font-semibold uppercase text-cyan-300">Persistent</span>
@@ -531,7 +531,7 @@ watch(() => activeTab.value, (newTab) => {
             </div>
         </div>
 
-        <div v-if="operationalHealth" class="mt-4 rounded border border-gray-700 bg-gray-900/60 p-4">
+        <div id="operational-health" v-if="operationalHealth" class="mt-4 rounded border border-gray-700 bg-gray-900/60 p-4 scroll-mt-24">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Operational Health</span>

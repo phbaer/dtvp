@@ -11,6 +11,7 @@ const loading = ref(false)
 const loadError = ref(false)
 const pollTimer = ref<ReturnType<typeof setInterval> | null>(null)
 const refreshInProgress = ref(false)
+const now = ref(Date.now())
 
 const warningCount = computed(() => {
     if (!operationalHealth.value) return 0
@@ -24,6 +25,13 @@ const warningDescriptions: Record<keyof OperationalHealthSummary['checks'], stri
     knowledge_store_write_backlog: 'Knowledge-store write backlog',
     knowledge_store_orphans: 'Orphaned retained assessments',
     knowledge_store_maintenance_freshness: 'Knowledge-store maintenance freshness',
+}
+
+const warningTargets: Record<keyof OperationalHealthSummary['checks'], string> = {
+    pending_updates_backlog: '#cache-status',
+    knowledge_store_write_backlog: '#cache-status',
+    knowledge_store_orphans: '#knowledge-store-status',
+    knowledge_store_maintenance_freshness: '#operational-health',
 }
 
 const buildWarningSummary = (
@@ -51,6 +59,7 @@ const warningSummaries = computed(() => {
         .filter(([, check]) => check.status === 'warning')
         .map(([key, check]) => ({
             key,
+            target: warningTargets[key as keyof OperationalHealthSummary['checks']],
             text: buildWarningSummary(
                 key as keyof OperationalHealthSummary['checks'],
                 check as OperationalHealthSummary['checks'][keyof OperationalHealthSummary['checks']]
@@ -79,12 +88,35 @@ const indicatorLabel = computed(() => {
     return 'Checking'
 })
 
+const checkedAtDate = computed(() => {
+    if (!operationalHealth.value?.checked_at) return null
+    const parsed = new Date(operationalHealth.value.checked_at)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+})
+
+const checkedAtAgeLabel = computed(() => {
+    if (!checkedAtDate.value) return 'freshness unknown'
+    const ageSeconds = Math.max(
+        0,
+        Math.floor((now.value - checkedAtDate.value.getTime()) / 1000)
+    )
+    if (ageSeconds < 60) {
+        return `checked ${ageSeconds}s ago`
+    }
+    const minutes = Math.floor(ageSeconds / 60)
+    if (minutes < 60) {
+        return `checked ${minutes}m ago`
+    }
+    const hours = Math.floor(minutes / 60)
+    return `checked ${hours}h ago`
+})
+
 const indicatorTitle = computed(() => {
     if (indicatorState.value === 'warning') {
-        return `Operational health has ${warningCount.value} warning${warningCount.value === 1 ? '' : 's'}. ${firstWarningSummary.value} Open Settings for details.`
+        return `Operational health has ${warningCount.value} warning${warningCount.value === 1 ? '' : 's'}. ${checkedAtAgeLabel.value}. ${firstWarningSummary.value} Open Settings for details.`
     }
     if (indicatorState.value === 'healthy') {
-        return 'Operational health is healthy. Open Settings for details.'
+        return `Operational health is healthy, ${checkedAtAgeLabel.value}. Open Settings for details.`
     }
     if (indicatorState.value === 'error') {
         return 'Operational health is unavailable. Open Settings to retry.'
@@ -131,6 +163,7 @@ const refreshOperationalHealth = async () => {
 const startPolling = () => {
     if (pollTimer.value !== null) return
     pollTimer.value = globalThis.setInterval(() => {
+        now.value = Date.now()
         if (typeof document === 'undefined' || document.visibilityState === 'visible') {
             void refreshOperationalHealth()
         }
@@ -145,6 +178,7 @@ const stopPolling = () => {
 }
 
 onMounted(() => {
+    now.value = Date.now()
     if (realRole?.value === 'REVIEWER') {
         void refreshOperationalHealth()
         startPolling()
@@ -177,6 +211,9 @@ watch(realRole, (role) => {
             <component :is="indicatorIcon" :size="14" />
             <span class="hidden lg:inline">Ops</span>
             <span>{{ indicatorLabel }}</span>
+            <span class="hidden xl:inline text-[10px] font-medium normal-case tracking-normal opacity-80">
+                {{ checkedAtAgeLabel }}
+            </span>
             <span
                 v-if="indicatorState === 'warning' && warningCount > 0"
                 class="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-1"
@@ -194,13 +231,22 @@ watch(realRole, (role) => {
                 <AlertTriangle :size="12" />
                 Active Warnings
             </div>
+            <div class="mb-3 text-[11px] text-gray-500">
+                {{ checkedAtAgeLabel }}
+            </div>
             <ul class="space-y-2">
                 <li
                     v-for="warning in warningSummaries"
                     :key="warning.key"
-                    class="rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-2 leading-relaxed"
+                    class="list-none"
                 >
-                    {{ warning.text }}
+                    <router-link
+                        :to="{ path: '/settings', hash: warning.target }"
+                        :data-warning-target="warning.target"
+                        class="pointer-events-auto block rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-2 leading-relaxed transition-colors hover:border-amber-400/30 hover:bg-amber-500/10"
+                    >
+                        {{ warning.text }}
+                    </router-link>
                 </li>
             </ul>
         </div>

@@ -8,6 +8,11 @@ vi.mock('../../lib/api', () => ({
     getOperationalHealth: vi.fn(),
 }))
 
+const routerLinkStub = {
+    template: "<a v-bind='$attrs' :data-to='typeof to === \"string\" ? to : JSON.stringify(to)'><slot /></a>",
+    props: ['to'],
+}
+
 describe('OperationalHealthIndicator', () => {
     afterEach(() => {
         vi.useRealTimers()
@@ -15,9 +20,11 @@ describe('OperationalHealthIndicator', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.setSystemTime(new Date('2026-05-07T10:06:00+00:00'))
     })
 
     it('shows warning state for reviewers', async () => {
+        vi.useFakeTimers()
         vi.mocked(getOperationalHealth).mockResolvedValue({
             status: 'warning',
             checked_at: '2026-05-07T10:05:00+00:00',
@@ -40,9 +47,7 @@ describe('OperationalHealthIndicator', () => {
                     realRole: computed(() => 'REVIEWER'),
                 },
                 stubs: {
-                    'router-link': {
-                        template: '<a><slot /></a>',
-                    },
+                    'router-link': routerLinkStub,
                 },
             },
         })
@@ -55,11 +60,19 @@ describe('OperationalHealthIndicator', () => {
         expect(getOperationalHealth).toHaveBeenCalled()
         expect(wrapper.text()).toContain('Ops')
         expect(wrapper.text()).toContain('2 warnings')
+        expect(wrapper.text()).toContain('checked 1m ago')
         expect(indicator.attributes('title')).toContain('2 warnings')
+        expect(indicator.attributes('title')).toContain('checked 1m ago')
         expect(indicator.attributes('title')).toContain('Pending DT updates backlog: 3 queued, oldest 412s.')
         expect(panel.text()).toContain('Active Warnings')
+        expect(panel.text()).toContain('checked 1m ago')
         expect(panel.text()).toContain('Pending DT updates backlog: 3 queued, oldest 412s.')
         expect(panel.text()).toContain('Orphaned retained assessments: 0 records detected.')
+        const warningLinks = wrapper.findAll('[data-warning-target]')
+        expect(warningLinks).toHaveLength(2)
+        expect(warningLinks[0]?.attributes('data-warning-target')).toBe('#cache-status')
+        expect(warningLinks[0]?.attributes('data-to')).toContain('"hash":"#cache-status"')
+        expect(warningLinks[1]?.attributes('data-warning-target')).toBe('#knowledge-store-status')
     })
 
     it('stays hidden for analysts', async () => {
@@ -69,9 +82,7 @@ describe('OperationalHealthIndicator', () => {
                     realRole: computed(() => 'ANALYST'),
                 },
                 stubs: {
-                    'router-link': {
-                        template: '<a><slot /></a>',
-                    },
+                    'router-link': routerLinkStub,
                 },
             },
         })
@@ -102,9 +113,7 @@ describe('OperationalHealthIndicator', () => {
                     realRole: role,
                 },
                 stubs: {
-                    'router-link': {
-                        template: '<a><slot /></a>',
-                    },
+                    'router-link': routerLinkStub,
                 },
             },
         })
