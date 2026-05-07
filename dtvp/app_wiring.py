@@ -1,5 +1,4 @@
 import asyncio
-import os
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
@@ -29,9 +28,10 @@ from .grouped_vuln_services import (
 from .knowledge_store import knowledge_store
 from .logic import calculate_statistics, group_vulnerabilities, load_team_mapping
 from .settings_routes import SettingsRouteDeps
-from .startup_services import KnowledgeStoreRuntimeDeps, StartupServiceDeps
-from .startup_services import StartupInstanceGuardDeps
 from .startup_services import (
+    KnowledgeStoreRuntimeDeps,
+    StartupInstanceGuardDeps,
+    StartupServiceDeps,
     acquire_single_instance_guard,
     release_single_instance_guard,
 )
@@ -550,6 +550,7 @@ def build_startup_service_deps(
         ),
         knowledge_store_runtime=KnowledgeStoreRuntimeDeps(
             initialize_knowledge_store=initialize_knowledge_store,
+            get_knowledge_store_status=knowledge_store.get_status,
             get_active_project_uuids=get_active_project_uuids,
             synchronize_knowledge_store_projects=synchronize_knowledge_store_projects,
             purge_expired_knowledge_store=purge_expired_knowledge_store,

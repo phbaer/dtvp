@@ -78,7 +78,7 @@ def _get_env_int(name: str, default: int) -> int:
     raw_value = os.getenv(name, str(default))
     try:
         return max(0, int(raw_value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         logger.warning(
             "Invalid %s=%r, falling back to %s",
             name,

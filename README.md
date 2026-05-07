@@ -370,6 +370,8 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_PENDING_UPDATE_WARNING_AGE_SECONDS` | Warn when the oldest pending Dependency-Track retry item reaches this age in seconds | `300` |
 | `DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_THRESHOLD` | Warn when the in-memory knowledge-store write queue reaches this many items | `100` |
 | `DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_AGE_SECONDS` | Warn when the oldest queued knowledge-store write reaches this age in seconds | `60` |
+| `DTVP_KNOWLEDGE_STORE_ORPHAN_WARNING_THRESHOLD` | Warn when orphaned retained assessments accumulate past this many records | `100` |
+| `DTVP_KNOWLEDGE_STORE_MAINTENANCE_WARNING_AGE_SECONDS` | Warn when the last successful knowledge-store maintenance pass is older than this many seconds | `7200` |
 | `DTVP_TMRESCORE_OLLAMA_MODEL` | Default Ollama model preselected for LLM enrichment in the threat-model UI | `qwen2.5:7b` |
 | `DTVP_TMRESCORE_TASK_TTL_SECONDS` | How long completed or failed tmrescore analysis tasks stay in DTVP memory for `/progress` polling | `3600` |
 | `DTVP_CODE_ANALYSIS_URL` | Base URL of the external or mock code analysis service | unset |

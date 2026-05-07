@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, Coroutine, Iterable
 @dataclass(frozen=True)
 class KnowledgeStoreRuntimeDeps:
     initialize_knowledge_store: Callable[[], None]
+    get_knowledge_store_status: Callable[[], dict[str, Any]]
     get_active_project_uuids: Callable[[], Iterable[str]]
     synchronize_knowledge_store_projects: Callable[..., None]
     purge_expired_knowledge_store: Callable[[], int]
@@ -59,13 +60,30 @@ def _is_truthy_env_value(value: str) -> bool:
 
 
 def get_single_instance_enforcement_enabled() -> bool:
-    return _is_truthy_env_value(
-        os.getenv("DTVP_ENFORCE_SINGLE_INSTANCE", "true")
-    )
+    return _is_truthy_env_value(os.getenv("DTVP_ENFORCE_SINGLE_INSTANCE", "true"))
 
 
 def get_single_instance_lock_path() -> str:
     return os.getenv("DTVP_SINGLE_INSTANCE_LOCK_PATH", "data/dtvp.instance.lock")
+
+
+def _get_env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        return max(0, int(raw_value))
+    except (TypeError, ValueError):
+        return default
+
+
+def get_knowledge_store_orphan_warning_threshold() -> int:
+    return _get_env_int("DTVP_KNOWLEDGE_STORE_ORPHAN_WARNING_THRESHOLD", 100)
+
+
+def get_knowledge_store_maintenance_warning_age_seconds() -> int:
+    return _get_env_int(
+        "DTVP_KNOWLEDGE_STORE_MAINTENANCE_WARNING_AGE_SECONDS",
+        7200,
+    )
 
 
 def acquire_single_instance_guard(logger: Any) -> Any:
@@ -129,6 +147,58 @@ def create_tracked_task(
     return task
 
 
+def _warn_on_knowledge_store_maintenance_health(
+    deps: StartupServiceDeps,
+    *,
+    check_staleness: bool,
+    check_orphans: bool,
+) -> None:
+    status = deps.knowledge_store_runtime.get_knowledge_store_status()
+    if check_orphans:
+        orphaned_assessment_records = int(
+            status.get("orphaned_assessment_records") or 0
+        )
+        orphan_warning_threshold = get_knowledge_store_orphan_warning_threshold()
+        if (
+            orphan_warning_threshold > 0
+            and orphaned_assessment_records >= orphan_warning_threshold
+        ):
+            deps.logger.warning(
+                "Knowledge-store has %s orphaned assessment record(s)",
+                orphaned_assessment_records,
+            )
+
+    if not check_staleness:
+        return
+
+    maintenance_warning_age_seconds = (
+        get_knowledge_store_maintenance_warning_age_seconds()
+    )
+    last_maintenance_at = status.get("last_maintenance_at")
+    if (
+        maintenance_warning_age_seconds <= 0
+        or not isinstance(last_maintenance_at, str)
+        or not last_maintenance_at
+    ):
+        return
+
+    try:
+        maintenance_time = datetime.fromisoformat(last_maintenance_at)
+    except ValueError:
+        return
+    if maintenance_time.tzinfo is None:
+        maintenance_time = maintenance_time.replace(tzinfo=UTC)
+    maintenance_age_seconds = max(
+        0.0,
+        (datetime.now(UTC) - maintenance_time).total_seconds(),
+    )
+    if maintenance_age_seconds >= maintenance_warning_age_seconds:
+        deps.logger.warning(
+            "Knowledge-store maintenance last ran %.1f second(s) ago",
+            maintenance_age_seconds,
+        )
+
+
 async def start_application_runtime(
     deps: StartupServiceDeps,
 ) -> StartupRuntimeTasks:
@@ -167,6 +237,11 @@ async def start_application_runtime(
 
 
 def perform_knowledge_store_maintenance(deps: StartupServiceDeps) -> int:
+    _warn_on_knowledge_store_maintenance_health(
+        deps,
+        check_staleness=True,
+        check_orphans=False,
+    )
     deps.knowledge_store_runtime.synchronize_knowledge_store_projects(
         deps.knowledge_store_runtime.get_active_project_uuids(),
         grace_period_days=deps.knowledge_store_runtime.get_knowledge_store_retention_days(),
@@ -176,6 +251,11 @@ def perform_knowledge_store_maintenance(deps: StartupServiceDeps) -> int:
         deps.logger.info(
             "Purged %s expired knowledge-store assessments", purged_records
         )
+    _warn_on_knowledge_store_maintenance_health(
+        deps,
+        check_staleness=False,
+        check_orphans=True,
+    )
     return purged_records
 
 
