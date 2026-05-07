@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from .analysis_queue_runtime import AnalysisQueue, AnalysisQueueDeps
 from .analysis_queue_services import AnalysisQueueRuntimeDeps, AnalysisQueueServiceDeps
 from .app_info_routes import AppInfoRouteDeps
+from .app_info_services import build_operational_health_summary
 from .assessment_services import (
     AssessmentServiceDeps,
     apply_assessment_payloads,
@@ -419,6 +420,10 @@ def build_app_info_route_deps(
         load_pyproject_metadata=load_pyproject_metadata,
         get_cache_status=lambda: cache_manager.get_cache_status(),
         get_knowledge_store_status=lambda: knowledge_store.get_status(),
+        get_operational_health_summary=lambda: build_operational_health_summary(
+            cache_manager.get_cache_status(),
+            knowledge_store.get_status(),
+        ),
         load_changelog_content=load_changelog_content,
         get_sbom_path=get_sbom_path,
         read_text=read_text,

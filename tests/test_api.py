@@ -86,6 +86,72 @@ def test_knowledge_store_status_endpoint(client):
         assert response.json() == mock_status
 
 
+def test_operational_health_endpoint_reports_warning_state(client):
+    cache_status = {
+        "pending_updates": 2,
+        "pending_updates_oldest_age_seconds": 400.0,
+        "knowledge_store_write_queue_size": 0,
+        "knowledge_store_write_queue_oldest_age_seconds": None,
+    }
+    knowledge_store_status = {
+        "orphaned_assessment_records": 3,
+        "last_maintenance_at": None,
+    }
+    with (
+        patch("dtvp.main.cache_manager.get_cache_status", return_value=cache_status),
+        patch("dtvp.app_wiring.knowledge_store.get_status", return_value=knowledge_store_status),
+        patch.dict(
+            os.environ,
+            {
+                "DTVP_PENDING_UPDATE_WARNING_THRESHOLD": "1",
+                "DTVP_KNOWLEDGE_STORE_ORPHAN_WARNING_THRESHOLD": "1",
+            },
+            clear=False,
+        ),
+    ):
+        response = client.get("/api/operational-health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "warning"
+    assert data["checks"]["pending_updates_backlog"]["status"] == "warning"
+    assert data["checks"]["pending_updates_backlog"]["count"] == 2
+    assert data["checks"]["knowledge_store_orphans"]["status"] == "warning"
+    assert data["checks"]["knowledge_store_orphans"]["count"] == 3
+    assert (
+        data["checks"]["knowledge_store_maintenance_freshness"]["status"]
+        == "warning"
+    )
+
+
+def test_operational_health_endpoint_reports_ok_state(client):
+    cache_status = {
+        "pending_updates": 0,
+        "pending_updates_oldest_age_seconds": None,
+        "knowledge_store_write_queue_size": 0,
+        "knowledge_store_write_queue_oldest_age_seconds": None,
+    }
+    knowledge_store_status = {
+        "orphaned_assessment_records": 0,
+        "last_maintenance_at": "2026-05-07T10:00:00+00:00",
+    }
+    with (
+        patch("dtvp.main.cache_manager.get_cache_status", return_value=cache_status),
+        patch("dtvp.app_wiring.knowledge_store.get_status", return_value=knowledge_store_status),
+    ):
+        response = client.get("/api/operational-health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["checks"]["pending_updates_backlog"]["status"] == "ok"
+    assert data["checks"]["knowledge_store_write_backlog"]["status"] == "ok"
+    assert data["checks"]["knowledge_store_orphans"]["status"] == "ok"
+    assert (
+        data["checks"]["knowledge_store_maintenance_freshness"]["status"] == "ok"
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
     # Configure mock for context manager usage

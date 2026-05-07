@@ -60,6 +60,7 @@ SBOM strategy matters here:
 - Retained assessment state lives in the knowledge store, while `data/dt_cache/` is treated as reconstructible warm cache.
 - The recommended production setting is `DTVP_KNOWLEDGE_STORE_BACKEND=sqlite`.
 - By default, DTVP enforces a single-instance startup lock at `data/dtvp.instance.lock`. Override this with `DTVP_SINGLE_INSTANCE_LOCK_PATH` or disable enforcement with `DTVP_ENFORCE_SINGLE_INSTANCE=false` only if you understand the coordination risks.
+- For lightweight operational checks, use `/api/operational-health` for a derived summary of cache backlog, knowledge-store write backlog, orphan accumulation, and maintenance freshness. The raw metrics remain available at `/api/cache-status` and `/api/knowledge-store-status`.
 
 ## Prerequisites
 
@@ -104,6 +105,7 @@ Then open:
 
 - Frontend: `http://localhost:5173`
 - Backend API version endpoint: `http://localhost:8000/api/version`
+- Backend operational health endpoint: `http://localhost:8000/api/operational-health`
 - Mock Dependency-Track service: `http://localhost:8081`
 - Mock TMRescore service: `http://localhost:8090/ui`
 
