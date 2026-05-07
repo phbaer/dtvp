@@ -1,6 +1,10 @@
 import asyncio
+import json
+import os
+import socket
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable, Coroutine, Iterable
 
 
@@ -16,6 +20,12 @@ class KnowledgeStoreRuntimeDeps:
 
 
 @dataclass(frozen=True)
+class StartupInstanceGuardDeps:
+    acquire_instance_guard: Callable[[], Any]
+    release_instance_guard: Callable[[Any], None]
+
+
+@dataclass(frozen=True)
 class StartupServiceDeps:
     logger: Any
     version: str
@@ -23,6 +33,7 @@ class StartupServiceDeps:
     analysis_queue: Any
     tmrescore_project_cache: dict[str, dict[str, Any]]
     load_tmrescore_project_cache: Callable[[], dict[str, dict[str, Any]]]
+    instance_guard: StartupInstanceGuardDeps
     knowledge_store_runtime: KnowledgeStoreRuntimeDeps
     initialize_cache_manager: Callable[[], Awaitable[None]]
     run_background_sync_loop: Callable[[], Awaitable[None]]
@@ -34,11 +45,77 @@ class StartupServiceDeps:
 
 @dataclass(frozen=True)
 class StartupRuntimeTasks:
+    instance_guard_token: Any
+    release_instance_guard: Callable[[Any], None]
     sync_task: asyncio.Task[Any]
     knowledge_store_write_task: asyncio.Task[Any]
     queue_task: asyncio.Task[Any]
     queue_cleanup_task: asyncio.Task[Any]
     knowledge_store_task: asyncio.Task[Any]
+
+
+def _is_truthy_env_value(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_single_instance_enforcement_enabled() -> bool:
+    return _is_truthy_env_value(
+        os.getenv("DTVP_ENFORCE_SINGLE_INSTANCE", "true")
+    )
+
+
+def get_single_instance_lock_path() -> str:
+    return os.getenv("DTVP_SINGLE_INSTANCE_LOCK_PATH", "data/dtvp.instance.lock")
+
+
+def acquire_single_instance_guard(logger: Any) -> Any:
+    if not get_single_instance_enforcement_enabled():
+        logger.info("Single-instance enforcement disabled")
+        return None
+
+    lock_path = get_single_instance_lock_path()
+    lock_dir = os.path.dirname(lock_path)
+    if lock_dir:
+        os.makedirs(lock_dir, exist_ok=True)
+
+    metadata = {
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "started_at": datetime.now(UTC).isoformat(),
+    }
+
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    try:
+        file_descriptor = os.open(lock_path, flags, 0o644)
+    except FileExistsError as exc:
+        raise RuntimeError(
+            f"Another DTVP instance may already be using {lock_path}. "
+            "If this is a stale lock, remove it or set DTVP_ENFORCE_SINGLE_INSTANCE=false."
+        ) from exc
+
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            json.dump(metadata, handle)
+            handle.write("\n")
+    except Exception:
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass
+        raise
+
+    logger.info("Acquired single-instance lock at %s", lock_path)
+    return lock_path
+
+
+def release_single_instance_guard(lock_token: Any) -> None:
+    if not lock_token:
+        return
+
+    try:
+        os.remove(str(lock_token))
+    except FileNotFoundError:
+        return
 
 
 def create_tracked_task(
@@ -55,31 +132,38 @@ def create_tracked_task(
 async def start_application_runtime(
     deps: StartupServiceDeps,
 ) -> StartupRuntimeTasks:
-    if hasattr(deps.analysis_queue, "load_persisted_state"):
-        deps.analysis_queue.load_persisted_state()
-    deps.analysis_queue.reset_runtime_state()
-    deps.logger.info(
-        "Starting DTVP version %s (build %s)",
-        deps.version,
-        deps.build_commit,
-    )
-    deps.knowledge_store_runtime.initialize_knowledge_store()
-    deps.tmrescore_project_cache.clear()
-    deps.tmrescore_project_cache.update(deps.load_tmrescore_project_cache())
-    await deps.initialize_cache_manager()
-    deps.analysis_queue.prune_finished()
-    perform_knowledge_store_maintenance(deps)
-    return StartupRuntimeTasks(
-        sync_task=deps.create_task(deps.run_background_sync_loop()),
-        knowledge_store_write_task=deps.create_task(
-            deps.knowledge_store_runtime.run_knowledge_store_write_loop()
-        ),
-        queue_task=deps.create_task(deps.run_analysis_queue_worker()),
-        queue_cleanup_task=deps.create_task(deps.run_analysis_queue_cleanup_loop()),
-        knowledge_store_task=deps.create_task(
-            run_knowledge_store_maintenance_loop(deps)
-        ),
-    )
+    instance_guard_token = deps.instance_guard.acquire_instance_guard()
+    try:
+        if hasattr(deps.analysis_queue, "load_persisted_state"):
+            deps.analysis_queue.load_persisted_state()
+        deps.analysis_queue.reset_runtime_state()
+        deps.logger.info(
+            "Starting DTVP version %s (build %s)",
+            deps.version,
+            deps.build_commit,
+        )
+        deps.knowledge_store_runtime.initialize_knowledge_store()
+        deps.tmrescore_project_cache.clear()
+        deps.tmrescore_project_cache.update(deps.load_tmrescore_project_cache())
+        await deps.initialize_cache_manager()
+        deps.analysis_queue.prune_finished()
+        perform_knowledge_store_maintenance(deps)
+        return StartupRuntimeTasks(
+            instance_guard_token=instance_guard_token,
+            release_instance_guard=deps.instance_guard.release_instance_guard,
+            sync_task=deps.create_task(deps.run_background_sync_loop()),
+            knowledge_store_write_task=deps.create_task(
+                deps.knowledge_store_runtime.run_knowledge_store_write_loop()
+            ),
+            queue_task=deps.create_task(deps.run_analysis_queue_worker()),
+            queue_cleanup_task=deps.create_task(deps.run_analysis_queue_cleanup_loop()),
+            knowledge_store_task=deps.create_task(
+                run_knowledge_store_maintenance_loop(deps)
+            ),
+        )
+    except Exception:
+        deps.instance_guard.release_instance_guard(instance_guard_token)
+        raise
 
 
 def perform_knowledge_store_maintenance(deps: StartupServiceDeps) -> int:
@@ -114,26 +198,29 @@ async def stop_application_runtime(
     analysis_queue: Any,
     background_tasks: set[asyncio.Task[Any]],
 ) -> None:
-    analysis_queue.shutdown()
-    runtime_tasks.knowledge_store_task.cancel()
-    runtime_tasks.knowledge_store_write_task.cancel()
-    runtime_tasks.queue_task.cancel()
-    runtime_tasks.queue_cleanup_task.cancel()
-    runtime_tasks.sync_task.cancel()
-    for task in tuple(background_tasks):
-        task.cancel()
+    try:
+        analysis_queue.shutdown()
+        runtime_tasks.knowledge_store_task.cancel()
+        runtime_tasks.knowledge_store_write_task.cancel()
+        runtime_tasks.queue_task.cancel()
+        runtime_tasks.queue_cleanup_task.cancel()
+        runtime_tasks.sync_task.cancel()
+        for task in tuple(background_tasks):
+            task.cancel()
 
-    with suppress(asyncio.CancelledError):
-        await runtime_tasks.knowledge_store_task
-    with suppress(asyncio.CancelledError):
-        await runtime_tasks.knowledge_store_write_task
-    with suppress(asyncio.CancelledError):
-        await runtime_tasks.queue_task
-    with suppress(asyncio.CancelledError):
-        await runtime_tasks.queue_cleanup_task
-    with suppress(asyncio.CancelledError):
-        await runtime_tasks.sync_task
-
-    for task in tuple(background_tasks):
         with suppress(asyncio.CancelledError):
-            await task
+            await runtime_tasks.knowledge_store_task
+        with suppress(asyncio.CancelledError):
+            await runtime_tasks.knowledge_store_write_task
+        with suppress(asyncio.CancelledError):
+            await runtime_tasks.queue_task
+        with suppress(asyncio.CancelledError):
+            await runtime_tasks.queue_cleanup_task
+        with suppress(asyncio.CancelledError):
+            await runtime_tasks.sync_task
+
+        for task in tuple(background_tasks):
+            with suppress(asyncio.CancelledError):
+                await task
+    finally:
+        runtime_tasks.release_instance_guard(runtime_tasks.instance_guard_token)

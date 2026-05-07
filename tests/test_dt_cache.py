@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -111,6 +111,82 @@ async def test_save_local_analysis_updates_cache_metadata(tmp_path):
     assert manager.cache_meta.get("last_refreshed_at") is not None
     loaded_meta = manager._load_projects_meta()
     assert loaded_meta.get("last_refreshed_at") is not None
+
+
+@pytest.mark.asyncio
+async def test_get_cache_status_reports_pending_and_write_queue_observability(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+
+    await manager.queue_analysis_update(
+        {
+            "project_uuid": "puuid",
+            "component_uuid": "cuuid",
+            "vulnerability_uuid": "vuuid",
+            "state": "NOT_AFFECTED",
+            "details": "Safe",
+            "suppressed": False,
+        }
+    )
+
+    status = manager.get_cache_status()
+
+    assert status["pending_updates"] == 1
+    assert status["pending_updates_oldest_age_seconds"] is not None
+    assert status["pending_updates_oldest_age_seconds"] >= 0
+    assert status["knowledge_store_write_queue_size"] == 1
+    assert status["knowledge_store_write_queue_oldest_age_seconds"] is not None
+    assert status["knowledge_store_write_queue_oldest_age_seconds"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_queue_analysis_update_warns_when_pending_backlog_crosses_threshold(
+    tmp_path,
+):
+    with patch.dict(
+        "os.environ",
+        {"DTVP_PENDING_UPDATE_WARNING_THRESHOLD": "1"},
+        clear=False,
+    ):
+        manager = CacheManager(base_path=str(tmp_path))
+
+    with patch("dtvp.dt_cache.logger.warning") as warning:
+        await manager.queue_analysis_update(
+            {
+                "project_uuid": "puuid",
+                "component_uuid": "cuuid",
+                "vulnerability_uuid": "vuuid",
+                "state": "NOT_AFFECTED",
+                "details": "Safe",
+                "suppressed": False,
+            }
+        )
+
+    assert warning.call_count == 1
+    assert "Pending DT update backlog" in warning.call_args.args[0]
+
+
+def test_save_local_analysis_warns_when_write_queue_crosses_threshold(tmp_path):
+    with patch.dict(
+        "os.environ",
+        {"DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_THRESHOLD": "1"},
+        clear=False,
+    ):
+        manager = CacheManager(base_path=str(tmp_path))
+
+    with patch("dtvp.dt_cache.logger.warning") as warning:
+        manager._save_local_analysis(
+            {
+                "project_uuid": "project-1",
+                "component_uuid": "component-1",
+                "vulnerability_uuid": "vuln-1",
+                "state": "NOT_AFFECTED",
+                "details": "Queued durable assessment.",
+                "suppressed": False,
+            }
+        )
+
+    assert warning.call_count == 1
+    assert "Knowledge-store write queue" in warning.call_args.args[0]
 
 
 @pytest.mark.asyncio

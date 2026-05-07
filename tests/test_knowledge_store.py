@@ -4,9 +4,9 @@ from unittest.mock import patch
 from dtvp.knowledge_store import KnowledgeStore, get_knowledge_store_backend
 
 
-def test_default_backend_is_json():
+def test_default_backend_is_sqlite():
     with patch.dict("os.environ", {}, clear=False):
-        assert get_knowledge_store_backend() == "json"
+        assert get_knowledge_store_backend() == "sqlite"
 
 
 def test_sqlite_backend_persists_and_reads_assessment(tmp_path):
@@ -60,6 +60,9 @@ def test_sqlite_backend_persists_and_reads_assessment(tmp_path):
         assert status["store_type"] == "sqlite"
         assert status["assessment_records"] == 1
         assert status["assessment_triplet_index_entries"] == 1
+        assert status["orphaned_assessment_records"] == 0
+        assert status["last_maintenance_at"] is None
+        assert status["last_purge_deleted_records"] == 0
         assert status["database_path"].endswith("knowledge_store.db")
 
 
@@ -125,10 +128,22 @@ def test_sqlite_backend_purges_assessments_after_project_retention_expires(tmp_p
             now=now,
         )
         assert store.purge_expired_knowledge(now=now + timedelta(hours=12)) == 0
+        status = store.get_status()
+        assert status["orphaned_assessment_records"] == 0
+        assert status["last_maintenance_at"] == (
+            now + timedelta(hours=12)
+        ).isoformat()
+        assert status["last_purge_deleted_records"] == 0
 
         store.synchronize_active_projects([], grace_period_days=1, now=now)
+        status = store.get_status()
+        assert status["orphaned_assessment_records"] == 1
         assert store.purge_expired_knowledge(now=now + timedelta(hours=12)) == 0
         assert store.purge_expired_knowledge(now=now + timedelta(days=2)) == 1
+        status = store.get_status()
+        assert status["orphaned_assessment_records"] == 0
+        assert status["last_maintenance_at"] == (now + timedelta(days=2)).isoformat()
+        assert status["last_purge_deleted_records"] == 1
 
         assert (
             store.get_assessment_by_triplet(

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
@@ -29,6 +30,11 @@ from .knowledge_store import knowledge_store
 from .logic import calculate_statistics, group_vulnerabilities, load_team_mapping
 from .settings_routes import SettingsRouteDeps
 from .startup_services import KnowledgeStoreRuntimeDeps, StartupServiceDeps
+from .startup_services import StartupInstanceGuardDeps
+from .startup_services import (
+    acquire_single_instance_guard,
+    release_single_instance_guard,
+)
 from .startup_services import create_tracked_task as create_tracked_task_impl
 from .tmrescore_cache_services import TMRescoreCacheServiceDeps
 from .tmrescore_cache_services import (
@@ -538,6 +544,10 @@ def build_startup_service_deps(
         analysis_queue=analysis_queue,
         tmrescore_project_cache=tmrescore_project_cache,
         load_tmrescore_project_cache=load_tmrescore_project_cache,
+        instance_guard=StartupInstanceGuardDeps(
+            acquire_instance_guard=lambda: acquire_single_instance_guard(logger),
+            release_instance_guard=release_single_instance_guard,
+        ),
         knowledge_store_runtime=KnowledgeStoreRuntimeDeps(
             initialize_knowledge_store=initialize_knowledge_store,
             get_active_project_uuids=get_active_project_uuids,

@@ -18,7 +18,7 @@ def get_knowledge_store_path() -> str:
 
 
 def get_knowledge_store_backend() -> str:
-    return os.getenv("DTVP_KNOWLEDGE_STORE_BACKEND", "json").strip().lower()
+    return os.getenv("DTVP_KNOWLEDGE_STORE_BACKEND", "sqlite").strip().lower()
 
 
 def _safe_filename(value: str) -> str:
@@ -344,6 +344,10 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
             "assessments": {},
             "assessment_triplet_index": {},
             "code_analysis_queue": {"items": {}, "order": []},
+            "maintenance": {
+                "last_maintenance_at": None,
+                "last_purge_deleted_records": 0,
+            },
         }
 
     def _load_state(self) -> Dict[str, Any]:
@@ -365,6 +369,15 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
             "items": queue_state.get("items") or {},
             "order": queue_state.get("order") or [],
         }
+        maintenance_state = merged.get("maintenance") or {}
+        if not isinstance(maintenance_state, dict):
+            maintenance_state = {}
+        merged["maintenance"] = {
+            "last_maintenance_at": maintenance_state.get("last_maintenance_at"),
+            "last_purge_deleted_records": int(
+                maintenance_state.get("last_purge_deleted_records") or 0
+            ),
+        }
         self._cached_state = merged
         return merged
 
@@ -376,6 +389,7 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
         with self._lock:
             state = self._load_state()
         queue_items = state.get("code_analysis_queue", {}).get("items", {})
+        maintenance_state = state.get("maintenance") or {}
         terminal_status_counts: Dict[str, int] = {}
         for item in queue_items.values():
             if not isinstance(item, dict):
@@ -389,8 +403,13 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
             "assessment_triplet_index_entries": len(
                 state.get("assessment_triplet_index", {})
             ),
+            "orphaned_assessment_records": 0,
             "code_analysis_queue_items": len(queue_items),
             "code_analysis_queue_status_counts": terminal_status_counts,
+            "last_maintenance_at": maintenance_state.get("last_maintenance_at"),
+            "last_purge_deleted_records": int(
+                maintenance_state.get("last_purge_deleted_records") or 0
+            ),
         }
 
     def initialize(self) -> None:
@@ -407,6 +426,13 @@ class JsonKnowledgeStoreBackend(KnowledgeStoreBackend):
         return None
 
     def purge_expired_knowledge(self, *, now: Optional[datetime] = None) -> int:
+        with self._lock:
+            state = self._load_state()
+            state["maintenance"] = {
+                "last_maintenance_at": (now or datetime.now(timezone.utc)).isoformat(),
+                "last_purge_deleted_records": 0,
+            }
+            self._save_state(state)
         return 0
 
     def persist_assessment(
@@ -642,6 +668,11 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
 
                     CREATE INDEX IF NOT EXISTS idx_project_reachability_active
                     ON project_reachability(is_active, purge_after);
+
+                    CREATE TABLE IF NOT EXISTS store_metadata (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    );
                     """
                 )
                 row = connection.execute(
@@ -777,11 +808,37 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
             orphaned_records = connection.execute(
                 "SELECT COUNT(*) AS count FROM project_reachability WHERE is_active = 0"
             ).fetchone()["count"]
+            orphaned_assessment_records = connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM assessments
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM assessment_triplets
+                    WHERE assessment_triplets.primary_key = assessments.primary_key
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM assessment_triplets
+                    LEFT JOIN project_reachability
+                        ON project_reachability.project_uuid = assessment_triplets.project_uuid
+                    WHERE assessment_triplets.primary_key = assessments.primary_key
+                      AND (
+                        project_reachability.project_uuid IS NULL
+                        OR project_reachability.is_active = 1
+                      )
+                )
+                """
+            ).fetchone()["count"]
+            metadata_rows = connection.execute(
+                "SELECT key, value FROM store_metadata"
+            ).fetchall()
         terminal_status_counts: Dict[str, int] = {}
         for row in queue_rows:
             payload = json.loads(row["payload_json"])
             status = str(payload.get("status") or "unknown")
             terminal_status_counts[status] = terminal_status_counts.get(status, 0) + 1
+        metadata = {row["key"]: row["value"] for row in metadata_rows}
         return {
             "store_type": "sqlite",
             "path": self.base_path,
@@ -789,8 +846,13 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
             "assessment_records": assessment_records,
             "assessment_triplet_index_entries": triplet_entries,
             "orphaned_project_records": orphaned_records,
+            "orphaned_assessment_records": orphaned_assessment_records,
             "code_analysis_queue_items": len(queue_rows),
             "code_analysis_queue_status_counts": terminal_status_counts,
+            "last_maintenance_at": metadata.get("last_maintenance_at"),
+            "last_purge_deleted_records": int(
+                metadata.get("last_purge_deleted_records") or 0
+            ),
         }
 
     def synchronize_active_projects(
@@ -851,7 +913,8 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
 
     def purge_expired_knowledge(self, *, now: Optional[datetime] = None) -> int:
         self._ensure_initialized()
-        cutoff = (now or datetime.now(timezone.utc)).isoformat()
+        maintenance_time = (now or datetime.now(timezone.utc)).isoformat()
+        cutoff = maintenance_time
         with self._connection() as connection:
             rows = connection.execute(
                 """
@@ -879,14 +942,35 @@ class SqliteKnowledgeStoreBackend(KnowledgeStoreBackend):
                 (cutoff,),
             ).fetchall()
             primary_keys = [row["primary_key"] for row in rows]
+            deleted_count = len(primary_keys)
             if not primary_keys:
+                connection.executemany(
+                    """
+                    INSERT INTO store_metadata (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                    """,
+                    [
+                        ("last_maintenance_at", maintenance_time),
+                        ("last_purge_deleted_records", "0"),
+                    ],
+                )
                 return 0
             placeholders = ",".join("?" for _ in primary_keys)
             connection.execute(
                 f"DELETE FROM assessments WHERE primary_key IN ({placeholders})",
                 primary_keys,
             )
-            return len(primary_keys)
+            connection.executemany(
+                """
+                INSERT INTO store_metadata (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                [
+                    ("last_maintenance_at", maintenance_time),
+                    ("last_purge_deleted_records", str(deleted_count)),
+                ],
+            )
+            return deleted_count
 
     def persist_assessment(
         self,

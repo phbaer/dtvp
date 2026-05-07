@@ -48,6 +48,9 @@ def test_cache_status_endpoint(client):
         "cached_boms": 2,
         "cached_analyses": 10,
         "pending_updates": 1,
+        "pending_updates_oldest_age_seconds": 12.5,
+        "knowledge_store_write_queue_size": 2,
+        "knowledge_store_write_queue_oldest_age_seconds": 3.0,
     }
     with patch("dtvp.main.cache_manager.get_cache_status", return_value=mock_status):
         response = client.get("/api/cache-status")
@@ -61,6 +64,9 @@ def test_cache_status_endpoint(client):
         assert data["cached_boms"] == 2
         assert data["cached_analyses"] == 10
         assert data["pending_updates"] == 1
+        assert data["pending_updates_oldest_age_seconds"] == 12.5
+        assert data["knowledge_store_write_queue_size"] == 2
+        assert data["knowledge_store_write_queue_oldest_age_seconds"] == 3.0
 
 
 def test_knowledge_store_status_endpoint(client):
@@ -68,8 +74,11 @@ def test_knowledge_store_status_endpoint(client):
         "path": "data/knowledge_store",
         "assessment_records": 5,
         "assessment_triplet_index_entries": 8,
+        "orphaned_assessment_records": 1,
         "code_analysis_queue_items": 1,
         "code_analysis_queue_status_counts": {"queued": 1},
+        "last_maintenance_at": "2026-05-07T10:00:00+00:00",
+        "last_purge_deleted_records": 2,
     }
     with patch("dtvp.app_wiring.knowledge_store.get_status", return_value=mock_status):
         response = client.get("/api/knowledge-store-status")

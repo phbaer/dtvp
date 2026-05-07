@@ -32,6 +32,7 @@ class KnowledgeStoreWriteBuffer:
         vulnerability: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._entries[key] = {
+            "enqueued_at": datetime.now(timezone.utc).isoformat(),
             "payload": dict(payload),
             "component": dict(component or {}),
             "vulnerability": dict(vulnerability or {}),
@@ -48,9 +49,62 @@ class KnowledgeStoreWriteBuffer:
     def reset(self) -> None:
         self._entries = {}
 
+    def size(self) -> int:
+        return len(self._entries)
+
+    def oldest_age_seconds(self) -> Optional[float]:
+        if not self._entries:
+            return None
+
+        ages: List[float] = []
+        now = datetime.now(timezone.utc)
+        for entry in self._entries.values():
+            created_at = _parse_iso_datetime(entry.get("enqueued_at"))
+            if created_at is None:
+                continue
+            ages.append(max(0.0, (now - created_at).total_seconds()))
+
+        if not ages:
+            return None
+
+        return max(ages)
+
 
 def get_dt_cache_path() -> str:
     return os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
+
+
+def _get_env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        return max(0, int(raw_value))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid %s=%r, falling back to %s",
+            name,
+            raw_value,
+            default,
+        )
+        return default
+
+
+def get_pending_update_warning_threshold() -> int:
+    return _get_env_int("DTVP_PENDING_UPDATE_WARNING_THRESHOLD", 100)
+
+
+def get_pending_update_warning_age_seconds() -> int:
+    return _get_env_int("DTVP_PENDING_UPDATE_WARNING_AGE_SECONDS", 300)
+
+
+def get_knowledge_store_write_queue_warning_threshold() -> int:
+    return _get_env_int("DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_THRESHOLD", 100)
+
+
+def get_knowledge_store_write_queue_warning_age_seconds() -> int:
+    return _get_env_int(
+        "DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_AGE_SECONDS",
+        60,
+    )
 
 
 def _safe_filename(value: str) -> str:
@@ -93,6 +147,40 @@ def _normalize_analysis_details(details: Optional[str]) -> str:
     if not isinstance(details, str):
         return ""
     return details.strip()
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _oldest_entry_age_seconds(
+    entries: List[Dict[str, Any]],
+    *,
+    timestamp_field: str,
+) -> Optional[float]:
+    if not entries:
+        return None
+
+    ages: List[float] = []
+    now = datetime.now(timezone.utc)
+    for entry in entries:
+        created_at = _parse_iso_datetime(entry.get(timestamp_field))
+        if created_at is None:
+            continue
+        ages.append(max(0.0, (now - created_at).total_seconds()))
+
+    if not ages:
+        return None
+
+    return max(ages)
 
 
 def _get_analysis_details(analysis: Optional[Dict[str, Any]]) -> str:
@@ -268,6 +356,18 @@ class CacheManager:
         self.active_project_uuids: Set[str] = set()
         self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
         self._knowledge_store_write_buffer = KnowledgeStoreWriteBuffer()
+        self.pending_update_warning_threshold = get_pending_update_warning_threshold()
+        self.pending_update_warning_age_seconds = (
+            get_pending_update_warning_age_seconds()
+        )
+        self.knowledge_store_write_queue_warning_threshold = (
+            get_knowledge_store_write_queue_warning_threshold()
+        )
+        self.knowledge_store_write_queue_warning_age_seconds = (
+            get_knowledge_store_write_queue_warning_age_seconds()
+        )
+        self._last_pending_update_warning_signature: Optional[Tuple[int, int]] = None
+        self._last_write_queue_warning_signature: Optional[Tuple[int, int]] = None
         self.cache_meta: Dict[str, Any] = {
             "fully_cached": False,
             "last_refreshed_at": None,
@@ -340,6 +440,14 @@ class CacheManager:
             "cached_boms": cached_boms,
             "cached_analyses": cached_analyses,
             "pending_updates": len(pending),
+            "pending_updates_oldest_age_seconds": _oldest_entry_age_seconds(
+                pending,
+                timestamp_field="created_at",
+            ),
+            "knowledge_store_write_queue_size": self._knowledge_store_write_buffer.size(),
+            "knowledge_store_write_queue_oldest_age_seconds": (
+                self._knowledge_store_write_buffer.oldest_age_seconds()
+            ),
         }
 
     def _touch_cache_meta(self) -> None:
@@ -406,6 +514,7 @@ class CacheManager:
             component=component,
             vulnerability=vulnerability,
         )
+        self._warn_on_knowledge_store_write_backlog()
 
     def _flush_analysis_to_knowledge_store(
         self,
@@ -436,6 +545,7 @@ class CacheManager:
     def flush_queued_knowledge_store_writes(self) -> int:
         queued_items = self._knowledge_store_write_buffer.drain()
         if not queued_items:
+            self._warn_on_knowledge_store_write_backlog()
             return 0
 
         flushed = 0
@@ -454,6 +564,7 @@ class CacheManager:
                     exc,
                 )
                 self._knowledge_store_write_buffer.requeue(key, entry)
+        self._warn_on_knowledge_store_write_backlog()
         return flushed
 
     async def background_knowledge_store_write_loop(self) -> None:
@@ -499,6 +610,69 @@ class CacheManager:
             self._active_projects_path(), sorted(set(uuids)), touch_meta=False
         )
 
+    def _warn_on_pending_update_backlog(
+        self,
+        pending: List[Dict[str, Any]],
+    ) -> None:
+        pending_count = len(pending)
+        oldest_age_seconds = _oldest_entry_age_seconds(
+            pending,
+            timestamp_field="created_at",
+        )
+        over_count = (
+            self.pending_update_warning_threshold > 0
+            and pending_count >= self.pending_update_warning_threshold
+        )
+        over_age = (
+            self.pending_update_warning_age_seconds > 0
+            and oldest_age_seconds is not None
+            and oldest_age_seconds >= self.pending_update_warning_age_seconds
+        )
+
+        if not (over_count or over_age):
+            self._last_pending_update_warning_signature = None
+            return
+
+        signature = (pending_count, int(oldest_age_seconds or 0))
+        if signature == self._last_pending_update_warning_signature:
+            return
+
+        logger.warning(
+            "Pending DT update backlog has %s item(s); oldest pending age is %.1f second(s)",
+            pending_count,
+            oldest_age_seconds or 0.0,
+        )
+        self._last_pending_update_warning_signature = signature
+
+    def _warn_on_knowledge_store_write_backlog(self) -> None:
+        queue_size = self._knowledge_store_write_buffer.size()
+        oldest_age_seconds = self._knowledge_store_write_buffer.oldest_age_seconds()
+        over_count = (
+            self.knowledge_store_write_queue_warning_threshold > 0
+            and queue_size >= self.knowledge_store_write_queue_warning_threshold
+        )
+        over_age = (
+            self.knowledge_store_write_queue_warning_age_seconds > 0
+            and oldest_age_seconds is not None
+            and oldest_age_seconds
+            >= self.knowledge_store_write_queue_warning_age_seconds
+        )
+
+        if not (over_count or over_age):
+            self._last_write_queue_warning_signature = None
+            return
+
+        signature = (queue_size, int(oldest_age_seconds or 0))
+        if signature == self._last_write_queue_warning_signature:
+            return
+
+        logger.warning(
+            "Knowledge-store write queue has %s item(s); oldest queued age is %.1f second(s)",
+            queue_size,
+            oldest_age_seconds or 0.0,
+        )
+        self._last_write_queue_warning_signature = signature
+
     def reset(self, base_path: str = None) -> None:
         if base_path:
             self.base_path = base_path
@@ -507,6 +681,8 @@ class CacheManager:
         self.active_project_uuids = set()
         self.project_query_cache = {}
         self._knowledge_store_write_buffer.reset()
+        self._last_pending_update_warning_signature = None
+        self._last_write_queue_warning_signature = None
         self.cache_meta = {"fully_cached": False, "last_refreshed_at": None}
         self._memory_cache = {}
         self._ensure_directories()
@@ -1033,6 +1209,7 @@ class CacheManager:
             pending.append(entry)
             self._save_pending_updates(pending)
             self._save_local_analysis(payload)
+            self._warn_on_pending_update_backlog(pending)
         return update_id
 
     async def remove_pending_update(self, update_id: str) -> None:
@@ -1040,6 +1217,7 @@ class CacheManager:
             pending = self._load_pending_updates()
             pending = [entry for entry in pending if entry.get("id") != update_id]
             self._save_pending_updates(pending)
+            self._warn_on_pending_update_backlog(pending)
 
     async def flush_pending_updates(self, client: DTClient) -> None:
         async with self.lock:
@@ -1065,6 +1243,7 @@ class CacheManager:
 
         async with self.lock:
             self._save_pending_updates(remaining)
+            self._warn_on_pending_update_backlog(remaining)
 
     def _save_local_analysis(self, payload: Dict[str, Any]) -> None:
         project_uuid = payload.get("project_uuid")
