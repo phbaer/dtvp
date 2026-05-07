@@ -6,6 +6,8 @@ import type {
     AssessmentPayload,
     Statistics,
     CacheStatus,
+    KnowledgeStoreStatus,
+    OperationalHealthSummary,
     TMRescoreAnalysisProgress,
     TMRescoreAnalysisResult,
     TMRescoreProjectState,
@@ -66,6 +68,16 @@ export const getChangelog = async (): Promise<{ content: string }> => {
 
 export const getCacheStatus = async (): Promise<CacheStatus> => {
     const res = await api.get('/cache-status');
+    return res.data;
+};
+
+export const getKnowledgeStoreStatus = async (): Promise<KnowledgeStoreStatus> => {
+    const res = await api.get('/knowledge-store-status');
+    return res.data;
+};
+
+export const getOperationalHealth = async (): Promise<OperationalHealthSummary> => {
+    const res = await api.get('/operational-health');
     return res.data;
 };
 

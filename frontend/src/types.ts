@@ -95,12 +95,41 @@ export interface CacheStatus {
     cached_boms: number;
     cached_analyses: number;
     pending_updates: number;
-    knowledge_store?: {
-        path: string;
-        assessment_records: number;
-        assessment_triplet_index_entries: number;
-        code_analysis_queue_items: number;
-        code_analysis_queue_status_counts: Record<string, number>;
+    pending_updates_oldest_age_seconds?: number | null;
+    knowledge_store_write_queue_size?: number;
+    knowledge_store_write_queue_oldest_age_seconds?: number | null;
+}
+
+export interface KnowledgeStoreStatus {
+    path: string;
+    assessment_records: number;
+    assessment_triplet_index_entries: number;
+    orphaned_assessment_records?: number;
+    code_analysis_queue_items: number;
+    code_analysis_queue_status_counts: Record<string, number>;
+    last_maintenance_at?: string | null;
+    last_purge_deleted_records?: number;
+}
+
+export interface OperationalHealthCheck {
+    name: string;
+    status: 'ok' | 'warning';
+    count?: number;
+    count_threshold?: number;
+    oldest_age_seconds?: number | null;
+    age_seconds?: number | null;
+    age_threshold_seconds?: number;
+    last_maintenance_at?: string | null;
+}
+
+export interface OperationalHealthSummary {
+    status: 'ok' | 'warning';
+    checked_at: string;
+    checks: {
+        pending_updates_backlog: OperationalHealthCheck;
+        knowledge_store_write_backlog: OperationalHealthCheck;
+        knowledge_store_orphans: OperationalHealthCheck;
+        knowledge_store_maintenance_freshness: OperationalHealthCheck;
     };
 }
 

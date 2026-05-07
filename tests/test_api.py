@@ -99,7 +99,10 @@ def test_operational_health_endpoint_reports_warning_state(client):
     }
     with (
         patch("dtvp.main.cache_manager.get_cache_status", return_value=cache_status),
-        patch("dtvp.app_wiring.knowledge_store.get_status", return_value=knowledge_store_status),
+        patch(
+            "dtvp.app_wiring.knowledge_store.get_status",
+            return_value=knowledge_store_status,
+        ),
         patch.dict(
             os.environ,
             {
@@ -119,8 +122,7 @@ def test_operational_health_endpoint_reports_warning_state(client):
     assert data["checks"]["knowledge_store_orphans"]["status"] == "warning"
     assert data["checks"]["knowledge_store_orphans"]["count"] == 3
     assert (
-        data["checks"]["knowledge_store_maintenance_freshness"]["status"]
-        == "warning"
+        data["checks"]["knowledge_store_maintenance_freshness"]["status"] == "warning"
     )
 
 
@@ -137,7 +139,10 @@ def test_operational_health_endpoint_reports_ok_state(client):
     }
     with (
         patch("dtvp.main.cache_manager.get_cache_status", return_value=cache_status),
-        patch("dtvp.app_wiring.knowledge_store.get_status", return_value=knowledge_store_status),
+        patch(
+            "dtvp.app_wiring.knowledge_store.get_status",
+            return_value=knowledge_store_status,
+        ),
     ):
         response = client.get("/api/operational-health")
 
@@ -147,9 +152,7 @@ def test_operational_health_endpoint_reports_ok_state(client):
     assert data["checks"]["pending_updates_backlog"]["status"] == "ok"
     assert data["checks"]["knowledge_store_write_backlog"]["status"] == "ok"
     assert data["checks"]["knowledge_store_orphans"]["status"] == "ok"
-    assert (
-        data["checks"]["knowledge_store_maintenance_freshness"]["status"] == "ok"
-    )
+    assert data["checks"]["knowledge_store_maintenance_freshness"]["status"] == "ok"
 
 
 @pytest.mark.asyncio

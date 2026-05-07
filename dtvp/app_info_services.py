@@ -1,6 +1,6 @@
 import os
-from datetime import datetime, timezone
 import tomllib
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .dt_cache import (
@@ -118,9 +118,7 @@ def build_operational_health_summary(
         "knowledge_store_orphans": {
             "name": "knowledge_store_orphans",
             "status": (
-                "warning"
-                if orphaned_assessment_records >= orphan_threshold
-                else "ok"
+                "warning" if orphaned_assessment_records >= orphan_threshold else "ok"
             ),
             "count": orphaned_assessment_records,
             "count_threshold": orphan_threshold,

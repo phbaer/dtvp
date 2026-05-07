@@ -1,14 +1,68 @@
 <script setup lang="ts">
-import { ref, onMounted, inject, watch } from 'vue'
+import { ref, onMounted, inject, watch, computed } from 'vue'
 import { X } from 'lucide-vue-next'
-import { getCacheStatus, getRoles, uploadRoles, updateRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
-import type { CacheStatus } from '../types'
+import { getCacheStatus, getKnowledgeStoreStatus, getOperationalHealth, getRoles, uploadRoles, updateRoles, getTeamMapping, uploadTeamMapping, updateTeamMapping, getRescoreRules, uploadRescoreRules, updateRescoreRules } from '../lib/api'
+import type { CacheStatus, KnowledgeStoreStatus, OperationalHealthSummary } from '../types'
 
 const user = inject<any>('user', { role: 'ANALYST' })
 const realRole = inject<any>('realRole', ref('ANALYST'))
 const activeTab = ref('mapping')
 const cacheStatus = ref<CacheStatus | null>(null)
+const knowledgeStoreStatus = ref<KnowledgeStoreStatus | null>(null)
+const operationalHealth = ref<OperationalHealthSummary | null>(null)
 const cacheStatusError = ref('')
+
+const healthTone = (status: 'ok' | 'warning') => (
+    status === 'warning'
+        ? 'bg-amber-900/30 text-amber-300 border-amber-700/60'
+        : 'bg-emerald-900/30 text-emerald-300 border-emerald-700/60'
+)
+
+const formatAge = (value?: number | null) => {
+    if (value === undefined || value === null) return 'n/a'
+    if (value < 60) return `${Math.round(value)}s`
+    const minutes = Math.floor(value / 60)
+    if (minutes < 60) return `${minutes}m`
+    const hours = Math.floor(minutes / 60)
+    return `${hours}h ${minutes % 60}m`
+}
+
+const healthChecks = computed(() => {
+    if (!operationalHealth.value) return []
+    const checks = operationalHealth.value.checks
+    return [
+        {
+            key: 'pending_updates_backlog',
+            label: 'Pending DT updates',
+            detail: `${checks.pending_updates_backlog.count ?? 0} queued, oldest ${formatAge(checks.pending_updates_backlog.oldest_age_seconds)}`,
+            threshold: `warn at ${checks.pending_updates_backlog.count_threshold ?? 0} items or ${formatAge(checks.pending_updates_backlog.age_threshold_seconds)}`,
+            status: checks.pending_updates_backlog.status,
+        },
+        {
+            key: 'knowledge_store_write_backlog',
+            label: 'Knowledge-store writes',
+            detail: `${checks.knowledge_store_write_backlog.count ?? 0} queued, oldest ${formatAge(checks.knowledge_store_write_backlog.oldest_age_seconds)}`,
+            threshold: `warn at ${checks.knowledge_store_write_backlog.count_threshold ?? 0} items or ${formatAge(checks.knowledge_store_write_backlog.age_threshold_seconds)}`,
+            status: checks.knowledge_store_write_backlog.status,
+        },
+        {
+            key: 'knowledge_store_orphans',
+            label: 'Orphaned retained assessments',
+            detail: `${checks.knowledge_store_orphans.count ?? 0} records detected`,
+            threshold: `warn at ${checks.knowledge_store_orphans.count_threshold ?? 0} records`,
+            status: checks.knowledge_store_orphans.status,
+        },
+        {
+            key: 'knowledge_store_maintenance_freshness',
+            label: 'Maintenance freshness',
+            detail: checks.knowledge_store_maintenance_freshness.last_maintenance_at
+                ? `last run ${checks.knowledge_store_maintenance_freshness.last_maintenance_at}`
+                : 'no successful maintenance run recorded',
+            threshold: `warn after ${formatAge(checks.knowledge_store_maintenance_freshness.age_threshold_seconds)}`,
+            status: checks.knowledge_store_maintenance_freshness.status,
+        },
+    ]
+})
 
 // Mapping state
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -110,7 +164,14 @@ const loadCacheStatus = async () => {
     if (realRole?.value !== 'REVIEWER') return
     cacheStatusError.value = ''
     try {
-        cacheStatus.value = await getCacheStatus()
+        const [cache, knowledgeStore, health] = await Promise.all([
+            getCacheStatus(),
+            getKnowledgeStoreStatus(),
+            getOperationalHealth(),
+        ])
+        cacheStatus.value = cache
+        knowledgeStoreStatus.value = knowledgeStore
+        operationalHealth.value = health
     } catch (e) {
         console.error('Failed to load cache status', e)
         cacheStatusError.value = 'Unable to load runtime status.'
@@ -406,6 +467,18 @@ watch(() => activeTab.value, (newTab) => {
                         <dd :class="['font-semibold', cacheStatus.pending_updates > 0 ? 'text-amber-300' : 'text-gray-200']">{{ cacheStatus.pending_updates }}</dd>
                     </div>
                     <div>
+                        <dt class="text-gray-500">Pending Update Age</dt>
+                        <dd class="font-semibold text-gray-200">{{ formatAge(cacheStatus.pending_updates_oldest_age_seconds) }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-gray-500">Write Queue</dt>
+                        <dd class="font-semibold text-gray-200">{{ cacheStatus.knowledge_store_write_queue_size ?? 0 }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-gray-500">Write Queue Age</dt>
+                        <dd class="font-semibold text-gray-200">{{ formatAge(cacheStatus.knowledge_store_write_queue_oldest_age_seconds) }}</dd>
+                    </div>
+                    <div>
                         <dt class="text-gray-500">Last Refreshed</dt>
                         <dd class="font-semibold text-gray-200">{{ cacheStatus.last_refreshed_at || 'Unknown' }}</dd>
                     </div>
@@ -417,36 +490,68 @@ watch(() => activeTab.value, (newTab) => {
                     <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Knowledge Store</span>
                     <span class="rounded bg-cyan-900/30 px-2 py-0.5 text-[10px] font-semibold uppercase text-cyan-300">Persistent</span>
                 </div>
-                <template v-if="cacheStatus.knowledge_store">
+                <template v-if="knowledgeStoreStatus">
                     <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                         <div>
                             <dt class="text-gray-500">Assessment Records</dt>
-                            <dd class="font-semibold text-gray-200">{{ cacheStatus.knowledge_store.assessment_records }}</dd>
+                            <dd class="font-semibold text-gray-200">{{ knowledgeStoreStatus.assessment_records }}</dd>
                         </div>
                         <div>
                             <dt class="text-gray-500">Triplet Index Entries</dt>
-                            <dd class="font-semibold text-gray-200">{{ cacheStatus.knowledge_store.assessment_triplet_index_entries }}</dd>
+                            <dd class="font-semibold text-gray-200">{{ knowledgeStoreStatus.assessment_triplet_index_entries }}</dd>
                         </div>
                         <div>
                             <dt class="text-gray-500">Analysis Queue Items</dt>
-                            <dd class="font-semibold text-gray-200">{{ cacheStatus.knowledge_store.code_analysis_queue_items }}</dd>
+                            <dd class="font-semibold text-gray-200">{{ knowledgeStoreStatus.code_analysis_queue_items }}</dd>
                         </div>
                         <div>
                             <dt class="text-gray-500">Queue Status Mix</dt>
                             <dd class="font-semibold text-gray-200">
-                                <span v-if="Object.keys(cacheStatus.knowledge_store.code_analysis_queue_status_counts).length === 0">None</span>
+                                <span v-if="Object.keys(knowledgeStoreStatus.code_analysis_queue_status_counts).length === 0">None</span>
                                 <span v-else>
-                                    {{ Object.entries(cacheStatus.knowledge_store.code_analysis_queue_status_counts).map(([status, count]) => `${status}: ${count}`).join(', ') }}
+                                    {{ Object.entries(knowledgeStoreStatus.code_analysis_queue_status_counts).map(([status, count]) => `${status}: ${count}`).join(', ') }}
                                 </span>
                             </dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Orphaned Assessments</dt>
+                            <dd :class="['font-semibold', (knowledgeStoreStatus.orphaned_assessment_records ?? 0) > 0 ? 'text-amber-300' : 'text-gray-200']">{{ knowledgeStoreStatus.orphaned_assessment_records ?? 0 }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-gray-500">Last Maintenance</dt>
+                            <dd class="font-semibold text-gray-200">{{ knowledgeStoreStatus.last_maintenance_at || 'Unknown' }}</dd>
                         </div>
                     </dl>
                     <div class="mt-3 rounded bg-gray-950/60 px-3 py-2 text-[11px] text-gray-400">
                         <span class="font-semibold text-gray-300">Path:</span>
-                        <span class="ml-2 break-all">{{ cacheStatus.knowledge_store.path }}</span>
+                        <span class="ml-2 break-all">{{ knowledgeStoreStatus.path }}</span>
                     </div>
                 </template>
                 <p v-else class="text-xs text-gray-500">Knowledge store status not available.</p>
+            </div>
+        </div>
+
+        <div v-if="operationalHealth" class="mt-4 rounded border border-gray-700 bg-gray-900/60 p-4">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Operational Health</span>
+                    <p class="mt-1 text-xs text-gray-500">Derived from the same warning thresholds used by backend backlog and maintenance monitoring.</p>
+                </div>
+                <span :class="['rounded border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider', healthTone(operationalHealth.status)]">
+                    {{ operationalHealth.status === 'warning' ? 'Needs Attention' : 'Healthy' }}
+                </span>
+            </div>
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div v-for="check in healthChecks" :key="check.key" class="rounded border border-gray-800 bg-gray-950/60 p-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <h4 class="text-sm font-semibold text-gray-100">{{ check.label }}</h4>
+                        <span :class="['rounded border px-2 py-0.5 text-[10px] font-semibold uppercase', healthTone(check.status)]">
+                            {{ check.status }}
+                        </span>
+                    </div>
+                    <p class="mt-3 text-sm text-gray-200">{{ check.detail }}</p>
+                    <p class="mt-2 text-[11px] text-gray-500">{{ check.threshold }}</p>
+                </div>
             </div>
         </div>
 

@@ -6,6 +6,8 @@ import { ref, computed } from 'vue'
 
 vi.mock('../../lib/api', () => ({
     getCacheStatus: vi.fn(),
+    getKnowledgeStoreStatus: vi.fn(),
+    getOperationalHealth: vi.fn(),
     getRoles: vi.fn(),
     uploadRoles: vi.fn(),
     getTeamMapping: vi.fn(),
@@ -30,14 +32,55 @@ describe('Settings.vue', () => {
             cached_boms: 2,
             cached_analyses: 6,
             pending_updates: 1,
-            knowledge_store: {
-                path: '/tmp/knowledge',
-                assessment_records: 7,
-                assessment_triplet_index_entries: 9,
-                code_analysis_queue_items: 3,
-                code_analysis_queue_status_counts: {
-                    completed: 2,
-                    failed: 1,
+            pending_updates_oldest_age_seconds: 45,
+            knowledge_store_write_queue_size: 2,
+            knowledge_store_write_queue_oldest_age_seconds: 15,
+        })
+        vi.mocked(api.getKnowledgeStoreStatus).mockResolvedValue({
+            path: '/tmp/knowledge',
+            assessment_records: 7,
+            assessment_triplet_index_entries: 9,
+            orphaned_assessment_records: 1,
+            code_analysis_queue_items: 3,
+            code_analysis_queue_status_counts: {
+                completed: 2,
+                failed: 1,
+            },
+            last_maintenance_at: '2026-05-07T10:00:00+00:00',
+            last_purge_deleted_records: 2,
+        })
+        vi.mocked(api.getOperationalHealth).mockResolvedValue({
+            status: 'warning',
+            checked_at: '2026-05-07T10:05:00+00:00',
+            checks: {
+                pending_updates_backlog: {
+                    name: 'pending_updates_backlog',
+                    status: 'warning',
+                    count: 1,
+                    count_threshold: 1,
+                    oldest_age_seconds: 45,
+                    age_threshold_seconds: 300,
+                },
+                knowledge_store_write_backlog: {
+                    name: 'knowledge_store_write_backlog',
+                    status: 'ok',
+                    count: 2,
+                    count_threshold: 100,
+                    oldest_age_seconds: 15,
+                    age_threshold_seconds: 60,
+                },
+                knowledge_store_orphans: {
+                    name: 'knowledge_store_orphans',
+                    status: 'warning',
+                    count: 1,
+                    count_threshold: 1,
+                },
+                knowledge_store_maintenance_freshness: {
+                    name: 'knowledge_store_maintenance_freshness',
+                    status: 'ok',
+                    last_maintenance_at: '2026-05-07T10:00:00+00:00',
+                    age_seconds: 300,
+                    age_threshold_seconds: 7200,
                 },
             },
         })
@@ -83,6 +126,9 @@ describe('Settings.vue', () => {
         expect(wrapper.text()).toContain('Assessment Records')
         expect(wrapper.text()).toContain('/tmp/knowledge')
         expect(wrapper.text()).toContain('completed: 2')
+        expect(wrapper.text()).toContain('Operational Health')
+        expect(wrapper.text()).toContain('Needs Attention')
+        expect(wrapper.text()).toContain('Orphaned Assessments')
     })
 
     it('loads and displays rescore rules in the editor', async () => {
