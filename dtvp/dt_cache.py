@@ -630,10 +630,12 @@ class CacheManager:
         )
 
         if not (over_count or over_age):
+            if self._last_pending_update_warning_signature is not None:
+                logger.info("Pending DT update backlog returned to healthy state.")
             self._last_pending_update_warning_signature = None
             return
 
-        signature = (pending_count, int(oldest_age_seconds or 0))
+        signature = (int(over_count), int(over_age))
         if signature == self._last_pending_update_warning_signature:
             return
 
@@ -659,10 +661,12 @@ class CacheManager:
         )
 
         if not (over_count or over_age):
+            if self._last_write_queue_warning_signature is not None:
+                logger.info("Knowledge-store write queue returned to healthy state.")
             self._last_write_queue_warning_signature = None
             return
 
-        signature = (queue_size, int(oldest_age_seconds or 0))
+        signature = (int(over_count), int(over_age))
         if signature == self._last_write_queue_warning_signature:
             return
 
@@ -774,6 +778,8 @@ class CacheManager:
             projects_meta = self.cache_meta
 
         if not name:
+            if projects_meta.get("fully_cached"):
+                return projects
             projects = await client.get_projects("")
             async with self.lock:
                 self._save_project_cache(self._projects_path(), projects)

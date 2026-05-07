@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, onMounted, ref } from 'vue'
 import { getProjects } from '../lib/api'
 import { getRuntimeConfig } from '../lib/env'
 import type { Project } from '../types'
@@ -14,8 +14,7 @@ const loading = ref(false)
 const fetchProjects = async () => {
     loading.value = true
     try {
-        // Fetch projects from backend (backend handles filtering by name if provided)
-        const data = await getProjects(query.value || '')
+        const data = await getProjects()
         allProjects.value = data
     } catch (err) {
         console.error(err)
@@ -25,11 +24,9 @@ const fetchProjects = async () => {
     }
 }
 
-// Fetch projects when the component mounts and whenever the search query changes.
-// This ensures that the default project filter (from runtime config) is applied immediately.
-watch(query, () => {
-    fetchProjects()
-}, { immediate: true })
+onMounted(() => {
+    void fetchProjects()
+})
 
 // Grouping logic
 interface GroupedProject {

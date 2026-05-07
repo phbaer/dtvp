@@ -86,7 +86,7 @@ def _register_project_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         try:
-            return await deps.cache_manager.get_projects(client, name or "")
+            return await deps.cache_manager.get_projects(client, name)
         except Exception as exc:
             deps.logger.error("Error fetching projects from Dependency-Track: %s", exc)
             raise HTTPException(
@@ -166,7 +166,7 @@ def _register_statistics_route(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         try:
-            projects = await deps.cache_manager.get_projects(client, name or "")
+            projects = await deps.cache_manager.get_projects(client, name)
         except Exception as exc:
             deps.logger.error("Error fetching projects from Dependency-Track: %s", exc)
             raise HTTPException(

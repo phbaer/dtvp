@@ -36,6 +36,23 @@ async def test_get_projects_caches_results(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_get_projects_without_name_uses_cached_full_list_when_fully_cached(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_projects.return_value = [
+        {"name": "TestApp", "uuid": "uuid1", "version": "1.0"},
+    ]
+
+    first = await manager.get_projects(client)
+    assert first == client.get_projects.return_value
+    assert client.get_projects.call_count == 1
+
+    second = await manager.get_projects(client)
+    assert second == first
+    assert client.get_projects.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_get_vulnerabilities_caches_results(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()
@@ -187,6 +204,108 @@ def test_save_local_analysis_warns_when_write_queue_crosses_threshold(tmp_path):
 
     assert warning.call_count == 1
     assert "Knowledge-store write queue" in warning.call_args.args[0]
+
+
+def test_save_local_analysis_does_not_repeat_write_queue_warning_while_backlog_remains_unhealthy(
+    tmp_path,
+):
+    with patch.dict(
+        "os.environ",
+        {"DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_THRESHOLD": "1"},
+        clear=False,
+    ):
+        manager = CacheManager(base_path=str(tmp_path))
+
+    with patch("dtvp.dt_cache.logger.warning") as warning:
+        manager._save_local_analysis(
+            {
+                "project_uuid": "project-1",
+                "component_uuid": "component-1",
+                "vulnerability_uuid": "vuln-1",
+                "state": "NOT_AFFECTED",
+                "details": "Queued durable assessment.",
+                "suppressed": False,
+            }
+        )
+        manager._save_local_analysis(
+            {
+                "project_uuid": "project-1",
+                "component_uuid": "component-2",
+                "vulnerability_uuid": "vuln-2",
+                "state": "NOT_AFFECTED",
+                "details": "Queued durable assessment.",
+                "suppressed": False,
+            }
+        )
+
+    assert warning.call_count == 1
+    assert "Knowledge-store write queue" in warning.call_args.args[0]
+
+
+def test_save_local_analysis_logs_write_queue_recovery_once_backlog_clears(tmp_path):
+    with patch.dict(
+        "os.environ",
+        {"DTVP_KNOWLEDGE_STORE_WRITE_QUEUE_WARNING_THRESHOLD": "1"},
+        clear=False,
+    ):
+        manager = CacheManager(base_path=str(tmp_path))
+
+    with (
+        patch("dtvp.dt_cache.logger.warning") as warning,
+        patch("dtvp.dt_cache.logger.info") as info,
+    ):
+        manager._save_local_analysis(
+            {
+                "project_uuid": "project-1",
+                "component_uuid": "component-1",
+                "vulnerability_uuid": "vuln-1",
+                "state": "NOT_AFFECTED",
+                "details": "Queued durable assessment.",
+                "suppressed": False,
+            }
+        )
+        assert warning.call_count == 1
+        assert info.call_count == 0
+
+        assert manager.flush_queued_knowledge_store_writes() == 1
+
+    assert info.call_count == 1
+    assert info.call_args.args[0] == "Knowledge-store write queue returned to healthy state."
+
+
+@pytest.mark.asyncio
+async def test_pending_update_backlog_logs_recovery_once_queue_clears(tmp_path):
+    with patch.dict(
+        "os.environ",
+        {"DTVP_PENDING_UPDATE_WARNING_THRESHOLD": "1"},
+        clear=False,
+    ):
+        manager = CacheManager(base_path=str(tmp_path))
+
+    client = AsyncMock()
+    client.update_analysis = AsyncMock(return_value={"status": "updated"})
+
+    with (
+        patch("dtvp.dt_cache.logger.warning") as warning,
+        patch("dtvp.dt_cache.logger.info") as info,
+    ):
+        await manager.queue_analysis_update(
+            {
+                "project_uuid": "puuid",
+                "component_uuid": "cuuid",
+                "vulnerability_uuid": "vuuid",
+                "state": "NOT_AFFECTED",
+                "details": "Safe",
+                "suppressed": False,
+            }
+        )
+        assert warning.call_count == 1
+        assert info.call_count == 0
+
+        await manager.flush_pending_updates(client)
+
+    assert info.call_count == 1
+    assert info.call_args.args[0] == "Pending DT update backlog returned to healthy state."
 
 
 @pytest.mark.asyncio

@@ -28,7 +28,7 @@ describe('Dashboard.vue', () => {
         })
 
         // Initial loading state might be visible briefly
-        expect(getProjects).toHaveBeenCalledWith('')
+        expect(getProjects).toHaveBeenCalledWith()
 
         await flushPromises()
 
@@ -116,6 +116,21 @@ describe('Dashboard.vue', () => {
 
         expect(wrapper.text()).toContain('Lib B')
         expect(wrapper.text()).not.toContain('App A')
+    })
+
+    it('does not refetch projects when the local filter changes', async () => {
+        vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
+        const wrapper = mount(Dashboard, {
+            global: { stubs: { RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] } } }
+        })
+        await flushPromises()
+
+        expect(getProjects).toHaveBeenCalledTimes(1)
+
+        await wrapper.find('input').setValue('Lib')
+
+        expect(getProjects).toHaveBeenCalledTimes(1)
+        expect(wrapper.text()).toContain('Lib B')
     })
 
     it('applies default project filter from runtime config', async () => {
