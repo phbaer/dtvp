@@ -19,6 +19,49 @@ const warningCount = computed(() => {
     ).length
 })
 
+const warningDescriptions: Record<keyof OperationalHealthSummary['checks'], string> = {
+    pending_updates_backlog: 'Pending DT updates backlog',
+    knowledge_store_write_backlog: 'Knowledge-store write backlog',
+    knowledge_store_orphans: 'Orphaned retained assessments',
+    knowledge_store_maintenance_freshness: 'Knowledge-store maintenance freshness',
+}
+
+const buildWarningSummary = (
+    key: keyof OperationalHealthSummary['checks'],
+    check: OperationalHealthSummary['checks'][keyof OperationalHealthSummary['checks']]
+) => {
+    const label = warningDescriptions[key]
+    if (key === 'pending_updates_backlog' || key === 'knowledge_store_write_backlog') {
+        const count = check.count ?? 0
+        const oldestAge = check.oldest_age_seconds ?? 0
+        return `${label}: ${count} queued, oldest ${Math.round(oldestAge)}s.`
+    }
+    if (key === 'knowledge_store_orphans') {
+        return `${label}: ${check.count ?? 0} records detected.`
+    }
+    if (check.last_maintenance_at) {
+        return `${label}: last run ${check.last_maintenance_at}.`
+    }
+    return `${label}: no successful maintenance run recorded.`
+}
+
+const warningSummaries = computed(() => {
+    if (!operationalHealth.value) return []
+    return Object.entries(operationalHealth.value.checks)
+        .filter(([, check]) => check.status === 'warning')
+        .map(([key, check]) => ({
+            key,
+            text: buildWarningSummary(
+                key as keyof OperationalHealthSummary['checks'],
+                check as OperationalHealthSummary['checks'][keyof OperationalHealthSummary['checks']]
+            ),
+        }))
+})
+
+const firstWarningSummary = computed(() => {
+    return warningSummaries.value[0]?.text ?? ''
+})
+
 const indicatorState = computed<'idle' | 'healthy' | 'warning' | 'error'>(() => {
     if (loading.value && !operationalHealth.value) return 'idle'
     if (loadError.value) return 'error'
@@ -38,7 +81,7 @@ const indicatorLabel = computed(() => {
 
 const indicatorTitle = computed(() => {
     if (indicatorState.value === 'warning') {
-        return `Operational health has ${warningCount.value} warning${warningCount.value === 1 ? '' : 's'}. Open Settings for details.`
+        return `Operational health has ${warningCount.value} warning${warningCount.value === 1 ? '' : 's'}. ${firstWarningSummary.value} Open Settings for details.`
     }
     if (indicatorState.value === 'healthy') {
         return 'Operational health is healthy. Open Settings for details.'
@@ -123,22 +166,43 @@ watch(realRole, (role) => {
 </script>
 
 <template>
-    <router-link
-        v-if="realRole === 'REVIEWER'"
-        to="/settings"
-        data-testid="operational-health-indicator"
-        class="relative h-8 px-3 inline-flex items-center gap-2 rounded-full border text-[11px] font-semibold uppercase tracking-widest transition-all whitespace-nowrap"
-        :class="indicatorClass"
-        :title="indicatorTitle"
-    >
-        <component :is="indicatorIcon" :size="14" />
-        <span class="hidden lg:inline">Ops</span>
-        <span>{{ indicatorLabel }}</span>
-        <span
-            v-if="indicatorState === 'warning' && warningCount > 0"
-            class="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-1"
+    <div v-if="realRole === 'REVIEWER'" class="relative group">
+        <router-link
+            to="/settings"
+            data-testid="operational-health-indicator"
+            class="relative h-8 px-3 inline-flex items-center gap-2 rounded-full border text-[11px] font-semibold uppercase tracking-widest transition-all whitespace-nowrap"
+            :class="indicatorClass"
+            :title="indicatorTitle"
         >
-            {{ warningCount }}
-        </span>
-    </router-link>
+            <component :is="indicatorIcon" :size="14" />
+            <span class="hidden lg:inline">Ops</span>
+            <span>{{ indicatorLabel }}</span>
+            <span
+                v-if="indicatorState === 'warning' && warningCount > 0"
+                class="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-1"
+            >
+                {{ warningCount }}
+            </span>
+        </router-link>
+
+        <div
+            v-if="warningSummaries.length > 0"
+            data-testid="operational-health-panel"
+            class="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden min-w-[320px] rounded-xl border border-amber-500/20 bg-gray-950/95 p-3 text-xs text-gray-200 shadow-2xl group-hover:block group-focus-within:block"
+        >
+            <div class="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-amber-300">
+                <AlertTriangle :size="12" />
+                Active Warnings
+            </div>
+            <ul class="space-y-2">
+                <li
+                    v-for="warning in warningSummaries"
+                    :key="warning.key"
+                    class="rounded-lg border border-white/5 bg-white/[0.03] px-2.5 py-2 leading-relaxed"
+                >
+                    {{ warning.text }}
+                </li>
+            </ul>
+        </div>
+    </div>
 </template>

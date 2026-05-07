@@ -22,7 +22,12 @@ describe('OperationalHealthIndicator', () => {
             status: 'warning',
             checked_at: '2026-05-07T10:05:00+00:00',
             checks: {
-                pending_updates_backlog: { name: 'pending_updates_backlog', status: 'warning' },
+                    pending_updates_backlog: {
+                        name: 'pending_updates_backlog',
+                        status: 'warning',
+                        count: 3,
+                        oldest_age_seconds: 412,
+                    },
                 knowledge_store_write_backlog: { name: 'knowledge_store_write_backlog', status: 'ok' },
                 knowledge_store_orphans: { name: 'knowledge_store_orphans', status: 'warning' },
                 knowledge_store_maintenance_freshness: { name: 'knowledge_store_maintenance_freshness', status: 'ok' },
@@ -44,10 +49,17 @@ describe('OperationalHealthIndicator', () => {
 
         await flushPromises()
 
+        const indicator = wrapper.find('[data-testid="operational-health-indicator"]')
+        const panel = wrapper.find('[data-testid="operational-health-panel"]')
+
         expect(getOperationalHealth).toHaveBeenCalled()
         expect(wrapper.text()).toContain('Ops')
         expect(wrapper.text()).toContain('2 warnings')
-        expect(wrapper.attributes('title')).toContain('2 warnings')
+        expect(indicator.attributes('title')).toContain('2 warnings')
+        expect(indicator.attributes('title')).toContain('Pending DT updates backlog: 3 queued, oldest 412s.')
+        expect(panel.text()).toContain('Active Warnings')
+        expect(panel.text()).toContain('Pending DT updates backlog: 3 queued, oldest 412s.')
+        expect(panel.text()).toContain('Orphaned retained assessments: 0 records detected.')
     })
 
     it('stays hidden for analysts', async () => {
