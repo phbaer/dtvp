@@ -218,6 +218,25 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('1.0') // Version should be shown
     })
 
+    it('renders advisory descriptions as markdown', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    description: 'Summary with **bold** text.\n\n- first item\n- second item\n\n`inline code`'
+                }
+            }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const description = wrapper.get('[data-testid="vuln-description"]')
+        expect(description.html()).toContain('<strong>bold</strong>')
+        expect(description.html()).toContain('<ul>')
+        expect(description.html()).toContain('<code>inline code</code>')
+        expect(description.html()).not.toContain('**bold**')
+    })
+
     it('submits assessment update', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },

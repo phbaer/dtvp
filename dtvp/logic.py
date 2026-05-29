@@ -228,6 +228,7 @@ class BOMAnalysisCache:
         self.parent_map = build_parent_map(bom)
         self.comp_map = {}  # ref -> comp
         self.direct_tags_by_name = {}
+        self.direct_tags_by_group_name = {}  # (group, name) -> tuple(tags)
 
         # Caches
         self.uuid_to_ref = {}
@@ -236,12 +237,19 @@ class BOMAnalysisCache:
         self.path_cache = {}  # ref -> tuple(paths)
         self.analysis_cache = {}  # (component_uuid, component_name) -> (tags, paths)
         self.ref_to_name = {}  # ref -> human-readable name (includes metadata component)
+        self.ref_to_group = {}  # ref -> group (CycloneDX component group)
 
         self._preprocess_components()
 
     def _preprocess_components(self):
-        for name, tag_val in self.mapping.items():
-            self.direct_tags_by_name[name] = self._normalize_tags(tag_val)
+        for key, tag_val in self.mapping.items():
+            tags = self._normalize_tags(tag_val)
+            # Support "group:name" composite keys for disambiguation
+            if ":" in key and key != "*":
+                group_part, name_part = key.split(":", 1)
+                self.direct_tags_by_group_name[(group_part, name_part)] = tags
+            else:
+                self.direct_tags_by_name[key] = tags
 
         if not self.bom:
             return
@@ -255,6 +263,9 @@ class BOMAnalysisCache:
             meta_name = meta_comp.get("name")
             if meta_name:
                 self.ref_to_name[meta_ref] = meta_name
+            meta_group = meta_comp.get("group")
+            if meta_group:
+                self.ref_to_group[meta_ref] = meta_group
 
         for comp in self.bom.get("components", []):
             ref = comp.get("bom-ref")
@@ -265,6 +276,7 @@ class BOMAnalysisCache:
 
             c_uuid = comp.get("uuid")
             c_name = comp.get("name")
+            c_group = comp.get("group")
 
             if c_uuid:
                 self.uuid_to_ref[c_uuid] = ref
@@ -274,6 +286,9 @@ class BOMAnalysisCache:
                 if c_name not in self.name_to_ref_candidates:
                     self.name_to_ref_candidates[c_name] = []
                 self.name_to_ref_candidates[c_name].append(ref)
+
+            if c_group:
+                self.ref_to_group[ref] = c_group
 
     def _normalize_tags(self, tag_val: Any) -> Tuple[str, ...]:
         if isinstance(tag_val, list):
@@ -291,9 +306,18 @@ class BOMAnalysisCache:
             return (str(tag_val).strip(),)
         return ()
 
-    def _get_direct_tags(self, component_name: Optional[str]) -> Set[str]:
+    def _get_component_group(self, ref: str) -> Optional[str]:
+        """Return the CycloneDX group for a BOM ref, if known."""
+        return self.ref_to_group.get(ref)
+
+    def _get_direct_tags(self, component_name: Optional[str], component_group: Optional[str] = None) -> Set[str]:
         if not component_name:
             return set()
+        if component_group is not None:
+            # Component has a group → only match group:name keys
+            group_key = (component_group, component_name)
+            return set(self.direct_tags_by_group_name.get(group_key, ()))
+        # Component has no group → match name-only keys
         return set(self.direct_tags_by_name.get(component_name, ()))
 
     def _get_component_name(self, ref: str) -> str:
@@ -333,7 +357,12 @@ class BOMAnalysisCache:
     def _is_team_mapped_ref(self, ref: str) -> bool:
         """Check whether a BOM ref corresponds to a component with an explicit team mapping."""
         name = self._get_component_name(ref)
-        return bool(name and name in self.mapping and name != "*")
+        if not name:
+            return False
+        group = self._get_component_group(ref)
+        if group is not None:
+            return (group, name) in self.direct_tags_by_group_name
+        return bool(name in self.direct_tags_by_name and name != "*")
 
     def is_direct_dependency(
         self,
@@ -370,7 +399,7 @@ class BOMAnalysisCache:
         if ref in self.tags_cache:
             return list(self.tags_cache[ref])
 
-        direct_tags = list(self._get_direct_tags(self._get_component_name(ref)))
+        direct_tags = list(self._get_direct_tags(self._get_component_name(ref), self._get_component_group(ref)))
         if direct_tags:
             unique_tags = list(dict.fromkeys(tag for tag in direct_tags if tag))
             self.tags_cache[ref] = tuple(unique_tags)
@@ -387,7 +416,8 @@ class BOMAnalysisCache:
                 seen_refs.add(parent_ref)
 
                 parent_name = self._get_component_name(parent_ref)
-                parent_tags = list(self._get_direct_tags(parent_name))
+                parent_group = self._get_component_group(parent_ref)
+                parent_tags = list(self._get_direct_tags(parent_name, parent_group))
                 if parent_tags:
                     for tag in parent_tags:
                         if tag and tag not in tag_seen:

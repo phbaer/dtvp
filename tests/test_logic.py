@@ -848,3 +848,165 @@ def test_group_vulnerabilities_emits_dependency_chains():
     component = grouped[0]["affected_versions"][0]["components"][0]
 
     assert component["dependency_chains"] == ["libA -> TestProj"]
+
+
+# --- Group-aware team mapping tests ---
+
+
+def test_tagging_group_name_key_matches_component_with_group():
+    """A 'group:name' mapping key matches a component that has that group."""
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "u1", "name": "core", "group": "@angular"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"@angular:core": "FrontendTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u1", "core")
+    assert tags == ["FrontendTeam"]
+
+
+def test_tagging_name_only_key_matches_component_without_group():
+    """A plain name key matches a component that has NO group."""
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "u1", "name": "core"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"core": "CoreTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u1", "core")
+    assert tags == ["CoreTeam"]
+
+
+def test_tagging_name_only_key_does_not_match_component_with_group():
+    """A plain name key must NOT match a component that HAS a group."""
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "u1", "name": "core", "group": "@angular"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"core": "CoreTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u1", "core")
+    # @angular/core should not get CoreTeam, it should fall to wildcard or empty
+    assert tags == []
+
+
+def test_tagging_group_disambiguates_same_name_components():
+    """Two components named 'core' with different groups get different teams."""
+    bom = {
+        "components": [
+            {"bom-ref": "cpp-core", "uuid": "u1", "name": "core"},
+            {"bom-ref": "ng-core", "uuid": "u2", "name": "core", "group": "@angular"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"core": "NativeTeam", "@angular:core": "FrontendTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+
+    # C++ core (no group) → NativeTeam
+    tags = cache.get_tags_only("u1", "core")
+    assert tags == ["NativeTeam"]
+
+    # @angular/core → FrontendTeam
+    tags = cache.get_tags_only("u2", "core")
+    assert tags == ["FrontendTeam"]
+
+
+def test_tagging_grouped_component_without_mapping_gets_wildcard():
+    """A grouped component with no matching group:name key falls to wildcard."""
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "u1", "name": "core", "group": "@angular"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"core": "CoreTeam", "*": "Unassigned"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u1", "core")
+    assert tags == ["Unassigned"]
+
+
+def test_tagging_grouped_component_inherits_from_parent():
+    """A grouped component with no direct mapping inherits tags from its parent."""
+    bom = {
+        "components": [
+            {"bom-ref": "app", "uuid": "u-app", "name": "my-app"},
+            {"bom-ref": "ng-core", "uuid": "u1", "name": "core", "group": "@angular"},
+        ],
+        "dependencies": [
+            {"ref": "app", "dependsOn": ["ng-core"]},
+        ],
+    }
+    mapping = {"my-app": "AppTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u1", "core")
+    assert tags == ["AppTeam"]
+
+
+def test_tagging_is_direct_dependency_respects_group_mapping():
+    """is_direct_dependency recognises a group:name mapped parent as team-mapped."""
+    bom = {
+        "components": [
+            {"bom-ref": "parent", "uuid": "u-p", "name": "core", "group": "com.example"},
+            {"bom-ref": "child", "uuid": "u-c", "name": "some-lib"},
+        ],
+        "dependencies": [
+            {"ref": "parent", "dependsOn": ["child"]},
+        ],
+    }
+    mapping = {"com.example:core": "ExampleTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    result = cache.is_direct_dependency("u-c", "some-lib")
+    assert result is True
+
+
+def test_tagging_group_name_with_multiple_teams():
+    """A group:name key with a list value assigns multiple teams."""
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "u1", "name": "shared", "group": "org.internal"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"org.internal:shared": ["TeamA", "TeamB"]}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u1", "shared")
+    assert sorted(tags) == ["TeamA", "TeamB"]
+
+
+def test_tagging_metadata_component_group():
+    """The metadata (root) component's group is also extracted."""
+    bom = {
+        "metadata": {
+            "component": {
+                "bom-ref": "root-ref",
+                "name": "core",
+                "group": "com.mycompany",
+            }
+        },
+        "components": [
+            {"bom-ref": "child", "uuid": "u-c", "name": "some-lib"},
+        ],
+        "dependencies": [
+            {"ref": "root-ref", "dependsOn": ["child"]},
+        ],
+    }
+    mapping = {"com.mycompany:core": "RootTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u-c", "some-lib")
+    # child inherits from root which matches via group:name
+    assert tags == ["RootTeam"]

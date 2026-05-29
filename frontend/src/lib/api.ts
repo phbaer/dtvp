@@ -452,6 +452,9 @@ export interface CodeAnalysisAssessment {
     adjusted_cvss?: CodeAnalysisCvssAdjustment;
     summary: string;
     reasoning: string;
+    advisory_sources?: string[];
+    cwe_ids?: string[];
+    cwe_descriptions?: Record<string, string>;
 }
 
 export interface CodeAnalysisComponentResult {
