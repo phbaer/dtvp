@@ -161,6 +161,14 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
     seed = f"{req.vuln_id or ''}|{req.component_name}"
     verdict_template = _VERDICTS[_deterministic_index(seed, len(_VERDICTS))]
     affected = verdict_template["affected"]
+    vuln_id = (req.vuln_id or "").upper()
+    is_ghsa = vuln_id.startswith("GHSA-")
+    advisory_sources = ["GHSA", "NVD"] if is_ghsa else ["NVD", "OSV"]
+    cwe_ids = ["CWE-79", "CWE-94"] if affected else ["CWE-79"]
+    cwe_descriptions = {
+        "CWE-79": "Improper Neutralization of Input During Web Page Generation",
+        "CWE-94": "Improper Control of Generation of Code",
+    }
 
     # Build pipeline steps
     steps = []
@@ -248,6 +256,9 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
         if affected
         else "Dependency is present but vulnerable code path is not reachable."
     )
+    if is_ghsa:
+        summary += " GHSA advisory details were supplemented with NVD metadata for version-range coverage."
+
     reasoning = (
         f"The dependency {req.component_name} is present, the locked version is inside the advisory range, "
         f"and the vulnerable API is reachable from application code."
@@ -255,6 +266,7 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
         else f"The dependency {req.component_name} is present but the vulnerable API surface is not imported "
         f"or invoked anywhere in the application code."
     )
+    reasoning += f" CWE mapping considered: {', '.join(cwe_ids)}."
 
     if req.user_guidance:
         reasoning += f" (User guidance considered: {req.user_guidance})"
@@ -265,6 +277,13 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
             "verdict": verdict_template["verdict"],
             "confidence": verdict_template["confidence"],
             "exposure": verdict_template["exposure"],
+            "advisory_sources": advisory_sources,
+            "cwe_ids": cwe_ids,
+            "cwe_descriptions": {
+                cwe_id: cwe_descriptions[cwe_id]
+                for cwe_id in cwe_ids
+                if cwe_id in cwe_descriptions
+            },
             "adjusted_cvss": adjusted_cvss,
             "summary": summary,
             "reasoning": reasoning,

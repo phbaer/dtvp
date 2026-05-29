@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/api'
+import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap } from 'lucide-vue-next'
@@ -29,6 +30,23 @@ import type { CodeAnalysisAssessResponse } from '../lib/api'
 const props = defineProps<{
   group: GroupedVuln
 }>()
+
+const DESCRIPTION_FALLBACK = 'No description available.'
+
+const sanitizeRenderedMarkdown = (html: string): string => html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+    .replace(/<(iframe|object|embed|form|input|button|textarea|select|option|link|meta)\b[^>]*>/gi, '')
+    .replace(/<\/(iframe|object|embed|form|input|button|textarea|select|option)>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(?:href|src)\s*=\s*(['"])\s*(?:javascript:|data:text\/html)[\s\S]*?\1/gi, '')
+
+const renderAdvisoryMarkdown = (text?: string): string => {
+    const source = text?.trim() || DESCRIPTION_FALLBACK
+    return sanitizeRenderedMarkdown(marked.parse(source) as string)
+}
+
+const renderedDescription = computed(() => renderAdvisoryMarkdown(props.group.description))
 
 const handleCloseOnEscape = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -1648,7 +1666,11 @@ const teamBlockStateColor = (state?: string): string => {
                     <!-- Title + Description -->
                     <h4 v-if="group.title && group.title !== group.id" class="font-semibold text-gray-200 mb-1">{{ group.title }}</h4>
                     <h4 v-else class="font-semibold mb-2 text-gray-300">Description</h4>
-                    <p class="text-sm text-gray-400 mb-4 leading-relaxed">{{ group.description || 'No description available.' }}</p>
+                    <div
+                        class="advisory-markdown text-sm text-gray-400 mb-4 leading-relaxed"
+                        data-testid="vuln-description"
+                        v-html="renderedDescription"
+                    ></div>
 
                     <div v-if="triggeringTaggedComponents.length > 0" class="mb-4">
                         <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">Triggering team-mapped components</h4>
@@ -2027,6 +2049,8 @@ const teamBlockStateColor = (state?: string): string => {
 </template>
 
 <style scoped>
+@reference "../style.css";
+
 .scale-in-center {
 	animation: scale-in-center 0.15s cubic-bezier(0.250, 0.460, 0.450, 0.940) both;
 }
@@ -2043,5 +2067,45 @@ const teamBlockStateColor = (state?: string): string => {
         rgba(99, 102, 241, 0.03) 10px,
         rgba(99, 102, 241, 0.03) 20px
     );
+}
+
+.advisory-markdown :deep(p) {
+    @apply mb-3 last:mb-0;
+}
+
+.advisory-markdown :deep(ul) {
+    @apply mb-3 ml-5 list-disc space-y-1;
+}
+
+.advisory-markdown :deep(ol) {
+    @apply mb-3 ml-5 list-decimal space-y-1;
+}
+
+.advisory-markdown :deep(li) {
+    @apply pl-1;
+}
+
+.advisory-markdown :deep(a) {
+    @apply text-blue-300 underline decoration-blue-500/60 underline-offset-2 break-words;
+}
+
+.advisory-markdown :deep(code) {
+    @apply rounded bg-gray-900 px-1.5 py-0.5 font-mono text-[0.95em] text-pink-300;
+}
+
+.advisory-markdown :deep(pre) {
+    @apply mb-3 overflow-x-auto rounded-lg border border-gray-800 bg-gray-950 p-3 text-gray-200;
+}
+
+.advisory-markdown :deep(pre code) {
+    @apply bg-transparent p-0 text-inherit;
+}
+
+.advisory-markdown :deep(blockquote) {
+    @apply mb-3 border-l-2 border-gray-700 pl-4 italic text-gray-300;
+}
+
+.advisory-markdown :deep(strong) {
+    @apply font-semibold text-gray-200;
 }
 </style>

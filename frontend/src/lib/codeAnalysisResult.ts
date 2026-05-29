@@ -56,18 +56,53 @@ const getComponentResults = (result: CodeAnalysisAssessResponse): CodeAnalysisCo
     return (result.component_results || []).filter(componentResult => Boolean(componentResult?.component))
 }
 
+const buildCweLines = (assessment: CodeAnalysisAssessResponse['assessment']): string[] => {
+    const cweIds = (assessment.cwe_ids || []).filter(Boolean)
+    const cweDescriptions = assessment.cwe_descriptions || {}
+    const described = cweIds
+        .map(cweId => cweDescriptions[cweId] ? `${cweId}: ${cweDescriptions[cweId]}` : cweId)
+
+    const extraDescriptions = Object.entries(cweDescriptions)
+        .filter(([cweId]) => !cweIds.includes(cweId))
+        .map(([cweId, description]) => `${cweId}: ${description}`)
+
+    const allEntries = [...described, ...extraDescriptions]
+
+    if (allEntries.length === 0) {
+        return []
+    }
+
+    return [
+        '',
+        'CWEs:',
+        ...allEntries.map(entry => `  - ${entry}`),
+    ]
+}
+
+const buildAdvisorySourceLines = (assessment: CodeAnalysisAssessResponse['assessment']): string[] => {
+    const advisorySources = (assessment.advisory_sources || []).filter(Boolean)
+    if (advisorySources.length === 0) {
+        return []
+    }
+
+    return [`Advisory Sources: ${advisorySources.join(', ')}`]
+}
+
 const buildCompactComponentSection = (componentResult: CodeAnalysisComponentResult): string[] => {
     const versionsChecked = (componentResult.versions_checked || []).filter(Boolean)
     const lines = [
         `[Component: ${componentResult.component}]`,
         `Verdict: ${componentResult.assessment.verdict} (${componentResult.assessment.confidence} confidence)`,
         `Exposure: ${componentResult.assessment.exposure}`,
+        ...buildAdvisorySourceLines(componentResult.assessment),
         `Summary: ${componentResult.assessment.summary}`,
     ]
 
     if (componentResult.assessment.reasoning) {
         lines.push(`Reasoning: ${componentResult.assessment.reasoning}`)
     }
+
+    lines.push(...buildCweLines(componentResult.assessment))
 
     if (versionsChecked.length) {
         lines.push(`Versions: ${versionsChecked.join(', ')}`)
@@ -91,6 +126,7 @@ export const buildCodeAnalysisDetails = (
         '[Code Analysis]',
         `Verdict: ${result.assessment.verdict} (${result.assessment.confidence} confidence)`,
         `Exposure: ${result.assessment.exposure}`,
+        ...buildAdvisorySourceLines(result.assessment),
         ...justificationLine,
         ...(versionsChecked.length
             ? [
@@ -104,6 +140,7 @@ export const buildCodeAnalysisDetails = (
         ...(result.assessment.reasoning
             ? ['', `Reasoning: ${result.assessment.reasoning}`]
             : []),
+        ...buildCweLines(result.assessment),
         ...(cvss
             ? [
                 '',

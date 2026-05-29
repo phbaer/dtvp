@@ -9,6 +9,12 @@ describe('codeAnalysisResult', () => {
             verdict: 'not affected',
             confidence: 'high',
             exposure: 'none',
+            advisory_sources: ['GHSA', 'NVD'],
+            cwe_ids: ['CWE-79', 'CWE-94'],
+            cwe_descriptions: {
+                'CWE-79': 'Improper Neutralization of Input During Web Page Generation',
+                'CWE-94': 'Improper Control of Generation of Code',
+            },
             summary: 'The vulnerable path is not reachable.',
             reasoning: 'Static analysis found no invocation path into the sink.',
             adjusted_cvss: {
@@ -37,10 +43,13 @@ describe('codeAnalysisResult', () => {
 
         expect(details).toContain('[Code Analysis]')
         expect(details).toContain('Verdict: not affected (high confidence)')
+        expect(details).toContain('Advisory Sources: GHSA, NVD')
         expect(details).toContain('Justification: CODE_NOT_PRESENT')
         expect(details).toContain('Versions Checked:')
         expect(details).toContain('  - 2.0.0')
         expect(details).toContain('  - 2.1.0')
+        expect(details).toContain('CWEs:')
+        expect(details).toContain('  - CWE-79: Improper Neutralization of Input During Web Page Generation')
         expect(details).toContain('CVSS: 8.1 → 3.2')
         expect(details).toContain('[Rescored: 3.2]')
         expect(details).toContain('Adjusted Vector: CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N')
@@ -82,6 +91,7 @@ describe('codeAnalysisResult', () => {
         expect(details).toContain('Components:')
         expect(details).toContain('[Component: lib-a]')
         expect(details).toContain('Summary: No vulnerable path is reachable.')
+        expect(details).toContain('Advisory Sources: GHSA, NVD')
         expect(details).toContain('Versions: 2.0.0')
         expect(details).toContain('[Component: lib-b]')
         expect(details).toContain('Verdict: affected (high confidence)')

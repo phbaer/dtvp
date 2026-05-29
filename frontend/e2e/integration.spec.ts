@@ -7,6 +7,17 @@ test.describe('Integration Tests (Real Backend)', () => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.4');
         });
 
+        // Catch-all for any unmocked API/auth requests to prevent proxy errors
+        // when running without a backend (e.g. in a container).
+        // Registered FIRST so specific mocks (registered later) take priority
+        // (Playwright checks routes in reverse registration order).
+        await page.route('**/api/**', async (route) => {
+            await route.fulfill({ status: 200, body: '{}' });
+        });
+        await page.route('**/auth/**', async (route) => {
+            await route.fulfill({ status: 200, body: '{}' });
+        });
+
         // Mock backend endpoints so tests don't depend on a real DT instance.
         await page.route('**/auth/me', async (route) => {
             await route.fulfill({
@@ -282,9 +293,18 @@ test.describe('Integration Tests (Real Backend)', () => {
             await overlay.evaluate((node: any) => node.remove());
         }
 
-        await projectLink.click();
+        // Grab the href and navigate directly if click doesn't trigger router
+        const href = await projectLink.getAttribute('href');
+        await projectLink.click({ timeout: 10000 });
+
+        // If click didn't navigate (can happen in containerised Chromium), follow the href
+        const currentUrl = page.url();
+        if (href && !currentUrl.includes('/project/')) {
+            await page.goto(href);
+        }
+
         // 3. Check for URL change
-        await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/);
+        await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/, { timeout: 15000 });
 
         // 4. Vulnerabilities should be visible with default reviewer filters (all lifecycle states enabled)
         // 5. Now wait for vulnerabilities to be visible

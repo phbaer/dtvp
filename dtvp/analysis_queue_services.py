@@ -142,6 +142,7 @@ async def process_analysis_queue_item(
             vuln_id=item.vuln_id,
             component_name=item.component_name,
             cvss_vector=item.cvss_vector,
+            user_guidance=item.user_guidance,
         )
         item.job_id = job.get("job_id")
         if not item.job_id:

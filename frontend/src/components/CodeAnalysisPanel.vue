@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock } from 'lucide-vue-next'
 import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
-
-const ALL_COMPONENTS = '__all__'
 
 const props = defineProps<{
     vulnId: string
@@ -20,7 +18,8 @@ const userGuidance = ref('')
 const error = ref<string | null>(null)
 const result = ref<CodeAnalysisAssessResponse | null>(null)
 const stepsExpanded = ref(false)
-const selectedComponent = ref<string>(ALL_COMPONENTS)
+const selectedComponents = ref<Set<string>>(new Set())
+const componentDropdownOpen = ref(false)
 const submitting = ref(false)
 
 // Track queue IDs for items submitted from this panel
@@ -45,11 +44,42 @@ const uniqueComponents = computed(() => {
     })
 })
 
-const componentOptions = computed(() => {
-    const items = uniqueComponents.value
-    if (items.length <= 1) return items
-    return [ALL_COMPONENTS, ...items]
+const allSelected = computed(() =>
+    uniqueComponents.value.length > 0 && uniqueComponents.value.every(c => selectedComponents.value.has(c))
+)
+
+const noneSelected = computed(() => selectedComponents.value.size === 0)
+
+const selectionLabel = computed(() => {
+    const total = uniqueComponents.value.length
+    const count = selectedComponents.value.size
+    if (count === 0) return 'Select components…'
+    if (count === total) return `All Components (${total})`
+    if (count === 1) return [...selectedComponents.value][0]
+    return `${count} of ${total} components`
 })
+
+function toggleComponent(comp: string) {
+    const next = new Set(selectedComponents.value)
+    if (next.has(comp)) next.delete(comp)
+    else next.add(comp)
+    selectedComponents.value = next
+}
+
+function toggleAll() {
+    if (allSelected.value) {
+        selectedComponents.value = new Set()
+    } else {
+        selectedComponents.value = new Set(uniqueComponents.value)
+    }
+}
+
+// Auto-select all when component list is first populated
+watch(uniqueComponents, (comps) => {
+    if (selectedComponents.value.size === 0 && comps.length > 0) {
+        selectedComponents.value = new Set(comps)
+    }
+}, { immediate: true })
 
 // Find active queue items for this vulnerability
 const activeQueueItems = computed(() => {
@@ -215,14 +245,13 @@ const handleComponentError = (component: string, err: string) => {
 
 const startScan = async () => {
     submitting.value = true
+    componentDropdownOpen.value = false
     error.value = null
     result.value = null
     collectedResults.value = []
     pendingQueueIds.value = []
 
-    const targets = selectedComponent.value === ALL_COMPONENTS
-        ? uniqueComponents.value
-        : [selectedComponent.value]
+    const targets = [...selectedComponents.value]
 
     expectedTargets = [...targets]
     analyzedComponents.value = []
@@ -259,13 +288,15 @@ const completedQueueItems = computed(() => {
     )
 })
 
+const completedComponentNames = computed(() => {
+    return new Set(completedQueueItems.value.map(i => i.component_name))
+})
+
 // Load the most recent completed result for the current component selection
 const loadCompletedResult = async () => {
     if (isActive.value) return // Don't overwrite active state
 
-    const targets = selectedComponent.value === ALL_COMPONENTS
-        ? uniqueComponents.value
-        : [selectedComponent.value]
+    const targets = [...selectedComponents.value]
 
     const completedForTargets = targets
         .map(comp => completedQueueItems.value.find(i => i.component_name === comp))
@@ -298,18 +329,30 @@ const viewCompletedResult = async (item: AnalysisQueueItem) => {
 
     result.value = res
     analyzedComponents.value = [item.component_name]
-    if (selectedComponent.value !== item.component_name) {
-        selectedComponent.value = item.component_name
+    if (!selectedComponents.value.has(item.component_name)) {
+        selectedComponents.value = new Set([item.component_name])
     }
 }
 
 // On mount, check if there are completed results to display
 onMounted(() => {
     loadCompletedResult()
+    document.addEventListener('click', handleClickOutside)
 })
 
+onBeforeUnmount(() => {
+    document.removeEventListener('click', handleClickOutside)
+})
+
+function handleClickOutside(e: MouseEvent) {
+    const target = e.target as HTMLElement
+    if (componentDropdownOpen.value && !target.closest('.relative')) {
+        componentDropdownOpen.value = false
+    }
+}
+
 // When the component selection changes, try loading completed results
-watch(selectedComponent, () => {
+watch(selectedComponents, () => {
     if (!isActive.value) {
         result.value = null
         loadCompletedResult()
@@ -377,19 +420,40 @@ watch(selectedComponent, () => {
 
         <!-- Inputs row -->
         <div class="grid grid-cols-[1fr_1fr_auto] gap-3 items-end">
-            <!-- Component selector -->
-            <div>
-                <label for="code-analysis-component" class="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Component</label>
-                <select
-                    id="code-analysis-component"
-                    v-model="selectedComponent"
+            <!-- Component multi-select -->
+            <div class="relative">
+                <label for="code-analysis-components" class="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Components</label>
+                <button
+                    id="code-analysis-components"
+                    type="button"
+                    @click="componentDropdownOpen = !componentDropdownOpen"
                     :disabled="isActive"
-                    class="w-full p-1.5 rounded bg-gray-900 border border-gray-700 focus:border-cyan-500 text-xs disabled:opacity-50"
+                    class="w-full p-1.5 rounded bg-gray-900 border border-gray-700 focus:border-cyan-500 text-xs disabled:opacity-50 text-left flex items-center justify-between cursor-pointer"
                 >
-                    <option v-for="c in componentOptions" :key="c" :value="c">
-                        {{ c === '__all__' ? `All Components (${uniqueComponents.length})` : c }}
-                    </option>
-                </select>
+                    <span :class="noneSelected ? 'text-gray-500' : 'text-gray-200'" class="truncate">{{ selectionLabel }}</span>
+                    <ChevronDown :size="12" class="shrink-0 text-gray-500 transition-transform" :class="{ 'rotate-180': componentDropdownOpen }" />
+                </button>
+                <div
+                    v-if="componentDropdownOpen && !isActive"
+                    class="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded bg-gray-900 border border-gray-700 shadow-lg"
+                >
+                    <label
+                        v-if="uniqueComponents.length > 1"
+                        class="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-gray-800 cursor-pointer border-b border-gray-700/50"
+                    >
+                        <input type="checkbox" :checked="allSelected" @change="toggleAll()" class="accent-cyan-500" />
+                        <span class="text-gray-300 font-semibold">All ({{ uniqueComponents.length }})</span>
+                    </label>
+                    <label
+                        v-for="c in uniqueComponents"
+                        :key="c"
+                        class="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-gray-800 cursor-pointer"
+                    >
+                        <input type="checkbox" :checked="selectedComponents.has(c)" @change="toggleComponent(c)" class="accent-cyan-500" />
+                        <CheckCircle v-if="completedComponentNames.has(c)" :size="11" class="shrink-0 text-green-400" />
+                        <span class="font-mono truncate" :class="completedComponentNames.has(c) ? 'text-green-300' : 'text-gray-300'">{{ c }}</span>
+                    </label>
+                </div>
             </div>
 
             <!-- User guidance -->
@@ -407,7 +471,7 @@ watch(selectedComponent, () => {
             <!-- Start button -->
             <button
                 @click="startScan"
-                :disabled="isActive"
+                :disabled="isActive || noneSelected"
                 class="flex items-center justify-center gap-2 px-4 py-1.5 rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
                 :class="isActive
                     ? 'bg-cyan-900/40 text-cyan-400 border border-cyan-700/40'

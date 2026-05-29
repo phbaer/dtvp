@@ -44,18 +44,12 @@ jobs:
     runs-on: node
     steps:
       - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - name: Install dependencies (backend)
-        run: uv sync --frozen
       - name: Install dependencies
         uses: nick-fields/retry@v4
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: cd frontend && npm ci
-      - name: Prepare .env
-        run: cp .env.test .env
       - name: Run unit tests with coverage
         working-directory: frontend
         run: npm run test:unit -- --run --coverage
@@ -66,31 +60,23 @@ jobs:
           name: vitest-coverage-report
           path: frontend/coverage/
           retention-days: 30
-      - name: Start Dev Stack
-        run: |
-          npm install -g pm2
-          pm2 start ecosystem.config.js
-          echo "Waiting for stack to spin up..."
-          sleep 15
-          pm2 list
-          pm2 logs --lines 50 --nostream
-      - name: Verify Reachability
-        run: |
-          curl -f -H "X-Api-Key: mock_key" http://localhost:8081/api/v1/project
-          curl -f http://localhost:8000/api/version
-          curl -Is http://localhost:5173 | head -n 1
-      - name: Install Playwright browsers
+
+  test-e2e:
+    if: github.event.action != 'closed'
+    runs-on: node
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install dependencies
         uses: nick-fields/retry@v4
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: cd frontend && npx playwright install --with-deps chromium
-      - name: Run UI tests
-        uses: nick-fields/retry@v4
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: cd frontend && npm run test:ui -- --reporter=line
+          command: cd frontend && npm ci
+      - name: Run E2E tests
+        working-directory: frontend
+        run: npx playwright test --reporter=line
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v3
         if: always()
@@ -98,13 +84,10 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 30
-      - name: Stop Dev Stack
-        if: always()
-        run: pm2 kill || true
 
   check-version:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test-backend, test-frontend]
+    needs: [test-backend, test-frontend, test-e2e]
     runs-on: node
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}

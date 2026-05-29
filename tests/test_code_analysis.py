@@ -7,6 +7,10 @@ import pytest
 import dtvp.agentizer_integration as agentizer
 import dtvp.code_analysis_integration as code_analysis
 from dtvp import main
+from dtvp.analysis_queue_services import (
+    AnalysisQueueServiceDeps,
+    process_analysis_queue_item,
+)
 
 
 class DummyResponse:
@@ -128,6 +132,10 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
 
     assert dummy_client.post.call_count == 2
     assert dummy_client.post.call_args_list[1].kwargs["params"] == {"sync": "true"}
+    assert (
+        dummy_client.post.call_args_list[0].kwargs["json"]["user_guidance"]
+        == "Please review"
+    )
     dummy_client.aclose.assert_awaited_once()
 
 
@@ -248,6 +256,58 @@ def test_analysis_queue_cancel_running_returns_conflict(client):
 def test_analysis_queue_cancel_missing_returns_404(client):
     response = client.delete("/api/analysis-queue/unknown")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_analysis_queue_worker_passes_user_guidance_to_client(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class FakeClient:
+        def __init__(self, _settings):
+            self._settings = _settings
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+        async def start_assessment(self, **kwargs):
+            captured.update(kwargs)
+            return {"job_id": "job-1"}
+
+        async def get_job_status(self, _job_id):
+            return {"status": "completed"}
+
+        async def get_job_result(self, _job_id):
+            return {"assessment": {"summary": "done"}, "steps": []}
+
+    item = main.analysis_queue.submit(
+        vuln_id="GHSA-queue-test",
+        component_name="libA",
+        submitted_by="testuser",
+        cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        user_guidance="Check GHSA metadata gaps",
+    )
+
+    completed: dict[str, object] = {}
+
+    def finish_item(_item, **kwargs):
+        completed.update(kwargs)
+
+    deps = AnalysisQueueServiceDeps(
+        get_code_analysis_settings_cls=lambda: (
+            lambda: type("Settings", (), {"enabled": True})()
+        ),
+        get_code_analysis_client_cls=lambda: FakeClient,
+        code_analysis_not_configured_detail="not configured",
+        sleep=AsyncMock(),
+    )
+
+    await process_analysis_queue_item(deps, item, finish_item)
+
+    assert captured["user_guidance"] == "Check GHSA metadata gaps"
+    assert completed["status"] == "completed"
 
 
 def test_analysis_queue_prune_finished_removes_expired_terminal_items():
