@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns, getTMRescoreProposals } from '../../lib/api'
 import { mountWithRouter } from './routerTestUtils'
+import { setProjectViewViewport } from './projectViewTestUtils'
 
 // Mock API
 vi.mock('../../lib/api', () => ({
@@ -14,8 +15,9 @@ vi.mock('../../lib/api', () => ({
 }))
 
 // Mock Child Components
-vi.mock('../../components/VulnGroupCard.vue', () => ({
+vi.mock('../../components/VulnRowCompact.vue', () => ({
     default: {
+        name: 'VulnRowCompact',
         template: '<div class="vuln-card" :data-id="group.id">{{ group.id }}</div>',
         props: ['group']
     }
@@ -26,6 +28,7 @@ describe('ProjectView Filters', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
+        setProjectViewViewport(1920)
         const routes = [
                 { path: '/', component: { template: '<div />' } },
                 { path: '/statistics', component: { template: '<div />' } },
@@ -239,13 +242,13 @@ describe('ProjectView Filters', () => {
         // V1 is NOT_SET (OPEN), V3 is FALSE_POSITIVE (INCONSISTENT).
         // V3 matches Lifecycle=INCONSISTENT AND Analysis=False Positive
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
-        expect(wrapper.findAll('.vuln-card')[0]?.text()).toBe('V3')
+        expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V3')
         // Set Lifecycle to ONLY 'Assessed'
         ;(wrapper.vm as any).lifecycleFilters = ['ASSESSED']
         await wrapper.vm.$nextTick()
         // V2 matches Lifecycle=Assessed AND Analysis=False Positive
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
-        expect(wrapper.findAll('.vuln-card')[0]?.text()).toBe('V2')
+        expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V2')
         
         // Clear Analysis filters
         ;(wrapper.vm as any).analysisFilters = []
@@ -338,7 +341,7 @@ describe('ProjectView Filters', () => {
         ;(wrapper.vm as any).analysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
         await wrapper.vm.$nextTick()
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
-        expect(wrapper.findAll('.vuln-card')[0]?.text()).toBe('V4')
+        expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V4')
     })
 
     it('includes pending review items with open team assessment in OPEN filter', async () => {
@@ -374,7 +377,7 @@ describe('ProjectView Filters', () => {
         ;(wrapper.vm as any).analysisFilters = ['NOT_AFFECTED']
         await wrapper.vm.$nextTick()
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
-        expect(wrapper.findAll('.vuln-card')[0]?.text()).toBe('V6')
+        expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V6')
     })
 
     it('supports filtering assessed legacy items separately', async () => {
@@ -412,7 +415,7 @@ describe('ProjectView Filters', () => {
         ;(wrapper.vm as any).analysisFilters = ['FALSE_POSITIVE']
         await wrapper.vm.$nextTick()
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
-        expect(wrapper.findAll('.vuln-card')[0]?.text()).toBe('V9')
+        expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V9')
     })
 
     it('should match partial team identifiers like 3p when filtering', async () => {

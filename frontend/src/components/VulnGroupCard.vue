@@ -4,7 +4,7 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/ap
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Package, Layers, ShieldOff, Zap, X } from 'lucide-vue-next'
 
 import { parseAssessmentBlocks, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
@@ -29,6 +29,7 @@ import type { CodeAnalysisAssessResponse } from '../lib/api'
 
 const props = defineProps<{
   group: GroupedVuln
+  inModal?: boolean
 }>()
 
 const DESCRIPTION_FALLBACK = 'No description available.'
@@ -85,7 +86,7 @@ const teamMapping = inject<any>('teamMapping', ref({}))
 const rescoreRules = inject<any>('rescoreRules', ref({ transitions: [] }))
 const tmrescoreProposals = inject<any>('tmrescoreProposals', ref({}))
 
-const emit = defineEmits(['update', 'update:assessment', 'toggle-expand'])
+const emit = defineEmits(['update', 'update:assessment', 'toggle-expand', 'close'])
 
 const ANALYSIS_STATES = [
     { value: 'NOT_SET', label: 'Not Set', description: 'No analysis has been performed yet.' },
@@ -115,6 +116,7 @@ let bodyScrollLockY = 0
 const isDebugPersistenceEnabled = () => globalThis.localStorage?.getItem?.('dtvp_debug_persistence') === 'true'
 
 const lockBodyScroll = () => {
+    if (props.inModal) return
     if (globalThis.window === undefined || typeof document === 'undefined') return
     if (openCardCount > 0) return
 
@@ -128,6 +130,7 @@ const lockBodyScroll = () => {
 }
 
 const unlockBodyScroll = () => {
+    if (props.inModal) return
     if (globalThis.window === undefined || typeof document === 'undefined') return
 
     document.body.style.position = ''
@@ -139,7 +142,7 @@ const unlockBodyScroll = () => {
     globalThis.scrollTo(0, bodyScrollLockY)
 }
 
-const expanded = ref(false)
+const expanded = ref(props.inModal ? true : false)
 const state = ref('NOT_SET')
 const details = ref('')
 const justification = ref('NOT_SET')
@@ -1480,7 +1483,7 @@ const teamBlockStateColor = (state?: string): string => {
 </script>
 
 <template>
-    <div :class="['vuln-card relative border rounded-lg transition-colors', expanded ? 'overflow-visible z-40' : 'overflow-hidden', cardStyle]">
+    <div :class="['vuln-card relative border rounded-lg transition-colors', inModal ? 'overflow-hidden' : (expanded ? 'overflow-visible z-40' : 'overflow-hidden'), cardStyle]">
     <!-- Criticality Badges — header-height only -->
     <div
         class="absolute top-0 left-0 z-20 pointer-events-none flex"
@@ -1516,7 +1519,7 @@ const teamBlockStateColor = (state?: string): string => {
         </div>
     </div>
     <!-- Assessed Corner Fold -->
-    <div v-if="isAssessed" class="absolute top-0 right-0 pointer-events-none z-20">
+    <div v-if="isAssessed && !inModal" class="absolute top-0 right-0 pointer-events-none z-20">
         <div
             class="w-8 h-8 flex justify-end items-start p-1 uppercase"
             :class="assessedFoldClass"
@@ -1529,8 +1532,9 @@ const teamBlockStateColor = (state?: string): string => {
     <!-- Header -->
     <div 
         ref="headerEl"
-        @click="expanded = !expanded" 
-        class="pl-[76px] pr-4 py-3 flex items-start cursor-pointer hover:bg-white/2 transition-all relative overflow-hidden"
+        @click="!inModal && (expanded = !expanded)" 
+        class="pl-[76px] pr-4 py-3 flex items-start transition-all relative overflow-hidden"
+        :class="inModal ? '' : 'cursor-pointer hover:bg-white/2'"
     >
 
         <VulnGroupCardHeader
@@ -1550,11 +1554,24 @@ const teamBlockStateColor = (state?: string): string => {
             :isPendingReview="isPendingReview"
             :dependencyRelationship="dependencyRelationship"
             :assignees="group.assignees || []"
+            :showExpandToggle="!inModal"
             @approve-assessment="approveAssessment"
-        />
+        >
+            <template v-if="inModal" #actions>
+                <button
+                    type="button"
+                    class="relative z-30 mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-700/80 bg-gray-950/70 text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+                    title="Close details"
+                    @click.stop="emit('close')"
+                >
+                    <X :size="15" />
+                    <span class="sr-only">Close details</span>
+                </button>
+            </template>
+        </VulnGroupCardHeader>
     </div>
             <!-- Expanded Details -->
-    <div v-if="expanded" ref="detailsEl" class="pl-4 pr-4 py-4 border-t border-gray-700 overflow-y-auto" :style="{ maxHeight: detailsMaxHeight }">
+    <div v-if="expanded" ref="detailsEl" class="pl-4 pr-4 py-4 border-t border-gray-700 overflow-y-auto" :style="inModal ? {} : { maxHeight: detailsMaxHeight }">
         <!-- Top bar: External refs + Quick stats -->
         <div class="flex flex-wrap items-center gap-2 mb-3 text-[10px]">
             <a
@@ -1657,6 +1674,8 @@ const teamBlockStateColor = (state?: string): string => {
             :vulnId="group.id"
             :cvssVector="group.cvss_vector"
             :componentNames="triggeringTaggedComponents.map(c => c.name)"
+            :componentTeams="Object.fromEntries(triggeringTaggedComponents.map(c => [c.name, c.tag]))"
+            :assessedTeams="assessedTeams"
             @apply-result="handleCodeAnalysisResult"
             class="mb-4"
         />

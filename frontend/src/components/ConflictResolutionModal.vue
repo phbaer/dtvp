@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-50 bg-black/80 flex min-h-screen items-center justify-center px-4 py-6 overflow-y-auto">
+    <div v-if="show" class="fixed inset-0 bg-black/80 flex min-h-screen items-center justify-center px-4 py-6 overflow-y-auto" style="z-index: 10000">
       <div class="bg-gray-800 w-full max-w-3xl max-h-[calc(100vh-3rem)] flex flex-col rounded-lg border border-red-500 shadow-2xl overflow-hidden">
         <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
           <h3 class="font-bold text-lg text-red-400 flex items-center gap-2">

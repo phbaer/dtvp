@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock } from 'lucide-vue-next'
+import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck } from 'lucide-vue-next'
 import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 
@@ -8,6 +8,8 @@ const props = defineProps<{
     vulnId: string
     cvssVector?: string
     componentNames: string[]
+    componentTeams?: Record<string, string>
+    assessedTeams?: Set<string>
 }>()
 
 const emit = defineEmits<{
@@ -292,6 +294,18 @@ const completedComponentNames = computed(() => {
     return new Set(completedQueueItems.value.map(i => i.component_name))
 })
 
+const assessedComponentNames = computed(() => {
+    if (!props.componentTeams || !props.assessedTeams) return new Set<string>()
+    const result = new Set<string>()
+    for (const comp of uniqueComponents.value) {
+        const team = props.componentTeams[comp]
+        if (team && props.assessedTeams.has(team)) {
+            result.add(comp)
+        }
+    }
+    return result
+})
+
 // Load the most recent completed result for the current component selection
 const loadCompletedResult = async () => {
     if (isActive.value) return // Don't overwrite active state
@@ -450,8 +464,9 @@ watch(selectedComponents, () => {
                         class="flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-gray-800 cursor-pointer"
                     >
                         <input type="checkbox" :checked="selectedComponents.has(c)" @change="toggleComponent(c)" class="accent-cyan-500" />
-                        <CheckCircle v-if="completedComponentNames.has(c)" :size="11" class="shrink-0 text-green-400" />
-                        <span class="font-mono truncate" :class="completedComponentNames.has(c) ? 'text-green-300' : 'text-gray-300'">{{ c }}</span>
+                        <ClipboardCheck v-if="assessedComponentNames.has(c)" :size="11" class="shrink-0 text-purple-400" title="Team assessment exists" />
+                        <CheckCircle v-else-if="completedComponentNames.has(c)" :size="11" class="shrink-0 text-green-400" title="Code analysis completed" />
+                        <span class="font-mono truncate" :class="assessedComponentNames.has(c) ? 'text-purple-300' : completedComponentNames.has(c) ? 'text-green-300' : 'text-gray-300'">{{ c }}</span>
                     </label>
                 </div>
             </div>

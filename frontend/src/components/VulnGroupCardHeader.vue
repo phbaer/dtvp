@@ -19,6 +19,8 @@ const props = defineProps<{
   isPendingReview: boolean
   dependencyRelationship: 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
   assignees: string[]
+  compact?: boolean
+  showExpandToggle?: boolean
 }>()
 
 const {
@@ -37,6 +39,8 @@ const {
   isPendingReview,
   dependencyRelationship,
   assignees,
+  compact,
+  showExpandToggle,
 } = toRefs(props)
 
 const emit = defineEmits<{
@@ -150,22 +154,40 @@ const componentSummary = computed(() => {
 </script>
 
 <template>
-  <div class="flex items-start gap-3 min-w-0 flex-1">
+  <div :class="['flex min-w-0 flex-1', compact ? 'items-center gap-2' : 'items-start gap-3']">
     <div class="flex-1 min-w-0">
       <!-- Primary row: ID + component context -->
-      <div class="flex items-center gap-2 flex-wrap">
-        <span data-testid="vuln-primary-id" class="min-w-0 shrink overflow-hidden text-ellipsis whitespace-nowrap text-base font-black text-yellow-400 tracking-tight leading-none cursor-pointer hover:underline" title="Click to copy ID" @click.stop="emit('copy-id')">
+      <div :class="['flex items-center min-w-0', compact ? 'gap-1.5' : 'gap-2 flex-wrap']">
+        <span
+          data-testid="vuln-primary-id"
+          :class="[
+            'min-w-0 shrink overflow-hidden text-ellipsis whitespace-nowrap font-black text-yellow-400 tracking-tight leading-none cursor-pointer hover:underline',
+            compact ? 'text-sm' : 'text-base'
+          ]"
+          title="Click to copy ID"
+          @click.stop="emit('copy-id')"
+        >
           {{ group.id }}
         </span>
 
-        <span v-if="componentSummary" class="inline-flex items-center gap-1 text-[10px] text-gray-500 font-medium truncate max-w-[20rem]" :title="componentSummary">
+        <span v-if="compact" class="inline-flex shrink-0 items-center gap-1 rounded border border-gray-700/70 bg-gray-950/40 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-200" data-testid="header-cvss-block" title="CVSS base score">
+          <span data-testid="base-score-value">{{ baseScoreDisplay }}</span>
+          <template v-if="isRescoredOrModified">
+            <span class="text-gray-600" data-testid="rescored-arrow">&rarr;</span>
+            <span :class="pendingScore !== null ? 'text-purple-400' : 'text-purple-500'" data-testid="rescored-value-badge" title="Rescored CVSS score after contextual analysis">
+              {{ rescoredScoreDisplay }}
+            </span>
+          </template>
+        </span>
+
+        <span v-if="componentSummary" :class="['inline-flex min-w-0 items-center gap-1 text-[10px] text-gray-500 font-medium truncate', compact ? 'max-w-[16rem]' : 'max-w-[20rem]']" :title="componentSummary">
           <Package :size="9" class="shrink-0 text-gray-600" />
           {{ componentSummary }}
         </span>
       </div>
 
       <!-- Status row: lifecycle | analysis state | meta -->
-      <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+      <div :class="['flex items-center flex-wrap', compact ? 'gap-1 mt-1 max-h-[3.1rem] overflow-hidden' : 'gap-1.5 mt-1.5']">
         <!-- Lifecycle group -->
         <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l text-[10px] font-bold uppercase tracking-wide border-y border-l shrink-0', lifecycleClass]" data-testid="lifecycle-badge" :title="lifecycleTooltip">
           <CircleDot :size="9" />
@@ -205,6 +227,32 @@ const componentSummary = computed(() => {
           Review
         </span>
 
+        <template v-if="compact">
+          <span
+            v-for="tag in normalizedTags"
+            :key="tag"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-tight transition-all border"
+            :class="assessedTeams.has(tag)
+              ? 'bg-green-500/10 text-green-400 border-green-500/20'
+              : 'bg-red-500/8 text-red-400/70 border-red-500/15'"
+            data-testid="team-tag"
+          >
+            <CheckCircle v-if="assessedTeams.has(tag)" :size="9" class="text-green-400" />
+            <AlertTriangle v-else :size="8" class="text-red-400/60" />
+            {{ tag }}
+          </span>
+
+          <span
+            v-for="assignee in assignees"
+            :key="assignee"
+            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium border bg-blue-500/10 text-blue-300 border-blue-500/20"
+            data-testid="assignee-chip"
+          >
+            <User :size="8" class="text-blue-400" />
+            {{ assignee }}
+          </span>
+        </template>
+
         <button v-if="canApprove" @click.stop="emit('approve-assessment', $event)"
           class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 transition-colors shrink-0 cursor-pointer ml-auto"
           data-testid="approve-btn"
@@ -216,7 +264,7 @@ const componentSummary = computed(() => {
       </div>
 
       <!-- Score row -->
-      <div class="flex items-center gap-1.5 mt-1" data-testid="header-cvss-block" title="CVSS base score">
+      <div v-if="!compact" class="flex items-center gap-1.5 mt-1" data-testid="header-cvss-block" title="CVSS base score">
         <span class="text-sm font-black text-gray-100 tabular-nums" data-testid="base-score-value">{{ baseScoreDisplay }}</span>
         <template v-if="isRescoredOrModified">
           <span class="text-[10px] text-gray-600" data-testid="rescored-arrow">&rarr;</span>
@@ -227,7 +275,7 @@ const componentSummary = computed(() => {
       </div>
 
       <!-- Team tags row -->
-      <div v-if="normalizedTags.length > 0" class="flex flex-wrap items-center gap-1 mt-1.5">
+      <div v-if="!compact && normalizedTags.length > 0" class="flex flex-wrap items-center gap-1 mt-1.5">
         <span
           v-for="tag in normalizedTags"
           :key="tag"
@@ -244,7 +292,7 @@ const componentSummary = computed(() => {
       </div>
 
       <!-- Assignee chips row -->
-      <div v-if="assignees.length > 0" class="flex flex-wrap items-center gap-1 mt-1">
+      <div v-if="!compact && assignees.length > 0" class="flex flex-wrap items-center gap-1 mt-1">
         <span
           v-for="assignee in assignees"
           :key="assignee"
@@ -257,7 +305,9 @@ const componentSummary = computed(() => {
       </div>
     </div>
 
+    <slot name="actions"></slot>
+
     <!-- Expand indicator -->
-    <component :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0 mt-0.5" />
+    <component v-if="!compact && showExpandToggle !== false" :is="expanded ? ChevronUp : ChevronDown" :size="16" class="text-gray-600 shrink-0 mt-0.5" />
   </div>
 </template>

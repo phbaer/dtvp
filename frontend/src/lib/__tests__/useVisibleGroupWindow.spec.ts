@@ -55,6 +55,7 @@ describe('useVisibleGroupWindow', () => {
     })
 
     afterEach(() => {
+        vi.useRealTimers()
         vi.unstubAllGlobals()
     })
 
@@ -123,5 +124,39 @@ describe('useVisibleGroupWindow', () => {
         await nextTick()
 
         expect(wrapper.get('[data-testid="visible-count"]').text()).toBe('1')
+    })
+
+    it('loads additional batches without IntersectionObserver support', async () => {
+        vi.useFakeTimers()
+        vi.stubGlobal('IntersectionObserver', undefined)
+
+        const Harness = defineComponent({
+            setup() {
+                const items = ref([1, 2, 3, 4, 5])
+                const isActive = ref(true)
+                return useVisibleGroupWindow({
+                    items: computed(() => items.value),
+                    isActive,
+                    batchSize: 2,
+                })
+            },
+            template: `
+                <div>
+                    <span data-testid="visible-count">{{ visibleItems.length }}</span>
+                    <div ref="loadMoreTrigger"></div>
+                </div>
+            `,
+        })
+
+        const wrapper = mount(Harness)
+        await nextTick()
+
+        expect(wrapper.get('[data-testid="visible-count"]').text()).toBe('2')
+
+        await vi.advanceTimersByTimeAsync(250)
+        await nextTick()
+
+        expect(wrapper.get('[data-testid="visible-count"]').text()).toBe('4')
+        vi.useRealTimers()
     })
 })

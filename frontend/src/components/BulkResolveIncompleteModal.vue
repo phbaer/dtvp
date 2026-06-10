@@ -194,7 +194,7 @@ const getStateClass = (state: string) => {
 </script>
 
 <template>
-    <div v-if="show" class="fixed inset-0 bg-[#0a0a12]/80 flex items-center justify-center p-4 z-[100] backdrop-blur-md">
+    <div v-if="show" class="fixed inset-0 bg-[#0a0a12]/80 flex items-center justify-center p-4 backdrop-blur-md" style="z-index: 10000">
         <div class="bg-[#12121e] w-full max-w-5xl max-h-[90vh] flex flex-col rounded-2xl border border-white/10 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.6)] overflow-hidden animate-modal">
             
             <!-- Header: Premium & Spacious -->

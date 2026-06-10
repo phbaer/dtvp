@@ -92,6 +92,10 @@ export function useVisibleGroupWindow<T>({
     const attachLoadMoreObserver = () => {
         disconnectLoadMoreObserver()
         if (!loadMoreTrigger.value || !isActive.value) return
+        if (typeof IntersectionObserver === 'undefined') {
+            scheduleBackgroundLoad()
+            return
+        }
 
         loadMoreObserver.value = new IntersectionObserver((entries) => {
             for (const entry of entries) {
@@ -108,7 +112,9 @@ export function useVisibleGroupWindow<T>({
 
     const resetVisibleItems = () => {
         visibleItemCount.value = batchSize
-        scheduleBackgroundLoad()
+        if (isActive.value) {
+            scheduleBackgroundLoad()
+        }
     }
 
     watch([
@@ -131,7 +137,9 @@ export function useVisibleGroupWindow<T>({
         if (visibleItemCount.value > items.value.length) {
             visibleItemCount.value = Math.min(items.value.length, batchSize)
         }
-        scheduleBackgroundLoad()
+        if (isActive.value) {
+            scheduleBackgroundLoad()
+        }
     })
 
     watch(loadMoreTrigger, () => {
