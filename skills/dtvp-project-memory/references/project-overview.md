@@ -48,7 +48,7 @@ The app can run against a real Dependency-Track instance or the bundled mock ser
 - `frontend/src/lib/assessmentFormState.ts`, `assessmentSubmission.ts`, `assessment-helpers.ts`, `cvssRescore.ts`, `cvss.ts`, `mergedAssessmentData.ts`, `group-classifier.ts`, `vulnListIndex.ts`, `useVisibleGroupWindow.ts`, and modal/selection composables support the Project View workflow.
 - Shared project header state lives in `frontend/src/lib/projectHeaderStore.ts`.
 - Major UI surfaces are `Dashboard.vue`, `ProjectView.vue`, `TMRescore.vue`, `Statistics.vue`, `Settings.vue`, and `Login.vue`.
-- Reusable vulnerability and modal components live under `frontend/src/components/`, especially `VulnRowCompact.vue`, `VulnGroupCard.vue`, `VulnDetailInspector.vue`, `VulnDetailModal.vue`, `VulnModalTaskbar.vue`, `AssessmentReviewModal.vue`, `CalculatorModal.vue`, CVSS calculators, dependency chain components, filter/sidebar components, and bulk action modals.
+- Reusable vulnerability and modal components live under `frontend/src/components/`, especially `VulnRowCompact.vue`, `VulnGroupCard.vue`, `VulnDetailInspector.vue`, `VulnDetailModal.vue`, `VulnModalTaskbar.vue`, `AssessmentReviewModal.vue`, `CalculatorModal.vue`, CVSS calculators, dependency chain components, filter/sidebar components, and bulk action modals. `CustomSelect.vue` teleports dropdown menus above modal overlays so selects inside dialogs remain clickable.
 
 ## Data And Domain Rules
 

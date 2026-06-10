@@ -35,6 +35,7 @@ const menuStyle = ref<Record<string, string>>({})
 const VIEWPORT_MARGIN = 8
 const MENU_GAP = 4
 const MENU_MAX_HEIGHT = 208
+const MENU_Z_INDEX = '11000'
 
 const updateMenuPosition = () => {
     const trigger = triggerRef.value
@@ -57,7 +58,7 @@ const updateMenuPosition = () => {
             bottom: `${Math.max(VIEWPORT_MARGIN, viewportHeight - rect.top + MENU_GAP)}px`,
             width: `${width}px`,
             maxHeight: `${maxHeight}px`,
-            zIndex: '9999',
+            zIndex: MENU_Z_INDEX,
         }
         return
     }
@@ -68,7 +69,7 @@ const updateMenuPosition = () => {
         top: `${Math.min(viewportHeight - maxHeight - VIEWPORT_MARGIN, rect.bottom + MENU_GAP)}px`,
         width: `${width}px`,
         maxHeight: `${maxHeight}px`,
-        zIndex: '9999',
+        zIndex: MENU_Z_INDEX,
     }
 }
 
