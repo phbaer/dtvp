@@ -303,7 +303,7 @@ def build_tmrescore_route_deps(
             asyncio.create_task,
             coro,
         ),
-        run_tmrescore_analysis_task=lambda task, settings, project_name, threatmodel_bytes, synthetic_sbom, dtvp_original_proposals, items_csv_bytes, config_bytes, chain_analysis, prioritize, what_if, enrich, ollama_model: (
+        run_tmrescore_analysis_task=lambda task, settings, project_name, threatmodel_bytes, synthetic_sbom, dtvp_original_proposals, items_csv_bytes, config_bytes, chain_analysis, prioritize, what_if, enrich, ollama_model, reuse_uploaded_inventory=False: (
             run_tmrescore_analysis_task_impl(
                 tmrescore_execution_service_deps,
                 task,
@@ -320,6 +320,7 @@ def build_tmrescore_route_deps(
                     what_if=what_if,
                     enrich=enrich,
                     ollama_model=ollama_model,
+                    reuse_uploaded_inventory=reuse_uploaded_inventory,
                 ),
             )
         ),

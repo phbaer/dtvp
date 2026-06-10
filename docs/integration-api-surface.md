@@ -2,20 +2,35 @@
 
 This document defines the external HTTP APIs expected by DTVP for the optional integrations.
 
-## TMRescore Service
+## VScorer Service
 
-DTVP expects the TMRescore backend to expose the following endpoints under its configured base URL (`DTVP_TMRESCORE_URL`):
+DTVP expects the VScorer backend, historically called TMRescore in DTVP route and environment names, to expose the following endpoints under its configured base URL (`DTVP_TMRESCORE_URL`):
 
 - `GET /health`
   - Returns service health and optional configuration status.
+
+- `GET /wizard`
+  - Serves the VScorer browser wizard. DTVP exposes this URL in the VScorer page context so reviewers can open the full wizard from the DTVP UI.
 
 - `POST /api/v1/sessions`
   - Create a new analysis session.
   - Request body: JSON with `application_name`, `application_version`, and optional `session_id`.
 
+- `PUT /api/v1/sessions/{session_id}/files/threatmodel`
+  - Upload a `.tm7` threat model into a session for wizard review or later analysis.
+
+- `PUT /api/v1/sessions/{session_id}/files/sbom`
+  - Upload a CycloneDX SBOM into a session for wizard review or later analysis.
+
+- `PUT /api/v1/sessions/{session_id}/files/items`
+  - Upload an optional `items.csv` component-to-threat-model mapping into a session.
+
+- `PUT /api/v1/sessions/{session_id}/config/upload`
+  - Upload an optional analysis configuration YAML into a session.
+
 - `POST /api/v1/sessions/{session_id}/inventory`
-  - One-shot upload + analysis endpoint.
-  - Multipart form data with `threatmodel`, `sbom`, optional `items_csv`, optional `config`, and query flags.
+  - One-shot upload + analysis endpoint, or a prepared-session analysis endpoint when files were uploaded earlier.
+  - Multipart form data with optional `threatmodel`, optional `sbom`, optional `items_csv`, optional `config`, and analysis flags. The threat model and SBOM are required only when they are not already stored in the session.
 
 - `GET /api/v1/sessions/{session_id}/results`
   - Retrieve the final analysis result summary.
@@ -32,7 +47,37 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 - `GET /api/v1/sessions/{session_id}/progress`
   - Poll the analysis progress state while an analysis is running.
 
-### TMRescore Result JSON expectations
+- `GET /api/v1/sessions/{session_id}/wizard/context`
+  - Return a path-free wizard import view for files already uploaded to the session.
+  - Includes session/file summaries, readiness, optional validation reports, parsed threat-model elements and boundaries, and threat-model repair editor state.
+
+- `GET /api/v1/sessions/{session_id}/wizard/catalogs`
+  - Return path-free wizard metadata for browser/API clients, including rule types, ATT&CK mitigations, archetypes, and app info.
+
+- `GET/PATCH /api/v1/sessions/{session_id}/threatmodel/editor`
+  - Return and apply session-scoped threat-model repair decisions.
+
+- `POST /api/v1/sessions/{session_id}/validators/{threatmodel|sbom|cves}` and `GET /api/v1/sessions/{session_id}/validators/report`
+  - Run preflight input-quality validation for uploaded session inputs.
+
+### DTVP VScorer proxy endpoints
+
+DTVP keeps its existing `/tmrescore` API paths for compatibility, but the page labels this integration as VScorer:
+
+- Frontend routes:
+  - `/project/{project_name}/vscorer` is the preferred DTVP VScorer page.
+  - `/project/{project_name}/tmrescore` remains available as a legacy alias.
+
+- `POST /api/projects/{project_name}/tmrescore/import`
+  - Builds the selected synthetic SBOM, creates a VScorer session, uploads the threat model/SBOM/optional files through the session upload API, fetches `wizard/context` and `wizard/catalogs`, and returns a prepared DTVP session state.
+
+- `POST /api/tmrescore/sessions/{session_id}/wizard/refresh`
+  - Re-fetches session-scoped VScorer `wizard/context` and `wizard/catalogs` for a DTVP-tracked prepared session, so reviewers can refresh DTVP after using the VScorer wizard/editor.
+
+- `POST /api/tmrescore/sessions/{session_id}/analyze`
+  - Starts analysis for a previously prepared VScorer session by reusing files already uploaded to that session.
+
+### VScorer Result JSON expectations
 
 - `GET /api/v1/sessions/{session_id}/results`
   - Returns an `AnalysisResult` object with at least:
@@ -46,7 +91,7 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
     - `error` — string or null when status is `failed`
 
 - `GET /api/v1/sessions/{session_id}/results/json`
-  - Returns the complete raw analysis payload produced by TMRescore.
+  - Returns the complete raw analysis payload produced by VScorer.
   - Expected to include the session context, proposal details, per-CVE rescoring information, and any internal scoring metadata needed by the DTVP backend.
 
 - `GET /api/v1/sessions/{session_id}/progress`
@@ -65,7 +110,7 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 ### Notes
 
 - Static OpenAPI specifications for the integrations are available in `openapi/`.
-- TMRescore has a static spec at `openapi/tmrescore-openapi.json`.
+- VScorer/TMRescore has a static spec at `openapi/tmrescore-openapi.json`.
 - Code Analysis has a static spec at `openapi/code-analysis-openapi.json`.
 - In the mock environment, both service mocks expose a dynamic OpenAPI definition at `/openapi.json`.
 

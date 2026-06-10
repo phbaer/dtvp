@@ -93,8 +93,8 @@ def test_tmrescore_project_state_returns_latest_cached_task(client):
         "llm_enrichment": {"enabled": False, "ollama_model": None},
         "status": "completed",
         "progress": 100,
-        "message": "TMRescore analysis completed.",
-        "log": ["TMRescore analysis completed."],
+        "message": "VScorer analysis completed.",
+        "log": ["VScorer analysis completed."],
         "result": {"session_id": "session-older", "status": "completed"},
         "created_at": 100.0,
         "updated_at": 100.0,
@@ -111,7 +111,7 @@ def test_tmrescore_project_state_returns_latest_cached_task(client):
         "progress": 64,
         "message": "Rescoring vulnerabilities against the threat model...",
         "log": [
-            "Queued tmrescore analysis.",
+            "Queued VScorer analysis.",
             "Rescoring vulnerabilities against the threat model...",
         ],
         "result": None,
@@ -259,6 +259,7 @@ def test_tmrescore_context_endpoint_uses_natural_version_order(client, mock_dt_c
     assert payload["latest_version"] == "1.10.0"
     assert payload["recommended_scope"] == "merged_versions"
     assert payload["versions"] == ["1.9.0", "1.10.0"]
+    assert payload["wizard_url"] is None
     assert payload["llm_enrichment"]["available"] is False
     assert payload["llm_enrichment"]["status"] == "integration_disabled"
 
@@ -430,11 +431,12 @@ def test_tmrescore_context_endpoint_uses_remote_health_for_ollama_availability(
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_enrichment"]["available"] is False
+    assert payload["wizard_url"] == "http://tmrescore.local/wizard"
     assert payload["llm_enrichment"]["host_configured"] is False
     assert payload["llm_enrichment"]["status"] == "not_configured"
     assert (
         payload["llm_enrichment"]["warning"]
-        == "LLM enrichment requires OLLAMA_HOST to be configured on the tmrescore backend."
+        == "LLM enrichment requires OLLAMA_HOST to be configured on the VScorer backend."
     )
 
 
@@ -458,6 +460,7 @@ def test_tmrescore_context_endpoint_reports_remote_ollama_when_available(
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_enrichment"]["available"] is True
+    assert payload["wizard_url"] == "http://tmrescore.local/wizard"
     assert payload["llm_enrichment"]["host_configured"] is True
     assert payload["llm_enrichment"]["status"] == "available"
     assert payload["llm_enrichment"]["warning"] is None
@@ -487,7 +490,7 @@ def test_tmrescore_context_endpoint_reports_unreachable_when_health_check_fails(
     assert payload["llm_enrichment"]["status"] == "unreachable"
     assert (
         payload["llm_enrichment"]["warning"]
-        == "Could not verify LLM enrichment availability from the tmrescore backend."
+        == "Could not verify LLM enrichment availability from the VScorer backend."
     )
 
 
@@ -1251,3 +1254,128 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
             )
             assert enriched_sbom.status_code == 200
             assert "vp:threatModelElementIds" in enriched_sbom.text
+
+
+def test_tmrescore_import_prepares_vscorer_wizard_session_and_runs(
+    client, mock_dt_client
+):
+    importlib.reload(mock_tmrescore)
+    real_async_client = httpx.AsyncClient
+
+    mock_dt_client.get_projects.return_value = [
+        {"name": "ExampleApp", "version": "1.10.0", "uuid": "proj-1"},
+    ]
+    mock_dt_client.get_vulnerabilities.return_value = [
+        {
+            "component": {
+                "uuid": "component-1",
+                "name": "lib-a",
+                "version": "1.0.0",
+            },
+            "vulnerability": {
+                "vulnId": "CVE-2024-0001",
+                "severity": "HIGH",
+                "cvssV3BaseScore": 8.8,
+                "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+            },
+        }
+    ]
+    mock_dt_client.get_project_vulnerabilities.return_value = [
+        {
+            "vulnId": "CVE-2024-0001",
+            "cvssV3BaseScore": 8.8,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    ]
+    mock_dt_client.get_bom.return_value = {
+        "metadata": {
+            "component": {
+                "bom-ref": "root-1",
+                "name": "ExampleApp",
+                "version": "1.10.0",
+                "type": "application",
+            }
+        },
+        "components": [
+            {
+                "bom-ref": "comp-1",
+                "uuid": "component-1",
+                "name": "lib-a",
+                "version": "1.0.0",
+            }
+        ],
+        "dependencies": [{"ref": "root-1", "dependsOn": ["comp-1"]}],
+    }
+
+    def build_mock_async_client(*args, **kwargs):
+        timeout = kwargs.get("timeout")
+        return real_async_client(
+            transport=httpx.ASGITransport(app=mock_tmrescore.app),
+            base_url="http://mock-tmrescore.test",
+            timeout=timeout,
+        )
+
+    with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://mock-tmrescore.test"}):
+        with patch(
+            "dtvp.tmrescore_integration.httpx.AsyncClient",
+            side_effect=build_mock_async_client,
+        ):
+            prepare_response = client.post(
+                "/api/projects/ExampleApp/tmrescore/import",
+                data={"scope": "merged_versions"},
+                files={
+                    "threatmodel": (
+                        "model.tm7",
+                        b"tm7-data",
+                        "application/octet-stream",
+                    ),
+                    "items_csv": ("items.csv", b"item;threatmodel_id\nlib-a;TM-1\n", "text/csv"),
+                    "config": ("config.yaml", b"rescoring_rules: {}\n", "application/x-yaml"),
+                },
+            )
+
+            assert prepare_response.status_code == 200
+            prepared = prepare_response.json()
+            assert prepared["status"] == "prepared"
+            assert prepared["message"] == "VScorer wizard session prepared."
+            assert prepared["wizard_url"] == "http://mock-tmrescore.test/wizard"
+            assert prepared["wizard_context"]["validation"]["summary"]["errors"] == 0
+            assert (
+                prepared["wizard_context"]["files"]["threatmodel"]["uploaded"] is True
+            )
+            assert len(prepared["wizard_catalogs"]["rescoring_rule_types"]) >= 1
+
+            session_id = prepared["session_id"]
+            refresh_response = client.post(
+                f"/api/tmrescore/sessions/{session_id}/wizard/refresh"
+            )
+            assert refresh_response.status_code == 200
+            refreshed = refresh_response.json()
+            assert refreshed["status"] == "prepared"
+            assert refreshed["message"] == "Refreshed VScorer wizard context."
+            assert (
+                refreshed["wizard_context"]["files"]["threatmodel"]["uploaded"]
+                is True
+            )
+            assert len(refreshed["wizard_catalogs"]["rescoring_rule_types"]) >= 1
+
+            run_response = client.post(
+                f"/api/tmrescore/sessions/{session_id}/analyze",
+                data={"chain_analysis": "true", "prioritize": "true"},
+            )
+
+            assert run_response.status_code == 200
+            run_payload = run_response.json()
+            assert run_payload["status"] == "running"
+            assert run_payload["session_id"] == session_id
+
+            progress_payload = wait_for_tmrescore_progress(client, session_id)
+            assert progress_payload["status"] == "completed"
+            results_response = client.get(
+                f"/api/tmrescore/sessions/{session_id}/results"
+            )
+            assert results_response.status_code == 200
+            final_result = results_response.json()
+            assert final_result["status"] == "completed"
+            assert final_result["total_cves"] == 1
+            assert final_result["scope"] == "merged_versions"

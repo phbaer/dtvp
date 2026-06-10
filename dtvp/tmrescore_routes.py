@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Awaitable, Callable, Coroutine
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
 
 from .dt_client import DTClient
 from .tmrescore_integration import (
@@ -57,12 +57,89 @@ def _safe_project_filename(project_name: str) -> str:
     )
 
 
+def _normalize_vscorer_wizard_context(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload or {})
+    editor = normalized.get("editor")
+    threat_model_editor = normalized.get("threat_model_editor")
+    if editor is None and threat_model_editor is not None:
+        normalized["editor"] = threat_model_editor
+    if threat_model_editor is None and editor is not None:
+        normalized["threat_model_editor"] = editor
+
+    readiness = normalized.get("readiness")
+    if (
+        normalized.get("missing_inputs") is None
+        and isinstance(readiness, dict)
+        and isinstance(readiness.get("missing"), dict)
+    ):
+        normalized["missing_inputs"] = readiness["missing"]
+
+    return normalized
+
+
+def _store_vscorer_wizard_context(
+    task: dict[str, Any],
+    wizard_context: dict[str, Any],
+    wizard_catalogs: dict[str, Any] | None = None,
+) -> None:
+    task["wizard_context"] = _normalize_vscorer_wizard_context(wizard_context)
+    if wizard_catalogs is not None:
+        task["wizard_catalogs"] = wizard_catalogs
+
+
+def _get_tracked_vscorer_task(
+    deps: TMRescoreRouteDeps,
+    session_id: str,
+) -> dict[str, Any]:
+    deps.prune_tmrescore_analysis_tasks()
+    task = deps.tmrescore_analysis_tasks.get(session_id)
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="No VScorer session is available in DTVP for this session id.",
+        )
+    return task
+
+
+def _touch_vscorer_task_message(
+    task: dict[str, Any],
+    message: str,
+    *,
+    min_progress: int | None = None,
+) -> None:
+    now = datetime.now().timestamp()
+    task["message"] = message
+    task["updated_at"] = now
+    if min_progress is not None and str(task.get("status") or "").lower() == "prepared":
+        task["progress"] = max(int(task.get("progress") or 0), min_progress)
+    log = task.setdefault("log", [])
+    if not log or log[-1] != message:
+        log.append(message)
+
+
+def _forward_vscorer_file_response(response: Any) -> Response:
+    media_type = response.headers.get("content-type", "application/octet-stream")
+    content_disposition = response.headers.get("content-disposition")
+    headers = {}
+    if content_disposition:
+        headers["content-disposition"] = content_disposition
+    return Response(content=response.content, media_type=media_type, headers=headers)
+
+
 def _register_tmrescore_context_route(
     router: APIRouter,
     deps: TMRescoreRouteDeps,
     client_dependency: Callable[..., Any],
     current_user_dependency: Callable[..., Any],
 ) -> None:
+    @router.get(
+        "/projects/{project_name}/vscorer/context",
+        responses={
+            400: {"description": "Bad request"},
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
     @router.get(
         "/projects/{project_name}/tmrescore/context",
         responses={
@@ -92,15 +169,15 @@ def _register_tmrescore_context_route(
                     "available" if llm_enrichment_available else "not_configured"
                 )
                 if not llm_enrichment_available:
-                    llm_enrichment_warning = "LLM enrichment requires OLLAMA_HOST to be configured on the tmrescore backend."
+                    llm_enrichment_warning = "LLM enrichment requires OLLAMA_HOST to be configured on the VScorer backend."
             except Exception as exc:
                 llm_enrichment_status = "unreachable"
                 deps.logger.warning(
-                    "Unable to determine tmrescore Ollama configuration for %s: %s",
+                    "Unable to determine VScorer Ollama configuration for %s: %s",
                     project_name,
                     exc,
                 )
-                llm_enrichment_warning = "Could not verify LLM enrichment availability from the tmrescore backend."
+                llm_enrichment_warning = "Could not verify LLM enrichment availability from the VScorer backend."
         else:
             llm_enrichment_warning = deps.tmrescore_disabled_detail
 
@@ -121,8 +198,10 @@ def _register_tmrescore_context_route(
             raise HTTPException(status_code=404, detail="Project not found")
 
         latest_version = versions[-1].get("version", "unknown")
+        wizard_url = f"{settings.base_url}/wizard" if settings.enabled else None
         return {
             "enabled": settings.enabled,
+            "wizard_url": wizard_url,
             "project_name": project_name,
             "latest_version": latest_version,
             "versions": [version.get("version") for version in versions],
@@ -164,6 +243,14 @@ def _register_tmrescore_inventory_routes(
     current_user_dependency: Callable[..., Any],
 ) -> None:
     @router.get(
+        "/projects/{project_name}/vscorer/sbom",
+        responses=_merge_responses(
+            bad_request_response,
+            not_found_response,
+            service_unavailable_response,
+        ),
+    )
+    @router.get(
         "/projects/{project_name}/tmrescore/sbom",
         responses=_merge_responses(
             bad_request_response,
@@ -192,6 +279,14 @@ def _register_tmrescore_inventory_routes(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    @router.get(
+        "/projects/{project_name}/vscorer/sbom/summary",
+        responses=_merge_responses(
+            bad_request_response,
+            not_found_response,
+            service_unavailable_response,
+        ),
+    )
     @router.get(
         "/projects/{project_name}/tmrescore/sbom/summary",
         responses=_merge_responses(
@@ -229,6 +324,437 @@ def _register_tmrescore_analysis_route(
     client_dependency: Callable[..., Any],
     current_user_dependency: Callable[..., Any],
 ) -> None:
+    @router.post(
+        "/projects/{project_name}/vscorer/import",
+        responses={
+            400: {"description": "Bad request"},
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.post(
+        "/projects/{project_name}/tmrescore/import",
+        responses={
+            400: {"description": "Bad request"},
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    async def import_project_into_vscorer_wizard(
+        project_name: str,
+        threatmodel: Annotated[UploadFile, File(...)],
+        items_csv: Annotated[UploadFile | None, File()] = None,
+        config: Annotated[UploadFile | None, File()] = None,
+        scope: Annotated[str, Form()] = "merged_versions",
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = TMRescoreSettings()
+        if not settings.enabled:
+            raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+
+        inventory = await deps.prepare_tmrescore_inventory_or_raise(
+            project_name,
+            scope,
+            client,
+        )
+        latest_version = inventory["latest_version"]
+        synthetic_sbom = inventory["synthetic_sbom"]
+        session_version_label = (
+            latest_version
+            if scope == "latest_only"
+            else f"multi-version:{latest_version}"
+        )
+
+        threatmodel_bytes = await threatmodel.read()
+        items_csv_bytes = await items_csv.read() if items_csv else None
+        config_bytes = await config.read() if config else None
+        deps.prune_tmrescore_analysis_tasks()
+
+        async with TMRescoreClient(settings) as tmrescore_client:
+            session = await tmrescore_client.create_session(
+                project_name, session_version_label
+            )
+            session_id = session.get("session_id") or ""
+            if not session_id:
+                raise HTTPException(
+                    status_code=503,
+                    detail="VScorer session creation failed",
+                )
+
+            upload_results = {
+                "threatmodel": await tmrescore_client.upload_threatmodel(
+                    session_id,
+                    threatmodel_bytes,
+                    threatmodel.filename or "threatmodel.tm7",
+                ),
+                "sbom": await tmrescore_client.upload_sbom(
+                    session_id,
+                    json.dumps(synthetic_sbom).encode("utf-8"),
+                    f"{_safe_project_filename(project_name)}-{scope}-{latest_version}-analysis-sbom.cdx.json",
+                ),
+            }
+            if items_csv_bytes is not None:
+                upload_results["items_csv"] = await tmrescore_client.upload_items_csv(
+                    session_id,
+                    items_csv_bytes,
+                    items_csv.filename or "items.csv",
+                )
+            if config_bytes is not None:
+                upload_results["config"] = await tmrescore_client.upload_config(
+                    session_id,
+                    config_bytes,
+                    config.filename or "config.yaml",
+                )
+
+            wizard_context = await tmrescore_client.get_wizard_context(session_id)
+            wizard_catalogs = await tmrescore_client.get_wizard_catalogs(session_id)
+
+        now = datetime.now().timestamp()
+        task = {
+            "session_id": session_id,
+            "project_name": project_name,
+            "session": session,
+            "scope": scope,
+            "latest_version": latest_version,
+            "analyzed_versions": inventory["analyzed_versions"],
+            "sbom_component_count": len(synthetic_sbom.get("components") or []),
+            "sbom_vulnerability_count": len(
+                synthetic_sbom.get("vulnerabilities") or []
+            ),
+            "strategy_note": inventory["strategy_note"],
+            "llm_enrichment": {"enabled": False, "ollama_model": None},
+            "status": "prepared",
+            "progress": 25,
+            "message": "VScorer wizard session prepared.",
+            "log": [
+                "Created VScorer session.",
+                "Uploaded threat model and synthetic SBOM to VScorer.",
+                "Loaded VScorer wizard context and catalogs.",
+            ],
+            "result": None,
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+            "completed_at": None,
+            "wizard_context": _normalize_vscorer_wizard_context(wizard_context),
+            "wizard_catalogs": wizard_catalogs,
+            "wizard_url": f"{settings.base_url}/wizard",
+            "upload_results": upload_results,
+            "dtvp_original_proposals": inventory["dtvp_original_proposals"],
+        }
+        deps.tmrescore_analysis_tasks[session_id] = task
+
+        return deps.build_tmrescore_cached_state(task, False)
+
+    @router.post(
+        "/vscorer/sessions/{session_id}/analyze",
+        responses={
+            404: {"description": "Not found"},
+            409: {"description": "Conflict"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.post(
+        "/tmrescore/sessions/{session_id}/analyze",
+        responses={
+            404: {"description": "Not found"},
+            409: {"description": "Conflict"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    async def analyze_prepared_vscorer_session(
+        session_id: str,
+        chain_analysis: Annotated[bool, Form()] = True,
+        prioritize: Annotated[bool, Form()] = True,
+        what_if: Annotated[bool, Form()] = False,
+        enrich: Annotated[bool, Form()] = False,
+        ollama_model: Annotated[str, Form()] = "qwen2.5:7b",
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = TMRescoreSettings()
+        if not settings.enabled:
+            raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+
+        deps.prune_tmrescore_analysis_tasks()
+        task = deps.tmrescore_analysis_tasks.get(session_id)
+        if not task:
+            raise HTTPException(
+                status_code=404,
+                detail="No prepared VScorer session is available in DTVP for this session id.",
+            )
+
+        normalized_status = str(task.get("status") or "").lower()
+        if normalized_status == "running":
+            return deps.build_tmrescore_cached_state(task, False)
+        if normalized_status == "completed":
+            return deps.build_tmrescore_cached_state(task, True)
+        if normalized_status not in {"prepared", "created", "failed"}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"VScorer session cannot be started from status '{task.get('status')}'.",
+            )
+
+        now = datetime.now().timestamp()
+        task["status"] = "running"
+        task["progress"] = max(int(task.get("progress") or 0), 30)
+        task["message"] = "Queued VScorer analysis from prepared wizard session."
+        task["llm_enrichment"] = {
+            "enabled": enrich,
+            "ollama_model": ollama_model if enrich else None,
+        }
+        task["error"] = None
+        task["updated_at"] = now
+        task["completed_at"] = None
+        log = task.setdefault("log", [])
+        if not log or log[-1] != task["message"]:
+            log.append(task["message"])
+
+        deps.create_tracked_task(
+            deps.run_tmrescore_analysis_task(
+                task,
+                settings,
+                task["project_name"],
+                None,
+                None,
+                task.get("dtvp_original_proposals") or {},
+                None,
+                None,
+                chain_analysis,
+                prioritize,
+                what_if,
+                enrich,
+                ollama_model,
+                True,
+            )
+        )
+
+        return deps.build_tmrescore_cached_state(task, False)
+
+    @router.post(
+        "/vscorer/sessions/{session_id}/wizard/refresh",
+        responses={
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.post(
+        "/tmrescore/sessions/{session_id}/wizard/refresh",
+        responses={
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    async def refresh_prepared_vscorer_wizard_context(
+        session_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = TMRescoreSettings()
+        if not settings.enabled:
+            raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+
+        task = _get_tracked_vscorer_task(deps, session_id)
+
+        async with TMRescoreClient(settings) as tmrescore_client:
+            _store_vscorer_wizard_context(
+                task,
+                await tmrescore_client.get_wizard_context(session_id),
+                await tmrescore_client.get_wizard_catalogs(session_id),
+            )
+
+        task["wizard_url"] = f"{settings.base_url}/wizard"
+        _touch_vscorer_task_message(
+            task,
+            "Refreshed VScorer wizard context.",
+            min_progress=25,
+        )
+
+        return deps.build_tmrescore_cached_state(task, False)
+
+    @router.post(
+        "/vscorer/sessions/{session_id}/wizard/validate",
+        responses={
+            404: {"description": "Not found"},
+            422: {"description": "Unprocessable content"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.post(
+        "/tmrescore/sessions/{session_id}/wizard/validate",
+        responses={
+            404: {"description": "Not found"},
+            422: {"description": "Unprocessable content"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    async def validate_prepared_vscorer_wizard_inputs(
+        session_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = TMRescoreSettings()
+        if not settings.enabled:
+            raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+
+        task = _get_tracked_vscorer_task(deps, session_id)
+
+        async with TMRescoreClient(settings) as tmrescore_client:
+            validation = await tmrescore_client.get_validator_report(session_id)
+            context = await tmrescore_client.get_wizard_context(session_id)
+
+        normalized_context = _normalize_vscorer_wizard_context(context)
+        normalized_context["validation"] = validation
+        task["wizard_context"] = normalized_context
+        task["wizard_validation"] = validation
+        _touch_vscorer_task_message(
+            task,
+            "Validated VScorer wizard inputs.",
+            min_progress=28,
+        )
+
+        return deps.build_tmrescore_cached_state(task, False)
+
+    @router.get(
+        "/vscorer/sessions/{session_id}/wizard/editor",
+        responses={
+            404: {"description": "Not found"},
+            422: {"description": "Unprocessable content"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.get(
+        "/tmrescore/sessions/{session_id}/wizard/editor",
+        responses={
+            404: {"description": "Not found"},
+            422: {"description": "Unprocessable content"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    async def get_prepared_vscorer_wizard_editor(
+        session_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = TMRescoreSettings()
+        if not settings.enabled:
+            raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+
+        task = _get_tracked_vscorer_task(deps, session_id)
+
+        async with TMRescoreClient(settings) as tmrescore_client:
+            editor = await tmrescore_client.get_threat_model_editor(session_id)
+
+        context = _normalize_vscorer_wizard_context(task.get("wizard_context") or {})
+        context["editor"] = editor
+        context["threat_model_editor"] = editor
+        task["wizard_context"] = context
+        task["wizard_editor"] = editor
+        _touch_vscorer_task_message(
+            task,
+            "Loaded VScorer threat-model editor state.",
+            min_progress=28,
+        )
+
+        return deps.build_tmrescore_cached_state(task, False)
+
+    @router.patch(
+        "/vscorer/sessions/{session_id}/wizard/editor",
+        responses={
+            400: {"description": "Bad request"},
+            404: {"description": "Not found"},
+            422: {"description": "Unprocessable content"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.patch(
+        "/tmrescore/sessions/{session_id}/wizard/editor",
+        responses={
+            400: {"description": "Bad request"},
+            404: {"description": "Not found"},
+            422: {"description": "Unprocessable content"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    async def patch_prepared_vscorer_wizard_editor(
+        session_id: str,
+        patches: Annotated[list[dict[str, Any]], Body(embed=True)],
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = TMRescoreSettings()
+        if not settings.enabled:
+            raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+        if not patches:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one VScorer editor patch is required.",
+            )
+
+        task = _get_tracked_vscorer_task(deps, session_id)
+
+        async with TMRescoreClient(settings) as tmrescore_client:
+            editor_result = await tmrescore_client.patch_threat_model_editor(
+                session_id,
+                patches,
+            )
+            context = await tmrescore_client.get_wizard_context(session_id)
+
+        editor = editor_result.get("editor") or editor_result
+        normalized_context = _normalize_vscorer_wizard_context(context)
+        normalized_context["editor"] = editor
+        normalized_context["threat_model_editor"] = editor
+        task["wizard_context"] = normalized_context
+        task["wizard_editor"] = editor
+        task["wizard_editor_result"] = editor_result
+        _touch_vscorer_task_message(
+            task,
+            "Updated VScorer threat-model editor state.",
+            min_progress=30,
+        )
+
+        return deps.build_tmrescore_cached_state(task, False)
+
+    @router.get(
+        "/vscorer/sessions/{session_id}/wizard/threatmodel",
+        responses={
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.get(
+        "/tmrescore/sessions/{session_id}/wizard/threatmodel",
+        responses={
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    async def download_prepared_vscorer_threat_model(
+        session_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = TMRescoreSettings()
+        if not settings.enabled:
+            raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+
+        _get_tracked_vscorer_task(deps, session_id)
+
+        async with TMRescoreClient(settings) as tmrescore_client:
+            response = await tmrescore_client.get_threat_model_file(session_id)
+
+        return _forward_vscorer_file_response(response)
+
+    @router.post(
+        "/projects/{project_name}/vscorer/analyze",
+        responses={
+            400: {"description": "Bad request"},
+            404: {"description": "Not found"},
+            503: {"description": "Service unavailable"},
+        },
+    )
     @router.post(
         "/projects/{project_name}/tmrescore/analyze",
         responses={
@@ -283,7 +809,7 @@ def _register_tmrescore_analysis_route(
 
         if not session_id:
             raise HTTPException(
-                status_code=503, detail="TMRescore session creation failed"
+                status_code=503, detail="VScorer session creation failed"
             )
 
         task = {
@@ -304,8 +830,8 @@ def _register_tmrescore_analysis_route(
             },
             "status": "running",
             "progress": 10,
-            "message": "Queued tmrescore analysis.",
-            "log": ["Queued tmrescore analysis."],
+            "message": "Queued VScorer analysis.",
+            "log": ["Queued VScorer analysis."],
             "result": None,
             "error": None,
             "created_at": datetime.now().timestamp(),
@@ -342,6 +868,10 @@ def _register_tmrescore_cached_state_routes(
     current_user_dependency: Callable[..., Any],
 ) -> None:
     @router.get(
+        "/projects/{project_name}/vscorer/proposals",
+        responses=not_found_response,
+    )
+    @router.get(
         "/projects/{project_name}/tmrescore/proposals",
         responses=not_found_response,
     )
@@ -361,6 +891,10 @@ def _register_tmrescore_cached_state_routes(
             deps.persist_tmrescore_project_snapshot(project_name, normalized_cached)
         return normalized_cached
 
+    @router.get(
+        "/projects/{project_name}/vscorer/state",
+        responses=not_found_response,
+    )
     @router.get(
         "/projects/{project_name}/tmrescore/state",
         responses=not_found_response,
@@ -387,6 +921,10 @@ def _register_tmrescore_progress_route(
     service_unavailable_response: dict[int | str, dict[str, Any]],
     current_user_dependency: Callable[..., Any],
 ) -> None:
+    @router.get(
+        "/vscorer/sessions/{session_id}/progress",
+        responses=service_unavailable_response,
+    )
     @router.get(
         "/tmrescore/sessions/{session_id}/progress",
         responses=service_unavailable_response,
@@ -434,6 +972,13 @@ def _register_tmrescore_results_route(
     current_user_dependency: Callable[..., Any],
 ) -> None:
     @router.get(
+        "/vscorer/sessions/{session_id}/results",
+        responses={
+            409: {"description": "Conflict"},
+            503: {"description": "Service unavailable"},
+        },
+    )
+    @router.get(
         "/tmrescore/sessions/{session_id}/results",
         responses={
             409: {"description": "Conflict"},
@@ -454,11 +999,11 @@ def _register_tmrescore_results_route(
             if status == "failed":
                 raise HTTPException(
                     status_code=409,
-                    detail=task.get("error") or "TMRescore analysis failed",
+                    detail=task.get("error") or "VScorer analysis failed",
                 )
             raise HTTPException(
                 status_code=409,
-                detail="TMRescore analysis is not complete yet. Poll /progress until status is completed.",
+                detail="VScorer analysis is not complete yet. Poll /progress until status is completed.",
             )
 
         settings = TMRescoreSettings()
@@ -479,6 +1024,10 @@ def _register_tmrescore_download_routes(
     current_user_dependency: Callable[..., Any],
 ) -> None:
     @router.get(
+        "/vscorer/sessions/{session_id}/results/json",
+        responses=service_unavailable_response,
+    )
+    @router.get(
         "/tmrescore/sessions/{session_id}/results/json",
         responses=service_unavailable_response,
     )
@@ -498,6 +1047,10 @@ def _register_tmrescore_download_routes(
             return await tmrescore_client.get_results_json(session_id)
 
     @router.get(
+        "/vscorer/sessions/{session_id}/results/vex",
+        responses=service_unavailable_response,
+    )
+    @router.get(
         "/tmrescore/sessions/{session_id}/results/vex",
         responses=service_unavailable_response,
     )
@@ -516,6 +1069,10 @@ def _register_tmrescore_download_routes(
         async with TMRescoreClient(settings) as tmrescore_client:
             return await tmrescore_client.get_results_vex(session_id)
 
+    @router.get(
+        "/vscorer/sessions/{session_id}/outputs/{filename}",
+        responses=service_unavailable_response,
+    )
     @router.get(
         "/tmrescore/sessions/{session_id}/outputs/{filename}",
         responses=service_unavailable_response,

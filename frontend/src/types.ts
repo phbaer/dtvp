@@ -105,6 +105,7 @@ export interface TMRescoreScopeOption {
 
 export interface TMRescoreContext {
     enabled: boolean;
+    wizard_url?: string | null;
     project_name: string;
     latest_version: string;
     versions: string[];
@@ -118,6 +119,90 @@ export interface TMRescoreContext {
         host_configured: boolean;
         warning?: string | null;
     };
+}
+
+export interface VScorerWizardValidationSummary {
+    errors?: number;
+    warnings?: number;
+    infos?: number;
+}
+
+export interface VScorerValidationReport {
+    artefact?: string;
+    ok?: boolean;
+    file?: string;
+    model_name?: string;
+    parsed_at?: number;
+    counts?: Record<string, any>;
+    grade?: string;
+    grade_rationale?: string;
+    findings?: Array<Record<string, any>>;
+    family_labels?: Record<string, string>;
+    summary?: VScorerWizardValidationSummary;
+    [key: string]: any;
+}
+
+export interface VScorerValidationReports {
+    reports?: VScorerValidationReport[];
+    summary?: VScorerWizardValidationSummary;
+    [key: string]: any;
+}
+
+export interface VScorerThreatModelEditorIssue {
+    issue_id?: string;
+    severity?: string;
+    title?: string;
+    message?: string;
+    target_type?: string;
+    target_id?: string;
+    editable?: boolean;
+    kept?: boolean;
+    note?: string;
+    [key: string]: any;
+}
+
+export interface VScorerThreatModelEditorState {
+    ok?: boolean;
+    model_name?: string;
+    summary?: Record<string, any>;
+    issues?: VScorerThreatModelEditorIssue[];
+    [key: string]: any;
+}
+
+export interface VScorerThreatModelEditorPatch {
+    issue_id: string;
+    action?: string;
+    target_type?: string | null;
+    target_id?: string | null;
+    values?: Record<string, any>;
+    note?: string;
+}
+
+export interface VScorerWizardContext {
+    session?: Record<string, any>;
+    files?: Record<string, any>;
+    missing_inputs?: Record<string, string[]>;
+    validation?: VScorerValidationReports | null;
+    threat_model?: {
+        ok?: boolean;
+        elements?: Array<Record<string, any>>;
+        boundaries?: Array<Record<string, any>>;
+        [key: string]: any;
+    } | null;
+    editor?: VScorerThreatModelEditorState | null;
+    threat_model_editor?: VScorerThreatModelEditorState | null;
+    links?: Record<string, string>;
+    [key: string]: any;
+}
+
+export type VScorerRuleTypeCatalog = Record<string, Array<Record<string, any>>> | Array<Record<string, any>>;
+
+export interface VScorerWizardCatalogs {
+    app_info?: Record<string, any>;
+    rescoring_rule_types?: VScorerRuleTypeCatalog;
+    attack_mitigations?: Array<Record<string, any>>;
+    archetypes?: Array<Record<string, any>>;
+    [key: string]: any;
 }
 
 export interface TMRescoreAnalysisResult {
@@ -158,6 +243,9 @@ export interface TMRescoreAnalysisProgress {
     updated_at?: number | null;
     completed_at?: number | null;
     result?: TMRescoreAnalysisResult | null;
+    wizard_url?: string | null;
+    wizard_context?: VScorerWizardContext | null;
+    wizard_catalogs?: VScorerWizardCatalogs | null;
 }
 
 export interface TMRescoreProjectState {
@@ -178,6 +266,9 @@ export interface TMRescoreProjectState {
     updated_at?: number | null;
     completed_at?: number | null;
     result?: TMRescoreAnalysisResult | null;
+    wizard_url?: string | null;
+    wizard_context?: VScorerWizardContext | null;
+    wizard_catalogs?: VScorerWizardCatalogs | null;
 }
 
 export interface TMRescoreSyntheticSbomSummary {
@@ -235,3 +326,13 @@ export interface TMRescoreProposalSnapshot {
     proposals: Record<string, TMRescoreProposal>;
 }
 
+export type VScorerScopeOption = TMRescoreScopeOption;
+export type VScorerContext = TMRescoreContext;
+export type VScorerAnalysisResult = TMRescoreAnalysisResult;
+export type VScorerAnalysisProgress = TMRescoreAnalysisProgress;
+export type VScorerProjectState = TMRescoreProjectState;
+export type VScorerSyntheticSbomSummary = TMRescoreSyntheticSbomSummary;
+export type VScorerProposalAnalysisResponse = TMRescoreProposalAnalysisResponse;
+export type VScorerProposalAnalysis = TMRescoreProposalAnalysis;
+export type VScorerProposal = TMRescoreProposal;
+export type VScorerProposalSnapshot = TMRescoreProposalSnapshot;

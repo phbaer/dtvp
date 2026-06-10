@@ -23,8 +23,8 @@ class TMRescoreExecutionServiceDeps:
 @dataclass(frozen=True)
 class TMRescoreInventoryRequest:
     session_id: str
-    threatmodel_bytes: bytes
-    synthetic_sbom: dict[str, Any]
+    threatmodel_bytes: Optional[bytes]
+    synthetic_sbom: Optional[dict[str, Any]]
     items_csv_bytes: Optional[bytes]
     config_bytes: Optional[bytes]
     chain_analysis: bool
@@ -33,13 +33,14 @@ class TMRescoreInventoryRequest:
     enrich: bool
     ollama_model: str
     max_wait_seconds: float
+    reuse_uploaded_inventory: bool = False
 
 
 @dataclass(frozen=True)
 class TMRescoreExecutionRequest:
     project_name: str
-    threatmodel_bytes: bytes
-    synthetic_sbom: dict[str, Any]
+    threatmodel_bytes: Optional[bytes]
+    synthetic_sbom: Optional[dict[str, Any]]
     dtvp_original_proposals: dict[str, dict[str, Any]]
     items_csv_bytes: Optional[bytes]
     config_bytes: Optional[bytes]
@@ -48,6 +49,7 @@ class TMRescoreExecutionRequest:
     what_if: bool
     enrich: bool
     ollama_model: str
+    reuse_uploaded_inventory: bool = False
 
 
 async def wait_for_tmrescore_completion(
@@ -87,7 +89,7 @@ async def wait_for_tmrescore_completion(
             )
         if deps.loop_time() >= deadline:
             raise TimeoutError(
-                f"Timed out while waiting for tmrescore analysis session {session_id} to complete"
+                f"Timed out while waiting for VScorer analysis session {session_id} to complete"
             )
         await deps.sleep(1.5)
 
@@ -99,6 +101,19 @@ async def submit_tmrescore_inventory(
     request: TMRescoreInventoryRequest,
 ) -> Optional[dict[str, Any]]:
     try:
+        if request.reuse_uploaded_inventory:
+            return await tmrescore_client.analyze_existing_inventory(
+                request.session_id,
+                chain_analysis=request.chain_analysis,
+                prioritize=request.prioritize,
+                what_if=request.what_if,
+                enrich=request.enrich,
+                ollama_model=request.ollama_model if request.enrich else None,
+            )
+
+        if request.threatmodel_bytes is None or request.synthetic_sbom is None:
+            raise RuntimeError("VScorer analysis inputs are missing")
+
         return await tmrescore_client.analyze_inventory(
             request.session_id,
             threatmodel_bytes=request.threatmodel_bytes,
@@ -111,8 +126,8 @@ async def submit_tmrescore_inventory(
             enrich=request.enrich,
             ollama_model=request.ollama_model if request.enrich else None,
         )
-    except httpx.ReadTimeout, httpx.TimeoutException:
-        task["message"] = "TMRescore is still processing remotely. Polling progress..."
+    except (httpx.ReadTimeout, httpx.TimeoutException):
+        task["message"] = "VScorer is still processing remotely. Polling progress..."
         deps.append_tmrescore_analysis_log(task, task["message"])
         await wait_for_tmrescore_completion(
             deps,
@@ -125,7 +140,7 @@ async def submit_tmrescore_inventory(
         if exc.response is None or exc.response.status_code not in {502, 503, 504}:
             raise
         task["message"] = (
-            f"TMRescore returned HTTP {exc.response.status_code} while still running. Polling progress..."
+            f"VScorer returned HTTP {exc.response.status_code} while still running. Polling progress..."
         )
         deps.append_tmrescore_analysis_log(task, task["message"])
         await wait_for_tmrescore_completion(
@@ -149,7 +164,7 @@ async def resolve_tmrescore_service_result(
         normalized_status = returned_status.lower()
         if normalized_status == "failed":
             raise RuntimeError(
-                service_result.get("error") or "TMRescore analysis failed"
+                service_result.get("error") or "VScorer analysis failed"
             )
         if normalized_status != "completed":
             task["status"] = returned_status
@@ -189,7 +204,11 @@ async def run_tmrescore_analysis_task(
         async with client_cls(settings) as tmrescore_client:
             task["status"] = "running"
             task["progress"] = max(int(task.get("progress") or 0), 25)
-            task["message"] = "Uploading analysis inputs to tmrescore..."
+            task["message"] = (
+                "Starting VScorer analysis from prepared wizard session..."
+                if request.reuse_uploaded_inventory
+                else "Uploading analysis inputs to VScorer..."
+            )
             deps.touch_tmrescore_analysis_task(task)
             deps.append_tmrescore_analysis_log(task, task["message"])
             service_result = await submit_tmrescore_inventory(
@@ -208,6 +227,7 @@ async def run_tmrescore_analysis_task(
                     enrich=request.enrich,
                     ollama_model=request.ollama_model,
                     max_wait_seconds=max_wait_seconds,
+                    reuse_uploaded_inventory=request.reuse_uploaded_inventory,
                 ),
             )
             final_service_result = await resolve_tmrescore_service_result(
@@ -234,14 +254,14 @@ async def run_tmrescore_analysis_task(
             )
             task["status"] = "completed"
             task["progress"] = 100
-            task["message"] = "TMRescore analysis completed."
+            task["message"] = "VScorer analysis completed."
             task["result"] = final_result
             task["error"] = None
             deps.touch_tmrescore_analysis_task(task, mark_terminal=True)
             deps.append_tmrescore_analysis_log(task, task["message"])
     except Exception as exc:
         deps.logger.warning(
-            "TMRescore analysis task for %s session %s failed: %s",
+            "VScorer analysis task for %s session %s failed: %s",
             request.project_name,
             session_id,
             exc,
@@ -251,4 +271,4 @@ async def run_tmrescore_analysis_task(
         task["message"] = str(exc)
         task["progress"] = 100
         deps.touch_tmrescore_analysis_task(task, mark_terminal=True)
-        deps.append_tmrescore_analysis_log(task, f"TMRescore analysis failed: {exc}")
+        deps.append_tmrescore_analysis_log(task, f"VScorer analysis failed: {exc}")

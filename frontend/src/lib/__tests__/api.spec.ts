@@ -13,7 +13,10 @@ import {
     getTMRescoreProjectState,
     getTMRescoreSyntheticSbomDownloadUrl,
     getTMRescoreSyntheticSbomSummary,
+    prepareTMRescoreAnalysis,
+    refreshPreparedVScorerWizardContext,
     resumeTMRescoreAnalysis,
+    runPreparedTMRescoreAnalysis,
     runTMRescoreAnalysis,
 } from '../api'
 
@@ -278,6 +281,130 @@ describe('api.ts', () => {
         expect(result.status).toBe('completed')
     })
 
+    it('prepareTMRescoreAnalysis imports files into a VScorer wizard session', async () => {
+        mocks.post.mockResolvedValue({ data: {
+            session_id: 'session-1',
+            status: 'prepared',
+            progress: 25,
+            message: 'VScorer wizard session prepared.',
+            scope: 'merged_versions',
+            latest_version: '1.0.0',
+            analyzed_versions: ['1.0.0'],
+            wizard_context: {
+                validation: { summary: { errors: 0, warnings: 1 } },
+            },
+            wizard_catalogs: {
+                rescoring_rule_types: [{ id: 'attack_vector' }],
+            },
+        } })
+
+        const threatmodel = new File(['tm7'], 'model.tm7', { type: 'application/octet-stream' })
+        const itemsCsv = new File(['item;threatmodel_id'], 'items.csv', { type: 'text/csv' })
+        const config = new File(['rescoring_rules: {}'], 'config.yaml', { type: 'application/x-yaml' })
+        const result = await prepareTMRescoreAnalysis('Example App', {
+            scope: 'merged_versions',
+            threatmodel,
+            itemsCsv,
+            config,
+        })
+
+        expect(mocks.post).toHaveBeenCalledTimes(1)
+        expect(mocks.post.mock.calls[0]?.[0]).toBe('/projects/Example%20App/tmrescore/import')
+        const formData = mocks.post.mock.calls[0]?.[1] as FormData
+        expect(formData).toBeInstanceOf(FormData)
+        expect(formData.get('scope')).toBe('merged_versions')
+        expect(formData.get('threatmodel')).toBe(threatmodel)
+        expect(formData.get('items_csv')).toBe(itemsCsv)
+        expect(formData.get('config')).toBe(config)
+        expect(result.status).toBe('prepared')
+        expect(result.wizard_context?.validation?.summary?.warnings).toBe(1)
+    })
+
+    it('runPreparedTMRescoreAnalysis starts a prepared VScorer session and polls', async () => {
+        vi.useFakeTimers()
+        mocks.post.mockResolvedValue({ data: {
+            session_id: 'session-1',
+            status: 'running',
+            progress: 30,
+            message: 'Queued VScorer analysis from prepared wizard session.',
+            log: ['Queued VScorer analysis from prepared wizard session.'],
+        } })
+        mocks.get
+            .mockResolvedValueOnce({ data: {
+                session_id: 'session-1',
+                status: 'completed',
+                progress: 100,
+                message: 'VScorer analysis completed.',
+                log: ['Queued VScorer analysis from prepared wizard session.', 'VScorer analysis completed.'],
+                result: null,
+            } })
+            .mockResolvedValueOnce({ data: {
+                session_id: 'session-1',
+                status: 'completed',
+                total_cves: 2,
+                rescored_count: 1,
+                avg_score_reduction: 0.5,
+                elapsed_seconds: 3.2,
+                scope: 'merged_versions',
+                recommended_scope: 'merged_versions',
+                latest_version: '1.0.0',
+                analyzed_versions: ['1.0.0'],
+                sbom_component_count: 3,
+                sbom_vulnerability_count: 2,
+                strategy_note: 'Merged multi-version analysis keeps findings attached.',
+                download_urls: {
+                    json: '/api/tmrescore/sessions/session-1/results/json',
+                    vex: '/api/tmrescore/sessions/session-1/results/vex',
+                },
+            } })
+
+        const onAnalysisProgress = vi.fn()
+        const promise = runPreparedTMRescoreAnalysis('session-1', {
+            enrich: true,
+            ollamaModel: 'llama3.1:8b',
+        }, {
+            onAnalysisProgress,
+            pollIntervalMs: 1000,
+        })
+
+        await vi.advanceTimersByTimeAsync(1100)
+        const result = await promise
+
+        expect(mocks.post.mock.calls[0]?.[0]).toBe('/tmrescore/sessions/session-1/analyze')
+        const formData = mocks.post.mock.calls[0]?.[1] as FormData
+        expect(formData.get('enrich')).toBe('true')
+        expect(formData.get('ollama_model')).toBe('llama3.1:8b')
+        expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/progress')
+        expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/results')
+        expect(onAnalysisProgress).toHaveBeenCalledTimes(2)
+        expect(result.session_id).toBe('session-1')
+        vi.useRealTimers()
+    })
+
+    it('refreshPreparedVScorerWizardContext refreshes cached wizard state', async () => {
+        mocks.post.mockResolvedValue({ data: {
+            session_id: 'session-1',
+            status: 'prepared',
+            progress: 25,
+            message: 'Refreshed VScorer wizard context.',
+            scope: 'merged_versions',
+            latest_version: '1.0.0',
+            analyzed_versions: ['1.0.0'],
+            wizard_context: {
+                validation: { summary: { errors: 0, warnings: 0 } },
+            },
+            wizard_catalogs: {
+                rescoring_rule_types: [{ id: 'attack_vector' }],
+            },
+        } })
+
+        const result = await refreshPreparedVScorerWizardContext('session-1')
+
+        expect(mocks.post).toHaveBeenCalledWith('/tmrescore/sessions/session-1/wizard/refresh')
+        expect(result.status).toBe('prepared')
+        expect(result.wizard_context?.validation?.summary?.warnings).toBe(0)
+    })
+
     it('getTMRescoreSyntheticSbomDownloadUrl builds an API download URL', () => {
         const url = getTMRescoreSyntheticSbomDownloadUrl('Example App', 'merged_versions')
 
@@ -309,7 +436,7 @@ describe('api.ts', () => {
             status: 'running',
             progress: 64,
             message: 'Rescoring vulnerabilities against the threat model...',
-            log: ['Queued tmrescore analysis.'],
+            log: ['Queued VScorer analysis.'],
             scope: 'merged_versions',
             latest_version: '1.0.0',
             analyzed_versions: ['1.0.0'],
@@ -350,8 +477,8 @@ describe('api.ts', () => {
             session_id: 'session-1',
             status: 'completed',
             progress: 100,
-            message: 'TMRescore analysis completed.',
-            log: ['TMRescore analysis completed.'],
+            message: 'VScorer analysis completed.',
+            log: ['VScorer analysis completed.'],
             scope: 'merged_versions',
             latest_version: '1.0.0',
             analyzed_versions: ['1.0.0'],
@@ -370,16 +497,16 @@ describe('api.ts', () => {
             session_id: 'session-1',
             status: 'running',
             progress: 10,
-            message: 'Queued tmrescore analysis.',
-            log: ['Queued tmrescore analysis.'],
+            message: 'Queued VScorer analysis.',
+            log: ['Queued VScorer analysis.'],
         } })
         mocks.get
             .mockResolvedValueOnce({ data: {
                 session_id: 'session-1',
                 status: 'completed',
                 progress: 100,
-                message: 'TMRescore analysis completed.',
-                log: ['Queued tmrescore analysis.', 'TMRescore analysis completed.'],
+                message: 'VScorer analysis completed.',
+                log: ['Queued VScorer analysis.', 'VScorer analysis completed.'],
                 result: null,
             } })
             .mockResolvedValueOnce({ data: {

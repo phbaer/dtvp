@@ -82,18 +82,18 @@ def build_tmrescore_analysis_response(
 def describe_tmrescore_progress(status: str, progress: int) -> str:
     normalized_status = (status or "running").lower()
     if normalized_status == "completed":
-        return "TMRescore analysis completed."
+        return "VScorer analysis completed."
     if normalized_status == "failed":
-        return "TMRescore analysis failed."
+        return "VScorer analysis failed."
     if progress >= 95:
-        return "Finalizing tmrescore outputs..."
+        return "Finalizing VScorer outputs..."
     if progress >= 75:
         return "Rescoring vulnerabilities against the threat model..."
     if progress >= 45:
         return "Correlating threat model data with the synthetic SBOM..."
     if progress >= 20:
-        return "Uploading analysis inputs to tmrescore..."
-    return "Preparing tmrescore analysis session..."
+        return "Uploading analysis inputs to VScorer..."
+    return "Preparing VScorer analysis session..."
 
 
 def build_tmrescore_cached_state(
@@ -119,6 +119,9 @@ def build_tmrescore_cached_state(
         "updated_at": task.get("updated_at"),
         "completed_at": task.get("completed_at"),
         "result": task.get("result") if include_result else None,
+        "wizard_context": task.get("wizard_context"),
+        "wizard_catalogs": task.get("wizard_catalogs"),
+        "wizard_url": task.get("wizard_url"),
     }
 
 

@@ -68,7 +68,7 @@ describe('Dashboard.vue', () => {
         expect(wrapper.text()).toContain('v1.1')
     })
 
-    it('shows Threat Model button only for reviewers', async () => {
+    it('shows VScorer button only for reviewers', async () => {
         vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
 
         const wrapper = mount(Dashboard, {
@@ -82,11 +82,11 @@ describe('Dashboard.vue', () => {
 
         await flushPromises()
 
-        const threatModelLink = wrapper.findAll('a').find(a => a.text() === 'Threat Model')
-        expect(threatModelLink).toBeDefined()
+        const vscorerLink = wrapper.findAll('a').find(a => a.text() === 'VScorer')
+        expect(vscorerLink).toBeDefined()
     })
 
-    it('hides Threat Model button for analysts', async () => {
+    it('hides VScorer button for analysts', async () => {
         vi.mocked(getProjects).mockResolvedValue(mockProjects as any)
 
         const wrapper = mount(Dashboard, {
@@ -100,8 +100,8 @@ describe('Dashboard.vue', () => {
 
         await flushPromises()
 
-        const threatModelLink = wrapper.findAll('a').find(a => a.text() === 'Threat Model')
-        expect(threatModelLink).toBeUndefined()
+        const vscorerLink = wrapper.findAll('a').find(a => a.text() === 'VScorer')
+        expect(vscorerLink).toBeUndefined()
     })
 
     it('filters projects via search input', async () => {

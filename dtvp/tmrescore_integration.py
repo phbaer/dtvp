@@ -120,7 +120,7 @@ class TMRescoreClient:
     def __init__(self, settings: Optional[TMRescoreSettings] = None):
         self.settings = settings or TMRescoreSettings()
         if not self.settings.enabled:
-            raise RuntimeError("TMRescore integration is not configured")
+            raise RuntimeError("VScorer integration is not configured")
 
         self.client = httpx.AsyncClient(timeout=self.settings.DTVP_TMRESCORE_TIMEOUT_SECONDS)
 
@@ -155,6 +155,146 @@ class TMRescoreClient:
 
     async def get_health(self) -> Dict[str, Any]:
         response = await self.client.get(f"{self.settings.base_url}/health")
+        response.raise_for_status()
+        return response.json()
+
+    async def _upload_session_file(
+        self,
+        session_id: str,
+        endpoint: str,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str,
+    ) -> Dict[str, Any]:
+        response = await self.client.put(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/{endpoint}",
+            files={"file": (filename, file_bytes, content_type)},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def upload_threatmodel(
+        self,
+        session_id: str,
+        threatmodel_bytes: bytes,
+        filename: str = "threatmodel.tm7",
+    ) -> Dict[str, Any]:
+        return await self._upload_session_file(
+            session_id,
+            "files/threatmodel",
+            threatmodel_bytes,
+            filename,
+            "application/octet-stream",
+        )
+
+    async def upload_sbom(
+        self,
+        session_id: str,
+        sbom_bytes: bytes,
+        filename: str = "sbom.cdx.json",
+    ) -> Dict[str, Any]:
+        return await self._upload_session_file(
+            session_id,
+            "files/sbom",
+            sbom_bytes,
+            filename,
+            "application/json",
+        )
+
+    async def upload_items_csv(
+        self,
+        session_id: str,
+        items_csv_bytes: bytes,
+        filename: str = "items.csv",
+    ) -> Dict[str, Any]:
+        return await self._upload_session_file(
+            session_id,
+            "files/items",
+            items_csv_bytes,
+            filename,
+            "text/csv",
+        )
+
+    async def upload_config(
+        self,
+        session_id: str,
+        config_bytes: bytes,
+        filename: str = "config.yaml",
+    ) -> Dict[str, Any]:
+        return await self._upload_session_file(
+            session_id,
+            "config/upload",
+            config_bytes,
+            filename,
+            "application/x-yaml",
+        )
+
+    async def get_wizard_context(self, session_id: str) -> Dict[str, Any]:
+        response = await self.client.get(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/wizard/context"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_wizard_catalogs(self, session_id: str) -> Dict[str, Any]:
+        response = await self.client.get(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/wizard/catalogs"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_validator_report(self, session_id: str) -> Dict[str, Any]:
+        response = await self.client.get(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/validators/report"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_threat_model_editor(self, session_id: str) -> Dict[str, Any]:
+        response = await self.client.get(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/threatmodel/editor"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def patch_threat_model_editor(
+        self,
+        session_id: str,
+        patches: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        response = await self.client.patch(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/threatmodel/editor",
+            json={"patches": patches},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def get_threat_model_file(self, session_id: str) -> httpx.Response:
+        response = await self.client.get(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/threatmodel/download"
+        )
+        response.raise_for_status()
+        return response
+
+    async def analyze_existing_inventory(
+        self,
+        session_id: str,
+        chain_analysis: bool = True,
+        prioritize: bool = True,
+        what_if: bool = False,
+        enrich: bool = False,
+        ollama_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        response = await self.client.post(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/inventory",
+            data={
+                "chain_analysis": str(chain_analysis).lower(),
+                "prioritize": str(prioritize).lower(),
+                "what_if": str(what_if).lower(),
+                "enrich": str(enrich).lower(),
+                **({"ollama_model": ollama_model} if ollama_model else {}),
+            },
+        )
         response.raise_for_status()
         return response.json()
 

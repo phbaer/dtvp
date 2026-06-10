@@ -1,14 +1,21 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChevronLeft, ShieldCheck, Upload } from 'lucide-vue-next'
+import { CheckCircle2, ChevronLeft, Download, ExternalLink, RefreshCw, ShieldCheck, Upload, WandSparkles } from 'lucide-vue-next'
 import {
-  getTMRescoreContext,
-  getTMRescoreProjectState,
-  getTMRescoreSyntheticSbomDownloadUrl,
-  getTMRescoreSyntheticSbomSummary,
-  resumeTMRescoreAnalysis,
-  runTMRescoreAnalysis,
+  getPreparedVScorerThreatModelDownloadUrl,
+  getPreparedVScorerWizardEditor,
+  getVScorerContext,
+  getVScorerProjectState,
+  getVScorerSyntheticSbomDownloadUrl,
+  getVScorerSyntheticSbomSummary,
+  patchPreparedVScorerWizardEditor,
+  prepareVScorerAnalysis,
+  refreshPreparedVScorerWizardContext,
+  resumeVScorerAnalysis,
+  runPreparedVScorerAnalysis,
+  runVScorerAnalysis,
+  validatePreparedVScorerWizardInputs,
 } from '../lib/api'
 import { getRuntimeConfig } from '../lib/env'
 import type {
@@ -17,6 +24,7 @@ import type {
   TMRescoreAnalysisResult,
   TMRescoreContext,
   TMRescoreSyntheticSbomSummary,
+  VScorerThreatModelEditorIssue,
 } from '../types'
 
 const route = useRoute()
@@ -42,6 +50,11 @@ const whatIf = ref(false)
 const enrich = ref(false)
 const ollamaModel = ref('qwen2.5:7b')
 const submitting = ref(false)
+const preparingWizard = ref(false)
+const refreshingWizardContext = ref(false)
+const validatingWizardInputs = ref(false)
+const loadingWizardEditor = ref(false)
+const applyingWizardIssueId = ref('')
 const result = ref<TMRescoreAnalysisResult | null>(null)
 const submitError = ref('')
 const syntheticSbomSummary = ref<TMRescoreSyntheticSbomSummary | null>(null)
@@ -54,11 +67,38 @@ const refreshingCachedState = ref(false)
 const contextPathRaw = getRuntimeConfig('DTVP_CONTEXT_PATH', '')
 const contextPath = contextPathRaw ? (contextPathRaw.startsWith('/') ? contextPathRaw.replace(/\/$/, '') : '/' + contextPathRaw.replace(/\/$/, '')) : ''
 const apiPrefix = `${contextPath || ''}/api`
-const refreshSignalKey = computed(() => `dtvp:tmrescore-refresh:${projectName.value}`)
+const refreshSignalKey = computed(() => `dtvp:vscorer-refresh:${projectName.value}`)
+const legacyRefreshSignalKey = computed(() => `dtvp:tmrescore-refresh:${projectName.value}`)
 const projectReturnUrl = computed(() => `/project/${projectName.value}`)
-const syntheticSbomDownloadUrl = computed(() => getTMRescoreSyntheticSbomDownloadUrl(projectName.value, selectedScope.value))
+const syntheticSbomDownloadUrl = computed(() => getVScorerSyntheticSbomDownloadUrl(projectName.value, selectedScope.value))
 
 const outputFiles = computed(() => Object.keys(result.value?.outputs || {}))
+const preparedVScorerState = computed(() => (
+  cachedProjectState.value?.status === 'prepared' ? cachedProjectState.value : null
+))
+const wizardContext = computed(() => cachedProjectState.value?.wizard_context || null)
+const wizardCatalogs = computed(() => cachedProjectState.value?.wizard_catalogs || null)
+const wizardValidationSummary = computed(() => wizardContext.value?.validation?.summary || null)
+const wizardValidationReports = computed(() => wizardContext.value?.validation?.reports || [])
+const wizardThreatModelElementCount = computed(() => wizardContext.value?.threat_model?.elements?.length ?? null)
+const wizardThreatBoundaryCount = computed(() => wizardContext.value?.threat_model?.boundaries?.length ?? null)
+const wizardEditor = computed(() => wizardContext.value?.editor || wizardContext.value?.threat_model_editor || null)
+const wizardEditorIssues = computed(() => wizardEditor.value?.issues || [])
+const wizardEditorIssueCount = computed(() => wizardEditorIssues.value.length)
+const wizardOpenEditorIssueCount = computed(() => wizardEditorIssues.value.filter(issue => !issue.kept).length)
+const wizardRuleTypes = computed(() => {
+  const ruleTypes = wizardCatalogs.value?.rescoring_rule_types
+  if (Array.isArray(ruleTypes)) return ruleTypes
+  if (ruleTypes && typeof ruleTypes === 'object') {
+    return Object.values(ruleTypes).flatMap((items: any) => Array.isArray(items) ? items : [])
+  }
+  return []
+})
+const wizardRuleTypeCount = computed(() => wizardRuleTypes.value.length)
+const wizardAttackMitigationCount = computed(() => wizardCatalogs.value?.attack_mitigations?.length ?? null)
+const preparedThreatModelDownloadUrl = computed(() => (
+  cachedProjectState.value?.session_id ? getPreparedVScorerThreatModelDownloadUrl(cachedProjectState.value.session_id) : '#'
+))
 
 const progressTimer = ref<number | null>(null)
 const stagedProgressTimers: number[] = []
@@ -124,6 +164,15 @@ const updateCachedProjectState = (state: Partial<TMRescoreProjectState | TMResco
     updated_at: state.updated_at ?? previous?.updated_at ?? null,
     completed_at: state.completed_at ?? previous?.completed_at ?? null,
     result: state.result ?? previous?.result ?? null,
+    wizard_url: state.wizard_url ?? previous?.wizard_url ?? null,
+    wizard_context: state.wizard_context ?? previous?.wizard_context ?? null,
+    wizard_catalogs: state.wizard_catalogs ?? previous?.wizard_catalogs ?? null,
+  }
+}
+
+const clearPreparedWizardState = () => {
+  if (preparedVScorerState.value) {
+    cachedProjectState.value = null
   }
 }
 
@@ -149,7 +198,7 @@ const loadSyntheticSbomSummary = async (mode: 'initial' | 'refresh' = 'refresh')
   }
 
   try {
-    const summary = await getTMRescoreSyntheticSbomSummary(projectName.value, selectedScope.value)
+    const summary = await getVScorerSyntheticSbomSummary(projectName.value, selectedScope.value)
     if (syntheticSbomSummaryRequestId.value !== requestId) return
     syntheticSbomSummary.value = summary
     if (mode === 'initial') {
@@ -248,7 +297,7 @@ const enrichmentBadgeClass = computed(() => {
 
 const getOutputUrl = (filename: string) => {
     if (!result.value?.session_id) return '#'
-    return `${apiPrefix}/tmrescore/sessions/${encodeURIComponent(result.value.session_id)}/outputs/${encodeURIComponent(filename)}`
+    return `${apiPrefix}/vscorer/sessions/${encodeURIComponent(result.value.session_id)}/outputs/${encodeURIComponent(filename)}`
 }
 
 const handleFileChange = (event: Event, target: 'threatmodel' | 'items' | 'config') => {
@@ -257,6 +306,7 @@ const handleFileChange = (event: Event, target: 'threatmodel' | 'items' | 'confi
     if (target === 'threatmodel') threatModelFile.value = file
     if (target === 'items') itemsCsvFile.value = file
     if (target === 'config') configFile.value = file
+    clearPreparedWizardState()
 }
 
 const applyAnalysisProgress = (progress: TMRescoreAnalysisProgress) => {
@@ -298,10 +348,16 @@ const restoreCachedAnalysisState = async (state: TMRescoreProjectState) => {
     return
   }
 
+  if (state.status === 'prepared') {
+    setProgressState(`Restored prepared VScorer wizard session ${state.session_id}.`, 100)
+    submitting.value = false
+    return
+  }
+
   submitting.value = true
-  appendProgressLog(`Restoring cached tmrescore session ${state.session_id} after page reload...`)
+  appendProgressLog(`Restoring cached VScorer session ${state.session_id} after page reload...`)
   try {
-    result.value = await resumeTMRescoreAnalysis(state.session_id, state, {
+    result.value = await resumeVScorerAnalysis(state.session_id, state, {
       onAnalysisProgress: (progress) => {
         applyAnalysisProgress(progress)
       },
@@ -309,6 +365,7 @@ const restoreCachedAnalysisState = async (state: TMRescoreProjectState) => {
     setProgressState(`Analysis completed. ${result.value.rescored_count} of ${result.value.total_cves} CVEs were rescored.`, 100)
     if (typeof window !== 'undefined' && window.sessionStorage) {
       window.sessionStorage.setItem(refreshSignalKey.value, String(Date.now()))
+      window.sessionStorage.setItem(legacyRefreshSignalKey.value, String(Date.now()))
     }
   } catch (err: any) {
     submitError.value = err?.response?.data?.detail || err?.message || 'Threat-model analysis failed.'
@@ -324,41 +381,174 @@ const refreshCachedAnalysisState = async () => {
   refreshingCachedState.value = true
   submitError.value = ''
   try {
-    const latestState = await getTMRescoreProjectState(projectName.value)
+    const latestState = await getVScorerProjectState(projectName.value)
     selectedScope.value = latestState.scope
-    appendProgressLog(`Refreshed cached tmrescore session ${latestState.session_id}.`)
+    appendProgressLog(`Refreshed cached VScorer session ${latestState.session_id}.`)
     await loadSyntheticSbomSummary('refresh')
     await restoreCachedAnalysisState(latestState)
   } catch (err: any) {
-    submitError.value = err?.response?.data?.detail || err?.message || 'Failed to refresh cached tmrescore state.'
+    submitError.value = err?.response?.data?.detail || err?.message || 'Failed to refresh cached VScorer state.'
     appendProgressLog(submitError.value)
   } finally {
     refreshingCachedState.value = false
   }
 }
 
+const prepareWizardSession = async () => {
+    if (!threatModelFile.value) {
+        submitError.value = 'A threat model file is required to prepare a VScorer wizard session.'
+        return
+    }
+
+    preparingWizard.value = true
+    submitError.value = ''
+    result.value = null
+    clearPreparedWizardState()
+    resetProgressState('Preparing VScorer wizard session...')
+    setProgressState(`Building ${getScopeLabel(selectedScope.value)} analysis inventory from Dependency-Track data.`, 18)
+    driftProgressTo(56)
+    scheduleProgressState(900, 'Uploading threat model and synthetic SBOM to VScorer...', 64)
+    scheduleProgressState(1800, 'Loading VScorer wizard context and catalogs...', 78)
+
+    try {
+        const preparedState = await prepareVScorerAnalysis(projectName.value, {
+            scope: selectedScope.value,
+            threatmodel: threatModelFile.value,
+            itemsCsv: itemsCsvFile.value,
+            config: configFile.value,
+          }, {
+            onUploadProgress: (event) => {
+              const total = event.total || 0
+              if (total <= 0) return
+              const uploadPercent = Math.round((event.loaded / total) * 100)
+              progressMessage.value = `Uploading VScorer wizard inputs... ${uploadPercent}%`
+              progressValue.value = Math.max(progressValue.value, Math.min(70, 24 + Math.round(uploadPercent * 0.46)))
+            },
+        })
+        stopProgressTimer()
+        clearStagedProgressTimers()
+        cachedProjectState.value = preparedState
+        applyAnalysisProgress(preparedState)
+        setProgressState(`Prepared VScorer wizard session ${preparedState.session_id}.`, 100)
+    } catch (err: any) {
+        stopProgressTimer()
+        clearStagedProgressTimers()
+        submitError.value = err?.response?.data?.detail || err?.message || 'Failed to prepare VScorer wizard session.'
+        setProgressState(submitError.value, 100)
+    } finally {
+        preparingWizard.value = false
+    }
+}
+
+const refreshWizardContext = async () => {
+    const sessionId = cachedProjectState.value?.session_id
+    if (!sessionId) return
+
+    refreshingWizardContext.value = true
+    submitError.value = ''
+    appendProgressLog(`Refreshing VScorer wizard context for session ${sessionId}...`)
+    try {
+      const refreshedState = await refreshPreparedVScorerWizardContext(sessionId)
+      updateCachedProjectState(refreshedState)
+      applyAnalysisProgress(refreshedState)
+      setProgressState('Refreshed VScorer wizard context.', Math.max(progressValue.value, refreshedState.progress || 25))
+    } catch (err: any) {
+      submitError.value = err?.response?.data?.detail || err?.message || 'Failed to refresh VScorer wizard context.'
+      appendProgressLog(submitError.value)
+    } finally {
+      refreshingWizardContext.value = false
+    }
+}
+
+const validateWizardInputs = async () => {
+    const sessionId = cachedProjectState.value?.session_id
+    if (!sessionId) return
+
+    validatingWizardInputs.value = true
+    submitError.value = ''
+    appendProgressLog(`Validating VScorer wizard inputs for session ${sessionId}...`)
+    try {
+      const validatedState = await validatePreparedVScorerWizardInputs(sessionId)
+      updateCachedProjectState(validatedState)
+      applyAnalysisProgress(validatedState)
+      setProgressState('Validated VScorer wizard inputs.', Math.max(progressValue.value, validatedState.progress || 28))
+    } catch (err: any) {
+      submitError.value = err?.response?.data?.detail || err?.message || 'Failed to validate VScorer wizard inputs.'
+      appendProgressLog(submitError.value)
+    } finally {
+      validatingWizardInputs.value = false
+    }
+}
+
+const loadWizardEditor = async () => {
+    const sessionId = cachedProjectState.value?.session_id
+    if (!sessionId) return
+
+    loadingWizardEditor.value = true
+    submitError.value = ''
+    appendProgressLog(`Loading VScorer threat-model editor state for session ${sessionId}...`)
+    try {
+      const editorState = await getPreparedVScorerWizardEditor(sessionId)
+      updateCachedProjectState(editorState)
+      applyAnalysisProgress(editorState)
+      setProgressState('Loaded VScorer threat-model editor state.', Math.max(progressValue.value, editorState.progress || 28))
+    } catch (err: any) {
+      submitError.value = err?.response?.data?.detail || err?.message || 'Failed to load VScorer threat-model editor state.'
+      appendProgressLog(submitError.value)
+    } finally {
+      loadingWizardEditor.value = false
+    }
+}
+
+const keepWizardEditorIssue = async (issue: VScorerThreatModelEditorIssue) => {
+    const sessionId = cachedProjectState.value?.session_id
+    const issueId = issue.issue_id
+    if (!sessionId || !issueId) return
+
+    applyingWizardIssueId.value = issueId
+    submitError.value = ''
+    appendProgressLog(`Marking VScorer editor issue ${issueId} as kept...`)
+    try {
+      const patchedState = await patchPreparedVScorerWizardEditor(sessionId, [{
+        issue_id: issueId,
+        action: 'keep',
+        target_type: issue.target_type || null,
+        target_id: issue.target_id || null,
+        note: issue.note || 'Kept from DTVP.',
+      }])
+      updateCachedProjectState(patchedState)
+      applyAnalysisProgress(patchedState)
+      setProgressState('Updated VScorer threat-model editor state.', Math.max(progressValue.value, patchedState.progress || 30))
+    } catch (err: any) {
+      submitError.value = err?.response?.data?.detail || err?.message || 'Failed to update VScorer threat-model editor state.'
+      appendProgressLog(submitError.value)
+    } finally {
+      applyingWizardIssueId.value = ''
+    }
+}
+
 const loadContext = async () => {
     loading.value = true
     error.value = ''
   resetProgressState('Opening threat-model analysis page...')
-  setProgressState('Loading project versions, tmrescore settings, and enrichment options...', 18)
+  setProgressState('Loading project versions, VScorer settings, and enrichment options...', 18)
   driftProgressTo(46)
     try {
-        context.value = await getTMRescoreContext(projectName.value)
+        context.value = await getVScorerContext(projectName.value)
         selectedScope.value = context.value.recommended_scope
     let cachedState: TMRescoreProjectState | null = null
     try {
-      cachedState = await getTMRescoreProjectState(projectName.value)
+      cachedState = await getVScorerProjectState(projectName.value)
       cachedProjectState.value = cachedState
       selectedScope.value = cachedState.scope
       setProgressState(
-        `Found cached tmrescore session ${cachedState.session_id}. Preparing the ${getScopeLabel(selectedScope.value)} analysis preview...`,
+        `Found cached VScorer session ${cachedState.session_id}. Preparing the ${getScopeLabel(selectedScope.value)} analysis preview...`,
         52,
       )
     } catch (stateErr: any) {
       if (stateErr?.response?.status !== 404) {
         appendProgressLog(
-          stateErr?.response?.data?.detail || stateErr?.message || 'Could not restore cached tmrescore state.',
+          stateErr?.response?.data?.detail || stateErr?.message || 'Could not restore cached VScorer state.',
         )
       }
     }
@@ -392,7 +582,8 @@ const loadContext = async () => {
 }
 
 const submit = async () => {
-    if (!threatModelFile.value) {
+    const preparedSession = preparedVScorerState.value
+    if (!preparedSession && !threatModelFile.value) {
         submitError.value = 'A threat model file is required.'
         return
     }
@@ -400,21 +591,39 @@ const submit = async () => {
     submitting.value = true
     submitError.value = ''
     result.value = null
-    resetProgressState('Preparing threat-model analysis request...')
+    resetProgressState(preparedSession ? 'Starting prepared VScorer analysis...' : 'Preparing VScorer analysis request...')
     setProgressState(`Queued ${selectedScope.value === 'merged_versions' ? 'merged multi-version' : 'latest-only'} analysis scope.`, 10)
     if (enrich.value) {
       appendProgressLog(`LLM enrichment enabled with model ${ollamaModel.value}.`)
     }
-    setProgressState('Uploading threat model and analysis inputs...', 18)
-    driftProgressTo(58)
-    scheduleProgressState(900, 'Building analysis inventory from Dependency-Track versions...', 62)
-    scheduleProgressState(1800, 'Submitting synthetic SBOM and threat model to tmrescore...', 72)
-    scheduleProgressState(3200, 'Waiting for tmrescore analysis results...', 84)
+    if (preparedSession) {
+      setProgressState('Submitting prepared VScorer wizard session for analysis...', 28)
+      driftProgressTo(70)
+      scheduleProgressState(1200, 'Waiting for VScorer analysis results...', 84)
+    } else {
+      setProgressState('Uploading threat model and analysis inputs...', 18)
+      driftProgressTo(58)
+      scheduleProgressState(900, 'Building analysis inventory from Dependency-Track versions...', 62)
+      scheduleProgressState(1800, 'Submitting synthetic SBOM and threat model to VScorer...', 72)
+      scheduleProgressState(3200, 'Waiting for VScorer analysis results...', 84)
+    }
 
     try {
-        result.value = await runTMRescoreAnalysis(projectName.value, {
+        result.value = preparedSession
+          ? await runPreparedVScorerAnalysis(preparedSession.session_id, {
+            chainAnalysis: chainAnalysis.value,
+            prioritize: prioritize.value,
+            whatIf: whatIf.value,
+            enrich: enrich.value,
+            ollamaModel: ollamaModel.value,
+          }, {
+            onAnalysisProgress: (progress) => {
+              applyAnalysisProgress(progress)
+            },
+          })
+          : await runVScorerAnalysis(projectName.value, {
             scope: selectedScope.value,
-            threatmodel: threatModelFile.value,
+            threatmodel: threatModelFile.value as File,
             itemsCsv: itemsCsvFile.value,
             config: configFile.value,
             chainAnalysis: chainAnalysis.value,
@@ -431,7 +640,7 @@ const submit = async () => {
               progressMessage.value = `Uploading threat model and analysis inputs... ${uploadPercent}%`
               progressValue.value = Math.max(progressValue.value, mappedProgress)
               if (uploadPercent === 100) {
-                appendProgressLog('Upload complete. Waiting for tmrescore processing...')
+                appendProgressLog('Upload complete. Waiting for VScorer processing...')
               }
             },
             onAnalysisProgress: (progress) => {
@@ -443,6 +652,7 @@ const submit = async () => {
           setProgressState(`Analysis completed. ${result.value.rescored_count} of ${result.value.total_cves} CVEs were rescored.`, 100)
           if (typeof window !== 'undefined' && window.sessionStorage) {
             window.sessionStorage.setItem(refreshSignalKey.value, String(Date.now()))
+            window.sessionStorage.setItem(legacyRefreshSignalKey.value, String(Date.now()))
           }
     } catch (err: any) {
           stopProgressTimer()
@@ -460,6 +670,7 @@ onMounted(() => {
 
 watch(selectedScope, () => {
   if (!context.value?.enabled) return
+  clearPreparedWizardState()
   void loadSyntheticSbomSummary()
 })
       onBeforeUnmount(() => {
@@ -478,11 +689,22 @@ watch(selectedScope, () => {
 
       <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 class="text-4xl font-extrabold tracking-tight text-white leading-none">Threat-Model Analysis for {{ projectName }}</h2>
+          <h2 class="text-4xl font-extrabold tracking-tight text-white leading-none">VScorer Analysis for {{ projectName }}</h2>
           <p class="mt-2 text-sm text-gray-400 max-w-3xl">
-            This runs the external tmrescore service from DTVP. The recommended mode builds an analysis-only synthetic SBOM across all versions so historical vulnerabilities remain attached to the versioned components that actually carried them.
+            This runs the external VScorer service from DTVP. The recommended mode builds an analysis-only synthetic SBOM across all versions so historical vulnerabilities remain attached to the versioned components that actually carried them.
           </p>
         </div>
+        <a
+          v-if="context?.enabled && context.wizard_url && isReviewer"
+          :href="context.wizard_url"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-200 transition-colors hover:bg-blue-600/25"
+          data-testid="open-vscorer-wizard"
+        >
+          <ExternalLink :size="16" />
+          Open VScorer Wizard
+        </a>
       </div>
     </div>
 
@@ -516,14 +738,14 @@ watch(selectedScope, () => {
           </div>
 
           <div v-if="!context.enabled" class="rounded-xl border border-amber-700/40 bg-amber-950/30 p-4 text-sm text-amber-100">
-            TMRescore is not configured on the backend. Set <span class="font-mono">DTVP_TMRESCORE_URL</span> and reload the app.
+            VScorer is not configured on the backend. Set <span class="font-mono">DTVP_TMRESCORE_URL</span> and reload the app.
           </div>
 
           <template v-else-if="!isReviewer">
             <div class="rounded-2xl border border-gray-800 bg-gray-900/80 p-6 shadow-xl shadow-black/20">
               <h3 class="text-lg font-bold text-white">Reviewer access required</h3>
               <p class="mt-3 text-sm text-gray-400">
-                Threat Model analysis and the interactive TMRescore controls are available only to users with the reviewer role.
+                VScorer analysis controls are available only to users with the reviewer role.
               </p>
               <router-link
                 :to="projectReturnUrl"
@@ -628,7 +850,7 @@ watch(selectedScope, () => {
                   />
                 </label>
                 <div class="text-xs text-gray-500 md:max-w-xs">
-                  Adds LLM-based threat justification enrichment before analysis when the tmrescore backend has Ollama configured.
+                  Adds LLM-based threat justification enrichment before analysis when the VScorer backend has Ollama configured.
                 </div>
               </div>
 
@@ -646,7 +868,7 @@ watch(selectedScope, () => {
                 <div>
                   <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Synthetic Analysis SBOM</div>
                   <div class="mt-1 text-sm text-gray-300">
-                    Download the generated CycloneDX input for the currently selected scope before sending it to tmrescore.
+                    Download the generated CycloneDX input for the currently selected scope before sending it to VScorer.
                   </div>
                 </div>
                 <a
@@ -690,7 +912,7 @@ watch(selectedScope, () => {
               </div>
               <div v-if="cachedProjectState" class="mt-4 rounded-xl border border-gray-800 bg-black/20 p-4" data-testid="cached-analysis-state-meta">
                 <div class="flex items-center justify-between gap-3">
-                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Cached Analysis State</div>
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Cached VScorer State</div>
                   <button
                     type="button"
                     class="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-semibold text-gray-200 transition-colors hover:border-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
@@ -740,6 +962,82 @@ watch(selectedScope, () => {
             </div>
 
             <div
+              v-if="wizardContext || wizardCatalogs"
+              class="rounded-2xl border border-blue-500/20 bg-blue-950/20 p-4"
+              data-testid="vscorer-wizard-summary"
+            >
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-blue-200/70">VScorer Wizard Context</div>
+                  <div class="mt-1 text-sm text-blue-100">
+                    Session {{ cachedProjectState?.session_id }}
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-400/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-100 transition-colors hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    :disabled="refreshingWizardContext || preparingWizard || submitting"
+                    data-testid="refresh-vscorer-wizard-context"
+                    @click="refreshWizardContext"
+                  >
+                    <RefreshCw :size="14" />
+                    {{ refreshingWizardContext ? 'Refreshing...' : 'Refresh Context' }}
+                  </button>
+                  <a
+                    v-if="cachedProjectState?.wizard_url || context.wizard_url"
+                    :href="cachedProjectState?.wizard_url || context.wizard_url || '#'"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-400/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-100 transition-colors hover:bg-blue-500/20"
+                    data-testid="open-prepared-vscorer-wizard"
+                  >
+                    <ExternalLink :size="14" />
+                    Open Wizard
+                  </a>
+                </div>
+              </div>
+              <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Validation</div>
+                  <div class="mt-1 text-sm text-blue-50" data-testid="vscorer-wizard-validation">
+                    {{ wizardValidationSummary?.errors ?? 0 }} errors / {{ wizardValidationSummary?.warnings ?? 0 }} warnings
+                  </div>
+                </div>
+                <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Threat Model</div>
+                  <div class="mt-1 text-sm text-blue-50" data-testid="vscorer-wizard-threatmodel">
+                    {{ wizardThreatModelElementCount ?? 0 }} elements / {{ wizardThreatBoundaryCount ?? 0 }} boundaries
+                  </div>
+                </div>
+                <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Editor Issues</div>
+                  <div class="mt-1 text-sm text-blue-50" data-testid="vscorer-wizard-editor-issues">
+                    {{ wizardEditorIssueCount ?? 0 }}
+                  </div>
+                </div>
+                <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Rule Types</div>
+                  <div class="mt-1 text-sm text-blue-50" data-testid="vscorer-wizard-rule-types">
+                    {{ wizardRuleTypeCount ?? 0 }}
+                  </div>
+                </div>
+                <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">ATT&CK Mitigations</div>
+                  <div class="mt-1 text-sm text-blue-50" data-testid="vscorer-wizard-attack-mitigations">
+                    {{ wizardAttackMitigationCount ?? 0 }}
+                  </div>
+                </div>
+                <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
+                  <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Status</div>
+                  <div class="mt-1 text-sm text-blue-50" data-testid="vscorer-wizard-status">
+                    {{ cachedProjectState?.status || 'prepared' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
               v-if="progressLog.length > 0"
               class="rounded-2xl border border-gray-800 bg-gray-950/60 p-4"
             >
@@ -763,13 +1061,24 @@ watch(selectedScope, () => {
 
             <div class="flex items-center gap-4">
               <button
+                type="button"
+                :disabled="preparingWizard || submitting || !context.enabled"
+                class="inline-flex items-center gap-2 rounded-xl border border-purple-400/30 bg-purple-500/10 px-4 py-2 text-sm font-semibold text-purple-100 transition-colors hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="prepare-vscorer-wizard"
+                @click="prepareWizardSession"
+              >
+                <WandSparkles :size="16" />
+                {{ preparingWizard ? 'Preparing Wizard...' : 'Prepare VScorer Wizard' }}
+              </button>
+
+              <button
                 type="submit"
-                :disabled="submitting || !context.enabled"
+                :disabled="submitting || preparingWizard || !context.enabled"
                 class="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-200 transition-colors hover:bg-blue-600/25 disabled:cursor-not-allowed disabled:opacity-50"
                 data-testid="run-tmrescore-analysis"
               >
                 <Upload :size="16" />
-                {{ submitting ? 'Running Analysis...' : 'Run Threat-Model Analysis' }}
+                {{ submitting ? 'Running Analysis...' : (preparedVScorerState ? 'Run Prepared VScorer Analysis' : 'Run VScorer Analysis') }}
               </button>
 
               <div class="text-sm text-gray-500">

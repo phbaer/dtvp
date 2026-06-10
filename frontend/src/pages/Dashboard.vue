@@ -143,10 +143,10 @@ const groupedProjects = computed(() => {
                         </router-link>
                         <router-link
                             v-if="realRole === 'REVIEWER'"
-                            :to="`/project/${p.name}/tmrescore`"
+                            :to="`/project/${p.name}/vscorer`"
                             class="shrink-0 rounded-lg border border-blue-500/30 bg-blue-600/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-200 transition-colors hover:bg-blue-600/20"
                         >
-                            Threat Model
+                            VScorer
                         </router-link>
                     </div>
                     

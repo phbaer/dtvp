@@ -12,6 +12,8 @@ import type {
     TMRescoreContext,
     TMRescoreProposalSnapshot,
     TMRescoreSyntheticSbomSummary,
+    VScorerProjectState,
+    VScorerThreatModelEditorPatch,
 } from '../types';
 import { getRuntimeConfig } from './env';
 
@@ -226,10 +228,12 @@ export const updateRescoreRules = async (rules: Record<string, any>): Promise<{ 
     return res.data;
 };
 
-export const getTMRescoreContext = async (projectName: string): Promise<TMRescoreContext> => {
-    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/context`);
+export const getVScorerContext = async (projectName: string): Promise<TMRescoreContext> => {
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/vscorer/context`);
     return res.data;
 };
+
+export const getTMRescoreContext = getVScorerContext;
 
 export interface TMRescoreAnalysisOptions {
     scope: 'latest_only' | 'merged_versions';
@@ -243,51 +247,73 @@ export interface TMRescoreAnalysisOptions {
     ollamaModel?: string;
 }
 
+export interface TMRescorePreparedRunOptions {
+    chainAnalysis?: boolean;
+    prioritize?: boolean;
+    whatIf?: boolean;
+    enrich?: boolean;
+    ollamaModel?: string;
+}
+
 export interface TMRescoreAnalysisProgressHandlers {
     onUploadProgress?: (event: AxiosProgressEvent) => void;
     onAnalysisProgress?: (progress: TMRescoreAnalysisProgress) => void;
     pollIntervalMs?: number;
 }
 
-export const getTMRescoreSyntheticSbomDownloadUrl = (
+export type VScorerAnalysisOptions = TMRescoreAnalysisOptions;
+export type VScorerPreparedRunOptions = TMRescorePreparedRunOptions;
+export type VScorerAnalysisProgressHandlers = TMRescoreAnalysisProgressHandlers;
+
+export const getVScorerSyntheticSbomDownloadUrl = (
     projectName: string,
     scope: TMRescoreAnalysisOptions['scope'],
-): string => `${API_BASE}/projects/${encodeURIComponent(projectName)}/tmrescore/sbom?scope=${encodeURIComponent(scope)}`;
+): string => `${API_BASE}/projects/${encodeURIComponent(projectName)}/vscorer/sbom?scope=${encodeURIComponent(scope)}`;
 
-export const getTMRescoreSyntheticSbomSummary = async (
+export const getTMRescoreSyntheticSbomDownloadUrl = getVScorerSyntheticSbomDownloadUrl;
+
+export const getVScorerSyntheticSbomSummary = async (
     projectName: string,
     scope: TMRescoreAnalysisOptions['scope'],
 ): Promise<TMRescoreSyntheticSbomSummary> => {
-    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/sbom/summary`, {
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/vscorer/sbom/summary`, {
         params: { scope },
     });
     return res.data;
 };
 
-export const getTMRescoreProjectState = async (
+export const getTMRescoreSyntheticSbomSummary = getVScorerSyntheticSbomSummary;
+
+export const getVScorerProjectState = async (
     projectName: string,
 ): Promise<TMRescoreProjectState> => {
-    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/state`);
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/vscorer/state`);
     return res.data;
 };
+
+export const getTMRescoreProjectState = getVScorerProjectState;
 
 const delay = async (ms: number): Promise<void> => new Promise((resolve) => {
     window.setTimeout(resolve, ms);
 });
 
-export const getTMRescoreAnalysisProgress = async (
+export const getVScorerAnalysisProgress = async (
     sessionId: string,
 ): Promise<TMRescoreAnalysisProgress> => {
-    const res = await api.get(`/tmrescore/sessions/${encodeURIComponent(sessionId)}/progress`);
+    const res = await api.get(`/vscorer/sessions/${encodeURIComponent(sessionId)}/progress`);
     return res.data;
 };
 
-export const getTMRescoreAnalysisResult = async (
+export const getTMRescoreAnalysisProgress = getVScorerAnalysisProgress;
+
+export const getVScorerAnalysisResult = async (
     sessionId: string,
 ): Promise<TMRescoreAnalysisResult> => {
-    const res = await api.get(`/tmrescore/sessions/${encodeURIComponent(sessionId)}/results`);
+    const res = await api.get(`/vscorer/sessions/${encodeURIComponent(sessionId)}/results`);
     return res.data;
 };
+
+export const getTMRescoreAnalysisResult = getVScorerAnalysisResult;
 
 const waitForTMRescoreAnalysisCompletion = async (
     sessionId: string,
@@ -302,7 +328,7 @@ const waitForTMRescoreAnalysisCompletion = async (
     const pollIntervalMs = handlers?.pollIntervalMs ?? 1000;
     while (progressState.status !== 'completed') {
         await delay(pollIntervalMs);
-        progressState = await getTMRescoreAnalysisProgress(sessionId);
+        progressState = await getVScorerAnalysisProgress(sessionId);
         if (handlers?.onAnalysisProgress) {
             handlers.onAnalysisProgress(progressState);
         }
@@ -311,10 +337,10 @@ const waitForTMRescoreAnalysisCompletion = async (
         }
     }
 
-    return getTMRescoreAnalysisResult(sessionId);
+    return getVScorerAnalysisResult(sessionId);
 };
 
-export const resumeTMRescoreAnalysis = async (
+export const resumeVScorerAnalysis = async (
     sessionId: string,
     state: TMRescoreAnalysisProgress | TMRescoreProjectState,
     handlers?: TMRescoreAnalysisProgressHandlers,
@@ -324,13 +350,15 @@ export const resumeTMRescoreAnalysis = async (
     }
 
     if (state.status === 'completed') {
-        return getTMRescoreAnalysisResult(sessionId);
+        return getVScorerAnalysisResult(sessionId);
     }
 
     return waitForTMRescoreAnalysisCompletion(sessionId, state, handlers);
 };
 
-export const runTMRescoreAnalysis = async (
+export const resumeTMRescoreAnalysis = resumeVScorerAnalysis;
+
+export const runVScorerAnalysis = async (
     projectName: string,
     options: TMRescoreAnalysisOptions,
     handlers?: TMRescoreAnalysisProgressHandlers,
@@ -350,7 +378,7 @@ export const runTMRescoreAnalysis = async (
         formData.append('config', options.config);
     }
 
-    const res = await api.post(`/projects/${encodeURIComponent(projectName)}/tmrescore/analyze`, formData, {
+    const res = await api.post(`/projects/${encodeURIComponent(projectName)}/vscorer/analyze`, formData, {
         onUploadProgress: handlers?.onUploadProgress,
     });
     const initialState = res.data as TMRescoreAnalysisResult | TMRescoreAnalysisProgress;
@@ -364,16 +392,112 @@ export const runTMRescoreAnalysis = async (
     }
 
     if (!initialState.session_id) {
-        throw new Error('TMRescore analysis did not return a session id.');
+        throw new Error('VScorer analysis did not return a session id.');
     }
 
     return waitForTMRescoreAnalysisCompletion(initialState.session_id, initialState, handlers);
 };
 
-export const getTMRescoreProposals = async (projectName: string): Promise<TMRescoreProposalSnapshot> => {
-    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/proposals`);
+export const runTMRescoreAnalysis = runVScorerAnalysis;
+
+export const prepareVScorerAnalysis = async (
+    projectName: string,
+    options: Pick<TMRescoreAnalysisOptions, 'scope' | 'threatmodel' | 'itemsCsv' | 'config'>,
+    handlers?: TMRescoreAnalysisProgressHandlers,
+): Promise<TMRescoreProjectState> => {
+    const formData = new FormData();
+    formData.append('scope', options.scope);
+    formData.append('threatmodel', options.threatmodel);
+    if (options.itemsCsv) {
+        formData.append('items_csv', options.itemsCsv);
+    }
+    if (options.config) {
+        formData.append('config', options.config);
+    }
+
+    const res = await api.post(`/projects/${encodeURIComponent(projectName)}/vscorer/import`, formData, {
+        onUploadProgress: handlers?.onUploadProgress,
+    });
     return res.data;
 };
+
+export const prepareTMRescoreAnalysis = prepareVScorerAnalysis;
+
+export const runPreparedVScorerAnalysis = async (
+    sessionId: string,
+    options: TMRescorePreparedRunOptions,
+    handlers?: TMRescoreAnalysisProgressHandlers,
+): Promise<TMRescoreAnalysisResult> => {
+    const formData = new FormData();
+    formData.append('chain_analysis', String(options.chainAnalysis ?? true));
+    formData.append('prioritize', String(options.prioritize ?? true));
+    formData.append('what_if', String(options.whatIf ?? false));
+    formData.append('enrich', String(options.enrich ?? false));
+    formData.append('ollama_model', options.ollamaModel ?? 'qwen2.5:7b');
+
+    const res = await api.post(`/vscorer/sessions/${encodeURIComponent(sessionId)}/analyze`, formData);
+    const initialState = res.data as TMRescoreAnalysisResult | TMRescoreAnalysisProgress;
+
+    if ('download_urls' in initialState) {
+        return initialState;
+    }
+
+    if (initialState.status === 'completed' && initialState.result) {
+        return initialState.result;
+    }
+
+    if (handlers?.onAnalysisProgress) {
+        handlers.onAnalysisProgress(initialState);
+    }
+
+    if (!initialState.session_id) {
+        throw new Error('VScorer analysis did not return a session id.');
+    }
+
+    return waitForTMRescoreAnalysisCompletion(initialState.session_id, initialState, handlers);
+};
+
+export const runPreparedTMRescoreAnalysis = runPreparedVScorerAnalysis;
+
+export const refreshPreparedVScorerWizardContext = async (
+    sessionId: string,
+): Promise<TMRescoreProjectState> => {
+    const res = await api.post(`/vscorer/sessions/${encodeURIComponent(sessionId)}/wizard/refresh`);
+    return res.data;
+};
+
+export const validatePreparedVScorerWizardInputs = async (
+    sessionId: string,
+): Promise<VScorerProjectState> => {
+    const res = await api.post(`/vscorer/sessions/${encodeURIComponent(sessionId)}/wizard/validate`);
+    return res.data;
+};
+
+export const getPreparedVScorerWizardEditor = async (
+    sessionId: string,
+): Promise<VScorerProjectState> => {
+    const res = await api.get(`/vscorer/sessions/${encodeURIComponent(sessionId)}/wizard/editor`);
+    return res.data;
+};
+
+export const patchPreparedVScorerWizardEditor = async (
+    sessionId: string,
+    patches: VScorerThreatModelEditorPatch[],
+): Promise<VScorerProjectState> => {
+    const res = await api.patch(`/vscorer/sessions/${encodeURIComponent(sessionId)}/wizard/editor`, { patches });
+    return res.data;
+};
+
+export const getPreparedVScorerThreatModelDownloadUrl = (
+    sessionId: string,
+): string => `${API_BASE}/vscorer/sessions/${encodeURIComponent(sessionId)}/wizard/threatmodel`;
+
+export const getVScorerProposals = async (projectName: string): Promise<TMRescoreProposalSnapshot> => {
+    const res = await api.get(`/projects/${encodeURIComponent(projectName)}/vscorer/proposals`);
+    return res.data;
+};
+
+export const getTMRescoreProposals = getVScorerProposals;
 
 // ── Code Analysis ────────────────────────────────────────────────────────────
 

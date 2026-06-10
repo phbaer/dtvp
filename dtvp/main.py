@@ -334,7 +334,7 @@ api_router.include_router(
             media_type_json=MEDIA_TYPE_JSON,
             tmrescore_not_configured_detail=TMRESCORE_NOT_CONFIGURED_DETAIL,
             dependency_track_unavailable_detail="Dependency-Track unavailable while preparing threat-model analysis context.",
-            tmrescore_disabled_detail="TMRescore integration is not configured. Set DTVP_TMRESCORE_URL to enable threat-model analysis.",
+            tmrescore_disabled_detail="VScorer integration is not configured. Set DTVP_TMRESCORE_URL to enable threat-model analysis.",
         ),
         bad_request_response=BAD_REQUEST_RESPONSE,
         not_found_response=NOT_FOUND_RESPONSE,

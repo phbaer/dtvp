@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -22,6 +22,24 @@ class SessionCreate(BaseModel):
     application_name: str
     application_version: str
     session_id: Optional[str] = None
+
+
+class ThreatModelEditorPatch(BaseModel):
+    issue_id: str
+    action: str = "set"
+    target_type: Optional[str] = None
+    target_id: Optional[str] = None
+    values: Dict[str, Any] = Field(default_factory=dict)
+    note: str = ""
+
+
+class ThreatModelEditorPatchRequest(BaseModel):
+    patches: list[ThreatModelEditorPatch] = Field(default_factory=list)
+
+
+class WizardCallRequest(BaseModel):
+    args: list[Any] = Field(default_factory=list)
+    kwargs: Dict[str, Any] = Field(default_factory=dict)
 
 
 sessions: Dict[str, Dict[str, Any]] = {}
@@ -94,6 +112,9 @@ def _build_session_info(session: Dict[str, Any]) -> Dict[str, Any]:
         "has_cves": session["files"]["cves"] is not None,
         "has_items_csv": session["files"]["items_csv"] is not None,
         "has_analysis_config": session["files"]["config"] is not None,
+        "prior_vex_count": 0,
+        "code_review_verdict_count": 0,
+        "compliance_declaration_count": 0,
         "status": session["status"],
     }
 
@@ -109,6 +130,296 @@ def _parse_sbom_bytes(raw: Optional[bytes]) -> Dict[str, Any]:
     if not raw:
         return {}
     return json.loads(raw.decode("utf-8"))
+
+
+def _file_summary(session: Dict[str, Any], key: str) -> Dict[str, Any]:
+    raw = session["files"].get(key)
+    return {
+        "uploaded": raw is not None,
+        "present": raw is not None,
+        "filename": session["filenames"].get(key) if raw is not None else None,
+        "size": len(raw) if raw is not None else 0,
+    }
+
+
+async def _store_upload(
+    session: Dict[str, Any],
+    key: str,
+    file: UploadFile,
+    fallback_filename: str,
+) -> Dict[str, Any]:
+    raw = await file.read()
+    filename = file.filename or fallback_filename
+    session["files"][key] = raw
+    session["filenames"][key] = filename
+    return {"filename": filename, "size": len(raw)}
+
+
+def _config_sections(session: Dict[str, Any]) -> list[str]:
+    if isinstance(session.get("config_json"), dict):
+        return sorted(session["config_json"].keys())
+    raw = session["files"].get("config")
+    if not raw:
+        return []
+    return ["uploaded_config"]
+
+
+def _session_file_summaries(session: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "threatmodel": _file_summary(session, "threatmodel"),
+        "sbom": _file_summary(session, "sbom"),
+        "cves": _file_summary(session, "cves"),
+        "items_csv": _file_summary(session, "items_csv"),
+        "countermeasures": {"uploaded": False, "present": False, "filename": None, "size": 0},
+        "analysis_config": {
+            "uploaded": session["files"].get("config") is not None,
+            "present": session["files"].get("config") is not None,
+            "sections": _config_sections(session),
+        },
+        "prior_vex_count": 0,
+        "code_review_verdict_count": 0,
+        "compliance_declaration_count": 0,
+    }
+
+
+def _missing_session_inputs(session: Dict[str, Any]) -> Dict[str, list[str]]:
+    classic = []
+    inventory = []
+    if session["files"].get("threatmodel") is None:
+        classic.append("threatmodel")
+        inventory.append("threatmodel")
+    if session["files"].get("sbom") is None:
+        classic.append("sbom")
+        inventory.append("sbom")
+    if session["files"].get("config") is None:
+        classic.append("analysis_config")
+    return {"classic": classic, "inventory": inventory}
+
+
+def _mock_validation_report(
+    session: Dict[str, Any],
+    artefact: str,
+    key: str,
+) -> Dict[str, Any]:
+    raw = session["files"].get(key)
+    if raw is None:
+        raise HTTPException(status_code=422, detail=f"No {artefact} has been uploaded")
+
+    filename = session["filenames"].get(key) or key
+    counts: Dict[str, Any] = {"bytes": len(raw)}
+    findings = []
+    grade = "A"
+    grade_rationale = "Mock artefact accepted for local VScorer testing."
+
+    if key == "sbom":
+        try:
+            sbom = _parse_sbom_bytes(raw)
+            counts.update(
+                {
+                    "components": len(sbom.get("components") or []),
+                    "vulnerabilities": len(sbom.get("vulnerabilities") or []),
+                }
+            )
+        except Exception as exc:
+            findings.append(
+                {
+                    "severity": "error",
+                    "family": "sbom_required",
+                    "rule_id": "MOCK-SBOM-001",
+                    "title": "SBOM JSON could not be parsed",
+                    "message": str(exc),
+                    "items": [],
+                    "fix": "Upload valid CycloneDX JSON.",
+                    "reference": "mock-vscorer",
+                }
+            )
+            grade = "F"
+            grade_rationale = "The mock SBOM validator could not parse JSON."
+
+    return {
+        "artefact": artefact,
+        "ok": grade != "F",
+        "file": filename,
+        "model_name": "Mock Threat Model" if key == "threatmodel" else "",
+        "parsed_at": datetime.now(timezone.utc).timestamp(),
+        "counts": counts,
+        "grade": grade,
+        "grade_rationale": grade_rationale,
+        "findings": findings,
+        "family_labels": {
+            "required": "Required (Structural)",
+            "sbom_required": "SBOM - Required",
+            "cve_required": "CVE List - Required",
+        },
+        "summary": {
+            "errors": len([item for item in findings if item["severity"] == "error"]),
+            "warnings": len([item for item in findings if item["severity"] == "warn"]),
+            "infos": len([item for item in findings if item["severity"] == "info"]),
+        },
+    }
+
+
+def _session_validation_reports(session: Dict[str, Any]) -> Dict[str, Any]:
+    reports = []
+    for artefact, key in (
+        ("threat_model", "threatmodel"),
+        ("sbom", "sbom"),
+        ("cve", "cves"),
+    ):
+        if session["files"].get(key) is not None:
+            reports.append(_mock_validation_report(session, artefact, key))
+    return {
+        "reports": reports,
+        "summary": {
+            "errors": sum(report["summary"]["errors"] for report in reports),
+            "warnings": sum(report["summary"]["warnings"] for report in reports),
+            "infos": sum(report["summary"]["infos"] for report in reports),
+        },
+    }
+
+
+def _mock_threat_model_summary(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if session["files"].get("threatmodel") is None:
+        return None
+    return {
+        "ok": True,
+        "elements": [
+            {"guid": "TM-ELEMENT-1", "name": "Mock API", "type": "Process"},
+            {"guid": "TM-ELEMENT-2", "name": "Mock Database", "type": "DataStore"},
+        ],
+        "boundaries": [
+            {
+                "guid": "TM-BOUNDARY-1",
+                "name": "Mock Trust Boundary",
+                "contained": [
+                    {"guid": "TM-ELEMENT-1", "name": "Mock API", "type": "Process"},
+                    {"guid": "TM-ELEMENT-2", "name": "Mock Database", "type": "DataStore"},
+                ],
+            }
+        ],
+        "flow_count": 1,
+    }
+
+
+def _mock_threat_model_editor_state(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if session["files"].get("threatmodel") is None:
+        return None
+    kept = session.get("tm_editor_kept") or {}
+    return {
+        "ok": True,
+        "model_name": "Mock Threat Model",
+        "summary": {
+            "total": 1,
+            "editable": 1,
+            "blocked": 0,
+            "kept": len(kept),
+        },
+        "issues": [
+            {
+                "issue_id": "mock-missing-auth",
+                "severity": "warning",
+                "title": "Mock missing authentication property",
+                "message": "Set or keep this mock issue to exercise the VScorer editor flow.",
+                "target_type": "element",
+                "target_id": "TM-ELEMENT-1",
+                "editable": True,
+                "kept": "mock-missing-auth" in kept,
+                "note": kept.get("mock-missing-auth", ""),
+            }
+        ],
+    }
+
+
+def _build_wizard_context(
+    session: Dict[str, Any],
+    include_validation: bool,
+    include_editor: bool,
+    include_threat_model: bool,
+) -> Dict[str, Any]:
+    missing = _missing_session_inputs(session)
+    session_id = session["session_id"]
+    return {
+        "session": _build_session_info(session),
+        "files": _session_file_summaries(session),
+        "readiness": {
+            "status": session["status"],
+            "classic_ready": not missing["classic"],
+            "inventory_ready": not missing["inventory"],
+            "missing": missing,
+        },
+        "validation": _session_validation_reports(session) if include_validation else None,
+        "threat_model": _mock_threat_model_summary(session) if include_threat_model else None,
+        "threat_model_editor": _mock_threat_model_editor_state(session) if include_editor else None,
+        "links": {
+            "catalogs": f"/api/v1/sessions/{session_id}/wizard/catalogs",
+            "validators": f"/api/v1/sessions/{session_id}/validators/report",
+            "editor": f"/api/v1/sessions/{session_id}/threatmodel/editor",
+            "threatmodel_download": f"/api/v1/sessions/{session_id}/threatmodel/download",
+            "generic_wizard_methods": "/api/v1/wizard/methods",
+        },
+    }
+
+
+def _wizard_catalogs() -> Dict[str, Any]:
+    return {
+        "app_info": {
+            "version": "mock",
+            "python": sys.version.split()[0],
+            "platform": sys.platform,
+        },
+        "rescoring_rule_types": {
+            "attack_vector": [
+                {
+                    "condition": "no_inbound_data_path",
+                    "modification": "MAV:P",
+                    "label": "No inbound data path -> Physical access required",
+                    "help": "Mock rule exposed for DTVP wizard integration tests.",
+                }
+            ],
+            "attack_complexity": [
+                {
+                    "condition": "upstream_sanitizes_input",
+                    "modification": "MAC:H",
+                    "label": "Upstream sanitizes input -> AC High",
+                    "help": "Mock rule exposed for DTVP wizard integration tests.",
+                }
+            ],
+            "privileges_required": [
+                {
+                    "condition": "upstream_provides_auth",
+                    "modification": "MPR:L",
+                    "label": "Authentication enforced -> PR Low",
+                    "help": "Mock rule exposed for DTVP wizard integration tests.",
+                }
+            ],
+        },
+        "attack_mitigations": [
+            {
+                "id": "M1036",
+                "name": "Account Use Policies",
+                "description": "Mock ATT&CK mitigation used by local tests.",
+                "tm7_properties": ["Provides Authentication"],
+            }
+        ],
+        "archetypes": [
+            {
+                "id": "software_only",
+                "name": "Software Only",
+                "description": "Mock software-only starter archetype.",
+                "excludes": 0,
+                "includes": 1,
+                "countermeasures": 1,
+            }
+        ],
+    }
+
+
+WIZARD_METHODS = {
+    "app_info": lambda: _wizard_catalogs()["app_info"],
+    "list_rescoring_rule_types": lambda: _wizard_catalogs()["rescoring_rule_types"],
+    "list_attack_mitigations": lambda: _wizard_catalogs()["attack_mitigations"],
+    "list_archetypes": lambda: _wizard_catalogs()["archetypes"],
+}
 
 
 def _extract_rating(vulnerability: Dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
@@ -378,6 +689,14 @@ def _new_session(payload: SessionCreate) -> Dict[str, Any]:
             "items_csv": None,
             "config": None,
         },
+        "filenames": {
+            "threatmodel": None,
+            "sbom": None,
+            "cves": None,
+            "items_csv": None,
+            "config": None,
+        },
+        "tm_editor_kept": {},
         "config_json": None,
         "results": None,
         "results_json": None,
@@ -386,6 +705,27 @@ def _new_session(payload: SessionCreate) -> Dict[str, Any]:
     }
     sessions[session_id] = session
     return session
+
+
+@app.get("/api/v1/wizard/methods")
+async def list_wizard_methods():
+    return {"methods": sorted(WIZARD_METHODS.keys())}
+
+
+@app.post("/api/v1/wizard/call/{method_name}")
+async def call_wizard_method(method_name: str, payload: WizardCallRequest):
+    method = WIZARD_METHODS.get(method_name)
+    if method is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Wizard method is not exposed by the mock service: {method_name}",
+        )
+    if payload.args or payload.kwargs:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Mock wizard method '{method_name}' does not accept arguments.",
+        )
+    return {"result": method()}
 
 
 @app.post("/api/v1/sessions", status_code=201)
@@ -409,29 +749,29 @@ async def delete_session(session_id: str):
 @app.put("/api/v1/sessions/{session_id}/files/threatmodel")
 async def upload_threatmodel(session_id: str, file: UploadFile = File(...)):
     session = _get_session(session_id)
-    session["files"]["threatmodel"] = await file.read()
-    return {"status": "ok"}
+    stored = await _store_upload(session, "threatmodel", file, "threatmodel.tm7")
+    return {"status": "ok", **stored}
 
 
 @app.put("/api/v1/sessions/{session_id}/files/sbom")
 async def upload_sbom(session_id: str, file: UploadFile = File(...)):
     session = _get_session(session_id)
-    session["files"]["sbom"] = await file.read()
-    return {"status": "ok"}
+    stored = await _store_upload(session, "sbom", file, "sbom.cdx.json")
+    return {"status": "ok", **stored}
 
 
 @app.put("/api/v1/sessions/{session_id}/files/cves")
 async def upload_cves(session_id: str, file: UploadFile = File(...)):
     session = _get_session(session_id)
-    session["files"]["cves"] = await file.read()
-    return {"status": "ok"}
+    stored = await _store_upload(session, "cves", file, "cves.json")
+    return {"status": "ok", **stored}
 
 
 @app.put("/api/v1/sessions/{session_id}/files/items")
 async def upload_items(session_id: str, file: UploadFile = File(...)):
     session = _get_session(session_id)
-    session["files"]["items_csv"] = await file.read()
-    return {"status": "ok"}
+    stored = await _store_upload(session, "items_csv", file, "items.csv")
+    return {"status": "ok", **stored}
 
 
 @app.put("/api/v1/sessions/{session_id}/config")
@@ -439,14 +779,132 @@ async def update_config(session_id: str, config: Dict[str, Any]):
     session = _get_session(session_id)
     session["config_json"] = config
     session["files"]["config"] = json.dumps(config).encode("utf-8")
+    session["filenames"]["config"] = "config.json"
     return {"status": "ok"}
 
 
 @app.put("/api/v1/sessions/{session_id}/config/upload")
 async def upload_config(session_id: str, file: UploadFile = File(...)):
     session = _get_session(session_id)
-    session["files"]["config"] = await file.read()
-    return {"status": "ok"}
+    stored = await _store_upload(session, "config", file, "config.yaml")
+    return {"status": "ok", **stored}
+
+
+@app.get("/api/v1/sessions/{session_id}/wizard/context")
+async def get_session_wizard_context(
+    session_id: str,
+    include_validation: bool = True,
+    include_editor: bool = True,
+    include_threat_model: bool = True,
+):
+    session = _get_session(session_id)
+    return _build_wizard_context(
+        session,
+        include_validation=include_validation,
+        include_editor=include_editor,
+        include_threat_model=include_threat_model,
+    )
+
+
+@app.get("/api/v1/sessions/{session_id}/wizard/catalogs")
+async def get_session_wizard_catalogs(session_id: str):
+    _get_session(session_id)
+    return _wizard_catalogs()
+
+
+@app.post("/api/v1/sessions/{session_id}/validators/threatmodel")
+async def validate_threatmodel(session_id: str):
+    return _mock_validation_report(_get_session(session_id), "threat_model", "threatmodel")
+
+
+@app.post("/api/v1/sessions/{session_id}/validators/sbom")
+async def validate_sbom(session_id: str):
+    return _mock_validation_report(_get_session(session_id), "sbom", "sbom")
+
+
+@app.post("/api/v1/sessions/{session_id}/validators/cves")
+async def validate_cves(session_id: str):
+    return _mock_validation_report(_get_session(session_id), "cve", "cves")
+
+
+@app.get("/api/v1/sessions/{session_id}/validators/report")
+async def validators_report(session_id: str):
+    reports = _session_validation_reports(_get_session(session_id))
+    if not reports["reports"]:
+        raise HTTPException(
+            status_code=422,
+            detail="No validatable input files have been uploaded for this session",
+        )
+    return reports
+
+
+@app.get("/api/v1/sessions/{session_id}/validators/todo")
+async def validators_todo(session_id: str):
+    reports = _session_validation_reports(_get_session(session_id))
+    if not reports["reports"]:
+        raise HTTPException(
+            status_code=422,
+            detail="No validatable input files have been uploaded for this session",
+        )
+    lines = ["# Mock VScorer input-quality TODO", ""]
+    for report in reports["reports"]:
+        marker = "x" if report["ok"] else " "
+        lines.append(
+            f"- [{marker}] {report['artefact']}: grade {report['grade']}"
+        )
+    return Response(content="\n".join(lines) + "\n", media_type="text/markdown")
+
+
+@app.get("/api/v1/sessions/{session_id}/threatmodel/editor")
+async def get_threat_model_editor(session_id: str):
+    editor = _mock_threat_model_editor_state(_get_session(session_id))
+    if editor is None:
+        raise HTTPException(status_code=422, detail="No threat model uploaded")
+    return editor
+
+
+@app.patch("/api/v1/sessions/{session_id}/threatmodel/editor")
+async def patch_threat_model_editor(
+    session_id: str,
+    request: ThreatModelEditorPatchRequest,
+):
+    session = _get_session(session_id)
+    if session["files"].get("threatmodel") is None:
+        raise HTTPException(status_code=422, detail="No threat model uploaded")
+
+    applied = []
+    changed = False
+    for patch in request.patches:
+        if patch.action == "keep":
+            session["tm_editor_kept"][patch.issue_id] = patch.note
+            continue
+        changed = True
+        session["tm_editor_kept"].pop(patch.issue_id, None)
+        applied.append(patch.model_dump())
+
+    return {
+        "status": "accepted",
+        "changed": changed,
+        "backup": "",
+        "applied": applied,
+        "errors": [],
+        "download_url": f"/api/v1/sessions/{session_id}/threatmodel/download",
+        "editor": _mock_threat_model_editor_state(session),
+    }
+
+
+@app.get("/api/v1/sessions/{session_id}/threatmodel/download")
+async def download_threat_model(session_id: str):
+    session = _get_session(session_id)
+    content = session["files"].get("threatmodel")
+    if content is None:
+        raise HTTPException(status_code=404, detail="Threat model not available")
+    filename = session["filenames"].get("threatmodel") or "threatmodel.tm7"
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"content-disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/api/v1/sessions/{session_id}/analyze")
@@ -467,8 +925,8 @@ async def run_analysis(
 @app.post("/api/v1/sessions/{session_id}/inventory")
 async def analyze_inventory(
     session_id: str,
-    threatmodel: UploadFile = File(...),
-    sbom: UploadFile = File(...),
+    threatmodel: UploadFile | None = File(None),
+    sbom: UploadFile | None = File(None),
     items_csv: UploadFile | None = File(None),
     config: UploadFile | None = File(None),
     chain_analysis: bool = Form(True),
@@ -478,10 +936,26 @@ async def analyze_inventory(
     ollama_model: str = Form("qwen2.5:7b"),
 ):
     session = _get_session(session_id)
-    session["files"]["threatmodel"] = await threatmodel.read()
-    session["files"]["sbom"] = await sbom.read()
-    session["files"]["items_csv"] = await items_csv.read() if items_csv else None
-    session["files"]["config"] = await config.read() if config else None
+    if threatmodel:
+        await _store_upload(session, "threatmodel", threatmodel, "threatmodel.tm7")
+    if sbom:
+        await _store_upload(session, "sbom", sbom, "sbom.cdx.json")
+    if items_csv:
+        await _store_upload(session, "items_csv", items_csv, "items.csv")
+    if config:
+        await _store_upload(session, "config", config, "config.yaml")
+
+    if not session["files"].get("threatmodel"):
+        raise HTTPException(
+            status_code=422,
+            detail="Inventory analysis requires a threat model upload or stored threat model.",
+        )
+    if not session["files"].get("sbom"):
+        raise HTTPException(
+            status_code=422,
+            detail="Inventory analysis requires an SBOM upload or stored SBOM.",
+        )
+
     session["status"] = "running"
     session["progress"] = 75
     return _perform_analysis(session, chain_analysis, prioritize, what_if, enrich, ollama_model)

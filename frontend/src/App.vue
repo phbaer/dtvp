@@ -131,6 +131,11 @@ const showProjectHeaderButtons = computed(
 )
 
 const isActive = (path: string) => route.path === path
+const isProjectWorkspaceRoute = computed(() =>
+    route.path.startsWith('/project/') &&
+    !route.path.endsWith('/tmrescore') &&
+    !route.path.endsWith('/vscorer')
+)
 
 watch(() => route.path, (path) => {
     if (!path.startsWith('/project/')) {
@@ -259,7 +264,7 @@ const acknowledgeChangelog = () => {
         <main
             :class="[
                 'min-h-0 w-full flex-1 px-6 pt-4 sm:px-8 sm:pt-6',
-                route.path.startsWith('/project/')
+                isProjectWorkspaceRoute
                     ? 'overflow-hidden pb-4 sm:pb-6'
                     : 'overflow-y-auto overscroll-contain pb-8'
             ]"

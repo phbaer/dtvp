@@ -29,7 +29,7 @@ const goToProject = () => {
 
 const goToThreatModel = () => {
     if (!isAllProjects) {
-        router.push(`/project/${projectName}/tmrescore`)
+        router.push(`/project/${projectName}/vscorer`)
     }
 }
 </script>
@@ -65,7 +65,7 @@ const goToThreatModel = () => {
                 @click="goToThreatModel"
                 class="inline-flex h-9 min-h-9 items-center justify-center leading-none px-4 rounded-full text-[11px] font-semibold uppercase tracking-widest transition-all border border-white/10 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
             >
-                Threat Model
+                VScorer
             </button>
 
             <span v-if="!isAllProjects" class="h-5 w-px bg-white/10 mx-2"></span>
