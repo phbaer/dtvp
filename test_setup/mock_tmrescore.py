@@ -1035,5 +1035,30 @@ async def ui():
     )
 
 
+@app.get("/wizard")
+async def wizard_ui():
+    return HTMLResponse(
+        """
+        <html>
+          <head><title>Mock VScorer Wizard</title></head>
+          <body style=\"font-family: sans-serif; padding: 2rem; background: #111827; color: #f3f4f6;\">
+            <h1>Mock VScorer Wizard</h1>
+            <p>Browser wizard placeholder for DTVP proxy testing.</p>
+            <script>
+              async function callWizard(method, args = []) {
+                const res = await fetch(`api/v1/wizard/call/${encodeURIComponent(method)}`, {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({args}),
+                });
+                return res.json();
+              }
+            </script>
+          </body>
+        </html>
+        """
+    )
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8090)

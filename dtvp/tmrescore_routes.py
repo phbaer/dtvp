@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Awaitable, Callable, Coroutine
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, Response, UploadFile
 
 from .dt_client import DTClient
 from .tmrescore_integration import (
@@ -134,6 +134,126 @@ def _forward_vscorer_file_response(response: Any) -> Response:
     return Response(content=response.content, media_type=media_type, headers=headers)
 
 
+def _forward_vscorer_proxy_response(
+    response: Any,
+    *,
+    default_media_type: str = "application/json",
+) -> Response:
+    return Response(
+        content=response.content,
+        media_type=response.headers.get("content-type", default_media_type),
+        status_code=response.status_code,
+    )
+
+
+def _get_enabled_vscorer_settings(deps: TMRescoreRouteDeps) -> TMRescoreSettings:
+    settings = TMRescoreSettings()
+    if not settings.enabled:
+        raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+    return settings
+
+
+def _build_vscorer_wizard_proxy_url(request: Request) -> str:
+    return str(request.url_for("get_vscorer_wizard_proxy"))
+
+
+def _register_vscorer_wizard_proxy_routes(
+    router: APIRouter,
+    deps: TMRescoreRouteDeps,
+    service_unavailable_response: dict[int | str, dict[str, Any]],
+    current_user_dependency: Callable[..., Any],
+) -> None:
+    @router.get(
+        "/vscorer/wizard",
+        responses=service_unavailable_response,
+        include_in_schema=False,
+        name="get_vscorer_wizard_proxy",
+    )
+    @router.get(
+        "/tmrescore/wizard",
+        responses=service_unavailable_response,
+        include_in_schema=False,
+        name="get_legacy_tmrescore_wizard_proxy",
+    )
+    async def get_vscorer_wizard_proxy(
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = _get_enabled_vscorer_settings(deps)
+        try:
+            async with TMRescoreClient(settings) as tmrescore_client:
+                response = await tmrescore_client.get_wizard_page()
+        except Exception as exc:
+            deps.logger.warning("Unable to load VScorer wizard UI: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="VScorer wizard is unavailable.",
+            )
+        return _forward_vscorer_proxy_response(
+            response,
+            default_media_type="text/html",
+        )
+
+    @router.get(
+        "/vscorer/api/v1/wizard/methods",
+        responses=service_unavailable_response,
+        include_in_schema=False,
+    )
+    @router.get(
+        "/tmrescore/api/v1/wizard/methods",
+        responses=service_unavailable_response,
+        include_in_schema=False,
+    )
+    async def list_vscorer_wizard_methods_proxy(
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = _get_enabled_vscorer_settings(deps)
+        try:
+            async with TMRescoreClient(settings) as tmrescore_client:
+                response = await tmrescore_client.list_wizard_methods()
+        except Exception as exc:
+            deps.logger.warning("Unable to list VScorer wizard methods: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="VScorer wizard is unavailable.",
+            )
+        return _forward_vscorer_proxy_response(response)
+
+    @router.post(
+        "/vscorer/api/v1/wizard/call/{method_name}",
+        responses=service_unavailable_response,
+        include_in_schema=False,
+    )
+    @router.post(
+        "/tmrescore/api/v1/wizard/call/{method_name}",
+        responses=service_unavailable_response,
+        include_in_schema=False,
+    )
+    async def call_vscorer_wizard_method_proxy(
+        method_name: str,
+        payload: Annotated[dict[str, Any], Body()],
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        settings = _get_enabled_vscorer_settings(deps)
+        try:
+            async with TMRescoreClient(settings) as tmrescore_client:
+                response = await tmrescore_client.call_wizard_method(
+                    method_name,
+                    payload,
+                )
+        except Exception as exc:
+            deps.logger.warning(
+                "Unable to call VScorer wizard method %s: %s",
+                method_name,
+                exc,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="VScorer wizard is unavailable.",
+            )
+        return _forward_vscorer_proxy_response(response)
+
+
 def _register_tmrescore_context_route(
     router: APIRouter,
     deps: TMRescoreRouteDeps,
@@ -158,6 +278,7 @@ def _register_tmrescore_context_route(
     )
     async def get_tmrescore_context(
         project_name: str,
+        request: Request,
         *,
         client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
@@ -206,7 +327,9 @@ def _register_tmrescore_context_route(
             raise HTTPException(status_code=404, detail="Project not found")
 
         latest_version = versions[-1].get("version", "unknown")
-        wizard_url = f"{settings.base_url}/wizard" if settings.enabled else None
+        wizard_url = (
+            _build_vscorer_wizard_proxy_url(request) if settings.enabled else None
+        )
         return {
             "enabled": settings.enabled,
             "wizard_url": wizard_url,
@@ -350,6 +473,7 @@ def _register_tmrescore_analysis_route(
     )
     async def import_project_into_vscorer_wizard(
         project_name: str,
+        request: Request,
         threatmodel: Annotated[UploadFile, File(...)],
         items_csv: Annotated[UploadFile | None, File()] = None,
         config: Annotated[UploadFile | None, File()] = None,
@@ -448,7 +572,7 @@ def _register_tmrescore_analysis_route(
             "completed_at": None,
             "wizard_context": _normalize_vscorer_wizard_context(wizard_context),
             "wizard_catalogs": wizard_catalogs,
-            "wizard_url": f"{settings.base_url}/wizard",
+            "wizard_url": _build_vscorer_wizard_proxy_url(request),
             "upload_results": upload_results,
             "dtvp_original_proposals": inventory["dtvp_original_proposals"],
         }
@@ -557,6 +681,7 @@ def _register_tmrescore_analysis_route(
     )
     async def refresh_prepared_vscorer_wizard_context(
         session_id: str,
+        request: Request,
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
@@ -573,7 +698,7 @@ def _register_tmrescore_analysis_route(
                 await tmrescore_client.get_wizard_catalogs(session_id),
             )
 
-        task["wizard_url"] = f"{settings.base_url}/wizard"
+        task["wizard_url"] = _build_vscorer_wizard_proxy_url(request)
         _touch_vscorer_task_message(
             task,
             "Refreshed VScorer wizard context.",
@@ -1122,6 +1247,12 @@ def create_tmrescore_router(
 ) -> APIRouter:
     router = APIRouter()
 
+    _register_vscorer_wizard_proxy_routes(
+        router,
+        deps,
+        service_unavailable_response,
+        current_user_dependency,
+    )
     _register_tmrescore_context_route(
         router,
         deps,

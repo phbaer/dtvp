@@ -463,7 +463,7 @@ def test_tmrescore_context_endpoint_uses_remote_health_for_ollama_availability(
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_enrichment"]["available"] is False
-    assert payload["wizard_url"] == "http://vscorer.local/wizard"
+    assert payload["wizard_url"] == "http://testserver/api/vscorer/wizard"
     assert payload["llm_enrichment"]["host_configured"] is False
     assert payload["llm_enrichment"]["status"] == "not_configured"
     assert payload["llm_enrichment"]["default_model"] == "qwen2.5:14b"
@@ -493,7 +493,7 @@ def test_tmrescore_context_endpoint_reports_remote_ollama_when_available(
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_enrichment"]["available"] is True
-    assert payload["wizard_url"] == "http://vscorer.local/wizard"
+    assert payload["wizard_url"] == "http://testserver/api/vscorer/wizard"
     assert payload["llm_enrichment"]["host_configured"] is True
     assert payload["llm_enrichment"]["status"] == "available"
     assert payload["llm_enrichment"]["warning"] is None
@@ -1123,6 +1123,39 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(
     assert get_progress_mock.await_count >= 2
 
 
+def test_vscorer_wizard_proxy_serves_ui_and_rpc_calls(client):
+    importlib.reload(mock_tmrescore)
+    real_async_client = httpx.AsyncClient
+
+    def build_mock_async_client(*args, **kwargs):
+        timeout = kwargs.get("timeout")
+        return real_async_client(
+            transport=httpx.ASGITransport(app=mock_tmrescore.app),
+            base_url="http://mock-vscorer.test",
+            timeout=timeout,
+        )
+
+    with patch.dict(os.environ, {"DTVP_VSCORER_URL": "http://mock-vscorer.test"}):
+        with patch(
+            "dtvp.tmrescore_integration.httpx.AsyncClient",
+            side_effect=build_mock_async_client,
+        ):
+            page = client.get("/api/vscorer/wizard")
+            assert page.status_code == 200
+            assert "api/v1/wizard/call" in page.text
+
+            methods = client.get("/api/vscorer/api/v1/wizard/methods")
+            assert methods.status_code == 200
+            assert "list_rescoring_rule_types" in methods.json()["methods"]
+
+            call = client.post(
+                "/api/vscorer/api/v1/wizard/call/list_rescoring_rule_types",
+                json={},
+            )
+            assert call.status_code == 200
+            assert "attack_vector" in call.json()["result"]
+
+
 def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_client):
     importlib.reload(mock_tmrescore)
     real_async_client = httpx.AsyncClient
@@ -1386,7 +1419,7 @@ def test_tmrescore_import_prepares_vscorer_wizard_session_and_runs(
             prepared = prepare_response.json()
             assert prepared["status"] == "prepared"
             assert prepared["message"] == "VScorer wizard session prepared."
-            assert prepared["wizard_url"] == "http://mock-vscorer.test/wizard"
+            assert prepared["wizard_url"] == "http://testserver/api/vscorer/wizard"
             assert prepared["wizard_context"]["validation"]["summary"]["errors"] == 0
             assert (
                 prepared["wizard_context"]["files"]["threatmodel"]["uploaded"] is True

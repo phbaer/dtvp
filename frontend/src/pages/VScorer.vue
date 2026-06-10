@@ -9,6 +9,7 @@ import {
   getVScorerProjectState,
   getVScorerSyntheticSbomDownloadUrl,
   getVScorerSyntheticSbomSummary,
+  getVScorerWizardUrl,
   patchPreparedVScorerWizardEditor,
   prepareVScorerAnalysis,
   refreshPreparedVScorerWizardContext,
@@ -71,6 +72,7 @@ const refreshSignalKey = computed(() => `dtvp:vscorer-refresh:${projectName.valu
 const legacyRefreshSignalKey = computed(() => `dtvp:tmrescore-refresh:${projectName.value}`)
 const projectReturnUrl = computed(() => `/project/${projectName.value}`)
 const syntheticSbomDownloadUrl = computed(() => getVScorerSyntheticSbomDownloadUrl(projectName.value, selectedScope.value))
+const vscorerWizardUrl = computed(() => context.value?.enabled ? getVScorerWizardUrl() : null)
 
 const outputFiles = computed(() => Object.keys(result.value?.outputs || {}))
 const preparedVScorerState = computed(() => (
@@ -695,8 +697,8 @@ watch(selectedScope, () => {
           </p>
         </div>
         <a
-          v-if="context?.enabled && context.wizard_url && isReviewer"
-          :href="context.wizard_url"
+          v-if="vscorerWizardUrl && isReviewer"
+          :href="vscorerWizardUrl"
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-500/30 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-200 transition-colors hover:bg-blue-600/25"
@@ -1016,8 +1018,8 @@ watch(selectedScope, () => {
                     Download TM7
                   </a>
                   <a
-                    v-if="cachedProjectState?.wizard_url || context.wizard_url"
-                    :href="cachedProjectState?.wizard_url || context.wizard_url || '#'"
+                    v-if="vscorerWizardUrl"
+                    :href="vscorerWizardUrl"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-400/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-100 transition-colors hover:bg-blue-500/20"

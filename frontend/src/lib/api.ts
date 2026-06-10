@@ -492,6 +492,10 @@ export const getPreparedVScorerThreatModelDownloadUrl = (
     sessionId: string,
 ): string => `${API_BASE}/vscorer/sessions/${encodeURIComponent(sessionId)}/wizard/threatmodel`;
 
+export const getVScorerWizardUrl = (): string => `${API_BASE}/vscorer/wizard`;
+
+export const getTMRescoreWizardUrl = getVScorerWizardUrl;
+
 export const getVScorerProposals = async (projectName: string): Promise<TMRescoreProposalSnapshot> => {
     const res = await api.get(`/projects/${encodeURIComponent(projectName)}/vscorer/proposals`);
     return res.data;

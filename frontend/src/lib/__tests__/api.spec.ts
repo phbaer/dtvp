@@ -11,6 +11,7 @@ import {
     getCacheStatus,
     getPreparedVScorerThreatModelDownloadUrl,
     getPreparedVScorerWizardEditor,
+    getVScorerWizardUrl,
     getTMRescoreContext,
     getTMRescoreProjectState,
     getTMRescoreSyntheticSbomDownloadUrl,
@@ -470,6 +471,13 @@ describe('api.ts', () => {
         expect(validated.wizard_context?.validation?.reports?.[0]?.grade).toBe('A')
         expect(editor.wizard_context?.editor?.issues?.[0]?.issue_id).toBe('mock-missing-auth')
         expect(patched.wizard_context?.editor?.issues?.[0]?.kept).toBe(true)
+    })
+
+    it('getVScorerWizardUrl builds the DTVP-hosted wizard proxy URL', () => {
+        const url = getVScorerWizardUrl()
+
+        expect(url).toContain('/api/vscorer/wizard')
+        expect(url).not.toContain('vscorer.local')
     })
 
     it('getTMRescoreSyntheticSbomDownloadUrl builds an API download URL', () => {

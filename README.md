@@ -34,6 +34,7 @@ DTVP can optionally call an external VScorer service to re-score vulnerabilities
 - Configure the backend with `DTVP_VSCORER_URL` to enable the UI entry points. The historical `DTVP_TMRESCORE_URL` name remains a compatibility fallback.
 - Optionally set `DTVP_VSCORER_CACHE_PATH` to control where the latest per-project proposal snapshots are stored. By default DTVP writes them to `data/vscorer_proposals.json`, while still loading an existing legacy `data/tmrescore_proposals.json` when no VScorer cache file exists.
 - Open a project and use the `Threat Model` action from the dashboard or project view.
+- Use `Open VScorer Wizard` from that page to access the VScorer browser wizard through DTVP at `/api/vscorer/wizard`, even when the VScorer service URL itself is internal to the backend network.
 - Upload the current `.tm7` file and optional `items.csv` / analysis config inputs.
 - If an LLM backend is configured for VScorer, you can enable `LLM enrichment` in the Threat Model UI and optionally choose the model used for threat-justification enrichment.
 - After a successful run, the latest cached proposal set for that project is available directly inside each reviewer rescoring dialog where the vulnerability ID matches.

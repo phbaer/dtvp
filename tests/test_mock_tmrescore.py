@@ -28,6 +28,11 @@ def test_mock_tmrescore_health_and_ui():
     assert ui.status_code == 200
     assert "Mock VScorer" in ui.text
 
+    wizard = client.get("/wizard")
+    assert wizard.status_code == 200
+    assert "Mock VScorer Wizard" in wizard.text
+    assert "api/v1/wizard/call" in wizard.text
+
 
 def test_mock_tmrescore_inventory_flow_returns_downloadable_results():
     client = _build_test_client()

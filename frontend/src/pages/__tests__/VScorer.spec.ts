@@ -33,6 +33,7 @@ vi.mock('../../lib/api', () => ({
             ? 'Merged multi-version analysis keeps historical vulnerabilities attached to the versioned components they came from.'
             : 'Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases.',
     })),
+    getVScorerWizardUrl: vi.fn(() => '/api/vscorer/wizard'),
     patchPreparedVScorerWizardEditor: vi.fn(),
     prepareVScorerAnalysis: vi.fn(),
     refreshPreparedVScorerWizardContext: vi.fn(),
@@ -69,7 +70,7 @@ describe('VScorer.vue', () => {
     it('loads context and renders recommended scope', async () => {
         vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
-            wizard_url: 'http://vscorer.local/wizard',
+            wizard_url: '/api/vscorer/wizard',
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
             versions: ['1.9.0', '1.10.0'],
@@ -103,7 +104,7 @@ describe('VScorer.vue', () => {
         expect(getVScorerSyntheticSbomDownloadUrl).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
         expect(getVScorerSyntheticSbomSummary).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
         expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toBe('/api/projects/ExampleApp/vscorer/sbom?scope=merged_versions')
-        expect(wrapper.get('[data-testid="open-vscorer-wizard"]').attributes('href')).toBe('http://vscorer.local/wizard')
+        expect(wrapper.get('[data-testid="open-vscorer-wizard"]').attributes('href')).toBe('/api/vscorer/wizard')
         expect(wrapper.get('[data-testid="open-vscorer-wizard"]').attributes('target')).toBe('_blank')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('6')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('4')
@@ -423,7 +424,7 @@ describe('VScorer.vue', () => {
     it('prepares a VScorer wizard session and runs that prepared session', async () => {
         vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
-            wizard_url: 'http://vscorer.local/wizard',
+            wizard_url: '/api/vscorer/wizard',
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
             versions: ['1.10.0'],
@@ -451,7 +452,7 @@ describe('VScorer.vue', () => {
             analyzed_versions: ['1.10.0'],
             llm_enrichment: { enabled: false, ollama_model: null },
             result: null,
-            wizard_url: 'http://vscorer.local/wizard',
+            wizard_url: '/api/vscorer/wizard',
             wizard_context: {
                 validation: { summary: { errors: 0, warnings: 1 } },
                 threat_model: {
@@ -476,7 +477,7 @@ describe('VScorer.vue', () => {
             analyzed_versions: ['1.10.0'],
             llm_enrichment: { enabled: false, ollama_model: null },
             result: null,
-            wizard_url: 'http://vscorer.local/wizard',
+            wizard_url: '/api/vscorer/wizard',
             wizard_context: {
                 validation: {
                     summary: { errors: 0, warnings: 0 },
@@ -504,7 +505,7 @@ describe('VScorer.vue', () => {
             analyzed_versions: ['1.10.0'],
             llm_enrichment: { enabled: false, ollama_model: null },
             result: null,
-            wizard_url: 'http://vscorer.local/wizard',
+            wizard_url: '/api/vscorer/wizard',
             wizard_context: {
                 validation: {
                     summary: { errors: 0, warnings: 0 },
@@ -541,7 +542,7 @@ describe('VScorer.vue', () => {
             analyzed_versions: ['1.10.0'],
             llm_enrichment: { enabled: false, ollama_model: null },
             result: null,
-            wizard_url: 'http://vscorer.local/wizard',
+            wizard_url: '/api/vscorer/wizard',
             wizard_context: {
                 validation: {
                     summary: { errors: 0, warnings: 0 },
@@ -579,7 +580,7 @@ describe('VScorer.vue', () => {
             analyzed_versions: ['1.10.0'],
             llm_enrichment: { enabled: false, ollama_model: null },
             result: null,
-            wizard_url: 'http://vscorer.local/wizard',
+            wizard_url: '/api/vscorer/wizard',
             wizard_context: {
                 validation: { summary: { errors: 0, warnings: 0 } },
                 threat_model: {
@@ -646,6 +647,7 @@ describe('VScorer.vue', () => {
         expect(wrapper.get('[data-testid="vscorer-wizard-editor-issues"]').text()).toContain('1 open / 1 total')
         expect(wrapper.get('[data-testid="vscorer-wizard-rule-types"]').text()).toBe('2')
         expect(wrapper.get('[data-testid="download-prepared-vscorer-threatmodel"]').attributes('href')).toBe('/api/vscorer/sessions/session-prepared/wizard/threatmodel')
+        expect(wrapper.get('[data-testid="open-prepared-vscorer-wizard"]').attributes('href')).toBe('/api/vscorer/wizard')
         expect(wrapper.get('[data-testid="run-vscorer-analysis"]').text()).toContain('Run Prepared VScorer Analysis')
 
         await wrapper.get('[data-testid="validate-vscorer-wizard-inputs"]').trigger('click')

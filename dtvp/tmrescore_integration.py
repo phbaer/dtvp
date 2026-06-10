@@ -167,6 +167,22 @@ class TMRescoreClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_wizard_page(self) -> httpx.Response:
+        return await self.client.get(f"{self.settings.base_url}/wizard")
+
+    async def list_wizard_methods(self) -> httpx.Response:
+        return await self.client.get(f"{self.settings.base_url}/api/v1/wizard/methods")
+
+    async def call_wizard_method(
+        self,
+        method_name: str,
+        payload: Dict[str, Any],
+    ) -> httpx.Response:
+        return await self.client.post(
+            f"{self.settings.base_url}/api/v1/wizard/call/{method_name}",
+            json=payload,
+        )
+
     async def _upload_session_file(
         self,
         session_id: str,

@@ -68,8 +68,12 @@ DTVP exposes VScorer through `/api/vscorer/...` endpoints. The historical `/api/
   - `/project/{project_name}/vscorer` is the preferred DTVP VScorer page.
   - `/project/{project_name}/tmrescore` remains available as a legacy alias.
 
+- `GET /api/vscorer/wizard`
+  - Serves the VScorer browser wizard through DTVP so users do not need direct browser access to the VScorer service network endpoint.
+  - The proxied wizard calls `POST /api/vscorer/api/v1/wizard/call/{method_name}` for service-hosted wizard bridge methods. `/api/tmrescore/wizard` and `/api/tmrescore/api/v1/wizard/call/{method_name}` remain legacy aliases.
+
 - `GET /api/projects/{project_name}/vscorer/context`
-  - Returns project versions, available VScorer scopes, the external wizard URL, and remote LLM-enrichment availability.
+  - Returns project versions, available VScorer scopes, wizard metadata, and remote LLM-enrichment availability.
 
 - `GET /api/projects/{project_name}/vscorer/sbom` and `GET /api/projects/{project_name}/vscorer/sbom/summary`
   - Build/download or summarize the synthetic analysis SBOM for the selected scope before upload.
