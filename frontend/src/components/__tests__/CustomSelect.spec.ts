@@ -40,6 +40,7 @@ describe('CustomSelect', () => {
 
         expect(menu).not.toBeNull()
         expect(menu?.style.position).toBe('fixed')
+        expect(Number(menu?.style.zIndex)).toBeGreaterThan(10000)
         expect(menu?.textContent).toContain('Alpha')
         expect(menu?.textContent).toContain('Beta')
 
