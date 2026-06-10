@@ -9,19 +9,24 @@ import {
     getDependencyChains,
     getChangelog,
     getCacheStatus,
+    getPreparedVScorerThreatModelDownloadUrl,
+    getPreparedVScorerWizardEditor,
     getTMRescoreContext,
     getTMRescoreProjectState,
     getTMRescoreSyntheticSbomDownloadUrl,
     getTMRescoreSyntheticSbomSummary,
+    patchPreparedVScorerWizardEditor,
     prepareTMRescoreAnalysis,
     refreshPreparedVScorerWizardContext,
     resumeTMRescoreAnalysis,
     runPreparedTMRescoreAnalysis,
     runTMRescoreAnalysis,
+    validatePreparedVScorerWizardInputs,
 } from '../api'
 
 const mocks = vi.hoisted(() => ({
     get: vi.fn(),
+    patch: vi.fn(),
     post: vi.fn(),
 }))
 
@@ -30,6 +35,7 @@ vi.mock('axios', () => {
         default: {
             create: vi.fn(() => ({
                 get: mocks.get,
+                patch: mocks.patch,
                 post: mocks.post,
                 interceptors: {
                     request: { use: vi.fn(), eject: vi.fn() },
@@ -232,13 +238,13 @@ describe('api.ts', () => {
         vi.useRealTimers()
     })
 
-    it('getTMRescoreContext calls the project context endpoint', async () => {
+    it('getTMRescoreContext calls the VScorer project context endpoint', async () => {
         const mockData = { enabled: true, latest_version: '1.10.0' }
         mocks.get.mockResolvedValue({ data: mockData })
 
         const result = await getTMRescoreContext('Example App')
 
-        expect(mocks.get).toHaveBeenCalledWith('/projects/Example%20App/tmrescore/context')
+        expect(mocks.get).toHaveBeenCalledWith('/projects/Example%20App/vscorer/context')
         expect(result).toEqual(mockData)
     })
 
@@ -258,8 +264,8 @@ describe('api.ts', () => {
             sbom_vulnerability_count: 2,
             strategy_note: 'Merged multi-version analysis keeps findings attached.',
             download_urls: {
-                json: '/api/tmrescore/sessions/session-1/results/json',
-                vex: '/api/tmrescore/sessions/session-1/results/vex',
+                json: '/api/vscorer/sessions/session-1/results/json',
+                vex: '/api/vscorer/sessions/session-1/results/vex',
             },
         } })
 
@@ -272,7 +278,7 @@ describe('api.ts', () => {
         })
 
         expect(mocks.post).toHaveBeenCalledTimes(1)
-        expect(mocks.post.mock.calls[0]?.[0]).toBe('/projects/Example%20App/tmrescore/analyze')
+        expect(mocks.post.mock.calls[0]?.[0]).toBe('/projects/Example%20App/vscorer/analyze')
         const formData = mocks.post.mock.calls[0]?.[1] as FormData
         expect(formData).toBeInstanceOf(FormData)
         expect(formData.get('enrich')).toBe('true')
@@ -309,7 +315,7 @@ describe('api.ts', () => {
         })
 
         expect(mocks.post).toHaveBeenCalledTimes(1)
-        expect(mocks.post.mock.calls[0]?.[0]).toBe('/projects/Example%20App/tmrescore/import')
+        expect(mocks.post.mock.calls[0]?.[0]).toBe('/projects/Example%20App/vscorer/import')
         const formData = mocks.post.mock.calls[0]?.[1] as FormData
         expect(formData).toBeInstanceOf(FormData)
         expect(formData.get('scope')).toBe('merged_versions')
@@ -353,8 +359,8 @@ describe('api.ts', () => {
                 sbom_vulnerability_count: 2,
                 strategy_note: 'Merged multi-version analysis keeps findings attached.',
                 download_urls: {
-                    json: '/api/tmrescore/sessions/session-1/results/json',
-                    vex: '/api/tmrescore/sessions/session-1/results/vex',
+                    json: '/api/vscorer/sessions/session-1/results/json',
+                    vex: '/api/vscorer/sessions/session-1/results/vex',
                 },
             } })
 
@@ -370,12 +376,12 @@ describe('api.ts', () => {
         await vi.advanceTimersByTimeAsync(1100)
         const result = await promise
 
-        expect(mocks.post.mock.calls[0]?.[0]).toBe('/tmrescore/sessions/session-1/analyze')
+        expect(mocks.post.mock.calls[0]?.[0]).toBe('/vscorer/sessions/session-1/analyze')
         const formData = mocks.post.mock.calls[0]?.[1] as FormData
         expect(formData.get('enrich')).toBe('true')
         expect(formData.get('ollama_model')).toBe('llama3.1:8b')
-        expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/progress')
-        expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/results')
+        expect(mocks.get).toHaveBeenCalledWith('/vscorer/sessions/session-1/progress')
+        expect(mocks.get).toHaveBeenCalledWith('/vscorer/sessions/session-1/results')
         expect(onAnalysisProgress).toHaveBeenCalledTimes(2)
         expect(result.session_id).toBe('session-1')
         vi.useRealTimers()
@@ -400,15 +406,76 @@ describe('api.ts', () => {
 
         const result = await refreshPreparedVScorerWizardContext('session-1')
 
-        expect(mocks.post).toHaveBeenCalledWith('/tmrescore/sessions/session-1/wizard/refresh')
+        expect(mocks.post).toHaveBeenCalledWith('/vscorer/sessions/session-1/wizard/refresh')
         expect(result.status).toBe('prepared')
         expect(result.wizard_context?.validation?.summary?.warnings).toBe(0)
+    })
+
+    it('uses VScorer wizard validator and editor endpoints', async () => {
+        mocks.post.mockResolvedValueOnce({ data: {
+            session_id: 'session-1',
+            status: 'prepared',
+            progress: 28,
+            message: 'Validated VScorer wizard inputs.',
+            scope: 'merged_versions',
+            latest_version: '1.0.0',
+            analyzed_versions: ['1.0.0'],
+            wizard_context: {
+                validation: {
+                    summary: { errors: 0, warnings: 0 },
+                    reports: [{ artefact: 'threat_model', grade: 'A' }],
+                },
+            },
+        } })
+        mocks.get.mockResolvedValueOnce({ data: {
+            session_id: 'session-1',
+            status: 'prepared',
+            progress: 28,
+            message: 'Loaded VScorer threat-model editor state.',
+            scope: 'merged_versions',
+            latest_version: '1.0.0',
+            analyzed_versions: ['1.0.0'],
+            wizard_context: {
+                editor: { issues: [{ issue_id: 'mock-missing-auth' }] },
+            },
+        } })
+        mocks.patch.mockResolvedValueOnce({ data: {
+            session_id: 'session-1',
+            status: 'prepared',
+            progress: 30,
+            message: 'Updated VScorer threat-model editor state.',
+            scope: 'merged_versions',
+            latest_version: '1.0.0',
+            analyzed_versions: ['1.0.0'],
+            wizard_context: {
+                editor: { issues: [{ issue_id: 'mock-missing-auth', kept: true }] },
+            },
+        } })
+
+        const validated = await validatePreparedVScorerWizardInputs('session-1')
+        const editor = await getPreparedVScorerWizardEditor('session-1')
+        const patched = await patchPreparedVScorerWizardEditor('session-1', [{
+            issue_id: 'mock-missing-auth',
+            action: 'keep',
+            note: 'Kept from test.',
+        }])
+        const downloadUrl = getPreparedVScorerThreatModelDownloadUrl('session-1')
+
+        expect(mocks.post).toHaveBeenCalledWith('/vscorer/sessions/session-1/wizard/validate')
+        expect(mocks.get).toHaveBeenCalledWith('/vscorer/sessions/session-1/wizard/editor')
+        expect(mocks.patch).toHaveBeenCalledWith('/vscorer/sessions/session-1/wizard/editor', {
+            patches: [{ issue_id: 'mock-missing-auth', action: 'keep', note: 'Kept from test.' }],
+        })
+        expect(downloadUrl).toContain('/api/vscorer/sessions/session-1/wizard/threatmodel')
+        expect(validated.wizard_context?.validation?.reports?.[0]?.grade).toBe('A')
+        expect(editor.wizard_context?.editor?.issues?.[0]?.issue_id).toBe('mock-missing-auth')
+        expect(patched.wizard_context?.editor?.issues?.[0]?.kept).toBe(true)
     })
 
     it('getTMRescoreSyntheticSbomDownloadUrl builds an API download URL', () => {
         const url = getTMRescoreSyntheticSbomDownloadUrl('Example App', 'merged_versions')
 
-        expect(url).toContain('/api/projects/Example%20App/tmrescore/sbom?scope=merged_versions')
+        expect(url).toContain('/api/projects/Example%20App/vscorer/sbom?scope=merged_versions')
     })
 
     it('getTMRescoreSyntheticSbomSummary fetches preflight SBOM counts', async () => {
@@ -423,7 +490,7 @@ describe('api.ts', () => {
 
         const result = await getTMRescoreSyntheticSbomSummary('Example App', 'merged_versions')
 
-        expect(mocks.get).toHaveBeenCalledWith('/projects/Example%20App/tmrescore/sbom/summary', {
+        expect(mocks.get).toHaveBeenCalledWith('/projects/Example%20App/vscorer/sbom/summary', {
             params: { scope: 'merged_versions' },
         })
         expect(result.component_count).toBe(5)
@@ -446,7 +513,7 @@ describe('api.ts', () => {
 
         const result = await getTMRescoreProjectState('Example App')
 
-        expect(mocks.get).toHaveBeenCalledWith('/projects/Example%20App/tmrescore/state')
+        expect(mocks.get).toHaveBeenCalledWith('/projects/Example%20App/vscorer/state')
         expect(result.session_id).toBe('session-1')
         expect(result.progress).toBe(64)
     })
@@ -467,8 +534,8 @@ describe('api.ts', () => {
             sbom_vulnerability_count: 2,
             strategy_note: 'Merged multi-version analysis keeps findings attached.',
             download_urls: {
-                json: '/api/tmrescore/sessions/session-1/results/json',
-                vex: '/api/tmrescore/sessions/session-1/results/vex',
+                json: '/api/vscorer/sessions/session-1/results/json',
+                vex: '/api/vscorer/sessions/session-1/results/vex',
             },
         } })
 
@@ -487,7 +554,7 @@ describe('api.ts', () => {
         }, { onAnalysisProgress })
 
         expect(onAnalysisProgress).toHaveBeenCalledTimes(1)
-        expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/results')
+        expect(mocks.get).toHaveBeenCalledWith('/vscorer/sessions/session-1/results')
         expect(result.status).toBe('completed')
     })
 
@@ -524,8 +591,8 @@ describe('api.ts', () => {
                 sbom_vulnerability_count: 2,
                 strategy_note: 'Merged multi-version analysis keeps findings attached.',
                 download_urls: {
-                    json: '/api/tmrescore/sessions/session-1/results/json',
-                    vex: '/api/tmrescore/sessions/session-1/results/vex',
+                    json: '/api/vscorer/sessions/session-1/results/json',
+                    vex: '/api/vscorer/sessions/session-1/results/vex',
                 },
             } })
 
@@ -541,8 +608,8 @@ describe('api.ts', () => {
         await vi.advanceTimersByTimeAsync(1100)
         const result = await promise
 
-        expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/progress')
-        expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/results')
+        expect(mocks.get).toHaveBeenCalledWith('/vscorer/sessions/session-1/progress')
+        expect(mocks.get).toHaveBeenCalledWith('/vscorer/sessions/session-1/results')
         expect(onAnalysisProgress).toHaveBeenCalledTimes(2)
         expect(result.session_id).toBe('session-1')
         expect(result.status).toBe('completed')

@@ -1,24 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
-import TMRescore from '../TMRescore.vue'
+import VScorer from '../VScorer.vue'
 import {
-    getTMRescoreContext,
-    getTMRescoreProjectState,
-    getTMRescoreSyntheticSbomDownloadUrl,
-    getTMRescoreSyntheticSbomSummary,
-    prepareTMRescoreAnalysis,
+    getPreparedVScorerWizardEditor,
+    getVScorerContext,
+    getVScorerProjectState,
+    getVScorerSyntheticSbomDownloadUrl,
+    getVScorerSyntheticSbomSummary,
+    patchPreparedVScorerWizardEditor,
+    prepareVScorerAnalysis,
     refreshPreparedVScorerWizardContext,
-    resumeTMRescoreAnalysis,
-    runPreparedTMRescoreAnalysis,
-    runTMRescoreAnalysis,
+    resumeVScorerAnalysis,
+    runPreparedVScorerAnalysis,
+    runVScorerAnalysis,
+    validatePreparedVScorerWizardInputs,
 } from '../../lib/api'
 import { mountWithRouter } from './routerTestUtils'
 
 vi.mock('../../lib/api', () => ({
-    getTMRescoreContext: vi.fn(),
-    getTMRescoreProjectState: vi.fn(),
-    getTMRescoreSyntheticSbomDownloadUrl: vi.fn((projectName: string, scope: string) => `/api/projects/${projectName}/tmrescore/sbom?scope=${scope}`),
-    getTMRescoreSyntheticSbomSummary: vi.fn(async (_projectName: string, scope: string) => ({
+    getPreparedVScorerThreatModelDownloadUrl: vi.fn((sessionId: string) => `/api/vscorer/sessions/${sessionId}/wizard/threatmodel`),
+    getPreparedVScorerWizardEditor: vi.fn(),
+    getVScorerContext: vi.fn(),
+    getVScorerProjectState: vi.fn(),
+    getVScorerSyntheticSbomDownloadUrl: vi.fn((projectName: string, scope: string) => `/api/projects/${projectName}/vscorer/sbom?scope=${scope}`),
+    getVScorerSyntheticSbomSummary: vi.fn(async (_projectName: string, scope: string) => ({
         scope,
         latest_version: '1.10.0',
         analyzed_versions: scope === 'merged_versions' ? ['1.9.0', '1.10.0'] : ['1.10.0'],
@@ -28,24 +33,26 @@ vi.mock('../../lib/api', () => ({
             ? 'Merged multi-version analysis keeps historical vulnerabilities attached to the versioned components they came from.'
             : 'Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases.',
     })),
-    prepareTMRescoreAnalysis: vi.fn(),
+    patchPreparedVScorerWizardEditor: vi.fn(),
+    prepareVScorerAnalysis: vi.fn(),
     refreshPreparedVScorerWizardContext: vi.fn(),
-    resumeTMRescoreAnalysis: vi.fn(),
-    runPreparedTMRescoreAnalysis: vi.fn(),
-    runTMRescoreAnalysis: vi.fn(),
+    resumeVScorerAnalysis: vi.fn(),
+    runPreparedVScorerAnalysis: vi.fn(),
+    runVScorerAnalysis: vi.fn(),
+    validatePreparedVScorerWizardInputs: vi.fn(),
 }))
 
-describe('TMRescore.vue', () => {
-    const tmRescoreRoutes = [
+describe('VScorer.vue', () => {
+    const vscorerRoutes = [
         { path: '/project/:name', component: { template: '<div />' } },
-        { path: '/project/:name/vscorer', component: TMRescore },
-        { path: '/project/:name/tmrescore', component: TMRescore },
+        { path: '/project/:name/vscorer', component: VScorer },
+        { path: '/project/:name/tmrescore', component: VScorer },
     ]
 
     beforeEach(() => {
         vi.clearAllMocks()
         window.sessionStorage.clear()
-        vi.mocked(getTMRescoreProjectState).mockRejectedValue({ response: { status: 404 } })
+        vi.mocked(getVScorerProjectState).mockRejectedValue({ response: { status: 404 } })
         vi.spyOn(Date, 'now').mockReturnValue(new Date('2024-03-30T12:10:00Z').getTime())
     })
 
@@ -60,9 +67,9 @@ describe('TMRescore.vue', () => {
     }
 
     it('loads context and renders recommended scope', async () => {
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
-            wizard_url: 'http://tmrescore.local/wizard',
+            wizard_url: 'http://vscorer.local/wizard',
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
             versions: ['1.9.0', '1.10.0'],
@@ -81,22 +88,22 @@ describe('TMRescore.vue', () => {
             },
         } as any)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
+        const { wrapper } = await mountWithRouter(VScorer, {
             initialPath: '/project/ExampleApp/vscorer',
-            routes: tmRescoreRoutes,
+            routes: vscorerRoutes,
         })
 
-        expect(getTMRescoreContext).toHaveBeenCalledWith('ExampleApp')
+        expect(getVScorerContext).toHaveBeenCalledWith('ExampleApp')
         expect(wrapper.text()).toContain('Merged Multi-Version SBOM')
         expect(wrapper.text()).toContain('Recommended')
         expect(wrapper.text()).toContain('1.10.0')
         expect(wrapper.text()).toContain('LLM enrichment')
         expect(wrapper.get('[data-testid="llm-enrichment-status"]').text()).toBe('Available')
         expect((wrapper.get('[data-testid="ollama-model-input"]').element as HTMLInputElement).value).toBe('qwen2.5:14b')
-        expect(getTMRescoreSyntheticSbomDownloadUrl).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
-        expect(getTMRescoreSyntheticSbomSummary).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
-        expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toBe('/api/projects/ExampleApp/tmrescore/sbom?scope=merged_versions')
-        expect(wrapper.get('[data-testid="open-vscorer-wizard"]').attributes('href')).toBe('http://tmrescore.local/wizard')
+        expect(getVScorerSyntheticSbomDownloadUrl).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
+        expect(getVScorerSyntheticSbomSummary).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
+        expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toBe('/api/projects/ExampleApp/vscorer/sbom?scope=merged_versions')
+        expect(wrapper.get('[data-testid="open-vscorer-wizard"]').attributes('href')).toBe('http://vscorer.local/wizard')
         expect(wrapper.get('[data-testid="open-vscorer-wizard"]').attributes('target')).toBe('_blank')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('6')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('4')
@@ -104,7 +111,7 @@ describe('TMRescore.vue', () => {
     })
 
     it('refreshes the synthetic SBOM summary when the scope changes', async () => {
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
@@ -124,24 +131,24 @@ describe('TMRescore.vue', () => {
             },
         } as any)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
         await flushPromises()
 
         await wrapper.get('[data-testid="scope-latest_only"]').trigger('click')
         await flushPromises()
 
-        expect(getTMRescoreSyntheticSbomSummary).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
-        expect(getTMRescoreSyntheticSbomDownloadUrl).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
+        expect(getVScorerSyntheticSbomSummary).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
+        expect(getVScorerSyntheticSbomDownloadUrl).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('3')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('2')
     })
 
     it('restores a cached VScorer session after page reload', async () => {
         const nowSeconds = Math.floor(Date.now() / 1000)
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
@@ -160,7 +167,7 @@ describe('TMRescore.vue', () => {
                 warning: null,
             },
         } as any)
-        vi.mocked(getTMRescoreProjectState).mockResolvedValue({
+        vi.mocked(getVScorerProjectState).mockResolvedValue({
             session_id: 'session-1',
             status: 'running',
             progress: 64,
@@ -178,7 +185,7 @@ describe('TMRescore.vue', () => {
             completed_at: null,
             result: null,
         } as any)
-        vi.mocked(resumeTMRescoreAnalysis).mockResolvedValue({
+        vi.mocked(resumeVScorerAnalysis).mockResolvedValue({
             session_id: 'session-1',
             status: 'completed',
             total_cves: 2,
@@ -193,25 +200,25 @@ describe('TMRescore.vue', () => {
             sbom_vulnerability_count: 2,
             strategy_note: 'Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases.',
             download_urls: {
-                json: '/api/tmrescore/sessions/session-1/results/json',
-                vex: '/api/tmrescore/sessions/session-1/results/vex',
+                json: '/api/vscorer/sessions/session-1/results/json',
+                vex: '/api/vscorer/sessions/session-1/results/vex',
             },
             outputs: {},
         } as any)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
         await flushPromises()
 
-        expect(getTMRescoreProjectState).toHaveBeenCalledWith('ExampleApp')
-        expect(resumeTMRescoreAnalysis).toHaveBeenCalledWith(
+        expect(getVScorerProjectState).toHaveBeenCalledWith('ExampleApp')
+        expect(resumeVScorerAnalysis).toHaveBeenCalledWith(
             'session-1',
             expect.objectContaining({ scope: 'latest_only', status: 'running' }),
             expect.objectContaining({ onAnalysisProgress: expect.any(Function) }),
         )
-        expect(getTMRescoreSyntheticSbomDownloadUrl).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
+        expect(getVScorerSyntheticSbomDownloadUrl).toHaveBeenLastCalledWith('ExampleApp', 'latest_only')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('3')
         expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('Latest Version')
         expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('1.10.0')
@@ -220,7 +227,7 @@ describe('TMRescore.vue', () => {
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
 
-        vi.mocked(getTMRescoreProjectState).mockResolvedValueOnce({
+        vi.mocked(getVScorerProjectState).mockResolvedValueOnce({
             session_id: 'session-1',
             status: 'completed',
             progress: 100,
@@ -251,8 +258,8 @@ describe('TMRescore.vue', () => {
                 sbom_vulnerability_count: 2,
                 strategy_note: 'Latest-only analysis is limited to the newest version and does not account for vulnerabilities seen only in older releases.',
                 download_urls: {
-                    json: '/api/tmrescore/sessions/session-1/results/json',
-                    vex: '/api/tmrescore/sessions/session-1/results/vex',
+                    json: '/api/vscorer/sessions/session-1/results/json',
+                    vex: '/api/vscorer/sessions/session-1/results/vex',
                 },
                 outputs: {},
             },
@@ -261,20 +268,20 @@ describe('TMRescore.vue', () => {
         await wrapper.get('[data-testid="refresh-cached-analysis-state"]').trigger('click')
         await flushPromises()
 
-        expect(getTMRescoreProjectState).toHaveBeenCalledTimes(2)
+        expect(getVScorerProjectState).toHaveBeenCalledTimes(2)
         expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('0 seconds ago')
     })
 
     it('shows a scrolling progress log while loading context', async () => {
         const pendingContext = deferred<any>()
-        vi.mocked(getTMRescoreContext).mockReturnValue(pendingContext.promise)
+        vi.mocked(getVScorerContext).mockReturnValue(pendingContext.promise)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
 
-        const log = wrapper.get('[data-testid="tmrescore-progress-log"]')
+        const log = wrapper.get('[data-testid="vscorer-progress-log"]')
         expect(log.text()).toContain('Opening threat-model analysis page...')
         expect(log.text()).toContain('Loading project versions, VScorer settings, and enrichment options...')
 
@@ -305,14 +312,14 @@ describe('TMRescore.vue', () => {
 
     it('shows a scrolling progress log while loading context', async () => {
         const pendingContext = deferred<any>()
-        vi.mocked(getTMRescoreContext).mockReturnValue(pendingContext.promise)
+        vi.mocked(getVScorerContext).mockReturnValue(pendingContext.promise)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
 
-        const log = wrapper.get('[data-testid="tmrescore-progress-log"]')
+        const log = wrapper.get('[data-testid="vscorer-progress-log"]')
         expect(log.text()).toContain('Opening threat-model analysis page...')
         expect(log.text()).toContain('Loading project versions, VScorer settings, and enrichment options...')
 
@@ -340,7 +347,7 @@ describe('TMRescore.vue', () => {
     })
 
     it('submits analysis once a threat model file is selected', async () => {
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
@@ -358,7 +365,7 @@ describe('TMRescore.vue', () => {
                 warning: null,
             },
         } as any)
-        vi.mocked(runTMRescoreAnalysis).mockResolvedValue({
+        vi.mocked(runVScorerAnalysis).mockResolvedValue({
             session_id: 'session-1',
             status: 'completed',
             total_cves: 2,
@@ -373,15 +380,15 @@ describe('TMRescore.vue', () => {
             sbom_vulnerability_count: 2,
             strategy_note: 'Merged multi-version analysis keeps findings attached.',
             download_urls: {
-                json: '/api/tmrescore/sessions/session-1/results/json',
-                vex: '/api/tmrescore/sessions/session-1/results/vex',
+                json: '/api/vscorer/sessions/session-1/results/json',
+                vex: '/api/vscorer/sessions/session-1/results/vex',
             },
             outputs: {},
         } as any)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
 
         const input = wrapper.get('[data-testid="threatmodel-input"]')
@@ -397,8 +404,8 @@ describe('TMRescore.vue', () => {
         await wrapper.get('form').trigger('submit.prevent')
         await flushPromises()
 
-        expect(runTMRescoreAnalysis).toHaveBeenCalledOnce()
-        expect(runTMRescoreAnalysis).toHaveBeenCalledWith('ExampleApp', expect.objectContaining({
+        expect(runVScorerAnalysis).toHaveBeenCalledOnce()
+        expect(runVScorerAnalysis).toHaveBeenCalledWith('ExampleApp', expect.objectContaining({
             scope: 'merged_versions',
             threatmodel: file,
             enrich: true,
@@ -408,14 +415,15 @@ describe('TMRescore.vue', () => {
         }))
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
+        expect(window.sessionStorage.getItem('dtvp:vscorer-refresh:ExampleApp')).toBeTruthy()
         expect(window.sessionStorage.getItem('dtvp:tmrescore-refresh:ExampleApp')).toBeTruthy()
         expect(wrapper.getComponent({ name: 'RouterLink' }).props('to')).toBe('/project/ExampleApp')
     })
 
     it('prepares a VScorer wizard session and runs that prepared session', async () => {
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
-            wizard_url: 'http://tmrescore.local/wizard',
+            wizard_url: 'http://vscorer.local/wizard',
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
             versions: ['1.10.0'],
@@ -432,7 +440,7 @@ describe('TMRescore.vue', () => {
                 warning: null,
             },
         } as any)
-        vi.mocked(prepareTMRescoreAnalysis).mockResolvedValue({
+        vi.mocked(prepareVScorerAnalysis).mockResolvedValue({
             session_id: 'session-prepared',
             status: 'prepared',
             progress: 25,
@@ -443,14 +451,117 @@ describe('TMRescore.vue', () => {
             analyzed_versions: ['1.10.0'],
             llm_enrichment: { enabled: false, ollama_model: null },
             result: null,
-            wizard_url: 'http://tmrescore.local/wizard',
+            wizard_url: 'http://vscorer.local/wizard',
             wizard_context: {
                 validation: { summary: { errors: 0, warnings: 1 } },
                 threat_model: {
                     elements: [{ guid: 'TM-1', name: 'API' }, { guid: 'TM-2', name: 'DB' }],
                     boundaries: [{ guid: 'B-1', name: 'Internet' }],
                 },
-                editor: { issues: [{ issue_id: 'issue-1' }] },
+                editor: { issues: [{ issue_id: 'issue-1', title: 'Missing authentication', editable: true }] },
+            },
+            wizard_catalogs: {
+                rescoring_rule_types: [{ id: 'attack_vector' }, { id: 'privileges_required' }],
+                attack_mitigations: [{ id: 'M1032' }],
+            },
+        } as any)
+        vi.mocked(validatePreparedVScorerWizardInputs).mockResolvedValue({
+            session_id: 'session-prepared',
+            status: 'prepared',
+            progress: 28,
+            message: 'Validated VScorer wizard inputs.',
+            log: ['Created VScorer session.', 'Validated VScorer wizard inputs.'],
+            scope: 'merged_versions',
+            latest_version: '1.10.0',
+            analyzed_versions: ['1.10.0'],
+            llm_enrichment: { enabled: false, ollama_model: null },
+            result: null,
+            wizard_url: 'http://vscorer.local/wizard',
+            wizard_context: {
+                validation: {
+                    summary: { errors: 0, warnings: 0 },
+                    reports: [{ artefact: 'threat_model', grade: 'A', ok: true, summary: { errors: 0, warnings: 0 } }],
+                },
+                threat_model: {
+                    elements: [{ guid: 'TM-1', name: 'API' }, { guid: 'TM-2', name: 'DB' }],
+                    boundaries: [{ guid: 'B-1', name: 'Internet' }],
+                },
+                editor: { issues: [{ issue_id: 'issue-1', title: 'Missing authentication', editable: true }] },
+            },
+            wizard_catalogs: {
+                rescoring_rule_types: [{ id: 'attack_vector' }, { id: 'privileges_required' }],
+                attack_mitigations: [{ id: 'M1032' }],
+            },
+        } as any)
+        vi.mocked(getPreparedVScorerWizardEditor).mockResolvedValue({
+            session_id: 'session-prepared',
+            status: 'prepared',
+            progress: 28,
+            message: 'Loaded VScorer threat-model editor state.',
+            log: ['Created VScorer session.', 'Loaded VScorer threat-model editor state.'],
+            scope: 'merged_versions',
+            latest_version: '1.10.0',
+            analyzed_versions: ['1.10.0'],
+            llm_enrichment: { enabled: false, ollama_model: null },
+            result: null,
+            wizard_url: 'http://vscorer.local/wizard',
+            wizard_context: {
+                validation: {
+                    summary: { errors: 0, warnings: 0 },
+                    reports: [{ artefact: 'threat_model', grade: 'A', ok: true, summary: { errors: 0, warnings: 0 } }],
+                },
+                threat_model: {
+                    elements: [{ guid: 'TM-1', name: 'API' }, { guid: 'TM-2', name: 'DB' }],
+                    boundaries: [{ guid: 'B-1', name: 'Internet' }],
+                },
+                threat_model_editor: {
+                    issues: [{
+                        issue_id: 'issue-1',
+                        title: 'Missing authentication',
+                        message: 'Set or keep this issue.',
+                        target_type: 'element',
+                        target_id: 'TM-1',
+                        editable: true,
+                    }],
+                },
+            },
+            wizard_catalogs: {
+                rescoring_rule_types: [{ id: 'attack_vector' }, { id: 'privileges_required' }],
+                attack_mitigations: [{ id: 'M1032' }],
+            },
+        } as any)
+        vi.mocked(patchPreparedVScorerWizardEditor).mockResolvedValue({
+            session_id: 'session-prepared',
+            status: 'prepared',
+            progress: 30,
+            message: 'Updated VScorer threat-model editor state.',
+            log: ['Created VScorer session.', 'Updated VScorer threat-model editor state.'],
+            scope: 'merged_versions',
+            latest_version: '1.10.0',
+            analyzed_versions: ['1.10.0'],
+            llm_enrichment: { enabled: false, ollama_model: null },
+            result: null,
+            wizard_url: 'http://vscorer.local/wizard',
+            wizard_context: {
+                validation: {
+                    summary: { errors: 0, warnings: 0 },
+                    reports: [{ artefact: 'threat_model', grade: 'A', ok: true, summary: { errors: 0, warnings: 0 } }],
+                },
+                threat_model: {
+                    elements: [{ guid: 'TM-1', name: 'API' }, { guid: 'TM-2', name: 'DB' }],
+                    boundaries: [{ guid: 'B-1', name: 'Internet' }],
+                },
+                editor: {
+                    issues: [{
+                        issue_id: 'issue-1',
+                        title: 'Missing authentication',
+                        message: 'Set or keep this issue.',
+                        target_type: 'element',
+                        target_id: 'TM-1',
+                        editable: true,
+                        kept: true,
+                    }],
+                },
             },
             wizard_catalogs: {
                 rescoring_rule_types: [{ id: 'attack_vector' }, { id: 'privileges_required' }],
@@ -468,7 +579,7 @@ describe('TMRescore.vue', () => {
             analyzed_versions: ['1.10.0'],
             llm_enrichment: { enabled: false, ollama_model: null },
             result: null,
-            wizard_url: 'http://tmrescore.local/wizard',
+            wizard_url: 'http://vscorer.local/wizard',
             wizard_context: {
                 validation: { summary: { errors: 0, warnings: 0 } },
                 threat_model: {
@@ -486,7 +597,7 @@ describe('TMRescore.vue', () => {
                 attack_mitigations: [{ id: 'M1032' }],
             },
         } as any)
-        vi.mocked(runPreparedTMRescoreAnalysis).mockResolvedValue({
+        vi.mocked(runPreparedVScorerAnalysis).mockResolvedValue({
             session_id: 'session-prepared',
             status: 'completed',
             total_cves: 2,
@@ -501,15 +612,15 @@ describe('TMRescore.vue', () => {
             sbom_vulnerability_count: 2,
             strategy_note: 'Merged multi-version analysis keeps findings attached.',
             download_urls: {
-                json: '/api/tmrescore/sessions/session-prepared/results/json',
-                vex: '/api/tmrescore/sessions/session-prepared/results/vex',
+                json: '/api/vscorer/sessions/session-prepared/results/json',
+                vex: '/api/vscorer/sessions/session-prepared/results/vex',
             },
             outputs: {},
         } as any)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
         await flushPromises()
 
@@ -523,7 +634,7 @@ describe('TMRescore.vue', () => {
         await wrapper.get('[data-testid="prepare-vscorer-wizard"]').trigger('click')
         await flushPromises()
 
-        expect(prepareTMRescoreAnalysis).toHaveBeenCalledWith('ExampleApp', expect.objectContaining({
+        expect(prepareVScorerAnalysis).toHaveBeenCalledWith('ExampleApp', expect.objectContaining({
             scope: 'merged_versions',
             threatmodel: file,
         }), expect.objectContaining({
@@ -532,8 +643,35 @@ describe('TMRescore.vue', () => {
         expect(wrapper.get('[data-testid="vscorer-wizard-summary"]').text()).toContain('session-prepared')
         expect(wrapper.get('[data-testid="vscorer-wizard-validation"]').text()).toContain('0 errors / 1 warnings')
         expect(wrapper.get('[data-testid="vscorer-wizard-threatmodel"]').text()).toContain('2 elements / 1 boundaries')
+        expect(wrapper.get('[data-testid="vscorer-wizard-editor-issues"]').text()).toContain('1 open / 1 total')
         expect(wrapper.get('[data-testid="vscorer-wizard-rule-types"]').text()).toBe('2')
-        expect(wrapper.get('[data-testid="run-tmrescore-analysis"]').text()).toContain('Run Prepared VScorer Analysis')
+        expect(wrapper.get('[data-testid="download-prepared-vscorer-threatmodel"]').attributes('href')).toBe('/api/vscorer/sessions/session-prepared/wizard/threatmodel')
+        expect(wrapper.get('[data-testid="run-vscorer-analysis"]').text()).toContain('Run Prepared VScorer Analysis')
+
+        await wrapper.get('[data-testid="validate-vscorer-wizard-inputs"]').trigger('click')
+        await flushPromises()
+
+        expect(validatePreparedVScorerWizardInputs).toHaveBeenCalledWith('session-prepared')
+        expect(wrapper.get('[data-testid="vscorer-wizard-validation"]').text()).toContain('0 errors / 0 warnings')
+        expect(wrapper.get('[data-testid="vscorer-wizard-validation-reports"]').text()).toContain('threat_model')
+        expect(wrapper.get('[data-testid="vscorer-wizard-validation-reports"]').text()).toContain('A')
+
+        await wrapper.get('[data-testid="load-vscorer-wizard-editor"]').trigger('click')
+        await flushPromises()
+
+        expect(getPreparedVScorerWizardEditor).toHaveBeenCalledWith('session-prepared')
+        expect(wrapper.get('[data-testid="vscorer-wizard-editor-list"]').text()).toContain('Missing authentication')
+        expect(wrapper.get('[data-testid="vscorer-wizard-editor-list"]').text()).toContain('TM-1')
+
+        await wrapper.get('[data-testid="keep-vscorer-editor-issue-issue-1"]').trigger('click')
+        await flushPromises()
+
+        expect(patchPreparedVScorerWizardEditor).toHaveBeenCalledWith('session-prepared', [expect.objectContaining({
+            issue_id: 'issue-1',
+            action: 'keep',
+        })])
+        expect(wrapper.get('[data-testid="vscorer-wizard-editor-issues"]').text()).toContain('0 open / 1 total')
+        expect(wrapper.get('[data-testid="vscorer-wizard-editor-list"]').text()).toContain('Kept')
 
         await wrapper.get('[data-testid="refresh-vscorer-wizard-context"]').trigger('click')
         await flushPromises()
@@ -546,20 +684,20 @@ describe('TMRescore.vue', () => {
         await wrapper.get('form').trigger('submit.prevent')
         await flushPromises()
 
-        expect(runPreparedTMRescoreAnalysis).toHaveBeenCalledWith('session-prepared', expect.objectContaining({
+        expect(runPreparedVScorerAnalysis).toHaveBeenCalledWith('session-prepared', expect.objectContaining({
             chainAnalysis: true,
             prioritize: true,
             enrich: false,
         }), expect.objectContaining({
             onAnalysisProgress: expect.any(Function),
         }))
-        expect(runTMRescoreAnalysis).not.toHaveBeenCalled()
+        expect(runVScorerAnalysis).not.toHaveBeenCalled()
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-prepared')
     })
 
     it('shows a scrolling progress log while analysis is running', async () => {
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
@@ -579,11 +717,11 @@ describe('TMRescore.vue', () => {
         } as any)
 
         const pendingAnalysis = deferred<any>()
-        vi.mocked(runTMRescoreAnalysis).mockReturnValue(pendingAnalysis.promise)
+        vi.mocked(runVScorerAnalysis).mockReturnValue(pendingAnalysis.promise)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
         await flushPromises()
 
@@ -597,7 +735,7 @@ describe('TMRescore.vue', () => {
         await wrapper.get('form').trigger('submit.prevent')
         await wrapper.vm.$nextTick()
 
-        const log = wrapper.get('[data-testid="tmrescore-progress-log"]')
+        const log = wrapper.get('[data-testid="vscorer-progress-log"]')
         expect(log.text()).toContain('Preparing VScorer analysis request...')
         expect(log.text()).toContain('Uploading threat model and analysis inputs...')
 
@@ -616,8 +754,8 @@ describe('TMRescore.vue', () => {
             sbom_vulnerability_count: 2,
             strategy_note: 'Merged multi-version analysis keeps findings attached.',
             download_urls: {
-                json: '/api/tmrescore/sessions/session-1/results/json',
-                vex: '/api/tmrescore/sessions/session-1/results/vex',
+                json: '/api/vscorer/sessions/session-1/results/json',
+                vex: '/api/vscorer/sessions/session-1/results/vex',
             },
             outputs: {},
         })
@@ -627,7 +765,7 @@ describe('TMRescore.vue', () => {
     })
 
     it('shows a scrolling progress log while analysis is running', async () => {
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
@@ -647,11 +785,11 @@ describe('TMRescore.vue', () => {
         } as any)
 
         const pendingAnalysis = deferred<any>()
-        vi.mocked(runTMRescoreAnalysis).mockReturnValue(pendingAnalysis.promise)
+        vi.mocked(runVScorerAnalysis).mockReturnValue(pendingAnalysis.promise)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
         await flushPromises()
 
@@ -665,7 +803,7 @@ describe('TMRescore.vue', () => {
         await wrapper.get('form').trigger('submit.prevent')
         await wrapper.vm.$nextTick()
 
-        const log = wrapper.get('[data-testid="tmrescore-progress-log"]')
+        const log = wrapper.get('[data-testid="vscorer-progress-log"]')
         expect(log.text()).toContain('Preparing VScorer analysis request...')
         expect(log.text()).toContain('Uploading threat model and analysis inputs...')
 
@@ -684,8 +822,8 @@ describe('TMRescore.vue', () => {
             sbom_vulnerability_count: 2,
             strategy_note: 'Merged multi-version analysis keeps findings attached.',
             download_urls: {
-                json: '/api/tmrescore/sessions/session-1/results/json',
-                vex: '/api/tmrescore/sessions/session-1/results/vex',
+                json: '/api/vscorer/sessions/session-1/results/json',
+                vex: '/api/vscorer/sessions/session-1/results/vex',
             },
             outputs: {},
         })
@@ -695,7 +833,7 @@ describe('TMRescore.vue', () => {
     })
 
     it('renders unavailable when remote enrichment status cannot be verified', async () => {
-        vi.mocked(getTMRescoreContext).mockResolvedValue({
+        vi.mocked(getVScorerContext).mockResolvedValue({
             enabled: true,
             project_name: 'ExampleApp',
             latest_version: '1.10.0',
@@ -714,9 +852,9 @@ describe('TMRescore.vue', () => {
             },
         } as any)
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
-            routes: tmRescoreRoutes,
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
+            routes: vscorerRoutes,
         })
 
         expect(wrapper.get('[data-testid="llm-enrichment-status"]').text()).toBe('Unavailable')

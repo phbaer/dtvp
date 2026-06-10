@@ -19,11 +19,11 @@ import {
 } from '../lib/api'
 import { getRuntimeConfig } from '../lib/env'
 import type {
-  TMRescoreAnalysisProgress,
-  TMRescoreProjectState,
-  TMRescoreAnalysisResult,
-  TMRescoreContext,
-  TMRescoreSyntheticSbomSummary,
+  VScorerAnalysisProgress,
+  VScorerProjectState,
+  VScorerAnalysisResult,
+  VScorerContext,
+  VScorerSyntheticSbomSummary,
   VScorerThreatModelEditorIssue,
 } from '../types'
 
@@ -32,7 +32,7 @@ const projectName = computed(() => String(route.params.name || ''))
 const realRole = inject<any>('realRole', ref('ANALYST'))
 const isReviewer = computed(() => realRole.value === 'REVIEWER')
 
-const context = ref<TMRescoreContext | null>(null)
+const context = ref<VScorerContext | null>(null)
 const loading = ref(true)
 const error = ref('')
 const progressMessage = ref('Initializing threat-model analysis...')
@@ -55,13 +55,13 @@ const refreshingWizardContext = ref(false)
 const validatingWizardInputs = ref(false)
 const loadingWizardEditor = ref(false)
 const applyingWizardIssueId = ref('')
-const result = ref<TMRescoreAnalysisResult | null>(null)
+const result = ref<VScorerAnalysisResult | null>(null)
 const submitError = ref('')
-const syntheticSbomSummary = ref<TMRescoreSyntheticSbomSummary | null>(null)
+const syntheticSbomSummary = ref<VScorerSyntheticSbomSummary | null>(null)
 const syntheticSbomSummaryLoading = ref(false)
 const syntheticSbomSummaryError = ref('')
 const syntheticSbomSummaryRequestId = ref(0)
-const cachedProjectState = ref<TMRescoreProjectState | null>(null)
+const cachedProjectState = ref<VScorerProjectState | null>(null)
 const refreshingCachedState = ref(false)
 
 const contextPathRaw = getRuntimeConfig('DTVP_CONTEXT_PATH', '')
@@ -146,7 +146,7 @@ const formatRelativeTimestamp = (timestamp?: number | null) => {
   return `${days} day${days === 1 ? '' : 's'} ago`
 }
 
-const updateCachedProjectState = (state: Partial<TMRescoreProjectState | TMRescoreAnalysisProgress>) => {
+const updateCachedProjectState = (state: Partial<VScorerProjectState | VScorerAnalysisProgress>) => {
   if (!state.session_id) return
   const previous = cachedProjectState.value
   cachedProjectState.value = {
@@ -156,10 +156,10 @@ const updateCachedProjectState = (state: Partial<TMRescoreProjectState | TMResco
     message: state.message || previous?.message || '',
     log: state.log || previous?.log || [],
     error: state.error ?? previous?.error ?? null,
-    scope: (state as Partial<TMRescoreProjectState>).scope || previous?.scope || selectedScope.value,
-    latest_version: (state as Partial<TMRescoreProjectState>).latest_version || previous?.latest_version || context.value?.latest_version || '',
-    analyzed_versions: (state as Partial<TMRescoreProjectState>).analyzed_versions || previous?.analyzed_versions || [],
-    llm_enrichment: (state as Partial<TMRescoreProjectState>).llm_enrichment || previous?.llm_enrichment || { enabled: false, ollama_model: null },
+    scope: (state as Partial<VScorerProjectState>).scope || previous?.scope || selectedScope.value,
+    latest_version: (state as Partial<VScorerProjectState>).latest_version || previous?.latest_version || context.value?.latest_version || '',
+    analyzed_versions: (state as Partial<VScorerProjectState>).analyzed_versions || previous?.analyzed_versions || [],
+    llm_enrichment: (state as Partial<VScorerProjectState>).llm_enrichment || previous?.llm_enrichment || { enabled: false, ollama_model: null },
     created_at: state.created_at ?? previous?.created_at ?? null,
     updated_at: state.updated_at ?? previous?.updated_at ?? null,
     completed_at: state.completed_at ?? previous?.completed_at ?? null,
@@ -309,7 +309,7 @@ const handleFileChange = (event: Event, target: 'threatmodel' | 'items' | 'confi
     clearPreparedWizardState()
 }
 
-const applyAnalysisProgress = (progress: TMRescoreAnalysisProgress) => {
+const applyAnalysisProgress = (progress: VScorerAnalysisProgress) => {
   stopProgressTimer()
   clearStagedProgressTimers()
   updateCachedProjectState(progress)
@@ -322,7 +322,7 @@ const applyAnalysisProgress = (progress: TMRescoreAnalysisProgress) => {
   }
 }
 
-const restoreCachedAnalysisState = async (state: TMRescoreProjectState) => {
+const restoreCachedAnalysisState = async (state: VScorerProjectState) => {
   cachedProjectState.value = state
   selectedScope.value = state.scope
   enrich.value = Boolean(state.llm_enrichment?.enabled)
@@ -536,7 +536,7 @@ const loadContext = async () => {
     try {
         context.value = await getVScorerContext(projectName.value)
         selectedScope.value = context.value.recommended_scope
-    let cachedState: TMRescoreProjectState | null = null
+    let cachedState: VScorerProjectState | null = null
     try {
       cachedState = await getVScorerProjectState(projectName.value)
       cachedProjectState.value = cachedState
@@ -714,7 +714,7 @@ watch(selectedScope, () => {
         <div class="h-full rounded-full bg-blue-500 transition-all duration-300" :style="{ width: `${progressValue}%` }"></div>
       </div>
       <div class="mt-2 text-sm text-gray-400">{{ progressValue }}%</div>
-      <div ref="logContainer" data-testid="tmrescore-progress-log" class="mt-4 max-h-48 overflow-y-auto rounded-xl border border-gray-700 bg-black/30 p-3 text-left">
+      <div ref="logContainer" data-testid="vscorer-progress-log" class="mt-4 max-h-48 overflow-y-auto rounded-xl border border-gray-700 bg-black/30 p-3 text-left">
         <div v-for="(entry, index) in progressLog" :key="`${index}-${entry}`" class="py-0.5 font-mono text-xs text-gray-300">
           <span class="select-none text-gray-600">{{ String(index + 1).padStart(2, '0') }}</span>
           {{ entry }}
@@ -738,7 +738,7 @@ watch(selectedScope, () => {
           </div>
 
           <div v-if="!context.enabled" class="rounded-xl border border-amber-700/40 bg-amber-950/30 p-4 text-sm text-amber-100">
-            VScorer is not configured on the backend. Set <span class="font-mono">DTVP_TMRESCORE_URL</span> and reload the app.
+            VScorer is not configured on the backend. Set <span class="font-mono">DTVP_VSCORER_URL</span> and reload the app.
           </div>
 
           <template v-else-if="!isReviewer">
@@ -977,13 +977,44 @@ watch(selectedScope, () => {
                   <button
                     type="button"
                     class="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-400/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-100 transition-colors hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                    :disabled="refreshingWizardContext || preparingWizard || submitting"
+                    :disabled="refreshingWizardContext || validatingWizardInputs || loadingWizardEditor || preparingWizard || submitting"
                     data-testid="refresh-vscorer-wizard-context"
                     @click="refreshWizardContext"
                   >
                     <RefreshCw :size="14" />
                     {{ refreshingWizardContext ? 'Refreshing...' : 'Refresh Context' }}
                   </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    :disabled="validatingWizardInputs || refreshingWizardContext || preparingWizard || submitting"
+                    data-testid="validate-vscorer-wizard-inputs"
+                    @click="validateWizardInputs"
+                  >
+                    <CheckCircle2 :size="14" />
+                    {{ validatingWizardInputs ? 'Validating...' : 'Validate Inputs' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-100 transition-colors hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    :disabled="loadingWizardEditor || refreshingWizardContext || preparingWizard || submitting"
+                    data-testid="load-vscorer-wizard-editor"
+                    @click="loadWizardEditor"
+                  >
+                    <WandSparkles :size="14" />
+                    {{ loadingWizardEditor ? 'Loading...' : 'Load Editor' }}
+                  </button>
+                  <a
+                    v-if="cachedProjectState?.session_id"
+                    :href="preparedThreatModelDownloadUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-500/40 bg-gray-900/60 px-3 py-2 text-xs font-semibold text-gray-100 transition-colors hover:border-gray-400"
+                    data-testid="download-prepared-vscorer-threatmodel"
+                  >
+                    <Download :size="14" />
+                    Download TM7
+                  </a>
                   <a
                     v-if="cachedProjectState?.wizard_url || context.wizard_url"
                     :href="cachedProjectState?.wizard_url || context.wizard_url || '#'"
@@ -1013,7 +1044,7 @@ watch(selectedScope, () => {
                 <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
                   <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Editor Issues</div>
                   <div class="mt-1 text-sm text-blue-50" data-testid="vscorer-wizard-editor-issues">
-                    {{ wizardEditorIssueCount ?? 0 }}
+                    {{ wizardOpenEditorIssueCount }} open / {{ wizardEditorIssueCount }} total
                   </div>
                 </div>
                 <div class="rounded-xl border border-blue-400/15 bg-black/20 px-4 py-3">
@@ -1035,6 +1066,68 @@ watch(selectedScope, () => {
                   </div>
                 </div>
               </div>
+              <div v-if="wizardValidationReports.length > 0" class="mt-4 border-t border-blue-400/15 pt-4" data-testid="vscorer-wizard-validation-reports">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Validation Reports</div>
+                <div class="mt-3 grid gap-2 md:grid-cols-2">
+                  <div
+                    v-for="report in wizardValidationReports"
+                    :key="`${report.artefact || report.file}-${report.file || report.grade}`"
+                    class="rounded-xl border border-blue-400/15 bg-black/20 px-3 py-2"
+                  >
+                    <div class="flex items-center justify-between gap-3 text-sm">
+                      <span class="font-semibold text-blue-50">{{ report.artefact || report.file || 'Input' }}</span>
+                      <span :class="report.ok === false ? 'text-rose-200' : 'text-emerald-200'">
+                        {{ report.grade || (report.ok === false ? 'Failed' : 'OK') }}
+                      </span>
+                    </div>
+                    <div class="mt-1 text-xs text-blue-100/70">
+                      {{ report.summary?.errors ?? 0 }} errors / {{ report.summary?.warnings ?? 0 }} warnings
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="wizardEditorIssueCount > 0" class="mt-4 border-t border-blue-400/15 pt-4" data-testid="vscorer-wizard-editor-list">
+                <div class="text-[10px] font-bold uppercase tracking-widest text-blue-200/60">Threat Model Editor</div>
+                <div class="mt-3 space-y-2">
+                  <div
+                    v-for="(issue, index) in wizardEditorIssues"
+                    :key="issue.issue_id || index"
+                    class="rounded-xl border border-blue-400/15 bg-black/20 px-3 py-3"
+                    :data-testid="`vscorer-editor-issue-${issue.issue_id || index}`"
+                  >
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-sm font-semibold text-blue-50">{{ issue.title || issue.issue_id || 'Editor issue' }}</span>
+                          <span class="rounded-full border border-blue-300/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-100/70">
+                            {{ issue.severity || 'info' }}
+                          </span>
+                          <span v-if="issue.kept" class="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-100">
+                            Kept
+                          </span>
+                        </div>
+                        <div v-if="issue.message" class="mt-1 text-sm text-blue-100/80">
+                          {{ issue.message }}
+                        </div>
+                        <div v-if="issue.target_id" class="mt-1 font-mono text-xs text-blue-100/50">
+                          {{ issue.target_type || 'target' }}: {{ issue.target_id }}
+                        </div>
+                      </div>
+                      <button
+                        v-if="!issue.kept && issue.editable !== false"
+                        type="button"
+                        class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="!!applyingWizardIssueId || submitting || preparingWizard"
+                        :data-testid="`keep-vscorer-editor-issue-${issue.issue_id || index}`"
+                        @click="keepWizardEditorIssue(issue)"
+                      >
+                        <CheckCircle2 :size="14" />
+                        {{ applyingWizardIssueId === issue.issue_id ? 'Keeping...' : 'Keep' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div
@@ -1051,7 +1144,7 @@ watch(selectedScope, () => {
               <div class="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-800">
                 <div class="h-full rounded-full bg-blue-500 transition-all duration-300" :style="{ width: `${progressValue}%` }"></div>
               </div>
-              <div ref="logContainer" data-testid="tmrescore-progress-log" class="mt-4 max-h-52 overflow-y-auto rounded-xl border border-gray-700 bg-black/30 p-3 text-left">
+              <div ref="logContainer" data-testid="vscorer-progress-log" class="mt-4 max-h-52 overflow-y-auto rounded-xl border border-gray-700 bg-black/30 p-3 text-left">
                 <div v-for="(entry, index) in progressLog" :key="`${index}-${entry}`" class="py-0.5 font-mono text-xs text-gray-300">
                   <span class="select-none text-gray-600">{{ String(index + 1).padStart(2, '0') }}</span>
                   {{ entry }}
@@ -1075,7 +1168,7 @@ watch(selectedScope, () => {
                 type="submit"
                 :disabled="submitting || preparingWizard || !context.enabled"
                 class="inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-200 transition-colors hover:bg-blue-600/25 disabled:cursor-not-allowed disabled:opacity-50"
-                data-testid="run-tmrescore-analysis"
+                data-testid="run-vscorer-analysis"
               >
                 <Upload :size="16" />
                 {{ submitting ? 'Running Analysis...' : (preparedVScorerState ? 'Run Prepared VScorer Analysis' : 'Run VScorer Analysis') }}

@@ -12,10 +12,18 @@ class TMRescoreCacheServiceDeps:
 
 
 def get_tmrescore_cache_path() -> str:
-    configured_path = os.getenv("DTVP_TMRESCORE_CACHE_PATH", "").strip()
+    configured_path = (
+        os.getenv("DTVP_VSCORER_CACHE_PATH", "").strip()
+        or os.getenv("DTVP_TMRESCORE_CACHE_PATH", "").strip()
+    )
     if configured_path:
         return configured_path
-    return os.path.join(os.getcwd(), "data", "tmrescore_proposals.json")
+    cache_dir = os.path.join(os.getcwd(), "data")
+    vscorer_cache_path = os.path.join(cache_dir, "vscorer_proposals.json")
+    legacy_cache_path = os.path.join(cache_dir, "tmrescore_proposals.json")
+    if os.path.exists(legacy_cache_path) and not os.path.exists(vscorer_cache_path):
+        return legacy_cache_path
+    return vscorer_cache_path
 
 
 def load_tmrescore_project_cache(

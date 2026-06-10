@@ -163,13 +163,14 @@ describe('vulnListIndex', () => {
     })
 
     it('parses broad smart search terms and typed filter tokens', () => {
-        const parsed = parseVulnSearchQuery('log4j team:platform state:open dep:direct has:tmrescore cvss:mismatch')
+        const parsed = parseVulnSearchQuery('log4j team:platform state:open dep:direct has:vscorer cvss:mismatch')
 
         expect(parsed.textTerms).toEqual(['log4j'])
         expect(parsed.teamTerms).toEqual(['platform'])
         expect(parsed.lifecycleTerms).toEqual(['OPEN'])
         expect(parsed.dependencyTerms).toEqual(['DIRECT'])
         expect(parsed.tmrescoreTerms).toEqual(['WITH_PROPOSAL'])
+        expect(parseVulnSearchQuery('has:tmrescore').tmrescoreTerms).toEqual(['WITH_PROPOSAL'])
         expect(parsed.cvssMismatchOnly).toBe(true)
         expect(parsed.chips.map(chip => chip.label)).toContain('Team: platform')
     })
@@ -222,7 +223,7 @@ describe('vulnListIndex', () => {
         expect(matchesSmartSearch(item, 'log4j')).toBe(true)
         expect(matchesSmartSearch(item, 'id:GHSA-smart')).toBe(true)
         expect(matchesSmartSearch(item, 'component:core team:platform assignee:alice version:2.5')).toBe(true)
-        expect(matchesSmartSearch(item, 'state:open dep:direct has:tmrescore cvss:mismatch')).toBe(true)
+        expect(matchesSmartSearch(item, 'state:open dep:direct has:vscorer cvss:mismatch')).toBe(true)
         expect(matchesSmartSearch(item, 'component:netty')).toBe(false)
     })
 

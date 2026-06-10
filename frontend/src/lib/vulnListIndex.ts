@@ -175,10 +175,10 @@ const dependencyAlias = (value: string): DependencyRelationship | null => {
 
 const parseTmrescoreValue = (value: string): TMRescoreProposalFilter | null => {
     const normalized = upperKey(value)
-    if (['WITH', 'YES', 'TRUE', 'PROPOSAL', 'PROPOSALS', 'TMRESCORE', 'HAS'].includes(normalized)) {
+    if (['WITH', 'YES', 'TRUE', 'PROPOSAL', 'PROPOSALS', 'VSCORER', 'TMRESCORE', 'HAS'].includes(normalized)) {
         return 'WITH_PROPOSAL'
     }
-    if (['WITHOUT', 'NO', 'FALSE', 'NONE', 'NO_PROPOSAL', 'NO_PROPOSALS', 'MISSING'].includes(normalized)) {
+    if (['WITHOUT', 'NO', 'FALSE', 'NONE', 'NO_VSCORER', 'NO_TMRESCORE', 'NO_PROPOSAL', 'NO_PROPOSALS', 'MISSING'].includes(normalized)) {
         return 'WITHOUT_PROPOSAL'
     }
     return null
@@ -267,23 +267,24 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 break
             }
             case 'tm':
+            case 'vscorer':
             case 'tmrescore':
             case 'proposal': {
                 const proposal = parseTmrescoreValue(rawValue)
                 if (proposal) {
                     pushUnique(parsed.tmrescoreTerms, proposal)
-                    addChip('tmrescore', proposal === 'WITH_PROPOSAL' ? 'TM: with proposal' : 'TM: without proposal', proposal)
+                    addChip('tmrescore', proposal === 'WITH_PROPOSAL' ? 'VScorer: with proposal' : 'VScorer: without proposal', proposal)
                 }
                 break
             }
             case 'has': {
                 const normalized = upperKey(rawValue)
-                if (['TMRESCORE', 'PROPOSAL', 'PROPOSALS'].includes(normalized)) {
+                if (['VSCORER', 'TMRESCORE', 'PROPOSAL', 'PROPOSALS'].includes(normalized)) {
                     pushUnique(parsed.tmrescoreTerms, 'WITH_PROPOSAL')
-                    addChip('tmrescore', 'Has: tmrescore', 'WITH_PROPOSAL')
-                } else if (['NO_TMRESCORE', 'NO_PROPOSAL', 'NO_PROPOSALS'].includes(normalized)) {
+                    addChip('tmrescore', 'Has: VScorer proposal', 'WITH_PROPOSAL')
+                } else if (['NO_VSCORER', 'NO_TMRESCORE', 'NO_PROPOSAL', 'NO_PROPOSALS'].includes(normalized)) {
                     pushUnique(parsed.tmrescoreTerms, 'WITHOUT_PROPOSAL')
-                    addChip('tmrescore', 'Has: no tmrescore', 'WITHOUT_PROPOSAL')
+                    addChip('tmrescore', 'Has: no VScorer proposal', 'WITHOUT_PROPOSAL')
                 } else if (['CVSS_MISMATCH', 'MISMATCH'].includes(normalized)) {
                     parsed.cvssMismatchOnly = true
                     addChip('cvss', 'Has: CVSS mismatch', 'mismatch')

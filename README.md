@@ -27,15 +27,15 @@ SBOM
 - Edit team mappings, user roles, and rescore rules from the settings screen.
 - Run against either a live Dependency-Track server or the bundled mock service.
 
-## Threat-Model Rescoring
+## VScorer Threat-Model Rescoring
 
-DTVP can optionally call an external tmrescore service to re-score vulnerabilities against a Microsoft Threat Modeling Tool export.
+DTVP can optionally call an external VScorer service to re-score vulnerabilities against a Microsoft Threat Modeling Tool export.
 
-- Configure the backend with `DTVP_TMRESCORE_URL` to enable the UI entry points.
-- Optionally set `DTVP_TMRESCORE_CACHE_PATH` to control where the latest per-project proposal snapshots are stored. By default DTVP writes them to `data/tmrescore_proposals.json`.
+- Configure the backend with `DTVP_VSCORER_URL` to enable the UI entry points. The historical `DTVP_TMRESCORE_URL` name remains a compatibility fallback.
+- Optionally set `DTVP_VSCORER_CACHE_PATH` to control where the latest per-project proposal snapshots are stored. By default DTVP writes them to `data/vscorer_proposals.json`, while still loading an existing legacy `data/tmrescore_proposals.json` when no VScorer cache file exists.
 - Open a project and use the `Threat Model` action from the dashboard or project view.
 - Upload the current `.tm7` file and optional `items.csv` / analysis config inputs.
-- If an LLM backend is configured for tmrescore, you can enable `LLM enrichment` in the Threat Model UI and optionally choose the model used for threat-justification enrichment.
+- If an LLM backend is configured for VScorer, you can enable `LLM enrichment` in the Threat Model UI and optionally choose the model used for threat-justification enrichment.
 - After a successful run, the latest cached proposal set for that project is available directly inside each reviewer rescoring dialog where the vulnerability ID matches.
 - Returning to the project view after a run triggers an immediate proposal refresh so the rescoring dialog can use the new suggestions without waiting for a backend restart or a manual reload.
 
@@ -81,7 +81,7 @@ cd ..
 This is the simplest way to test the full application locally. It starts:
 
 - `mock-dt` on `http://localhost:8081`
-- `mock-tmrescore` on `http://localhost:8090`
+- `mock-tmrescore` on `http://localhost:8090` as the in-memory Mock VScorer service
 - `dtvp-backend` on `http://localhost:8000`
 - `dtvp-frontend` on `http://localhost:5173`
 
@@ -98,7 +98,7 @@ Then open:
 - Frontend: `http://localhost:5173`
 - Backend API version endpoint: `http://localhost:8000/api/version`
 - Mock Dependency-Track service: `http://localhost:8081`
-- Mock TMRescore service: `http://localhost:8090/ui`
+- Mock VScorer service: `http://localhost:8090/ui`
 
 ### Sign In To The Mock Stack
 
@@ -159,7 +159,7 @@ export DTVP_OIDC_CLIENT_ID=mock_id
 export DTVP_OIDC_CLIENT_SECRET=mock_secret
 export DTVP_OIDC_REDIRECT_URI=http://localhost:5173/auth/callback
 export DTVP_FRONTEND_URL=http://localhost:5173
-export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
+export DTVP_VSCORER_URL=http://127.0.0.1:8090
 export DTVP_VERSION_FETCH_CONCURRENCY=4
 uv run uvicorn dtvp.main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -353,21 +353,14 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_DT_API_URL` | Base URL of the Dependency-Track API | `http://localhost:8081` |
 | `DTVP_DT_API_KEY` | Dependency-Track API key | `change_me` |
 | `DTVP_DT_CACHE_PATH` | Local path for Dependency-Track cache files and pending update queue | `data/dt_cache` |
-| `DTVP_TMRESCORE_URL` | Base URL of the external or mock tmrescore service | unset |
-| `DTVP_TMRESCORE_TIMEOUT_SECONDS` | HTTP timeout for tmrescore API calls before DTVP falls back to polling `/progress` | `180` |
-| `DTVP_TMRESCORE_CACHE_PATH` | Path to the cached per-project tmrescore proposal snapshot file | `data/tmrescore_proposals.json` |
-| `DTVP_TMRESCORE_OLLAMA_MODEL` | Default Ollama model preselected for LLM enrichment in the threat-model UI | `qwen2.5:7b` |
-| `DTVP_TMRESCORE_TASK_TTL_SECONDS` | How long completed or failed tmrescore analysis tasks stay in DTVP memory for `/progress` polling | `3600` |
+| `DTVP_VSCORER_URL` | Base URL of the external or mock VScorer service; `DTVP_TMRESCORE_URL` remains a legacy fallback | unset |
+| `DTVP_VSCORER_TIMEOUT_SECONDS` | HTTP timeout for VScorer API calls before DTVP falls back to polling `/progress`; `DTVP_TMRESCORE_TIMEOUT_SECONDS` remains a legacy fallback | `180` |
+| `DTVP_VSCORER_CACHE_PATH` | Path to the cached per-project VScorer proposal snapshot file; `DTVP_TMRESCORE_CACHE_PATH` remains a legacy fallback | `data/vscorer_proposals.json` |
+| `DTVP_VSCORER_OLLAMA_MODEL` | Default Ollama model preselected for LLM enrichment in the threat-model UI; `DTVP_TMRESCORE_OLLAMA_MODEL` remains a legacy fallback | `qwen2.5:7b` |
+| `DTVP_VSCORER_TASK_TTL_SECONDS` | How long completed or failed VScorer analysis tasks stay in DTVP memory for `/progress` polling; `DTVP_TMRESCORE_TASK_TTL_SECONDS` remains a legacy fallback | `3600` |
 | `DTVP_CODE_ANALYSIS_URL` | Base URL of the external or mock code analysis service | unset |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | HTTP timeout for code analysis API calls | `300` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
-
-### External Integration API Specs
-
-- TMRescore static OpenAPI spec: `openapi/tmrescore-openapi.json`
-- Code Analysis static OpenAPI spec: `openapi/code-analysis-openapi.json`
-- Expected Code Analysis API surface: defined by `code_analysis_integration.py` and the mock server at `test_setup/mock_code_analysis.py`
-- Integration API expectations are documented in `docs/integration-api-surface.md`
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback URL | derived from frontend URL and context path |
@@ -378,6 +371,13 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Max number of project versions fetched in parallel when building grouped views and statistics | `4` |
 | `DTVP_DEV_DISABLE_AUTH` | Disable OIDC and force the backend to return `devuser` locally | `false` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
+
+### External Integration API Specs
+
+- VScorer static OpenAPI spec: `openapi/vscorer-openapi.json` (`openapi/tmrescore-openapi.json` remains as a legacy filename)
+- Code Analysis static OpenAPI spec: `openapi/code-analysis-openapi.json`
+- Expected Code Analysis API surface: defined by `code_analysis_integration.py` and the mock server at `test_setup/mock_code_analysis.py`
+- Integration API expectations are documented in `docs/integration-api-surface.md`
 
 ## License
 

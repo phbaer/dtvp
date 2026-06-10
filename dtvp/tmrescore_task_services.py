@@ -73,8 +73,8 @@ def build_tmrescore_analysis_response(
         "strategy_note": task["strategy_note"],
         "llm_enrichment": task["llm_enrichment"],
         "download_urls": {
-            "json": f"{deps.context_path}/api/tmrescore/sessions/{session_id}/results/json",
-            "vex": f"{deps.context_path}/api/tmrescore/sessions/{session_id}/results/vex",
+            "json": f"{deps.context_path}/api/vscorer/sessions/{session_id}/results/json",
+            "vex": f"{deps.context_path}/api/vscorer/sessions/{session_id}/results/vex",
         },
     }
 

@@ -3,7 +3,7 @@
 This directory contains the mock service implementations used by the local pm2 development stack.
 
 - `mock_dt.py` provides the in-memory Dependency-Track API.
-- `mock_tmrescore.py` provides the in-memory tmrescore API.
+- `mock_tmrescore.py` provides the in-memory VScorer API.
 - `mock_code_analysis.py` provides locally hosted service mocks for analysis integrations.
 
 ## Run the Local Mock Stack
@@ -17,7 +17,7 @@ pm2 start ecosystem.config.js --update-env
 The mock services are available at:
 
 - Dependency-Track API: `http://127.0.0.1:8081`
-- TMRescore API/UI: `http://127.0.0.1:8090`
+- VScorer API/UI: `http://127.0.0.1:8090`
 - Code Analysis API: `http://127.0.0.1:8095`
 
 To stop the stack:
@@ -38,6 +38,6 @@ uv run uvicorn mock_dt:app --host 127.0.0.1 --port 8081
 ## Files
 
 - `mock_dt.py`: In-memory Dependency-Track mock.
-- `mock_tmrescore.py`: In-memory tmrescore mock.
+- `mock_tmrescore.py`: In-memory VScorer mock.
 - `mock_agentizer.py`: In-memory agentizer mock.
 - `mock_code_analysis.py`: In-memory code analysis mock.

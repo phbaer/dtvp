@@ -95,6 +95,11 @@ def is_meaningful_tmrescore_proposal(proposal: Dict[str, Any]) -> bool:
 
 
 class TMRescoreSettings(BaseSettings):
+    DTVP_VSCORER_URL: str = Field(alias="DTVP_VSCORER_URL", default="")
+    DTVP_VSCORER_TIMEOUT_SECONDS: Optional[float] = Field(
+        alias="DTVP_VSCORER_TIMEOUT_SECONDS",
+        default=None,
+    )
     DTVP_TMRESCORE_URL: str = Field(alias="DTVP_TMRESCORE_URL", default="")
     DTVP_TMRESCORE_TIMEOUT_SECONDS: float = Field(
         alias="DTVP_TMRESCORE_TIMEOUT_SECONDS",
@@ -109,7 +114,11 @@ class TMRescoreSettings(BaseSettings):
 
     @property
     def base_url(self) -> str:
-        return self.DTVP_TMRESCORE_URL.rstrip("/")
+        return (self.DTVP_VSCORER_URL or self.DTVP_TMRESCORE_URL).rstrip("/")
+
+    @property
+    def timeout_seconds(self) -> float:
+        return self.DTVP_VSCORER_TIMEOUT_SECONDS or self.DTVP_TMRESCORE_TIMEOUT_SECONDS
 
     @property
     def enabled(self) -> bool:
@@ -122,7 +131,7 @@ class TMRescoreClient:
         if not self.settings.enabled:
             raise RuntimeError("VScorer integration is not configured")
 
-        self.client = httpx.AsyncClient(timeout=self.settings.DTVP_TMRESCORE_TIMEOUT_SECONDS)
+        self.client = httpx.AsyncClient(timeout=self.settings.timeout_seconds)
 
     async def close(self):
         await self.client.aclose()

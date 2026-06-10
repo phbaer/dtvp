@@ -473,7 +473,7 @@ const applyProposal = async () => {
 
     // Populate the analysis details from the proposal reasoning
     const parts: string[] = []
-    parts.push('[TMRescore Proposal Applied]')
+    parts.push('[VScorer Proposal Applied]')
     if (proposal.analysis?.detail) {
         parts.push(`Reasoning: ${proposal.analysis.detail}`)
     }
@@ -1625,7 +1625,7 @@ const teamBlockStateColor = (state?: string): string => {
             class="mb-4"
         />
 
-        <!-- TMRescore Proposal (Reviewers only) -->
+        <!-- VScorer Proposal (Reviewers only) -->
         <div v-if="isReviewer && matchedProposal" class="mb-4 p-3 rounded border border-gray-700 bg-gray-850">
             <div class="flex items-center justify-between mb-2">
                 <h5 class="text-xs font-bold uppercase tracking-wider text-teal-300 flex items-center gap-1.5">

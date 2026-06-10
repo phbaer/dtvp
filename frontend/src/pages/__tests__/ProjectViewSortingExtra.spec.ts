@@ -14,6 +14,7 @@ vi.mock('../../lib/api', () => ({
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} })),
+    getVScorerProposals: vi.fn(() => Promise.resolve({ proposals: {} })),
 }))
 
 const router = createRouter({

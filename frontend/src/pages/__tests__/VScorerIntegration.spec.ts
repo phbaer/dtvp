@@ -23,7 +23,7 @@ vi.mock('axios', () => {
     }
 })
 
-describe('TMRescore integration via api.ts', () => {
+describe('VScorer integration via api.ts', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.resetModules()
@@ -92,8 +92,8 @@ describe('TMRescore integration via api.ts', () => {
                 sbom_vulnerability_count: 2,
                 strategy_note: 'Merged multi-version analysis keeps findings attached.',
                 download_urls: {
-                    json: '/api/tmrescore/sessions/session-1/results/json',
-                    vex: '/api/tmrescore/sessions/session-1/results/vex',
+                    json: '/api/vscorer/sessions/session-1/results/json',
+                    vex: '/api/vscorer/sessions/session-1/results/vex',
                 },
                 outputs: {
                     'enriched-sbom.json': { size: 1234, content_type: 'application/json' },
@@ -101,24 +101,24 @@ describe('TMRescore integration via api.ts', () => {
             },
         })
 
-        const module = await import('../TMRescore.vue')
-        const TMRescore = module.default
+        const module = await import('../VScorer.vue')
+        const VScorer = module.default
 
-        const { wrapper } = await mountWithRouter(TMRescore, {
-            initialPath: '/project/ExampleApp/tmrescore',
+        const { wrapper } = await mountWithRouter(VScorer, {
+            initialPath: '/project/ExampleApp/vscorer',
             routes: [
                 { path: '/project/:name', component: { template: '<div />' } },
-                { path: '/project/:name/tmrescore', component: TMRescore },
+                { path: '/project/:name/vscorer', component: VScorer },
             ],
         })
 
-        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/tmrescore/context')
-        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/tmrescore/state')
-        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/tmrescore/sbom/summary', {
+        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/vscorer/context')
+        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/vscorer/state')
+        expect(axiosMocks.get).toHaveBeenCalledWith('/projects/ExampleApp/vscorer/sbom/summary', {
             params: { scope: 'merged_versions' },
         })
         expect(wrapper.text()).toContain('Merged Multi-Version SBOM')
-        expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toContain('/api/projects/ExampleApp/tmrescore/sbom?scope=merged_versions')
+        expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toContain('/api/projects/ExampleApp/vscorer/sbom?scope=merged_versions')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('5')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('2')
 
@@ -136,7 +136,7 @@ describe('TMRescore integration via api.ts', () => {
         await flushPromises()
 
         expect(axiosMocks.post).toHaveBeenCalledTimes(1)
-        expect(axiosMocks.post.mock.calls[0]?.[0]).toBe('/projects/ExampleApp/tmrescore/analyze')
+        expect(axiosMocks.post.mock.calls[0]?.[0]).toBe('/projects/ExampleApp/vscorer/analyze')
         expect(axiosMocks.post.mock.calls[0]?.[1]).toBeInstanceOf(FormData)
         const payload = axiosMocks.post.mock.calls[0]?.[1] as FormData
         expect(payload.get('enrich')).toBe('true')

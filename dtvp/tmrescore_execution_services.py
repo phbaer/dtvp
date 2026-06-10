@@ -197,7 +197,7 @@ async def run_tmrescore_analysis_task(
     request: TMRescoreExecutionRequest,
 ) -> None:
     session_id = task["session_id"]
-    max_wait_seconds = max(settings.DTVP_TMRESCORE_TIMEOUT_SECONDS * 4, 900.0)
+    max_wait_seconds = max(settings.timeout_seconds * 4, 900.0)
 
     try:
         client_cls = deps.get_tmrescore_client_cls()

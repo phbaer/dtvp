@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick, triggerRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMRescoreProposals } from '../lib/api'
+import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getVScorerProposals } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
@@ -94,10 +94,12 @@ const consumeThreatModelRefreshSignal = () => {
         return false
     }
 
-    const key = `dtvp:tmrescore-refresh:${name}`
-    const hasSignal = !!sessionStorage.getItem(key)
+    const key = `dtvp:vscorer-refresh:${name}`
+    const legacyKey = `dtvp:tmrescore-refresh:${name}`
+    const hasSignal = !!sessionStorage.getItem(key) || !!sessionStorage.getItem(legacyKey)
     if (hasSignal) {
         sessionStorage.removeItem(key)
+        sessionStorage.removeItem(legacyKey)
     }
     return hasSignal
 }
@@ -117,7 +119,7 @@ const fetchTMRescoreProposals = async () => {
     }
 
     try {
-        tmrescoreProposalSnapshot.value = await getTMRescoreProposals(name)
+        tmrescoreProposalSnapshot.value = await getVScorerProposals(name)
     } catch (err: any) {
         if (err?.response?.status === 404) {
             tmrescoreProposalSnapshot.value = null
@@ -426,8 +428,10 @@ const filterUrl = computed(() => {
     }
 
     if (selectedTMRescoreProposalFilters.value.length > 0) {
-        query.tmrescore = selectedTMRescoreProposalFilters.value
+        query.vscorer = selectedTMRescoreProposalFilters.value
+        delete query.tmrescore
     } else {
+        delete query.vscorer
         delete query.tmrescore
     }
 
@@ -486,7 +490,7 @@ const sortOrder = ref<'asc' | 'desc'>('desc')
 onMounted(() => {
     const q = route.query
     const hasFilterParams = Object.entries(q).some(([k, v]) => {
-        if (!['q', 'lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'sort', 'order', 'tmrescore'].includes(k)) return false;
+        if (!['q', 'lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'sort', 'order', 'vscorer', 'tmrescore'].includes(k)) return false;
         if (Array.isArray(v)) return v.length > 0;
         return v !== undefined && v !== null && v !== '';
     })
@@ -509,7 +513,8 @@ onMounted(() => {
         if (q.assignee) assigneeFilter.value = q.assignee as string
         if (q.dependency) dependencyFilter.value = Array.isArray(q.dependency) ? (q.dependency as string[]).map(v => v.toUpperCase() as DependencyRelationship) : [(q.dependency as string).toUpperCase() as DependencyRelationship]
         if (q.versions) versionFilterInput.value = Array.isArray(q.versions) ? q.versions.join(',') : (q.versions as string)
-        if (q.tmrescore) tmrescoreProposalFilter.value = Array.isArray(q.tmrescore) ? (q.tmrescore as string[]).map(v => v.toUpperCase() as TMRescoreProposalFilter) : [String(q.tmrescore).toUpperCase() as TMRescoreProposalFilter]
+        const proposalFilterQuery = q.vscorer || q.tmrescore
+        if (proposalFilterQuery) tmrescoreProposalFilter.value = Array.isArray(proposalFilterQuery) ? (proposalFilterQuery as string[]).map(v => v.toUpperCase() as TMRescoreProposalFilter) : [String(proposalFilterQuery).toUpperCase() as TMRescoreProposalFilter]
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
         if (q.sort) sortBy.value = q.sort as string
         if (q.order) sortOrder.value = q.order as 'asc' | 'desc'
@@ -590,8 +595,13 @@ const syncFilterQueryToUrl = () => {
     if (versionFilterInput.value) query.versions = versionFilterInput.value
     else delete query.versions
 
-    if (selectedTMRescoreProposalFilters.value.length > 0) query.tmrescore = selectedTMRescoreProposalFilters.value
-    else delete query.tmrescore
+    if (selectedTMRescoreProposalFilters.value.length > 0) {
+        query.vscorer = selectedTMRescoreProposalFilters.value
+        delete query.tmrescore
+    } else {
+        delete query.vscorer
+        delete query.tmrescore
+    }
 
     if (cvssVersionMismatchOnly.value) query.cvss_mismatch = 'true'
     else delete query.cvss_mismatch
@@ -1048,12 +1058,14 @@ const searchCompletionOptionsByPrefix = computed<Record<string, SearchCompletion
         detail: 'Dependency',
     }))
     const tmrescoreOptions = [
-        { value: 'with', label: 'With proposal', detail: 'TM' },
-        { value: 'without', label: 'Without proposal', detail: 'TM' },
+        { value: 'with', label: 'With proposal', detail: 'VScorer' },
+        { value: 'without', label: 'Without proposal', detail: 'VScorer' },
     ]
     const hasOptions = [
-        { value: 'tmrescore', label: 'TM proposal', detail: 'Has' },
-        { value: 'no_tmrescore', label: 'No TM proposal', detail: 'Has' },
+        { value: 'vscorer', label: 'VScorer proposal', detail: 'Has' },
+        { value: 'no_vscorer', label: 'No VScorer proposal', detail: 'Has' },
+        { value: 'tmrescore', label: 'VScorer proposal', detail: 'Has' },
+        { value: 'no_tmrescore', label: 'No VScorer proposal', detail: 'Has' },
         { value: 'cvss_mismatch', label: 'CVSS mismatch', detail: 'Has' },
     ]
     const cvssOptions = [
@@ -1258,7 +1270,7 @@ const activeFilterChips = computed(() => {
     if (assigneeFilter.value) chips.push({ key: 'assignee', label: `Assignee: ${assigneeFilter.value}` })
     if (versionFilterList.value.length) chips.push({ key: 'versions', label: `Versions: ${versionFilterList.value.join(', ')}` })
     if (selectedTMRescoreProposalFilters.value.length !== TMRESCORE_FILTER_OPTIONS.length) {
-        chips.push({ key: 'tmrescore', label: `TM: ${summarizedSelection(selectedTMRescoreProposalFilters.value, TMRESCORE_FILTER_OPTIONS, 'All proposals')}` })
+        chips.push({ key: 'tmrescore', label: `VScorer: ${summarizedSelection(selectedTMRescoreProposalFilters.value, TMRESCORE_FILTER_OPTIONS, 'All proposals')}` })
     }
     if (cvssVersionMismatchOnly.value) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
 

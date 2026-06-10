@@ -21,12 +21,12 @@ def test_mock_tmrescore_health_and_ui():
 
     health = client.get("/health")
     assert health.status_code == 200
-    assert health.json()["service"] == "mock-tmrescore"
+    assert health.json()["service"] == "mock-vscorer"
     assert health.json()["ollama_configured"] is True
 
     ui = client.get("/ui")
     assert ui.status_code == 200
-    assert "Mock TMRescore" in ui.text
+    assert "Mock VScorer" in ui.text
 
 
 def test_mock_tmrescore_inventory_flow_returns_downloadable_results():
@@ -324,10 +324,10 @@ def test_mock_tmrescore_vex_results_include_detail_messages():
     first_analysis = vulnerabilities[0]["analysis"]
     second_analysis = vulnerabilities[1]["analysis"]
 
-    assert first_analysis["detail"] == "Mock tmrescore result generated for local testing."
+    assert first_analysis["detail"] == "Mock VScorer result generated for local testing."
     assert first_analysis["response"][0]["detail"] == "Structured mock analysis response without a top-level detail message."
 
-    assert second_analysis["detail"] == "Mock tmrescore result generated for local testing."
+    assert second_analysis["detail"] == "Mock VScorer result generated for local testing."
     assert second_analysis["response"][0]["detail"] == "Structured mock analysis response without a top-level detail message."
 
 

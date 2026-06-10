@@ -8,8 +8,8 @@ const routes = [
     { path: '/', component: () => import('./pages/Dashboard.vue') },
     { path: '/settings', component: () => import('./pages/Settings.vue'), meta: { role: 'REVIEWER' } },
     { path: '/project/:name', component: () => import('./pages/ProjectView.vue') },
-    { path: '/project/:name/vscorer', component: () => import('./pages/TMRescore.vue'), meta: { role: 'REVIEWER' } },
-    { path: '/project/:name/tmrescore', component: () => import('./pages/TMRescore.vue'), meta: { role: 'REVIEWER' } },
+    { path: '/project/:name/vscorer', component: () => import('./pages/VScorer.vue'), meta: { role: 'REVIEWER' } },
+    { path: '/project/:name/tmrescore', component: () => import('./pages/VScorer.vue'), meta: { role: 'REVIEWER' } },
     { path: '/statistics', component: () => import('./pages/Statistics.vue') },
 ]
 

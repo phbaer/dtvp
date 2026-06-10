@@ -48,9 +48,9 @@ const highlightedHtml = computed(() => {
       '<span class="hl-tag">$1</span>'
     )
     // Status tags without colon: [Status: Pending Review]
-    // Already covered above, but catch standalone [TMRescore Proposal Applied] etc.
+    // Already covered above, but catch standalone proposal markers.
     .replace(
-      /(\[(?:TMRescore Proposal Applied)\])/g,
+      /(\[(?:VScorer Proposal Applied|TMRescore Proposal Applied)\])/g,
       '<span class="hl-marker">$1</span>'
     )
     // Key-value labels at start of line: Reasoning:, Vector:, Score:, Analysis:, etc.

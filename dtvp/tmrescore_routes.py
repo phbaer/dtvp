@@ -26,6 +26,14 @@ def _merge_responses(
     return merged
 
 
+def _get_default_vscorer_ollama_model() -> str:
+    return (
+        os.getenv("DTVP_VSCORER_OLLAMA_MODEL")
+        or os.getenv("DTVP_TMRESCORE_OLLAMA_MODEL")
+        or "qwen2.5:7b"
+    )
+
+
 @dataclass(frozen=True)
 class TMRescoreRouteDeps:
     prepare_tmrescore_inventory_or_raise: Callable[
@@ -226,7 +234,7 @@ def _register_tmrescore_context_route(
             "llm_enrichment": {
                 "available": llm_enrichment_available,
                 "status": llm_enrichment_status,
-                "default_model": os.getenv("DTVP_TMRESCORE_OLLAMA_MODEL", "qwen2.5:7b"),
+                "default_model": _get_default_vscorer_ollama_model(),
                 "host_configured": llm_enrichment_available,
                 "warning": llm_enrichment_warning,
             },

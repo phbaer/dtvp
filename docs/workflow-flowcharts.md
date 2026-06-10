@@ -1,6 +1,6 @@
 # DTVP Workflow Flowcharts
 
-This document summarizes the overall DTVP workflow and the optional TMRescore integration.
+This document summarizes the overall DTVP workflow and the optional VScorer integration.
 
 ## 1. Core DTVP Workflow
 
@@ -59,19 +59,20 @@ flowchart TD
     API --> ProjectView
 ```
 
-## 2. DTVP and TMRescore Integration Workflow
+## 2. DTVP and VScorer Integration Workflow
 
 ```mermaid
 flowchart LR
     User[Reviewer] --> ProjectView[Project View]
-    ProjectView -->|Open Threat Model action| TMView[Threat-Model Page]
+    ProjectView -->|Open Threat Model action| VSView[VScorer Page]
 
     subgraph DTVP["DTVP Backend"]
-        Context[Load project versions and TMRescore context]
+        Context[Load project versions and VScorer context]
         Inventory[Collect findings, full vulnerabilities, and BOMs from Dependency-Track]
         SyntheticSBOM[Build synthetic multi-version or latest-only CycloneDX SBOM]
+        PrepareWizard[Prepare wizard session from frontend]
         AnalyzeRequest[Accept analysis request from frontend]
-        SessionCache[Track async tmrescore session state]
+        SessionCache[Track async VScorer session state]
         ProposalCache[Persist per-project proposal snapshot]
     end
 
@@ -81,22 +82,28 @@ flowchart LR
         DTBOMs[BOM data]
     end
 
-    subgraph TMR["TMRescore Service"]
+    subgraph VS["VScorer Service"]
         Session[Create session]
+        WizardContext[Load wizard context, catalogs, validators, and editor]
         Analyze[Analyze threat model and SBOM]
         Progress[Poll progress]
         Results[Fetch result summary]
         VEX[Fetch CycloneDX VEX]
     end
 
-    TMView -->|Load context and SBOM preview| Context
-    TMView -->|Submit TM7, optional items.csv and config| AnalyzeRequest
+    VSView -->|Load context and SBOM preview| Context
+    VSView -->|Prepare TM7, optional items.csv and config| PrepareWizard
+    VSView -->|Run prepared or one-shot analysis| AnalyzeRequest
     Context --> DTProjects
     Context --> Inventory
     Inventory --> DTVulns
     Inventory --> DTBOMs
     Inventory --> SyntheticSBOM
 
+    PrepareWizard --> SyntheticSBOM
+    PrepareWizard --> Session
+    PrepareWizard --> WizardContext
+    WizardContext --> SessionCache
     AnalyzeRequest --> SyntheticSBOM
     AnalyzeRequest --> Session
     AnalyzeRequest --> Analyze
@@ -110,7 +117,7 @@ flowchart LR
     VEX --> ProposalCache
     DTVulns -->|Provide original score and vector baseline| ProposalCache
 
-    SessionCache -->|Return progress and final result via DTVP API| TMView
+    SessionCache -->|Return progress and final result via DTVP API| VSView
     ProposalCache -->|Expose cached proposals via DTVP API| ProjectView
 
     ProjectView -->|Use proposal in rescoring dialog| User

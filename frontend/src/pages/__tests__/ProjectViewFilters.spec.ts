@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import ProjectView from '../ProjectView.vue'
-import { getGroupedVulns, getTMRescoreProposals } from '../../lib/api'
+import { getGroupedVulns, getVScorerProposals } from '../../lib/api'
 import { mountWithRouter } from './routerTestUtils'
 import { setProjectViewViewport } from './projectViewTestUtils'
 
@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} })),
+    getVScorerProposals: vi.fn(() => Promise.resolve({ proposals: {} })),
 }))
 
 // Mock Child Components
@@ -276,7 +277,7 @@ describe('ProjectView Filters', () => {
 
     it('filters vulnerabilities by tmrescore proposal availability', async () => {
         ;(getGroupedVulns as any).mockResolvedValue(mockData)
-        ;(getTMRescoreProposals as any).mockResolvedValue({
+        ;(getVScorerProposals as any).mockResolvedValue({
             proposals: {
                 V1: {
                     vuln_id: 'V1',

@@ -4,7 +4,7 @@ This document defines the external HTTP APIs expected by DTVP for the optional i
 
 ## VScorer Service
 
-DTVP expects the VScorer backend, historically called TMRescore in DTVP route and environment names, to expose the following endpoints under its configured base URL (`DTVP_TMRESCORE_URL`):
+DTVP expects the VScorer backend, historically called TMRescore in DTVP route and environment names, to expose the following endpoints under its configured base URL (`DTVP_VSCORER_URL`; legacy fallback `DTVP_TMRESCORE_URL`):
 
 - `GET /health`
   - Returns service health and optional configuration status.
@@ -62,20 +62,44 @@ DTVP expects the VScorer backend, historically called TMRescore in DTVP route an
 
 ### DTVP VScorer proxy endpoints
 
-DTVP keeps its existing `/tmrescore` API paths for compatibility, but the page labels this integration as VScorer:
+DTVP exposes VScorer through `/api/vscorer/...` endpoints. The historical `/api/tmrescore/...` paths remain available as compatibility aliases.
 
 - Frontend routes:
   - `/project/{project_name}/vscorer` is the preferred DTVP VScorer page.
   - `/project/{project_name}/tmrescore` remains available as a legacy alias.
 
-- `POST /api/projects/{project_name}/tmrescore/import`
+- `GET /api/projects/{project_name}/vscorer/context`
+  - Returns project versions, available VScorer scopes, the external wizard URL, and remote LLM-enrichment availability.
+
+- `GET /api/projects/{project_name}/vscorer/sbom` and `GET /api/projects/{project_name}/vscorer/sbom/summary`
+  - Build/download or summarize the synthetic analysis SBOM for the selected scope before upload.
+
+- `POST /api/projects/{project_name}/vscorer/import`
   - Builds the selected synthetic SBOM, creates a VScorer session, uploads the threat model/SBOM/optional files through the session upload API, fetches `wizard/context` and `wizard/catalogs`, and returns a prepared DTVP session state.
 
-- `POST /api/tmrescore/sessions/{session_id}/wizard/refresh`
+- `POST /api/vscorer/sessions/{session_id}/wizard/refresh`
   - Re-fetches session-scoped VScorer `wizard/context` and `wizard/catalogs` for a DTVP-tracked prepared session, so reviewers can refresh DTVP after using the VScorer wizard/editor.
 
-- `POST /api/tmrescore/sessions/{session_id}/analyze`
+- `POST /api/vscorer/sessions/{session_id}/wizard/validate`
+  - Runs the VScorer session validator report and stores the refreshed validation summary in DTVP's prepared-session state.
+
+- `GET/PATCH /api/vscorer/sessions/{session_id}/wizard/editor`
+  - Loads and applies session-scoped VScorer threat-model editor decisions, then returns the updated DTVP prepared-session state.
+
+- `GET /api/vscorer/sessions/{session_id}/wizard/threatmodel`
+  - Downloads the current threat model file from the prepared VScorer session.
+
+- `POST /api/vscorer/sessions/{session_id}/analyze`
   - Starts analysis for a previously prepared VScorer session by reusing files already uploaded to that session.
+
+- `POST /api/projects/{project_name}/vscorer/analyze`
+  - Starts a one-shot VScorer analysis by creating a session and uploading analysis inputs in a single DTVP request.
+
+- `GET /api/vscorer/sessions/{session_id}/progress`, `GET /api/vscorer/sessions/{session_id}/results`, `GET /api/vscorer/sessions/{session_id}/results/{json|vex}`, and `GET /api/vscorer/sessions/{session_id}/outputs/{filename}`
+  - Poll progress, read final results, and download result artifacts.
+
+- `GET /api/projects/{project_name}/vscorer/proposals` and `GET /api/projects/{project_name}/vscorer/state`
+  - Return cached project proposal snapshots and latest tracked VScorer session state.
 
 ### VScorer Result JSON expectations
 
@@ -110,7 +134,7 @@ DTVP keeps its existing `/tmrescore` API paths for compatibility, but the page l
 ### Notes
 
 - Static OpenAPI specifications for the integrations are available in `openapi/`.
-- VScorer/TMRescore has a static spec at `openapi/tmrescore-openapi.json`.
+- VScorer has a static spec at `openapi/vscorer-openapi.json`; `openapi/tmrescore-openapi.json` remains as a legacy filename.
 - Code Analysis has a static spec at `openapi/code-analysis-openapi.json`.
 - In the mock environment, both service mocks expose a dynamic OpenAPI definition at `/openapi.json`.
 

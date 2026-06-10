@@ -9,10 +9,12 @@ import pytest
 
 import dtvp.main as main_module
 from dtvp.tmrescore_cache_services import (
+    get_tmrescore_cache_path,
     load_tmrescore_project_cache,
     persist_tmrescore_project_snapshot,
 )
 from dtvp.tmrescore_integration import (
+    TMRescoreSettings,
     build_analysis_sbom,
     build_dtvp_vulnerability_proposals,
     build_tmrescore_proposals,
@@ -39,7 +41,7 @@ def wait_for_tmrescore_progress(
 ):
     last_payload = None
     for _ in range(60):
-        response = client.get(f"/api/tmrescore/sessions/{session_id}/progress")
+        response = client.get(f"/api/vscorer/sessions/{session_id}/progress")
         assert response.status_code == 200
         last_payload = response.json()
         if last_payload["status"] == expected_status:
@@ -71,7 +73,7 @@ def test_prune_tmrescore_analysis_tasks_removes_expired_terminal_entries():
     }
 
     with patch.dict(
-        os.environ, {"DTVP_TMRESCORE_TASK_TTL_SECONDS": "3600"}, clear=False
+        os.environ, {"DTVP_VSCORER_TASK_TTL_SECONDS": "3600"}, clear=False
     ):
         prune_tmrescore_analysis_tasks(
             main_module.tmrescore_task_service_deps, now=4000.0
@@ -80,6 +82,24 @@ def test_prune_tmrescore_analysis_tasks_removes_expired_terminal_entries():
     assert "expired" not in main_module.tmrescore_analysis_tasks
     assert "fresh" in main_module.tmrescore_analysis_tasks
     assert "running" in main_module.tmrescore_analysis_tasks
+
+
+def test_tmrescore_settings_prefers_vscorer_environment_aliases():
+    with patch.dict(
+        os.environ,
+        {
+            "DTVP_VSCORER_URL": "http://vscorer.local/",
+            "DTVP_TMRESCORE_URL": "http://tmrescore.local",
+            "DTVP_VSCORER_TIMEOUT_SECONDS": "12.5",
+            "DTVP_TMRESCORE_TIMEOUT_SECONDS": "60",
+        },
+        clear=False,
+    ):
+        settings = TMRescoreSettings()
+
+    assert settings.base_url == "http://vscorer.local"
+    assert settings.timeout_seconds == pytest.approx(12.5)
+    assert settings.enabled is True
 
 
 def test_tmrescore_project_state_returns_latest_cached_task(client):
@@ -120,7 +140,7 @@ def test_tmrescore_project_state_returns_latest_cached_task(client):
         "completed_at": None,
     }
 
-    response = client.get("/api/projects/ExampleApp/tmrescore/state")
+    response = client.get("/api/projects/ExampleApp/vscorer/state")
 
     assert response.status_code == 200
     payload = response.json()
@@ -252,7 +272,7 @@ def test_tmrescore_context_endpoint_uses_natural_version_order(client, mock_dt_c
         {"name": "ExampleApp", "version": "1.10.0", "uuid": "proj-2"},
     ]
 
-    response = client.get("/api/projects/ExampleApp/tmrescore/context")
+    response = client.get("/api/projects/ExampleApp/vscorer/context")
 
     assert response.status_code == 200
     payload = response.json()
@@ -262,6 +282,17 @@ def test_tmrescore_context_endpoint_uses_natural_version_order(client, mock_dt_c
     assert payload["wizard_url"] is None
     assert payload["llm_enrichment"]["available"] is False
     assert payload["llm_enrichment"]["status"] == "integration_disabled"
+
+
+def test_tmrescore_legacy_context_route_alias_still_works(client, mock_dt_client):
+    mock_dt_client.get_projects.return_value = [
+        {"name": "ExampleApp", "version": "1.10.0", "uuid": "proj-1"},
+    ]
+
+    response = client.get("/api/projects/ExampleApp/tmrescore/context")
+
+    assert response.status_code == 200
+    assert response.json()["project_name"] == "ExampleApp"
 
 
 def test_tmrescore_sbom_download_endpoint_returns_synthetic_analysis_sbom(
@@ -313,7 +344,7 @@ def test_tmrescore_sbom_download_endpoint_returns_synthetic_analysis_sbom(
     ]
 
     response = client.get(
-        "/api/projects/ExampleApp/tmrescore/sbom", params={"scope": "merged_versions"}
+        "/api/projects/ExampleApp/vscorer/sbom", params={"scope": "merged_versions"}
     )
 
     assert response.status_code == 200
@@ -393,7 +424,7 @@ def test_tmrescore_sbom_summary_endpoint_returns_preflight_counts(
     ]
 
     response = client.get(
-        "/api/projects/ExampleApp/tmrescore/sbom/summary",
+        "/api/projects/ExampleApp/vscorer/sbom/summary",
         params={"scope": "merged_versions"},
     )
 
@@ -417,7 +448,8 @@ def test_tmrescore_context_endpoint_uses_remote_health_for_ollama_availability(
     with patch.dict(
         os.environ,
         {
-            "DTVP_TMRESCORE_URL": "http://tmrescore.local",
+            "DTVP_VSCORER_URL": "http://vscorer.local",
+            "DTVP_VSCORER_OLLAMA_MODEL": "qwen2.5:14b",
             "OLLAMA_HOST": "http://local-dtvp-host:11434",
         },
         clear=False,
@@ -426,14 +458,15 @@ def test_tmrescore_context_endpoint_uses_remote_health_for_ollama_availability(
             "dtvp.main.TMRescoreClient.get_health",
             new=AsyncMock(return_value={"status": "ok", "ollama_configured": False}),
         ):
-            response = client.get("/api/projects/ExampleApp/tmrescore/context")
+            response = client.get("/api/projects/ExampleApp/vscorer/context")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_enrichment"]["available"] is False
-    assert payload["wizard_url"] == "http://tmrescore.local/wizard"
+    assert payload["wizard_url"] == "http://vscorer.local/wizard"
     assert payload["llm_enrichment"]["host_configured"] is False
     assert payload["llm_enrichment"]["status"] == "not_configured"
+    assert payload["llm_enrichment"]["default_model"] == "qwen2.5:14b"
     assert (
         payload["llm_enrichment"]["warning"]
         == "LLM enrichment requires OLLAMA_HOST to be configured on the VScorer backend."
@@ -449,18 +482,18 @@ def test_tmrescore_context_endpoint_reports_remote_ollama_when_available(
     ]
 
     with patch.dict(
-        os.environ, {"DTVP_TMRESCORE_URL": "http://tmrescore.local"}, clear=False
+        os.environ, {"DTVP_VSCORER_URL": "http://vscorer.local"}, clear=False
     ):
         with patch(
             "dtvp.main.TMRescoreClient.get_health",
             new=AsyncMock(return_value={"status": "ok", "ollama_configured": True}),
         ):
-            response = client.get("/api/projects/ExampleApp/tmrescore/context")
+            response = client.get("/api/projects/ExampleApp/vscorer/context")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_enrichment"]["available"] is True
-    assert payload["wizard_url"] == "http://tmrescore.local/wizard"
+    assert payload["wizard_url"] == "http://vscorer.local/wizard"
     assert payload["llm_enrichment"]["host_configured"] is True
     assert payload["llm_enrichment"]["status"] == "available"
     assert payload["llm_enrichment"]["warning"] is None
@@ -481,7 +514,7 @@ def test_tmrescore_context_endpoint_reports_unreachable_when_health_check_fails(
             "dtvp.main.TMRescoreClient.get_health",
             new=AsyncMock(side_effect=httpx.ConnectError("health failed")),
         ):
-            response = client.get("/api/projects/ExampleApp/tmrescore/context")
+            response = client.get("/api/projects/ExampleApp/vscorer/context")
 
     assert response.status_code == 200
     payload = response.json()
@@ -530,6 +563,21 @@ def test_tmrescore_project_cache_persists_to_disk(tmp_path):
         ] == pytest.approx(8.0)
 
     main_module.tmrescore_project_cache.clear()
+
+
+def test_tmrescore_project_cache_prefers_vscorer_path_alias(tmp_path):
+    vscorer_cache_file = tmp_path / "vscorer-cache.json"
+    legacy_cache_file = tmp_path / "tmrescore-cache.json"
+
+    with patch.dict(
+        os.environ,
+        {
+            "DTVP_VSCORER_CACHE_PATH": str(vscorer_cache_file),
+            "DTVP_TMRESCORE_CACHE_PATH": str(legacy_cache_file),
+        },
+        clear=False,
+    ):
+        assert get_tmrescore_cache_path() == str(vscorer_cache_file)
 
 
 def test_tmrescore_project_cache_load_preserves_provided_scores(tmp_path):
@@ -905,7 +953,7 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
     with patch.dict(
         os.environ,
         {
-            "DTVP_TMRESCORE_URL": "http://tmrescore.local",
+            "DTVP_VSCORER_URL": "http://vscorer.local",
             "OLLAMA_HOST": "http://ollama.local:11434",
         },
     ):
@@ -924,7 +972,7 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
                     ),
                 ):
                     response = client.post(
-                        "/api/projects/ExampleApp/tmrescore/analyze",
+                        "/api/projects/ExampleApp/vscorer/analyze",
                         data={
                             "scope": "merged_versions",
                             "enrich": "true",
@@ -947,7 +995,7 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
                     progress_payload = wait_for_tmrescore_progress(client, "session-1")
                     assert progress_payload["result"] is None
                     results_response = client.get(
-                        "/api/tmrescore/sessions/session-1/results"
+                        "/api/vscorer/sessions/session-1/results"
                     )
                     assert results_response.status_code == 200
                     final_result = results_response.json()
@@ -956,7 +1004,7 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
                     assert final_result["sbom_component_count"] >= 3
                     assert final_result["sbom_vulnerability_count"] == 2
                     assert final_result["download_urls"]["json"].endswith(
-                        "/api/tmrescore/sessions/session-1/results/json"
+                        "/api/vscorer/sessions/session-1/results/json"
                     )
                     assert final_result["llm_enrichment"] == {
                         "enabled": True,
@@ -990,7 +1038,7 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(
     }
 
     request = httpx.Request(
-        "POST", "http://tmrescore.local/api/v1/sessions/session-1/inventory"
+        "POST", "http://vscorer.local/api/v1/sessions/session-1/inventory"
     )
     timeout_error = httpx.HTTPStatusError(
         "gateway timeout",
@@ -998,7 +1046,7 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(
         response=httpx.Response(504, request=request),
     )
 
-    with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://tmrescore.local"}):
+    with patch.dict(os.environ, {"DTVP_VSCORER_URL": "http://vscorer.local"}):
         with patch(
             "dtvp.main.TMRescoreClient.create_session",
             new=AsyncMock(return_value={"session_id": "session-1"}),
@@ -1048,7 +1096,7 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(
                             ),
                         ):
                             response = client.post(
-                                "/api/projects/ExampleApp/tmrescore/analyze",
+                                "/api/projects/ExampleApp/vscorer/analyze",
                                 files={
                                     "threatmodel": (
                                         "model.tm7",
@@ -1067,7 +1115,7 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(
                             assert progress_payload["status"] == "completed"
                             assert progress_payload["result"] is None
                             results_response = client.get(
-                                "/api/tmrescore/sessions/session-1/results"
+                                "/api/vscorer/sessions/session-1/results"
                             )
                             assert results_response.status_code == 200
                             assert results_response.json()["session_id"] == "session-1"
@@ -1176,17 +1224,17 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
         timeout = kwargs.get("timeout")
         return real_async_client(
             transport=httpx.ASGITransport(app=mock_tmrescore.app),
-            base_url="http://mock-tmrescore.test",
+            base_url="http://mock-vscorer.test",
             timeout=timeout,
         )
 
-    with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://mock-tmrescore.test"}):
+    with patch.dict(os.environ, {"DTVP_VSCORER_URL": "http://mock-vscorer.test"}):
         with patch(
             "dtvp.tmrescore_integration.httpx.AsyncClient",
             side_effect=build_mock_async_client,
         ):
             response = client.post(
-                "/api/projects/ExampleApp/tmrescore/analyze",
+                "/api/projects/ExampleApp/vscorer/analyze",
                 data={
                     "scope": "merged_versions",
                     "chain_analysis": "true",
@@ -1209,7 +1257,7 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
             progress_payload = wait_for_tmrescore_progress(client, session_id)
             assert progress_payload["result"] is None
             results_response = client.get(
-                f"/api/tmrescore/sessions/{session_id}/results"
+                f"/api/vscorer/sessions/{session_id}/results"
             )
             assert results_response.status_code == 200
             final_result = results_response.json()
@@ -1218,14 +1266,14 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
             assert final_result["analyzed_versions"] == ["1.9.0", "1.10.0"]
 
             results_json = client.get(
-                f"/api/tmrescore/sessions/{session_id}/results/json"
+                f"/api/vscorer/sessions/{session_id}/results/json"
             )
             assert results_json.status_code == 200
             results_payload = results_json.json()
             assert results_payload["summary"]["vulnerability_count"] == 2
 
             cached_proposals = client.get(
-                "/api/projects/ExampleApp/tmrescore/proposals"
+                "/api/projects/ExampleApp/vscorer/proposals"
             )
             assert cached_proposals.status_code == 200
             proposals_payload = cached_proposals.json()
@@ -1245,12 +1293,12 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
             assert proposal_two["rescored_vector"] != proposal_two["original_vector"]
             assert proposal_two["rescored_vector"] != proposal_two["original_vector"]
 
-            vex = client.get(f"/api/tmrescore/sessions/{session_id}/results/vex")
+            vex = client.get(f"/api/vscorer/sessions/{session_id}/results/vex")
             assert vex.status_code == 200
             assert len(vex.json()["vulnerabilities"]) == 2
 
             enriched_sbom = client.get(
-                f"/api/tmrescore/sessions/{session_id}/outputs/enriched-sbom.json"
+                f"/api/vscorer/sessions/{session_id}/outputs/enriched-sbom.json"
             )
             assert enriched_sbom.status_code == 200
             assert "vp:threatModelElementIds" in enriched_sbom.text
@@ -1311,17 +1359,17 @@ def test_tmrescore_import_prepares_vscorer_wizard_session_and_runs(
         timeout = kwargs.get("timeout")
         return real_async_client(
             transport=httpx.ASGITransport(app=mock_tmrescore.app),
-            base_url="http://mock-tmrescore.test",
+            base_url="http://mock-vscorer.test",
             timeout=timeout,
         )
 
-    with patch.dict(os.environ, {"DTVP_TMRESCORE_URL": "http://mock-tmrescore.test"}):
+    with patch.dict(os.environ, {"DTVP_VSCORER_URL": "http://mock-vscorer.test"}):
         with patch(
             "dtvp.tmrescore_integration.httpx.AsyncClient",
             side_effect=build_mock_async_client,
         ):
             prepare_response = client.post(
-                "/api/projects/ExampleApp/tmrescore/import",
+                "/api/projects/ExampleApp/vscorer/import",
                 data={"scope": "merged_versions"},
                 files={
                     "threatmodel": (
@@ -1338,16 +1386,60 @@ def test_tmrescore_import_prepares_vscorer_wizard_session_and_runs(
             prepared = prepare_response.json()
             assert prepared["status"] == "prepared"
             assert prepared["message"] == "VScorer wizard session prepared."
-            assert prepared["wizard_url"] == "http://mock-tmrescore.test/wizard"
+            assert prepared["wizard_url"] == "http://mock-vscorer.test/wizard"
             assert prepared["wizard_context"]["validation"]["summary"]["errors"] == 0
             assert (
                 prepared["wizard_context"]["files"]["threatmodel"]["uploaded"] is True
             )
+            assert prepared["wizard_context"]["editor"]["issues"][0]["issue_id"]
             assert len(prepared["wizard_catalogs"]["rescoring_rule_types"]) >= 1
 
             session_id = prepared["session_id"]
+            validate_response = client.post(
+                f"/api/vscorer/sessions/{session_id}/wizard/validate"
+            )
+            assert validate_response.status_code == 200
+            validated = validate_response.json()
+            assert validated["message"] == "Validated VScorer wizard inputs."
+            assert validated["wizard_context"]["validation"]["summary"]["errors"] == 0
+            assert len(validated["wizard_context"]["validation"]["reports"]) >= 1
+
+            editor_response = client.get(
+                f"/api/vscorer/sessions/{session_id}/wizard/editor"
+            )
+            assert editor_response.status_code == 200
+            editor_state = editor_response.json()
+            editor_issue = editor_state["wizard_context"]["editor"]["issues"][0]
+            assert editor_issue["issue_id"] == "mock-missing-auth"
+            assert editor_issue["kept"] is False
+
+            patch_response = client.patch(
+                f"/api/vscorer/sessions/{session_id}/wizard/editor",
+                json={
+                    "patches": [
+                        {
+                            "issue_id": "mock-missing-auth",
+                            "action": "keep",
+                            "note": "Accepted in DTVP test.",
+                        }
+                    ]
+                },
+            )
+            assert patch_response.status_code == 200
+            patched = patch_response.json()
+            assert patched["message"] == "Updated VScorer threat-model editor state."
+            assert (
+                patched["wizard_context"]["editor"]["issues"][0]["kept"] is True
+            )
+
+            threatmodel_download = client.get(
+                f"/api/vscorer/sessions/{session_id}/wizard/threatmodel"
+            )
+            assert threatmodel_download.status_code == 200
+            assert threatmodel_download.content == b"tm7-data"
+
             refresh_response = client.post(
-                f"/api/tmrescore/sessions/{session_id}/wizard/refresh"
+                f"/api/vscorer/sessions/{session_id}/wizard/refresh"
             )
             assert refresh_response.status_code == 200
             refreshed = refresh_response.json()
@@ -1360,7 +1452,7 @@ def test_tmrescore_import_prepares_vscorer_wizard_session_and_runs(
             assert len(refreshed["wizard_catalogs"]["rescoring_rule_types"]) >= 1
 
             run_response = client.post(
-                f"/api/tmrescore/sessions/{session_id}/analyze",
+                f"/api/vscorer/sessions/{session_id}/analyze",
                 data={"chain_analysis": "true", "prioritize": "true"},
             )
 
@@ -1372,7 +1464,7 @@ def test_tmrescore_import_prepares_vscorer_wizard_session_and_runs(
             progress_payload = wait_for_tmrescore_progress(client, session_id)
             assert progress_payload["status"] == "completed"
             results_response = client.get(
-                f"/api/tmrescore/sessions/{session_id}/results"
+                f"/api/vscorer/sessions/{session_id}/results"
             )
             assert results_response.status_code == 200
             final_result = results_response.json()

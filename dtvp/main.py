@@ -185,6 +185,15 @@ tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
 tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
 
 
+def get_vscorer_task_ttl_seconds() -> int:
+    env_name = (
+        "DTVP_VSCORER_TASK_TTL_SECONDS"
+        if os.getenv("DTVP_VSCORER_TASK_TTL_SECONDS") is not None
+        else "DTVP_TMRESCORE_TASK_TTL_SECONDS"
+    )
+    return get_env_int_with_floor(env_name, default=3600, minimum=60, logger=logger)
+
+
 grouped_vuln_service_deps = build_grouped_vuln_service_deps(
     cache_manager=cache_manager,
     logger=logger,
@@ -207,12 +216,7 @@ tmrescore_cache_service_deps = build_tmrescore_cache_service_deps(
 
 tmrescore_task_service_deps = build_tmrescore_task_service_deps(
     tmrescore_analysis_tasks=tmrescore_analysis_tasks,
-    get_tmrescore_task_ttl_seconds=lambda: get_env_int_with_floor(
-        "DTVP_TMRESCORE_TASK_TTL_SECONDS",
-        default=3600,
-        minimum=60,
-        logger=logger,
-    ),
+    get_tmrescore_task_ttl_seconds=get_vscorer_task_ttl_seconds,
     context_path=context_path,
 )
 
@@ -334,7 +338,7 @@ api_router.include_router(
             media_type_json=MEDIA_TYPE_JSON,
             tmrescore_not_configured_detail=TMRESCORE_NOT_CONFIGURED_DETAIL,
             dependency_track_unavailable_detail="Dependency-Track unavailable while preparing threat-model analysis context.",
-            tmrescore_disabled_detail="VScorer integration is not configured. Set DTVP_TMRESCORE_URL to enable threat-model analysis.",
+            tmrescore_disabled_detail="VScorer integration is not configured. Set DTVP_VSCORER_URL to enable threat-model analysis.",
         ),
         bad_request_response=BAD_REQUEST_RESPONSE,
         not_found_response=NOT_FOUND_RESPONSE,

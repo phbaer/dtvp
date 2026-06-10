@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-app = FastAPI(title="Mock TMRescore", version="0.1.0")
+app = FastAPI(title="Mock VScorer", version="0.1.0")
 
 
 class SessionCreate(BaseModel):
@@ -597,7 +597,7 @@ def _perform_analysis(
                 "id": vulnerability["id"],
                 "analysis": {
                     "state": "in_triage" if not what_if else "under_investigation",
-                    "detail": "Mock tmrescore result generated for local testing.",
+                    "detail": "Mock VScorer result generated for local testing.",
                     **({"response": [
                         {
                             "title": "LLM enrichment",
@@ -632,7 +632,7 @@ def _perform_analysis(
         "rescored-report.json": json.dumps(raw_result, indent=2).encode("utf-8"),
         "enriched-sbom.json": json.dumps(enriched_sbom, indent=2).encode("utf-8"),
         "summary.txt": (
-            f"Mock TMRescore session {session['session_id']}\n"
+            f"Mock VScorer session {session['session_id']}\n"
             f"Application: {session['application_name']} {session['application_version']}\n"
             f"Components: {len(sbom.get('components') or [])}\n"
             f"Vulnerabilities: {len(vulnerabilities)}\n"
@@ -1011,7 +1011,7 @@ async def get_progress(session_id: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "mock-tmrescore", "ollama_configured": True}
+    return {"status": "ok", "service": "mock-vscorer", "ollama_configured": True}
 
 
 @app.get("/ui")
@@ -1020,9 +1020,9 @@ async def ui():
     return HTMLResponse(
         f"""
         <html>
-          <head><title>Mock TMRescore</title></head>
+          <head><title>Mock VScorer</title></head>
           <body style=\"font-family: sans-serif; padding: 2rem; background: #111827; color: #f3f4f6;\">
-            <h1>Mock TMRescore</h1>
+            <h1>Mock VScorer</h1>
             <p>In-memory mock service for local DTVP integration testing.</p>
             <ul>
               <li>Sessions: {session_count}</li>
