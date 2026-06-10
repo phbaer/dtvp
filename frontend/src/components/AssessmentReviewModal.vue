@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100] overflow-y-auto">
+    <div v-if="show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 overflow-y-auto" style="z-index: 10000">
       <div class="bg-gray-800 w-full max-w-2xl rounded-lg border border-gray-700 shadow-2xl overflow-hidden scale-in-center">
         <div class="p-4 border-b border-gray-700 bg-gray-800 flex justify-between items-center">
           <h3 class="font-bold text-lg text-gray-200">Review Assessment Before Submitting</h3>

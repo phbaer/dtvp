@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+    <div v-if="show" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4" style="z-index: 10000">
       <div class="bg-gray-800 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg border border-gray-700 shadow-2xl">
         <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
           <h3 class="font-bold text-lg text-gray-300">CVSS v{{ activeVersion }} Calculator</h3>

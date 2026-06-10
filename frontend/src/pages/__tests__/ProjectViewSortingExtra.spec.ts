@@ -45,7 +45,7 @@ describe('ProjectView Sorting Extra', () => {
                 },
                 stubs: {
                     LoadingProgress: true,
-                    VulnGroupCard: {
+                    VulnRowCompact: {
                         props: ['group'],
                         template: '<div class="vuln-group-card" :data-id="group.id">{{ group.id }}</div>'
                     }

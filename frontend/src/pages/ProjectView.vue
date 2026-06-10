@@ -1,26 +1,37 @@
 <script setup lang="ts">
-import { ref, watch, computed, inject, provide, onMounted, onActivated, nextTick, triggerRef } from 'vue'
+import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick, triggerRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTMRescoreProposals } from '../lib/api'
-import { getGroupLifecycle, tagToString, hasCvssVersionMismatch, normalizeTags } from '../lib/assessment-helpers'
-import { classifyGroup, computeFilterCounts, computeTeamCounts, matchesFilters, getGroupTechnicalState } from '../lib/group-classifier'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
-import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
 import type { GroupedVuln, Statistics, TMRescoreProposalSnapshot } from '../types'
 import { projectHeaderState } from '../lib/projectHeaderStore'
+import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
+import {
+    buildVulnListItems,
+    computeListFilterCounts,
+    computeListTeamCounts,
+    matchesLifecycleFilter,
+    matchesListFilters,
+    matchesStateFilters,
+    normalizeFilterSelection,
+    parseVulnSearchQuery,
+} from '../lib/vulnListIndex'
+import type { DependencyRelationship, TMRescoreProposalFilter, VulnListItem } from '../lib/vulnListIndex'
 
-import VulnGroupCard from '../components/VulnGroupCard.vue'
+import VulnRowCompact from '../components/VulnRowCompact.vue'
+import VulnDetailInspector from '../components/VulnDetailInspector.vue'
 import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal.vue'
 import BulkApproveModal from '../components/BulkApproveModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
 import type { FilterState } from '../components/FilterSidebar.vue'
-import { BarChart3 } from 'lucide-vue-next'
+import { BarChart3, Plus, Search, SlidersHorizontal, X } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
 const user = inject<any>('user', { role: 'ANALYST' })
+const currentUserRole = computed(() => (user?.value ?? user)?.role || 'ANALYST')
 const groups = ref<GroupedVuln[]>([])
 const loading = ref(true)
 const error = ref('')
@@ -52,11 +63,9 @@ const tmrescoreProposalSnapshot = ref<TMRescoreProposalSnapshot | null>(null)
 provide('tmrescoreProposals', computed(() => tmrescoreProposalSnapshot.value?.proposals || {}))
 
 const showBulkApproveModal = ref(false)
-const needsApprovalGroups = computed(() => {
-    return groups.value.filter(g => getDisplayState(g) === 'NEEDS_APPROVAL')
-})
+let filterUrlSyncTimer: ReturnType<typeof setTimeout> | null = null
 
-const tmrescoreProposalFilter = ref<Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>>(['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'])
+const tmrescoreProposalFilter = ref<TMRescoreProposalFilter[]>(['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'])
 const TMRESCORE_FILTER_OPTIONS = [
     { value: 'WITH_PROPOSAL', label: 'with' },
     { value: 'WITHOUT_PROPOSAL', label: 'without' },
@@ -224,8 +233,35 @@ watch(() => viewMode.value, (newMode) => {
     }
 })
 
+const selectedGroupId = ref<string | null>(
+    typeof route.query.vuln === 'string' ? route.query.vuln : null
+)
+const DETAIL_INSPECTOR_MIN_VIEWPORT = 1360
+const FILTER_RAIL_MIN_VIEWPORT = 1280
+const FILTER_RAIL_WITH_DETAIL_MIN_VIEWPORT = 1680
+const viewportWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const isDesktopInspector = computed(() => viewportWidth.value >= DETAIL_INSPECTOR_MIN_VIEWPORT)
+
+const updateViewportWidth = () => {
+    if (typeof window === 'undefined') return
+    viewportWidth.value = window.innerWidth
+}
+
+onMounted(() => {
+    updateViewportWidth()
+    window.addEventListener('resize', updateViewportWidth)
+})
+
+onUnmounted(() => {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('resize', updateViewportWidth)
+    if (filterUrlSyncTimer) {
+        clearTimeout(filterUrlSyncTimer)
+        filterUrlSyncTimer = null
+    }
+})
+
 const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
-    const groupId = group.id
     group.rescored_cvss = data.rescored_cvss
     group.rescored_vector = data.rescored_vector
     if (data.assignees !== undefined) {
@@ -254,14 +290,6 @@ const handleLocalAssessmentUpdate = (group: GroupedVuln, data: any) => {
         groups.value[idx] = { ...group }
     }
     triggerRef(groups)
-
-    // After Vue re-renders with new sort order, scroll the updated card back into view
-    nextTick(() => {
-        const el = document.querySelector(`[data-group-id="${groupId.replace(/"/g, '\\"')}"]`)
-        if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }
-    })
 
     statsDirty.value = true
 
@@ -296,19 +324,11 @@ const handleBulkUpdates = (updates: Array<{ id: string; data: any }>, onComplete
 }
 
 const replaceGroup = (updatedGroup: GroupedVuln) => {
-    const groupId = updatedGroup.id
     const idx = groups.value.findIndex(g => g.id === updatedGroup.id)
     if (idx === -1) return
 
     groups.value[idx] = updatedGroup
     groups.value = [...groups.value]
-
-    nextTick(() => {
-        const el = document.querySelector(`[data-group-id="${groupId.replace(/"/g, '\\"')}"]`)
-        if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }
-    })
 }
 
 const handleTeamMappingUpdated = async (updatedGroup?: GroupedVuln) => {
@@ -330,28 +350,20 @@ const showBulkModal = ref(false)
 projectHeaderState.bulkSyncHandler.value = () => {
     showBulkModal.value = true
 }
-const incompleteGroups = computed(() => {
-    return groups.value.filter(g => getDisplayState(g) === 'INCOMPLETE')
-})
 
 const handleBulkApproveModalUpdates = (updates: Array<{ id: string; data: any }>) => {
     handleBulkUpdates(updates, () => { showBulkApproveModal.value = false })
 }
 
-const expandedGroupIds = ref(new Set<string>())
-const handleToggleExpand = (id: string, expanded: boolean) => {
-    if (expanded) {
-        expandedGroupIds.value.add(id)
-    } else {
-        expandedGroupIds.value.delete(id)
-    }
-}
+// Expansion tracking removed — now handled by VulnRowCompact click → modal flow
 
+const smartSearchInput = ref('')
+const parsedSmartSearch = computed(() => parseVulnSearchQuery(smartSearchInput.value))
 const tagFilter = ref('')
 const idFilter = ref('')
 const componentFilter = ref('')
 const assigneeFilter = ref('')
-const dependencyFilter = ref<Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>>(['DIRECT', 'TRANSITIVE', 'UNKNOWN'])
+const dependencyFilter = ref<DependencyRelationship[]>(['DIRECT', 'TRANSITIVE', 'UNKNOWN'])
 const cvssVersionMismatchOnly = ref(false)
 
 const SORT_OPTIONS = [
@@ -376,14 +388,21 @@ const versionFilterList = computed(() => {
         .filter(v => v.length > 0)
 })
 
+const selectedDependencyFilters = computed(() => normalizeFilterSelection(dependencyFilter.value))
+const selectedTMRescoreProposalFilters = computed(() => normalizeFilterSelection(tmrescoreProposalFilter.value))
+
+const listItems = computed(() => {
+    return buildVulnListItems(
+        groups.value,
+        teamMapping.value,
+        tmrescoreProposalSnapshot.value?.proposals || {},
+    )
+})
+
 const availableVersions = computed(() => {
     const allVersions = new Set<string>()
-    groups.value.forEach(g => {
-        (g.affected_versions || []).forEach((v: any) => {
-            if (typeof v.project_version === 'string' && v.project_version.trim().length > 0) {
-                allVersions.add(v.project_version.trim())
-            }
-        })
+    listItems.value.forEach(item => {
+        item.versions.forEach(version => allVersions.add(version))
     })
     return Array.from(allVersions).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
 })
@@ -394,8 +413,8 @@ const filterUrl = computed(() => {
         ...(route.query as Record<string, string | string[]>)
     }
 
-    if (dependencyFilter.value.length > 0) {
-        query.dependency = dependencyFilter.value
+    if (selectedDependencyFilters.value.length > 0) {
+        query.dependency = selectedDependencyFilters.value
     } else {
         delete query.dependency
     }
@@ -406,10 +425,16 @@ const filterUrl = computed(() => {
         delete query.versions
     }
 
-    if (tmrescoreProposalFilter.value.length > 0) {
-        query.tmrescore = tmrescoreProposalFilter.value
+    if (selectedTMRescoreProposalFilters.value.length > 0) {
+        query.tmrescore = selectedTMRescoreProposalFilters.value
     } else {
         delete query.tmrescore
+    }
+
+    if (smartSearchInput.value.trim()) {
+        query.q = smartSearchInput.value.trim()
+    } else {
+        delete query.q
     }
 
     const params = new URLSearchParams()
@@ -426,6 +451,12 @@ const filterUrl = computed(() => {
 })
 
 const copiedUrl = ref(false)
+const showFilterDrawer = ref(false)
+const showSearchTokenMenu = ref(false)
+const searchInput = ref<HTMLInputElement | null>(null)
+const searchFocused = ref(false)
+const searchCursorPosition = ref(0)
+const activeCompletionIndex = ref(0)
 
 const copyFilterUrl = async () => {
     const link = filterUrl.value
@@ -455,14 +486,15 @@ const sortOrder = ref<'asc' | 'desc'>('desc')
 onMounted(() => {
     const q = route.query
     const hasFilterParams = Object.entries(q).some(([k, v]) => {
-        if (!['lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'sort', 'order', 'tmrescore'].includes(k)) return false;
+        if (!['q', 'lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'sort', 'order', 'tmrescore'].includes(k)) return false;
         if (Array.isArray(v)) return v.length > 0;
         return v !== undefined && v !== null && v !== '';
     })
 
     if (hasFilterParams) {
+        if (q.q) smartSearchInput.value = Array.isArray(q.q) ? q.q.join(' ') : (q.q as string)
         if (q.lifecycle) lifecycleFilters.value = (Array.isArray(q.lifecycle) ? q.lifecycle : [q.lifecycle]) as string[]
-        else lifecycleFilters.value = (user?.value?.role === 'REVIEWER')
+        else lifecycleFilters.value = (currentUserRole.value === 'REVIEWER')
             ? ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
             : ['OPEN']
         
@@ -475,9 +507,9 @@ onMounted(() => {
 
         if (q.component) componentFilter.value = q.component as string
         if (q.assignee) assigneeFilter.value = q.assignee as string
-        if (q.dependency) dependencyFilter.value = Array.isArray(q.dependency) ? (q.dependency as string[]).map(v => v.toUpperCase() as 'DIRECT'|'TRANSITIVE'|'UNKNOWN') : [(q.dependency as string).toUpperCase() as 'DIRECT'|'TRANSITIVE'|'UNKNOWN']
+        if (q.dependency) dependencyFilter.value = Array.isArray(q.dependency) ? (q.dependency as string[]).map(v => v.toUpperCase() as DependencyRelationship) : [(q.dependency as string).toUpperCase() as DependencyRelationship]
         if (q.versions) versionFilterInput.value = Array.isArray(q.versions) ? q.versions.join(',') : (q.versions as string)
-        if (q.tmrescore) tmrescoreProposalFilter.value = Array.isArray(q.tmrescore) ? (q.tmrescore as string[]).map(v => v.toUpperCase() as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') : [String(q.tmrescore).toUpperCase() as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']
+        if (q.tmrescore) tmrescoreProposalFilter.value = Array.isArray(q.tmrescore) ? (q.tmrescore as string[]).map(v => v.toUpperCase() as TMRescoreProposalFilter) : [String(q.tmrescore).toUpperCase() as TMRescoreProposalFilter]
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
         if (q.sort) sortBy.value = q.sort as string
         if (q.order) sortOrder.value = q.order as 'asc' | 'desc'
@@ -487,7 +519,7 @@ onMounted(() => {
 })
 
 // If the user switches between reviewer and analyst, reapply defaults for lifecycle/analysis
-watch(() => user?.value?.role, (newRole, oldRole) => {
+watch(currentUserRole, (newRole, oldRole) => {
     if (!newRole || newRole === oldRole) return
 
     const allAnalysis = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
@@ -506,13 +538,14 @@ const resetFilters = () => {
     const allAnalysis = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
     analysisFilters.value = [...allAnalysis]
     
-    if (user?.value?.role === 'REVIEWER') {
+    if (currentUserRole.value === 'REVIEWER') {
         lifecycleFilters.value = ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
     } else {
         lifecycleFilters.value = ['OPEN']
     }
     idFilter.value = ''
     tagFilter.value = ''
+    smartSearchInput.value = ''
     componentFilter.value = ''
     assigneeFilter.value = ''
     dependencyFilter.value = ['DIRECT', 'TRANSITIVE', 'UNKNOWN']
@@ -527,8 +560,11 @@ const resetFilters = () => {
 // This reduces unnecessary chattiness and keeps filtering fast and responsive.
 // URL sync was removed to avoid automatic API refresh for every filter tweak.
 
-watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, assigneeFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, cvssVersionMismatchOnly, sortBy, sortOrder], () => {
+const syncFilterQueryToUrl = () => {
     const query = { ...route.query }
+
+    if (smartSearchInput.value.trim()) query.q = smartSearchInput.value.trim()
+    else delete query.q
 
     if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
     else delete query.lifecycle
@@ -548,13 +584,13 @@ watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, 
     if (assigneeFilter.value) query.assignee = assigneeFilter.value
     else delete query.assignee
 
-    if (dependencyFilter.value.length > 0) query.dependency = dependencyFilter.value
+    if (selectedDependencyFilters.value.length > 0) query.dependency = selectedDependencyFilters.value
     else delete query.dependency
 
     if (versionFilterInput.value) query.versions = versionFilterInput.value
     else delete query.versions
 
-    if (tmrescoreProposalFilter.value.length > 0) query.tmrescore = tmrescoreProposalFilter.value
+    if (selectedTMRescoreProposalFilters.value.length > 0) query.tmrescore = selectedTMRescoreProposalFilters.value
     else delete query.tmrescore
 
     if (cvssVersionMismatchOnly.value) query.cvss_mismatch = 'true'
@@ -564,6 +600,14 @@ watch([lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, 
     query.order = sortOrder.value
 
     router.replace({ query }).catch(() => {})
+}
+
+watch([smartSearchInput, lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, assigneeFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, cvssVersionMismatchOnly, sortBy, sortOrder], () => {
+    if (filterUrlSyncTimer) clearTimeout(filterUrlSyncTimer)
+    filterUrlSyncTimer = setTimeout(() => {
+        filterUrlSyncTimer = null
+        syncFilterQueryToUrl()
+    }, 200)
 }, { deep: true })
 
 const LIFECYCLE_OPTIONS = [
@@ -602,160 +646,63 @@ const ANALYSIS_STATE_ORDER: Record<string, number> = {
     'NOT_AFFECTED': 5
 }
 
+const nonStateFilters = computed(() => ({
+    smartSearch: parsedSmartSearch.value,
+    tagFilter: tagFilter.value,
+    idFilter: idFilter.value,
+    componentFilter: componentFilter.value,
+    assigneeFilter: assigneeFilter.value,
+    dependencyFilter: selectedDependencyFilters.value,
+    tmrescoreProposalFilter: selectedTMRescoreProposalFilters.value,
+    versionFilterList: versionFilterList.value,
+    cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+}))
 
-const getDisplayState = (group: GroupedVuln): string => {
-    return getGroupLifecycle(group, group.tags || [], teamMapping.value)
-}
-
-const getGroupDependencyRelationship = (group: GroupedVuln): 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN' => {
-    const directFlags = (group.affected_versions || [])
-        .flatMap(v => (v.components || []).map(c => c.is_direct_dependency))
-        .filter((x): x is boolean => x === true || x === false)
-
-    if (directFlags.includes(true)) return 'DIRECT'
-    if (directFlags.includes(false)) return 'TRANSITIVE'
-    return 'UNKNOWN'
-}
-
-const isMeaningfulTMRescoreProposal = (group: GroupedVuln, proposal: any) => {
-    const rescoredVector = proposal?.rescored_vector || null
-    const originalVector = proposal?.original_vector || group.cvss_vector || null
-    if (!rescoredVector) return false
-    return !originalVector || rescoredVector !== originalVector
-}
-
-const hasTMRescoreProposal = (group: GroupedVuln) => {
-    const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
-    const candidateIds = [group.id, ...(group.aliases || [])]
-    return candidateIds.some((candidateId) => {
-        const normalized = String(candidateId || '').trim().toUpperCase()
-        return normalized && isMeaningfulTMRescoreProposal(group, proposals[normalized])
-    })
-}
-
-// Groups after applying all non-lifecycle/non-analysis filters (used for filter counts)
-const preFilteredGroups = computed(() => {
-    let result = [...groups.value]
-    
-    const rawTagFilter = tagFilter.value.trim().toLowerCase()
-    if (rawTagFilter) {
-        result = result.filter(g => {
-            const rawTags = (g.tags || []).map(tagToString).filter(Boolean)
-            const normalized = teamMapping.value ? normalizeTags(g.tags || [], teamMapping.value) : []
-            const allTags = Array.from(new Set([...rawTags, ...normalized]))
-            return allTags.some(tag => tag.toLowerCase().includes(rawTagFilter))
-        })
-    }
-
-    if (dependencyFilter.value.length === 0) {
-        return []
-    }
-
-    if (tmrescoreProposalFilter.value.length === 0) {
-        return []
-    }
-
-    if (dependencyFilter.value.length > 0) {
-        result = result.filter(g => dependencyFilter.value.includes(getGroupDependencyRelationship(g)))
-    }
-
-    if (tmrescoreProposalFilter.value.length > 0) {
-        result = result.filter(g => {
-            const hasProposal = hasTMRescoreProposal(g)
-            const matchesWith = tmrescoreProposalFilter.value.includes('WITH_PROPOSAL') && hasProposal
-            const matchesWithout = tmrescoreProposalFilter.value.includes('WITHOUT_PROPOSAL') && !hasProposal
-            return matchesWith || matchesWithout
-        })
-    }
-
-    if (versionFilterList.value.length > 0) {
-        result = result.filter(g => {
-            const available = (g.affected_versions || []).map((v: any) => v.project_version).filter((x: any) => !!x)
-            return versionFilterList.value.some(v => available.includes(v))
-        })
-    }
-
-    if (idFilter.value) {
-        const term = idFilter.value.toLowerCase()
-        result = result.filter(g => 
-            g.id.toLowerCase().includes(term)
-        )
-    }
-
-    if (componentFilter.value) {
-        const term = componentFilter.value.toLowerCase()
-        result = result.filter((g: any) => 
-            g.affected_versions.some((v: any) => 
-                v.components.some((c: any) => c.component_name.toLowerCase().includes(term))
-            )
-        )
-    }
-
-    if (assigneeFilter.value) {
-        const term = assigneeFilter.value.trim().toLowerCase()
-        result = result.filter(g =>
-            (g.assignees || []).some((a: string) => a.toLowerCase().includes(term))
-        )
-    }
-
-    if (cvssVersionMismatchOnly.value) {
-        result = result.filter(g => hasCvssVersionMismatch(g))
-    }
-
-    return result
+// Items after applying all non-lifecycle/non-analysis filters (used for filter counts)
+const preFilteredItems = computed(() => {
+    return listItems.value.filter(item => matchesListFilters(item, nonStateFilters.value))
 })
 
-const matchingGroups = computed(() => {
-    return preFilteredGroups.value.filter(group => {
-        return matchesFilters(group, lifecycleFilters.value, analysisFilters.value, teamMapping.value)
-    })
+const matchingItems = computed(() => {
+    return preFilteredItems.value.filter(item => matchesStateFilters(item, {
+        lifecycleFilters: lifecycleFilters.value,
+        analysisFilters: analysisFilters.value,
+    }))
 })
 
-const sortedGroups = computed(() => {
-    const result = [...matchingGroups.value]
+const sortedItems = computed(() => {
+    const result = [...matchingItems.value]
 
     result.sort((a, b) => {
         let comparison = 0
         
         switch (sortBy.value) {
             case 'analysis': {
-                const stateA = getGroupTechnicalState(a)
-                const stateB = getGroupTechnicalState(b)
+                const stateA = a.technicalState
+                const stateB = b.technicalState
                 comparison = (ANALYSIS_STATE_ORDER[stateA] ?? 99) - (ANALYSIS_STATE_ORDER[stateB] ?? 99)
                 break
             }
             case 'tags': {
-                const tagsA = teamMapping.value ? normalizeTags(a.tags || [], teamMapping.value) : (a.tags || []).map(tagToString).filter(Boolean)
-                const tagsB = teamMapping.value ? normalizeTags(b.tags || [], teamMapping.value) : (b.tags || []).map(tagToString).filter(Boolean)
-                const tagA = tagsA.length > 0 ? tagsA[0] : ''
-                const tagB = tagsB.length > 0 ? tagsB[0] : ''
-                comparison = tagA.localeCompare(tagB)
+                comparison = a.firstTag.localeCompare(b.firstTag)
                 break
             }
             case 'severity': {
-                const baseA = a.cvss_score ?? a.cvss
-                const baseB = b.cvss_score ?? b.cvss
                 // Negate so that desc = most critical first (CRITICAL=0 is highest priority)
-                comparison = scoreSeverityOrder(baseB) - scoreSeverityOrder(baseA)
+                comparison = scoreSeverityOrder(b.baseScore) - scoreSeverityOrder(a.baseScore)
                 break
             }
             case 'rescored-severity': {
-                const rA = a.rescored_cvss ?? a.cvss_score ?? a.cvss
-                const rB = b.rescored_cvss ?? b.cvss_score ?? b.cvss
                 // Negate so that desc = most critical first (CRITICAL=0 is highest priority)
-                comparison = scoreSeverityOrder(rB) - scoreSeverityOrder(rA)
+                comparison = scoreSeverityOrder(b.rescoredScore) - scoreSeverityOrder(a.rescoredScore)
                 break
             }
             case 'score': {
-                const scoreA = a.cvss_score ?? a.cvss ?? 0
-                const scoreB = b.cvss_score ?? b.cvss ?? 0
-                comparison = scoreA - scoreB
+                comparison = a.baseScore - b.baseScore
                 break
             }
             case 'rescored': {
-                const scoreA = a.rescored_cvss ?? a.cvss_score ?? a.cvss ?? 0
-                const scoreB = b.rescored_cvss ?? b.cvss_score ?? b.cvss ?? 0
-                comparison = scoreA - scoreB
+                comparison = a.rescoredScore - b.rescoredScore
                 break
             }
             case 'id': {
@@ -774,32 +721,93 @@ const sortedGroups = computed(() => {
     return result
 })
 
-const filteredGroups = sortedGroups
+const sortedGroups = computed(() => sortedItems.value.map(item => item.group))
 
-defineExpose({ filteredGroups })
+const selectedGroup = computed(() => {
+    if (!selectedGroupId.value) return null
+    return sortedGroups.value.find(group => group.id === selectedGroupId.value) || null
+})
 
+const isDesktopDetailOpen = computed(() =>
+    !!selectedGroup.value && viewMode.value === 'analysis' && isDesktopInspector.value
+)
+
+const isFilterRailVisible = computed(() => {
+    const requiredWidth = isDesktopDetailOpen.value
+        ? FILTER_RAIL_WITH_DETAIL_MIN_VIEWPORT
+        : FILTER_RAIL_MIN_VIEWPORT
+    return viewportWidth.value >= requiredWidth
+})
+
+const isAnalysisViewActive = computed(() => viewMode.value === 'analysis' && !loading.value && !error.value)
+const isAnalysisWorkspaceActive = isAnalysisViewActive
 const {
     visibleItems: visibleGroups,
     hasMoreItems: hasMoreGroups,
     loadMoreTrigger,
+    visibleItemCount,
+    resetVisibleItems,
 } = useVisibleGroupWindow({
     items: sortedGroups,
-    isActive: computed(() => viewMode.value === 'analysis'),
-    batchSize: 20,
+    isActive: isAnalysisViewActive,
+    batchSize: 40,
+    rootMargin: '800px',
 })
 
-void loadMoreTrigger
+const setLoadMoreTrigger = (element: any) => {
+    loadMoreTrigger.value = element as HTMLElement | null
+}
+
+const updateVulnQuery = (id: string | null) => {
+    const query: Record<string, any> = { ...route.query }
+    if (id) query.vuln = id
+    else delete query.vuln
+    router.replace({ query }).catch(() => {})
+}
+
+const selectGroup = (group: GroupedVuln) => {
+    selectedGroupId.value = group.id
+    updateVulnQuery(group.id)
+}
+
+const closeSelectedGroup = () => {
+    selectedGroupId.value = null
+    updateVulnQuery(null)
+}
+
+watch(() => route.query.vuln, (value) => {
+    selectedGroupId.value = typeof value === 'string' ? value : null
+})
+
+watch(isFilterRailVisible, (visible) => {
+    if (visible) showFilterDrawer.value = false
+})
+
+watch(() => viewMode.value, () => {
+    showFilterDrawer.value = false
+})
+
+watch(sortedGroups, () => {
+    resetVisibleItems()
+    if (selectedGroupId.value && !selectedGroup.value) {
+        closeSelectedGroup()
+    }
+})
+
+const filteredGroups = sortedGroups
+
+defineExpose({ filteredGroups })
 
 const filterCounts = computed(() => {
-    return computeFilterCounts(groups.value, teamMapping.value, lifecycleFilters.value)
+    return computeListFilterCounts(listItems.value, lifecycleFilters.value)
 })
 
 const cvssVersionMismatchCount = computed(() => {
-    return groups.value.filter(g => hasCvssVersionMismatch(g)).length
+    return listItems.value.filter(item => item.cvssVersionMismatch).length
 })
 
 const teamTagCounts = computed(() => {
-    return computeTeamCounts(groups.value, teamMapping.value)
+    return computeListTeamCounts(listItems.value)
 })
 
 const teamTagList = computed(() => {
@@ -808,55 +816,42 @@ const teamTagList = computed(() => {
         .sort((a, b) => a.team.localeCompare(b.team))
 })
 
-const groupsAfterLifecycle = computed(() => {
-    if (lifecycleFilters.value.length === 0) return groups.value
+const itemsAfterLifecycle = computed(() => {
+    if (lifecycleFilters.value.length === 0) return listItems.value
 
-    return groups.value.filter(g => {
-        const c = classifyGroup(g, teamMapping.value)
-        return (
-            (lifecycleFilters.value.includes('OPEN') && c.isOpen) ||
-            (lifecycleFilters.value.includes('NEEDS_APPROVAL') && c.isPending) ||
-            lifecycleFilters.value.includes(c.lifecycle)
-        )
-    })
+    return listItems.value.filter(item => matchesLifecycleFilter(item, lifecycleFilters.value))
 })
 
-const groupsAfterLifecycleAndDependency = computed(() => {
-    if (dependencyFilter.value.length === 0) return groupsAfterLifecycle.value
-    return groupsAfterLifecycle.value.filter(g => dependencyFilter.value.includes(getGroupDependencyRelationship(g)))
+const itemsAfterLifecycleAndDependency = computed(() => {
+    if (selectedDependencyFilters.value.length === 0) return itemsAfterLifecycle.value
+    return itemsAfterLifecycle.value.filter(item => selectedDependencyFilters.value.includes(item.dependencyRelationship))
 })
 
-const groupsBeforeAnalysis = computed(() => {
-    if (tmrescoreProposalFilter.value.length === 0) return groupsAfterLifecycleAndDependency.value
+const itemsBeforeAnalysis = computed(() => {
+    if (selectedTMRescoreProposalFilters.value.length === 0) return itemsAfterLifecycleAndDependency.value
 
-    const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
-    return groupsAfterLifecycleAndDependency.value.filter(g => {
-        const candidateIds = [g.id, ...(g.aliases || [])]
-        const hasProposal = candidateIds.some((candidateId) => {
-            const normalized = String(candidateId || '').trim().toUpperCase()
-            return normalized && isMeaningfulTMRescoreProposal(g, proposals[normalized])
-        })
-        const matchesWith = tmrescoreProposalFilter.value.includes('WITH_PROPOSAL') && hasProposal
-        const matchesWithout = tmrescoreProposalFilter.value.includes('WITHOUT_PROPOSAL') && !hasProposal
+    return itemsAfterLifecycleAndDependency.value.filter(item => {
+        const matchesWith = selectedTMRescoreProposalFilters.value.includes('WITH_PROPOSAL') && item.hasTmrescoreProposal
+        const matchesWithout = selectedTMRescoreProposalFilters.value.includes('WITHOUT_PROPOSAL') && !item.hasTmrescoreProposal
         return matchesWith || matchesWithout
     })
 })
-const dependencyFilterCounts = computed(() => {
+
+const countRelationships = (items: VulnListItem[]) => {
     const counts = { direct: 0, transitive: 0, unknown: 0 }
-    groupsAfterLifecycle.value.forEach(g => {
-        const relationship = getGroupDependencyRelationship(g).toLowerCase() as 'direct' | 'transitive' | 'unknown'
+    items.forEach(item => {
+        const relationship = item.dependencyRelationship.toLowerCase() as 'direct' | 'transitive' | 'unknown'
         counts[relationship]++
     })
     return counts
+}
+
+const dependencyFilterCounts = computed(() => {
+    return countRelationships(itemsAfterLifecycle.value)
 })
 
 const dependencyRelationshipCounts = computed(() => {
-    const counts = { direct: 0, transitive: 0, unknown: 0 }
-    matchingGroups.value.forEach(g => {
-        const relationship = getGroupDependencyRelationship(g).toLowerCase() as 'direct' | 'transitive' | 'unknown'
-        counts[relationship]++
-    })
-    return counts
+    return countRelationships(matchingItems.value)
 })
 
 const tmrescoreProposalCounts = computed(() => {
@@ -864,15 +859,8 @@ const tmrescoreProposalCounts = computed(() => {
         WITH_PROPOSAL: 0,
         WITHOUT_PROPOSAL: 0,
     }
-    groupsAfterLifecycleAndDependency.value.forEach(g => {
-        const proposals = tmrescoreProposalSnapshot.value?.proposals || {}
-        const candidateIds = [g.id, ...(g.aliases || [])]
-        const hasProposal = candidateIds.some((candidateId) => {
-            const normalized = String(candidateId || '').trim().toUpperCase()
-            return normalized && isMeaningfulTMRescoreProposal(g, proposals[normalized])
-        })
-
-        if (hasProposal) counts.WITH_PROPOSAL++
+    itemsAfterLifecycleAndDependency.value.forEach(item => {
+        if (item.hasTmrescoreProposal) counts.WITH_PROPOSAL++
         else counts.WITHOUT_PROPOSAL++
     })
     return counts
@@ -888,18 +876,29 @@ const analysisCounts = computed(() => {
         NOT_AFFECTED: 0,
         NEEDS_APPROVAL: 0,
     }
-    groupsBeforeAnalysis.value.forEach(g => {
-        const state = getGroupTechnicalState(g)
-        counts[state] = (counts[state] || 0) + 1
+    itemsBeforeAnalysis.value.forEach(item => {
+        counts[item.technicalState] = (counts[item.technicalState] || 0) + 1
     })
     return counts
+})
+
+const needsApprovalGroups = computed(() => {
+    return listItems.value
+        .filter(item => item.lifecycle === 'NEEDS_APPROVAL')
+        .map(item => item.group)
+})
+
+const incompleteGroups = computed(() => {
+    return listItems.value
+        .filter(item => item.lifecycle === 'INCOMPLETE')
+        .map(item => item.group)
 })
 
 const filterState = computed<FilterState>(() => ({
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
-    dependencyFilter: dependencyFilter.value,
-    tmrescoreFilter: tmrescoreProposalFilter.value,
+    dependencyFilter: selectedDependencyFilters.value,
+    tmrescoreFilter: selectedTMRescoreProposalFilters.value,
     idFilter: idFilter.value,
     tagFilter: tagFilter.value,
     componentFilter: componentFilter.value,
@@ -908,6 +907,437 @@ const filterState = computed<FilterState>(() => ({
     lifecycleFilters: lifecycleFilters.value,
     analysisFilters: analysisFilters.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+}))
+
+const optionLabel = (
+    value: string,
+    options: ReadonlyArray<{ value: string; label: string }>,
+) => options.find(option => option.value === value)?.label || value.replace(/_/g, ' ')
+
+const summarizedSelection = (
+    values: readonly string[],
+    options: ReadonlyArray<{ value: string; label: string }>,
+    allLabel: string,
+) => {
+    if (values.length === 0) return 'None'
+    if (values.length === options.length) return allLabel
+    return values.map(value => optionLabel(value, options)).join(', ')
+}
+
+const hasAllOptionsSelected = (
+    values: readonly string[],
+    options: ReadonlyArray<{ value: string }>,
+) => {
+    if (values.length !== options.length) return false
+    const selected = new Set(values)
+    return options.every(option => selected.has(option.value))
+}
+
+const defaultLifecycleFilters = computed(() => {
+    if (currentUserRole.value === 'REVIEWER') {
+        return ['OPEN', 'ASSESSED', 'ASSESSED_LEGACY', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
+    }
+    return ['OPEN']
+})
+
+const defaultAnalysisFilters = ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED']
+const allLifecycleFilterValues = computed(() => LIFECYCLE_OPTIONS.map(option => option.value))
+const allAnalysisFilterValues = computed(() => ANALYSIS_OPTIONS.map(option => option.value))
+const allDependencyFilterValues = computed(() => DEPENDENCY_OPTIONS.map(option => option.value as DependencyRelationship))
+const allTMRescoreFilterValues = computed(() => TMRESCORE_FILTER_OPTIONS.map(option => option.value as TMRescoreProposalFilter))
+
+const sameStringSet = (a: readonly string[], b: readonly string[]) => {
+    if (a.length !== b.length) return false
+    const set = new Set(a)
+    return b.every(value => set.has(value))
+}
+
+const smartSearchChips = computed(() => parsedSmartSearch.value.chips)
+
+const SEARCH_TOKEN_SHORTCUTS = [
+    { label: 'CVE', value: 'cve:' },
+    { label: 'Component', value: 'component:' },
+    { label: 'Team', value: 'team:' },
+    { label: 'Assignee', value: 'assignee:' },
+    { label: 'Version', value: 'version:' },
+] as const
+
+interface SearchCompletionOption {
+    value: string
+    label: string
+    detail: string
+}
+
+interface SearchCompletionToken {
+    prefix: string
+    typedPrefix: string
+    value: string
+    start: number
+    end: number
+}
+
+const cleanCompletionValue = (value: unknown) => String(value || '').trim()
+
+const buildCompletionOptions = (
+    values: unknown[],
+    detail: string,
+    labelForValue: (value: string) => string = value => value,
+): SearchCompletionOption[] => {
+    return Array.from(new Set(values.map(cleanCompletionValue).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+        .map(value => ({ value, label: labelForValue(value), detail }))
+}
+
+const quoteSearchValue = (value: string) => {
+    if (!/\s/.test(value)) return value
+    return `"${value.replace(/"/g, '\\"')}"`
+}
+
+const updateSearchCursorPosition = (event?: Event) => {
+    const target = event?.target as HTMLInputElement | null
+    searchCursorPosition.value = target?.selectionStart
+        ?? searchInput.value?.selectionStart
+        ?? smartSearchInput.value.length
+}
+
+const handleSearchFocus = (event: FocusEvent) => {
+    searchFocused.value = true
+    updateSearchCursorPosition(event)
+}
+
+const handleSearchBlur = () => {
+    setTimeout(() => {
+        searchFocused.value = false
+    }, 120)
+}
+
+const searchCompletionOptionsByPrefix = computed<Record<string, SearchCompletionOption[]>>(() => {
+    const ids: string[] = []
+    const components: string[] = []
+    const assignees: string[] = []
+
+    groups.value.forEach(group => {
+        ids.push(group.id, ...(group.aliases || []))
+        assignees.push(...(group.assignees || []))
+        const affectedVersions = group.affected_versions || []
+        affectedVersions.forEach(version => {
+            (version.components || []).forEach(component => {
+                components.push(component.component_name)
+            })
+        })
+    })
+
+    const idOptions = buildCompletionOptions(ids, 'ID')
+    const componentOptions = buildCompletionOptions(components, 'Component')
+    const teamOptions = buildCompletionOptions(teamTagList.value.map(entry => entry.team), 'Team')
+    const assigneeOptions = buildCompletionOptions(assignees, 'Assignee')
+    const versionOptions = buildCompletionOptions(availableVersions.value, 'Version')
+    const lifecycleOptions = LIFECYCLE_OPTIONS.map(option => ({
+        value: option.value.toLowerCase(),
+        label: option.label,
+        detail: 'Lifecycle',
+    }))
+    const analysisOptions = ANALYSIS_OPTIONS.map(option => ({
+        value: option.value.toLowerCase(),
+        label: option.label,
+        detail: 'State',
+    }))
+    const dependencyOptions = DEPENDENCY_OPTIONS.map(option => ({
+        value: option.value.toLowerCase(),
+        label: option.label,
+        detail: 'Dependency',
+    }))
+    const tmrescoreOptions = [
+        { value: 'with', label: 'With proposal', detail: 'TM' },
+        { value: 'without', label: 'Without proposal', detail: 'TM' },
+    ]
+    const hasOptions = [
+        { value: 'tmrescore', label: 'TM proposal', detail: 'Has' },
+        { value: 'no_tmrescore', label: 'No TM proposal', detail: 'Has' },
+        { value: 'cvss_mismatch', label: 'CVSS mismatch', detail: 'Has' },
+    ]
+    const cvssOptions = [
+        { value: 'mismatch', label: 'Mismatch', detail: 'CVSS' },
+    ]
+
+    return {
+        id: idOptions,
+        cve: idOptions,
+        alias: idOptions,
+        vuln: idOptions,
+        component: componentOptions,
+        comp: componentOptions,
+        pkg: componentOptions,
+        package: componentOptions,
+        team: teamOptions,
+        tag: teamOptions,
+        assignee: assigneeOptions,
+        assigned: assigneeOptions,
+        owner: assigneeOptions,
+        version: versionOptions,
+        ver: versionOptions,
+        v: versionOptions,
+        lifecycle: lifecycleOptions,
+        analysis: analysisOptions,
+        state: [...lifecycleOptions, ...analysisOptions],
+        dep: dependencyOptions,
+        dependency: dependencyOptions,
+        tm: tmrescoreOptions,
+        tmrescore: tmrescoreOptions,
+        proposal: tmrescoreOptions,
+        has: hasOptions,
+        cvss: cvssOptions,
+    }
+})
+
+const currentSearchCompletionToken = computed<SearchCompletionToken | null>(() => {
+    const input = smartSearchInput.value
+    const cursor = Math.min(searchCursorPosition.value, input.length)
+    const beforeCursor = input.slice(0, cursor)
+    const tokenMatch = beforeCursor.match(/(?:^|\s)([^\s]*)$/)
+    const tokenUntilCursor = tokenMatch?.[1] || ''
+    const tokenStart = cursor - tokenUntilCursor.length
+    const separatorIndex = tokenUntilCursor.indexOf(':')
+
+    if (separatorIndex <= 0) return null
+
+    const typedPrefix = tokenUntilCursor.slice(0, separatorIndex)
+    const prefix = typedPrefix.toLowerCase()
+    if (!searchCompletionOptionsByPrefix.value[prefix]) return null
+
+    const rawValue = tokenUntilCursor.slice(separatorIndex + 1).replace(/^["']/, '')
+    const afterCursor = input.slice(cursor)
+    const tokenEndOffset = afterCursor.search(/\s/)
+    const tokenEnd = tokenEndOffset === -1 ? input.length : cursor + tokenEndOffset
+
+    return {
+        prefix,
+        typedPrefix,
+        value: rawValue.toLowerCase(),
+        start: tokenStart,
+        end: tokenEnd,
+    }
+})
+
+const currentSearchCompletions = computed(() => {
+    const token = currentSearchCompletionToken.value
+    if (!token) return []
+
+    const query = token.value
+    const options = searchCompletionOptionsByPrefix.value[token.prefix] || []
+
+    return options
+        .filter(option => {
+            if (!query) return true
+            const value = option.value.toLowerCase()
+            const label = option.label.toLowerCase()
+            return value.includes(query) || label.includes(query)
+        })
+        .sort((a, b) => {
+            if (!query) return 0
+            const aStarts = a.value.toLowerCase().startsWith(query) || a.label.toLowerCase().startsWith(query)
+            const bStarts = b.value.toLowerCase().startsWith(query) || b.label.toLowerCase().startsWith(query)
+            if (aStarts !== bStarts) return aStarts ? -1 : 1
+            return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' })
+        })
+        .slice(0, 8)
+})
+
+const showSearchCompletions = computed(() =>
+    searchFocused.value
+    && !!currentSearchCompletionToken.value
+    && currentSearchCompletions.value.length > 0
+)
+
+watch(() => `${currentSearchCompletionToken.value?.prefix || ''}:${currentSearchCompletionToken.value?.value || ''}`, () => {
+    activeCompletionIndex.value = 0
+})
+
+const selectSearchCompletion = async (completion: SearchCompletionOption) => {
+    const token = currentSearchCompletionToken.value
+    if (!token) return
+
+    const before = smartSearchInput.value.slice(0, token.start)
+    const after = smartSearchInput.value.slice(token.end).replace(/^\s+/, '')
+    const replacement = `${token.typedPrefix}:${quoteSearchValue(completion.value)}`
+    smartSearchInput.value = `${before}${replacement}${after ? ` ${after}` : ' '}`
+
+    const cursor = `${before}${replacement} `.length
+    searchCursorPosition.value = cursor
+    activeCompletionIndex.value = 0
+    await nextTick()
+    searchInput.value?.focus()
+    searchInput.value?.setSelectionRange(cursor, cursor)
+}
+
+const handleSearchKeydown = (event: KeyboardEvent) => {
+    if (!showSearchCompletions.value) {
+        return
+    }
+
+    if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        activeCompletionIndex.value = (activeCompletionIndex.value + 1) % currentSearchCompletions.value.length
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        activeCompletionIndex.value = (activeCompletionIndex.value - 1 + currentSearchCompletions.value.length) % currentSearchCompletions.value.length
+    } else if (event.key === 'Enter' || event.key === 'Tab') {
+        const selected = currentSearchCompletions.value[activeCompletionIndex.value]
+        if (selected) {
+            event.preventDefault()
+            void selectSearchCompletion(selected)
+        }
+    }
+}
+
+const appendSearchToken = async (token: string) => {
+    const current = smartSearchInput.value.trim()
+    const hasToken = !token.endsWith(':') && current.split(/\s+/).filter(Boolean).includes(token)
+    smartSearchInput.value = hasToken ? current : `${current}${current && !hasToken ? ' ' : ''}${hasToken ? '' : token}`.trim()
+    showSearchTokenMenu.value = false
+    await nextTick()
+    searchInput.value?.focus()
+
+    if (token.endsWith(':')) {
+        const end = smartSearchInput.value.length
+        searchCursorPosition.value = end
+        searchInput.value?.setSelectionRange(end, end)
+    }
+}
+
+const formatSearchChipRaw = (raw: string) => {
+    const separatorIndex = raw.indexOf(':')
+    if (separatorIndex > 0) {
+        const prefix = raw.slice(0, separatorIndex)
+        const value = raw.slice(separatorIndex + 1)
+        return /\s/.test(value) ? `${prefix}:${quoteSearchValue(value)}` : raw
+    }
+    return raw.includes(' ') ? quoteSearchValue(raw) : raw
+}
+
+const removeSmartSearchChip = (indexToRemove: number) => {
+    smartSearchInput.value = smartSearchChips.value
+        .filter((_, index) => index !== indexToRemove)
+        .map(chip => formatSearchChipRaw(chip.raw))
+        .join(' ')
+}
+
+const clearSmartSearch = () => {
+    smartSearchInput.value = ''
+    searchCursorPosition.value = 0
+}
+
+type ActiveFilterChipKey =
+    | 'lifecycle'
+    | 'analysis'
+    | 'dependency'
+    | 'id'
+    | 'tag'
+    | 'component'
+    | 'assignee'
+    | 'versions'
+    | 'tmrescore'
+    | 'cvss'
+
+const activeFilterChips = computed(() => {
+    const chips: Array<{ key: ActiveFilterChipKey; label: string }> = []
+
+    if (!hasAllOptionsSelected(lifecycleFilters.value, LIFECYCLE_OPTIONS)) {
+        chips.push({ key: 'lifecycle', label: `Lifecycle: ${summarizedSelection(lifecycleFilters.value, LIFECYCLE_OPTIONS, 'All lifecycle')}` })
+    }
+    if (!hasAllOptionsSelected(analysisFilters.value, ANALYSIS_OPTIONS)) {
+        chips.push({ key: 'analysis', label: `State: ${summarizedSelection(analysisFilters.value, ANALYSIS_OPTIONS, 'All states')}` })
+    }
+    if (!hasAllOptionsSelected(selectedDependencyFilters.value, DEPENDENCY_OPTIONS)) {
+        chips.push({ key: 'dependency', label: `Dependency: ${summarizedSelection(selectedDependencyFilters.value, DEPENDENCY_OPTIONS, 'All dependencies')}` })
+    }
+
+    if (idFilter.value) chips.push({ key: 'id', label: `ID: ${idFilter.value}` })
+    if (tagFilter.value) chips.push({ key: 'tag', label: `Team: ${tagFilter.value}` })
+    if (componentFilter.value) chips.push({ key: 'component', label: `Component: ${componentFilter.value}` })
+    if (assigneeFilter.value) chips.push({ key: 'assignee', label: `Assignee: ${assigneeFilter.value}` })
+    if (versionFilterList.value.length) chips.push({ key: 'versions', label: `Versions: ${versionFilterList.value.join(', ')}` })
+    if (selectedTMRescoreProposalFilters.value.length !== TMRESCORE_FILTER_OPTIONS.length) {
+        chips.push({ key: 'tmrescore', label: `TM: ${summarizedSelection(selectedTMRescoreProposalFilters.value, TMRESCORE_FILTER_OPTIONS, 'All proposals')}` })
+    }
+    if (cvssVersionMismatchOnly.value) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
+
+    return chips
+})
+
+const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
+    switch (key) {
+        case 'lifecycle':
+            lifecycleFilters.value = allLifecycleFilterValues.value
+            break
+        case 'analysis':
+            analysisFilters.value = allAnalysisFilterValues.value
+            break
+        case 'dependency':
+            dependencyFilter.value = allDependencyFilterValues.value
+            break
+        case 'id':
+            idFilter.value = ''
+            break
+        case 'tag':
+            tagFilter.value = ''
+            break
+        case 'component':
+            componentFilter.value = ''
+            break
+        case 'assignee':
+            assigneeFilter.value = ''
+            break
+        case 'versions':
+            versionFilterInput.value = ''
+            break
+        case 'tmrescore':
+            tmrescoreProposalFilter.value = allTMRescoreFilterValues.value
+            break
+        case 'cvss':
+            cvssVersionMismatchOnly.value = false
+            break
+    }
+}
+
+const hasCustomFilterState = computed(() =>
+    !!smartSearchInput.value.trim()
+    || !!idFilter.value
+    || !!tagFilter.value
+    || !!componentFilter.value
+    || !!assigneeFilter.value
+    || versionFilterList.value.length > 0
+    || cvssVersionMismatchOnly.value
+    || sortBy.value !== 'rescored-severity'
+    || sortOrder.value !== 'desc'
+    || !sameStringSet(lifecycleFilters.value, defaultLifecycleFilters.value)
+    || !sameStringSet(analysisFilters.value, defaultAnalysisFilters)
+    || !sameStringSet(selectedDependencyFilters.value, allDependencyFilterValues.value)
+    || !sameStringSet(selectedTMRescoreProposalFilters.value, allTMRescoreFilterValues.value)
+)
+
+const filterSidebarProps = computed(() => ({
+    filters: filterState.value,
+    filterCounts: filterCounts.value,
+    availableVersions: availableVersions.value,
+    lifecycleOptions: LIFECYCLE_OPTIONS,
+    analysisOptions: ANALYSIS_OPTIONS,
+    copiedUrl: copiedUrl.value,
+    filteredCount: sortedGroups.value.length,
+    dependencyCounts: dependencyRelationshipCounts.value,
+    dependencyFilterCounts: dependencyFilterCounts.value,
+    tmrescoreCounts: tmrescoreProposalCounts.value,
+    analysisCounts: analysisCounts.value,
+    teamTagList: teamTagList.value,
+    cacheStatusState: cacheStatusState.value,
+    cacheStatusLabel: cacheStatusLabel.value,
+    cacheStatusAge: cacheStatusAge.value,
+    cacheStatusTooltip: cacheStatusText.value,
+    cacheStatusDetail: cacheStatus.value,
+    sortOptions: SORT_OPTIONS,
+    dependencyOptions: DEPENDENCY_OPTIONS,
+    tmrescoreOptions: TMRESCORE_FILTER_OPTIONS,
+    cvssVersionMismatchCount: cvssVersionMismatchCount.value,
 }))
 
 const handleFilterUpdate = (newFilters: FilterState) => {
@@ -929,7 +1359,7 @@ const syncProjectHeaderState = () => {
     const name = route.params.name as string
     projectHeaderState.currentProjectName.value = name === '_all_' ? null : name
     projectHeaderState.isAllProjects.value = name === '_all_'
-    projectHeaderState.isReviewer.value = (user?.role || 'ANALYST') === 'REVIEWER'
+    projectHeaderState.isReviewer.value = currentUserRole.value === 'REVIEWER'
     projectHeaderState.incompleteCount.value = needsApprovalGroups.value.length
 }
 
@@ -948,15 +1378,208 @@ watch(() => needsApprovalGroups.value.length, (length) => {
     projectHeaderState.incompleteCount.value = length
 }, { immediate: true })
 
-watch(() => user?.role, (role) => {
+watch(currentUserRole, (role) => {
     projectHeaderState.isReviewer.value = (role || 'ANALYST') === 'REVIEWER'
 }, { immediate: true })
 </script>
 
 <template>
-  <div class="overflow-x-visible min-h-0">
-    <div class="grid min-w-full w-full gap-y-10 pt-2.5 lg:pt-0 lg:gap-x-4 pb-8">
-        <div class="flex-1 min-w-[20rem] max-w-full w-full pl-0 lg:pl-0 lg:-ml-2 lg:pr-[425px]">
+  <div
+      :class="[
+          'overflow-x-visible min-h-0',
+          isAnalysisWorkspaceActive
+              ? 'flex h-full flex-col overflow-visible'
+              : ''
+      ]"
+  >
+    <div
+        v-if="viewMode === 'analysis' && !loading && !error"
+        class="relative z-30 mb-3 shrink-0 rounded-2xl border border-white/10 bg-gray-900/85 p-2 shadow-xl shadow-black/20 backdrop-blur-2xl"
+        @keydown.esc="showSearchTokenMenu = false"
+    >
+        <div class="flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+                <button
+                    v-if="!isFilterRailVisible"
+                    type="button"
+                    title="Open filters"
+                    class="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/35 px-3 text-xs font-semibold uppercase tracking-wider text-slate-200 transition-colors hover:bg-slate-900/55 hover:text-white"
+                    @click="showFilterDrawer = true"
+                >
+                    <SlidersHorizontal :size="15" />
+                    <span class="hidden sm:inline">Filters</span>
+                </button>
+                <div class="relative min-w-0 flex-1">
+                    <Search :size="16" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input
+                        ref="searchInput"
+                        v-model="smartSearchInput"
+                        type="search"
+                        class="h-10 w-full rounded-xl border border-white/10 bg-slate-950/45 pl-9 pr-9 text-sm font-medium text-gray-100 outline-none transition-colors placeholder:text-gray-600 focus:border-blue-500/50 focus:bg-slate-950/65"
+                        placeholder="Search CVE, component, team, assignee, version..."
+                        @focus="handleSearchFocus"
+                        @blur="handleSearchBlur"
+                        @input="updateSearchCursorPosition"
+                        @click="updateSearchCursorPosition"
+                        @keyup="updateSearchCursorPosition"
+                        @keydown="handleSearchKeydown"
+                    />
+                    <button
+                        v-if="smartSearchInput"
+                        type="button"
+                        class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+                        title="Clear search"
+                        @click="clearSmartSearch"
+                    >
+                        <X :size="13" />
+                        <span class="sr-only">Clear search</span>
+                    </button>
+                    <div
+                        v-if="showSearchCompletions"
+                        class="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-gray-950/95 p-1 shadow-2xl backdrop-blur-xl"
+                    >
+                        <button
+                            v-for="(completion, index) in currentSearchCompletions"
+                            :key="`${completion.detail}-${completion.value}`"
+                            type="button"
+                            :class="[
+                                'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors',
+                                activeCompletionIndex === index
+                                    ? 'bg-blue-500/15 text-white'
+                                    : 'text-gray-300 hover:bg-white/10 hover:text-white'
+                            ]"
+                            @mouseenter="activeCompletionIndex = index"
+                            @mousedown.prevent="selectSearchCompletion(completion)"
+                        >
+                            <span class="min-w-0 truncate text-sm font-semibold">{{ completion.label }}</span>
+                            <span class="shrink-0 rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                                {{ completion.detail }}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+                <div class="relative shrink-0">
+                    <button
+                        type="button"
+                        title="Insert search filter"
+                        class="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/35 px-3 text-xs font-semibold uppercase tracking-wider text-slate-200 transition-colors hover:bg-slate-900/55 hover:text-white"
+                        @click="showSearchTokenMenu = !showSearchTokenMenu"
+                    >
+                        <Plus :size="14" />
+                        <span class="hidden sm:inline">Filter</span>
+                    </button>
+                    <div
+                        v-if="showSearchTokenMenu"
+                        class="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-52 overflow-hidden rounded-xl border border-white/10 bg-gray-950/95 p-1 shadow-2xl backdrop-blur-xl"
+                    >
+                        <button
+                            v-for="shortcut in SEARCH_TOKEN_SHORTCUTS"
+                            :key="shortcut.value"
+                            type="button"
+                            class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                            @click="appendSearchToken(shortcut.value)"
+                        >
+                            <span>{{ shortcut.label }}</span>
+                            <span class="text-[10px] text-gray-500">{{ shortcut.value }}</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="hidden shrink-0 text-right text-[11px] leading-tight text-gray-400 md:block">
+                    <div><span class="font-semibold text-white">{{ sortedGroups.length }}</span> shown</div>
+                    <div>{{ listItems.length }} total</div>
+                </div>
+                <button
+                    v-if="hasCustomFilterState"
+                    type="button"
+                    class="hidden h-10 shrink-0 rounded-xl border border-white/10 bg-slate-950/35 px-3 text-xs font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:bg-white/10 hover:text-white sm:inline-flex sm:items-center"
+                    @click="resetFilters"
+                >
+                    Reset
+                </button>
+            </div>
+            <div class="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1">
+                <span class="rounded-full border border-blue-400/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-200">
+                    {{ optionLabel(sortBy, SORT_OPTIONS) }} · {{ sortOrder.toUpperCase() }}
+                </span>
+                <span
+                    v-for="(chip, index) in smartSearchChips"
+                    :key="`${chip.raw}-${index}`"
+                    class="inline-flex max-w-full items-center gap-1 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-100"
+                >
+                    <span class="truncate">{{ chip.label }}</span>
+                    <button
+                        type="button"
+                        class="shrink-0 rounded-full text-cyan-200/70 transition-colors hover:bg-cyan-300/15 hover:text-white"
+                        title="Remove search token"
+                        @click="removeSmartSearchChip(index)"
+                    >
+                        <X :size="10" />
+                        <span class="sr-only">Remove {{ chip.label }}</span>
+                    </button>
+                </span>
+                <span
+                    v-for="chip in activeFilterChips"
+                    :key="chip.key"
+                    class="inline-flex max-w-full items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-300"
+                >
+                    <span class="truncate">{{ chip.label }}</span>
+                    <button
+                        type="button"
+                        class="shrink-0 rounded-full text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+                        title="Remove filter"
+                        @click="removeActiveFilterChip(chip.key)"
+                    >
+                        <X :size="10" />
+                        <span class="sr-only">Remove {{ chip.label }}</span>
+                    </button>
+                </span>
+                <button
+                    v-if="hasCustomFilterState"
+                    type="button"
+                    class="rounded-full border border-white/10 bg-slate-950/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 transition-colors hover:bg-white/10 hover:text-white sm:hidden"
+                    @click="resetFilters"
+                >
+                    Reset
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div
+        :class="[
+            'grid min-w-full w-full gap-y-4',
+            isAnalysisWorkspaceActive
+                ? 'min-h-0 flex-1 overflow-hidden pt-0 pb-0'
+                : 'pt-2.5 lg:pt-0 pb-8',
+            viewMode === 'analysis'
+                ? (isDesktopDetailOpen
+                    ? (isFilterRailVisible
+                        ? 'lg:grid-cols-[20rem_30rem_minmax(48rem,1fr)] lg:items-start lg:gap-x-4'
+                        : 'lg:grid-cols-[30rem_minmax(48rem,1fr)] lg:items-start lg:gap-x-3')
+                    : (isFilterRailVisible
+                        ? 'lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start lg:gap-x-4'
+                        : 'lg:grid-cols-[minmax(0,1fr)] lg:items-start'))
+                : 'lg:grid-cols-[minmax(0,1fr)]'
+        ]"
+    >
+        <div
+            v-if="viewMode === 'analysis' && isFilterRailVisible"
+            class="block h-full min-h-0 w-[20rem] overflow-y-auto"
+        >
+            <StatsSidebar
+                v-bind="filterSidebarProps"
+                @update:filters="handleFilterUpdate"
+                @copy-filter-url="copyFilterUrl"
+            />
+        </div>
+
+        <div
+            :class="[
+                'min-w-0 max-w-full w-full pl-0 lg:pl-0',
+                isAnalysisWorkspaceActive ? 'h-full min-h-0 overflow-hidden' : '',
+                isDesktopDetailOpen ? 'lg:w-[30rem] lg:min-w-[30rem] lg:max-w-[30rem] lg:pr-0' : ''
+            ]"
+        >
             <div class="hidden"></div>
             <div v-if="loading" class="text-center py-10">
                 <div class="mb-2 text-xl font-semibold">{{ loadingMessage }}</div>
@@ -972,22 +1595,33 @@ watch(() => user?.role, (role) => {
                 </div>
             </div>
             <div v-else-if="error" class="text-red-500 text-center py-10">{{ error }}</div>
-            <div v-else class="shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden">
-                <div class="p-3 space-y-3">
-                    <div v-if="viewMode === 'analysis'" class="space-y-3">
-                        <VulnGroupCard
+            <div
+                v-else
+                :class="[
+                    'shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden',
+                    isAnalysisWorkspaceActive ? 'h-full min-h-0' : ''
+                ]"
+            >
+                <div :class="viewMode === 'analysis' ? 'flex h-full min-h-0 flex-col p-2' : 'p-3 space-y-3'">
+                    <div v-if="viewMode === 'analysis'" class="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                        <VulnRowCompact
                             v-for="group in visibleGroups"
                             :key="group.id"
                             :group="group"
+                            :selected="selectedGroupId === group.id"
                             :data-group-id="group.id"
+                            @select="selectGroup"
                             @update="handleTeamMappingUpdated"
                             @update:assessment="(data) => handleLocalAssessmentUpdate(group, data)"
-                            @toggle-expand="(id, expanded) => handleToggleExpand(id, expanded)"
                         />
-                        <div v-if="sortedGroups.length === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
-                        <div v-if="hasMoreGroups && sortedGroups.length > 0" ref="loadMoreTrigger" class="text-center py-6 text-sm text-gray-400">
-                            Loading more vulnerabilities…
+                        <div
+                            v-if="hasMoreGroups"
+                            :ref="setLoadMoreTrigger"
+                            class="flex min-h-14 items-center justify-center rounded-lg border border-dashed border-gray-700 bg-gray-900/60 text-xs font-semibold uppercase tracking-wide text-gray-500"
+                        >
+                            Showing {{ Math.min(visibleItemCount, sortedGroups.length) }} of {{ sortedGroups.length }}
                         </div>
+                        <div v-if="sortedGroups.length === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
                     </div>
                     <div v-else class="space-y-4">
                         <div v-if="statsLoading" class="text-center py-16">
@@ -1003,34 +1637,69 @@ watch(() => user?.role, (role) => {
             </div>
         </div>
 
-        <div class="hidden lg:block lg:fixed lg:top-24 lg:right-0 lg:w-[440px] lg:pr-4 lg:max-h-[calc(100vh-10rem)] overflow-y-auto">
-            <StatsSidebar
-                :filters="filterState"
-                :filterCounts="filterCounts"
-                :availableVersions="availableVersions"
-                :lifecycleOptions="LIFECYCLE_OPTIONS"
-                :analysisOptions="ANALYSIS_OPTIONS"
-                :copiedUrl="copiedUrl"
-                :filteredCount="sortedGroups.length"
-                :dependencyCounts="dependencyRelationshipCounts"
-                :dependencyFilterCounts="dependencyFilterCounts"
-                :tmrescoreCounts="tmrescoreProposalCounts"
-                :analysisCounts="analysisCounts"
-                :teamTagList="teamTagList"
-                :cacheStatusState="cacheStatusState"
-                :cacheStatusLabel="cacheStatusLabel"
-                :cacheStatusAge="cacheStatusAge"
-                :cacheStatusTooltip="cacheStatusText"
-                :cacheStatusDetail="cacheStatus"
-                :sortOptions="SORT_OPTIONS"
-                :dependencyOptions="DEPENDENCY_OPTIONS"
-                :tmrescoreOptions="TMRESCORE_FILTER_OPTIONS"
-                :cvssVersionMismatchCount="cvssVersionMismatchCount"
-                @update:filters="handleFilterUpdate"
-                @copy-filter-url="copyFilterUrl"
+        <div
+            v-if="isDesktopDetailOpen"
+            class="hidden h-full min-h-0 min-w-[48rem] overflow-hidden lg:block"
+        >
+            <VulnDetailInspector
+                v-if="selectedGroup"
+                :group="selectedGroup"
+                class="h-full"
+                @close="closeSelectedGroup"
+                @update="handleTeamMappingUpdated"
+                @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
             />
         </div>
     </div>
+
+    <Teleport to="body">
+        <div
+            v-if="selectedGroup && viewMode === 'analysis' && !isDesktopInspector"
+            class="fixed inset-0 z-[60] bg-gray-950/95 p-2"
+        >
+            <VulnDetailInspector
+                :group="selectedGroup"
+                @close="closeSelectedGroup"
+                @update="handleTeamMappingUpdated"
+                @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
+            />
+        </div>
+    </Teleport>
+
+    <Teleport to="body">
+        <div
+            v-if="showFilterDrawer"
+            class="fixed inset-0 z-[70]"
+        >
+            <button
+                type="button"
+                class="absolute inset-0 bg-gray-950/80 backdrop-blur-sm"
+                title="Close filters"
+                @click="showFilterDrawer = false"
+            >
+                <span class="sr-only">Close filters</span>
+            </button>
+            <aside class="absolute inset-y-0 left-0 w-[min(26rem,calc(100vw-1rem))] overflow-y-auto border-r border-white/10 bg-gray-950 p-2 shadow-2xl">
+                <div class="mb-2 flex items-center justify-between gap-3 px-1">
+                    <div class="text-xs font-semibold uppercase tracking-widest text-gray-400">Filters</div>
+                    <button
+                        type="button"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded border border-white/10 bg-white/5 text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                        title="Close filters"
+                        @click="showFilterDrawer = false"
+                    >
+                        <X :size="14" />
+                        <span class="sr-only">Close filters</span>
+                    </button>
+                </div>
+                <StatsSidebar
+                    v-bind="filterSidebarProps"
+                    @update:filters="handleFilterUpdate"
+                    @copy-filter-url="copyFilterUrl"
+                />
+            </aside>
+        </div>
+    </Teleport>
 
     <BulkResolveIncompleteModal
         :show="showBulkModal"
@@ -1047,4 +1716,3 @@ watch(() => user?.role, (role) => {
     />
   </div>
 </template>
-

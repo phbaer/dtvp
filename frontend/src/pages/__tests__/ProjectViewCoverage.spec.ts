@@ -18,11 +18,12 @@ vi.mock('vue-router', () => ({
     RouterLink: { template: '<a data-testid="router-link"><slot/></a>' }
 }))
 
-vi.mock('../../components/VulnGroupCard.vue', () => ({
+vi.mock('../../components/VulnRowCompact.vue', () => ({
     default: {
-        template: '<div></div>',
+        name: 'VulnRowCompact',
+        template: '<div class="vuln-card" :data-id="group.id">{{ group.id }}</div>',
         props: ['group'],
-        emits: ['update:assessment']
+        emits: ['update', 'update:assessment']
     }
 }))
 
@@ -85,7 +86,7 @@ describe('ProjectView Coverage Extras', () => {
             is_suppressed: true
         }
 
-        await wrapper.findComponent({ name: 'VulnGroupCard' }).vm.$emit('update:assessment', updateData)
+        await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('update:assessment', updateData)
 
         // Check updates applied
         // Check second component safely
@@ -109,13 +110,13 @@ describe('ProjectView Coverage Extras', () => {
             analysisFilters: extendedAnalysisFilters,
         })
 
-        // Set filter
-        const input = wrapper.find('input[placeholder*="Team Identifier"]')
-        await input.setValue('Team')
+        // Set filter via the smart-search team prefix.
+        const input = wrapper.find('input[placeholder*="Search CVE"]')
+        await input.setValue('team:Team')
 
         // Should only show group 1
         // Note: We need to check what is passed to VulnGroupCard components
-        const cards = wrapper.findAllComponents({ name: 'VulnGroupCard' })
+        const cards = wrapper.findAllComponents({ name: 'VulnRowCompact' })
         // With 'Team', only 'TeamA' matches
         expect(cards.length).toBe(1)
         if (cards.length > 0) {
@@ -124,7 +125,7 @@ describe('ProjectView Coverage Extras', () => {
 
         // Clear filter
         await input.setValue('')
-        expect(wrapper.findAllComponents({ name: 'VulnGroupCard' }).length).toBe(4)
+        expect(wrapper.findAllComponents({ name: 'VulnRowCompact' }).length).toBe(4)
     })
 
     it('updates loading progress via callback', async () => {

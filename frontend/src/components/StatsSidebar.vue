@@ -69,41 +69,9 @@ const emit = defineEmits<{
 
 const activeTab = ref<'scope-search' | 'statistics'>('scope-search')
 const copiedStats = ref(false)
-const versionSearch = ref('')
-const versionSearchInput = ref<HTMLInputElement | null>(null)
-
-const versionFilterList = computed(() => {
-    return props.filters.versionFilterInput
-        .split(',')
-        .map(v => v.trim())
-        .filter(v => v.length > 0)
-})
-
-const filteredVersionOptions = computed(() => {
-    const query = versionSearch.value.trim().toLowerCase()
-    return props.availableVersions.filter(ver => {
-        if (query && !ver.toLowerCase().includes(query)) return false
-        return true
-    })
-})
 
 const updateFilter = <K extends keyof FilterState>(key: K, value: FilterState[K]) => {
     emit('update:filters', { ...props.filters, [key]: value })
-}
-
-const toggleVersion = (version: string) => {
-    const list = versionFilterList.value
-    const idx = list.findIndex(v => v.toLowerCase() === version.toLowerCase())
-    let newInput: string
-    if (idx >= 0) {
-        const newList = [...list]
-        newList.splice(idx, 1)
-        newInput = newList.join(', ')
-    } else {
-        newInput = list.length ? `${list.join(', ')}, ${version}` : version
-    }
-    versionSearch.value = ''
-    updateFilter('versionFilterInput', newInput)
 }
 
 const toggleDependencyFilter = (value: 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN') => {
@@ -120,11 +88,6 @@ const toggleTmrescoreFilter = (value: 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') => {
     if (idx >= 0) current.splice(idx, 1)
     else current.push(value)
     updateFilter('tmrescoreFilter', current as FilterState['tmrescoreFilter'])
-}
-
-const removeVersion = (version: string) => {
-    const newList = versionFilterList.value.filter(v => v.toLowerCase() !== version.toLowerCase())
-    updateFilter('versionFilterInput', newList.join(', '))
 }
 
 const toggleLifecycleFilter = (val: string) => {
@@ -193,32 +156,32 @@ const handleCopy = () => {
 </script>
 
 <template>
-    <div class="w-full max-w-[440px] flex-shrink-0 space-y-3 z-40">
+    <div class="w-full min-w-0 flex-shrink-0 space-y-3">
         <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden">
             <div class="flex items-center gap-2 px-3 py-3">
                 <button
                     type="button"
                     @click="activeTab = 'scope-search'"
                     :class="[
-                        'flex-1 min-w-[11rem] h-10 px-4 text-sm font-semibold uppercase tracking-wider whitespace-nowrap transition-colors rounded-2xl',
+                        'flex-1 min-w-0 h-10 px-3 text-xs font-semibold uppercase tracking-wider whitespace-nowrap transition-colors rounded-2xl',
                         activeTab === 'scope-search'
                             ? 'bg-slate-900/30 text-white border border-white/15 shadow-sm shadow-slate-900/20'
                             : 'bg-slate-900/5 text-slate-400 hover:bg-slate-900/10 hover:text-white border border-transparent'
                     ]"
                 >
-                    Scope & Search
+                    Filters
                 </button>
                 <button
                     type="button"
                     @click="activeTab = 'statistics'"
                     :class="[
-                        'flex-1 h-10 px-4 text-sm font-semibold uppercase tracking-wider transition-colors rounded-2xl',
+                        'flex-1 min-w-0 h-10 px-3 text-xs font-semibold uppercase tracking-wider transition-colors rounded-2xl',
                         activeTab === 'statistics'
                             ? 'bg-slate-900/30 text-white border border-white/15 shadow-sm shadow-slate-900/20'
                             : 'bg-slate-900/5 text-slate-400 hover:bg-slate-900/10 hover:text-white border border-transparent'
                     ]"
                 >
-                    Statistics
+                    Results
                 </button>
                 <button
                     type="button"
@@ -233,7 +196,7 @@ const handleCopy = () => {
             <div class="p-3.5 space-y-3 relative">
                 <div v-if="activeTab === 'scope-search'" class="space-y-3">
                     <div class="space-y-3">
-                        <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-4 backdrop-blur-sm">
+                        <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                             <div class="space-y-2.5">
                                 <div class="grid gap-2 sm:grid-cols-[1fr_auto]">
                                     <div class="flex flex-col gap-1">
@@ -256,92 +219,9 @@ const handleCopy = () => {
                                     </div>
                                 </div>
 
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <div class="flex flex-col gap-1">
-                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Vulnerability ID</label>
-                                        <input
-                                            type="text"
-                                            :value="props.filters.idFilter"
-                                            @input="(event) => updateFilter('idFilter', (event.target as HTMLInputElement).value)"
-                                            placeholder="CVE or ID..."
-                                            class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
-                                        />
-                                    </div>
-                                    <div class="flex flex-col gap-1">
-                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Team Identifier</label>
-                                        <input
-                                            type="text"
-                                            :value="props.filters.tagFilter"
-                                            @input="(event) => updateFilter('tagFilter', (event.target as HTMLInputElement).value)"
-                                            placeholder="Team Identifier..."
-                                            class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
-                                        />
-                                    </div>
-                                    <div class="flex flex-col gap-1">
-                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Component Name</label>
-                                        <input
-                                            type="text"
-                                            :value="props.filters.componentFilter"
-                                            @input="(event) => updateFilter('componentFilter', (event.target as HTMLInputElement).value)"
-                                            placeholder="Component..."
-                                            class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
-                                        />
-                                    </div>
-                                    <div class="flex flex-col gap-1">
-                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Assignee</label>
-                                        <input
-                                            type="text"
-                                            :value="props.filters.assigneeFilter"
-                                            @input="(event) => updateFilter('assigneeFilter', (event.target as HTMLInputElement).value)"
-                                            placeholder="Username..."
-                                            class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
-                                        />
-                                    </div>
-                                    <div class="flex flex-col gap-1 relative">
-                                        <label class="text-[10px] uppercase tracking-widest text-gray-400">Project Versions</label>
-                                        <CustomSelect modelValue="" :options="[]">
-                                            <template #trigger="{ open }">
-                                                <div class="relative" @focusin="open">
-                                                    <div class="flex flex-wrap items-center gap-1 bg-black/40 border border-white/10 rounded-xl px-2 min-h-[2.5rem] cursor-text focus-within:border-blue-500/50 transition-all"
-                                                         @click="versionSearchInput?.focus()">
-                                                        <span v-for="ver in versionFilterList" :key="ver" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium">
-                                                            {{ ver }}
-                                                            <button @click.stop="removeVersion(ver)" class="hover:text-white text-blue-300/70 leading-none">&times;</button>
-                                                        </span>
-                                                        <input
-                                                            ref="versionSearchInput"
-                                                            v-model="versionSearch"
-                                                            type="text"
-                                                            placeholder="Search versions..."
-                                                            class="flex-1 min-w-[5rem] bg-transparent border-none outline-none text-sm font-medium text-gray-200 placeholder:text-gray-600 h-8 px-1"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </template>
-                                            <template #menu>
-                                                <div class="divide-y divide-white/5">
-                                                    <button
-                                                        v-for="opt in filteredVersionOptions"
-                                                        :key="opt"
-                                                        @mousedown.prevent="toggleVersion(opt)"
-                                                        :class="[
-                                                            'w-full text-left px-3 py-1.5 text-sm transition-colors flex items-center justify-between',
-                                                            versionFilterList.some(v => v.toLowerCase() === opt.toLowerCase())
-                                                                ? 'bg-blue-500/15 text-blue-200'
-                                                                : 'text-gray-300 hover:bg-white/5'
-                                                        ]"
-                                                    >
-                                                        {{ opt }}
-                                                        <span v-if="versionFilterList.some(v => v.toLowerCase() === opt.toLowerCase())" class="text-blue-400 text-xs">&#10003;</span>
-                                                    </button>
-                                                </div>
-                                            </template>
-                                        </CustomSelect>
-                                    </div>
-                                </div>
                             </div>
                         </div>
-                        <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-4 backdrop-blur-sm">
+                        <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                             <div class="space-y-3">
                                 <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Lifecycle Status</label>
@@ -463,7 +343,7 @@ const handleCopy = () => {
                 </div>
 
                 <div v-else class="space-y-3">
-                    <div class="relative shadow-xl bg-white/2 border border-white/5 rounded-2xl p-4 backdrop-blur-sm">
+                    <div class="relative shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                         <span v-if="copiedStats" class="absolute top-3 right-3 text-[10px] text-green-300">Copied!</span>
                         <div class="text-[10px] font-medium uppercase tracking-widest text-gray-500">Statistics</div>
                         <div class="flex items-center gap-2 px-3 py-1.5 my-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
@@ -486,7 +366,7 @@ const handleCopy = () => {
                         </div>
                     </div>
 
-                    <div v-if="props.teamTagList.length > 0" class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-4 backdrop-blur-sm">
+                    <div v-if="props.teamTagList.length > 0" class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                         <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Per Team</div>
                         <div class="overflow-y-auto max-h-[20rem]">
                             <table class="min-w-full table-auto text-left text-[10px] text-gray-300 border-separate border-spacing-0">
@@ -513,7 +393,7 @@ const handleCopy = () => {
                     </div>
 
                     <div
-                        class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-4 backdrop-blur-sm"
+                        class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm"
                         :title="props.cacheStatusTooltip"
                     >
                         <div class="text-[10px] font-medium uppercase tracking-widest text-gray-500 mb-2">Cache Status</div>

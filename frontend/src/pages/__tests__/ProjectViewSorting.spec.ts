@@ -18,8 +18,9 @@ vi.mock('vue-router', () => ({
 }))
 
 // Mock child component to show group info for verification
-vi.mock('../../components/VulnGroupCard.vue', () => ({
+vi.mock('../../components/VulnRowCompact.vue', () => ({
     default: {
+        name: 'VulnRowCompact',
         template: '<div class="vuln-group-card" :data-id="group.id">{{ group.id }}</div>',
         props: ['group']
     }

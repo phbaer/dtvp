@@ -146,10 +146,10 @@ const acknowledgeChangelog = () => {
 </script>
 
 <template>
-  <div class="min-h-screen w-full flex flex-col bg-slate-950/70 text-white">
+  <div class="h-screen w-full overflow-hidden flex flex-col bg-slate-950/70 text-white">
     <template v-if="$route.path !== '/login'">
-        <header class="sticky top-0 z-40 border-b border-gray-700/70 bg-gray-800/75 backdrop-blur-2xl">
-            <div class="w-full p-3 flex flex-wrap justify-between items-center gap-3">
+        <header class="shrink-0 border-b border-gray-700/70 bg-gray-800/75 backdrop-blur-2xl">
+            <div class="w-full p-3 flex flex-wrap items-center justify-between gap-3">
                 <div class="flex flex-wrap items-center gap-3">
                     <router-link
                         to="/"
@@ -256,7 +256,14 @@ const acknowledgeChangelog = () => {
                 </div>
             </div>
         </header>
-        <main class="px-6 sm:px-8 pt-4 sm:pt-6 w-full flex-grow pb-28">
+        <main
+            :class="[
+                'min-h-0 w-full flex-1 px-6 pt-4 sm:px-8 sm:pt-6',
+                route.path.startsWith('/project/')
+                    ? 'overflow-hidden pb-4 sm:pb-6'
+                    : 'overflow-y-auto overscroll-contain pb-8'
+            ]"
+        >
             <router-view v-slot="{ Component, route }">
                 <keep-alive>
                     <component
@@ -272,7 +279,7 @@ const acknowledgeChangelog = () => {
                 />
             </router-view>
         </main>
-        <footer class="fixed bottom-0 left-0 z-40 w-full border-t border-gray-700/70 bg-gray-900/70 backdrop-blur-2xl">
+        <footer class="z-40 w-full shrink-0 border-t border-gray-700/70 bg-gray-900/70 backdrop-blur-2xl">
             <div class="w-full p-3 flex flex-col gap-1 text-center text-[11px] text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:text-left">
                 <div class="font-medium text-gray-300">DTVP v{{ version }} (build {{ build }})</div>
                 <div>

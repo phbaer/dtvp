@@ -32,16 +32,30 @@ vi.mock('vue-router', () => ({
 }))
 
 // Mock child component
-vi.mock('../../components/VulnGroupCard.vue', () => ({
+vi.mock('../../components/VulnRowCompact.vue', () => ({
     default: {
-        name: 'VulnGroupCard',
+        name: 'VulnRowCompact',
         template: `
-            <div class="vuln-group-card" data-testid="group-card">
+            <div class="vuln-group-card vuln-card" data-testid="group-card" @click="$emit('select', group)">
                 <button data-testid="emit-update" @click="$emit('update', group)">emit update</button>
             </div>
         `,
         props: ['group'],
-        emits: ['update', 'update:assessment', 'toggle-expand']
+        emits: ['select', 'update', 'update:assessment']
+    }
+}))
+
+vi.mock('../../components/VulnDetailInspector.vue', () => ({
+    default: {
+        name: 'VulnDetailInspector',
+        template: `
+            <aside data-testid="detail-inspector">
+                <span>{{ group.id }}</span>
+                <button data-testid="close-inspector" @click="$emit('close')">close</button>
+            </aside>
+        `,
+        props: ['group'],
+        emits: ['close', 'update', 'update:assessment']
     }
 }))
 
@@ -136,6 +150,8 @@ describe('ProjectView.vue', () => {
         expect(wrapper.text()).toContain('Transitive')
 
         // Query update should occur for state-driven filters
+        await new Promise(resolve => setTimeout(resolve, 250))
+        await flushPromises()
         expect(replaceSpy).toHaveBeenCalled()
         const lastCall = replaceSpy.mock.calls[replaceSpy.mock.calls.length - 1] as any[] | undefined
         const latestQuery = lastCall?.[0]?.query
@@ -189,10 +205,43 @@ describe('ProjectView.vue', () => {
             is_suppressed: false
         }
 
-        await wrapper.findComponent({ name: 'VulnGroupCard' }).vm.$emit('update:assessment', updateData)
+        await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('update:assessment', updateData)
 
         expect(mockGroup.rescored_cvss).toBe(5.0)
         expect(mockGroup.affected_versions?.[0]?.components?.[0]?.analysis_state).toBe('EXPLOITABLE')
+    })
+
+    it('opens a single detail inspector when selecting a vulnerability row', async () => {
+        const mockGroups = [
+            { id: 'CVE-1', title: 'First', affected_versions: [] },
+            { id: 'CVE-2', title: 'Second', affected_versions: [] },
+        ]
+        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+
+        const rows = wrapper.findAllComponents({ name: 'VulnRowCompact' })
+        await rows[1].vm.$emit('select', mockGroups[1])
+
+        expect(wrapper.findAllComponents({ name: 'VulnDetailInspector' })).toHaveLength(1)
+        expect(wrapper.get('[data-testid="detail-inspector"]').text()).toContain('CVE-2')
+        expect(replaceSpy).toHaveBeenCalledWith(expect.objectContaining({
+            query: expect.objectContaining({ vuln: 'CVE-2' }),
+        }))
+    })
+
+    it('closes the selected inspector and removes the vulnerability query param', async () => {
+        const mockGroup = { id: 'CVE-1', title: 'First', affected_versions: [] }
+        vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+
+        await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('select', mockGroup)
+        await wrapper.get('[data-testid="close-inspector"]').trigger('click')
+
+        expect(wrapper.findAllComponents({ name: 'VulnDetailInspector' })).toHaveLength(0)
+        const lastCall = replaceSpy.mock.calls[replaceSpy.mock.calls.length - 1] as any[] | undefined
+        expect(lastCall?.[0]?.query?.vuln).toBeUndefined()
     })
 
     it('refreshes statistics when assessment update occurs in statistics mode', async () => {
@@ -217,7 +266,7 @@ describe('ProjectView.vue', () => {
             is_suppressed: false
         }
 
-        await wrapper.findComponent({ name: 'VulnGroupCard' }).vm.$emit('update:assessment', updateData)
+        await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('update:assessment', updateData)
 
         // Not in statistics mode yet, so update should only mark dirty, not fetch.
         expect(getStatistics).not.toHaveBeenCalled()

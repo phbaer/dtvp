@@ -13,13 +13,18 @@ export async function mountProjectView(options: {
     query?: Record<string, unknown>
     mountOptions?: Record<string, any>
     flush?: boolean
+    viewportWidth?: number | null
 } = {}) {
     const {
         routeName = 'Test',
         query = {},
         mountOptions = {},
         flush = true,
+        viewportWidth = 1920,
     } = options
+    if (viewportWidth != null) {
+        setProjectViewViewport(viewportWidth)
+    }
     const global = mountOptions.global ?? {}
     const resolvedMountOptions = {
         ...mountOptions,
@@ -50,6 +55,15 @@ export async function mountProjectView(options: {
     }
 
     return wrapper
+}
+
+export function setProjectViewViewport(width: number) {
+    Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        writable: true,
+        value: width,
+    })
+    window.dispatchEvent(new Event('resize'))
 }
 
 export async function updateProjectViewState(wrapper: any, state: Record<string, unknown>) {

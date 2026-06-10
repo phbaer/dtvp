@@ -18,7 +18,7 @@ onMounted(async () => {
 </script>
 
 <template>
-    <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
+    <div class="fixed inset-0 bg-black/80 flex items-center justify-center p-4" style="z-index: 10000">
         <div class="bg-gray-800 border border-gray-700 rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col">
             <!-- Header -->
             <div class="p-4 border-b border-gray-700 flex justify-between items-center">
