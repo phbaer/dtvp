@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { LayoutList, Copy } from 'lucide-vue-next'
 import CustomSelect from './CustomSelect.vue'
+import AttributionAgeFilter from './AttributionAgeFilter.vue'
 import type { CacheStatus } from '../types'
 
 export interface TeamEntry {
@@ -36,6 +37,8 @@ export interface FilterState {
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
     assigneeFilter: string
+    attributionAgeDays: number | null
+    attributionAgeMode: 'older' | 'younger'
 }
 
 const props = defineProps<{
@@ -60,6 +63,7 @@ const props = defineProps<{
     dependencyOptions: ReadonlyArray<{ value: string; label: string }>
     tmrescoreOptions: ReadonlyArray<{ value: string; label: string }>
     cvssVersionMismatchCount?: number
+    attributionRangeCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -105,6 +109,8 @@ const toggleAnalysisFilter = (val: string) => {
     else current.push(val)
     updateFilter('analysisFilters', current)
 }
+
+
 
 const statsText = computed(() => {
     const lines = [
@@ -223,6 +229,17 @@ const handleCopy = () => {
                         </div>
                         <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                             <div class="space-y-3">
+                                <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Attribution Age</label>
+                                    <AttributionAgeFilter
+                                        :days="props.filters.attributionAgeDays"
+                                        :mode="props.filters.attributionAgeMode"
+                                        :count="props.attributionRangeCount"
+                                        @update:days="updateFilter('attributionAgeDays', $event)"
+                                        @update:mode="updateFilter('attributionAgeMode', $event)"
+                                    />
+                                </div>
+
                                 <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Lifecycle Status</label>
                                     <div class="flex flex-wrap gap-1.5 items-center">

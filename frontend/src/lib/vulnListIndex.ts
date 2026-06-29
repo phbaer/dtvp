@@ -5,6 +5,8 @@ import type { FilterCounts, TeamCounts } from './group-classifier'
 
 export type DependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
 export type TMRescoreProposalFilter = 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'
+export const DEFAULT_ATTRIBUTION_AGE_DAYS = 28
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface VulnListItem {
     group: GroupedVuln
@@ -17,6 +19,8 @@ export interface VulnListItem {
     componentNamesLower: string[]
     assigneesLower: string[]
     versions: string[]
+    attributedOnMsValues: number[]
+    oldestAttributedOnMs: number | null
     searchableTextLower: string
     dependencyRelationship: DependencyRelationship
     hasTmrescoreProposal: boolean
@@ -40,6 +44,8 @@ export interface VulnListFilterInput {
     tmrescoreProposalFilter?: FilterSelection<TMRescoreProposalFilter>
     versionFilterList?: readonly string[]
     cvssVersionMismatchOnly?: boolean
+    attributionAgeDays?: number | string | null
+    attributionAgeMode?: 'older' | 'younger'
 }
 
 export interface VulnStateFilterInput {
@@ -52,6 +58,32 @@ type FilterSelection<T extends string> = readonly T[] | T | null | undefined
 const unique = (values: string[]) => Array.from(new Set(values))
 
 const lower = (value: unknown) => String(value || '').trim().toLowerCase()
+
+export const parseAttributionTimestamp = (value: unknown): number | null => {
+    if (value == null || value === '') return null
+
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value) || value <= 0) return null
+        return value < 1_000_000_000_000 ? value * 1000 : value
+    }
+
+    const raw = String(value).trim()
+    if (!raw) return null
+
+    const numeric = Number(raw)
+    if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric
+    }
+
+    const parsed = Date.parse(raw)
+    return Number.isFinite(parsed) ? parsed : null
+}
+
+export const normalizeAttributionAgeDays = (value: unknown): number | null => {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed <= 0) return null
+    return Math.floor(parsed)
+}
 
 const upperKey = (value: unknown) => String(value || '')
     .trim()
@@ -363,6 +395,16 @@ export function buildVulnListItem(
     const componentNamesLower = componentNames.map(component => component.toLowerCase())
     const assigneesLower = (group.assignees || []).map(assignee => lower(assignee)).filter(Boolean)
     const versionsLower = versions.map(version => version.toLowerCase())
+    const attributedOnMsValues = unique(
+        (group.affected_versions || [])
+            .flatMap(version => version.components || [])
+            .map(component => parseAttributionTimestamp(component.attributed_on))
+            .filter((value): value is number => value != null)
+            .map(value => String(value)),
+    ).map(value => Number(value))
+    const oldestAttributedOnMs = attributedOnMsValues.length
+        ? Math.min(...attributedOnMsValues)
+        : null
     const titleLower = lower(group.title)
     const classification = classifyGroup(group, teamMapping)
     const searchableTextLower = unique([
@@ -387,6 +429,8 @@ export function buildVulnListItem(
         componentNamesLower,
         assigneesLower,
         versions,
+        attributedOnMsValues,
+        oldestAttributedOnMs,
         searchableTextLower,
         dependencyRelationship: getGroupDependencyRelationship(group),
         hasTmrescoreProposal: hasTMRescoreProposalForGroup(group, proposals),
@@ -411,6 +455,20 @@ export function buildVulnListItems(
 
 const everyTermMatches = (terms: readonly string[], values: readonly string[]) => {
     return terms.every(term => values.some(value => value.includes(term)))
+}
+
+export function matchesAttributionAgeFilter(
+    item: VulnListItem,
+    days: unknown,
+    mode: 'older' | 'younger' = 'older',
+    nowMs = Date.now(),
+): boolean {
+    const normalizedDays = normalizeAttributionAgeDays(days)
+    if (normalizedDays == null) return false
+    const cutoff = nowMs - normalizedDays * DAY_MS
+    return item.attributedOnMsValues.some(value =>
+        mode === 'younger' ? value >= cutoff : value < cutoff,
+    )
 }
 
 export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQuery | string | undefined): boolean {
@@ -506,6 +564,13 @@ export function matchesListFilters(item: VulnListItem, filters: VulnListFilterIn
     }
 
     if (filters.cvssVersionMismatchOnly && !item.cvssVersionMismatch) {
+        return false
+    }
+
+    if (
+        filters.attributionAgeDays != null
+        && !matchesAttributionAgeFilter(item, filters.attributionAgeDays, filters.attributionAgeMode)
+    ) {
         return false
     }
 

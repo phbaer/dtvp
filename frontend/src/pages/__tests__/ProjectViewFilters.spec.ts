@@ -323,6 +323,76 @@ describe('ProjectView Filters', () => {
         expect(cards.map((card: any) => card.text())).toContain('V3')
     })
 
+    it('filters vulnerabilities by project attribution age', async () => {
+        const now = Date.UTC(2026, 5, 29, 12)
+        const dayMs = 24 * 60 * 60 * 1000
+        ;(getGroupedVulns as any).mockResolvedValue([
+            {
+                id: 'V-OLD',
+                severity: 'HIGH',
+                cvss_score: 8.0,
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        project_name: 'TestProject',
+                        project_uuid: 'p1',
+                        project_version: '1.0',
+                        components: [
+                            {
+                                component_name: 'CompA',
+                                analysis_state: 'NOT_SET',
+                                analysis_details: '',
+                                attributed_on: now - 29 * dayMs,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                id: 'V-NEW',
+                severity: 'HIGH',
+                cvss_score: 8.0,
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        project_name: 'TestProject',
+                        project_uuid: 'p1',
+                        project_version: '1.0',
+                        components: [
+                            {
+                                component_name: 'CompB',
+                                analysis_state: 'NOT_SET',
+                                analysis_details: '',
+                                attributed_on: now - 7 * dayMs,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ])
+
+        const wrapper = await mountProjectViewRoute()
+
+        expect(wrapper.findAll('.vuln-card').length).toBe(2)
+
+        // V-OLD was attributed 29 days ago, V-NEW 7 days ago. "younger" keeps
+        // recent findings, "older" keeps the aged ones.
+        ;(wrapper.vm as any).attributionAgeDays = 14
+        ;(wrapper.vm as any).attributionAgeMode = 'younger'
+        await wrapper.vm.$nextTick()
+
+        let cards = wrapper.findAll('.vuln-card')
+        expect(cards.length).toBe(1)
+        expect(cards[0]?.text()).toContain('V-NEW')
+
+        ;(wrapper.vm as any).attributionAgeMode = 'older'
+        await wrapper.vm.$nextTick()
+
+        cards = wrapper.findAll('.vuln-card')
+        expect(cards.length).toBe(1)
+        expect(cards[0]?.text()).toContain('V-OLD')
+    })
+
     it('shows "Pending Review" vulnerabilities regardless of filters', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockDataWithPending)
         const wrapper = await mountProjectViewRoute()

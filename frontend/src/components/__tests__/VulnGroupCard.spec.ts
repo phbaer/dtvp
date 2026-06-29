@@ -187,6 +187,40 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Trans.')
     })
 
+    it('shows vulnerability age from the oldest attribution date', () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(new Date('2026-06-29T12:00:00Z'))
+
+        try {
+            const wrapper = mount(VulnGroupCard, {
+                props: {
+                    group: {
+                        ...mockGroup,
+                        affected_versions: [
+                            {
+                                project_name: 'App1',
+                                project_version: '1.0',
+                                project_uuid: 'p1',
+                                components: [
+                                    {
+                                        ...mockComponents[0],
+                                        attributed_on: '2026-06-01T12:00:00Z',
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            })
+
+            const ageChip = wrapper.get('[data-testid="attribution-age-chip"]')
+            expect(ageChip.text()).toContain('Age 4w')
+            expect(ageChip.attributes('title')).toContain('2026-06-01')
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
     it('shows sorted project versions in analysis details block', async () => {
         const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
 
@@ -951,4 +985,3 @@ describe('VulnGroupCard', () => {
         expect(wrapper.findComponent({ name: 'CvssCalculatorV3' }).exists()).toBe(true)
     })
 })
-

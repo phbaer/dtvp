@@ -7,10 +7,12 @@ import {
     computeListTeamCounts,
     getGroupDependencyRelationship,
     hasTMRescoreProposalForGroup,
+    matchesAttributionAgeFilter,
     matchesLifecycleFilter,
     matchesListFilters,
     matchesSmartSearch,
     matchesStateFilters,
+    parseAttributionTimestamp,
     normalizeFilterSelection,
     parseVulnSearchQuery,
 } from '../vulnListIndex'
@@ -160,6 +162,152 @@ describe('vulnListIndex', () => {
             dependencyFilter: 'DIRECT',
             tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
         })).toBe(false)
+    })
+
+    it('matches findings attributed before the selected age threshold', () => {
+        const nowMs = Date.UTC(2026, 5, 29)
+        const oldMs = nowMs - 29 * 24 * 60 * 60 * 1000
+        const exactMs = nowMs - 28 * 24 * 60 * 60 * 1000
+        const group = makeGroup({
+            affected_versions: [
+                {
+                    project_name: 'Project',
+                    project_uuid: 'project-uuid',
+                    project_version: '2026.4',
+                    components: [
+                        {
+                            project_name: 'Project',
+                            project_version: '2026.4',
+                            project_uuid: 'project-uuid',
+                            component_name: 'Netty Handler',
+                            component_version: '4.1.0',
+                            component_uuid: 'component-old',
+                            vulnerability_uuid: 'vuln-uuid',
+                            finding_uuid: 'finding-old',
+                            attributed_on: oldMs,
+                            analysis_state: 'NOT_SET',
+                            analysis_details: '',
+                            is_suppressed: false,
+                        },
+                        {
+                            project_name: 'Project',
+                            project_version: '2026.4',
+                            project_uuid: 'project-uuid',
+                            component_name: 'Netty Handler',
+                            component_version: '4.1.0',
+                            component_uuid: 'component-exact',
+                            vulnerability_uuid: 'vuln-uuid',
+                            finding_uuid: 'finding-exact',
+                            attributed_on: exactMs,
+                            analysis_state: 'NOT_SET',
+                            analysis_details: '',
+                            is_suppressed: false,
+                        },
+                    ],
+                },
+            ],
+        })
+        const item = buildVulnListItem(group, {}, {})
+
+        expect(parseAttributionTimestamp(String(Math.floor(oldMs / 1000)))).toBe(oldMs)
+        expect(parseAttributionTimestamp(new Date(oldMs).toISOString())).toBe(oldMs)
+        expect(item.oldestAttributedOnMs).toBe(oldMs)
+        expect(matchesAttributionAgeFilter(item, 28, 'older', nowMs)).toBe(true)
+        expect(matchesAttributionAgeFilter(item, 30, 'older', nowMs)).toBe(false)
+    })
+
+    it('does not match the attribution age filter when timestamps are missing or invalid', () => {
+        const item = buildVulnListItem(makeGroup({
+            affected_versions: [
+                {
+                    project_name: 'Project',
+                    project_uuid: 'project-uuid',
+                    project_version: '2026.4',
+                    components: [
+                        {
+                            project_name: 'Project',
+                            project_version: '2026.4',
+                            project_uuid: 'project-uuid',
+                            component_name: 'Netty Handler',
+                            component_version: '4.1.0',
+                            component_uuid: 'component-invalid',
+                            vulnerability_uuid: 'vuln-uuid',
+                            finding_uuid: 'finding-invalid',
+                            attributed_on: 'not-a-date',
+                            analysis_state: 'NOT_SET',
+                            analysis_details: '',
+                            is_suppressed: false,
+                        },
+                    ],
+                },
+            ],
+        }), {}, {})
+
+        expect(item.attributedOnMsValues).toEqual([])
+        expect(matchesAttributionAgeFilter(item, 28, 'older', Date.UTC(2026, 5, 29))).toBe(false)
+    })
+
+    it('matches younger and older attribution ages using the mode', () => {
+        const dayMs = 24 * 60 * 60 * 1000
+        const nowMs = Date.UTC(2026, 5, 29, 12)
+        const oldMs = nowMs - 29 * dayMs
+        const recentMs = nowMs - 7 * dayMs
+        const item = buildVulnListItem(makeGroup({
+            affected_versions: [
+                {
+                    project_name: 'Project',
+                    project_uuid: 'project-uuid',
+                    project_version: '2026.4',
+                    components: [
+                        {
+                            project_name: 'Project',
+                            project_version: '2026.4',
+                            project_uuid: 'project-uuid',
+                            component_name: 'Netty Handler',
+                            component_version: '4.1.0',
+                            component_uuid: 'component-old',
+                            vulnerability_uuid: 'vuln-uuid',
+                            finding_uuid: 'finding-old',
+                            attributed_on: oldMs,
+                            analysis_state: 'NOT_SET',
+                            analysis_details: '',
+                            is_suppressed: false,
+                        },
+                    ],
+                },
+            ],
+        }), {}, {})
+
+        const recentOnlyItem = buildVulnListItem(makeGroup({
+            affected_versions: [
+                {
+                    project_name: 'Project',
+                    project_uuid: 'project-uuid',
+                    project_version: '2026.4',
+                    components: [
+                        {
+                            project_name: 'Project',
+                            project_version: '2026.4',
+                            project_uuid: 'project-uuid',
+                            component_name: 'Netty Handler',
+                            component_version: '4.1.0',
+                            component_uuid: 'component-recent',
+                            vulnerability_uuid: 'vuln-uuid',
+                            finding_uuid: 'finding-recent',
+                            attributed_on: recentMs,
+                            analysis_state: 'NOT_SET',
+                            analysis_details: '',
+                            is_suppressed: false,
+                        },
+                    ],
+                },
+            ],
+        }), {}, {})
+
+        expect(matchesAttributionAgeFilter(item, 14, 'older', nowMs)).toBe(true)
+        expect(matchesAttributionAgeFilter(item, 14, 'younger', nowMs)).toBe(false)
+        expect(matchesAttributionAgeFilter(recentOnlyItem, 14, 'younger', nowMs)).toBe(true)
+        expect(matchesAttributionAgeFilter(recentOnlyItem, 14, 'older', nowMs)).toBe(false)
     })
 
     it('parses broad smart search terms and typed filter tokens', () => {

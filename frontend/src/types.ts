@@ -18,6 +18,7 @@ export interface Instance {
     component_uuid: string;
     vulnerability_uuid: string;
     finding_uuid: string;
+    attributed_on?: string | number | null;
     analysis_state: string;
     analysisState?: string;
     analysis_details?: string;
@@ -234,4 +235,3 @@ export interface TMRescoreProposalSnapshot {
     generated_at?: string | null;
     proposals: Record<string, TMRescoreProposal>;
 }
-

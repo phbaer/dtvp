@@ -17,6 +17,8 @@ describe('FilterSidebar.vue', () => {
         lifecycleFilters: ['EXPLOITABLE'],
         analysisFilters: ['WITH_PROPOSAL'],
         cvssVersionMismatchOnly: false,
+        attributionAgeDays: null,
+        attributionAgeMode: 'older',
     }
 
     const lifecycleOptions = [
@@ -117,6 +119,28 @@ describe('FilterSidebar.vue', () => {
 
         const emitted = wrapper.emitted('update:filters')?.map(([payload]) => payload)
         expect(emitted).toContainEqual(expect.objectContaining({ versionFilterInput: '1.0, 2.0, 3.0' }))
+
+        wrapper.unmount()
+    })
+
+    it('exposes the attribution age filter', async () => {
+        const wrapper = wrapperFactory()
+        const trigger = wrapper.findAll('button').find((button) => button.text().includes('Any age'))
+        expect(trigger).toBeTruthy()
+
+        await trigger?.trigger('click')
+        await nextTick()
+
+        const presetButton = Array.from(document.body.querySelectorAll('button')).find((button) =>
+            button.textContent?.trim() === '30d'
+        ) as HTMLElement | undefined
+
+        expect(presetButton).toBeTruthy()
+        presetButton?.click()
+        await nextTick()
+
+        const emitted = wrapper.emitted('update:filters')?.map(([payload]) => payload)
+        expect(emitted).toContainEqual(expect.objectContaining({ attributionAgeDays: 30 }))
 
         wrapper.unmount()
     })
