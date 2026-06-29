@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import CustomSelect from './CustomSelect.vue'
+import AttributionAgeFilter from './AttributionAgeFilter.vue'
 import { Copy } from 'lucide-vue-next'
 
 export interface FilterState {
@@ -16,6 +17,8 @@ export interface FilterState {
     lifecycleFilters: string[]
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
+    attributionAgeDays: number | null
+    attributionAgeMode: 'older' | 'younger'
 }
 
 export interface FilterOption {
@@ -153,6 +156,15 @@ const toggleAnalysisFilter = (val: string) => {
                         type="text" 
                         placeholder="Username..." 
                         class="bg-black/40 border border-white/10 rounded-xl px-3 h-10 text-sm font-medium focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-gray-600 w-full"
+                    />
+                </div>
+                <div class="flex flex-col gap-1">
+                    <label class="text-[9px] uppercase tracking-widest text-gray-400">Attribution Age</label>
+                    <AttributionAgeFilter
+                        :days="filters.attributionAgeDays"
+                        :mode="filters.attributionAgeMode"
+                        @update:days="updateFilter('attributionAgeDays', $event)"
+                        @update:mode="updateFilter('attributionAgeMode', $event)"
                     />
                 </div>
                 <div class="flex flex-col gap-1 relative">

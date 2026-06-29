@@ -79,6 +79,31 @@ def test_group_vulnerabilities_basic():
     assert len(g2["affected_versions"][0]["components"]) == 1
 
 
+def test_group_vulnerabilities_preserves_finding_attribution():
+    input_data = [
+        {
+            "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+            "vulnerabilities": [
+                {
+                    "vulnerability": {
+                        "vulnId": "CVE-2026-001",
+                        "uuid": "vulnuuid1",
+                        "severity": "HIGH",
+                    },
+                    "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                    "analysis": {"state": "NOT_SET"},
+                    "attribution": {"attributedOn": 1760000000000},
+                }
+            ],
+        }
+    ]
+
+    grouped = group_vulnerabilities(input_data)
+
+    component = grouped[0]["affected_versions"][0]["components"][0]
+    assert component["attributed_on"] == 1760000000000
+
+
 def test_sanitize_rescored_vector_preserves_valid():
     """Valid rescored vector (base preserved + modifiers) passes through unchanged."""
     orig = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"

@@ -12,8 +12,10 @@ import {
     computeListFilterCounts,
     computeListTeamCounts,
     matchesLifecycleFilter,
+    matchesAttributionAgeFilter,
     matchesListFilters,
     matchesStateFilters,
+    normalizeAttributionAgeDays,
     normalizeFilterSelection,
     parseVulnSearchQuery,
 } from '../lib/vulnListIndex'
@@ -365,6 +367,8 @@ const componentFilter = ref('')
 const assigneeFilter = ref('')
 const dependencyFilter = ref<DependencyRelationship[]>(['DIRECT', 'TRANSITIVE', 'UNKNOWN'])
 const cvssVersionMismatchOnly = ref(false)
+const attributionAgeDays = ref<number | null>(null)
+const attributionAgeMode = ref<'older' | 'younger'>('older')
 
 const SORT_OPTIONS = [
     { value: 'severity', label: 'Original Criticality' },
@@ -431,6 +435,19 @@ const filterUrl = computed(() => {
         delete query.tmrescore
     }
 
+    if (attributionAgeDays.value == null) {
+        delete query.attributed_before_days
+        delete query.attribution_mode
+    } else {
+        query.attributed_before_days = String(attributionAgeDays.value)
+        query.attribution_mode = attributionAgeMode.value
+    }
+    delete query.attributed_from
+    delete query.attributed_to
+    delete query.attributed_not
+    delete query.attribution_age_days
+    delete query.age_days
+
     if (smartSearchInput.value.trim()) {
         query.q = smartSearchInput.value.trim()
     } else {
@@ -483,10 +500,30 @@ const analysisFilters = ref<string[]>([])
 const sortBy = ref('rescored-severity')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 
+const firstQueryValue = (value: unknown) => Array.isArray(value) ? value[0] : value
+const FILTER_QUERY_KEYS = new Set([
+    'q',
+    'lifecycle',
+    'analysis',
+    'tag',
+    'id',
+    'cve',
+    'component',
+    'assignee',
+    'sort',
+    'order',
+    'tmrescore',
+    'cvss_mismatch',
+    'attributed_before_days',
+    'attribution_mode',
+    'attribution_age_days',
+    'age_days',
+])
+
 onMounted(() => {
     const q = route.query
     const hasFilterParams = Object.entries(q).some(([k, v]) => {
-        if (!['q', 'lifecycle', 'analysis', 'tag', 'id', 'cve', 'component', 'assignee', 'sort', 'order', 'tmrescore'].includes(k)) return false;
+        if (!FILTER_QUERY_KEYS.has(k)) return false;
         if (Array.isArray(v)) return v.length > 0;
         return v !== undefined && v !== null && v !== '';
     })
@@ -511,6 +548,13 @@ onMounted(() => {
         if (q.versions) versionFilterInput.value = Array.isArray(q.versions) ? q.versions.join(',') : (q.versions as string)
         if (q.tmrescore) tmrescoreProposalFilter.value = Array.isArray(q.tmrescore) ? (q.tmrescore as string[]).map(v => v.toUpperCase() as TMRescoreProposalFilter) : [String(q.tmrescore).toUpperCase() as TMRescoreProposalFilter]
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
+        const legacyDays = normalizeAttributionAgeDays(
+            firstQueryValue(q.attributed_before_days ?? q.attribution_age_days ?? q.age_days),
+        )
+        if (legacyDays != null) {
+            attributionAgeDays.value = legacyDays
+            attributionAgeMode.value = firstQueryValue(q.attribution_mode) === 'younger' ? 'younger' : 'older'
+        }
         if (q.sort) sortBy.value = q.sort as string
         if (q.order) sortOrder.value = q.order as 'asc' | 'desc'
     } else {
@@ -552,6 +596,8 @@ const resetFilters = () => {
     tmrescoreProposalFilter.value = ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL']
     versionFilterInput.value = ''
     cvssVersionMismatchOnly.value = false
+    attributionAgeDays.value = null
+    attributionAgeMode.value = 'older'
     sortBy.value = 'rescored-severity'
     sortOrder.value = 'desc'
 }
@@ -596,13 +642,26 @@ const syncFilterQueryToUrl = () => {
     if (cvssVersionMismatchOnly.value) query.cvss_mismatch = 'true'
     else delete query.cvss_mismatch
 
+    if (attributionAgeDays.value == null) {
+        delete query.attributed_before_days
+        delete query.attribution_mode
+    } else {
+        query.attributed_before_days = String(attributionAgeDays.value)
+        query.attribution_mode = attributionAgeMode.value
+    }
+    delete query.attributed_from
+    delete query.attributed_to
+    delete query.attributed_not
+    delete query.attribution_age_days
+    delete query.age_days
+
     query.sort = sortBy.value
     query.order = sortOrder.value
 
     router.replace({ query }).catch(() => {})
 }
 
-watch([smartSearchInput, lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, assigneeFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, cvssVersionMismatchOnly, sortBy, sortOrder], () => {
+watch([smartSearchInput, lifecycleFilters, analysisFilters, tagFilter, idFilter, componentFilter, assigneeFilter, dependencyFilter, tmrescoreProposalFilter, versionFilterInput, cvssVersionMismatchOnly, attributionAgeDays, attributionAgeMode, sortBy, sortOrder], () => {
     if (filterUrlSyncTimer) clearTimeout(filterUrlSyncTimer)
     filterUrlSyncTimer = setTimeout(() => {
         filterUrlSyncTimer = null
@@ -656,6 +715,8 @@ const nonStateFilters = computed(() => ({
     tmrescoreProposalFilter: selectedTMRescoreProposalFilters.value,
     versionFilterList: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+    attributionAgeDays: attributionAgeDays.value,
+    attributionAgeMode: attributionAgeMode.value,
 }))
 
 // Items after applying all non-lifecycle/non-analysis filters (used for filter counts)
@@ -827,7 +888,7 @@ const itemsAfterLifecycleAndDependency = computed(() => {
     return itemsAfterLifecycle.value.filter(item => selectedDependencyFilters.value.includes(item.dependencyRelationship))
 })
 
-const itemsBeforeAnalysis = computed(() => {
+const itemsAfterLifecycleDependencyAndTMRescore = computed(() => {
     if (selectedTMRescoreProposalFilters.value.length === 0) return itemsAfterLifecycleAndDependency.value
 
     return itemsAfterLifecycleAndDependency.value.filter(item => {
@@ -835,6 +896,14 @@ const itemsBeforeAnalysis = computed(() => {
         const matchesWithout = selectedTMRescoreProposalFilters.value.includes('WITHOUT_PROPOSAL') && !item.hasTmrescoreProposal
         return matchesWith || matchesWithout
     })
+})
+
+const itemsBeforeAnalysis = computed(() => {
+    if (attributionAgeDays.value == null) return itemsAfterLifecycleDependencyAndTMRescore.value
+
+    return itemsAfterLifecycleDependencyAndTMRescore.value.filter(item =>
+        matchesAttributionAgeFilter(item, attributionAgeDays.value, attributionAgeMode.value)
+    )
 })
 
 const countRelationships = (items: VulnListItem[]) => {
@@ -864,6 +933,12 @@ const tmrescoreProposalCounts = computed(() => {
         else counts.WITHOUT_PROPOSAL++
     })
     return counts
+})
+
+const attributionAgeCount = computed(() => {
+    return itemsAfterLifecycleDependencyAndTMRescore.value.filter(item =>
+        matchesAttributionAgeFilter(item, attributionAgeDays.value, attributionAgeMode.value)
+    ).length
 })
 
 const analysisCounts = computed(() => {
@@ -907,6 +982,8 @@ const filterState = computed<FilterState>(() => ({
     lifecycleFilters: lifecycleFilters.value,
     analysisFilters: analysisFilters.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
+    attributionAgeDays: attributionAgeDays.value,
+    attributionAgeMode: attributionAgeMode.value,
 }))
 
 const optionLabel = (
@@ -1238,6 +1315,7 @@ type ActiveFilterChipKey =
     | 'versions'
     | 'tmrescore'
     | 'cvss'
+    | 'attributionAge'
 
 const activeFilterChips = computed(() => {
     const chips: Array<{ key: ActiveFilterChipKey; label: string }> = []
@@ -1261,6 +1339,10 @@ const activeFilterChips = computed(() => {
         chips.push({ key: 'tmrescore', label: `TM: ${summarizedSelection(selectedTMRescoreProposalFilters.value, TMRESCORE_FILTER_OPTIONS, 'All proposals')}` })
     }
     if (cvssVersionMismatchOnly.value) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
+    if (attributionAgeDays.value != null) {
+        const verb = attributionAgeMode.value === 'younger' ? 'younger' : 'older'
+        chips.push({ key: 'attributionAge', label: `Attributed ${verb} than ${attributionAgeDays.value}d` })
+    }
 
     return chips
 })
@@ -1297,6 +1379,10 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'cvss':
             cvssVersionMismatchOnly.value = false
             break
+        case 'attributionAge':
+            attributionAgeDays.value = null
+            attributionAgeMode.value = 'older'
+            break
     }
 }
 
@@ -1308,6 +1394,7 @@ const hasCustomFilterState = computed(() =>
     || !!assigneeFilter.value
     || versionFilterList.value.length > 0
     || cvssVersionMismatchOnly.value
+    || attributionAgeDays.value != null
     || sortBy.value !== 'rescored-severity'
     || sortOrder.value !== 'desc'
     || !sameStringSet(lifecycleFilters.value, defaultLifecycleFilters.value)
@@ -1338,6 +1425,7 @@ const filterSidebarProps = computed(() => ({
     dependencyOptions: DEPENDENCY_OPTIONS,
     tmrescoreOptions: TMRESCORE_FILTER_OPTIONS,
     cvssVersionMismatchCount: cvssVersionMismatchCount.value,
+    attributionRangeCount: attributionAgeCount.value,
 }))
 
 const handleFilterUpdate = (newFilters: FilterState) => {
@@ -1353,6 +1441,8 @@ const handleFilterUpdate = (newFilters: FilterState) => {
     lifecycleFilters.value = newFilters.lifecycleFilters
     analysisFilters.value = newFilters.analysisFilters
     cvssVersionMismatchOnly.value = newFilters.cvssVersionMismatchOnly
+    attributionAgeDays.value = normalizeAttributionAgeDays(newFilters.attributionAgeDays)
+    attributionAgeMode.value = newFilters.attributionAgeMode === 'younger' ? 'younger' : 'older'
 }
 
 const syncProjectHeaderState = () => {

@@ -731,6 +731,12 @@ def group_vulnerabilities(
 
             analysis = finding.get("analysis", {})
             details = analysis.get("analysisDetails") or ""
+            attribution = finding.get("attribution") or {}
+            attributed_on = (
+                attribution.get("attributedOn")
+                or finding.get("attributedOn")
+                or finding.get("attributed_on")
+            )
 
             # Parse rescored value if present
             rescored_score = None
@@ -802,6 +808,7 @@ def group_vulnerabilities(
                 "component_uuid": comp_uuid,
                 "vulnerability_uuid": vuln.get("uuid"),
                 "finding_uuid": finding.get("uuid"),
+                "attributed_on": attributed_on,
                 "analysis_state": analysis.get("state")
                 or analysis.get("analysisState"),
                 "justification": analysis.get("justification")

@@ -9,12 +9,42 @@ Repository links:
 - Main repo: https://git.baer.one/phbaer/dtvp/
 - GitHub mirror: https://github.com/phbaer/dtvp/
 
-The backend Python source lives under `dtvp/`, and local development uses `uv run uvicorn dtvp.main:app`.
+## AI Agent Entry Point
 
-SBOM
+This README is the canonical project overview for humans and AI agents. Any AI agent, assistant, automation, or project-specific skill should read this file before doing broad scans, planning changes, or modifying code.
+
+Keep this file in sync with the project:
+
+- When a change affects behavior, architecture, APIs, integrations, configuration, commands, workflows, or repository structure, update this README in the same change.
+- If the README conflicts with source code, configuration, tests, package metadata, or lockfiles, trust the source and update the README.
+- Agent-specific files such as `AGENTS.md` and `skills/*/SKILL.md` are routing hints only; they should point agents back here instead of carrying a separate architecture overview.
+- The generic project skill entry point is `skills/project-entrypoint/SKILL.md`; `skills/dtvp-project-memory/SKILL.md` remains as a DTVP-named compatibility entry point.
+- Python and backend work uses `uv` from the repository root.
+- Node and frontend work uses `npm` from `frontend/`.
+
+GitHub Copilot support needs a little extra care because Copilot does not treat every agent file the same way across all surfaces:
+
+- Copilot agents can read `AGENTS.md`, but GitHub.com Chat, IDE chat, code review, and cloud-agent workflows each support different subsets of `AGENTS.md`, `.github/copilot-instructions.md`, and `.github/instructions/*.instructions.md`.
+- If Copilot appears to ignore the repository rules, first check that repository/custom instructions are enabled in the Copilot surface being used. In VS Code this is the `Code Generation: Use Instruction Files` setting.
+- For broad Copilot repository instructions, use `.github/copilot-instructions.md` and keep it as a short pointer back to this README instead of duplicating the architecture overview.
+- Copilot project skills are discovered from `.github/skills`, `.claude/skills`, or `.agents/skills`. The project-local `skills/` directory in this repo is for Codex/project-entrypoint compatibility and should not be assumed to activate as Copilot skills unless mirrored or installed into a Copilot-supported skills location.
+- When adding any Copilot-specific instruction or skill file, keep this README canonical and update it whenever the workflow, command, architecture, or repository structure guidance changes.
+
+## Repository Layout
+
+- `dtvp/`: FastAPI backend package.
+- `frontend/`: Vue 3, Vite, and Tailwind frontend package managed with npm.
+- `test_setup/`: mock Dependency-Track, tmrescore, and code-analysis services for local and test workflows.
+- `tests/`: backend pytest test suite.
+- `data/`: local JSON configuration and cache defaults, including roles, team mapping, rescore rules, and Dependency-Track cache data.
+- `openapi/`: static OpenAPI specs for optional external integrations.
+- `docs/`: integration notes and generated README screenshot assets.
+- `skills/`: project-local AI skill entry points. These are lightweight pointers to this README.
+
+## SBOM
 
 - The container includes a CycloneDX SBOM at `/sbom/dtvp-cyclonedx.json`.
-- Generated via `syft` (standard SBOM tooling) during Docker image build. 
+- Generated via `syft` (standard SBOM tooling) during Docker image build.
 - The app exposes it at `/api/sbom` and `/api/sbom/html`; footer includes "Download CycloneDX SBOM".
 - Includes production frontend (`frontend/package.json`/`frontend/package-lock.json`) and backend (`pyproject.toml`/`uv.lock`) dependency components; test/dev dependencies excluded by design.
 
@@ -24,8 +54,47 @@ SBOM
 - Show lifecycle states such as open, assessed, incomplete, inconsistent, and needs approval.
 - Support global and team-specific assessments.
 - Rescore findings with CVSS data and review the aggregated result in the UI.
+- Optionally re-score against a Microsoft Threat Modeling Tool export via an external tmrescore service.
+- Optionally run reachability/exploitability code analysis through an external code-analysis service.
 - Edit team mappings, user roles, and rescore rules from the settings screen.
 - Run against either a live Dependency-Track server or the bundled mock service.
+
+## Architecture And Structure
+
+DTVP is split into a FastAPI backend, a Vue single-page application, and mock external services for local development. The backend can serve the built SPA from `frontend/dist`, while day-to-day development usually runs the backend and Vite dev server separately.
+
+### Backend
+
+- `dtvp/main.py` builds the FastAPI app, CORS, context path handling, task stores, dependency wiring, routers, startup/shutdown hooks, and SPA fallback.
+- `dtvp/app_wiring.py` centralizes dependency construction so routes and services can be tested without importing the full app.
+- `dtvp/general_api_routes.py` owns core routes for projects, grouped vulnerability tasks, task polling, statistics, assessment details, assessment writes, and dependency-chain lookup.
+- `dtvp/grouped_vuln_services.py` fetches per-version findings, detailed vulnerabilities, and BOMs concurrently before grouping.
+- `dtvp/logic.py` contains core domain logic for team mapping, roles, BOM dependency analysis, vulnerability grouping, statistics, CVSS vector handling, assessment-detail parsing, and aggregated assessment state.
+- `dtvp/assessment_services.py` handles Dependency-Track assessment payloads, conflict detection, local cache updates, remote writes, and result finalization.
+- `dtvp/dt_client.py` calls the Dependency-Track API. `dtvp/dt_cache.py` persists Dependency-Track projects, findings, vulnerabilities, BOMs, analyses, active project IDs, and pending updates under `data/dt_cache` by default.
+- `dtvp/settings_routes.py` manages team mapping, user roles, and CVSS rescore rules backed by files under `data/`.
+- `dtvp/app_info_routes.py`, `dtvp/app_info_services.py`, and `dtvp/frontend_routes.py` expose metadata, changelog/OpenAPI/SBOM downloads, and built frontend assets.
+- Optional integration routes and services live in `dtvp/tmrescore_*`, `dtvp/code_analysis_*`, `dtvp/analysis_queue_*`, and the matching mock services under `test_setup/`.
+
+### Frontend
+
+- Vue entry points are `frontend/src/main.ts`, `frontend/src/App.vue`, and `frontend/src/router.ts`.
+- `frontend/src/lib/api.ts` is the central backend client and defines most frontend-facing integration types.
+- `frontend/src/types.ts` defines project, grouped vulnerability, assessment, statistics, cache, tmrescore, and proposal shapes.
+- Major pages live under `frontend/src/pages/`: `Dashboard.vue`, `ProjectView.vue`, `TMRescore.vue`, `Statistics.vue`, `Settings.vue`, and `Login.vue`.
+- Reusable vulnerability, modal, queue, filter, dependency-chain, and CVSS components live under `frontend/src/components/`.
+- Project review state is supported by helpers and composables in `frontend/src/lib/`, including assessment form/submission helpers, CVSS utilities, vulnerability list indexing, modal selection, project header state, and code-analysis queue state.
+
+### Data And Domain Rules
+
+- Team mapping accepts either `"component": "Team"` or `"component": ["Primary", "Alias"]`; aliases normalize to the primary team label in much of the UI.
+- The wildcard team mapping key `"*"` provides a fallback team.
+- Assessment details are structured text blocks with metadata headers such as `[Team: ...]`, `[State: ...]`, `[Assessed By: ...]`, `[Reviewed By: ...]`, `[Rescored: ...]`, `[Rescored Vector: ...]`, and `[Assigned: ...]`.
+- Aggregated assessment state gives a non-`NOT_SET` General block precedence; otherwise it picks the worst team state using the state priority in `dtvp/logic.py`.
+- Rescored CVSS vectors are sanitized against original base metrics so threat or environmental changes do not silently mutate base metrics.
+- Dependency relationship and paths are derived from CycloneDX BOM dependency graphs.
+- Dependency-Track finding attribution timestamps are preserved on grouped component instances as `attributed_on`; the project view can filter vulnerability groups by attribution date range, invert that range to find older/outside findings such as "not in the last 4 weeks," and shows each vulnerability's age since its oldest attribution in the card header.
+- Analysis states commonly include `NOT_SET`, `EXPLOITABLE`, `IN_TRIAGE`, `RESOLVED`, `FALSE_POSITIVE`, and `NOT_AFFECTED`.
 
 ## Threat-Model Rescoring
 
@@ -45,12 +114,20 @@ SBOM strategy matters here:
 - `Merged multi-version SBOM` is the recommended mode for DTVP because it creates an analysis-only synthetic CycloneDX document with separate roots per version, preserving historical findings without pretending they all belong to the latest inventory.
 - DTVP intentionally does not combine the latest SBOM with vulnerabilities found only in older versions, because that would attach findings to components that may not exist in the latest release.
 
+## Code Analysis
+
+DTVP can optionally call an external code-analysis service to assess whether a vulnerable component is reachable or exploitable in consuming code.
+
+- Configure the backend with `DTVP_CODE_ANALYSIS_URL` to enable the integration.
+- Scans run through an in-process queue. Queue routes live in `dtvp/code_analysis_routes.py`, queue runtime/service code lives in `dtvp/analysis_queue_runtime.py` and `dtvp/analysis_queue_services.py`, and the frontend panel lives in `frontend/src/components/CodeAnalysisPanel.vue`.
+- The expected upstream API surface is defined by `dtvp/code_analysis_integration.py`, `openapi/code-analysis-openapi.json`, and the mock server in `test_setup/mock_code_analysis.py`.
+
 ## Stack
 
-- Backend: Python 3.13+, FastAPI, Uvicorn, httpx
+- Backend: Python 3.14+, FastAPI, Uvicorn, httpx
 - Frontend: Vue 3, Vite, Tailwind CSS
-- Python package manager: uv
-- Frontend package manager: npm
+- Python package manager: uv. Use `uv sync --dev`, `uv run pytest`, and `uv run uvicorn ...` from the repository root.
+- Frontend and Node package manager: npm. Run frontend dependency and script commands from `frontend/`.
 - Local process manager: pm2
 - Container runtime: Docker / Docker Compose
 
@@ -58,7 +135,7 @@ SBOM strategy matters here:
 
 Install the following first:
 
-- Python 3.13+
+- Python 3.14+
 - Node.js 22+
 - uv
 - npm
@@ -352,7 +429,11 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | :--- | :--- | :--- |
 | `DTVP_DT_API_URL` | Base URL of the Dependency-Track API | `http://localhost:8081` |
 | `DTVP_DT_API_KEY` | Dependency-Track API key | `change_me` |
+| `DTVP_DT_API_KEY_FILE` | Optional file path to read the Dependency-Track API key from when `DTVP_DT_API_KEY` is not set | unset |
+| `DEPENDENCY_TRACK_URL` | Deployment alias used when `DTVP_DT_API_URL` is unset | unset |
+| `DEPENDENCY_TRACK_API_KEY` | Deployment alias used when `DTVP_DT_API_KEY` and `DTVP_DT_API_KEY_FILE` are unset | unset |
 | `DTVP_DT_CACHE_PATH` | Local path for Dependency-Track cache files and pending update queue | `data/dt_cache` |
+| `DTVP_DT_CACHE_REFRESH_SECONDS` | Background Dependency-Track cache refresh interval | `60` |
 | `DTVP_TMRESCORE_URL` | Base URL of the external or mock tmrescore service | unset |
 | `DTVP_TMRESCORE_TIMEOUT_SECONDS` | HTTP timeout for tmrescore API calls before DTVP falls back to polling `/progress` | `180` |
 | `DTVP_TMRESCORE_CACHE_PATH` | Path to the cached per-project tmrescore proposal snapshot file | `data/tmrescore_proposals.json` |
@@ -360,24 +441,27 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_TMRESCORE_TASK_TTL_SECONDS` | How long completed or failed tmrescore analysis tasks stay in DTVP memory for `/progress` polling | `3600` |
 | `DTVP_CODE_ANALYSIS_URL` | Base URL of the external or mock code analysis service | unset |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | HTTP timeout for code analysis API calls | `300` |
+| `DTVP_ANALYSIS_QUEUE_TTL_SECONDS` | How long completed or failed code-analysis queue items stay in memory | `3600` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
-
-### External Integration API Specs
-
-- TMRescore static OpenAPI spec: `openapi/tmrescore-openapi.json`
-- Code Analysis static OpenAPI spec: `openapi/code-analysis-openapi.json`
-- Expected Code Analysis API surface: defined by `code_analysis_integration.py` and the mock server at `test_setup/mock_code_analysis.py`
-- Integration API expectations are documented in `docs/integration-api-surface.md`
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback URL | derived from frontend URL and context path |
 | `DTVP_FRONTEND_URL` | Frontend base URL | `http://localhost:8000` |
 | `DTVP_CONTEXT_PATH` | Application mount path | `/` |
 | `DTVP_SESSION_SECRET_KEY` | Session signing key | `change_me` |
+| `DTVP_CORS_ORIGINS` | Optional comma-separated extra CORS origins | unset |
+| `DTVP_API_URL` | Optional frontend API base URL override, also available as `VITE_DTVP_API_URL` during Vite development | empty |
 | `DTVP_DEFAULT_PROJECT_FILTER` | Default project filter shown on the dashboard | empty |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Max number of project versions fetched in parallel when building grouped views and statistics | `4` |
 | `DTVP_DEV_DISABLE_AUTH` | Disable OIDC and force the backend to return `devuser` locally | `false` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
+
+## External Integration API Specs
+
+- TMRescore static OpenAPI spec: `openapi/tmrescore-openapi.json`
+- Code Analysis static OpenAPI spec: `openapi/code-analysis-openapi.json`
+- Expected Code Analysis API surface: defined by `dtvp/code_analysis_integration.py` and the mock server at `test_setup/mock_code_analysis.py`
+- Integration API expectations are documented in `docs/integration-api-surface.md`
 
 ## License
 

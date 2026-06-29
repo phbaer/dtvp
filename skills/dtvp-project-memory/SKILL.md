@@ -1,21 +1,21 @@
 ---
 name: dtvp-project-memory
-description: Use when working in the DTVP repository, understanding its functionality, planning changes, onboarding to the codebase, reviewing project architecture, or after implementing changes that affect behavior, APIs, configuration, integrations, commands, or workflows. Read the project overview before broad scanning, and update it when meaningful changes are made.
+description: Use when working in the DTVP repository, understanding its functionality, planning changes, onboarding to the codebase, reviewing project architecture, or after implementing changes that affect behavior, APIs, configuration, integrations, commands, or workflows. Read README.md before broad scanning, and update it when meaningful changes are made.
 ---
 
 # DTVP Project Memory
 
 ## Start Here
 
-When you are working in this repository, read:
+When you are working in this repository, read the canonical project overview first:
 
-`skills/dtvp-project-memory/references/project-overview.md`
+`README.md`
 
-Use it as the project map before performing broad scans. Prefer targeted inspection of the files named in the overview, plus files directly relevant to the user's task.
+Use it as the project map before performing broad scans. Prefer targeted inspection of files named in the README, plus files directly relevant to the user's task.
 
 ## When To Update
 
-Update `references/project-overview.md` in the same change when you implement or discover changes to:
+Update `README.md` in the same change when you implement or discover changes to:
 
 - user-facing functionality or workflows
 - backend routes, service boundaries, data contracts, or external integrations
@@ -27,4 +27,4 @@ Skip updates for formatting-only changes, local cleanup, dependency lockfile chu
 
 ## Update Style
 
-Keep the overview factual, current, and compact. Preserve its section structure unless a new section clearly improves future agent onboarding. Write the current state of the project, not a changelog or implementation diary.
+Keep the README factual, current, and compact. Write the current state of the project, not a changelog or implementation diary. If the README conflicts with source code, configuration, tests, package metadata, or lockfiles, trust the source and update the README.

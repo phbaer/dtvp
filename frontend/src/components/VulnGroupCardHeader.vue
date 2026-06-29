@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, toRefs } from 'vue'
-import { CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
+import { CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
+import { parseAttributionTimestamp } from '../lib/vulnListIndex'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -138,6 +139,49 @@ const instanceCount = computed(() =>
   group.value.affected_versions?.reduce((sum, v) => sum + (v.components?.length || 0), 0) || 0
 )
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const oldestAttributedOnMs = computed(() => {
+  const values = (group.value.affected_versions || [])
+    .flatMap(version => version.components || [])
+    .map(component => parseAttributionTimestamp(component.attributed_on))
+    .filter((value): value is number => value != null)
+
+  return values.length ? Math.min(...values) : null
+})
+
+const attributionAgeDays = computed(() => {
+  if (oldestAttributedOnMs.value == null) return null
+  return Math.max(0, Math.floor((Date.now() - oldestAttributedOnMs.value) / DAY_MS))
+})
+
+const formatAttributionAge = (days: number) => {
+  if (days <= 0) return 'today'
+  if (days < 14) return `${days}d`
+  if (days < 70) {
+    const weeks = Math.floor(days / 7)
+    const remainingDays = days % 7
+    return remainingDays > 0 ? `${weeks}w ${remainingDays}d` : `${weeks}w`
+  }
+  if (days < 365) return `${Math.floor(days / 30)}mo`
+
+  const years = Math.floor(days / 365)
+  const months = Math.floor((days % 365) / 30)
+  return months > 0 ? `${years}y ${months}mo` : `${years}y`
+}
+
+const attributionAgeLabel = computed(() => {
+  if (attributionAgeDays.value == null) return ''
+  return formatAttributionAge(attributionAgeDays.value)
+})
+
+const attributionAgeTitle = computed(() => {
+  if (oldestAttributedOnMs.value == null || attributionAgeDays.value == null) return ''
+  const date = new Date(oldestAttributedOnMs.value).toISOString().slice(0, 10)
+  const age = formatAttributionAge(attributionAgeDays.value)
+  return `Oldest attribution: ${date} (${attributionAgeDays.value === 0 ? age : `${age} ago`})`
+})
+
 const componentSummary = computed(() => {
   const names = new Set<string>()
   for (const v of group.value.affected_versions || []) {
@@ -220,6 +264,11 @@ const componentSummary = computed(() => {
         <span class="inline-flex items-center gap-1 text-[10px] text-gray-600 shrink-0 tabular-nums" data-testid="instance-count" :title="`${instanceCount} affected component instance${instanceCount !== 1 ? 's' : ''} across all project versions`">
           <Layers :size="9" />
           {{ instanceCount }}&times;
+        </span>
+
+        <span v-if="attributionAgeLabel" class="inline-flex items-center gap-1 rounded border border-cyan-500/20 bg-cyan-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-300 shrink-0 tabular-nums" data-testid="attribution-age-chip" :title="attributionAgeTitle">
+          <CalendarClock :size="9" />
+          Age {{ attributionAgeLabel }}
         </span>
 
         <span v-if="isPendingReview && !canApprove" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
