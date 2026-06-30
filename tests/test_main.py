@@ -33,34 +33,31 @@ def test_main_context_path_reload():
     # We need to simulate DTVP_CONTEXT_PATH="myctx" (no slash)
     # Since main imports auth_settings, we need to patch that or env before reload
 
-    with patch.dict(os.environ, {"DTVP_CONTEXT_PATH": "myctx"}):
-        # We must also reload auth to pick up new env vars into AuthSettings if it's instantiated at module level
-        from dtvp import auth
+    from dtvp import auth
+    from dtvp import main
 
+    try:
+        with patch.dict(os.environ, {"DTVP_CONTEXT_PATH": "myctx"}):
+            # We must also reload auth to pick up new env vars into AuthSettings if it's instantiated at module level
+            importlib.reload(auth)
+            importlib.reload(main)
+
+            assert main.context_path == "/myctx"
+
+            client = TestClient(main.app)
+            resp = client.get("/myctx/api/version")
+            assert resp.status_code == 200
+
+            # Also check redirect_to_context_path (lines 161-163)
+            # app.get(context_path) -> redirect to context_path/
+            resp = client.get("/myctx", follow_redirects=False)
+            assert resp.status_code == 307
+            assert resp.headers["location"] == "/myctx/"
+    finally:
+        # Restore main to default even if an assertion fails, otherwise later tests
+        # keep using a context-prefixed app and fail with cascading 404s.
         importlib.reload(auth)
-
-        from dtvp import main
-
         importlib.reload(main)
-
-        # Check routes for /myctx prefix
-        found = False
-        for route in main.app.routes:
-            if route.path.startswith("/myctx/api"):
-                found = True
-                break
-        assert found
-
-        # Also check redirect_to_context_path (lines 161-163)
-        # app.get(context_path) -> redirect to context_path/
-        client = TestClient(main.app)
-        resp = client.get("/myctx", follow_redirects=False)
-        assert resp.status_code == 307
-        assert resp.headers["location"] == "/myctx/"
-
-    # Restore main to default for safety
-    importlib.reload(auth)
-    importlib.reload(main)
 
 
 def test_process_grouped_vulns_task_bom_failure():
