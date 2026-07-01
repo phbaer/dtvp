@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
+    drainTaskVulnGroupDetails,
+    drainTaskVulnGroups,
     getProjects,
     getGroupedVulns,
+    getTaskStatus,
+    getTaskStatistics,
+    getTaskVulnGroup,
+    getTaskVulnGroupDetailsWindow,
+    getTaskVulnGroups,
     updateAssessment,
     login,
     checkSession,
@@ -20,19 +27,23 @@ import {
 const mocks = vi.hoisted(() => ({
     get: vi.fn(),
     post: vi.fn(),
+    createConfig: undefined as any,
 }))
 
 vi.mock('axios', () => {
     return {
         default: {
-            create: vi.fn(() => ({
-                get: mocks.get,
-                post: mocks.post,
-                interceptors: {
-                    request: { use: vi.fn(), eject: vi.fn() },
-                    response: { use: vi.fn(), eject: vi.fn() }
+            create: vi.fn((config) => {
+                mocks.createConfig = config
+                return {
+                    get: mocks.get,
+                    post: mocks.post,
+                    interceptors: {
+                        request: { use: vi.fn(), eject: vi.fn() },
+                        response: { use: vi.fn(), eject: vi.fn() }
+                    }
                 }
-            })),
+            }),
             get: mocks.get
         }
     }
@@ -42,6 +53,12 @@ describe('api.ts', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.useRealTimers()
+    })
+
+    it('serializes array query params as repeated keys for FastAPI list filters', () => {
+        expect(mocks.createConfig).toEqual(expect.objectContaining({
+            paramsSerializer: { indexes: null },
+        }))
     })
 
     it('getProjects calls /projects', async () => {
@@ -106,11 +123,482 @@ describe('api.ts', () => {
 
         const result = await promise
 
-        expect(mocks.post).toHaveBeenCalledWith('/tasks/group-vulns', null, { params: { name: 'Test' } })
+        expect(mocks.post).toHaveBeenCalledWith('/tasks/group-vulns', null, { params: { name: 'Test', response_mode: 'full' } })
         expect(mocks.get).toHaveBeenCalledWith('/tasks/task-123')
         expect(result).toEqual(mockTaskCompleted.result)
 
         vi.useRealTimers()
+    })
+
+    it('getGroupedVulns can request summary mode and expose the task id', async () => {
+        const mockTaskStart = { task_id: 'task-summary' }
+        const mockTaskCompleted = { status: 'completed', result: [{ id: 'CVE-1', list_metadata: { lifecycle: 'OPEN' } }] }
+        const onTaskId = vi.fn()
+
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get.mockResolvedValueOnce({ data: mockTaskCompleted })
+
+        vi.useFakeTimers()
+        const promise = getGroupedVulns('Test', 'CVE-1', undefined, {
+            responseMode: 'summary',
+            onTaskId,
+        })
+
+        await vi.advanceTimersByTimeAsync(1100)
+        const result = await promise
+
+        expect(mocks.post).toHaveBeenCalledWith('/tasks/group-vulns', null, {
+            params: { name: 'Test', response_mode: 'summary', cve: 'CVE-1' },
+        })
+        expect(onTaskId).toHaveBeenCalledWith('task-summary')
+        expect(result).toEqual(mockTaskCompleted.result)
+        vi.useRealTimers()
+    })
+
+    it('getGroupedVulns reports partial result availability while polling', async () => {
+        const mockTaskStart = { task_id: 'task-partial' }
+        const mockTaskRunning = {
+            status: 'running',
+            progress: 35,
+            message: 'Processed version 1',
+            partial_result_available: true,
+            partial_versions_completed: 1,
+            partial_total_versions: 3,
+        }
+        const mockTaskCompleted = { status: 'completed', result: [{ id: 'CVE-1' }] }
+        const onPartialResultAvailable = vi.fn()
+        const onTaskCompleted = vi.fn()
+
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get
+            .mockResolvedValueOnce({ data: mockTaskRunning })
+            .mockResolvedValueOnce({ data: mockTaskCompleted })
+
+        vi.useFakeTimers()
+        const promise = getGroupedVulns('Test', undefined, undefined, {
+            responseMode: 'summary',
+            onPartialResultAvailable,
+            onTaskCompleted,
+        })
+
+        await vi.advanceTimersByTimeAsync(1100)
+        await vi.advanceTimersByTimeAsync(1100)
+        await promise
+
+        expect(onPartialResultAvailable).toHaveBeenCalledWith('task-partial', mockTaskRunning)
+        expect(onTaskCompleted).toHaveBeenCalledWith('task-partial', mockTaskCompleted)
+        vi.useRealTimers()
+    })
+
+    it('getGroupedVulns can consume the task event stream', async () => {
+        const mockTaskStart = { task_id: 'task-events' }
+        const runningEvent = {
+            status: 'running',
+            progress: 25,
+            message: 'Processed version 1',
+            partial_result_available: true,
+        }
+        const completedEvent = {
+            status: 'completed',
+            progress: 100,
+            message: 'Done',
+            result: [{ id: 'CVE-1' }],
+        }
+        const encoder = new TextEncoder()
+        const body = new ReadableStream({
+            start(controller) {
+                controller.enqueue(encoder.encode(`${JSON.stringify(runningEvent)}\n`))
+                controller.enqueue(encoder.encode(`${JSON.stringify(completedEvent)}\n`))
+                controller.close()
+            },
+        })
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            body,
+        })
+        vi.stubGlobal('fetch', fetchMock)
+        const onPartialResultAvailable = vi.fn()
+        const onTaskCompleted = vi.fn()
+        const onProgress = vi.fn()
+
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+
+        const result = await getGroupedVulns('Test', undefined, onProgress, {
+            useEventStream: true,
+            onPartialResultAvailable,
+            onTaskCompleted,
+        })
+
+        expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/tasks/task-events/events'), {
+            credentials: 'include',
+        })
+        expect(mocks.get).not.toHaveBeenCalled()
+        expect(onPartialResultAvailable).toHaveBeenCalledWith('task-events', runningEvent)
+        expect(onTaskCompleted).toHaveBeenCalledWith('task-events', completedEvent)
+        expect(onProgress).toHaveBeenCalledWith('Done', 100, undefined)
+        expect(result).toEqual([{ id: 'CVE-1' }])
+        vi.unstubAllGlobals()
+    })
+
+    it('getGroupedVulns can defer result download and drain task windows', async () => {
+        const mockTaskStart = { task_id: 'task-windowed' }
+        const mockTaskRunning = { status: 'running', progress: 50, message: 'Loading...', log: ['Loading...'] }
+        const mockTaskCompleted = { status: 'completed', progress: 100, message: 'Done', log: ['Done'], result_mode: 'summary' }
+        const firstWindow = {
+            items: [{ id: 'CVE-1' }],
+            total: 2,
+            filtered: 2,
+            offset: 0,
+            limit: 1,
+            next_cursor: 'cursor-1',
+            sort: 'id',
+            order: 'asc',
+        }
+        const secondWindow = {
+            items: [{ id: 'CVE-2' }],
+            total: 2,
+            filtered: 2,
+            offset: 1,
+            limit: 1,
+            next_cursor: null,
+            sort: 'id',
+            order: 'asc',
+        }
+
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get
+            .mockResolvedValueOnce({ data: mockTaskRunning })
+            .mockResolvedValueOnce({ data: mockTaskCompleted })
+            .mockResolvedValueOnce({ data: firstWindow })
+            .mockResolvedValueOnce({ data: secondWindow })
+
+        vi.useFakeTimers()
+        const onProgress = vi.fn()
+        const promise = getGroupedVulns('Test', undefined, onProgress, {
+            responseMode: 'summary',
+            deferResult: true,
+            taskWindowLimit: 1,
+        })
+
+        await vi.advanceTimersByTimeAsync(1100)
+        await vi.advanceTimersByTimeAsync(1100)
+        const result = await promise
+
+        expect(mocks.post).toHaveBeenCalledWith('/tasks/group-vulns', null, {
+            params: { name: 'Test', response_mode: 'summary' },
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(1, '/tasks/task-windowed', {
+            params: { include_result: false },
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(2, '/tasks/task-windowed', {
+            params: { include_result: false },
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(3, '/tasks/task-windowed/groups', {
+            params: { offset: 0, limit: 1, sort: 'id', order: 'asc' },
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(4, '/tasks/task-windowed/groups', {
+            params: { limit: 1, sort: 'id', order: 'asc', cursor: 'cursor-1' },
+        })
+        expect(result).toEqual([{ id: 'CVE-1' }, { id: 'CVE-2' }])
+        expect(onProgress).toHaveBeenCalledWith('Loading vulnerability list (2/2)...', 100, ['Done'])
+        vi.useRealTimers()
+    })
+
+    it('getGroupedVulns can skip completed result download for caller-managed windows', async () => {
+        const mockTaskStart = { task_id: 'task-window-owner' }
+        const mockTaskCompleted = {
+            status: 'completed',
+            progress: 100,
+            message: 'Done',
+            log: ['Done'],
+            result_mode: 'summary',
+        }
+
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get.mockResolvedValueOnce({ data: mockTaskCompleted })
+
+        vi.useFakeTimers()
+        const resultPromise = getGroupedVulns('Test', undefined, undefined, {
+            responseMode: 'summary',
+            deferResult: true,
+            skipResultDownload: true,
+        })
+
+        await vi.advanceTimersByTimeAsync(1100)
+        const result = await resultPromise
+
+        expect(mocks.get).toHaveBeenCalledTimes(1)
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task-window-owner', {
+            params: { include_result: false },
+        })
+        expect(result).toEqual([])
+        vi.useRealTimers()
+    })
+
+    it('getTaskStatus can omit completed task results', async () => {
+        const mockData = {
+            status: 'completed',
+            progress: 100,
+            message: 'Done',
+            result_mode: 'summary',
+        }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getTaskStatus('task-summary', { includeResult: false })
+
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task-summary', {
+            params: { include_result: false },
+        })
+        expect(result).toEqual(mockData)
+    })
+
+    it('getTaskStatistics fetches statistics for a completed task', async () => {
+        const mockStats = {
+            severity_counts: { HIGH: 1 },
+            state_counts: { NOT_SET: 1 },
+            total_unique: 1,
+            total_findings: 1,
+            affected_projects_count: 1,
+            version_counts: { '1.0.0': 1 },
+        }
+        mocks.get.mockResolvedValue({ data: mockStats })
+
+        const result = await getTaskStatistics('task 1')
+
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task%201/statistics')
+        expect(result).toEqual(mockStats)
+    })
+
+    it('getTaskVulnGroup fetches a single full group from a task', async () => {
+        const mockData = { id: 'GHSA/with/slash' }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getTaskVulnGroup('task 1', 'GHSA/with/slash')
+
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task%201/groups/GHSA%2Fwith%2Fslash')
+        expect(result).toEqual(mockData)
+    })
+
+    it('getTaskVulnGroups fetches a filtered task result window', async () => {
+        const mockData = {
+            items: [{ id: 'CVE-1' }],
+            total: 10,
+            filtered: 3,
+            counts: {
+                all: {
+                    total: 10,
+                    lifecycle: { OPEN: 6, ASSESSED: 4 },
+                    analysis: { NOT_SET: 5, IN_TRIAGE: 2 },
+                    dependency_relationship: { direct: 7, transitive: 2, unknown: 1 },
+                    cvss_version_mismatch: 1,
+                    versions: { '2.0.0': 3 },
+                    tags: { TeamA: 2 },
+                    assignees: { alice: 1 },
+                    components: { 'library-a': 2 },
+                },
+                filtered: {
+                    total: 3,
+                    lifecycle: { OPEN: 3 },
+                    analysis: { NOT_SET: 2, IN_TRIAGE: 1 },
+                    dependency_relationship: { direct: 3, transitive: 0, unknown: 0 },
+                    cvss_version_mismatch: 1,
+                    versions: { '2.0.0': 3 },
+                    tags: { TeamA: 2 },
+                    assignees: { alice: 1 },
+                    components: { 'library-a': 2 },
+                },
+            },
+            offset: 2,
+            limit: 1,
+            sort: 'id',
+            order: 'asc',
+        }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getTaskVulnGroups('task 1', {
+            lifecycle: ['OPEN'],
+            dependency: ['DIRECT', 'TRANSITIVE'],
+            versions: ['2.0.0'],
+            cvss_mismatch: true,
+            tmrescore: ['WITH_PROPOSAL'],
+            tmrescore_proposal_ids: ['CVE-1', 'GHSA-1'],
+            sort: 'id',
+            order: 'asc',
+            offset: 2,
+            cursor: 'cursor-2',
+            limit: 1,
+        })
+
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task%201/groups', {
+            params: {
+                lifecycle: ['OPEN'],
+                dependency: ['DIRECT', 'TRANSITIVE'],
+                versions: ['2.0.0'],
+                cvss_mismatch: true,
+                tmrescore: ['WITH_PROPOSAL'],
+                tmrescore_proposal_ids: ['CVE-1', 'GHSA-1'],
+                sort: 'id',
+                order: 'asc',
+                offset: 2,
+                cursor: 'cursor-2',
+                limit: 1,
+            },
+        })
+        expect(result).toEqual(mockData)
+    })
+
+    it('getTaskVulnGroupDetailsWindow fetches a filtered full-detail task result window', async () => {
+        const mockData = {
+            items: [{ id: 'CVE-1', affected_versions: [{ components: [{ analysis_details: 'full notes' }] }] }],
+            total: 10,
+            filtered: 1,
+            offset: 0,
+            limit: 1,
+            sort: 'id',
+            order: 'asc',
+            result_mode: 'full',
+            source_result_mode: 'summary',
+        }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getTaskVulnGroupDetailsWindow('task 1', {
+            lifecycle: ['INCOMPLETE'],
+            component: 'library-a',
+            sort: 'id',
+            order: 'asc',
+            offset: 0,
+            limit: 1,
+        })
+
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task%201/group-details', {
+            params: {
+                lifecycle: ['INCOMPLETE'],
+                component: 'library-a',
+                sort: 'id',
+                order: 'asc',
+                offset: 0,
+                limit: 1,
+            },
+        })
+        expect(result).toEqual(mockData)
+    })
+
+    it('drainTaskVulnGroups drains filtered windows with stable paging', async () => {
+        const firstWindow = {
+            items: [{ id: 'CVE-1' }],
+            total: 5,
+            filtered: 2,
+            offset: 0,
+            limit: 1,
+            next_cursor: 'cursor-1',
+            sort: 'severity',
+            order: 'desc',
+        }
+        const secondWindow = {
+            items: [{ id: 'CVE-2' }],
+            total: 5,
+            filtered: 2,
+            offset: 1,
+            limit: 1,
+            next_cursor: null,
+            sort: 'severity',
+            order: 'desc',
+        }
+        const progress = vi.fn()
+
+        mocks.get
+            .mockResolvedValueOnce({ data: firstWindow })
+            .mockResolvedValueOnce({ data: secondWindow })
+
+        const result = await drainTaskVulnGroups('task 1', {
+            lifecycle: ['INCOMPLETE'],
+            sort: 'severity',
+            order: 'desc',
+        }, {
+            limit: 1,
+            log: ['Ready'],
+            onProgress: progress,
+        })
+
+        expect(mocks.get).toHaveBeenNthCalledWith(1, '/tasks/task%201/groups', {
+            params: {
+                lifecycle: ['INCOMPLETE'],
+                offset: 0,
+                limit: 1,
+                sort: 'severity',
+                order: 'desc',
+            },
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(2, '/tasks/task%201/groups', {
+            params: {
+                lifecycle: ['INCOMPLETE'],
+                limit: 1,
+                sort: 'severity',
+                order: 'desc',
+                cursor: 'cursor-1',
+            },
+        })
+        expect(progress).toHaveBeenLastCalledWith(2, 2, ['Ready'])
+        expect(result).toEqual([{ id: 'CVE-1' }, { id: 'CVE-2' }])
+    })
+
+    it('drainTaskVulnGroupDetails drains full-detail windows with stable paging', async () => {
+        const firstWindow = {
+            items: [{ id: 'CVE-1', affected_versions: [{ components: [{ analysis_details: 'one' }] }] }],
+            total: 5,
+            filtered: 2,
+            offset: 0,
+            limit: 1,
+            next_cursor: 'cursor-1',
+            sort: 'id',
+            order: 'asc',
+            result_mode: 'full',
+        }
+        const secondWindow = {
+            items: [{ id: 'CVE-2', affected_versions: [{ components: [{ analysis_details: 'two' }] }] }],
+            total: 5,
+            filtered: 2,
+            offset: 1,
+            limit: 1,
+            next_cursor: null,
+            sort: 'id',
+            order: 'asc',
+            result_mode: 'full',
+        }
+        const progress = vi.fn()
+
+        mocks.get
+            .mockResolvedValueOnce({ data: firstWindow })
+            .mockResolvedValueOnce({ data: secondWindow })
+
+        const result = await drainTaskVulnGroupDetails('task 1', {
+            lifecycle: ['INCOMPLETE'],
+        }, {
+            limit: 1,
+            log: ['Ready'],
+            onProgress: progress,
+        })
+
+        expect(mocks.get).toHaveBeenNthCalledWith(1, '/tasks/task%201/group-details', {
+            params: {
+                lifecycle: ['INCOMPLETE'],
+                offset: 0,
+                limit: 1,
+                sort: 'id',
+                order: 'asc',
+            },
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(2, '/tasks/task%201/group-details', {
+            params: {
+                lifecycle: ['INCOMPLETE'],
+                limit: 1,
+                sort: 'id',
+                order: 'asc',
+                cursor: 'cursor-1',
+            },
+        })
+        expect(progress).toHaveBeenLastCalledWith(2, 2, ['Ready'])
+        expect(result).toEqual([...firstWindow.items, ...secondWindow.items])
     })
 
     it('getGroupedVulns reports progress', async () => {

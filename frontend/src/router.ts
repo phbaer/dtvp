@@ -20,6 +20,11 @@ export const router = createRouter({
 let sessionChecked = false;
 let userRole: string | undefined = undefined;
 
+const isAuthFailure = (error: any) => {
+    const status = error?.response?.status;
+    return status === 401 || status === 403;
+};
+
 router.beforeEach(async (to, _from) => {
     // If going to login, allow it
     if (to.path === '/login') {
@@ -31,9 +36,13 @@ router.beforeEach(async (to, _from) => {
             const user = await getUserInfo();
             userRole = user.role;
             sessionChecked = true;
-        } catch {
-            sessionChecked = true;
-            return '/login';
+        } catch (error) {
+            if (isAuthFailure(error)) {
+                sessionChecked = true;
+                return '/login';
+            }
+            console.warn('DTVP backend is not ready for session validation yet.', error);
+            return;
         }
     }
 

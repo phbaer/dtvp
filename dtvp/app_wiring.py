@@ -25,9 +25,13 @@ from .grouped_vuln_services import (
 from .grouped_vuln_services import (
     process_grouped_vulns_task as process_grouped_vulns_task_impl,
 )
+from .grouped_vuln_task_services import (
+    prune_grouped_vuln_tasks as prune_grouped_vuln_tasks_impl,
+)
 from .logic import calculate_statistics, group_vulnerabilities, load_team_mapping
 from .settings_routes import SettingsRouteDeps
 from .startup_services import StartupServiceDeps
+from .startup_services import build_startup_runtime_details
 from .startup_services import create_tracked_task as create_tracked_task_impl
 from .tmrescore_cache_services import TMRescoreCacheServiceDeps
 from .tmrescore_cache_services import (
@@ -76,6 +80,8 @@ def build_grouped_vuln_service_deps(
     queue_open_vulnerabilities_for_analysis: (
         Callable[[list[dict[str, Any]], dict[str, Any]], int] | None
     ) = None,
+    summary_index: Any = None,
+    summary_index_cache_revision: Callable[[], Any] | None = None,
 ) -> GroupedVulnServiceDeps:
     return GroupedVulnServiceDeps(
         cache_manager=cache_manager,
@@ -90,6 +96,8 @@ def build_grouped_vuln_service_deps(
         queue_open_vulnerabilities_for_analysis=(
             queue_open_vulnerabilities_for_analysis
         ),
+        summary_index=summary_index,
+        summary_index_cache_revision=summary_index_cache_revision or (lambda: None),
     )
 
 
@@ -222,6 +230,7 @@ def build_general_api_route_deps(
     default_dependency_chain_limit: int,
     service_unavailable_response: dict[int | str, dict[str, Any]],
     not_found_response: dict[int | str, dict[str, Any]],
+    get_grouped_vuln_task_ttl_seconds: Callable[[], int] | None = None,
 ) -> GeneralApiRouteDeps:
     return GeneralApiRouteDeps(
         cache_manager=cache_manager,
@@ -234,13 +243,14 @@ def build_general_api_route_deps(
             asyncio.create_task,
             coro,
         ),
-        process_grouped_vulns_task=lambda task_id, name, cve, client: (
+        process_grouped_vulns_task=lambda task_id, name, cve, client, response_mode="full": (
             process_grouped_vulns_task_impl(
                 grouped_vuln_service_deps,
                 task_id,
                 name,
                 cve,
                 client,
+                response_mode,
             )
         ),
         sort_projects_by_version=sort_projects_by_version,
@@ -257,6 +267,14 @@ def build_general_api_route_deps(
         ),
         group_vulnerabilities=group_vulnerabilities,
         calculate_statistics=calculate_statistics,
+        prune_grouped_vuln_tasks=lambda: prune_grouped_vuln_tasks_impl(
+            tasks,
+            ttl_seconds=(
+                get_grouped_vuln_task_ttl_seconds()
+                if get_grouped_vuln_task_ttl_seconds
+                else 3600
+            ),
+        ),
         get_user_role=get_user_role,
         fetch_current_assessment_analyses=lambda req, client: (
             fetch_current_assessment_analyses(assessment_service_deps, req, client)
@@ -532,6 +550,9 @@ def build_startup_service_deps(
     initialize_cache_manager: Callable[[], Any],
     run_background_sync_loop: Callable[[], Any],
     run_auto_analysis_sweep_loop: Callable[[], Any],
+    runtime_details_provider: Callable[[], dict[str, dict[str, Any]]] = (
+        build_startup_runtime_details
+    ),
 ) -> StartupServiceDeps:
     return StartupServiceDeps(
         logger=logger,
@@ -540,6 +561,7 @@ def build_startup_service_deps(
         analysis_queue=analysis_queue,
         tmrescore_project_cache=tmrescore_project_cache,
         load_tmrescore_project_cache=load_tmrescore_project_cache,
+        runtime_details_provider=runtime_details_provider,
         initialize_cache_manager=initialize_cache_manager,
         run_background_sync_loop=run_background_sync_loop,
         run_auto_analysis_sweep_loop=run_auto_analysis_sweep_loop,

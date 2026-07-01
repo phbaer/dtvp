@@ -1,5 +1,7 @@
 import asyncio
+import json
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -38,6 +40,51 @@ def test_search_projects_no_name(client, mock_dt_client):
     assert len(data) == 1
 
 
+def test_grouped_vuln_task_status_prunes_expired_terminal_tasks(client, monkeypatch):
+    monkeypatch.setenv("DTVP_GROUPED_VULN_TASK_TTL_SECONDS", "60")
+    task_id = "expired-grouped-vuln-task"
+    main.tasks[task_id] = {
+        "id": task_id,
+        "status": "completed",
+        "result": [],
+        "completed_at": datetime.now(timezone.utc) - timedelta(seconds=120),
+    }
+
+    try:
+        response = client.get(f"/api/tasks/{task_id}")
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "not_found"}
+
+
+def test_grouped_vuln_task_events_stream_status_without_result(client):
+    task_id = "task-events"
+    main.tasks[task_id] = {
+        "id": task_id,
+        "status": "completed",
+        "message": "Done",
+        "progress": 100,
+        "result": [{"id": "CVE-heavy"}],
+        "partial_result_available": False,
+    }
+
+    try:
+        response = client.get(f"/api/tasks/{task_id}/events")
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    lines = [line for line in response.text.splitlines() if line]
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["status"] == "completed"
+    assert event["progress"] == 100
+    assert "result" not in event
+
+
 def test_cache_status_endpoint(client):
     mock_status = {
         "fully_cached": True,
@@ -61,6 +108,576 @@ def test_cache_status_endpoint(client):
         assert data["cached_boms"] == 2
         assert data["cached_analyses"] == 10
         assert data["pending_updates"] == 1
+
+
+def test_get_task_statistics_reuses_completed_grouped_result(client):
+    task_id = "task-statistics"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "_full_result": [
+            {
+                "id": "CVE-2026-STATS",
+                "severity": "HIGH",
+                "affected_versions": [
+                    {
+                        "project_uuid": "project-1",
+                        "components": [
+                            {"analysis_state": "NOT_SET"},
+                            {"analysis_state": "EXPLOITABLE"},
+                        ],
+                    }
+                ],
+            }
+        ],
+        "_statistics_rollup": {
+            "version_counts": {"1.0.0": 2},
+            "major_version_counts": {"1": 2},
+            "major_version_details": {"1": {"1.0.0": 2}},
+            "major_version_severity_counts": {"1": {"HIGH": 2}},
+            "version_severity_counts": {"1.0.0": {"HIGH": 2}},
+        },
+    }
+
+    try:
+        response = client.get(f"/api/tasks/{task_id}/statistics")
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_findings"] == 2
+    assert data["state_counts"]["INCOMPLETE"] == 1
+    assert data["version_counts"] == {"1.0.0": 2}
+    assert data["major_version_counts"] == {"1": 2}
+
+
+def test_get_task_groups_filters_sorts_and_windows(client):
+    task_id = "task-list-query"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-2026-A",
+                "title": "Alpha finding",
+                "cvss_score": 5.0,
+                "tags": ["TeamA"],
+                "aliases": [],
+                "assignees": ["alice"],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                    "component_names": ["library-a"],
+                    "versions": ["2.0.0"],
+                    "dependency_relationship": "DIRECT",
+                    "cvss_version_mismatch": False,
+                    "attributed_on_ms_values": [1],
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-B",
+                "title": "Beta finding",
+                "cvss_score": 9.8,
+                "tags": ["TeamB"],
+                "aliases": [],
+                "assignees": ["bob"],
+                "list_metadata": {
+                    "lifecycle": "ASSESSED",
+                    "is_open": False,
+                    "is_pending": False,
+                    "technical_state": "FALSE_POSITIVE",
+                    "component_names": ["library-b"],
+                    "versions": ["1.0.0"],
+                    "dependency_relationship": "TRANSITIVE",
+                    "cvss_version_mismatch": False,
+                    "attributed_on_ms_values": [2],
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-C",
+                "title": "Gamma finding",
+                "cvss_score": 7.1,
+                "tags": ["TeamA"],
+                "aliases": ["GHSA-query"],
+                "assignees": ["carol"],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "IN_TRIAGE",
+                    "component_names": ["library-c"],
+                    "versions": ["2.0.0"],
+                    "dependency_relationship": "DIRECT",
+                    "cvss_version_mismatch": True,
+                    "attributed_on_ms_values": [3],
+                },
+                "affected_versions": [],
+            },
+        ],
+    }
+
+    try:
+        response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "lifecycle": "OPEN",
+                "dependency": "DIRECT",
+                "versions": "2.0.0",
+                "sort": "id",
+                "order": "desc",
+                "offset": 0,
+                "limit": 1,
+                "tmrescore_proposal_ids": "GHSA-query",
+                "attributed_before_days": 1,
+                "attribution_mode": "older",
+            },
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    assert data["filtered"] == 2
+    assert data["offset"] == 0
+    assert data["limit"] == 1
+    assert data["has_more"] is True
+    assert data["next_cursor"]
+    assert data["result_mode"] == "summary"
+    assert [item["id"] for item in data["items"]] == ["CVE-2026-C"]
+    assert data["counts"]["all"]["total"] == 3
+    assert data["counts"]["all"]["lifecycle"]["OPEN"] == 2
+    assert data["counts"]["all"]["lifecycle"]["ASSESSED"] == 1
+    assert data["counts"]["all"]["analysis"]["IN_TRIAGE"] == 1
+    assert data["counts"]["all"]["dependency_relationship"] == {
+        "direct": 2,
+        "transitive": 1,
+        "unknown": 0,
+    }
+    assert data["counts"]["all"]["cvss_version_mismatch"] == 1
+    assert data["counts"]["all"]["ids"]["CVE-2026-C"] == 1
+    assert data["counts"]["all"]["ids"]["GHSA-query"] == 1
+    assert data["counts"]["all"]["versions"]["2.0.0"] == 2
+    assert data["counts"]["all"]["tags"]["TeamA"] == 2
+    assert data["counts"]["all"]["team_tags"]["TeamA"] == {
+        "open": 2,
+        "assessed": 0,
+    }
+    assert data["counts"]["all"]["team_tags"]["TeamB"] == {
+        "open": 0,
+        "assessed": 1,
+    }
+    assert data["counts"]["all"]["tmrescore"] == {
+        "WITH_PROPOSAL": 1,
+        "WITHOUT_PROPOSAL": 2,
+    }
+    assert data["counts"]["filtered"]["total"] == 2
+    assert data["counts"]["filtered"]["analysis"]["IN_TRIAGE"] == 1
+    assert data["counts"]["filtered"]["dependency_relationship"]["direct"] == 2
+    assert data["counts"]["filtered"]["tmrescore"] == {
+        "WITH_PROPOSAL": 1,
+        "WITHOUT_PROPOSAL": 1,
+    }
+    assert data["counts"]["filtered"]["attribution_age"] == 2
+
+def test_get_task_groups_accepts_cursor(client):
+    task_id = "task-list-query-cursor"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-2026-CURSOR-A",
+                "title": "Cursor finding",
+                "tags": [],
+                "aliases": [],
+                "assignees": [],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                    "component_names": ["library-a"],
+                    "versions": ["1.0.0"],
+                    "dependency_relationship": "DIRECT",
+                    "cvss_version_mismatch": False,
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-CURSOR-B",
+                "title": "Cursor finding",
+                "tags": [],
+                "aliases": [],
+                "assignees": [],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                    "component_names": ["library-b"],
+                    "versions": ["1.0.0"],
+                    "dependency_relationship": "DIRECT",
+                    "cvss_version_mismatch": False,
+                },
+                "affected_versions": [],
+            },
+        ],
+    }
+
+    try:
+        first = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={"sort": "id", "order": "asc", "limit": 1},
+        )
+        assert first.status_code == 200
+        cursor = first.json()["next_cursor"]
+
+        second = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={"sort": "id", "order": "asc", "limit": 1, "cursor": cursor},
+        )
+        invalid = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={"cursor": "invalid"},
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert second.status_code == 200
+    second_data = second.json()
+    assert second_data["offset"] == 1
+    assert second_data["items"][0]["id"] == "CVE-2026-CURSOR-B"
+    assert second_data["next_cursor"] is None
+    assert second_data["has_more"] is False
+    assert invalid.status_code == 400
+
+
+def test_get_task_groups_serves_running_partial_summary_window(client):
+    from dtvp.task_group_query_services import build_task_group_query_index
+
+    task_id = "task-partial-summary"
+    groups = [
+        {
+            "id": "CVE-2026-PARTIAL",
+            "title": "Partial finding",
+            "tags": [],
+            "aliases": [],
+            "assignees": [],
+            "list_metadata": {
+                "lifecycle": "OPEN",
+                "is_open": True,
+                "is_pending": False,
+                "technical_state": "NOT_SET",
+                "component_names": ["library-a"],
+                "versions": ["1.0.0"],
+                "dependency_relationship": "DIRECT",
+                "cvss_version_mismatch": False,
+            },
+            "affected_versions": [],
+        }
+    ]
+    main.tasks[task_id] = {
+        "status": "running",
+        "result_mode": "summary",
+        "result": groups,
+        "partial_result_available": True,
+        "partial_versions_completed": 1,
+        "partial_total_versions": 3,
+        "_group_query_index": build_task_group_query_index(groups),
+    }
+
+    try:
+        response = client.get(f"/api/tasks/{task_id}/groups")
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["partial"] is True
+    assert data["partial_versions_completed"] == 1
+    assert data["partial_total_versions"] == 3
+    assert data["items"][0]["id"] == "CVE-2026-PARTIAL"
+
+
+def test_get_task_groups_field_filters_accept_multiple_terms(client):
+    task_id = "task-list-query-terms"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-2026-TERMS",
+                "title": "Term finding",
+                "tags": ["Platform Security"],
+                "aliases": ["GHSA-terms"],
+                "assignees": ["alice.smith"],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                    "component_names": ["spring security core"],
+                    "versions": ["2.0.0"],
+                    "dependency_relationship": "DIRECT",
+                    "cvss_version_mismatch": False,
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-OTHER",
+                "title": "Other finding",
+                "tags": ["Platform"],
+                "aliases": [],
+                "assignees": ["bob"],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                    "component_names": ["spring web"],
+                    "versions": ["2.1.0"],
+                    "dependency_relationship": "DIRECT",
+                    "cvss_version_mismatch": False,
+                },
+                "affected_versions": [],
+            },
+        ],
+    }
+
+    try:
+        response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "tag": "platform security",
+                "component": "spring core",
+                "assignee": "alice smith",
+                "versions": "2.0.0",
+            },
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filtered"] == 1
+    assert [item["id"] for item in data["items"]] == ["CVE-2026-TERMS"]
+
+
+def test_get_task_group_details_window_returns_full_groups(client):
+    task_id = "task-detail-window"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-2026-DETAIL-A",
+                "title": "Summary A",
+                "list_metadata": {
+                    "lifecycle": "INCOMPLETE",
+                    "is_open": True,
+                    "technical_state": "NOT_SET",
+                    "component_names": ["library-a"],
+                },
+                "affected_versions": [
+                    {
+                        "project_version": "1.0.0",
+                        "components": [
+                            {
+                                "component_name": "library-a",
+                                "analysis_state": "NOT_SET",
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "id": "CVE-2026-DETAIL-B",
+                "title": "Summary B",
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "technical_state": "NOT_SET",
+                    "component_names": ["library-b"],
+                },
+                "affected_versions": [],
+            },
+        ],
+        "_full_result_by_id": {
+            "CVE-2026-DETAIL-A": {
+                "id": "CVE-2026-DETAIL-A",
+                "title": "Full A",
+                "affected_versions": [
+                    {
+                        "project_version": "1.0.0",
+                        "components": [
+                            {
+                                "component_name": "library-a",
+                                "analysis_state": "NOT_SET",
+                                "analysis_details": "Full reviewer notes",
+                                "dependency_chains": ["root > library-a"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "CVE-2026-DETAIL-B": {
+                "id": "CVE-2026-DETAIL-B",
+                "title": "Full B",
+                "affected_versions": [],
+            },
+        },
+    }
+
+    try:
+        response = client.get(
+            f"/api/tasks/{task_id}/group-details",
+            params={
+                "lifecycle": "INCOMPLETE",
+                "component": "library-a",
+                "sort": "id",
+                "order": "asc",
+                "offset": 0,
+                "limit": 1,
+            },
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["result_mode"] == "full"
+    assert data["source_result_mode"] == "summary"
+    assert data["total"] == 2
+    assert data["filtered"] == 1
+    assert [item["id"] for item in data["items"]] == ["CVE-2026-DETAIL-A"]
+    full_component = data["items"][0]["affected_versions"][0]["components"][0]
+    assert full_component["analysis_details"] == "Full reviewer notes"
+    assert full_component["dependency_chains"] == ["root > library-a"]
+
+
+def test_get_task_groups_filters_by_tmrescore_proposal_ids_and_aliases(client):
+    task_id = "task-list-query-tmrescore"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-2026-WITH",
+                "title": "Direct proposal",
+                "aliases": [],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-ALIAS",
+                "title": "Alias proposal",
+                "aliases": ["GHSA-alias-proposal"],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-WITHOUT",
+                "title": "No proposal",
+                "aliases": [],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                },
+                "affected_versions": [],
+            },
+        ],
+    }
+
+    try:
+        with_response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "tmrescore": "WITH_PROPOSAL",
+                "tmrescore_proposal_ids": [
+                    "CVE-2026-WITH",
+                    "GHSA-alias-proposal",
+                ],
+                "sort": "id",
+                "order": "asc",
+            },
+        )
+        without_response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "tmrescore": "WITHOUT_PROPOSAL",
+                "tmrescore_proposal_ids": [
+                    "CVE-2026-WITH",
+                    "GHSA-alias-proposal",
+                ],
+                "sort": "id",
+                "order": "asc",
+            },
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert with_response.status_code == 200
+    assert [item["id"] for item in with_response.json()["items"]] == [
+        "CVE-2026-ALIAS",
+        "CVE-2026-WITH",
+    ]
+    assert without_response.status_code == 200
+    assert [item["id"] for item in without_response.json()["items"]] == [
+        "CVE-2026-WITHOUT",
+    ]
+
+
+def test_get_task_groups_rejects_incomplete_task(client):
+    task_id = "task-list-running"
+    main.tasks[task_id] = {"status": "running", "result": []}
+    try:
+        response = client.get(f"/api/tasks/{task_id}/groups")
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Task is not completed"
+
+
+def test_get_task_status_can_omit_result(client):
+    task_id = "task-status-lean"
+    main.tasks[task_id] = {
+        "id": task_id,
+        "status": "completed",
+        "message": "Done",
+        "progress": 100,
+        "result": [{"id": "CVE-2026-LEAN"}],
+        "result_mode": "summary",
+        "_full_result": [{"id": "CVE-2026-LEAN"}],
+    }
+    try:
+        response = client.get(f"/api/tasks/{task_id}?include_result=false")
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "completed"
+    assert data["result_mode"] == "summary"
+    assert "result" not in data
+    assert "_full_result" not in data
 
 
 @pytest.mark.asyncio
@@ -152,6 +769,90 @@ async def test_get_grouped_vulns_task_flow(client, mock_dt_client):
 
     # The partial team case should still show as pending review with open work left
     assert "[Status: Pending Review]" in partial_comp["analysis_details"]
+
+
+@pytest.mark.asyncio
+async def test_get_grouped_vulns_summary_mode_keeps_detail_lookup(
+    client, mock_dt_client
+):
+    mock_dt_client.__aenter__.return_value = mock_dt_client
+    mock_dt_client.__aexit__.return_value = None
+    mock_dt_client.get_projects.return_value = [
+        {"name": "TestApp", "uuid": "uuid1", "version": "1.0"},
+    ]
+    mock_dt_client.get_vulnerabilities.return_value = [
+        {
+            "uuid": "finding-1",
+            "vulnerability": {
+                "vulnId": "CVE-2026-DETAIL",
+                "uuid": "vuln-1",
+                "severity": "HIGH",
+                "cvssV3BaseScore": 8.1,
+                "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N",
+            },
+            "component": {
+                "name": "library-a",
+                "uuid": "component-1",
+                "version": "2.0",
+            },
+            "analysis": {
+                "state": "IN_TRIAGE",
+                "analysisDetails": (
+                    "--- [Team: General] [State: IN_TRIAGE] "
+                    "[Assessed By: reviewer] [Justification: CODE_NOT_REACHABLE] ---\n"
+                    "Full reviewer notes that should not be needed by list rows."
+                ),
+                "analysisComments": [{"comment": "heavy comment", "timestamp": 1}],
+                "justification": "CODE_NOT_REACHABLE",
+            },
+        }
+    ]
+    mock_dt_client.get_project_vulnerabilities.return_value = []
+    mock_dt_client.get_bom.return_value = {
+        "components": [{"bom-ref": "component-1", "name": "library-a"}],
+        "dependencies": [{"ref": "component-1", "dependsOn": []}],
+    }
+
+    with patch("dtvp.main.DTClient", return_value=mock_dt_client):
+        response = client.post(
+            "/api/tasks/group-vulns?name=TestApp&response_mode=summary"
+        )
+        assert response.status_code == 200
+        task_id = response.json()["task_id"]
+
+        for _ in range(10):
+            await asyncio.sleep(0.1)
+            response = client.get(f"/api/tasks/{task_id}")
+            status = response.json()
+            if status["status"] == "completed":
+                break
+            if status["status"] == "failed":
+                pytest.fail(f"Task failed: {status['message']}")
+
+    assert status["status"] == "completed"
+    assert status["result_mode"] == "summary"
+    assert "_full_result" not in status
+    assert "_group_query_index" not in status
+    assert main.tasks[task_id]["_group_query_index"]["total"] == 1
+
+    summary_group = status["result"][0]
+    summary_component = summary_group["affected_versions"][0]["components"][0]
+    assert summary_group["id"] == "CVE-2026-DETAIL"
+    assert summary_group["list_metadata"]["lifecycle"] == "ASSESSED"
+    assert summary_group["list_metadata"]["technical_state"] == "IN_TRIAGE"
+    assert summary_component["analysis_state"] == "IN_TRIAGE"
+    assert summary_component["justification"] == "CODE_NOT_REACHABLE"
+    assert "analysis_details" not in summary_component
+    assert "analysis_comments" not in summary_component
+    assert "dependency_chains" not in summary_component
+
+    response = client.get(f"/api/tasks/{task_id}/groups/CVE-2026-DETAIL")
+    assert response.status_code == 200
+    full_group = response.json()
+    full_component = full_group["affected_versions"][0]["components"][0]
+    assert "Full reviewer notes" in full_component["analysis_details"]
+    assert full_component["analysis_comments"][0]["comment"] == "heavy comment"
+    assert "dependency_chains" in full_component
 
 
 @pytest.mark.asyncio
@@ -384,6 +1085,92 @@ def test_assessment_update(client, mock_dt_client):
     assert "Verified as false positive" in call_kwargs["details"]
     assert "[Reviewed By: testuser]" in call_kwargs["details"]
     assert call_kwargs["suppressed"] is True
+
+
+def test_assessment_update_refreshes_grouped_task_windows(client, mock_dt_client):
+    from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
+    from dtvp.task_group_query_services import build_task_group_query_index
+
+    task_id = "assessment-refreshes-task-window"
+    full_group = {
+        "id": "CVE-2026-REFRESH",
+        "title": "Refresh test",
+        "severity": "HIGH",
+        "cvss_score": 7.5,
+        "tags": [],
+        "aliases": [],
+        "affected_versions": [
+            {
+                "project_name": "Project",
+                "project_version": "1.0.0",
+                "project_uuid": "puuid",
+                "components": [
+                    {
+                        "project_name": "Project",
+                        "project_version": "1.0.0",
+                        "project_uuid": "puuid",
+                        "component_name": "library-a",
+                        "component_version": "1.2.3",
+                        "component_uuid": "cuuid",
+                        "vulnerability_uuid": "vuuid",
+                        "finding_uuid": "fuuid",
+                        "analysis_state": "NOT_SET",
+                        "analysis_details": "",
+                        "is_suppressed": False,
+                    }
+                ],
+            }
+        ],
+    }
+    full_result = [full_group]
+    summary_result = summarize_grouped_vulnerabilities(full_result, {})
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": summary_result,
+        "_full_result": full_result,
+        "_full_result_by_id": {full_group["id"]: full_group},
+        "_group_query_index": build_task_group_query_index(summary_result),
+    }
+
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "puuid",
+                "component_uuid": "cuuid",
+                "vulnerability_uuid": "vuuid",
+                "finding_uuid": "fuuid",
+            }
+        ],
+        "state": "NOT_AFFECTED",
+        "details": "Reviewed as not affected",
+        "suppressed": False,
+    }
+
+    try:
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            response = client.post("/api/assessment", json=payload)
+
+        assert response.status_code == 200
+        open_response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={"lifecycle": "OPEN"},
+        )
+        assessed_response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={"lifecycle": "ASSESSED"},
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert open_response.status_code == 200
+    assert open_response.json()["filtered"] == 0
+    assert assessed_response.status_code == 200
+    assessed_data = assessed_response.json()
+    assert assessed_data["filtered"] == 1
+    assert assessed_data["items"][0]["id"] == "CVE-2026-REFRESH"
+    assert assessed_data["items"][0]["list_metadata"]["lifecycle"] == "ASSESSED"
+    mock_dt_client.update_analysis.assert_called_once()
 
 
 def test_assessment_update_failure(client, mock_dt_client):

@@ -79,7 +79,7 @@ def sanitize_rescored_vector(
     if corrected == norm_original:
         return None  # No meaningful change after correction
 
-    logger.warning(
+    logger.debug(
         "Corrected rescored vector (base metrics were altered): %s -> %s",
         rescored_vector,
         corrected,
@@ -1037,6 +1037,7 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                     "state": parsed_tags.get("State", "NOT_SET"),
                     "user": parsed_tags.get("Assessed By", "unknown"),
                     "reviewer": parsed_tags.get("Reviewed By"),
+                    "justification": parsed_tags.get("Justification", "NOT_SET"),
                     "rescored": rescored_val,
                     "vector": parsed_tags.get("Rescored Vector"),
                     "assigned": assigned_list,

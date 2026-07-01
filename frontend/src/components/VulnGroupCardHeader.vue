@@ -22,6 +22,11 @@ const props = defineProps<{
   assignees: string[]
   compact?: boolean
   showExpandToggle?: boolean
+  baseScoreDisplayOverride?: string
+  rescoredScoreDisplayOverride?: string
+  instanceCountOverride?: number
+  oldestAttributedOnMsOverride?: number | null
+  componentSummaryOverride?: string
 }>()
 
 const {
@@ -50,11 +55,13 @@ const emit = defineEmits<{
 }>()
 
 const baseScoreDisplay = computed(() => {
+  if (props.baseScoreDisplayOverride !== undefined) return props.baseScoreDisplayOverride
   const baseScore = group.value.cvss ?? group.value.cvss_score
   return baseScore == null ? '—' : String(baseScore)
 })
 
 const rescoredScoreDisplay = computed(() => {
+  if (props.rescoredScoreDisplayOverride !== undefined) return props.rescoredScoreDisplayOverride
   // Prefer stable group data, fallback to computed display score for pending edits
   if (hasStableRescore.value && stableRescoredScore.value != null) {
     return String(stableRescoredScore.value)
@@ -136,12 +143,17 @@ const analysisStateTooltip = computed(() => {
 })
 
 const instanceCount = computed(() =>
-  group.value.affected_versions?.reduce((sum, v) => sum + (v.components?.length || 0), 0) || 0
+  props.instanceCountOverride !== undefined
+    ? props.instanceCountOverride
+    : group.value.affected_versions?.reduce((sum, v) => sum + (v.components?.length || 0), 0) || 0
 )
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const oldestAttributedOnMs = computed(() => {
+  if (props.oldestAttributedOnMsOverride !== undefined) {
+    return props.oldestAttributedOnMsOverride
+  }
   const values = (group.value.affected_versions || [])
     .flatMap(version => version.components || [])
     .map(component => parseAttributionTimestamp(component.attributed_on))
@@ -183,6 +195,7 @@ const attributionAgeTitle = computed(() => {
 })
 
 const componentSummary = computed(() => {
+  if (props.componentSummaryOverride !== undefined) return props.componentSummaryOverride
   const names = new Set<string>()
   for (const v of group.value.affected_versions || []) {
     for (const c of v.components || []) {

@@ -136,6 +136,157 @@ def test_process_grouped_vulns_task_all_projects():
     assert "u2" in calls
 
 
+def test_summary_task_seeds_from_persistent_summary_index():
+    import asyncio
+
+    from dtvp.grouped_vuln_services import (
+        GroupedVulnServiceDeps,
+        process_grouped_vulns_task,
+    )
+
+    task_id = "summary-cache-seed"
+    tasks = {task_id: {"status": "pending", "log": []}}
+
+    class FakeCacheManager:
+        async def get_projects(self, client, name):
+            return [{"name": "Test", "version": "1.0", "uuid": "u1"}]
+
+        async def get_vulnerabilities(self, client, project_uuid, cve=None):
+            assert tasks[task_id]["partial_result_available"] is True
+            assert tasks[task_id]["partial_source"] == "summary_index"
+            assert tasks[task_id]["result"][0]["id"] == "CVE-CACHED"
+            return [
+                {
+                    "vulnerability": {
+                        "vulnId": "CVE-LIVE",
+                        "severity": "HIGH",
+                    },
+                    "component": {
+                        "name": "library-a",
+                        "uuid": "component-1",
+                        "version": "1.0",
+                    },
+                    "analysis": {"state": "NOT_SET"},
+                }
+            ]
+
+        async def get_project_vulnerabilities(self, client, project_uuid):
+            return []
+
+        async def get_bom(self, client, project_uuid):
+            return {}
+
+    class FakeSummaryIndex:
+        def __init__(self):
+            self.saved = []
+
+        def load(self, cache_key):
+            return {
+                "result": [
+                    {
+                        "id": "CVE-CACHED",
+                        "title": "Cached",
+                        "tags": [],
+                        "aliases": [],
+                        "assignees": [],
+                        "affected_versions": [],
+                        "list_metadata": {
+                            "lifecycle": "OPEN",
+                            "is_open": True,
+                            "is_pending": False,
+                            "technical_state": "NOT_SET",
+                        },
+                    }
+                ],
+                "statistics_rollup": {"version_counts": {"1.0": 1}},
+                "total_versions": 1,
+            }
+
+        def save(
+            self,
+            cache_key,
+            *,
+            scope,
+            summaries,
+            statistics_rollup,
+            total_versions,
+        ):
+            self.saved.append(
+                {
+                    "cache_key": cache_key,
+                    "scope": scope,
+                    "summaries": summaries,
+                    "statistics_rollup": statistics_rollup,
+                    "total_versions": total_versions,
+                }
+            )
+
+    summary_index = FakeSummaryIndex()
+
+    def group_vulnerabilities(combined_data, **kwargs):
+        return [
+            {
+                "id": "CVE-LIVE",
+                "title": "Live",
+                "severity": "HIGH",
+                "cvss_score": 8.0,
+                "tags": ["Team"],
+                "aliases": [],
+                "assignees": [],
+                "affected_versions": [
+                    {
+                        "project_name": "Test",
+                        "project_version": "1.0",
+                        "project_uuid": "u1",
+                        "components": [
+                            {
+                                "component_name": "library-a",
+                                "component_version": "1.0",
+                                "component_uuid": "component-1",
+                                "project_uuid": "u1",
+                                "analysis_state": "NOT_SET",
+                                "is_direct_dependency": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+
+    deps = GroupedVulnServiceDeps(
+        cache_manager=FakeCacheManager(),
+        logger=main.logger,
+        tasks=tasks,
+        bom_analysis_cache_cls=lambda bom, team_mapping: {},
+        get_version_fetch_concurrency=lambda: 1,
+        merge_vulnerability_details=lambda findings, full_vulns: {
+            "HIGH": len(findings)
+        },
+        sort_projects_by_version=lambda versions: versions,
+        load_team_mapping=lambda: {"*": "Team"},
+        group_vulnerabilities=group_vulnerabilities,
+        summary_index=summary_index,
+        summary_index_cache_revision=lambda: "rev-1",
+    )
+
+    asyncio.run(
+        process_grouped_vulns_task(
+            deps,
+            task_id,
+            "Test",
+            None,
+            client=object(),
+            response_mode="summary",
+        )
+    )
+
+    assert tasks[task_id]["status"] == "completed"
+    assert tasks[task_id]["result"][0]["id"] == "CVE-LIVE"
+    assert tasks[task_id]["partial_result_available"] is False
+    assert summary_index.saved[0]["summaries"][0]["id"] == "CVE-LIVE"
+    assert summary_index.saved[0]["total_versions"] == 1
+
+
 def test_spa_traversal_logic():
     from dtvp import main
 

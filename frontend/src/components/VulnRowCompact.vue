@@ -1,20 +1,12 @@
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue'
+import { computed } from 'vue'
 import type { GroupedVuln } from '../types'
-import {
-    getAssessedTeams,
-    getGroupLifecycle,
-    getGroupTechnicalState,
-    isPendingReview as isPendingReviewHelper,
-    hasGlobalAssessment,
-} from '../lib/assessment-helpers'
-import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
-import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
+import type { VulnListItem } from '../lib/vulnListIndex'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import { CheckCircle } from 'lucide-vue-next'
 
 const props = defineProps<{
-    group: GroupedVuln
+    item: VulnListItem
     selected?: boolean
 }>()
 
@@ -24,62 +16,20 @@ const emit = defineEmits<{
     (e: 'select', group: GroupedVuln): void
 }>()
 
-const teamMapping = inject<any>('teamMapping', ref({}))
+const listItem = computed(() => props.item)
+const group = computed(() => props.item.group)
 
-const groupRef = computed(() => props.group)
-const dependencyInfo = useVulnDependencyInfo({
-    group: groupRef,
-    teamMapping,
-})
-const normalizedTags = dependencyInfo.normalizedTags
-const dependencyRelationship = dependencyInfo.dependencyRelationship
-
-const mergedAssessmentData = computed(() => buildMergedAssessmentData(
-    props.group.affected_versions?.flatMap(v => v.components) ?? [], 0
-))
-
-const displayState = computed(() =>
-    getGroupLifecycle(props.group, normalizedTags.value, teamMapping?.value)
-)
-const technicalState = computed(() => getGroupTechnicalState(props.group))
-const isPendingReview = computed(() => isPendingReviewHelper(props.group))
-const isAssessed = computed(() =>
-    (hasGlobalAssessment(mergedAssessmentData.value.blocks) && !isPendingReview.value) ||
-    displayState.value === 'ASSESSED_LEGACY'
-)
-const stableRescoredScore = computed<number | null>(() => props.group.rescored_cvss ?? null)
-const hasStableRescore = computed(() => {
-    const base = props.group.cvss ?? props.group.cvss_score
-    const rescored = stableRescoredScore.value
-    if (rescored == null || base == null) return false
-    return Math.abs(rescored - base) > 0.05
-})
-const currentDisplayScore = computed(() =>
-    props.group.rescored_cvss ?? (props.group.cvss || props.group.cvss_score) ?? 'N/A'
-)
-const isRescoredOrModified = computed(() => {
-    const base = props.group.cvss || props.group.cvss_score
-    const current = currentDisplayScore.value
-    if (current === 'N/A' || base === undefined) return false
-    return Math.abs(Number(current) - Number(base)) > 0.05
-})
-
-const hasAssessedAliasForTag = (tag: string, assessed: Set<string>) => {
-    if (!teamMapping?.value) return false
-    for (const mappingVal of Object.values(teamMapping.value)) {
-        if (!Array.isArray(mappingVal) || mappingVal.length <= 1 || mappingVal[0] !== tag) continue
-        return (mappingVal as string[]).slice(1).some(alias => assessed.has(alias))
-    }
-    return false
-}
-const assessedTeams = computed(() => {
-    const assessed = getAssessedTeams(props.group)
-    const matched = new Set<string>()
-    for (const tag of normalizedTags.value) {
-        if (assessed.has(tag) || hasAssessedAliasForTag(tag, assessed)) matched.add(tag)
-    }
-    return matched
-})
+const normalizedTags = computed(() => listItem.value.normalizedTags)
+const assessedTeams = computed(() => listItem.value.assessedTeams)
+const dependencyRelationship = computed(() => listItem.value.dependencyRelationship)
+const displayState = computed(() => listItem.value.lifecycle)
+const technicalState = computed(() => listItem.value.technicalState)
+const isPendingReview = computed(() => listItem.value.isPending)
+const isAssessed = computed(() => listItem.value.isAssessed)
+const stableRescoredScore = computed(() => listItem.value.stableRescoredScore)
+const hasStableRescore = computed(() => listItem.value.hasStableRescore)
+const currentDisplayScore = computed(() => listItem.value.currentDisplayScore)
+const isRescoredOrModified = computed(() => listItem.value.isRescoredOrModified)
 
 const cardStyle = computed(() => props.selected
     ? 'bg-blue-950/40 border-blue-500/70 ring-1 ring-blue-400/50'
@@ -104,41 +54,21 @@ const hexToRgba = (hex: string, alpha: number) => {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
-const scoreSeverity = (score: number): string => {
-    if (score >= 9) return 'CRITICAL'
-    if (score >= 7) return 'HIGH'
-    if (score >= 4) return 'MEDIUM'
-    if (score >= 0.1) return 'LOW'
-    return 'INFO'
-}
-
-const originalSeverity = computed(() => {
-    const base = props.group.cvss ?? props.group.cvss_score
-    if (base != null && !Number.isNaN(Number(base))) return scoreSeverity(Number(base))
-    return 'UNKNOWN'
-})
+const originalSeverity = computed(() => listItem.value.originalSeverity)
 const originalSeverityFill = computed(() => hexToRgba(severityHexMap[originalSeverity.value] ?? '#4b5563', 0.4))
 
-const rescoredSeverity = computed(() => {
-    if (hasStableRescore.value) {
-        return scoreSeverity(stableRescoredScore.value!)
-    }
-    if (!isRescoredOrModified.value) return null
-    const score = Number(currentDisplayScore.value)
-    if (Number.isNaN(score)) return null
-    return scoreSeverity(score)
-})
+const rescoredSeverity = computed(() => listItem.value.rescoredSeverity)
 const rescoredSeverityHex = computed(() => {
     if (!rescoredSeverity.value) return hexToRgba('#6b7280', 0.4)
     return hexToRgba(severityHexMap[rescoredSeverity.value] ?? '#4b5563', 0.4)
 })
 
-const handleClick = () => emit('select', props.group)
+const handleClick = () => emit('select', group.value)
 </script>
 
 <template>
     <div
-        :class="['vuln-card relative border rounded-lg transition-colors overflow-hidden cursor-pointer hover:brightness-110', cardStyle]"
+        :class="['vuln-card relative min-h-[5rem] border rounded-lg transition-colors overflow-hidden cursor-pointer hover:brightness-110', cardStyle]"
         :data-group-id="group.id"
         :aria-selected="selected ? 'true' : 'false'"
         @click="handleClick"
@@ -203,6 +133,11 @@ const handleClick = () => emit('select', props.group)
                 :isPendingReview="isPendingReview"
                 :dependencyRelationship="dependencyRelationship"
                 :assignees="group.assignees || []"
+                :baseScoreDisplayOverride="listItem.baseScoreDisplay"
+                :rescoredScoreDisplayOverride="listItem.rescoredScoreDisplay"
+                :instanceCountOverride="listItem.instanceCount"
+                :oldestAttributedOnMsOverride="listItem.oldestAttributedOnMs"
+                :componentSummaryOverride="listItem.componentSummary"
                 compact
             />
         </div>

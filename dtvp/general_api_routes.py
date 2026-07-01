@@ -1,14 +1,25 @@
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .dt_client import DTClient
+from .grouped_vuln_services import (
+    build_grouped_vuln_statistics_rollup,
+    summarize_grouped_vulnerabilities,
+)
+from .task_group_query_services import (
+    build_task_group_query_index,
+    get_or_build_task_group_query_index,
+    query_task_groups,
+    split_query_values,
+)
 
 
 class AssessmentRequest(BaseModel):
@@ -38,7 +49,7 @@ class GeneralApiRouteDeps:
     get_dt_client_cls: Callable[[], type]
     create_tracked_task: Callable[[Any], Any]
     process_grouped_vulns_task: Callable[
-        [str, str, Optional[str], DTClient], Awaitable[None]
+        [str, str, Optional[str], DTClient, str], Awaitable[None]
     ]
     sort_projects_by_version: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
     load_team_mapping: Callable[[], dict[str, Any]]
@@ -50,6 +61,7 @@ class GeneralApiRouteDeps:
     ]
     group_vulnerabilities: Callable[..., list[dict[str, Any]]]
     calculate_statistics: Callable[[list[dict[str, Any]]], dict[str, Any]]
+    prune_grouped_vuln_tasks: Callable[[], list[str]]
     get_user_role: Callable[[str], str]
     fetch_current_assessment_analyses: Callable[
         [AssessmentRequest, DTClient], Awaitable[list[Any]]
@@ -70,6 +82,174 @@ class GeneralApiRouteDeps:
     default_dependency_chain_limit: int
     service_unavailable_response: dict[int | str, dict[str, Any]]
     not_found_response: dict[int | str, dict[str, Any]]
+
+
+ASSESSMENT_INSTANCE_KEY_FIELDS = (
+    "project_uuid",
+    "component_uuid",
+    "vulnerability_uuid",
+)
+
+
+def _assessment_identity_key(source: dict[str, Any]) -> tuple[str, str, str] | None:
+    values = tuple(str(source.get(key) or "") for key in ASSESSMENT_INSTANCE_KEY_FIELDS)
+    return values if all(values) else None
+
+
+def _build_assessment_payload_lookup(
+    payloads: list[tuple[dict, dict]],
+) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str, str], dict[str, Any]]]:
+    by_finding_uuid: dict[str, dict[str, Any]] = {}
+    by_identity: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for instance, payload in payloads:
+        finding_uuid = instance.get("finding_uuid")
+        if finding_uuid:
+            by_finding_uuid[str(finding_uuid)] = payload
+
+        identity = _assessment_identity_key(instance)
+        if identity is not None:
+            by_identity[identity] = payload
+
+    return by_finding_uuid, by_identity
+
+
+def _assessment_payload_for_component(
+    component: dict[str, Any],
+    by_finding_uuid: dict[str, dict[str, Any]],
+    by_identity: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any] | None:
+    finding_uuid = component.get("finding_uuid")
+    if finding_uuid and str(finding_uuid) in by_finding_uuid:
+        return by_finding_uuid[str(finding_uuid)]
+
+    identity = _assessment_identity_key(component)
+    if identity is None:
+        return None
+    return by_identity.get(identity)
+
+
+def _apply_assessment_payload_to_group(
+    group: dict[str, Any],
+    by_finding_uuid: dict[str, dict[str, Any]],
+    by_identity: dict[tuple[str, str, str], dict[str, Any]],
+) -> bool:
+    changed = False
+    for affected_version in group.get("affected_versions") or []:
+        for component in affected_version.get("components") or []:
+            payload = _assessment_payload_for_component(
+                component,
+                by_finding_uuid,
+                by_identity,
+            )
+            if payload is None:
+                continue
+
+            component["analysis_state"] = payload.get("state", "NOT_SET")
+            component["analysis_details"] = payload.get("details", "")
+            component["is_suppressed"] = bool(payload.get("suppressed", False))
+            if "justification" in payload:
+                component["justification"] = payload.get("justification")
+            changed = True
+    return changed
+
+
+def _refresh_grouped_task_groups(
+    groups: list[dict[str, Any]],
+    by_finding_uuid: dict[str, dict[str, Any]],
+    by_identity: dict[tuple[str, str, str], dict[str, Any]],
+    team_mapping: dict[str, Any],
+) -> bool:
+    changed_group_ids: set[str] = set()
+    for group in groups:
+        if _apply_assessment_payload_to_group(
+            group,
+            by_finding_uuid,
+            by_identity,
+        ):
+            group_id = group.get("id")
+            if group_id:
+                changed_group_ids.add(str(group_id))
+
+    if not changed_group_ids:
+        return False
+
+    for group in groups:
+        if str(group.get("id") or "") not in changed_group_ids:
+            continue
+        summary = summarize_grouped_vulnerabilities([group], team_mapping)
+        if summary:
+            group["list_metadata"] = summary[0].get("list_metadata") or {}
+    return True
+
+
+def _refresh_grouped_vuln_task_snapshots(
+    tasks: dict[str, Any],
+    payloads: list[tuple[dict, dict]],
+    team_mapping: dict[str, Any],
+) -> int:
+    refreshed = 0
+    now = datetime.now(timezone.utc)
+    by_finding_uuid, by_identity = _build_assessment_payload_lookup(payloads)
+
+    for task in tasks.values():
+        if not isinstance(task, dict):
+            continue
+
+        full_result = task.get("_full_result")
+        partial_full_result = task.get("_partial_full_result")
+        result = task.get("result")
+        full_changed = isinstance(full_result, list) and _refresh_grouped_task_groups(
+            full_result,
+            by_finding_uuid,
+            by_identity,
+            team_mapping,
+        )
+        partial_changed = (
+            isinstance(partial_full_result, list)
+            and partial_full_result is not full_result
+            and _refresh_grouped_task_groups(
+                partial_full_result,
+                by_finding_uuid,
+                by_identity,
+                team_mapping,
+            )
+        )
+        result_changed = False
+
+        if full_changed:
+            task["_full_result_by_id"] = {
+                item.get("id"): item for item in full_result if item.get("id")
+            }
+            task["result"] = (
+                summarize_grouped_vulnerabilities(full_result, team_mapping)
+                if task.get("result_mode") == "summary"
+                else full_result
+            )
+        elif partial_changed:
+            task["result"] = (
+                summarize_grouped_vulnerabilities(partial_full_result, team_mapping)
+                if task.get("result_mode") == "summary"
+                else partial_full_result
+            )
+        elif isinstance(result, list):
+            result_changed = _refresh_grouped_task_groups(
+                result,
+                by_finding_uuid,
+                by_identity,
+                team_mapping,
+            )
+
+        if not (full_changed or partial_changed or result_changed):
+            continue
+
+        task["_group_query_index"] = build_task_group_query_index(
+            task.get("result") if isinstance(task.get("result"), list) else []
+        )
+        task["updated_at"] = now
+        refreshed += 1
+
+    return refreshed
 
 
 def _register_project_routes(
@@ -105,16 +285,20 @@ def _register_task_routes(
         name: str,
         request: Request,
         cve: Optional[str] = None,
+        response_mode: str = Query("full", pattern="^(full|summary)$"),
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        deps.prune_grouped_vuln_tasks()
         task_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
         deps.tasks[task_id] = {
             "id": task_id,
             "status": "pending",
             "message": "Starting...",
             "progress": 0,
-            "created_at": datetime.now(),
+            "created_at": now,
+            "updated_at": now,
             "result": None,
             "log": ["Starting..."],
         }
@@ -134,7 +318,13 @@ def _register_task_routes(
                 token=token or "",
                 cookies=cookies,
             ) as client:
-                await deps.process_grouped_vulns_task(task_id, name, cve, client)
+                await deps.process_grouped_vulns_task(
+                    task_id,
+                    name,
+                    cve,
+                    client,
+                    response_mode,
+                )
 
         deps.create_tracked_task(task_wrapper())
         return {"task_id": task_id}
@@ -142,13 +332,229 @@ def _register_task_routes(
     @router.get("/tasks/{task_id}")
     async def get_task_status(
         task_id: str,
+        include_result: bool = True,
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        deps.prune_grouped_vuln_tasks()
         task = deps.tasks.get(task_id)
         if not task:
             return {"status": "not_found"}
-        return task
+        return {
+            key: value
+            for key, value in task.items()
+            if not key.startswith("_") and (include_result or key != "result")
+        }
+
+    @router.get("/tasks/{task_id}/events")
+    async def stream_task_events(
+        task_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        async def event_stream():
+            last_payload = ""
+            while True:
+                deps.prune_grouped_vuln_tasks()
+                task = deps.tasks.get(task_id)
+                if not task:
+                    payload = {"status": "not_found"}
+                else:
+                    payload = {
+                        key: value
+                        for key, value in task.items()
+                        if not key.startswith("_") and key != "result"
+                    }
+                text = json.dumps(payload, default=str)
+                if text != last_payload:
+                    yield text + "\n"
+                    last_payload = text
+
+                status = str(payload.get("status") or "").lower()
+                if status in {"completed", "failed", "not_found"}:
+                    break
+                await asyncio.sleep(1)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="application/x-ndjson",
+        )
+
+    @router.get("/tasks/{task_id}/groups")
+    async def get_task_groups(
+        task_id: str,
+        q: str = "",
+        lifecycle: list[str] | None = Query(default=None),
+        analysis: list[str] | None = Query(default=None),
+        tag: str = "",
+        vuln_id: str = Query("", alias="id"),
+        component: str = "",
+        assignee: str = "",
+        dependency: list[str] | None = Query(default=None),
+        versions: list[str] | None = Query(default=None),
+        cvss_mismatch: bool = False,
+        attributed_before_days: int | None = Query(default=None, ge=1),
+        attribution_mode: str = Query("older", pattern="^(older|younger)$"),
+        tmrescore: list[str] | None = Query(default=None),
+        tmrescore_proposal_ids: list[str] | None = Query(default=None),
+        sort: str = Query("rescored-severity"),
+        order: str = Query("desc", pattern="^(asc|desc)$"),
+        offset: int = Query(0, ge=0),
+        cursor: str = "",
+        limit: int = Query(100, ge=1, le=1000),
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        deps.prune_grouped_vuln_tasks()
+        task = deps.tasks.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        is_partial_summary = (
+            task.get("result_mode") == "summary"
+            and task.get("partial_result_available")
+            and task.get("_group_query_index") is not None
+        )
+        if task.get("status") != "completed" and not is_partial_summary:
+            raise HTTPException(status_code=409, detail="Task is not completed")
+
+        query_index = get_or_build_task_group_query_index(task)
+
+        try:
+            response = query_task_groups(
+                query_index,
+                q=q,
+                lifecycle=split_query_values(lifecycle),
+                analysis=split_query_values(analysis),
+                tag=tag,
+                vuln_id=vuln_id,
+                component=component,
+                assignee=assignee,
+                dependency=split_query_values(dependency),
+                versions=split_query_values(versions),
+                cvss_mismatch=cvss_mismatch,
+                attributed_before_days=attributed_before_days,
+                attribution_mode=attribution_mode,
+                tmrescore=split_query_values(tmrescore),
+                tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
+                sort_by=sort,
+                sort_order=order,
+                offset=offset,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        response["result_mode"] = task.get("result_mode")
+        response["partial"] = task.get("status") != "completed"
+        response["partial_versions_completed"] = task.get("partial_versions_completed")
+        response["partial_total_versions"] = task.get("partial_total_versions")
+        return response
+
+    @router.get("/tasks/{task_id}/group-details")
+    async def get_task_group_details_window(
+        task_id: str,
+        q: str = "",
+        lifecycle: list[str] | None = Query(default=None),
+        analysis: list[str] | None = Query(default=None),
+        tag: str = "",
+        vuln_id: str = Query("", alias="id"),
+        component: str = "",
+        assignee: str = "",
+        dependency: list[str] | None = Query(default=None),
+        versions: list[str] | None = Query(default=None),
+        cvss_mismatch: bool = False,
+        attributed_before_days: int | None = Query(default=None, ge=1),
+        attribution_mode: str = Query("older", pattern="^(older|younger)$"),
+        tmrescore: list[str] | None = Query(default=None),
+        tmrescore_proposal_ids: list[str] | None = Query(default=None),
+        sort: str = Query("rescored-severity"),
+        order: str = Query("desc", pattern="^(asc|desc)$"),
+        offset: int = Query(0, ge=0),
+        cursor: str = "",
+        limit: int = Query(100, ge=1, le=1000),
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        deps.prune_grouped_vuln_tasks()
+        task = deps.tasks.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.get("status") != "completed":
+            raise HTTPException(status_code=409, detail="Task is not completed")
+
+        query_index = get_or_build_task_group_query_index(task)
+        try:
+            response = query_task_groups(
+                query_index,
+                q=q,
+                lifecycle=split_query_values(lifecycle),
+                analysis=split_query_values(analysis),
+                tag=tag,
+                vuln_id=vuln_id,
+                component=component,
+                assignee=assignee,
+                dependency=split_query_values(dependency),
+                versions=split_query_values(versions),
+                cvss_mismatch=cvss_mismatch,
+                attributed_before_days=attributed_before_days,
+                attribution_mode=attribution_mode,
+                tmrescore=split_query_values(tmrescore),
+                tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
+                sort_by=sort,
+                sort_order=order,
+                offset=offset,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        full_by_id = task.get("_full_result_by_id") or {}
+        response["items"] = [
+            full_by_id.get(item.get("id"), item) if isinstance(item, dict) else item
+            for item in response["items"]
+        ]
+        response["result_mode"] = "full"
+        response["source_result_mode"] = task.get("result_mode")
+        return response
+
+    @router.get("/tasks/{task_id}/groups/{group_id:path}")
+    async def get_task_group_detail(
+        task_id: str,
+        group_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        deps.prune_grouped_vuln_tasks()
+        task = deps.tasks.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        full_by_id = task.get("_full_result_by_id") or {}
+        group = full_by_id.get(group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="Vulnerability group not found")
+        return group
+
+    @router.get("/tasks/{task_id}/statistics")
+    async def get_task_statistics(
+        task_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        deps.prune_grouped_vuln_tasks()
+        task = deps.tasks.get(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.get("status") != "completed":
+            raise HTTPException(status_code=409, detail="Task is not completed")
+
+        grouped = task.get("_full_result")
+        if not isinstance(grouped, list):
+            grouped = task.get("result") if isinstance(task.get("result"), list) else []
+
+        stats = deps.calculate_statistics(grouped)
+        stats.update(task.get("_statistics_rollup") or {})
+        return stats
 
 
 def _register_statistics_route(
@@ -205,49 +611,14 @@ def _register_statistics_route(
             combined_data, project_boms={}, processed_boms=bom_cache_map
         )
         stats = deps.calculate_statistics(grouped)
-        stats["version_counts"] = version_counts
-
-        major_version_counts = {}
-        version_major_details = {}
-        major_version_severity_counts = {}
-
-        for version in versions:
-            version_label = version.get("version", "unknown")
-            major = (
-                version_label.split(".")[0]
-                if isinstance(version_label, str) and "." in version_label
-                else version_label
+        stats.update(
+            build_grouped_vuln_statistics_rollup(
+                versions,
+                combined_data,
+                version_counts,
+                version_severity_counts,
             )
-            major = major or "unknown"
-
-            major_version_counts[major] = major_version_counts.get(
-                major, 0
-            ) + version_counts.get(version_label, 0)
-            version_major_details.setdefault(major, {})[version_label] = (
-                version_counts.get(version_label, 0)
-            )
-            major_version_severity_counts.setdefault(major, {})
-
-            findings = next(
-                (
-                    combined_entry["vulnerabilities"]
-                    for combined_entry in combined_data
-                    if combined_entry["version"]["uuid"] == version["uuid"]
-                ),
-                [],
-            )
-            for finding in findings:
-                severity = (
-                    finding.get("vulnerability", {}).get("severity") or "UNKNOWN"
-                ).upper()
-                major_version_severity_counts[major][severity] = (
-                    major_version_severity_counts[major].get(severity, 0) + 1
-                )
-
-        stats["major_version_counts"] = major_version_counts
-        stats["major_version_details"] = version_major_details
-        stats["major_version_severity_counts"] = major_version_severity_counts
-        stats["version_severity_counts"] = version_severity_counts
+        )
         return stats
 
 
@@ -337,6 +708,23 @@ def _register_assessment_routes(
         payloads = deps.build_assessment_payloads(req, user, role)
         for _instance, payload in payloads:
             deps.cache_manager._save_local_analysis(payload)
+        try:
+            refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
+                deps.tasks,
+                payloads,
+                deps.load_team_mapping(),
+            )
+            if refreshed_tasks:
+                deps.logger.info(
+                    "Refreshed %d grouped vulnerability task snapshot(s) "
+                    "after assessment update",
+                    refreshed_tasks,
+                )
+        except Exception:
+            deps.logger.exception(
+                "Failed to refresh grouped vulnerability task snapshots "
+                "after assessment update"
+            )
 
         api_results = await deps.apply_assessment_payloads(client, payloads)
         return await deps.finalize_assessment_results(api_results)

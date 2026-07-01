@@ -43,6 +43,24 @@ export interface AffectedVersion {
     components: Instance[];
 }
 
+export type GroupedVulnDependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN';
+
+export interface GroupedVulnListMetadata {
+    lifecycle?: string;
+    is_pending?: boolean;
+    is_open?: boolean;
+    is_assessed?: boolean;
+    technical_state?: string;
+    assessed_teams?: string[];
+    component_names?: string[];
+    versions?: string[];
+    attributed_on_ms_values?: number[];
+    oldest_attributed_on_ms?: number | null;
+    instance_count?: number;
+    dependency_relationship?: GroupedVulnDependencyRelationship;
+    cvss_version_mismatch?: boolean;
+}
+
 export interface GroupedVuln {
     id: string; // CVE/VulnID
     title?: string;
@@ -57,6 +75,7 @@ export interface GroupedVuln {
     tags?: string[];
     assignees?: string[];
     aliases?: string[];
+    list_metadata?: GroupedVulnListMetadata;
     affected_versions: AffectedVersion[];
 }
 

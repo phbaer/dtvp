@@ -1,5 +1,6 @@
 
 import { test, expect } from '@playwright/test';
+import { mockGroupedVulnTask } from './helpers/grouped-task';
 
 test.describe('Vulnerability View and Rescoring', () => {
     test.beforeEach(async ({ page }) => {
@@ -55,6 +56,77 @@ test.describe('Vulnerability View and Rescoring', () => {
             });
         });
 
+        const taskGroups = [
+            {
+                id: 'CVE-2023-1234',
+                title: 'Test Vulnerability',
+                description: 'A bad vulnerability description.',
+                severity: 'HIGH',
+                cvss: 9.8,
+                cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                tags: ['Security'],
+                affected_versions: [
+                    {
+                        project_name: 'TestProject',
+                        project_version: '1.0',
+                        project_uuid: 'p1',
+                        components: [
+                            {
+                                component_name: 'lib-a',
+                                component_version: '1.0',
+                                component_uuid: 'c-1',
+                                finding_uuid: 'f-1',
+                                vulnerability_uuid: 'v-1',
+                                analysis_state: 'NOT_SET',
+                                analysis_details: '',
+                                tags: ['Security']
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                id: 'CVE-2023-ASSESSED',
+                title: 'Already Assessed Vulnerability',
+                description: 'A vulnerability with a completed assessment.',
+                severity: 'MEDIUM',
+                cvss: 5.3,
+                cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N',
+                tags: ['Security'],
+                list_metadata: {
+                    lifecycle: 'ASSESSED',
+                    is_open: false,
+                    is_pending: false,
+                    technical_state: 'RESOLVED',
+                    component_names: ['lib-b'],
+                    versions: ['1.0'],
+                    dependency_relationship: 'DIRECT',
+                    instance_count: 1,
+                    assessed_teams: ['Security'],
+                    teams: ['Security'],
+                },
+                affected_versions: [
+                    {
+                        project_name: 'TestProject',
+                        project_version: '1.0',
+                        project_uuid: 'p1',
+                        components: [
+                            {
+                                component_name: 'lib-b',
+                                component_version: '1.0',
+                                component_uuid: 'c-2',
+                                finding_uuid: 'f-2',
+                                vulnerability_uuid: 'v-2',
+                                analysis_state: 'RESOLVED',
+                                analysis_details: '[State: RESOLVED]\nAlready assessed.',
+                                tags: ['Security']
+                            }
+                        ]
+                    }
+                ]
+            }
+        ];
+
         // Mock Task Start
         await page.route('**/api/tasks/group-vulns*', async (route) => {
             await route.fulfill({
@@ -63,46 +135,7 @@ test.describe('Vulnerability View and Rescoring', () => {
             });
         });
 
-        // Mock Task Status Polling
-        await page.route('**/api/tasks/task-123', async (route) => {
-            await route.fulfill({
-                status: 200,
-                body: JSON.stringify({
-                    status: 'completed',
-                    progress: 100,
-                    result: [
-                        {
-                            id: 'CVE-2023-1234',
-                            title: 'Test Vulnerability',
-                            description: 'A bad vulnerability description.',
-                            severity: 'HIGH',
-                            cvss: 9.8,
-                            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
-                            tags: ['Security'],
-                            affected_versions: [
-                                {
-                                    project_name: 'TestProject',
-                                    project_version: '1.0',
-                                    project_uuid: 'p1',
-                                    components: [
-                                        {
-                                            component_name: 'lib-a',
-                                            component_version: '1.0',
-                                            component_uuid: 'c-1',
-                                            finding_uuid: 'f-1',
-                                            vulnerability_uuid: 'v-1',
-                                            analysis_state: 'NOT_SET',
-                                            analysis_details: '',
-                                            tags: ['Security']
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                }),
-            });
-        });
+        await mockGroupedVulnTask(page, { taskId: 'task-123', groups: taskGroups });
 
         // Mock Assessment Details
         await page.route('**/api/assessments/details', async (route) => {
@@ -169,8 +202,12 @@ test.describe('Vulnerability View and Rescoring', () => {
         await page.goto('/project/TestProject');
         await page.waitForLoadState('networkidle');
 
-        // Ensure "Assessed" vulnerabilities are visible (avoid matching the similar "Assessed (Legacy)" button)
+        const assessedCard = page.locator('.vuln-card').filter({ hasText: /CVE-2023-ASSESSED/ });
+        await expect(assessedCard).toBeVisible({ timeout: 20000 });
+
+        // Deselect "Assessed" and verify backend-windowed filtering removes assessed rows.
         await page.getByRole('button', { name: /^Assessed(?!.*Legacy)/ }).click();
+        await expect(assessedCard).toHaveCount(0);
 
         // Wait for row to appear
         const vulnCard = page.locator('.vuln-card').filter({ hasText: /CVE-2023-1234/ }).first();

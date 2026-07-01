@@ -92,6 +92,10 @@ from .general_api_routes import (
 from .grouped_vuln_services import (
     collect_version_snapshots as collect_grouped_vuln_version_snapshots,
 )
+from .grouped_vuln_summary_index_services import (
+    GroupedVulnSummaryIndex,
+    get_grouped_vuln_summary_index_path,
+)
 from .logic import (
     DEFAULT_DEPENDENCY_CHAIN_LIMIT,
     BOMAnalysisCache,
@@ -204,6 +208,18 @@ def _is_auto_code_analysis_active() -> bool:
     return CodeAnalysisSettings().enabled
 
 
+grouped_vuln_summary_index = GroupedVulnSummaryIndex(
+    path_provider=get_grouped_vuln_summary_index_path,
+    max_entries_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES",
+        default=64,
+        minimum=1,
+        logger=logger,
+    ),
+    logger=logger,
+)
+
+
 grouped_vuln_service_deps = build_grouped_vuln_service_deps(
     cache_manager=cache_manager,
     logger=logger,
@@ -222,6 +238,10 @@ grouped_vuln_service_deps = build_grouped_vuln_service_deps(
             enabled=_is_auto_code_analysis_active(),
             logger=logger,
         )
+    ),
+    summary_index=grouped_vuln_summary_index,
+    summary_index_cache_revision=lambda: cache_manager.get_cache_status().get(
+        "last_refreshed_at"
     ),
 )
 
@@ -341,6 +361,12 @@ api_router.include_router(
             default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
             service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
             not_found_response=NOT_FOUND_RESPONSE,
+            get_grouped_vuln_task_ttl_seconds=lambda: get_env_int_with_floor(
+                "DTVP_GROUPED_VULN_TASK_TTL_SECONDS",
+                default=3600,
+                minimum=60,
+                logger=logger,
+            ),
         ),
         current_user_dependency=get_current_user,
         client_dependency=get_client,
