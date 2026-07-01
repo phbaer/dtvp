@@ -1,165 +1,150 @@
 import { computed, nextTick, onUnmounted, ref, watch, type ComputedRef, type Ref } from 'vue'
 
-type TimeoutHandle = ReturnType<typeof setTimeout>
-
-type IdleCapableWindow = Window & typeof globalThis & {
-    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
-    cancelIdleCallback?: (handle: number) => void
-}
-
 interface VisibleGroupWindowOptions<T> {
     items: ComputedRef<T[]>
     isActive: Ref<boolean> | ComputedRef<boolean>
     batchSize?: number
-    rootMargin?: string
+    estimatedItemHeight?: number
+    overscan?: number
 }
 
-const getBrowserWindow = (): IdleCapableWindow | undefined => {
-    return globalThis.window as IdleCapableWindow | undefined
+const getBrowserWindow = (): (Window & typeof globalThis) | undefined => {
+    return globalThis.window as (Window & typeof globalThis) | undefined
 }
 
 export function useVisibleGroupWindow<T>({
     items,
     isActive,
     batchSize = 20,
-    rootMargin = '400px',
+    estimatedItemHeight = 84,
+    overscan = 6,
 }: VisibleGroupWindowOptions<T>) {
-    const visibleItemCount = ref(batchSize)
-    const loadMoreTrigger = ref<HTMLElement | null>(null)
-    const loadMoreObserver = ref<IntersectionObserver | null>(null)
-    const backgroundLoadHandle = ref<number | TimeoutHandle | null>(null)
-    const backgroundLoadMode = ref<'idle' | 'timeout' | null>(null)
+    const scrollContainer = ref<HTMLElement | null>(null)
+    const scrollTop = ref(0)
+    const viewportHeight = ref(0)
 
-    const visibleItems = computed(() => {
-        return items.value.slice(0, visibleItemCount.value)
-    })
+    let activeScrollElement: HTMLElement | null = null
+    let resizeObserver: ResizeObserver | null = null
 
-    const hasMoreItems = computed(() => {
-        return visibleItemCount.value < items.value.length
-    })
-
-    const cancelBackgroundLoad = () => {
-        if (backgroundLoadHandle.value === null) return
-
-        const browserWindow = getBrowserWindow()
-        if (backgroundLoadMode.value === 'idle' && browserWindow?.cancelIdleCallback) {
-            browserWindow.cancelIdleCallback(backgroundLoadHandle.value as number)
-        } else if (browserWindow) {
-            browserWindow.clearTimeout(backgroundLoadHandle.value as number)
-        } else {
-            clearTimeout(backgroundLoadHandle.value as TimeoutHandle)
-        }
-        backgroundLoadHandle.value = null
-        backgroundLoadMode.value = null
-    }
-
-    const loadMoreItems = () => {
-        if (visibleItemCount.value >= items.value.length) return
-        visibleItemCount.value = Math.min(items.value.length, visibleItemCount.value + batchSize)
-        if (hasMoreItems.value) {
-            scheduleBackgroundLoad()
-        }
-    }
-
-    const scheduleBackgroundLoad = () => {
-        if (backgroundLoadHandle.value !== null || !hasMoreItems.value) return
-
-        const callback = () => {
-            backgroundLoadHandle.value = null
-            if (!hasMoreItems.value) return
-            loadMoreItems()
-        }
-
-        const browserWindow = getBrowserWindow()
-        if (browserWindow?.requestIdleCallback) {
-            backgroundLoadHandle.value = browserWindow.requestIdleCallback(callback, { timeout: 1000 })
-            backgroundLoadMode.value = 'idle'
-        } else if (browserWindow) {
-            backgroundLoadHandle.value = browserWindow.setTimeout(callback, 250)
-            backgroundLoadMode.value = 'timeout'
-        } else {
-            backgroundLoadHandle.value = setTimeout(callback, 250)
-            backgroundLoadMode.value = 'timeout'
-        }
-    }
-
-    const disconnectLoadMoreObserver = () => {
-        if (!loadMoreObserver.value) return
-        loadMoreObserver.value.disconnect()
-        loadMoreObserver.value = null
-    }
-
-    const attachLoadMoreObserver = () => {
-        disconnectLoadMoreObserver()
-        if (!loadMoreTrigger.value || !isActive.value) return
-        if (typeof IntersectionObserver === 'undefined') {
-            scheduleBackgroundLoad()
+    const measureViewport = () => {
+        const element = scrollContainer.value
+        if (!element) {
+            viewportHeight.value = 0
             return
         }
 
-        loadMoreObserver.value = new IntersectionObserver((entries) => {
-            for (const entry of entries) {
-                if (entry.isIntersecting && hasMoreItems.value) {
-                    loadMoreItems()
-                }
-            }
-        }, {
-            rootMargin,
-        })
-
-        loadMoreObserver.value.observe(loadMoreTrigger.value)
+        const measured = element.clientHeight || element.getBoundingClientRect().height || 0
+        viewportHeight.value = Math.max(0, Math.floor(measured))
     }
 
+    const handleScroll = () => {
+        const element = scrollContainer.value
+        scrollTop.value = element?.scrollTop || 0
+        measureViewport()
+    }
+
+    const detachScrollListeners = () => {
+        if (activeScrollElement) {
+            activeScrollElement.removeEventListener('scroll', handleScroll)
+            activeScrollElement = null
+        }
+        if (resizeObserver) {
+            resizeObserver.disconnect()
+            resizeObserver = null
+        }
+        getBrowserWindow()?.removeEventListener('resize', measureViewport)
+    }
+
+    const attachScrollListeners = () => {
+        detachScrollListeners()
+        const element = scrollContainer.value
+        if (!element || !isActive.value) return
+
+        activeScrollElement = element
+        activeScrollElement.addEventListener('scroll', handleScroll, { passive: true })
+
+        if (typeof ResizeObserver !== 'undefined') {
+            resizeObserver = new ResizeObserver(measureViewport)
+            resizeObserver.observe(element)
+        } else {
+            getBrowserWindow()?.addEventListener('resize', measureViewport)
+        }
+
+        handleScroll()
+    }
+
+    const effectiveItemHeight = computed(() => Math.max(1, estimatedItemHeight))
+    const viewportItemCount = computed(() => {
+        if (viewportHeight.value <= 0) return batchSize
+        return Math.max(batchSize, Math.ceil(viewportHeight.value / effectiveItemHeight.value))
+    })
+
+    const visibleStartIndex = computed(() => {
+        if (!isActive.value || items.value.length === 0) return 0
+        return Math.max(0, Math.floor(scrollTop.value / effectiveItemHeight.value) - overscan)
+    })
+
+    const visibleEndIndex = computed(() => {
+        if (!isActive.value) return Math.min(items.value.length, batchSize)
+        return Math.min(
+            items.value.length,
+            visibleStartIndex.value + viewportItemCount.value + overscan * 2,
+        )
+    })
+
+    const visibleItems = computed(() => {
+        return items.value.slice(visibleStartIndex.value, visibleEndIndex.value)
+    })
+
+    const virtualPaddingTop = computed(() => visibleStartIndex.value * effectiveItemHeight.value)
+    const virtualPaddingBottom = computed(() => {
+        return Math.max(0, (items.value.length - visibleEndIndex.value) * effectiveItemHeight.value)
+    })
+
+    const hasMoreItems = computed(() => visibleEndIndex.value < items.value.length)
+    const visibleItemCount = computed(() => visibleItems.value.length)
+
     const resetVisibleItems = () => {
-        visibleItemCount.value = batchSize
-        if (isActive.value) {
-            scheduleBackgroundLoad()
+        scrollTop.value = 0
+        if (scrollContainer.value) {
+            scrollContainer.value.scrollTop = 0
+            measureViewport()
         }
     }
 
     watch([
-        () => items.value.length,
+        () => scrollContainer.value,
         () => isActive.value,
     ], ([, active]) => {
-        if (active) {
-            resetVisibleItems()
-            void nextTick(() => {
-                attachLoadMoreObserver()
-            })
+        if (!active) {
+            detachScrollListeners()
             return
         }
 
-        disconnectLoadMoreObserver()
-        cancelBackgroundLoad()
+        void nextTick(() => {
+            attachScrollListeners()
+        })
     }, { immediate: true })
 
-    watch(items, () => {
-        if (visibleItemCount.value > items.value.length) {
-            visibleItemCount.value = Math.min(items.value.length, batchSize)
+    watch(() => items.value.length, () => {
+        if (visibleStartIndex.value >= items.value.length) {
+            resetVisibleItems()
         }
-        if (isActive.value) {
-            scheduleBackgroundLoad()
-        }
-    })
-
-    watch(loadMoreTrigger, () => {
-        if (!isActive.value) return
-        void nextTick(() => {
-            attachLoadMoreObserver()
-        })
     })
 
     onUnmounted(() => {
-        disconnectLoadMoreObserver()
-        cancelBackgroundLoad()
+        detachScrollListeners()
     })
 
     return {
         visibleItems,
         hasMoreItems,
-        loadMoreTrigger,
         visibleItemCount,
-        loadMoreItems,
+        visibleStartIndex,
+        visibleEndIndex,
+        virtualPaddingTop,
+        virtualPaddingBottom,
+        scrollContainer,
         resetVisibleItems,
     }
 }

@@ -12,6 +12,8 @@ const build = ref('')
 const user = ref({ username: '', role: '' })
 const realRole = ref('')
 const isAnalystView = ref(false)
+const bootStatus = ref<'loading' | 'ready' | 'unavailable'>('loading')
+const bootError = ref('')
 const router = useRouter()
 const route = useRoute()
 
@@ -38,27 +40,40 @@ provide('user', computed(() => ({
 })))
 provide('realRole', effectiveRole)
 
-onMounted(async () => {
-    try {
-        const v = await getVersion()
-        version.value = v.version
-        build.value = v.build
+const isAuthFailure = (error: any) => {
+    const status = error?.response?.status
+    return status === 401 || status === 403
+}
 
-        // Check for version update
-        const lastSeenVersion = localStorage.getItem('dtvp_last_seen_version')
-        if (lastSeenVersion !== v.version && v.version !== '0.0.0') {
-            try {
-                const res = await getChangelog()
-                changelogContent.value = res.content
-                showChangelog.value = true
-            } catch (e) {
-                console.error('Failed to fetch changelog', e)
-            }
-        }
-    } catch (e) {
-        console.error('Failed to fetch version', e)
+const describeBootstrapError = (error: any) => {
+    const status = error?.response?.status
+    if (status) {
+        return `Backend replied with HTTP ${status}. It may still be initialising.`
     }
+    if (error?.message) {
+        return error.message
+    }
+    return 'The backend is not reachable yet.'
+}
 
+const loadVersionInfo = async () => {
+    const v = await getVersion()
+    version.value = v.version
+    build.value = v.build
+
+    const lastSeenVersion = localStorage.getItem('dtvp_last_seen_version')
+    if (lastSeenVersion !== v.version && v.version !== '0.0.0') {
+        try {
+            const res = await getChangelog()
+            changelogContent.value = res.content
+            showChangelog.value = true
+        } catch (e) {
+            console.error('Failed to fetch changelog', e)
+        }
+    }
+}
+
+const loadProjectMetadata = async () => {
     try {
         const metaRes = await fetch(metadataUrl)
         if (metaRes.ok) {
@@ -82,7 +97,9 @@ onMounted(async () => {
     } catch (e) {
         console.error('Failed to fetch metadata', e)
     }
+}
 
+const loadCurrentUser = async () => {
     try {
         const u = await getUserInfo()
         user.value = { 
@@ -91,9 +108,40 @@ onMounted(async () => {
         }
         realRole.value = u.role || 'ANALYST'
     } catch (e) {
-        // Not logged in or error
+        if (isAuthFailure(e)) {
+            user.value = { username: '', role: '' }
+            realRole.value = ''
+            if (route.path !== '/login') {
+                await router.replace('/login')
+            }
+            return
+        }
+        throw e
     }
-})
+}
+
+const bootstrapApp = async () => {
+    bootStatus.value = 'loading'
+    bootError.value = ''
+
+    try {
+        await loadVersionInfo()
+        await loadProjectMetadata()
+        await loadCurrentUser()
+
+        if (route.meta.role && route.meta.role !== realRole.value) {
+            await router.replace('/')
+        }
+
+        bootStatus.value = 'ready'
+    } catch (e) {
+        console.error('Failed to initialise DTVP', e)
+        bootError.value = describeBootstrapError(e)
+        bootStatus.value = 'unavailable'
+    }
+}
+
+onMounted(bootstrapApp)
 
 const toggleView = () => {
     isAnalystView.value = !isAnalystView.value
@@ -147,7 +195,46 @@ const acknowledgeChangelog = () => {
 
 <template>
   <div class="h-screen w-full overflow-hidden flex flex-col bg-slate-950/70 text-white">
-    <template v-if="$route.path !== '/login'">
+    <template v-if="route.path !== '/login'">
+        <div
+            v-if="bootStatus !== 'ready'"
+            class="min-h-0 flex-1 flex items-center justify-center px-6"
+            data-testid="app-bootstrap-state"
+        >
+            <div class="w-full max-w-md text-center">
+                <div class="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full border border-blue-400/30 bg-blue-500/10">
+                    <div
+                        v-if="bootStatus === 'loading'"
+                        class="h-7 w-7 animate-spin rounded-full border-2 border-blue-200/30 border-t-blue-300"
+                    ></div>
+                    <span v-else class="text-xl font-black text-amber-300">!</span>
+                </div>
+                <h1 class="text-2xl font-black uppercase tracking-[0.18em] text-white">
+                    {{ bootStatus === 'loading' ? 'DTVP is starting' : 'DTVP is still starting' }}
+                </h1>
+                <p class="mt-4 text-sm leading-6 text-slate-300">
+                    {{ bootStatus === 'loading'
+                        ? 'Connecting to the backend and loading application metadata.'
+                        : 'The backend is not ready yet. You can retry while the container finishes initialisation.' }}
+                </p>
+                <p
+                    v-if="bootError"
+                    class="mt-4 rounded border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100"
+                    data-testid="app-bootstrap-error"
+                >
+                    {{ bootError }}
+                </p>
+                <button
+                    v-if="bootStatus === 'unavailable'"
+                    type="button"
+                    @click="bootstrapApp"
+                    class="mt-6 inline-flex h-9 items-center rounded border border-blue-300/30 bg-blue-500/15 px-4 text-xs font-bold uppercase tracking-widest text-blue-100 transition-colors hover:bg-blue-500/25"
+                >
+                    Retry
+                </button>
+            </div>
+        </div>
+        <template v-else>
         <header class="shrink-0 border-b border-gray-700/70 bg-gray-800/75 backdrop-blur-2xl">
             <div class="w-full p-3 flex flex-wrap items-center justify-between gap-3">
                 <div class="flex flex-wrap items-center gap-3">
@@ -300,6 +387,7 @@ const acknowledgeChangelog = () => {
             :changelog="changelogContent" 
             @acknowledge="acknowledgeChangelog"
         />
+        </template>
     </template>
     <router-view v-else></router-view>
   </div>

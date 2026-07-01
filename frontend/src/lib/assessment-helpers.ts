@@ -631,6 +631,10 @@ export function getAssessedTeams(group: GroupedVuln): Set<string> {
     return new Set(getGroupAssessmentSummary(group).assessedTeams);
 }
 
+export function hasGlobalAssessmentForGroup(group: GroupedVuln): boolean {
+    return getGroupAssessmentSummary(group).hasGlobalAssessment;
+}
+
 const hasOpenTeamAssessmentFromSummary = (
     summary: GroupAssessmentSummary,
     requiredTeamsOrTags?: Tags | undefined,

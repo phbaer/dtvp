@@ -119,6 +119,20 @@ def test_sanitize_rescored_vector_corrects_changed_base():
     assert result == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:H"
 
 
+def test_sanitize_rescored_vector_correction_is_not_warning(caplog):
+    """Corrected vectors are normal data cleanup and should not pollute default logs."""
+    orig = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    bad = "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:H/A:H/MPR:H"
+
+    with caplog.at_level("WARNING", logger="dtvp.logic"):
+        assert (
+            sanitize_rescored_vector(orig, bad)
+            == "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:H"
+        )
+
+    assert "Corrected rescored vector" not in caplog.text
+
+
 def test_sanitize_rescored_vector_no_modifiers_returns_none():
     """When corrected vector has no modifiers (equals original), returns None."""
     orig = "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N"

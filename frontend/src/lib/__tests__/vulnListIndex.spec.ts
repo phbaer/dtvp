@@ -3,11 +3,19 @@ import type { GroupedVuln, TMRescoreProposal } from '../../types'
 import {
     buildVulnListItem,
     buildVulnListItems,
+    compileVulnListFilters,
+    compileVulnStateFilters,
     computeListFilterCounts,
     computeListTeamCounts,
     getGroupDependencyRelationship,
     hasTMRescoreProposalForGroup,
     matchesAttributionAgeFilter,
+    matchesCompiledAttributionAgeFilter,
+    matchesCompiledDependencySelection,
+    matchesCompiledLifecycleFilter,
+    matchesCompiledListFilters,
+    matchesCompiledStateFilters,
+    matchesCompiledTMRescoreSelection,
     matchesLifecycleFilter,
     matchesListFilters,
     matchesSmartSearch,
@@ -111,9 +119,87 @@ describe('vulnListIndex', () => {
         expect(item.componentNamesLower).toEqual(['spring core'])
         expect(item.assigneesLower).toEqual(['alice'])
         expect(item.versions).toEqual(['2.0.0'])
+        expect(item.versionsLower).toEqual(['2.0.0'])
+        expect(item.baseSeverityRank).toBe(2)
+        expect(item.rescoredSeverityRank).toBe(2)
         expect(item.dependencyRelationship).toBe('DIRECT')
         expect(item.hasTmrescoreProposal).toBe(true)
         expect(item.cvssVersionMismatch).toBe(true)
+    })
+
+    it('uses summary list metadata without parsing full assessment details', () => {
+        const group = makeGroup({
+            tags: ['Team Alias'],
+            list_metadata: {
+                lifecycle: 'INCOMPLETE',
+                is_pending: false,
+                is_open: false,
+                is_assessed: false,
+                technical_state: 'IN_TRIAGE',
+                assessed_teams: ['Team Primary'],
+            },
+        })
+
+        const item = buildVulnListItem(group, {
+            'library-a': ['Team Primary', 'Team Alias'],
+        })
+
+        expect(item.normalizedTags).toEqual(['Team Primary'])
+        expect([...item.assessedTeams]).toEqual(['Team Primary'])
+        expect(item.lifecycle).toBe('INCOMPLETE')
+        expect(item.technicalState).toBe('IN_TRIAGE')
+        expect(item.isOpen).toBe(false)
+        expect(item.isAssessed).toBe(false)
+    })
+
+    it('hydrates row rollups from backend list metadata before scanning components', () => {
+        const item = buildVulnListItem(makeGroup({
+            rescored_vector: undefined,
+            affected_versions: [],
+            list_metadata: {
+                lifecycle: 'OPEN',
+                is_pending: false,
+                is_open: true,
+                is_assessed: false,
+                technical_state: 'NOT_SET',
+                assessed_teams: [],
+                component_names: ['library-a', 'library-b'],
+                versions: ['1.0.0', '1.1.0'],
+                attributed_on_ms_values: [1782748800000, 1782835200000],
+                oldest_attributed_on_ms: 1782748800000,
+                instance_count: 3,
+                dependency_relationship: 'TRANSITIVE',
+                cvss_version_mismatch: true,
+            },
+        }), {})
+
+        expect(item.componentNames).toEqual(['library-a', 'library-b'])
+        expect(item.versions).toEqual(['1.0.0', '1.1.0'])
+        expect(item.attributedOnMsValues).toEqual([1782748800000, 1782835200000])
+        expect(item.oldestAttributedOnMs).toBe(1782748800000)
+        expect(item.instanceCount).toBe(3)
+        expect(item.dependencyRelationship).toBe('TRANSITIVE')
+        expect(item.cvssVersionMismatch).toBe(true)
+        expect(item.searchableTextLower).toContain('library-a')
+        expect(item.searchableTextLower).toContain('1.1.0')
+    })
+
+    it('normalizes assessed team aliases from summary metadata', () => {
+        const item = buildVulnListItem(makeGroup({
+            tags: ['Team Alias'],
+            list_metadata: {
+                lifecycle: 'INCOMPLETE',
+                is_pending: false,
+                is_open: false,
+                is_assessed: false,
+                technical_state: 'IN_TRIAGE',
+                assessed_teams: ['Team Alias'],
+            },
+        }), {
+            'library-a': ['Team Primary', 'Team Alias'],
+        })
+
+        expect([...item.assessedTeams]).toEqual(['Team Primary'])
     })
 
     it('matches list filters from precomputed item fields', () => {
@@ -162,6 +248,71 @@ describe('vulnListIndex', () => {
             dependencyFilter: 'DIRECT',
             tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
         })).toBe(false)
+    })
+
+    it('matches compiled list filters without per-item filter normalization', () => {
+        const nowMs = Date.UTC(2026, 5, 29)
+        const item = buildVulnListItem(makeGroup({
+            affected_versions: [
+                {
+                    project_name: 'Project',
+                    project_uuid: 'project-uuid',
+                    project_version: '1.0.0',
+                    components: [
+                        {
+                            project_name: 'Project',
+                            project_version: '1.0.0',
+                            project_uuid: 'project-uuid',
+                            component_name: 'library-a',
+                            component_version: '2.0.0',
+                            component_uuid: 'component-uuid',
+                            vulnerability_uuid: 'vuln-uuid',
+                            finding_uuid: 'finding-uuid',
+                            attributed_on: nowMs - 35 * 24 * 60 * 60 * 1000,
+                            analysis_state: 'NOT_SET',
+                            analysis_details: '',
+                            is_suppressed: false,
+                            is_direct_dependency: true,
+                        },
+                    ],
+                },
+            ],
+        }), {}, {})
+
+        const compiled = compileVulnListFilters({
+            dependencyFilter: 'DIRECT',
+            tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
+            tagFilter: 'TEAM',
+            idFilter: 'cve-2026',
+            componentFilter: 'LIBRARY',
+            assigneeFilter: '',
+            versionFilterList: ['1.0.0'],
+            attributionAgeDays: 28,
+            attributionAgeMode: 'older',
+        }, nowMs)
+
+        expect(compiled.dependencyFilterSet.has('DIRECT')).toBe(true)
+        expect(compiled.includesNoTmrescoreProposal).toBe(true)
+        expect(compiled.includesTmrescoreProposal).toBe(false)
+        expect(matchesCompiledDependencySelection(item, compiled)).toBe(true)
+        expect(matchesCompiledTMRescoreSelection(item, compiled)).toBe(true)
+        expect(matchesCompiledAttributionAgeFilter(item, compiled)).toBe(true)
+        expect(matchesCompiledListFilters(item, compiled)).toBe(true)
+
+        const emptySelections = compileVulnListFilters({})
+        expect(matchesCompiledDependencySelection(item, emptySelections)).toBe(false)
+        expect(matchesCompiledDependencySelection(item, emptySelections, true)).toBe(true)
+        expect(matchesCompiledTMRescoreSelection(item, emptySelections)).toBe(false)
+        expect(matchesCompiledTMRescoreSelection(item, emptySelections, true)).toBe(true)
+        expect(matchesCompiledListFilters(item, emptySelections)).toBe(false)
+
+        const invalidAge = compileVulnListFilters({
+            dependencyFilter: 'DIRECT',
+            tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
+            attributionAgeDays: 'not-a-number',
+        }, nowMs)
+        expect(matchesCompiledAttributionAgeFilter(item, invalidAge)).toBe(false)
+        expect(matchesCompiledListFilters(item, invalidAge)).toBe(false)
     })
 
     it('matches findings attributed before the selected age threshold', () => {
@@ -409,6 +560,27 @@ describe('vulnListIndex', () => {
             lifecycleFilters: ['NEEDS_APPROVAL'],
             analysisFilters: ['NOT_SET'],
         })).toBe(true)
+
+        const compiled = compileVulnStateFilters({
+            lifecycleFilters: ['NEEDS_APPROVAL'],
+            analysisFilters: ['NOT_SET'],
+        })
+        expect(matchesCompiledLifecycleFilter(item, compiled)).toBe(true)
+        expect(matchesCompiledStateFilters(item, compiled)).toBe(true)
+
+        const emptyLifecycle = compileVulnStateFilters({
+            lifecycleFilters: [],
+            analysisFilters: ['NOT_SET'],
+        })
+        expect(matchesCompiledLifecycleFilter(item, emptyLifecycle)).toBe(false)
+        expect(matchesCompiledStateFilters(item, emptyLifecycle)).toBe(false)
+
+        const emptyAnalysis = compileVulnStateFilters({
+            lifecycleFilters: ['NEEDS_APPROVAL'],
+            analysisFilters: [],
+        })
+        expect(matchesCompiledLifecycleFilter(item, emptyAnalysis)).toBe(true)
+        expect(matchesCompiledStateFilters(item, emptyAnalysis)).toBe(false)
     })
 
     it('computes sidebar counts from indexed items', () => {

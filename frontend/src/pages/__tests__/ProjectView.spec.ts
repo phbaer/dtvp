@@ -1,12 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
-import { getGroupedVulns, getStatistics } from '../../lib/api'
+import { drainTaskVulnGroupDetails, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroup, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
+import { projectHeaderState } from '../../lib/projectHeaderStore'
 import { useRoute } from 'vue-router'
 import { defaultAnalysisFilters, defaultLifecycleFilters, defaultStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
+    drainTaskVulnGroupDetails: vi.fn(),
+    drainTaskVulnGroups: vi.fn(),
     getGroupedVulns: vi.fn(),
+    getTaskVulnGroup: vi.fn(),
+    getTaskVulnGroups: vi.fn(() => Promise.resolve({
+        items: [],
+        total: 0,
+        filtered: 0,
+        offset: 0,
+        limit: 250,
+        sort: 'rescored-severity',
+        order: 'desc',
+    })),
     getStatistics: vi.fn(() => Promise.resolve({
+        severity_counts: {},
+        state_counts: {},
+        total_unique: 0,
+        total_findings: 0,
+        affected_projects_count: 0,
+        version_counts: {},
+        version_severity_counts: {},
+        major_version_severity_counts: {},
+        major_version_counts: {},
+        major_version_details: {},
+    })),
+    getTaskStatistics: vi.fn(() => Promise.resolve({
         severity_counts: {},
         state_counts: {},
         total_unique: 0,
@@ -36,11 +61,11 @@ vi.mock('../../components/VulnRowCompact.vue', () => ({
     default: {
         name: 'VulnRowCompact',
         template: `
-            <div class="vuln-group-card vuln-card" data-testid="group-card" @click="$emit('select', group)">
-                <button data-testid="emit-update" @click="$emit('update', group)">emit update</button>
+            <div class="vuln-group-card vuln-card" data-testid="group-card" @click="$emit('select', item.group)">
+                <button data-testid="emit-update" @click="$emit('update', item.group)">emit update</button>
             </div>
         `,
-        props: ['group'],
+        props: ['item'],
         emits: ['select', 'update', 'update:assessment']
     }
 }))
@@ -59,11 +84,22 @@ vi.mock('../../components/VulnDetailInspector.vue', () => ({
     }
 }))
 
+vi.mock('../../components/BulkResolveIncompleteModal.vue', () => ({
+    default: {
+        name: 'BulkResolveIncompleteModal',
+        template: '<div v-if="show" data-testid="bulk-resolve-modal">{{ incompleteGroups.map(group => group.id).join(",") }}</div>',
+        props: ['show', 'incompleteGroups'],
+        emits: ['close', 'updated']
+    }
+}))
+
 describe('ProjectView.vue', () => {
     const writeTextSpy = vi.fn(() => Promise.resolve())
 
     beforeEach(() => {
         vi.clearAllMocks()
+        projectHeaderState.viewMode.value = 'analysis'
+        projectHeaderState.bulkSyncHandler.value = null
         Object.defineProperty(navigator, 'clipboard', {
             value: { writeText: writeTextSpy },
             writable: true,
@@ -82,7 +118,16 @@ describe('ProjectView.vue', () => {
 
         await updateProjectViewState(wrapper, { statusFilters: defaultStatusFilters })
 
-        expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', undefined, expect.any(Function))
+        expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', undefined, expect.any(Function), {
+            responseMode: 'summary',
+            deferResult: true,
+            skipResultDownload: true,
+            useEventStream: true,
+            taskWindowLimit: 250,
+            onTaskId: expect.any(Function),
+            onPartialResultAvailable: expect.any(Function),
+            onTaskCompleted: expect.any(Function),
+        })
         // Child component should be rendered
         expect(wrapper.findAll('.vuln-group-card')).toHaveLength(1)
     })
@@ -193,7 +238,7 @@ describe('ProjectView.vue', () => {
 
         // Ensure visible
         await updateProjectViewState(wrapper, {
-            lifecycleFilters: defaultLifecycleFilters,
+            lifecycleFilters: [...defaultLifecycleFilters, 'ASSESSED_LEGACY', 'NEEDS_APPROVAL'],
             analysisFilters: defaultAnalysisFilters,
         })
 
@@ -206,9 +251,13 @@ describe('ProjectView.vue', () => {
         }
 
         await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('update:assessment', updateData)
+        await flushPromises()
 
-        expect(mockGroup.rescored_cvss).toBe(5.0)
-        expect(mockGroup.affected_versions?.[0]?.components?.[0]?.analysis_state).toBe('EXPLOITABLE')
+        const updatedGroup = (wrapper.findComponent({ name: 'VulnRowCompact' }).props('item') as any).group
+        expect(updatedGroup.rescored_cvss).toBe(5.0)
+        expect(updatedGroup.affected_versions?.[0]?.components?.[0]?.analysis_state).toBe('EXPLOITABLE')
+        expect(updatedGroup.affected_versions?.[0]?.components?.[0]).not.toHaveProperty('analysis_details')
+        expect(mockGroup.rescored_cvss).toBeNull()
     })
 
     it('opens a single detail inspector when selecting a vulnerability row', async () => {
@@ -277,6 +326,29 @@ describe('ProjectView.vue', () => {
         expect(getStatistics).toHaveBeenCalled()
     })
 
+    it('loads statistics from the active vulnerability task when available', async () => {
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-statistics')
+            return [] as any
+        })
+        vi.mocked(getTaskStatistics).mockResolvedValue({
+            severity_counts: { HIGH: 1 },
+            state_counts: { NOT_SET: 1 },
+            total_unique: 1,
+            total_findings: 1,
+            affected_projects_count: 1,
+            version_counts: { '1.0.0': 1 },
+        } as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+
+        ;(wrapper.vm as any).viewMode = 'statistics'
+        await flushPromises()
+
+        expect(getTaskStatistics).toHaveBeenCalledWith('task-statistics')
+        expect(getStatistics).not.toHaveBeenCalled()
+    })
+
     it('updates only the local group on team mapping update without refetching vulnerabilities', async () => {
         const mockGroup = {
             id: '1',
@@ -307,6 +379,339 @@ describe('ProjectView.vue', () => {
         expect(getGroupedVulns).toHaveBeenCalledTimes(1)
     })
 
+    it('loads the first backend task window instead of draining all groups', async () => {
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-windowed-list')
+            return [] as any
+        })
+        vi.mocked(getTaskVulnGroups).mockResolvedValue({
+            items: [
+                {
+                    id: 'CVE-WINDOW-1',
+                    title: 'Windowed',
+                    list_metadata: {
+                        lifecycle: 'OPEN',
+                        is_open: true,
+                        is_pending: false,
+                        technical_state: 'NOT_SET',
+                    },
+                    affected_versions: [],
+                },
+            ],
+            total: 300,
+            filtered: 300,
+            counts: {
+                all: {
+                    total: 300,
+                    lifecycle: { OPEN: 300 },
+                    analysis: { NOT_SET: 300 },
+                    dependency_relationship: { direct: 0, transitive: 0, unknown: 300 },
+                    cvss_version_mismatch: 0,
+                    versions: {},
+                    tags: {},
+                    assignees: {},
+                    components: {},
+                },
+                filtered: {
+                    total: 300,
+                    lifecycle: { OPEN: 300 },
+                    analysis: { NOT_SET: 300 },
+                    dependency_relationship: { direct: 0, transitive: 0, unknown: 300 },
+                    cvss_version_mismatch: 0,
+                    versions: {},
+                    tags: {},
+                    assignees: {},
+                    components: {},
+                },
+            },
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+        } as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        expect(getGroupedVulns).toHaveBeenCalledWith('TestProject', undefined, expect.any(Function), {
+            responseMode: 'summary',
+            deferResult: true,
+            skipResultDownload: true,
+            useEventStream: true,
+            taskWindowLimit: 250,
+            onTaskId: expect.any(Function),
+            onPartialResultAvailable: expect.any(Function),
+            onTaskCompleted: expect.any(Function),
+        })
+        expect(getTaskVulnGroups).toHaveBeenCalledWith('task-windowed-list', expect.objectContaining({
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+        }))
+        expect(wrapper.findAll('.vuln-group-card')).toHaveLength(1)
+        expect(wrapper.text()).toContain('300')
+    })
+
+    it('refreshes backend task windows as partial grouping progress advances', async () => {
+        const taskWindow = (id: string, total: number, partial: boolean, completed?: number) => {
+            const counts = {
+                total,
+                lifecycle: { OPEN: total },
+                analysis: { NOT_SET: total },
+                dependency_relationship: { direct: 0, transitive: 0, unknown: total },
+                cvss_version_mismatch: 0,
+                versions: {},
+                tags: {},
+                assignees: {},
+                components: {},
+            }
+            return {
+                items: [
+                    {
+                        id,
+                        title: id,
+                        list_metadata: {
+                            lifecycle: 'OPEN',
+                            is_open: true,
+                            is_pending: false,
+                            technical_state: 'NOT_SET',
+                        },
+                        affected_versions: [],
+                    },
+                ],
+                total,
+                filtered: total,
+                counts: { all: counts, filtered: counts },
+                offset: 0,
+                limit: 250,
+                sort: 'rescored-severity',
+                order: 'desc',
+                partial,
+                partial_versions_completed: completed,
+                partial_total_versions: partial ? 29 : null,
+            }
+        }
+
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-progress')
+            await options?.onPartialResultAvailable?.('task-progress', {
+                status: 'running',
+                message: 'Processed version 12',
+                progress: 37,
+                partial_result_available: true,
+                partial_versions_completed: 12,
+                partial_total_versions: 29,
+            })
+            await options?.onPartialResultAvailable?.('task-progress', {
+                status: 'running',
+                message: 'Processed version 13',
+                progress: 40,
+                partial_result_available: true,
+                partial_versions_completed: 13,
+                partial_total_versions: 29,
+            })
+            await options?.onTaskCompleted?.('task-progress', {
+                status: 'completed',
+                message: 'Done',
+                progress: 100,
+                partial_result_available: false,
+            })
+            return [] as any
+        })
+        vi.mocked(getTaskVulnGroups)
+            .mockResolvedValueOnce(taskWindow('CVE-PARTIAL-12', 12, true, 12) as any)
+            .mockResolvedValueOnce(taskWindow('CVE-PARTIAL-13', 13, true, 13) as any)
+            .mockResolvedValueOnce(taskWindow('CVE-COMPLETE', 29, false) as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        expect(getTaskVulnGroups).toHaveBeenCalledTimes(3)
+        expect(wrapper.text()).not.toContain('Grouping still running')
+        expect(wrapper.text()).toContain('29')
+    })
+
+    it('displays backend-filtered task windows without a second local filter pass', async () => {
+        vi.mocked(useRoute).mockReturnValue({
+            params: { name: 'TestProject' },
+            query: { q: 'backend-only' },
+        } as any)
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-backend-owned-filter')
+            return [] as any
+        })
+        vi.mocked(getTaskVulnGroups).mockResolvedValue({
+            items: [
+                {
+                    id: 'CVE-WINDOW-NONLOCAL',
+                    title: 'Plain window row',
+                    list_metadata: {
+                        lifecycle: 'OPEN',
+                        is_open: true,
+                        is_pending: false,
+                        technical_state: 'NOT_SET',
+                    },
+                    affected_versions: [],
+                },
+            ],
+            total: 1,
+            filtered: 1,
+            counts: {
+                all: {
+                    total: 1,
+                    lifecycle: { OPEN: 1 },
+                    analysis: { NOT_SET: 1 },
+                    dependency_relationship: { direct: 0, transitive: 0, unknown: 1 },
+                    cvss_version_mismatch: 0,
+                    versions: {},
+                    tags: {},
+                    assignees: {},
+                    components: {},
+                },
+                filtered: {
+                    total: 1,
+                    lifecycle: { OPEN: 1 },
+                    analysis: { NOT_SET: 1 },
+                    dependency_relationship: { direct: 0, transitive: 0, unknown: 1 },
+                    cvss_version_mismatch: 0,
+                    versions: {},
+                    tags: {},
+                    assignees: {},
+                    components: {},
+                },
+            },
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+        } as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        expect(getTaskVulnGroups).toHaveBeenCalledWith('task-backend-owned-filter', expect.objectContaining({
+            q: 'backend-only',
+            offset: 0,
+            limit: 250,
+        }))
+        expect((wrapper.vm as any).filteredGroups.map((group: any) => group.id)).toEqual(['CVE-WINDOW-NONLOCAL'])
+        expect(wrapper.findAll('.vuln-group-card')).toHaveLength(1)
+    })
+
+    it('passes meaningful tmrescore proposal ids to backend task windows', async () => {
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-tm-window')
+            return [] as any
+        })
+        vi.mocked(getTMRescoreProposals).mockResolvedValue({
+            proposals: {
+                V1: {
+                    vuln_id: 'V1',
+                    rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                    original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                    rescored_score: 9.8,
+                    original_score: 9.8,
+                },
+                'ALIAS-2': {
+                    vuln_id: 'V2',
+                    rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L',
+                    original_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                    rescored_score: 7.9,
+                    original_score: 8.5,
+                },
+            },
+        } as any)
+        vi.mocked(getTaskVulnGroups).mockResolvedValue({
+            items: [],
+            total: 2,
+            filtered: 1,
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+        } as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await flushPromises()
+        vi.mocked(getTaskVulnGroups).mockClear()
+
+        ;(wrapper.vm as any).tmrescoreProposalFilter = ['WITH_PROPOSAL']
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        expect(getTaskVulnGroups).toHaveBeenCalled()
+        const lastCall = vi.mocked(getTaskVulnGroups).mock.calls.at(-1)
+        expect(lastCall?.[0]).toBe('task-tm-window')
+        expect(lastCall?.[1]).toEqual(expect.objectContaining({
+            tmrescore: ['WITH_PROPOSAL'],
+            tmrescore_proposal_ids: expect.arrayContaining(['ALIAS-2', 'V2']),
+        }))
+        expect(lastCall?.[1]?.tmrescore_proposal_ids).not.toContain('V1')
+        expect(drainTaskVulnGroupDetails).not.toHaveBeenCalled()
+    })
+
+    it('prepares bulk sync from backend incomplete full-detail windows', async () => {
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-1')
+            return [
+                {
+                    id: 'CVE-VISIBLE',
+                    list_metadata: { lifecycle: 'OPEN' },
+                    affected_versions: [],
+                },
+            ] as any
+        })
+        vi.mocked(getTaskVulnGroups).mockResolvedValue({
+            items: [
+                {
+                    id: 'CVE-VISIBLE',
+                    list_metadata: { lifecycle: 'OPEN' },
+                    affected_versions: [],
+                },
+            ],
+            total: 1,
+            filtered: 1,
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+        } as any)
+        vi.mocked(drainTaskVulnGroupDetails).mockResolvedValue([{
+            id: 'CVE-INCOMPLETE',
+            title: 'Needs sync',
+            affected_versions: [
+                {
+                    project_version: '1.0.0',
+                    components: [
+                        {
+                            component_name: 'library-a',
+                            analysis_state: 'NOT_SET',
+                            analysis_details: '--- [Team: Team A] [State: EXPLOITABLE] ---',
+                        },
+                    ],
+                },
+            ],
+        }] as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+
+        projectHeaderState.bulkSyncHandler.value?.()
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith('task-1', {
+            lifecycle: ['INCOMPLETE'],
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        expect(getTaskVulnGroup).not.toHaveBeenCalledWith('task-1', 'CVE-INCOMPLETE')
+        expect(wrapper.get('[data-testid="bulk-resolve-modal"]').text()).toContain('CVE-INCOMPLETE')
+    })
+
     it('does not fetch if route param name is undefined', async () => {
         vi.mocked(useRoute).mockReturnValue({
             params: {}, query: {}
@@ -328,6 +733,15 @@ describe('ProjectView.vue', () => {
 
         await flushPromises()
 
-        expect(getGroupedVulns).toHaveBeenCalledWith('', undefined, expect.any(Function))
+        expect(getGroupedVulns).toHaveBeenCalledWith('', undefined, expect.any(Function), {
+            responseMode: 'summary',
+            deferResult: true,
+            skipResultDownload: true,
+            useEventStream: true,
+            taskWindowLimit: 250,
+            onTaskId: expect.any(Function),
+            onPartialResultAvailable: expect.any(Function),
+            onTaskCompleted: expect.any(Function),
+        })
     })
 })

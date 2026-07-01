@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { mockGroupedVulnTask } from './helpers/grouped-task';
 
 test.describe('Per-Team Assessment UI Flow', () => {
     test.beforeEach(async ({ page }) => {
@@ -30,6 +31,44 @@ test.describe('Per-Team Assessment UI Flow', () => {
             });
         });
 
+        const taskGroups = [
+            {
+                id: 'CVE-TEAM-TEST',
+                title: 'Team Shared Vulnerability',
+                description: 'Vulnerability affects both Frontend and Backend teams.',
+                severity: 'HIGH',
+                cvss: 7.5,
+                tags: ['Frontend', 'Backend'],
+                affected_versions: [
+                    {
+                        project_name: 'TestProject',
+                        project_version: '1.0',
+                        project_uuid: 'p1',
+                        components: [
+                            {
+                                component_name: 'frontend-lib',
+                                component_version: '1.0',
+                                component_uuid: 'c-front',
+                                finding_uuid: 'f-front',
+                                vulnerability_uuid: 'v-1',
+                                analysis_state: 'NOT_SET',
+                                tags: ['Frontend']
+                            },
+                            {
+                                component_name: 'backend-lib',
+                                component_version: '1.0',
+                                component_uuid: 'c-back',
+                                finding_uuid: 'f-back',
+                                vulnerability_uuid: 'v-1',
+                                analysis_state: 'NOT_SET',
+                                tags: ['Backend']
+                            }
+                        ]
+                    }
+                ]
+            }
+        ];
+
         // Mock Task Start
         await page.route('**/api/tasks/group-vulns*', async (route) => {
             await route.fulfill({
@@ -38,53 +77,7 @@ test.describe('Per-Team Assessment UI Flow', () => {
             });
         });
 
-        // Mock Task Status Polling with Team Tags
-        await page.route('**/api/tasks/task-456', async (route) => {
-            await route.fulfill({
-                status: 200,
-                body: JSON.stringify({
-                    status: 'completed',
-                    progress: 100,
-                    result: [
-                        {
-                            id: 'CVE-TEAM-TEST',
-                            title: 'Team Shared Vulnerability',
-                            description: 'Vulnerability affects both Frontend and Backend teams.',
-                            severity: 'HIGH',
-                            cvss: 7.5,
-                            tags: ['Frontend', 'Backend'],
-                            affected_versions: [
-                                {
-                                    project_name: 'TestProject',
-                                    project_version: '1.0',
-                                    project_uuid: 'p1',
-                                    components: [
-                                        {
-                                            component_name: 'frontend-lib',
-                                            component_version: '1.0',
-                                            component_uuid: 'c-front',
-                                            finding_uuid: 'f-front',
-                                            vulnerability_uuid: 'v-1',
-                                            analysis_state: 'NOT_SET',
-                                            tags: ['Frontend']
-                                        },
-                                        {
-                                            component_name: 'backend-lib',
-                                            component_version: '1.0',
-                                            component_uuid: 'c-back',
-                                            finding_uuid: 'f-back',
-                                            vulnerability_uuid: 'v-1',
-                                            analysis_state: 'NOT_SET',
-                                            tags: ['Backend']
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                }),
-            });
-        });
+        await mockGroupedVulnTask(page, { taskId: 'task-456', groups: taskGroups });
 
         // Mock Assessment Details
         await page.route('**/api/assessments/details', async (route) => {

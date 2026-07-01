@@ -5,7 +5,12 @@ import { flushPromises } from '@vue/test-utils'
 import { extendedAnalysisFilters, extendedLifecycleFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
+    drainTaskVulnGroupDetails: vi.fn(),
+    drainTaskVulnGroups: vi.fn(),
     getGroupedVulns: vi.fn(),
+    getTaskVulnGroup: vi.fn(),
+    getTaskVulnGroups: vi.fn(),
+    getTaskStatistics: vi.fn(() => Promise.resolve({ severity_counts: {}, state_counts: {}, total_unique: 0, total_findings: 0, affected_projects_count: 0, version_counts: {} })),
     getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
@@ -21,8 +26,8 @@ vi.mock('vue-router', () => ({
 vi.mock('../../components/VulnRowCompact.vue', () => ({
     default: {
         name: 'VulnRowCompact',
-        template: '<div class="vuln-card" :data-id="group.id">{{ group.id }}</div>',
-        props: ['group'],
+        template: '<div class="vuln-card" :data-id="item.group.id">{{ item.group.id }}</div>',
+        props: ['item'],
         emits: ['update', 'update:assessment']
     }
 }))
@@ -87,12 +92,16 @@ describe('ProjectView Coverage Extras', () => {
         }
 
         await wrapper.findComponent({ name: 'VulnRowCompact' }).vm.$emit('update:assessment', updateData)
+        await flushPromises()
 
         // Check updates applied
         // Check second component safely
-        const comp = mockGroup.affected_versions?.[1]?.components?.[0]
+        const updatedGroup = (wrapper.findComponent({ name: 'VulnRowCompact' }).props('item') as any).group
+        const comp = updatedGroup.affected_versions?.[1]?.components?.[0]
         expect(comp?.analysis_state).toBe('NEW')
-        expect(mockGroup.rescored_cvss).toBe(1.0)
+        expect(updatedGroup.rescored_cvss).toBe(1.0)
+        expect(comp).not.toHaveProperty('analysis_details')
+        expect(mockGroup.rescored_cvss).not.toBe(1.0)
     })
 
     it('filters groups by tags', async () => {
@@ -113,6 +122,8 @@ describe('ProjectView Coverage Extras', () => {
         // Set filter via the smart-search team prefix.
         const input = wrapper.find('input[placeholder*="Search CVE"]')
         await input.setValue('team:Team')
+        await new Promise(resolve => setTimeout(resolve, 130))
+        await flushPromises()
 
         // Should only show group 1
         // Note: We need to check what is passed to VulnGroupCard components
@@ -120,11 +131,12 @@ describe('ProjectView Coverage Extras', () => {
         // With 'Team', only 'TeamA' matches
         expect(cards.length).toBe(1)
         if (cards.length > 0) {
-            expect(cards[0]!.props('group').id).toBe('1')
+            expect(cards[0]!.props('item').group.id).toBe('1')
         }
 
         // Clear filter
         await input.setValue('')
+        await flushPromises()
         expect(wrapper.findAllComponents({ name: 'VulnRowCompact' }).length).toBe(4)
     })
 

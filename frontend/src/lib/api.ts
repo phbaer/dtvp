@@ -35,6 +35,9 @@ const AUTH_BASE = BASE_URL + NORMALIZED_CONTEXT_PATH + '/auth';
 const api = axios.create({
     baseURL: API_BASE,
     withCredentials: true, // For cookies
+    paramsSerializer: {
+        indexes: null,
+    },
 });
 
 export const getProjects = async (name?: string): Promise<Project[]> => {
@@ -51,6 +54,11 @@ export const getProjects = async (name?: string): Promise<Project[]> => {
 
 export const getStatistics = async (name?: string, cve?: string): Promise<Statistics> => {
     const res = await api.get('/statistics', { params: { name, cve } });
+    return res.data;
+};
+
+export const getTaskStatistics = async (taskId: string): Promise<Statistics> => {
+    const res = await api.get(`/tasks/${encodeURIComponent(taskId)}/statistics`);
     return res.data;
 };
 
@@ -75,11 +83,101 @@ export interface TaskResponse {
     message: string;
     progress: number;
     result?: GroupedVuln[];
+    result_mode?: 'full' | 'summary';
+    partial_result_available?: boolean;
+    partial_versions_completed?: number;
+    partial_total_versions?: number;
     log?: string[];
 }
 
-export const startGroupVulnTask = async (name: string, cve?: string): Promise<{ task_id: string }> => {
-    const params: any = { name };
+export interface TaskStatusOptions {
+    includeResult?: boolean;
+}
+
+export interface GroupedVulnRequestOptions {
+    responseMode?: 'full' | 'summary';
+    onTaskId?: (taskId: string) => void;
+    onPartialResultAvailable?: (taskId: string, status: TaskResponse) => void | Promise<void>;
+    onTaskCompleted?: (taskId: string, status: TaskResponse) => void | Promise<void>;
+    useEventStream?: boolean;
+    deferResult?: boolean;
+    skipResultDownload?: boolean;
+    taskWindowLimit?: number;
+}
+
+export interface TaskVulnGroupListQuery {
+    q?: string;
+    lifecycle?: string[];
+    analysis?: string[];
+    tag?: string;
+    id?: string;
+    component?: string;
+    assignee?: string;
+    dependency?: string[];
+    versions?: string[];
+    cvss_mismatch?: boolean;
+    attributed_before_days?: number | null;
+    attribution_mode?: 'older' | 'younger';
+    tmrescore?: string[];
+    tmrescore_proposal_ids?: string[];
+    sort?: string;
+    order?: 'asc' | 'desc';
+    offset?: number;
+    cursor?: string | null;
+    limit?: number;
+}
+
+export interface TaskVulnGroupListCounts {
+    total: number;
+    lifecycle: Record<string, number>;
+    analysis: Record<string, number>;
+    dependency_relationship: {
+        direct: number;
+        transitive: number;
+        unknown: number;
+    };
+    cvss_version_mismatch: number;
+    ids?: Record<string, number>;
+    versions: Record<string, number>;
+    tags: Record<string, number>;
+    assignees: Record<string, number>;
+    components: Record<string, number>;
+    team_tags?: Record<string, { open: number; assessed: number }>;
+    tmrescore?: {
+        WITH_PROPOSAL: number;
+        WITHOUT_PROPOSAL: number;
+    };
+    attribution_age?: number;
+}
+
+export interface TaskVulnGroupListResponse {
+    items: GroupedVuln[];
+    total: number;
+    filtered: number;
+    counts?: {
+        all: TaskVulnGroupListCounts;
+        filtered: TaskVulnGroupListCounts;
+    };
+    offset: number;
+    limit: number;
+    cursor?: string | null;
+    next_cursor?: string | null;
+    has_more?: boolean;
+    sort: string;
+    order: 'asc' | 'desc';
+    result_mode?: 'full' | 'summary';
+    source_result_mode?: 'full' | 'summary';
+    partial?: boolean;
+    partial_versions_completed?: number | null;
+    partial_total_versions?: number | null;
+}
+
+export const startGroupVulnTask = async (
+    name: string,
+    cve?: string,
+    responseMode: 'full' | 'summary' = 'full',
+): Promise<{ task_id: string }> => {
+    const params: any = { name, response_mode: responseMode };
     if (cve) {
         params.cve = cve;
     }
@@ -87,35 +185,278 @@ export const startGroupVulnTask = async (name: string, cve?: string): Promise<{ 
     return res.data;
 };
 
-export const getTaskStatus = async (taskId: string): Promise<TaskResponse> => {
+export const getTaskStatus = async (
+    taskId: string,
+    options: TaskStatusOptions = {},
+): Promise<TaskResponse> => {
+    if (options.includeResult === false) {
+        const res = await api.get(`/tasks/${taskId}`, { params: { include_result: false } });
+        return res.data;
+    }
     const res = await api.get(`/tasks/${taskId}`);
     return res.data;
 };
 
+export const streamTaskEvents = async (
+    taskId: string,
+    onStatus: (status: TaskResponse) => void | Promise<void>,
+): Promise<void> => {
+    if (typeof fetch !== 'function' || typeof TextDecoder === 'undefined') {
+        throw new Error('Task event stream unavailable');
+    }
+
+    const response = await fetch(`${API_BASE}/tasks/${encodeURIComponent(taskId)}/events`, {
+        credentials: 'include',
+    });
+    if (!response.ok || !response.body) {
+        throw new Error('Task event stream unavailable');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const flushLines = async () => {
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            await onStatus(JSON.parse(trimmed));
+        }
+    };
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (value) {
+            buffer += decoder.decode(value, { stream: !done });
+            await flushLines();
+        }
+        if (done) break;
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+        await onStatus(JSON.parse(buffer));
+    }
+};
+
+export const getTaskVulnGroup = async (taskId: string, groupId: string): Promise<GroupedVuln> => {
+    const res = await api.get(`/tasks/${encodeURIComponent(taskId)}/groups/${encodeURIComponent(groupId)}`);
+    return res.data;
+};
+
+const taskGroupListParams = (query: TaskVulnGroupListQuery = {}) => {
+    const params: Record<string, any> = {};
+    Object.entries(query).forEach(([key, value]) => {
+        if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return;
+        params[key] = value;
+    });
+    return params;
+};
+
+export const getTaskVulnGroups = async (
+    taskId: string,
+    query: TaskVulnGroupListQuery = {},
+): Promise<TaskVulnGroupListResponse> => {
+    const params = taskGroupListParams(query);
+    const res = await api.get(`/tasks/${encodeURIComponent(taskId)}/groups`, { params });
+    return res.data;
+};
+
+export const getTaskVulnGroupDetailsWindow = async (
+    taskId: string,
+    query: TaskVulnGroupListQuery = {},
+): Promise<TaskVulnGroupListResponse> => {
+    const params = taskGroupListParams(query);
+    const res = await api.get(`/tasks/${encodeURIComponent(taskId)}/group-details`, { params });
+    return res.data;
+};
+
+const normalizeTaskWindowLimit = (value: unknown): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 1000;
+    return Math.min(1000, Math.max(1, Math.floor(parsed)));
+};
+
+export interface DrainTaskVulnGroupOptions {
+    limit?: number;
+    onProgress?: (loaded: number, total: number, log?: string[]) => void;
+    log?: string[];
+}
+
+export const drainTaskVulnGroups = async (
+    taskId: string,
+    query: TaskVulnGroupListQuery = {},
+    options: DrainTaskVulnGroupOptions = {},
+): Promise<GroupedVuln[]> => {
+    const groups: GroupedVuln[] = [];
+    let offset = 0;
+    let cursor: string | null = null;
+    let expectedTotal: number | null = null;
+    const limit = normalizeTaskWindowLimit(options.limit);
+
+    do {
+        const pageQuery: TaskVulnGroupListQuery = {
+            ...query,
+            limit,
+            sort: query.sort || 'id',
+            order: query.order || 'asc',
+        };
+        if (cursor) {
+            pageQuery.cursor = cursor;
+        } else {
+            pageQuery.offset = offset;
+        }
+        const window = await getTaskVulnGroups(taskId, {
+            ...pageQuery,
+        });
+        groups.push(...(window.items || []));
+        expectedTotal = window.filtered;
+        cursor = window.next_cursor || null;
+        if (!cursor) {
+            offset += window.items?.length || 0;
+        }
+
+        if (options.onProgress) {
+            const total = expectedTotal ?? groups.length;
+            options.onProgress(groups.length, total, options.log);
+        }
+
+        if (!window.items || window.items.length === 0) break;
+    } while (cursor || expectedTotal == null || groups.length < expectedTotal);
+
+    return groups;
+};
+
+export const drainTaskVulnGroupDetails = async (
+    taskId: string,
+    query: TaskVulnGroupListQuery = {},
+    options: DrainTaskVulnGroupOptions = {},
+): Promise<GroupedVuln[]> => {
+    const groups: GroupedVuln[] = [];
+    let offset = 0;
+    let cursor: string | null = null;
+    let expectedTotal: number | null = null;
+    const limit = normalizeTaskWindowLimit(options.limit);
+
+    do {
+        const pageQuery: TaskVulnGroupListQuery = {
+            ...query,
+            limit,
+            sort: query.sort || 'id',
+            order: query.order || 'asc',
+        };
+        if (cursor) {
+            pageQuery.cursor = cursor;
+        } else {
+            pageQuery.offset = offset;
+        }
+        const window = await getTaskVulnGroupDetailsWindow(taskId, {
+            ...pageQuery,
+        });
+        groups.push(...(window.items || []));
+        expectedTotal = window.filtered;
+        cursor = window.next_cursor || null;
+        if (!cursor) {
+            offset += window.items?.length || 0;
+        }
+
+        if (options.onProgress) {
+            const total = expectedTotal ?? groups.length;
+            options.onProgress(groups.length, total, options.log);
+        }
+
+        if (!window.items || window.items.length === 0) break;
+    } while (cursor || expectedTotal == null || groups.length < expectedTotal);
+
+    return groups;
+};
+
 // Start a task and poll until completion
-export const getGroupedVulns = async (name: string, cve?: string, onProgress?: (msg: string, progress: number, log?: string[]) => void): Promise<GroupedVuln[]> => {
+export const getGroupedVulns = async (
+    name: string,
+    cve?: string,
+    onProgress?: (msg: string, progress: number, log?: string[]) => void,
+    options: GroupedVulnRequestOptions = {},
+): Promise<GroupedVuln[]> => {
     // 1. Start Task
     if (onProgress) {
         onProgress('Submitting search request...', 0);
     }
-    const { task_id } = await startGroupVulnTask(name, cve);
+    const { task_id } = await startGroupVulnTask(name, cve, options.responseMode || 'full');
+    options.onTaskId?.(task_id);
 
     // 2. Poll — do an immediate first poll, then continue on interval
     if (onProgress) {
         onProgress('Waiting for results...', 1);
     }
 
-    const poll = async (): Promise<GroupedVuln[]> => {
-        const status = await getTaskStatus(task_id);
+    const buildTaskFailure = (message: string) => {
+        const error = new Error(message);
+        (error as any).taskFailed = true;
+        return error;
+    };
+
+    const handleStatus = async (status: TaskResponse): Promise<GroupedVuln[] | null> => {
         if (onProgress) {
             onProgress(status.message, status.progress, status.log);
         }
 
-        if (status.status === 'completed') {
-            return status.result || [];
-        } else if (status.status === 'failed') {
-            throw new Error(status.message);
+        if (status.partial_result_available && options.onPartialResultAvailable) {
+            await options.onPartialResultAvailable(task_id, status);
         }
+
+        if (status.status === 'completed') {
+            if (options.onTaskCompleted) {
+                await options.onTaskCompleted(task_id, status);
+            }
+            if (options.deferResult) {
+                if (options.skipResultDownload) {
+                    return [];
+                }
+                return drainTaskVulnGroups(
+                    task_id,
+                    {},
+                    {
+                        limit: options.taskWindowLimit,
+                        log: status.log,
+                        onProgress: (loaded, total, log) => {
+                            const progress = total > 0 ? 90 + Math.round(Math.min(loaded / total, 1) * 10) : 100;
+                            onProgress?.(`Loading vulnerability list (${loaded}/${total})...`, progress, log);
+                        },
+                    },
+                );
+            }
+            return status.result || [];
+        }
+        if (status.status === 'failed') {
+            throw buildTaskFailure(status.message);
+        }
+        if ((status as any).status === 'not_found') {
+            throw buildTaskFailure('Task not found');
+        }
+        return null;
+    };
+
+    if (options.useEventStream) {
+        try {
+            let streamedResult: GroupedVuln[] | null = null;
+            await streamTaskEvents(task_id, async (status) => {
+                const result = await handleStatus(status);
+                if (result) streamedResult = result;
+            });
+            if (streamedResult) return streamedResult;
+        } catch (err: any) {
+            if (err?.taskFailed) throw err;
+            console.warn('Task event stream failed; falling back to polling.', err);
+        }
+    }
+
+    const poll = async (): Promise<GroupedVuln[]> => {
+        const status = await getTaskStatus(task_id, { includeResult: !options.deferResult });
+        const result = await handleStatus(status);
+        if (result) return result;
         // Continue polling if pending or running
         return new Promise((resolve, reject) => {
             setTimeout(() => poll().then(resolve, reject), 1000);

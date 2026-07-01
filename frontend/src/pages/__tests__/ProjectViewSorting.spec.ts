@@ -4,7 +4,12 @@ import { useRoute } from 'vue-router'
 import { extendedStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
+    drainTaskVulnGroupDetails: vi.fn(),
+    drainTaskVulnGroups: vi.fn(),
     getGroupedVulns: vi.fn(),
+    getTaskVulnGroup: vi.fn(),
+    getTaskVulnGroups: vi.fn(),
+    getTaskStatistics: vi.fn(() => Promise.resolve({ severity_counts: {}, state_counts: {}, total_unique: 0, total_findings: 0, affected_projects_count: 0, version_counts: {} })),
     getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
@@ -21,8 +26,8 @@ vi.mock('vue-router', () => ({
 vi.mock('../../components/VulnRowCompact.vue', () => ({
     default: {
         name: 'VulnRowCompact',
-        template: '<div class="vuln-group-card" :data-id="group.id">{{ group.id }}</div>',
-        props: ['group']
+        template: '<div class="vuln-group-card" :data-id="item.group.id">{{ item.group.id }}</div>',
+        props: ['item']
     }
 }))
 

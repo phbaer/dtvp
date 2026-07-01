@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { mockGroupedVulnTask } from './helpers/grouped-task';
 
 test.describe('Integration Tests (Real Backend)', () => {
     test.beforeEach(async ({ page }) => {
@@ -51,6 +52,127 @@ test.describe('Integration Tests (Real Backend)', () => {
             await route.fulfill({ status: 200, body: JSON.stringify(filtered) });
         });
 
+        const taskGroups = [
+            {
+                id: 'CVE-2021-44228',
+                title: 'Log4Shell',
+                description: 'Log4j JNDI injection',
+                severity: 'CRITICAL',
+                cvss: 10.0,
+                cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
+                tags: ['Security'],
+                affected_versions: [
+                    {
+                        project_name: 'Vulnerable Project',
+                        project_version: '1.0.0',
+                        project_uuid: 'p1',
+                        components: [
+                            {
+                                component_name: 'log4j-core',
+                                component_version: '2.14.0',
+                                component_uuid: 'c1',
+                                finding_uuid: 'f1',
+                                vulnerability_uuid: 'v1',
+                                analysis_state: 'IN_TRIAGE',
+                                analysis_details: '',
+                                tags: ['Security'],
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                id: 'CVE-2025-INCOMPLETE',
+                title: 'Incomplete Analysis',
+                description: 'One version is assessed, another is missing.',
+                severity: 'HIGH',
+                cvss: 7.5,
+                cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
+                tags: ['Security'],
+                affected_versions: [
+                    {
+                        project_name: 'Vulnerable Project',
+                        project_version: '1.0.0',
+                        project_uuid: 'p1',
+                        components: [
+                            {
+                                component_name: 'lib-a',
+                                component_version: '1.0',
+                                component_uuid: 'c2',
+                                finding_uuid: 'f2',
+                                vulnerability_uuid: 'v2',
+                                analysis_state: 'EXPLOITABLE',
+                                analysis_details: '',
+                                tags: ['Security'],
+                            },
+                        ],
+                    },
+                    {
+                        project_name: 'Vulnerable Project',
+                        project_version: '2.0.0',
+                        project_uuid: 'p2',
+                        components: [
+                            {
+                                component_name: 'lib-a',
+                                component_version: '2.0',
+                                component_uuid: 'c3',
+                                finding_uuid: 'f3',
+                                vulnerability_uuid: 'v2',
+                                analysis_state: 'NOT_SET',
+                                analysis_details: '',
+                                tags: ['Security'],
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                id: 'CVE-2025-INCONSISTENT',
+                title: 'Inconsistent Analysis',
+                description: 'Different states across versions.',
+                severity: 'CRITICAL',
+                cvss: 9.8,
+                cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
+                tags: ['Security'],
+                affected_versions: [
+                    {
+                        project_name: 'Vulnerable Project',
+                        project_version: '1.0.0',
+                        project_uuid: 'p1',
+                        components: [
+                            {
+                                component_name: 'lib-b',
+                                component_version: '1.0',
+                                component_uuid: 'c4',
+                                finding_uuid: 'f4',
+                                vulnerability_uuid: 'v3',
+                                analysis_state: 'EXPLOITABLE',
+                                analysis_details: '',
+                                tags: ['Security'],
+                            },
+                        ],
+                    },
+                    {
+                        project_name: 'Vulnerable Project',
+                        project_version: '2.0.0',
+                        project_uuid: 'p2',
+                        components: [
+                            {
+                                component_name: 'lib-b',
+                                component_version: '2.0',
+                                component_uuid: 'c5',
+                                finding_uuid: 'f5',
+                                vulnerability_uuid: 'v3',
+                                analysis_state: 'NOT_AFFECTED',
+                                analysis_details: '',
+                                tags: ['Security'],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ];
+
         // Mock Task Start
         await page.route('**/api/tasks/group-vulns*', async (route) => {
             await route.fulfill({
@@ -59,136 +181,7 @@ test.describe('Integration Tests (Real Backend)', () => {
             });
         });
 
-        // Mock Task Status Polling
-        await page.route('**/api/tasks/task-123', async (route) => {
-            await route.fulfill({
-                status: 200,
-                body: JSON.stringify({
-                    status: 'completed',
-                    progress: 100,
-                    result: [
-                        {
-                            id: 'CVE-2021-44228',
-                            title: 'Log4Shell',
-                            description: 'Log4j JNDI injection',
-                            severity: 'CRITICAL',
-                            cvss: 10.0,
-                            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
-                            tags: ['Security'],
-                            affected_versions: [
-                                {
-                                    project_name: 'Vulnerable Project',
-                                    project_version: '1.0.0',
-                                    project_uuid: 'p1',
-                                    components: [
-                                        {
-                                            component_name: 'log4j-core',
-                                            component_version: '2.14.0',
-                                            component_uuid: 'c1',
-                                            finding_uuid: 'f1',
-                                            vulnerability_uuid: 'v1',
-                                            analysis_state: 'IN_TRIAGE',
-                                            analysis_details: '',
-                                            tags: ['Security'],
-                                        },
-                                    ],
-                                },
-                            ],
-                        },
-                        {
-                            id: 'CVE-2025-INCOMPLETE',
-                            title: 'Incomplete Analysis',
-                            description: 'One version is assessed, another is missing.',
-                            severity: 'HIGH',
-                            cvss: 7.5,
-                            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N',
-                            tags: ['Security'],
-                            affected_versions: [
-                                {
-                                    project_name: 'Vulnerable Project',
-                                    project_version: '1.0.0',
-                                    project_uuid: 'p1',
-                                    components: [
-                                        {
-                                            component_name: 'lib-a',
-                                            component_version: '1.0',
-                                            component_uuid: 'c2',
-                                            finding_uuid: 'f2',
-                                            vulnerability_uuid: 'v2',
-                                            analysis_state: 'EXPLOITABLE',
-                                            analysis_details: '',
-                                            tags: ['Security'],
-                                        },
-                                    ],
-                                },
-                                {
-                                    project_name: 'Vulnerable Project',
-                                    project_version: '2.0.0',
-                                    project_uuid: 'p2',
-                                    components: [
-                                        {
-                                            component_name: 'lib-a',
-                                            component_version: '2.0',
-                                            component_uuid: 'c3',
-                                            finding_uuid: 'f3',
-                                            vulnerability_uuid: 'v2',
-                                            analysis_state: 'NOT_SET',
-                                            analysis_details: '',
-                                            tags: ['Security'],
-                                        },
-                                    ],
-                                },
-                            ],
-                        },
-                        {
-                            id: 'CVE-2025-INCONSISTENT',
-                            title: 'Inconsistent Analysis',
-                            description: 'Different states across versions.',
-                            severity: 'CRITICAL',
-                            cvss: 9.8,
-                            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
-                            tags: ['Security'],
-                            affected_versions: [
-                                {
-                                    project_name: 'Vulnerable Project',
-                                    project_version: '1.0.0',
-                                    project_uuid: 'p1',
-                                    components: [
-                                        {
-                                            component_name: 'lib-b',
-                                            component_version: '1.0',
-                                            component_uuid: 'c4',
-                                            finding_uuid: 'f4',
-                                            vulnerability_uuid: 'v3',
-                                            analysis_state: 'EXPLOITABLE',
-                                            analysis_details: '',
-                                            tags: ['Security'],
-                                        },
-                                    ],
-                                },
-                                {
-                                    project_name: 'Vulnerable Project',
-                                    project_version: '2.0.0',
-                                    project_uuid: 'p2',
-                                    components: [
-                                        {
-                                            component_name: 'lib-b',
-                                            component_version: '2.0',
-                                            component_uuid: 'c5',
-                                            finding_uuid: 'f5',
-                                            vulnerability_uuid: 'v3',
-                                            analysis_state: 'NOT_AFFECTED',
-                                            analysis_details: '',
-                                            tags: ['Security'],
-                                        },
-                                    ],
-                                },
-                            ],
-                        },
-                    ],
-                }),
-            });
-        });
+        await mockGroupedVulnTask(page, { taskId: 'task-123', groups: taskGroups });
 
         // Mock Assessment Details
         await page.route('**/api/assessments/details', async (route) => {

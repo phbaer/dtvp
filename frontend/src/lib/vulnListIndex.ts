@@ -1,5 +1,11 @@
 import type { GroupedVuln, TMRescoreProposal } from '../types'
-import { tagToString, hasCvssVersionMismatch, normalizeTags } from './assessment-helpers'
+import {
+    getAssessedTeams,
+    hasCvssVersionMismatch,
+    hasGlobalAssessmentForGroup,
+    normalizeTags,
+    tagToString,
+} from './assessment-helpers'
 import { classifyGroup } from './group-classifier'
 import type { FilterCounts, TeamCounts } from './group-classifier'
 
@@ -16,11 +22,16 @@ export interface VulnListItem {
     aliasesLower: string[]
     tagsLower: string[]
     normalizedTags: string[]
+    assessedTeams: Set<string>
+    componentNames: string[]
     componentNamesLower: string[]
     assigneesLower: string[]
     versions: string[]
+    versionsLower: string[]
     attributedOnMsValues: number[]
     oldestAttributedOnMs: number | null
+    instanceCount: number
+    componentSummary: string
     searchableTextLower: string
     dependencyRelationship: DependencyRelationship
     hasTmrescoreProposal: boolean
@@ -28,10 +39,21 @@ export interface VulnListItem {
     lifecycle: string
     isPending: boolean
     isOpen: boolean
+    isAssessed: boolean
     technicalState: string
     firstTag: string
     baseScore: number
     rescoredScore: number
+    baseSeverityRank: number
+    rescoredSeverityRank: number
+    baseScoreDisplay: string
+    rescoredScoreDisplay: string
+    currentDisplayScore: number | string
+    stableRescoredScore: number | null
+    hasStableRescore: boolean
+    isRescoredOrModified: boolean
+    originalSeverity: string
+    rescoredSeverity: string | null
 }
 
 export interface VulnListFilterInput {
@@ -48,9 +70,34 @@ export interface VulnListFilterInput {
     attributionAgeMode?: 'older' | 'younger'
 }
 
+export interface CompiledVulnListFilters {
+    smartSearch?: ParsedVulnSearchQuery | string
+    dependencyFilter: DependencyRelationship[]
+    dependencyFilterSet: Set<DependencyRelationship>
+    tmrescoreProposalFilter: TMRescoreProposalFilter[]
+    tmrescoreProposalFilterSet: Set<TMRescoreProposalFilter>
+    includesTmrescoreProposal: boolean
+    includesNoTmrescoreProposal: boolean
+    tagFilterLower: string
+    idFilterLower: string
+    componentFilterLower: string
+    assigneeFilterLower: string
+    versionFilterSet: Set<string>
+    cvssVersionMismatchOnly: boolean
+    attributionAgeActive: boolean
+    attributionAgeCutoffMs: number | null
+    attributionAgeMode: 'older' | 'younger'
+}
+
 export interface VulnStateFilterInput {
     lifecycleFilters?: FilterSelection<string>
     analysisFilters?: FilterSelection<string>
+}
+
+export interface CompiledVulnStateFilters {
+    lifecycleFilters: string[]
+    lifecycleFilterSet: Set<string>
+    analysisFilterSet: Set<string>
 }
 
 type FilterSelection<T extends string> = readonly T[] | T | null | undefined
@@ -58,6 +105,92 @@ type FilterSelection<T extends string> = readonly T[] | T | null | undefined
 const unique = (values: string[]) => Array.from(new Set(values))
 
 const lower = (value: unknown) => String(value || '').trim().toLowerCase()
+
+const metadataStringArray = (value: unknown): string[] | null => {
+    if (!Array.isArray(value)) return null
+    return unique(value
+        .map(entry => String(entry || '').trim())
+        .filter(Boolean))
+}
+
+const metadataNumberArray = (value: unknown): number[] | null => {
+    if (!Array.isArray(value)) return null
+    const normalized: number[] = []
+    const seen = new Set<number>()
+    for (const entry of value) {
+        const numberValue = Number(entry)
+        if (!Number.isFinite(numberValue) || seen.has(numberValue)) continue
+        normalized.push(numberValue)
+        seen.add(numberValue)
+    }
+    return normalized
+}
+
+const metadataNumber = (value: unknown): number | null => {
+    if (value == null || value === '') return null
+    const numberValue = Number(value)
+    return Number.isFinite(numberValue) ? numberValue : null
+}
+
+const metadataDependencyRelationship = (value: unknown): DependencyRelationship | null => {
+    const relationship = String(value || '').trim().toUpperCase()
+    return relationship === 'DIRECT' || relationship === 'TRANSITIVE' || relationship === 'UNKNOWN'
+        ? relationship
+        : null
+}
+
+const scoreSeverity = (score: number): string => {
+    if (score >= 9) return 'CRITICAL'
+    if (score >= 7) return 'HIGH'
+    if (score >= 4) return 'MEDIUM'
+    if (score >= 0.1) return 'LOW'
+    return 'INFO'
+}
+
+const scoreSeverityRank = (score: number | undefined | null): number => {
+    const s = score ?? 0
+    if (s >= 9.0) return 0
+    if (s >= 7.0) return 1
+    if (s >= 4.0) return 2
+    if (s >= 0.1) return 3
+    return 4
+}
+
+const hasAssessedAliasForTag = (
+    tag: string,
+    assessed: Set<string>,
+    teamMapping: Record<string, any>,
+) => {
+    for (const mappingVal of Object.values(teamMapping || {})) {
+        if (!Array.isArray(mappingVal) || mappingVal.length <= 1 || mappingVal[0] !== tag) continue
+        if ((mappingVal as string[]).slice(1).some(alias => assessed.has(alias))) {
+            return true
+        }
+    }
+    return false
+}
+
+const getMatchedAssessedTeams = (
+    group: GroupedVuln,
+    normalizedTags: string[],
+    teamMapping: Record<string, any>,
+) => {
+    const assessed = getAssessedTeams(group)
+    const matched = new Set<string>()
+    for (const tag of normalizedTags) {
+        if (assessed.has(tag) || hasAssessedAliasForTag(tag, assessed, teamMapping)) {
+            matched.add(tag)
+        }
+    }
+    return matched
+}
+
+const summarizeComponents = (componentNames: string[]) => {
+    if (componentNames.length === 0) return ''
+    if (componentNames.length === 1) return componentNames[0] || ''
+    if (componentNames.length === 2) return componentNames.join(', ')
+    return `${componentNames[0]}, ${componentNames[1]} +${componentNames.length - 2}`
+}
 
 export const parseAttributionTimestamp = (value: unknown): number | null => {
     if (value == null || value === '') return null
@@ -352,10 +485,23 @@ export function getGroupDependencyRelationship(group: GroupedVuln): DependencyRe
     return 'UNKNOWN'
 }
 
+export function isMeaningfulTMRescoreProposalCandidate(proposal: TMRescoreProposal | null | undefined): boolean {
+    const rescoredVector = proposal?.rescored_vector || null
+    const originalVector = proposal?.original_vector || null
+    const rescoredScore = proposal?.rescored_score
+    const originalScore = proposal?.original_score
+    if (!rescoredVector) return false
+    if (originalVector && rescoredVector === originalVector) return false
+    if (originalVector == null && rescoredScore != null && originalScore != null && rescoredScore === originalScore) {
+        return false
+    }
+    return true
+}
+
 export function isMeaningfulTMRescoreProposal(group: GroupedVuln, proposal: TMRescoreProposal | null | undefined): boolean {
+    if (!isMeaningfulTMRescoreProposalCandidate(proposal)) return false
     const rescoredVector = proposal?.rescored_vector || null
     const originalVector = proposal?.original_vector || group.cvss_vector || null
-    if (!rescoredVector) return false
     return !originalVector || rescoredVector !== originalVector
 }
 
@@ -375,16 +521,20 @@ export function buildVulnListItem(
     teamMapping: Record<string, any>,
     proposals: Record<string, TMRescoreProposal> = {},
 ): VulnListItem {
+    const metadata = group.list_metadata
     const rawTags = (group.tags || []).map(tagToString).filter(Boolean)
     const normalizedTags = normalizeTags(group.tags || [], teamMapping)
+    const assessedTeams = metadata?.assessed_teams
+        ? new Set(normalizeTags(metadata.assessed_teams, teamMapping))
+        : getMatchedAssessedTeams(group, normalizedTags, teamMapping)
     const allTagText = unique([...rawTags, ...normalizedTags])
-    const componentNames = unique(
+    const componentNames = metadataStringArray(metadata?.component_names) ?? unique(
         (group.affected_versions || [])
             .flatMap(version => version.components || [])
             .map(component => component.component_name)
             .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
     )
-    const versions = unique(
+    const versions = metadataStringArray(metadata?.versions) ?? unique(
         (group.affected_versions || [])
             .map(version => version.project_version || (version as any).version)
             .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -395,18 +545,48 @@ export function buildVulnListItem(
     const componentNamesLower = componentNames.map(component => component.toLowerCase())
     const assigneesLower = (group.assignees || []).map(assignee => lower(assignee)).filter(Boolean)
     const versionsLower = versions.map(version => version.toLowerCase())
-    const attributedOnMsValues = unique(
+    const attributedOnMsValues = metadataNumberArray(metadata?.attributed_on_ms_values) ?? unique(
         (group.affected_versions || [])
             .flatMap(version => version.components || [])
             .map(component => parseAttributionTimestamp(component.attributed_on))
             .filter((value): value is number => value != null)
             .map(value => String(value)),
     ).map(value => Number(value))
-    const oldestAttributedOnMs = attributedOnMsValues.length
+    const oldestAttributedOnMs = metadataNumber(metadata?.oldest_attributed_on_ms)
+        ?? (attributedOnMsValues.length
         ? Math.min(...attributedOnMsValues)
-        : null
+        : null)
     const titleLower = lower(group.title)
-    const classification = classifyGroup(group, teamMapping)
+    const fallbackClassification = metadata ? null : classifyGroup(group, teamMapping)
+    const classification = {
+        lifecycle: metadata?.lifecycle || fallbackClassification?.lifecycle || 'OPEN',
+        isPending: metadata?.is_pending ?? fallbackClassification?.isPending ?? false,
+        isOpen: metadata?.is_open ?? fallbackClassification?.isOpen ?? false,
+        technicalState: metadata?.technical_state || fallbackClassification?.technicalState || 'NOT_SET',
+    }
+    const isAssessed = metadata?.is_assessed ?? (
+        (hasGlobalAssessmentForGroup(group) && !classification.isPending) ||
+        classification.lifecycle === 'ASSESSED_LEGACY'
+    )
+    const instanceCount = metadataNumber(metadata?.instance_count) ?? (group.affected_versions || [])
+        .reduce((total, version) => total + (version.components?.length || 0), 0)
+    const baseScoreValue = group.cvss ?? group.cvss_score
+    const stableRescoredScore = group.rescored_cvss ?? null
+    const currentDisplayScore = group.rescored_cvss ?? baseScoreValue ?? 'N/A'
+    const hasStableRescore = stableRescoredScore != null
+        && baseScoreValue != null
+        && Math.abs(stableRescoredScore - baseScoreValue) > 0.05
+    const isRescoredOrModified = currentDisplayScore !== 'N/A'
+        && baseScoreValue !== undefined
+        && baseScoreValue !== null
+        && Math.abs(Number(currentDisplayScore) - Number(baseScoreValue)) > 0.05
+    const rescoredSeverity = stableRescoredScore != null && hasStableRescore
+        ? scoreSeverity(stableRescoredScore)
+        : isRescoredOrModified
+            ? scoreSeverity(Number(currentDisplayScore))
+            : null
+    const baseScore = group.cvss_score ?? group.cvss ?? 0
+    const rescoredScore = group.rescored_cvss ?? group.cvss_score ?? group.cvss ?? 0
     const searchableTextLower = unique([
         lower(group.id),
         titleLower,
@@ -426,22 +606,47 @@ export function buildVulnListItem(
         aliasesLower,
         tagsLower,
         normalizedTags,
+        assessedTeams,
+        componentNames,
         componentNamesLower,
         assigneesLower,
         versions,
+        versionsLower,
         attributedOnMsValues,
         oldestAttributedOnMs,
+        instanceCount,
+        componentSummary: summarizeComponents(componentNames),
         searchableTextLower,
-        dependencyRelationship: getGroupDependencyRelationship(group),
+        dependencyRelationship: metadataDependencyRelationship(metadata?.dependency_relationship)
+            ?? getGroupDependencyRelationship(group),
         hasTmrescoreProposal: hasTMRescoreProposalForGroup(group, proposals),
-        cvssVersionMismatch: hasCvssVersionMismatch(group),
+        cvssVersionMismatch: typeof metadata?.cvss_version_mismatch === 'boolean'
+            ? metadata.cvss_version_mismatch
+            : hasCvssVersionMismatch(group),
         lifecycle: classification.lifecycle,
         isPending: classification.isPending,
         isOpen: classification.isOpen,
+        isAssessed,
         technicalState: classification.technicalState,
         firstTag: normalizedTags[0] || '',
-        baseScore: group.cvss_score ?? group.cvss ?? 0,
-        rescoredScore: group.rescored_cvss ?? group.cvss_score ?? group.cvss ?? 0,
+        baseScore,
+        rescoredScore,
+        baseSeverityRank: scoreSeverityRank(baseScore),
+        rescoredSeverityRank: scoreSeverityRank(rescoredScore),
+        baseScoreDisplay: baseScoreValue == null ? '—' : String(baseScoreValue),
+        rescoredScoreDisplay: currentDisplayScore === undefined
+            || currentDisplayScore === null
+            || currentDisplayScore === 'N/A'
+            ? '—'
+            : String(currentDisplayScore),
+        currentDisplayScore,
+        stableRescoredScore,
+        hasStableRescore,
+        isRescoredOrModified,
+        originalSeverity: baseScoreValue != null && !Number.isNaN(Number(baseScoreValue))
+            ? scoreSeverity(Number(baseScoreValue))
+            : 'UNKNOWN',
+        rescoredSeverity,
     }
 }
 
@@ -455,6 +660,18 @@ export function buildVulnListItems(
 
 const everyTermMatches = (terms: readonly string[], values: readonly string[]) => {
     return terms.every(term => values.some(value => value.includes(term)))
+}
+
+const everyTermMatchesValue = (terms: readonly string[], value: string) => {
+    return terms.every(term => value.includes(term))
+}
+
+const everyTermMatchesPrimaryOrAliases = (
+    terms: readonly string[],
+    primary: string,
+    aliases: readonly string[],
+) => {
+    return terms.every(term => primary.includes(term) || aliases.some(alias => alias.includes(term)))
 }
 
 export function matchesAttributionAgeFilter(
@@ -471,14 +688,74 @@ export function matchesAttributionAgeFilter(
     )
 }
 
+export function compileVulnListFilters(
+    filters: VulnListFilterInput,
+    nowMs = Date.now(),
+): CompiledVulnListFilters {
+    const normalizedAgeDays = normalizeAttributionAgeDays(filters.attributionAgeDays)
+    const dependencyFilter = normalizeFilterSelection(filters.dependencyFilter)
+    const tmrescoreProposalFilter = normalizeFilterSelection(filters.tmrescoreProposalFilter)
+    const tmrescoreProposalFilterSet = new Set(tmrescoreProposalFilter)
+
+    return {
+        smartSearch: filters.smartSearch,
+        dependencyFilter,
+        dependencyFilterSet: new Set(dependencyFilter),
+        tmrescoreProposalFilter,
+        tmrescoreProposalFilterSet,
+        includesTmrescoreProposal: tmrescoreProposalFilterSet.has('WITH_PROPOSAL'),
+        includesNoTmrescoreProposal: tmrescoreProposalFilterSet.has('WITHOUT_PROPOSAL'),
+        tagFilterLower: lower(filters.tagFilter),
+        idFilterLower: lower(filters.idFilter),
+        componentFilterLower: lower(filters.componentFilter),
+        assigneeFilterLower: lower(filters.assigneeFilter),
+        versionFilterSet: new Set(filters.versionFilterList || []),
+        cvssVersionMismatchOnly: !!filters.cvssVersionMismatchOnly,
+        attributionAgeActive: filters.attributionAgeDays != null,
+        attributionAgeCutoffMs: normalizedAgeDays == null ? null : nowMs - normalizedAgeDays * DAY_MS,
+        attributionAgeMode: filters.attributionAgeMode || 'older',
+    }
+}
+
+export function matchesCompiledAttributionAgeFilter(
+    item: VulnListItem,
+    filters: CompiledVulnListFilters,
+): boolean {
+    if (!filters.attributionAgeActive) return true
+    const cutoff = filters.attributionAgeCutoffMs
+    if (cutoff == null) return false
+    return item.attributedOnMsValues.some(value =>
+        filters.attributionAgeMode === 'younger' ? value >= cutoff : value < cutoff,
+    )
+}
+
+export function matchesCompiledDependencySelection(
+    item: VulnListItem,
+    filters: CompiledVulnListFilters,
+    emptyMatches = false,
+): boolean {
+    if (filters.dependencyFilterSet.size === 0) return emptyMatches
+    return filters.dependencyFilterSet.has(item.dependencyRelationship)
+}
+
+export function matchesCompiledTMRescoreSelection(
+    item: VulnListItem,
+    filters: CompiledVulnListFilters,
+    emptyMatches = false,
+): boolean {
+    if (filters.tmrescoreProposalFilterSet.size === 0) return emptyMatches
+    return (filters.includesTmrescoreProposal && item.hasTmrescoreProposal) ||
+        (filters.includesNoTmrescoreProposal && !item.hasTmrescoreProposal)
+}
+
 export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQuery | string | undefined): boolean {
     const parsed = typeof search === 'string' ? parseVulnSearchQuery(search) : search
     if (!parsed || parsed.chips.length === 0) return true
 
-    if (!everyTermMatches(parsed.textTerms, [item.searchableTextLower])) {
+    if (!everyTermMatchesValue(parsed.textTerms, item.searchableTextLower)) {
         return false
     }
-    if (!everyTermMatches(parsed.idTerms, [item.idLower, ...item.aliasesLower])) {
+    if (!everyTermMatchesPrimaryOrAliases(parsed.idTerms, item.idLower, item.aliasesLower)) {
         return false
     }
     if (!everyTermMatches(parsed.componentTerms, item.componentNamesLower)) {
@@ -490,7 +767,7 @@ export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQ
     if (!everyTermMatches(parsed.assigneeTerms, item.assigneesLower)) {
         return false
     }
-    if (!everyTermMatches(parsed.versionTerms, item.versions.map(version => version.toLowerCase()))) {
+    if (!everyTermMatches(parsed.versionTerms, item.versionsLower)) {
         return false
     }
     if (parsed.lifecycleTerms.length > 0 && !matchesLifecycleFilter(item, parsed.lifecycleTerms)) {
@@ -517,49 +794,49 @@ export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQ
     return true
 }
 
-export function matchesListFilters(item: VulnListItem, filters: VulnListFilterInput): boolean {
+export function matchesCompiledListFilters(
+    item: VulnListItem,
+    filters: CompiledVulnListFilters,
+): boolean {
     if (!matchesSmartSearch(item, filters.smartSearch)) {
         return false
     }
 
-    const dependencyFilter = normalizeFilterSelection(filters.dependencyFilter)
-    if (dependencyFilter.length === 0 || !dependencyFilter.includes(item.dependencyRelationship)) {
+    if (!matchesCompiledDependencySelection(item, filters)) {
         return false
     }
 
-    const tmrescoreFilter = normalizeFilterSelection(filters.tmrescoreProposalFilter)
-    if (tmrescoreFilter.length === 0) {
-        return false
-    }
-    const matchesProposal =
-        (tmrescoreFilter.includes('WITH_PROPOSAL') && item.hasTmrescoreProposal) ||
-        (tmrescoreFilter.includes('WITHOUT_PROPOSAL') && !item.hasTmrescoreProposal)
-    if (!matchesProposal) {
+    if (!matchesCompiledTMRescoreSelection(item, filters)) {
         return false
     }
 
-    const tagFilter = lower(filters.tagFilter)
-    if (tagFilter && !item.tagsLower.some(tag => tag.includes(tagFilter))) {
+    if (filters.tagFilterLower && !item.tagsLower.some(tag => tag.includes(filters.tagFilterLower))) {
         return false
     }
 
-    const idFilter = lower(filters.idFilter)
-    if (idFilter && !item.idLower.includes(idFilter) && !item.aliasesLower.some(alias => alias.includes(idFilter))) {
+    if (
+        filters.idFilterLower
+        && !item.idLower.includes(filters.idFilterLower)
+        && !item.aliasesLower.some(alias => alias.includes(filters.idFilterLower))
+    ) {
         return false
     }
 
-    const componentFilter = lower(filters.componentFilter)
-    if (componentFilter && !item.componentNamesLower.some(component => component.includes(componentFilter))) {
+    if (
+        filters.componentFilterLower
+        && !item.componentNamesLower.some(component => component.includes(filters.componentFilterLower))
+    ) {
         return false
     }
 
-    const assigneeFilter = lower(filters.assigneeFilter)
-    if (assigneeFilter && !item.assigneesLower.some(assignee => assignee.includes(assigneeFilter))) {
+    if (
+        filters.assigneeFilterLower
+        && !item.assigneesLower.some(assignee => assignee.includes(filters.assigneeFilterLower))
+    ) {
         return false
     }
 
-    const versionFilterList = filters.versionFilterList || []
-    if (versionFilterList.length > 0 && !versionFilterList.some(version => item.versions.includes(version))) {
+    if (filters.versionFilterSet.size > 0 && !item.versions.some(version => filters.versionFilterSet.has(version))) {
         return false
     }
 
@@ -567,14 +844,15 @@ export function matchesListFilters(item: VulnListItem, filters: VulnListFilterIn
         return false
     }
 
-    if (
-        filters.attributionAgeDays != null
-        && !matchesAttributionAgeFilter(item, filters.attributionAgeDays, filters.attributionAgeMode)
-    ) {
+    if (!matchesCompiledAttributionAgeFilter(item, filters)) {
         return false
     }
 
     return true
+}
+
+export function matchesListFilters(item: VulnListItem, filters: VulnListFilterInput): boolean {
+    return matchesCompiledListFilters(item, compileVulnListFilters(filters))
 }
 
 export function matchesLifecycleFilter(item: VulnListItem, lifecycleFilters: FilterSelection<string>): boolean {
@@ -593,19 +871,50 @@ export function matchesLifecycleFilter(item: VulnListItem, lifecycleFilters: Fil
     )
 }
 
-export function matchesStateFilters(item: VulnListItem, filters: VulnStateFilterInput): boolean {
+export function compileVulnStateFilters(filters: VulnStateFilterInput): CompiledVulnStateFilters {
     const lifecycleFilters = normalizeFilterSelection(filters.lifecycleFilters)
-    const analysisFilters = normalizeFilterSelection(filters.analysisFilters)
+    return {
+        lifecycleFilters,
+        lifecycleFilterSet: new Set(lifecycleFilters),
+        analysisFilterSet: new Set(normalizeFilterSelection(filters.analysisFilters)),
+    }
+}
 
-    if (lifecycleFilters.length === 0 || analysisFilters.length === 0) {
+export function matchesCompiledLifecycleFilter(
+    item: VulnListItem,
+    filters: CompiledVulnStateFilters,
+): boolean {
+    if (filters.lifecycleFilterSet.size === 0) {
         return false
     }
 
-    if (!matchesLifecycleFilter(item, lifecycleFilters)) {
+    return (
+        (filters.lifecycleFilterSet.has('OPEN') && item.isOpen) ||
+        (filters.lifecycleFilterSet.has('ASSESSED') && item.lifecycle === 'ASSESSED') ||
+        (filters.lifecycleFilterSet.has('ASSESSED_LEGACY') && item.lifecycle === 'ASSESSED_LEGACY') ||
+        (filters.lifecycleFilterSet.has('INCOMPLETE') && item.lifecycle === 'INCOMPLETE') ||
+        (filters.lifecycleFilterSet.has('INCONSISTENT') && item.lifecycle === 'INCONSISTENT') ||
+        (filters.lifecycleFilterSet.has('NEEDS_APPROVAL') && item.isPending)
+    )
+}
+
+export function matchesCompiledStateFilters(
+    item: VulnListItem,
+    filters: CompiledVulnStateFilters,
+): boolean {
+    if (filters.lifecycleFilterSet.size === 0 || filters.analysisFilterSet.size === 0) {
         return false
     }
 
-    return analysisFilters.includes(item.technicalState)
+    if (!matchesCompiledLifecycleFilter(item, filters)) {
+        return false
+    }
+
+    return filters.analysisFilterSet.has(item.technicalState)
+}
+
+export function matchesStateFilters(item: VulnListItem, filters: VulnStateFilterInput): boolean {
+    return matchesCompiledStateFilters(item, compileVulnStateFilters(filters))
 }
 
 export function computeListFilterCounts(
