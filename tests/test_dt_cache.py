@@ -47,6 +47,66 @@ async def test_get_vulnerabilities_caches_results(tmp_path):
     assert loaded[0]["component"]["name"] == "lib"
 
 
+def test_cached_project_snapshot_discovers_persisted_findings(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    findings = [
+        {
+            "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+            "component": {"uuid": "c1", "name": "lib"},
+            "analysis": {"analysisState": "NOT_SET"},
+        }
+    ]
+    project_vulnerabilities = [{"vulnId": "CVE-1", "cvssV3BaseScore": 8.1}]
+    bom = {"components": [{"bom-ref": "c1", "name": "lib"}]}
+
+    manager._save_project_cache(manager._findings_path("project-1"), findings)
+    manager._save_project_cache(
+        manager._project_vulns_path("project-1"),
+        project_vulnerabilities,
+    )
+    manager._save_project_cache(manager._bom_path("project-1"), bom)
+
+    versions = manager.get_cached_project_versions()
+    snapshot = manager.get_cached_project_snapshot("project-1")
+
+    assert versions == [
+        {"uuid": "project-1", "name": "project-1", "version": ""}
+    ]
+    assert snapshot == (findings, project_vulnerabilities, bom)
+
+
+def test_cached_project_snapshot_overlays_local_assessment(tmp_path):
+    # A finding whose cached findings file predates a local DTVP assessment
+    # must surface the assessed state via the snapshot, so the automatic
+    # code-analysis sweep does not re-queue an already-assessed vulnerability.
+    manager = CacheManager(base_path=str(tmp_path))
+    findings = [
+        {
+            "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+            "component": {"uuid": "c1", "name": "lib"},
+            "analysis": {"analysisState": "NOT_SET", "isSuppressed": False},
+        }
+    ]
+    manager._save_project_cache(manager._findings_path("project-1"), findings)
+    manager._save_project_cache(
+        manager._analysis_path("project-1", "c1", "v1"),
+        {
+            "analysisState": "NOT_AFFECTED",
+            "analysisDetails": (
+                "--- [Team: General] [State: NOT_AFFECTED] "
+                "[Assessed By: reviewer] ---\nNot affected."
+            ),
+            "isSuppressed": False,
+        },
+    )
+
+    snapshot = manager.get_cached_project_snapshot("project-1")
+    assert snapshot is not None
+    overlaid_analysis = snapshot[0][0]["analysis"]
+    assert overlaid_analysis["analysisState"] == "NOT_AFFECTED"
+    assert "NOT_AFFECTED" in overlaid_analysis["analysisDetails"]
+
+
 @pytest.mark.asyncio
 async def test_queue_and_flush_pending_updates(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))

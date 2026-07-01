@@ -14,6 +14,7 @@ class StartupServiceDeps:
     load_tmrescore_project_cache: Callable[[], dict[str, dict[str, Any]]]
     initialize_cache_manager: Callable[[], Awaitable[None]]
     run_background_sync_loop: Callable[[], Awaitable[None]]
+    run_auto_analysis_sweep_loop: Callable[[], Awaitable[None]]
     run_analysis_queue_worker: Callable[[], Awaitable[None]]
     run_analysis_queue_cleanup_loop: Callable[[], Awaitable[None]]
     create_task: Callable[..., asyncio.Task[Any]]
@@ -22,6 +23,7 @@ class StartupServiceDeps:
 @dataclass(frozen=True)
 class StartupRuntimeTasks:
     sync_task: asyncio.Task[Any]
+    auto_analysis_task: asyncio.Task[Any]
     queue_task: asyncio.Task[Any]
     queue_cleanup_task: asyncio.Task[Any]
 
@@ -51,6 +53,7 @@ async def start_application_runtime(
     await deps.initialize_cache_manager()
     return StartupRuntimeTasks(
         sync_task=deps.create_task(deps.run_background_sync_loop()),
+        auto_analysis_task=deps.create_task(deps.run_auto_analysis_sweep_loop()),
         queue_task=deps.create_task(deps.run_analysis_queue_worker()),
         queue_cleanup_task=deps.create_task(deps.run_analysis_queue_cleanup_loop()),
     )
@@ -65,6 +68,7 @@ async def stop_application_runtime(
     runtime_tasks.queue_task.cancel()
     runtime_tasks.queue_cleanup_task.cancel()
     runtime_tasks.sync_task.cancel()
+    runtime_tasks.auto_analysis_task.cancel()
     for task in tuple(background_tasks):
         task.cancel()
 
@@ -74,6 +78,8 @@ async def stop_application_runtime(
         await runtime_tasks.queue_cleanup_task
     with suppress(asyncio.CancelledError):
         await runtime_tasks.sync_task
+    with suppress(asyncio.CancelledError):
+        await runtime_tasks.auto_analysis_task
 
     for task in tuple(background_tasks):
         with suppress(asyncio.CancelledError):

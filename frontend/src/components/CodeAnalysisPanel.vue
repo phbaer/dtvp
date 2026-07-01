@@ -38,12 +38,15 @@ const VERDICT_SEVERITY: Record<string, number> = {
 
 const uniqueComponents = computed(() => {
     const seen = new Set<string>()
-    return props.componentNames.filter(n => {
-        const lower = n.toLowerCase()
-        if (seen.has(lower)) return false
-        seen.add(lower)
-        return true
-    })
+    return props.componentNames
+        .map(n => String(n || '').trim())
+        .filter(Boolean)
+        .filter(n => {
+            const lower = n.toLowerCase()
+            if (seen.has(lower)) return false
+            seen.add(lower)
+            return true
+        })
 })
 
 const allSelected = computed(() =>
@@ -405,6 +408,7 @@ watch(selectedComponents, () => {
                     <Loader2 v-if="qi.status === 'running'" :size="10" class="animate-spin text-blue-400" />
                     <Clock v-else :size="10" class="text-yellow-400" />
                     <span class="text-gray-300 font-mono">{{ qi.component_name }}</span>
+                    <span v-if="qi.source === 'automatic'" class="text-[9px] text-cyan-300 uppercase font-semibold">Auto</span>
                     <span v-if="qi.status === 'queued' && qi.position > 0" class="text-yellow-400 font-bold">#{{ qi.position }}</span>
                     <span class="uppercase font-semibold" :class="qi.status === 'running' ? 'text-blue-400' : 'text-yellow-400'">{{ qi.status }}</span>
                 </div>
@@ -426,6 +430,7 @@ watch(selectedComponents, () => {
                 <div class="flex items-center gap-2">
                     <CheckCircle :size="10" class="text-green-400" />
                     <span class="text-gray-300 font-mono">{{ qi.component_name }}</span>
+                    <span v-if="qi.source === 'automatic'" class="text-[9px] text-cyan-300 uppercase font-semibold">Auto</span>
                     <span class="uppercase font-semibold text-green-400">completed</span>
                 </div>
                 <span class="text-[9px] text-cyan-400 font-semibold uppercase">View Result</span>

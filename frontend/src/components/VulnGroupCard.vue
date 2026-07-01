@@ -1361,6 +1361,16 @@ const uniqueComponents = dependencyInfo.uniqueComponents
 const affectedTaggedComponents = dependencyInfo.affectedTaggedComponents
 const triggeringTaggedComponents = dependencyInfo.triggeringTaggedComponents
 const normalizedTags = dependencyInfo.normalizedTags
+const codeAnalysisComponents = computed(() =>
+    (triggeringTaggedComponents.value.length > 0
+        ? triggeringTaggedComponents.value.map(c => c.name)
+        : uniqueComponents.value.map(c => c.name))
+        .map(name => String(name || '').trim())
+        .filter(Boolean)
+)
+const codeAnalysisComponentTeams = computed(() =>
+    Object.fromEntries(triggeringTaggedComponents.value.map(c => [c.name, c.tag]))
+)
 
 const hasAssessedAliasForTag = (tag: string, assessed: Set<string>) => {
     if (!teamMapping?.value) {
@@ -1673,8 +1683,8 @@ const teamBlockStateColor = (state?: string): string => {
         <CodeAnalysisPanel
             :vulnId="group.id"
             :cvssVector="group.cvss_vector"
-            :componentNames="triggeringTaggedComponents.map(c => c.name)"
-            :componentTeams="Object.fromEntries(triggeringTaggedComponents.map(c => [c.name, c.tag]))"
+            :componentNames="codeAnalysisComponents"
+            :componentTeams="codeAnalysisComponentTeams"
             :assessedTeams="assessedTeams"
             @apply-result="handleCodeAnalysisResult"
             class="mb-4"

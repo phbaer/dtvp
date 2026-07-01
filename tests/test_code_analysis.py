@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -42,6 +43,25 @@ def reset_analysis_queue():
     main.analysis_queue._order.clear()
     main.analysis_queue._event.clear()
     main.analysis_queue._running = True
+
+
+@pytest.fixture(autouse=True)
+def reset_auto_analysis_sweep_state():
+    original_state = dict(main.auto_analysis_sweep_state)
+    main.auto_analysis_sweep_state.update(
+        {
+            "running": False,
+            "last_started_at": None,
+            "last_finished_at": None,
+            "last_queued_count": None,
+            "last_error": None,
+            "last_trigger": None,
+            "next_run_at": None,
+        }
+    )
+    yield
+    main.auto_analysis_sweep_state.clear()
+    main.auto_analysis_sweep_state.update(original_state)
 
 
 @pytest.fixture(autouse=True)
@@ -195,6 +215,49 @@ def test_code_analysis_endpoints_call_client_methods(client):
             assert response.json() == {"healthy": True}
 
 
+def test_code_analysis_auto_sweep_status_and_manual_run(client):
+    class FakeDTClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+    with patch.dict(
+        os.environ,
+        {
+            "DTVP_CODE_ANALYSIS_URL": "http://example.com",
+            "DTVP_AUTO_CODE_ANALYSIS_ENABLED": "true",
+            "DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS": "120",
+        },
+    ):
+        with patch("dtvp.main.DTClient", FakeDTClient), patch(
+            "dtvp.main.queue_existing_open_vulnerabilities_for_analysis_impl",
+            new=AsyncMock(return_value=2),
+        ) as sweep_mock:
+            status_response = client.get("/api/code-analysis/auto-sweep")
+            assert status_response.status_code == 200
+            status = status_response.json()
+            assert status["active"] is True
+            assert status["interval_seconds"] == 120
+            assert status["last_queued_count"] is None
+
+            run_response = client.post("/api/code-analysis/auto-sweep/run")
+            assert run_response.status_code == 200
+            payload = run_response.json()
+
+    assert payload["active"] is True
+    assert payload["running"] is False
+    assert payload["last_trigger"] == "manual"
+    assert payload["last_queued_count"] == 2
+    assert payload["last_started_at"]
+    assert payload["last_finished_at"]
+    sweep_mock.assert_awaited_once()
+
+
 def test_analysis_queue_submit_list_get_cancel(client):
     response = client.post(
         "/api/analysis-queue/submit",
@@ -256,6 +319,46 @@ def test_analysis_queue_cancel_running_returns_conflict(client):
 def test_analysis_queue_cancel_missing_returns_404(client):
     response = client.delete("/api/analysis-queue/unknown")
     assert response.status_code == 404
+
+
+def test_analysis_queue_submit_once_deduplicates_existing_items(client):
+    first, created = main.analysis_queue.submit_once(
+        vuln_id="CVE-2026-DEDUPE",
+        component_name="libA",
+        submitted_by="dtvp-auto-analysis",
+        source="automatic",
+    )
+    second, duplicate_created = main.analysis_queue.submit_once(
+        vuln_id="cve-2026-dedupe",
+        component_name="LIBA",
+        submitted_by="dtvp-auto-analysis",
+        source="automatic",
+    )
+
+    assert created is True
+    assert duplicate_created is False
+    assert second is first
+    assert first.source == "automatic"
+
+    first.status = "completed"
+    completed_duplicate, completed_created = main.analysis_queue.submit_once(
+        vuln_id="CVE-2026-DEDUPE",
+        component_name="libA",
+        submitted_by="dtvp-auto-analysis",
+        source="automatic",
+    )
+
+    assert completed_created is False
+    assert completed_duplicate is first
+
+
+@pytest.mark.asyncio
+async def test_analysis_queue_wait_for_work_keeps_existing_wake_signal(client):
+    main.analysis_queue._event.set()
+
+    await asyncio.wait_for(main.analysis_queue._wait_for_work(), timeout=0.1)
+
+    assert not main.analysis_queue._event.is_set()
 
 
 @pytest.mark.asyncio

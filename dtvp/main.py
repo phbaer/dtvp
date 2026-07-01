@@ -3,7 +3,7 @@ import logging
 import os
 import socket
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import (
     Any,
     AsyncIterator,
@@ -65,6 +65,16 @@ from .app_wiring import (
 )
 from .auth import auth_settings, get_current_user
 from .auth import router as auth_router
+from .auto_analysis_services import (
+    AutoAnalysisSweepDeps,
+    get_auto_code_analysis_enabled,
+)
+from .auto_analysis_services import (
+    queue_existing_open_vulnerabilities_for_analysis as queue_existing_open_vulnerabilities_for_analysis_impl,
+)
+from .auto_analysis_services import (
+    queue_open_vulnerabilities_for_analysis as queue_open_vulnerabilities_for_analysis_impl,
+)
 from .code_analysis_integration import CodeAnalysisClient, CodeAnalysisSettings
 from .code_analysis_routes import create_code_analysis_router
 from .dt_cache import cache_manager
@@ -78,6 +88,9 @@ from .file_io_services import write_json as write_json_impl
 from .frontend_routes import register_frontend_routes
 from .general_api_routes import (
     create_general_api_router,
+)
+from .grouped_vuln_services import (
+    collect_version_snapshots as collect_grouped_vuln_version_snapshots,
 )
 from .logic import (
     DEFAULT_DEPENDENCY_CHAIN_LIMIT,
@@ -185,6 +198,12 @@ tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
 tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
 
 
+def _is_auto_code_analysis_active() -> bool:
+    if not get_auto_code_analysis_enabled():
+        return False
+    return CodeAnalysisSettings().enabled
+
+
 grouped_vuln_service_deps = build_grouped_vuln_service_deps(
     cache_manager=cache_manager,
     logger=logger,
@@ -195,6 +214,15 @@ grouped_vuln_service_deps = build_grouped_vuln_service_deps(
     sort_projects_by_version=sort_projects_by_version,
     load_team_mapping=lambda: load_team_mapping(),
     group_vulnerabilities=group_vulnerabilities,
+    queue_open_vulnerabilities_for_analysis=lambda grouped, team_mapping: (
+        queue_open_vulnerabilities_for_analysis_impl(
+            analysis_queue=analysis_queue,
+            grouped_vulns=grouped,
+            team_mapping=team_mapping,
+            enabled=_is_auto_code_analysis_active(),
+            logger=logger,
+        )
+    ),
 )
 
 
@@ -395,6 +423,150 @@ analysis_queue = build_analysis_queue(
 )
 
 
+def _queue_sweep_grouped_vulnerabilities(
+    grouped: list[dict[str, Any]],
+    team_mapping: dict[str, Any],
+    handled_vulnerability_ids: set[str] | None = None,
+) -> int:
+    return queue_open_vulnerabilities_for_analysis_impl(
+        analysis_queue=analysis_queue,
+        grouped_vulns=grouped,
+        team_mapping=team_mapping,
+        enabled=True,
+        logger=logger,
+        handled_vulnerability_ids=handled_vulnerability_ids,
+    )
+
+
+auto_analysis_sweep_deps = AutoAnalysisSweepDeps(
+    cache_manager=cache_manager,
+    logger=logger,
+    sort_projects_by_version=sort_projects_by_version,
+    load_team_mapping=lambda: load_team_mapping(),
+    collect_version_snapshots=lambda versions, client, cve, team_mapping: (
+        collect_grouped_vuln_version_snapshots(
+            grouped_vuln_service_deps,
+            versions,
+            client,
+            cve,
+            team_mapping,
+        )
+    ),
+    bom_analysis_cache_cls=BOMAnalysisCache,
+    merge_vulnerability_details=merge_vulnerability_details_impl,
+    group_vulnerabilities=group_vulnerabilities,
+    queue_grouped_vulnerabilities_for_analysis=_queue_sweep_grouped_vulnerabilities,
+)
+
+
+auto_analysis_sweep_state: dict[str, Any] = {
+    "running": False,
+    "last_started_at": None,
+    "last_finished_at": None,
+    "last_queued_count": None,
+    "last_error": None,
+    "last_trigger": None,
+    "next_run_at": None,
+}
+auto_analysis_sweep_lock = asyncio.Lock()
+
+
+def _get_auto_analysis_sweep_interval_seconds() -> int:
+    return get_env_int_with_floor(
+        "DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS",
+        default=900,
+        minimum=60,
+        logger=logger,
+    )
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _utc_after_iso(seconds: int) -> str:
+    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat()
+
+
+def get_auto_analysis_sweep_status() -> dict[str, Any]:
+    enabled = get_auto_code_analysis_enabled()
+    code_analysis_configured = CodeAnalysisSettings().enabled
+    return {
+        "enabled": enabled,
+        "code_analysis_configured": code_analysis_configured,
+        "active": enabled and code_analysis_configured,
+        "interval_seconds": _get_auto_analysis_sweep_interval_seconds(),
+        **auto_analysis_sweep_state,
+    }
+
+
+async def run_auto_analysis_sweep_once(trigger: str) -> dict[str, Any]:
+    if auto_analysis_sweep_lock.locked():
+        return get_auto_analysis_sweep_status()
+
+    async with auto_analysis_sweep_lock:
+        if not _is_auto_code_analysis_active():
+            return get_auto_analysis_sweep_status()
+
+        auto_analysis_sweep_state.update(
+            {
+                "running": True,
+                "last_started_at": _utc_now_iso(),
+                "last_finished_at": None,
+                "last_error": None,
+                "last_trigger": trigger,
+            }
+        )
+
+        try:
+            settings = DTSettings()
+            async with DTClient(
+                settings.api_url,
+                api_key=settings.api_key,
+            ) as client:
+                queued_count = await queue_existing_open_vulnerabilities_for_analysis_impl(
+                    auto_analysis_sweep_deps,
+                    client,
+                )
+            auto_analysis_sweep_state["last_queued_count"] = queued_count
+            if queued_count:
+                logger.info(
+                    "Automatic code analysis sweep queued %d scan(s)",
+                    queued_count,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            auto_analysis_sweep_state["last_error"] = str(exc)
+            logger.warning("Automatic code analysis sweep failed: %s", exc)
+        finally:
+            auto_analysis_sweep_state.update(
+                {
+                    "running": False,
+                    "last_finished_at": _utc_now_iso(),
+                }
+            )
+
+        return get_auto_analysis_sweep_status()
+
+
+async def run_auto_analysis_sweep_now() -> dict[str, Any]:
+    return await run_auto_analysis_sweep_once("manual")
+
+
+async def run_auto_analysis_sweep_loop() -> None:
+    while True:
+        interval_seconds = _get_auto_analysis_sweep_interval_seconds()
+        auto_analysis_sweep_state["next_run_at"] = _utc_now_iso()
+        await run_auto_analysis_sweep_once("scheduled")
+        interval_seconds = _get_auto_analysis_sweep_interval_seconds()
+        auto_analysis_sweep_state["next_run_at"] = _utc_after_iso(interval_seconds)
+
+        await asyncio.sleep(
+            interval_seconds
+        )
+
+
 startup_service_deps = build_startup_service_deps(
     logger=logger,
     version=VERSION,
@@ -406,6 +578,7 @@ startup_service_deps = build_startup_service_deps(
     ),
     initialize_cache_manager=lambda: cache_manager.initialize(),
     run_background_sync_loop=lambda: cache_manager.background_sync_loop(),
+    run_auto_analysis_sweep_loop=run_auto_analysis_sweep_loop,
 )
 
 
@@ -415,6 +588,8 @@ api_router.include_router(
             code_analysis_settings_cls=CodeAnalysisSettings,
             code_analysis_client_cls=CodeAnalysisClient,
             analysis_queue=analysis_queue,
+            get_auto_analysis_sweep_status=get_auto_analysis_sweep_status,
+            run_auto_analysis_sweep_now=run_auto_analysis_sweep_now,
             code_analysis_not_configured_detail=CODE_ANALYSIS_NOT_CONFIGURED_DETAIL,
             code_analysis_disabled_detail="Code analysis integration is not configured. Set DTVP_CODE_ANALYSIS_URL to enable code analysis.",
             not_found_response=NOT_FOUND_RESPONSE,

@@ -73,6 +73,9 @@ def build_grouped_vuln_service_deps(
     sort_projects_by_version: Callable[..., Any],
     load_team_mapping: Callable[[], dict[str, Any]],
     group_vulnerabilities: Callable[..., Any],
+    queue_open_vulnerabilities_for_analysis: (
+        Callable[[list[dict[str, Any]], dict[str, Any]], int] | None
+    ) = None,
 ) -> GroupedVulnServiceDeps:
     return GroupedVulnServiceDeps(
         cache_manager=cache_manager,
@@ -84,6 +87,9 @@ def build_grouped_vuln_service_deps(
         sort_projects_by_version=sort_projects_by_version,
         load_team_mapping=lambda: load_team_mapping(),
         group_vulnerabilities=group_vulnerabilities,
+        queue_open_vulnerabilities_for_analysis=(
+            queue_open_vulnerabilities_for_analysis
+        ),
     )
 
 
@@ -358,6 +364,8 @@ def build_code_analysis_route_deps(
     code_analysis_settings_cls: Callable[[], Any],
     code_analysis_client_cls: type,
     analysis_queue: Any,
+    get_auto_analysis_sweep_status: Callable[[], dict[str, Any]],
+    run_auto_analysis_sweep_now: Callable[[], Any],
     code_analysis_not_configured_detail: str,
     code_analysis_disabled_detail: str,
     not_found_response: dict[int | str, dict[str, Any]],
@@ -367,6 +375,8 @@ def build_code_analysis_route_deps(
         code_analysis_settings_cls=code_analysis_settings_cls,
         code_analysis_client_cls=code_analysis_client_cls,
         analysis_queue=analysis_queue,
+        get_auto_analysis_sweep_status=get_auto_analysis_sweep_status,
+        run_auto_analysis_sweep_now=run_auto_analysis_sweep_now,
         code_analysis_not_configured_detail=code_analysis_not_configured_detail,
         code_analysis_disabled_detail=code_analysis_disabled_detail,
         not_found_response=not_found_response,
@@ -521,6 +531,7 @@ def build_startup_service_deps(
     load_tmrescore_project_cache: Callable[[], dict[str, dict[str, Any]]],
     initialize_cache_manager: Callable[[], Any],
     run_background_sync_loop: Callable[[], Any],
+    run_auto_analysis_sweep_loop: Callable[[], Any],
 ) -> StartupServiceDeps:
     return StartupServiceDeps(
         logger=logger,
@@ -531,6 +542,7 @@ def build_startup_service_deps(
         load_tmrescore_project_cache=load_tmrescore_project_cache,
         initialize_cache_manager=initialize_cache_manager,
         run_background_sync_loop=run_background_sync_loop,
+        run_auto_analysis_sweep_loop=run_auto_analysis_sweep_loop,
         run_analysis_queue_worker=lambda: analysis_queue.worker(),
         run_analysis_queue_cleanup_loop=lambda: analysis_queue.cleanup_loop(),
         create_task=asyncio.create_task,

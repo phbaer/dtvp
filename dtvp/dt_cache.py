@@ -266,6 +266,61 @@ class CacheManager:
             "pending_updates": len(pending),
         }
 
+    def get_cached_project_versions(self) -> List[Dict[str, Any]]:
+        projects = self._load_project_cache(self._projects_path(), []) or []
+        versions_by_uuid: Dict[str, Dict[str, Any]] = {
+            project.get("uuid"): project
+            for project in projects
+            if project.get("uuid")
+        }
+
+        for project_uuid in self.active_project_uuids:
+            if project_uuid and project_uuid not in versions_by_uuid:
+                versions_by_uuid[project_uuid] = {
+                    "uuid": project_uuid,
+                    "name": project_uuid,
+                    "version": "",
+                }
+
+        findings_dir = os.path.join(self.base_path, "findings")
+        if os.path.isdir(findings_dir):
+            for filename in os.listdir(findings_dir):
+                if not filename.endswith(".json"):
+                    continue
+                project_uuid = filename[:-5]
+                if project_uuid and project_uuid not in versions_by_uuid:
+                    versions_by_uuid[project_uuid] = {
+                        "uuid": project_uuid,
+                        "name": project_uuid,
+                        "version": "",
+                    }
+
+        return list(versions_by_uuid.values())
+
+    def get_cached_project_snapshot(
+        self,
+        project_uuid: str,
+    ) -> Optional[
+        Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]
+    ]:
+        findings = self._load_project_cache(self._findings_path(project_uuid), None)
+        if findings is None:
+            return None
+
+        # Overlay locally stored assessments so callers (e.g. the automatic
+        # code-analysis sweep) see the same analysis state as the live project
+        # view. Without this, a vulnerability assessed in DTVP but whose cached
+        # findings file predates that assessment still looks NOT_SET here and
+        # would be incorrectly treated as "open" and re-queued for analysis.
+        findings = self._overlay_local_analysis(project_uuid, findings)
+
+        project_vulnerabilities = self._load_project_cache(
+            self._project_vulns_path(project_uuid),
+            [],
+        ) or []
+        bom = self._load_project_cache(self._bom_path(project_uuid), {}) or {}
+        return findings, project_vulnerabilities, bom
+
     def _touch_cache_meta(self) -> None:
         self.cache_meta["last_refreshed_at"] = datetime.now(timezone.utc).isoformat()
         self._save_projects_meta(self.cache_meta)

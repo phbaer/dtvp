@@ -55,7 +55,7 @@ GitHub Copilot support needs a little extra care because Copilot does not treat 
 - Support global and team-specific assessments.
 - Rescore findings with CVSS data and review the aggregated result in the UI.
 - Optionally re-score against a Microsoft Threat Modeling Tool export via an external tmrescore service.
-- Optionally run reachability/exploitability code analysis through an external code-analysis service.
+- Optionally run reachability/exploitability code analysis, including automatic background scanning of newly discovered open vulnerabilities.
 - Edit team mappings, user roles, and rescore rules from the settings screen.
 - Run against either a live Dependency-Track server or the bundled mock service.
 
@@ -116,11 +116,24 @@ SBOM strategy matters here:
 
 ## Code Analysis
 
-DTVP can optionally call an external code-analysis service to assess whether a vulnerable component is reachable or exploitable in consuming code.
+DTVP can call an external code-analysis service to assess whether a vulnerable component is actually reachable/exploitable in the consuming code, and surface the result inside the reviewer workflow.
 
-- Configure the backend with `DTVP_CODE_ANALYSIS_URL` to enable the integration.
-- Scans run through an in-process queue. Queue routes live in `dtvp/code_analysis_routes.py`, queue runtime/service code lives in `dtvp/analysis_queue_runtime.py` and `dtvp/analysis_queue_services.py`, and the frontend panel lives in `frontend/src/components/CodeAnalysisPanel.vue`.
-- The expected upstream API surface is defined by `dtvp/code_analysis_integration.py`, `openapi/code-analysis-openapi.json`, and the mock server in `test_setup/mock_code_analysis.py`.
+- Configure the backend with `DTVP_CODE_ANALYSIS_URL` to enable the integration. When unset, all code-analysis UI and background scanning stay disabled.
+- Scans run through an in-process queue. Each queue item carries the vulnerability ID, the target component, the CVSS vector, and reviewer guidance, and is processed by a background worker.
+- The expected upstream API surface is defined by `dtvp/code_analysis_integration.py`, the static spec in `openapi/code-analysis-openapi.json`, and the mock server in `test_setup/mock_code_analysis.py`.
+
+### Automatic Scanning Of Open Vulnerabilities
+
+When `DTVP_AUTO_CODE_ANALYSIS_ENABLED=true` **and** a code-analysis URL is configured, DTVP automatically queues scans for genuinely new open vulnerabilities without a reviewer clicking anything.
+
+- **New work:** opening/refreshing a project view queues scans for newly discovered open grouped vulnerabilities it surfaces.
+- **Existing discovery:** a periodic sweep (`DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS`, default 900s) walks both the cached project snapshots and the live project list to catch new open vulnerabilities that no one has opened recently.
+
+Only newly discovered, truly **open** grouped vulnerabilities are queued — never everything. A group is considered automatically open only when every grouped instance is still `NOT_SET` and no instance has assessment detail text at all. Groups that already carry any global, team, or legacy plaintext assessment details are treated as handled, even if one detail block still says `State: NOT_SET` or a newly appeared version is still unassessed. During cached and live sweeps, handled vulnerability IDs suppress other open-looking copies of the same vulnerability so an already assessed CVE is not automatically re-assessed just because team-specific blocks, versions, or project snapshots are missing. Stale automatic queue items for groups that have since become handled are cancelled on the next pass; manually requested scans are left untouched.
+
+Because the sweep reads from the local cache, cached findings are overlaid with locally stored DTVP assessments before the open/closed decision is made. This keeps the background sweep consistent with the live project view, so a vulnerability assessed in DTVP is not re-scanned just because its cached findings file predates the assessment.
+
+The `enabled` / `code_analysis_configured` / `active` state and last-sweep status are exposed through the code-analysis API and reflected in the `AnalysisQueueIndicator` UI.
 
 ## Stack
 
@@ -442,6 +455,8 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_CODE_ANALYSIS_URL` | Base URL of the external or mock code analysis service | unset |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | HTTP timeout for code analysis API calls | `300` |
 | `DTVP_ANALYSIS_QUEUE_TTL_SECONDS` | How long completed or failed code-analysis queue items stay in memory | `3600` |
+| `DTVP_AUTO_CODE_ANALYSIS_ENABLED` | Automatically queue background code-analysis scans for newly discovered, fully unassessed grouped vulnerabilities when code analysis is configured | `false` |
+| `DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS` | Interval for sweeping existing cached findings and live projects for new open vulnerabilities to queue automatic scans | `900` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |
