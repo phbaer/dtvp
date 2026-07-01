@@ -12,6 +12,7 @@ class AnalysisQueueItem(BaseModel):
     component_name: str
     cvss_vector: Optional[str] = None
     user_guidance: Optional[str] = None
+    source: str = "manual"
     submitted_by: str
     submitted_at: str
     status: str = "queued"
@@ -77,6 +78,7 @@ class AnalysisQueue:
         submitted_by: str,
         cvss_vector: Optional[str] = None,
         user_guidance: Optional[str] = None,
+        source: str = "manual",
     ) -> AnalysisQueueItem:
         self.prune_finished()
         queue_id = str(uuid.uuid4())
@@ -86,6 +88,7 @@ class AnalysisQueue:
             component_name=component_name,
             cvss_vector=cvss_vector,
             user_guidance=user_guidance,
+            source=source,
             submitted_by=submitted_by,
             submitted_at=self._deps.utc_now().isoformat(),
         )
@@ -94,6 +97,61 @@ class AnalysisQueue:
         self._reindex()
         self._event.set()
         return item
+
+    def find_existing(
+        self,
+        vuln_id: str,
+        component_name: str,
+        *,
+        statuses: tuple[str, ...] = ("queued", "running", "completed", "failed"),
+    ) -> Optional[AnalysisQueueItem]:
+        self.prune_finished()
+        normalized_vuln = vuln_id.strip().lower()
+        normalized_component = component_name.strip().lower()
+        for item in self._items.values():
+            if item.status not in statuses:
+                continue
+            if item.vuln_id.strip().lower() != normalized_vuln:
+                continue
+            if item.component_name.strip().lower() != normalized_component:
+                continue
+            return item
+        return None
+
+    def submit_once(
+        self,
+        vuln_id: str,
+        component_name: str,
+        submitted_by: str,
+        cvss_vector: Optional[str] = None,
+        user_guidance: Optional[str] = None,
+        source: str = "manual",
+        duplicate_statuses: tuple[str, ...] = (
+            "queued",
+            "running",
+            "completed",
+            "failed",
+        ),
+    ) -> tuple[AnalysisQueueItem, bool]:
+        existing = self.find_existing(
+            vuln_id,
+            component_name,
+            statuses=duplicate_statuses,
+        )
+        if existing:
+            return existing, False
+
+        return (
+            self.submit(
+                vuln_id=vuln_id,
+                component_name=component_name,
+                submitted_by=submitted_by,
+                cvss_vector=cvss_vector,
+                user_guidance=user_guidance,
+                source=source,
+            ),
+            True,
+        )
 
     def get(self, queue_id: str) -> Optional[AnalysisQueueItem]:
         self.prune_finished()
@@ -133,8 +191,8 @@ class AnalysisQueue:
         )
 
     async def _wait_for_work(self) -> None:
-        self._event.clear()
         await self._event.wait()
+        self._event.clear()
 
     def _get_next_queued_item(self) -> Optional[AnalysisQueueItem]:
         return self._deps.get_next_queued_item(self._items, self._order)

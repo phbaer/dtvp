@@ -424,6 +424,20 @@ export interface CodeAnalysisJobStatus {
     progress?: CodeAnalysisJobProgress;
 }
 
+export interface CodeAnalysisAutoSweepStatus {
+    enabled: boolean;
+    code_analysis_configured: boolean;
+    active: boolean;
+    interval_seconds: number;
+    running: boolean;
+    last_started_at?: string | null;
+    last_finished_at?: string | null;
+    last_queued_count?: number | null;
+    last_error?: string | null;
+    last_trigger?: string | null;
+    next_run_at?: string | null;
+}
+
 export interface CodeAnalysisCvssAdjustment {
     original_score: number;
     adjusted_score: number;
@@ -490,6 +504,16 @@ export const codeAnalysisHealth = async (): Promise<{ status: string }> => {
     return res.data;
 };
 
+export const codeAnalysisGetAutoSweepStatus = async (): Promise<CodeAnalysisAutoSweepStatus> => {
+    const res = await api.get('/code-analysis/auto-sweep');
+    return res.data;
+};
+
+export const codeAnalysisRunAutoSweep = async (): Promise<CodeAnalysisAutoSweepStatus> => {
+    const res = await api.post('/code-analysis/auto-sweep/run');
+    return res.data;
+};
+
 export const codeAnalysisRunAssessment = async (
     req: CodeAnalysisAssessRequest,
     onProgress?: (status: CodeAnalysisJobStatus) => void,
@@ -523,6 +547,7 @@ export interface AnalysisQueueItem {
     component_name: string;
     cvss_vector?: string;
     user_guidance?: string;
+    source?: 'manual' | 'automatic' | string;
     submitted_by: string;
     submitted_at: string;
     status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';

@@ -1,19 +1,65 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { Zap, X, Loader2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, AlertTriangle, Activity } from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import { Zap, X, Loader2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, AlertTriangle, Activity, RefreshCw } from 'lucide-vue-next'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
-import type { CodeAnalysisAssessResponse } from '../lib/api'
+import {
+    codeAnalysisGetAutoSweepStatus,
+    codeAnalysisRunAutoSweep,
+    type CodeAnalysisAssessResponse,
+    type CodeAnalysisAutoSweepStatus,
+} from '../lib/api'
 
 const open = ref(false)
 const expandedItem = ref<string | null>(null)
 const expandedResult = ref<CodeAnalysisAssessResponse | null>(null)
 const loadingResult = ref(false)
+const sweepStatus = ref<CodeAnalysisAutoSweepStatus | null>(null)
+const sweepStatusLoading = ref(false)
+const sweepRunLoading = ref(false)
+const sweepError = ref<string | null>(null)
+const triggerRef = ref<HTMLElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+const panelStyle = ref<Record<string, string>>({})
+const PANEL_WIDTH = 384
+const PANEL_MARGIN = 8
+const PANEL_GAP = 8
+const PANEL_Z_INDEX = '12000'
+let sweepStatusTimer: ReturnType<typeof setInterval> | null = null
+
+const updatePanelPosition = () => {
+    const trigger = triggerRef.value
+    if (!trigger || typeof window === 'undefined') return
+
+    const rect = trigger.getBoundingClientRect()
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const width = Math.min(PANEL_WIDTH, viewportWidth - PANEL_MARGIN * 2)
+    const maxLeft = viewportWidth - width - PANEL_MARGIN
+    const left = Math.min(Math.max(PANEL_MARGIN, rect.left), maxLeft)
+    const availableBelow = Math.max(120, viewportHeight - rect.bottom - PANEL_GAP - PANEL_MARGIN)
+    const availableAbove = Math.max(120, rect.top - PANEL_GAP - PANEL_MARGIN)
+    const placeAbove = availableBelow < 260 && availableAbove > availableBelow
+    const maxHeight = Math.min(384, placeAbove ? availableAbove : availableBelow)
+
+    panelStyle.value = {
+        position: 'fixed',
+        left: `${left}px`,
+        width: `${width}px`,
+        maxHeight: `${maxHeight}px`,
+        zIndex: PANEL_Z_INDEX,
+        ...(placeAbove
+            ? { bottom: `${Math.max(PANEL_MARGIN, viewportHeight - rect.top + PANEL_GAP)}px` }
+            : { top: `${Math.min(viewportHeight - maxHeight - PANEL_MARGIN, rect.bottom + PANEL_GAP)}px` }),
+    }
+}
 
 const toggle = () => {
     open.value = !open.value
     if (!open.value) {
         expandedItem.value = null
         expandedResult.value = null
+    } else {
+        nextTick(updatePanelPosition)
     }
 }
 
@@ -22,6 +68,10 @@ const close = () => {
     expandedItem.value = null
     expandedResult.value = null
 }
+
+const isInsideQueuePopup = (target: Node | null) => (
+    Boolean(target && (triggerRef.value?.contains(target) || panelRef.value?.contains(target)))
+)
 
 const toggleItemResult = async (queueId: string, status: string) => {
     if (status !== 'completed') return
@@ -67,27 +117,133 @@ const statusColor = (status: string) => {
     return 'text-yellow-400'
 }
 
+const formatDuration = (seconds?: number | null) => {
+    if (!seconds) return 'unknown'
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    if (minutes && remainingSeconds) return `${minutes}m ${remainingSeconds}s`
+    if (minutes) return `${minutes}m`
+    return `${remainingSeconds}s`
+}
+
+const formatTimestamp = (value?: string | null) => {
+    if (!value) return 'never'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return 'unknown'
+    return date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    })
+}
+
+const formatRelativeTimestamp = (value?: string | null) => {
+    if (!value) return 'not scheduled'
+    const timestamp = Date.parse(value)
+    if (Number.isNaN(timestamp)) return 'unknown'
+    const deltaSeconds = Math.ceil((timestamp - Date.now()) / 1000)
+    if (deltaSeconds <= 0) return 'due now'
+    return `in ${formatDuration(deltaSeconds)}`
+}
+
+const sweepStatusLabel = computed(() => {
+    if (!sweepStatus.value) return sweepStatusLoading.value ? 'Loading' : 'Unknown'
+    if (sweepStatus.value.running) return 'Running'
+    if (sweepStatus.value.active) return 'Active'
+    if (!sweepStatus.value.enabled) return 'Disabled'
+    if (!sweepStatus.value.code_analysis_configured) return 'Not configured'
+    return 'Inactive'
+})
+
+const sweepStatusClass = computed(() => {
+    if (sweepStatus.value?.running) return 'bg-blue-900/30 text-blue-300 border-blue-700/40'
+    if (sweepStatus.value?.active) return 'bg-emerald-900/30 text-emerald-300 border-emerald-700/40'
+    return 'bg-gray-800 text-gray-400 border-gray-700/60'
+})
+
+const canRunSweepNow = computed(() =>
+    Boolean(sweepStatus.value?.active && !sweepStatus.value.running && !sweepRunLoading.value)
+)
+
+const refreshSweepStatus = async () => {
+    sweepStatusLoading.value = true
+    try {
+        sweepStatus.value = await codeAnalysisGetAutoSweepStatus()
+        sweepError.value = sweepStatus.value.last_error || null
+    } catch (error: any) {
+        sweepError.value = error?.message || 'Unable to load automatic sweep status.'
+    } finally {
+        sweepStatusLoading.value = false
+    }
+}
+
+const runSweepNow = async () => {
+    if (!canRunSweepNow.value) return
+    sweepRunLoading.value = true
+    sweepError.value = null
+    try {
+        sweepStatus.value = await codeAnalysisRunAutoSweep()
+        sweepError.value = sweepStatus.value.last_error || null
+        await analysisQueueStore.refresh()
+    } catch (error: any) {
+        sweepError.value = error?.message || 'Unable to run automatic sweep.'
+    } finally {
+        sweepRunLoading.value = false
+    }
+}
+
+const handleDocumentPointerdown = (event: PointerEvent) => {
+    if (!open.value) return
+    if (isInsideQueuePopup(event.target as Node | null)) return
+    close()
+}
+
 onMounted(() => {
     analysisQueueStore.startPolling()
+    refreshSweepStatus()
+    sweepStatusTimer = setInterval(refreshSweepStatus, 10000)
+    window.addEventListener('resize', updatePanelPosition)
+    window.addEventListener('scroll', updatePanelPosition, true)
+    window.visualViewport?.addEventListener('resize', updatePanelPosition)
+    document.addEventListener('pointerdown', handleDocumentPointerdown)
 })
 
 onUnmounted(() => {
     analysisQueueStore.stopPolling()
+    if (sweepStatusTimer) {
+        clearInterval(sweepStatusTimer)
+        sweepStatusTimer = null
+    }
+    window.removeEventListener('resize', updatePanelPosition)
+    window.removeEventListener('scroll', updatePanelPosition, true)
+    window.visualViewport?.removeEventListener('resize', updatePanelPosition)
+    document.removeEventListener('pointerdown', handleDocumentPointerdown)
 })
+
+watch(open, (isOpen) => {
+    if (isOpen) {
+        refreshSweepStatus()
+        nextTick(updatePanelPosition)
+    }
+})
+
 </script>
 
 <template>
     <div class="relative">
         <button
+            ref="triggerRef"
             type="button"
             @click="toggle"
-            class="relative h-8 w-8 inline-flex items-center justify-center rounded-full border border-white/10 transition-all cursor-pointer"
+            class="relative h-8 px-2.5 inline-flex items-center justify-center gap-1.5 rounded-full border border-white/10 transition-all cursor-pointer"
             :class="analysisQueueStore.hasActivity.value
                 ? 'bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600/30 border-cyan-500/40'
                 : 'bg-slate-950/20 text-slate-400 hover:bg-slate-950/30 hover:text-slate-200'"
-            title="Analysis Queue"
+            title="Automatic sweep and analysis queue"
+            data-testid="analysis-queue-trigger"
         >
             <Zap :size="14" />
+            <span class="text-[10px] font-semibold uppercase tracking-wider">Auto sweep</span>
             <span
                 v-if="analysisQueueStore.activeCount.value > 0"
                 class="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-cyan-500 text-[9px] font-bold text-white px-1"
@@ -101,10 +257,14 @@ onUnmounted(() => {
         </button>
 
         <!-- Dropdown panel -->
-        <div
-            v-if="open"
-            class="absolute right-0 top-full mt-2 w-96 rounded-lg border border-gray-700 bg-gray-900 shadow-2xl z-50 overflow-hidden"
-        >
+        <Teleport to="body">
+            <div
+                ref="panelRef"
+                v-if="open"
+                class="rounded-lg border border-gray-700 bg-gray-900 shadow-2xl overflow-hidden flex flex-col"
+                :style="panelStyle"
+                data-testid="analysis-queue-panel"
+            >
             <div class="flex items-center justify-between p-3 border-b border-gray-700/50">
                 <h3 class="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-2">
                     <Zap :size="12" />
@@ -115,11 +275,54 @@ onUnmounted(() => {
                 </button>
             </div>
 
+            <div class="p-3 border-b border-gray-700/50 bg-gray-950/40 space-y-2">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Automatic sweep</span>
+                            <span
+                                class="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded border"
+                                :class="sweepStatusClass"
+                            >
+                                {{ sweepStatusLabel }}
+                            </span>
+                        </div>
+                        <div class="mt-1 text-[10px] text-gray-500">
+                            Next {{ formatRelativeTimestamp(sweepStatus?.next_run_at) }}
+                            <span class="text-gray-700">·</span>
+                            every {{ formatDuration(sweepStatus?.interval_seconds) }}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        class="h-7 shrink-0 inline-flex items-center gap-1.5 rounded border px-2 text-[10px] font-semibold uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                        :class="canRunSweepNow
+                            ? 'border-cyan-700/50 bg-cyan-600/15 text-cyan-300 hover:bg-cyan-600/25'
+                            : 'border-gray-700 bg-gray-800 text-gray-500'"
+                        :disabled="!canRunSweepNow"
+                        @click="runSweepNow"
+                    >
+                        <RefreshCw :size="11" :class="{ 'animate-spin': sweepRunLoading || sweepStatus?.running }" />
+                        Run now
+                    </button>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-gray-500">
+                    <span>Last {{ formatTimestamp(sweepStatus?.last_finished_at) }}</span>
+                    <span v-if="sweepStatus?.last_queued_count !== null && sweepStatus?.last_queued_count !== undefined">
+                        queued {{ sweepStatus?.last_queued_count }}
+                    </span>
+                    <span v-if="sweepStatus?.last_trigger">via {{ sweepStatus?.last_trigger }}</span>
+                </div>
+                <div v-if="sweepError" class="text-[10px] text-red-400">
+                    {{ sweepError }}
+                </div>
+            </div>
+
             <div v-if="analysisQueueStore.items.value.length === 0" class="p-4 text-center text-xs text-gray-500">
                 No analyses in queue
             </div>
 
-            <div v-else class="max-h-96 overflow-y-auto divide-y divide-gray-800">
+            <div v-else class="min-h-0 overflow-y-auto divide-y divide-gray-800">
                 <div
                     v-for="item in analysisQueueStore.items.value"
                     :key="item.queue_id"
@@ -142,6 +345,12 @@ onUnmounted(() => {
                                 </div>
                             </div>
                             <div class="flex items-center gap-2 shrink-0">
+                                <span
+                                    v-if="item.source === 'automatic'"
+                                    class="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-cyan-900/30 text-cyan-300 border border-cyan-700/30"
+                                >
+                                    Auto
+                                </span>
                                 <span
                                     v-if="item.status === 'queued'"
                                     class="text-[9px] font-bold text-yellow-400 bg-yellow-900/30 px-1.5 py-0.5 rounded"
@@ -297,6 +506,7 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-        </div>
+            </div>
+        </Teleport>
     </div>
 </template>

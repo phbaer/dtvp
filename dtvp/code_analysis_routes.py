@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Annotated, Any, Callable, Optional
+from typing import Annotated, Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -10,6 +10,8 @@ class CodeAnalysisRouteDeps:
     code_analysis_settings_cls: Callable[[], Any]
     code_analysis_client_cls: type
     analysis_queue: Any
+    get_auto_analysis_sweep_status: Callable[[], dict[str, Any]]
+    run_auto_analysis_sweep_now: Callable[[], Awaitable[dict[str, Any]]]
     code_analysis_not_configured_detail: str
     code_analysis_disabled_detail: str
     not_found_response: dict[int | str, dict[str, Any]]
@@ -116,6 +118,20 @@ def _register_code_analysis_routes(
             )
         async with deps.code_analysis_client_cls(settings) as client:
             return await client.health()
+
+    @router.get("/code-analysis/auto-sweep")
+    async def code_analysis_auto_sweep_status(
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        return deps.get_auto_analysis_sweep_status()
+
+    @router.post("/code-analysis/auto-sweep/run")
+    async def code_analysis_auto_sweep_run(
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        return await deps.run_auto_analysis_sweep_now()
 
 
 def _register_analysis_queue_routes(

@@ -18,6 +18,9 @@ class GroupedVulnServiceDeps:
     sort_projects_by_version: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]]
     load_team_mapping: Callable[[], Dict[str, Any]]
     group_vulnerabilities: Callable[..., List[Dict[str, Any]]]
+    queue_open_vulnerabilities_for_analysis: Optional[
+        Callable[[List[Dict[str, Any]], Dict[str, Any]], int]
+    ] = None
 
 
 async def fetch_version_snapshot(
@@ -179,6 +182,25 @@ async def process_grouped_vulns_task(
             project_boms={},
             processed_boms=bom_cache_map,
         )
+
+        if deps.queue_open_vulnerabilities_for_analysis:
+            try:
+                queued_count = deps.queue_open_vulnerabilities_for_analysis(
+                    result,
+                    team_mapping,
+                )
+                deps.tasks[task_id]["auto_code_analysis_queued"] = queued_count
+                if queued_count:
+                    msg = (
+                        f"Queued {queued_count} automatic code analysis "
+                        f"scan{'s' if queued_count != 1 else ''}."
+                    )
+                    deps.tasks[task_id].setdefault("log", []).append(msg)
+            except Exception:
+                deps.logger.exception(
+                    "Task %s failed to queue automatic code analysis scans",
+                    task_id,
+                )
 
         deps.tasks[task_id]["status"] = "completed"
         deps.tasks[task_id]["progress"] = 100
