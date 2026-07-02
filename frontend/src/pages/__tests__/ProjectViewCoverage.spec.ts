@@ -158,6 +158,7 @@ describe('ProjectView Coverage Extras', () => {
 
         // At start, loading is true
         expect(wrapper.text()).toContain('Starting search...')
+        expect(wrapper.text()).toContain('Preparing vulnerability list...')
 
         // Verify callback updates state WHILE still loading (promise not resolved)
         // Wait for next tick to ensure onMounted started

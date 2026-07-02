@@ -78,7 +78,6 @@ const error = ref('')
 const loadingMessage = ref('Initializing...')
 const loadingProgress = ref(0)
 const loadingLog = ref<string[]>([])
-const logContainer = ref<HTMLElement | null>(null)
 const archiveExporting = ref(false)
 const archiveExportMessage = ref('')
 const archiveExportError = ref('')
@@ -190,15 +189,6 @@ onMounted(() => {
 
 onActivated(() => {
     void refreshThreatModelProposalsIfNeeded()
-})
-
-// Auto-scroll the loading log to the bottom when new entries appear
-watch(() => loadingLog.value.length, () => {
-    nextTick(() => {
-        if (logContainer.value) {
-            logContainer.value.scrollTop = logContainer.value.scrollHeight
-        }
-    })
 })
 
 const processFetchedGroups = async (data: GroupedVuln[]): Promise<GroupedVuln[]> => {
@@ -578,6 +568,20 @@ const taskListPartialProgress = computed(() => {
     return Math.min(100, Math.round((completed / total) * 100))
 })
 
+const loadingProgressPercent = computed(() =>
+    Math.max(0, Math.min(100, Math.round(loadingProgress.value || 0)))
+)
+
+const loadingProgressTitle = computed(() =>
+    loadingLog.value.length > 0
+        ? loadingLog.value.slice(-5).join('\n')
+        : loadingMessage.value
+)
+
+const showLoadingStatus = computed(() =>
+    viewMode.value === 'analysis' && loading.value && !error.value
+)
+
 const showTaskListStatus = computed(() =>
     isTaskWindowListActive.value
     && !loading.value
@@ -766,7 +770,7 @@ const {
     selectedGroupLoading,
 })
 
-const isAnalysisViewActive = computed(() => viewMode.value === 'analysis' && !loading.value && !error.value)
+const isAnalysisViewActive = computed(() => viewMode.value === 'analysis' && !error.value)
 const isAnalysisWorkspaceActive = isAnalysisViewActive
 const {
     visibleItems: visibleListItems,
@@ -785,6 +789,12 @@ const {
 
 const setListScrollContainer = (element: any) => {
     listScrollContainer.value = element as HTMLElement | null
+}
+
+const hasMeasuredListViewport = () => {
+    const element = listScrollContainer.value
+    if (!element) return false
+    return (element.clientHeight || element.getBoundingClientRect().height || 0) > 0
 }
 
 watch(selectedGroupId, (groupId) => {
@@ -822,6 +832,7 @@ watch(taskGroupListQueryKey, () => {
 
 watch([visibleEndIndex, loadedGroupCount, hasMoreTaskListGroups], () => {
     if (!isAnalysisViewActive.value || !hasMoreTaskListGroups.value) return
+    if (!hasMeasuredListViewport()) return
     if (taskListWindowLoading.value || taskListAppendLoading.value) return
     if (visibleEndIndex.value >= loadedGroupCount.value - 20) {
         void loadTaskGroupWindow({ reset: false })
@@ -972,7 +983,7 @@ watch(currentUserRole, (role) => {
       ]"
   >
     <div
-        v-if="viewMode === 'analysis' && !loading && !error"
+        v-if="viewMode === 'analysis' && !error"
         class="relative z-30 mb-3 shrink-0 rounded-2xl border border-white/10 bg-gray-900/85 p-2 shadow-xl shadow-black/20 backdrop-blur-2xl"
         @keydown.esc="showSearchTokenMenu = false"
     >
@@ -1089,6 +1100,36 @@ watch(currentUserRole, (role) => {
                 </button>
             </div>
             <div
+                v-if="showLoadingStatus"
+                class="rounded-xl border border-blue-400/20 bg-blue-500/10 p-3 text-sm text-blue-100"
+                role="status"
+                :title="loadingProgressTitle"
+            >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <span class="inline-flex min-w-0 flex-1 items-center gap-2">
+                        <Loader2 :size="14" class="shrink-0 animate-spin text-blue-200" />
+                        <span class="min-w-0 truncate">{{ loadingMessage }}</span>
+                    </span>
+                    <span
+                        v-if="loadingProgressPercent > 1"
+                        class="shrink-0 text-xs font-bold tabular-nums text-blue-50"
+                    >
+                        {{ loadingProgressPercent }}%
+                    </span>
+                </div>
+                <div class="mt-3 h-2 overflow-hidden rounded bg-black/30">
+                    <div
+                        v-if="loadingProgressPercent <= 1"
+                        class="h-full w-1/3 animate-pulse rounded-full bg-blue-300/70"
+                    ></div>
+                    <div
+                        v-else
+                        class="h-full rounded-full bg-blue-300 transition-all duration-300"
+                        :style="{ width: `${loadingProgressPercent}%` }"
+                    ></div>
+                </div>
+            </div>
+            <div
                 v-if="archiveExportMessage || archiveExportError"
                 class="rounded-xl border p-3 text-sm"
                 :class="archiveExportError ? 'border-red-400/20 bg-red-500/10 text-red-200' : 'border-blue-400/20 bg-blue-500/10 text-blue-100'"
@@ -1194,18 +1235,13 @@ watch(currentUserRole, (role) => {
             ]"
         >
             <div class="hidden"></div>
-            <div v-if="loading" class="text-center py-10">
+            <div v-if="loading && viewMode !== 'analysis'" class="text-center py-10">
                 <div class="mb-2 text-xl font-semibold">{{ loadingMessage }}</div>
                 <div class="w-full max-w-md mx-auto bg-gray-700 rounded-full h-4 relative overflow-hidden">
                     <div v-if="loadingProgress <= 1" class="bg-blue-500/60 h-4 w-1/3 rounded-full animate-pulse"></div>
                     <div v-else class="bg-blue-500 h-4 transition-all duration-300" :style="{ width: loadingProgress + '%' }"></div>
                 </div>
                 <div class="mt-2 text-sm text-gray-400">{{ loadingProgress > 1 ? loadingProgress + '%' : '' }}</div>
-                <div v-if="loadingLog.length > 0" ref="logContainer" class="mt-4 w-full max-w-md mx-auto bg-gray-900 border border-gray-700 rounded-lg p-3 max-h-40 overflow-y-auto text-left">
-                    <div v-for="(entry, i) in loadingLog" :key="i" class="text-xs font-mono text-gray-400 py-0.5">
-                        <span class="text-gray-600 select-none">{{ String(i + 1).padStart(2, '0') }}</span> {{ entry }}
-                    </div>
-                </div>
             </div>
             <div v-else-if="error" class="text-red-500 text-center py-10">{{ error }}</div>
             <div
@@ -1292,7 +1328,14 @@ watch(currentUserRole, (role) => {
                                 </button>
                             </div>
                         </template>
-                        <div v-if="filteredGroupCount === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
+                        <div
+                            v-if="filteredGroupCount === 0 && loading"
+                            class="flex min-h-[20rem] w-full min-w-full flex-col items-center justify-center gap-3 py-16 text-center text-gray-400"
+                        >
+                            <Loader2 :size="28" class="animate-spin text-blue-300" />
+                            <div class="text-sm font-semibold uppercase tracking-wider text-gray-300">Preparing vulnerability list...</div>
+                        </div>
+                        <div v-else-if="filteredGroupCount === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
                     </div>
                     <div v-else class="space-y-4">
                         <div v-if="statsLoading" class="text-center py-16">
