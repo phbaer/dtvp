@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getGroupedVulns, getTeamMapping, getRescoreRules, getStatistics, getTaskStatistics, getTMRescoreProposals } from '../lib/api'
+import {
+    getGroupedVulns,
+    getProjectArchiveTaskDownloadUrl,
+    getRescoreRules,
+    getStatistics,
+    getTaskStatistics,
+    getTeamMapping,
+    getTMRescoreProposals,
+    startProjectArchiveExport,
+    waitForProjectArchiveTask,
+} from '../lib/api'
 import type { TaskVulnGroupListQuery } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
-import type { GroupedVuln, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
+import type { GroupedVuln, ProjectArchiveTask, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
 import { projectHeaderState } from '../lib/projectHeaderStore'
 import { useProjectBulkResolve } from '../lib/useProjectBulkResolve'
 import { useProjectVulnFilters } from '../lib/useProjectVulnFilters'
@@ -45,7 +55,7 @@ import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal
 import BulkApproveModal from '../components/BulkApproveModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
-import { BarChart3, Loader2, Plus, Search, SlidersHorizontal, X } from 'lucide-vue-next'
+import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from 'lucide-vue-next'
 
 const TASK_LIST_WINDOW_LIMIT = 250
 
@@ -69,6 +79,10 @@ const loadingMessage = ref('Initializing...')
 const loadingProgress = ref(0)
 const loadingLog = ref<string[]>([])
 const logContainer = ref<HTMLElement | null>(null)
+const archiveExporting = ref(false)
+const archiveExportMessage = ref('')
+const archiveExportError = ref('')
+const archiveExportTask = ref<ProjectArchiveTask | null>(null)
 const viewMode = projectHeaderState.viewMode
 const stats = ref<Statistics | null>(null)
 const statsLoading = ref(false)
@@ -96,6 +110,16 @@ const listItemCache = createVulnListItemCache()
 provide('tmrescoreProposals', tmrescoreProposals)
 
 const showBulkApproveModal = ref(false)
+
+const archiveExportProgress = computed(() => {
+    const progress = archiveExportTask.value?.progress ?? 0
+    return Math.max(0, Math.min(100, progress))
+})
+
+const archiveExportDownloadUrl = computed(() => {
+    if (archiveExportTask.value?.status !== 'completed') return ''
+    return getProjectArchiveTaskDownloadUrl(archiveExportTask.value.id)
+})
 
 const TMRESCORE_FILTER_OPTIONS = [
     { value: 'WITH_PROPOSAL', label: 'with' },
@@ -702,6 +726,36 @@ const handleBulkApproveModalUpdates = (updates: Array<{ id: string; data: any }>
     handleBulkUpdates(updates, () => { showBulkApproveModal.value = false })
 }
 
+const exportCurrentProjectArchive = async () => {
+    const name = route.params.name as string
+    if (!name || name === '_all_') return
+    archiveExporting.value = true
+    archiveExportError.value = ''
+    archiveExportTask.value = null
+    archiveExportMessage.value = `Queueing archive export for ${name}...`
+    try {
+        const { task_id } = await startProjectArchiveExport({ project_name: name, refresh: true })
+        archiveExportTask.value = {
+            id: task_id,
+            kind: 'export',
+            status: 'pending',
+            message: `Queued archive export for ${name}`,
+            progress: 0,
+        }
+        const task = await waitForProjectArchiveTask(task_id, (status) => {
+            archiveExportTask.value = status
+            archiveExportMessage.value = status.message
+        })
+        archiveExportTask.value = task
+        archiveExportMessage.value = `Archive ready for ${name}`
+        window.location.href = getProjectArchiveTaskDownloadUrl(task.id)
+    } catch (err: any) {
+        archiveExportError.value = err.message || 'Project archive export failed'
+    } finally {
+        archiveExporting.value = false
+    }
+}
+
 const {
     isDesktopInspector,
     isDesktopDetailOpen,
@@ -1009,6 +1063,18 @@ watch(currentUserRole, (role) => {
                         </button>
                     </div>
                 </div>
+                <button
+                    v-if="currentUserRole === 'REVIEWER'"
+                    type="button"
+                    title="Export project archive"
+                    :disabled="archiveExporting"
+                    class="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-slate-950/35 px-3 text-xs font-semibold uppercase tracking-wider text-slate-200 transition-colors hover:bg-slate-900/55 hover:text-white disabled:cursor-wait disabled:opacity-60"
+                    @click="exportCurrentProjectArchive"
+                >
+                    <Loader2 v-if="archiveExporting" :size="14" class="animate-spin" />
+                    <Archive v-else :size="14" />
+                    <span class="hidden sm:inline">{{ archiveExporting ? 'Exporting' : 'Archive' }}</span>
+                </button>
                 <div class="hidden shrink-0 text-right text-[11px] leading-tight text-gray-400 md:block">
                     <div><span class="font-semibold text-white">{{ filteredGroupCount }}</span> matched</div>
                     <div>{{ loadedGroupCount }} loaded · {{ totalGroupCount }} total<span v-if="taskListPartial"> · provisional</span></div>
@@ -1021,6 +1087,28 @@ watch(currentUserRole, (role) => {
                 >
                     Reset
                 </button>
+            </div>
+            <div
+                v-if="archiveExportMessage || archiveExportError"
+                class="rounded-xl border p-3 text-sm"
+                :class="archiveExportError ? 'border-red-400/20 bg-red-500/10 text-red-200' : 'border-blue-400/20 bg-blue-500/10 text-blue-100'"
+                role="status"
+            >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <span class="min-w-0 flex-1 truncate">{{ archiveExportError || archiveExportMessage }}</span>
+                    <span v-if="archiveExportTask && !archiveExportError" class="text-xs font-bold text-blue-200">{{ archiveExportProgress }}%</span>
+                    <a
+                        v-if="archiveExportDownloadUrl"
+                        :href="archiveExportDownloadUrl"
+                        class="inline-flex items-center gap-1 rounded-lg border border-green-400/30 bg-green-500/15 px-2.5 py-1.5 text-xs font-bold text-green-100 transition-colors hover:bg-green-500/25"
+                    >
+                        <Download :size="13" />
+                        Download
+                    </a>
+                </div>
+                <div v-if="archiveExportTask && !archiveExportError && archiveExportTask.status !== 'completed'" class="mt-3 h-2 overflow-hidden rounded bg-black/30">
+                    <div class="h-full bg-blue-400 transition-all" :style="{ width: `${archiveExportProgress}%` }"></div>
+                </div>
             </div>
             <div class="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1">
                 <span class="rounded-full border border-blue-400/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-200">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, nextTick } from 'vue'
 import { Clock, X, ChevronDown } from 'lucide-vue-next'
+import { getAttributionAgeFilterDays } from '../lib/attributionAgePresets'
 
 const props = defineProps<{
     days: number | null
@@ -13,7 +14,7 @@ const emit = defineEmits<{
     'update:mode': [value: 'older' | 'younger']
 }>()
 
-const PRESETS = [7, 14, 30, 90, 180, 365]
+const presets = getAttributionAgeFilterDays()
 
 const isOpen = ref(false)
 const triggerRef = ref<HTMLElement | null>(null)
@@ -146,7 +147,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="grid grid-cols-3 gap-1.5">
                     <button
-                        v-for="preset in PRESETS"
+                        v-for="preset in presets"
                         :key="preset"
                         type="button"
                         @click="applyPreset(preset)"

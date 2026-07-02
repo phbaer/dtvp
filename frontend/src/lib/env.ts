@@ -3,7 +3,8 @@ export type RuntimeConfigKey =
     | 'DTVP_FRONTEND_URL'
     | 'DTVP_API_URL'
     | 'DTVP_DEV_DISABLE_AUTH'
-    | 'DTVP_DEFAULT_PROJECT_FILTER';
+    | 'DTVP_DEFAULT_PROJECT_FILTER'
+    | 'DTVP_ATTRIBUTION_AGE_FILTER_DAYS';
 
 export const getRuntimeConfig = (key: RuntimeConfigKey, defaultValue: string): string => {
     // Primary source: server-side injected config via index.html (window.__env__)

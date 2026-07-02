@@ -13,6 +13,8 @@ class FrontendRouteDeps:
     get_context_path: Callable[[], str]
     get_frontend_url: Callable[[], str]
     get_dev_disable_auth: Callable[[], bool]
+    get_default_project_filter: Callable[[], str]
+    get_attribution_age_filter_days: Callable[[], str]
     read_text: Callable[[str], str]
 
 
@@ -28,6 +30,14 @@ def _render_index_html(index_path: str, deps: FrontendRouteDeps) -> HTMLResponse
         content = content.replace(
             "${DTVP_DEV_DISABLE_AUTH}",
             "true" if deps.get_dev_disable_auth() else "false",
+        )
+        content = content.replace(
+            "${DTVP_DEFAULT_PROJECT_FILTER}",
+            deps.get_default_project_filter(),
+        )
+        content = content.replace(
+            "${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}",
+            deps.get_attribution_age_filter_days(),
         )
 
         if current_context_path:

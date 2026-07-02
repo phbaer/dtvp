@@ -2,6 +2,7 @@ import httpx
 import asyncio
 import os
 import logging
+import json
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from fastapi import Request
 from pydantic import Field
@@ -18,10 +19,7 @@ class DTClient:
         cookies: dict = None,
     ):
         self.base_url = base_url.rstrip("/")
-        self.headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
+        self.headers = {"Accept": "application/json"}
         if api_key:
             self.headers["X-Api-Key"] = api_key
         if token:
@@ -101,6 +99,93 @@ class DTClient:
         """
         # Placeholder as per original code
         pass
+
+    async def find_project_by_name_version(
+        self,
+        name: str,
+        version: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find one active project version by exact name and version.
+        """
+        projects = await self.get_projects(name)
+        for project in projects:
+            if project.get("name") == name and (project.get("version") or "") == (
+                version or ""
+            ):
+                return project
+        return None
+
+    async def upload_bom(
+        self,
+        bom: Dict[str, Any],
+        *,
+        project_uuid: Optional[str] = None,
+        project_name: Optional[str] = None,
+        project_version: Optional[str] = None,
+        auto_create: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Upload a CycloneDX BOM to Dependency-Track.
+
+        When project_uuid is omitted, projectName/projectVersion and autoCreate
+        let Dependency-Track create the missing project version.
+        """
+        data: Dict[str, str] = {}
+        if project_uuid:
+            data["project"] = project_uuid
+        else:
+            if not project_name:
+                raise ValueError("project_name is required when project_uuid is omitted")
+            data["projectName"] = project_name
+            data["projectVersion"] = project_version or ""
+            data["autoCreate"] = "true" if auto_create else "false"
+
+        bom_bytes = json.dumps(bom).encode("utf-8")
+        response = await self.client.post(
+            f"{self.base_url}/api/v1/bom",
+            data=data,
+            files={"bom": ("bom.json", bom_bytes, "application/json")},
+        )
+        response.raise_for_status()
+        if not response.content:
+            return {}
+        return response.json()
+
+    async def wait_for_project_version(
+        self,
+        name: str,
+        version: Optional[str],
+        *,
+        timeout_seconds: float = 30.0,
+        interval_seconds: float = 1.0,
+    ) -> Optional[Dict[str, Any]]:
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        while True:
+            project = await self.find_project_by_name_version(name, version)
+            if project:
+                return project
+            if asyncio.get_running_loop().time() >= deadline:
+                return None
+            await asyncio.sleep(interval_seconds)
+
+    async def wait_for_project_findings(
+        self,
+        project_uuid: str,
+        *,
+        expected_min_findings: int = 0,
+        timeout_seconds: float = 60.0,
+        interval_seconds: float = 2.0,
+    ) -> List[Dict[str, Any]]:
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        latest: List[Dict[str, Any]] = []
+        while True:
+            latest = await self.get_vulnerabilities(project_uuid)
+            if len(latest) >= expected_min_findings:
+                return latest
+            if asyncio.get_running_loop().time() >= deadline:
+                return latest
+            await asyncio.sleep(interval_seconds)
 
     async def get_vulnerabilities(
         self, project_uuid: str, cve: Optional[str] = None

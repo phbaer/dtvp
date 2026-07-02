@@ -466,7 +466,7 @@ describe('VulnGroupCard', () => {
 
 
 
-    it('submits assessment with comment and suppression', async () => {
+    it('submits assessment with suppression without audit comment', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
             global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } }, stubs: { teleport: true } }
@@ -477,36 +477,27 @@ describe('VulnGroupCard', () => {
         ;(wrapper.vm as any).selectedTeam = 'Security'
         await wrapper.vm.$nextTick()
 
-        // Use optional chaining / safe access for find
-        // 0: Team, 1: State
-        // Textareas: 0: Details (Team), 1: Comment (Global)
-        const textAreas = wrapper.findAll('textarea')
-        if (textAreas.length > 1) {
-            const commentArea = textAreas[1]
-            await commentArea?.setValue('Audit comment')
-            // Suppress checkbox id might be different now? Or generic?
-            // "Suppress this vulnerability"
-            const checkboxes = wrapper.findAll('input[type="checkbox"]')
-            if (checkboxes.length > 0) {
-                await checkboxes[checkboxes.length - 1]?.setValue(true) // Assuming suppression is last
-            }
+        expect(wrapper.find('#assessment-comment-textarea').exists()).toBe(false)
 
-            // Submit
-            const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-            applyBtn?.trigger('click')
-            await flushPromises()
-
-            // Confirm in modal
-            const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
-            await confirmBtn?.trigger('click')
-            await flushPromises()
-
-            expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
-                comment: 'Audit comment',
-                suppressed: true,
-                team: 'Security'
-            }))
+        const checkboxes = wrapper.findAll('input[type="checkbox"]')
+        if (checkboxes.length > 0) {
+            await checkboxes[checkboxes.length - 1]?.setValue(true) // Suppression is last
         }
+
+        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        applyBtn?.trigger('click')
+        await flushPromises()
+
+        const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
+        await confirmBtn?.trigger('click')
+        await flushPromises()
+
+        expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
+            suppressed: true,
+            team: 'Security'
+        }))
+        const lastPayload = vi.mocked(updateAssessment).mock.calls.at(-1)?.[0] as unknown as Record<string, unknown>
+        expect(lastPayload).not.toHaveProperty('comment')
     })
 
     it('renders analysis comments', async () => {
@@ -881,7 +872,7 @@ describe('VulnGroupCard', () => {
 
         // Initially invisible (Global for analyst)
         expect(wrapper.text()).not.toContain('CVSS Calculator')
-        // Comments/Suppression should be hidden for analysts
+        // Audit comment and suppression controls should be hidden for analysts
         expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(false)
         expect(wrapper.findAll('label').some(l => l.text() === 'Suppress this vulnerability')).toBe(false)
 
@@ -890,7 +881,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         // With role-based UI for Analyst:
-        // - Comments/Suppression are STILL hidden
+        // - Audit comment and suppression controls are STILL hidden
         expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(false)
         // - Team tab should be selected and its assessment section visible
         expect(wrapper.text()).toContain('Security')
@@ -898,7 +889,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Analysis State')
     })
 
-    it('shows comments and suppression for reviewers', async () => {
+    it('shows suppression but no audit comment input for reviewers', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: { ...mockGroup, tags: ['Security'] } },
             global: {
@@ -910,7 +901,7 @@ describe('VulnGroupCard', () => {
 
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(true)
+        expect(wrapper.findAll('label').some(l => l.text() === 'Comment')).toBe(false)
         expect(wrapper.text()).toContain('Suppress this vulnerability')
     })
 

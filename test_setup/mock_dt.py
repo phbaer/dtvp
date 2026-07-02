@@ -1,10 +1,11 @@
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -222,6 +223,51 @@ def get_projects(request: Request, name: Optional[str] = None):
     if name:
         return [p for p in mock_projects if name.lower() in p.name.lower()]
     return mock_projects
+
+
+@app.post("/api/v1/bom")
+async def upload_bom(
+    request: Request,
+    bom: UploadFile = File(...),
+    project: Optional[str] = Form(None),
+    projectName: Optional[str] = Form(None),
+    projectVersion: Optional[str] = Form(None),
+    autoCreate: bool = Form(False),
+):
+    check_auth(request)
+    await bom.read()
+
+    if project:
+        existing = next((p for p in mock_projects if p.uuid == project), None)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return {"token": "mock-bom-token", "project": existing.uuid}
+
+    if not projectName:
+        raise HTTPException(status_code=400, detail="project or projectName required")
+
+    existing = next(
+        (
+            p
+            for p in mock_projects
+            if p.name == projectName and (p.version or "") == (projectVersion or "")
+        ),
+        None,
+    )
+    if existing:
+        return {"token": "mock-bom-token", "project": existing.uuid}
+
+    if not autoCreate:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    created = Project(
+        name=projectName,
+        version=projectVersion or "",
+        uuid=str(uuid.uuid4()),
+        classifier="APPLICATION",
+    )
+    mock_projects.append(created)
+    return {"token": "mock-bom-token", "project": created.uuid}
 
 
 def _component_for_vuln(vuln_uuid: str):

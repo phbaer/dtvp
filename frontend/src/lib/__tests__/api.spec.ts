@@ -20,8 +20,16 @@ import {
     getTMRescoreProjectState,
     getTMRescoreSyntheticSbomDownloadUrl,
     getTMRescoreSyntheticSbomSummary,
+    applyProjectArchiveImport,
+    getProjectArchiveSnapshotDownloadUrl,
+    getProjectArchiveTask,
+    getProjectArchiveTaskDownloadUrl,
+    listProjectArchiveSnapshots,
     resumeTMRescoreAnalysis,
     runTMRescoreAnalysis,
+    startProjectArchiveExport,
+    uploadProjectArchiveImport,
+    waitForProjectArchiveTask,
 } from '../api'
 
 const mocks = vi.hoisted(() => ({
@@ -99,6 +107,50 @@ describe('api.ts', () => {
 
         expect(mocks.get).toHaveBeenCalledWith('/cache-status')
         expect(result).toEqual(mockData)
+    })
+
+    it('project archive helpers call the archive endpoints', async () => {
+        mocks.post.mockResolvedValueOnce({ data: { task_id: 'export-task' } })
+        mocks.get
+            .mockResolvedValueOnce({ data: { id: 'export-task', status: 'completed' } })
+            .mockResolvedValueOnce({ data: [{ filename: 'archive.dtvp-project-archive.zip' }] })
+        const file = new File(['zip'], 'archive.zip', { type: 'application/zip' })
+
+        await expect(startProjectArchiveExport({ project_name: 'ArchiveApp', refresh: true })).resolves.toEqual({ task_id: 'export-task' })
+        await expect(getProjectArchiveTask('export-task')).resolves.toEqual({ id: 'export-task', status: 'completed' })
+        await expect(listProjectArchiveSnapshots()).resolves.toEqual([{ filename: 'archive.dtvp-project-archive.zip' }])
+
+        mocks.post.mockResolvedValueOnce({ data: { task_id: 'import-task' } })
+        await expect(uploadProjectArchiveImport(file)).resolves.toEqual({ task_id: 'import-task' })
+        expect(mocks.post).toHaveBeenCalledWith('/project-archives/imports', expect.any(FormData))
+
+        mocks.post.mockResolvedValueOnce({ data: { task_id: 'import-task' } })
+        await expect(applyProjectArchiveImport('import-task', 'update')).resolves.toEqual({ task_id: 'import-task' })
+        expect(mocks.post).toHaveBeenCalledWith('/project-archives/imports/import-task/apply', { mode: 'update' })
+
+        expect(getProjectArchiveTaskDownloadUrl('export-task')).toContain('/project-archives/tasks/export-task/download')
+        expect(getProjectArchiveSnapshotDownloadUrl('archive.dtvp-project-archive.zip')).toContain('/project-archives/snapshots/archive.dtvp-project-archive.zip/download')
+    })
+
+    it('waitForProjectArchiveTask polls archive task progress by default', async () => {
+        const running = { id: 'archive-task', status: 'running', progress: 25, message: 'Running export' }
+        const completed = { id: 'archive-task', status: 'completed', progress: 100, message: 'Archive ready' }
+        const onProgress = vi.fn()
+        mocks.get
+            .mockResolvedValueOnce({ data: running })
+            .mockResolvedValueOnce({ data: completed })
+
+        vi.useFakeTimers()
+        const promise = waitForProjectArchiveTask('archive-task', onProgress, { pollIntervalMs: 250 })
+
+        await vi.advanceTimersByTimeAsync(0)
+        await vi.advanceTimersByTimeAsync(250)
+        await expect(promise).resolves.toEqual(completed)
+
+        expect(mocks.get).toHaveBeenCalledWith('/project-archives/tasks/archive-task')
+        expect(onProgress).toHaveBeenCalledWith(running)
+        expect(onProgress).toHaveBeenCalledWith(completed)
+        vi.useRealTimers()
     })
 
     it('getGroupedVulns starts task and polls for result', async () => {

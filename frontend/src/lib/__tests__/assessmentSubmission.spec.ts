@@ -44,7 +44,6 @@ describe('assessmentSubmission', () => {
             rawDetailsTouched: false,
             rawDetails: '',
             mergedAssessmentFullText: '',
-            comment: 'Looks bad',
             suppressed: false,
             force: false,
         })
@@ -60,7 +59,7 @@ describe('assessmentSubmission', () => {
         expect(prepared.reviewText).toContain('[Rescored: 9.8]')
         expect(prepared.reviewText).toContain('[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H]')
         expect(prepared.payload.team).toBe('TeamA')
-        expect(prepared.payload.comment).toBe('Looks bad')
+        expect(prepared.payload).not.toHaveProperty('comment')
         expect(prepared.payload.original_analysis).toEqual({})
     })
 
@@ -89,7 +88,6 @@ describe('assessmentSubmission', () => {
             rawDetailsTouched: true,
             rawDetails: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: reviewer] [Justification: CODE_NOT_PRESENT] ---\nRaw details',
             mergedAssessmentFullText: 'previous text',
-            comment: '',
             suppressed: true,
             force: true,
         })

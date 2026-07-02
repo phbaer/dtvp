@@ -36,7 +36,6 @@ interface PrepareAssessmentSubmissionInput {
     rawDetailsTouched: boolean
     rawDetails: string
     mergedAssessmentFullText: string
-    comment: string
     suppressed: boolean
     force: boolean
 }
@@ -251,7 +250,6 @@ export const prepareAssessmentSubmission = (
             instances: input.allInstances,
             state: finalState,
             details: finalText,
-            comment: input.comment,
             justification: input.justification && input.justification !== 'NOT_SET' ? input.justification : undefined,
             suppressed: input.suppressed,
             team: input.selectedTeam || undefined,

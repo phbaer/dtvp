@@ -1,15 +1,29 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from 'vue'
-import { getProjects } from '../lib/api'
+import { getProjectArchiveTaskDownloadUrl, getProjects, startProjectArchiveExport, waitForProjectArchiveTask } from '../lib/api'
 import { getRuntimeConfig } from '../lib/env'
-import type { Project } from '../types'
-import { Search } from 'lucide-vue-next'
+import type { Project, ProjectArchiveTask } from '../types'
+import { Archive, Download, Loader2, Search } from 'lucide-vue-next'
 
 const query = ref(getRuntimeConfig('DTVP_DEFAULT_PROJECT_FILTER', '')) // Kept for client-side filtering
 const cveFilter = ref('') // Optional global CVE filter
 const realRole = inject<any>('realRole', ref('ANALYST'))
 const allProjects = ref<Project[]>([])
 const loading = ref(false)
+const exportingProject = ref('')
+const exportMessage = ref('')
+const exportError = ref('')
+const exportTask = ref<ProjectArchiveTask | null>(null)
+
+const exportProgress = computed(() => {
+    const progress = exportTask.value?.progress ?? 0
+    return Math.max(0, Math.min(100, progress))
+})
+
+const exportDownloadUrl = computed(() => {
+    if (exportTask.value?.status !== 'completed') return ''
+    return getProjectArchiveTaskDownloadUrl(exportTask.value.id)
+})
 
 const fetchProjects = async () => {
     loading.value = true
@@ -82,6 +96,34 @@ const groupedProjects = computed(() => {
 
     return result
 })
+
+const exportProject = async (name: string) => {
+    exportingProject.value = name
+    exportTask.value = null
+    exportMessage.value = `Queueing archive export for ${name}...`
+    exportError.value = ''
+    try {
+        const { task_id } = await startProjectArchiveExport({ project_name: name, refresh: true })
+        exportTask.value = {
+            id: task_id,
+            kind: 'export',
+            status: 'pending',
+            message: `Queued archive export for ${name}`,
+            progress: 0,
+        }
+        const task = await waitForProjectArchiveTask(task_id, (status) => {
+            exportTask.value = status
+            exportMessage.value = status.message
+        })
+        exportTask.value = task
+        exportMessage.value = `Archive ready for ${name}`
+        window.location.href = getProjectArchiveTaskDownloadUrl(task.id)
+    } catch (err: any) {
+        exportError.value = err.message || 'Project archive export failed'
+    } finally {
+        exportingProject.value = ''
+    }
+}
 </script>
 
 <template>
@@ -121,6 +163,27 @@ const groupedProjects = computed(() => {
             </div>
         </div>
     </div>
+
+    <div v-if="exportMessage || exportError" class="mb-4 rounded border px-4 py-3 text-sm"
+        :class="exportError ? 'border-red-800 bg-red-900/30 text-red-300' : 'border-blue-800 bg-blue-900/20 text-blue-200'"
+        role="status"
+    >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <span>{{ exportError || exportMessage }}</span>
+            <span v-if="exportTask && !exportError" class="text-xs font-bold text-blue-200">{{ exportProgress }}%</span>
+            <a
+                v-if="exportDownloadUrl"
+                :href="exportDownloadUrl"
+                class="inline-flex items-center gap-1 rounded border border-green-500/30 bg-green-600/20 px-2 py-1 text-xs font-bold text-green-100 transition-colors hover:bg-green-600/30"
+            >
+                <Download :size="13" />
+                Download
+            </a>
+        </div>
+        <div v-if="exportTask && !exportError && exportTask.status !== 'completed'" class="mt-3 h-2 overflow-hidden rounded bg-black/30">
+            <div class="h-full bg-blue-400 transition-all" :style="{ width: `${exportProgress}%` }"></div>
+        </div>
+    </div>
     
     <div v-if="loading" class="text-center text-gray-500 py-8">Loading projects...</div>
 
@@ -148,6 +211,18 @@ const groupedProjects = computed(() => {
                         >
                             Threat Model
                         </router-link>
+                        <button
+                            v-if="realRole === 'REVIEWER'"
+                            type="button"
+                            :disabled="exportingProject === p.name"
+                            class="inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-gray-600 bg-gray-900/70 px-2 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-wait disabled:opacity-60"
+                            title="Export project archive"
+                            @click="exportProject(p.name)"
+                        >
+                            <Loader2 v-if="exportingProject === p.name" :size="14" class="animate-spin" />
+                            <Archive v-else :size="14" />
+                            <span class="sr-only">Export {{ p.name }}</span>
+                        </button>
                     </div>
                     
                     <div class="flex flex-wrap gap-2 mt-2">
