@@ -15,11 +15,16 @@ echo "Starting frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}"
 DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL:-http://localhost:8000}
 echo "Using DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}"
 
+# Default attribution-age filter presets if not set
+DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
+echo "Using DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}"
+
 # Replace placeholders in index.html
 # We use a temp file to avoid issues with sed in-place on some busybox versions
 sed -e "s|\${DTVP_CONTEXT_PATH}|${DTVP_CONTEXT_PATH}|g" \
     -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
     -e "s|\${DTVP_DEFAULT_PROJECT_FILTER}|${DTVP_DEFAULT_PROJECT_FILTER}|g" \
+    -e "s|\${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|g" \
     /usr/share/nginx/html/index.html > /usr/share/nginx/html/index.html.tmp && mv /usr/share/nginx/html/index.html.tmp /usr/share/nginx/html/index.html
 
 # Generate nginx.conf

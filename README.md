@@ -56,6 +56,7 @@ GitHub Copilot support needs a little extra care because Copilot does not treat 
 - Rescore findings with CVSS data and review the aggregated result in the UI.
 - Optionally re-score against a Microsoft Threat Modeling Tool export via an external tmrescore service.
 - Optionally run reachability/exploitability code analysis, including automatic background scanning of newly discovered open vulnerabilities.
+- Export and import versioned project archives so Dependency-Track project versions, SBOMs, findings, vulnerability details, and DTVP assessments can be restored into a replacement Dependency-Track instance.
 - Edit team mappings, user roles, and rescore rules from the settings screen.
 - Run against either a live Dependency-Track server or the bundled mock service.
 
@@ -65,6 +66,7 @@ DTVP is split into a FastAPI backend, a Vue single-page application, and mock ex
 
 ### Backend
 
+- `dtvp/boot.py` is the default ASGI entry point for packaged and local runs. It is intentionally tiny, lets Uvicorn bind and accept HTTP before importing the full backend, serves `/startup` and `/api/startup` while the real app loads, then hands traffic to `dtvp.main:app`.
 - `dtvp/main.py` builds the FastAPI app, CORS, context path handling, task stores, dependency wiring, routers, startup/shutdown hooks, and SPA fallback.
 - `dtvp/app_wiring.py` centralizes dependency construction so routes and services can be tested without importing the full app.
 - Backend startup prints a flushed console context block and logs the DTVP version, build commit, Python/platform/container hints, and a safe environment summary. Integration endpoints and auth providers are shown as configured/unset rather than printing secrets.
@@ -74,6 +76,7 @@ DTVP is split into a FastAPI backend, a Vue single-page application, and mock ex
 - `dtvp/logic.py` contains core domain logic for team mapping, roles, BOM dependency analysis, vulnerability grouping, statistics, CVSS vector handling, assessment-detail parsing, and aggregated assessment state.
 - `dtvp/assessment_services.py` handles Dependency-Track assessment payloads, conflict detection, local cache updates, remote writes, and result finalization.
 - `dtvp/dt_client.py` calls the Dependency-Track API. `dtvp/dt_cache.py` persists Dependency-Track projects, findings, vulnerabilities, BOMs, analyses, active project IDs, and pending updates under `data/dt_cache` by default.
+- `dtvp/project_archive_routes.py` and `dtvp/project_archive_services.py` provide reviewer-only project archive export/import, archive task progress, local snapshot downloads, and scheduled local snapshots under `data/project_archives` by default.
 - `dtvp/settings_routes.py` manages team mapping, user roles, and CVSS rescore rules backed by files under `data/`.
 - `dtvp/app_info_routes.py`, `dtvp/app_info_services.py`, and `dtvp/frontend_routes.py` expose metadata, changelog/OpenAPI/SBOM downloads, and built frontend assets.
 - Optional integration routes and services live in `dtvp/tmrescore_*`, `dtvp/code_analysis_*`, `dtvp/analysis_queue_*`, and the matching mock services under `test_setup/`.
@@ -81,11 +84,12 @@ DTVP is split into a FastAPI backend, a Vue single-page application, and mock ex
 ### Frontend
 
 - Vue entry points are `frontend/src/main.ts`, `frontend/src/App.vue`, and `frontend/src/router.ts`.
-- The app shell shows an initialization page while it loads backend version metadata, project metadata, and the current session. If the backend is still starting or temporarily unavailable, the UI shows a retryable startup page instead of exposing a raw HTTP/proxy error.
+- DTVP serves a native startup page from `/startup` while runtime initialization is still running, the static `index.html` includes a first-paint startup page before Vue mounts, and the app shell shows an initialization page while it loads backend version metadata, project metadata, and the current session. If the backend is still starting or temporarily unavailable after the SPA loads, the UI shows a retryable startup page instead of exposing a raw HTTP/proxy error.
 - `frontend/src/lib/api.ts` is the central backend client and defines most frontend-facing integration types.
 - `frontend/src/types.ts` defines project, grouped vulnerability, assessment, statistics, cache, tmrescore, and proposal shapes.
 - Major pages live under `frontend/src/pages/`: `Dashboard.vue`, `ProjectView.vue`, `TMRescore.vue`, `Statistics.vue`, `Settings.vue`, and `Login.vue`.
 - Reusable vulnerability, modal, queue, filter, dependency-chain, and CVSS components live under `frontend/src/components/`.
+- Reviewer users can export project archives from the dashboard or project view, and can preview/import archives from the Settings Archives tab.
 - Project review state is supported by helpers and composables in `frontend/src/lib/`, including assessment form/submission helpers, project assessment/list-summary update handling, bulk incomplete resolve state, CVSS utilities, vulnerability list indexing, filter/query synchronization, selection/detail route state, smart-search controls, responsive project-view layout state, backend task-window query and filter-chip view models, detail hydration, modal selection, project header state, and code-analysis queue state.
 - The project vulnerability list renders item-only compact rows from cached `VulnListItem` metadata hydrated from backend summary metadata when available, with precomputed search and sort fields, list-wide facets, static stats, and ID-indexed group lookups derived in one base index pass. It compiles active list/state filters and membership checks once per filtered pass for non-task fallback data, keeps filtered rows separate from final sorting, uses bounded search-completion matching, debounces expensive smart-search filtering while keeping input controls immediate, requests summary task results by default, streams grouped-vulnerability task events when available while falling back to result-free polling, loads an early backend-filtered partial task window when available, marks partial counts as provisional with version progress, refreshes the backend-filtered window as streamed version progress advances and again when task completion arrives, appends more cursor windows as the reviewer scrolls, renders backend-filtered task windows directly without a second local filter/sort pass, refreshes active task windows after assessment and team-mapping writes, reuses active task statistics when switching to the project statistics view, keeps backend all/filtered counts and task-wide facets for list badges and search completions where available, sends meaningful threat-model proposal IDs into backend task-window filters so TM proposal filtering stays windowed, keeps list state lightweight after detail hydration and local updates, lazy-loads full vulnerability groups for detail panels, prepares bulk incomplete sync from backend-filtered full-detail `INCOMPLETE` task windows instead of the current local list or per-group detail requests, and uses viewport windowing via `useVisibleGroupWindow` so row DOM stays proportional to the visible scroll area rather than the total number of vulnerabilities.
 
@@ -107,6 +111,22 @@ DTVP is split into a FastAPI backend, a Vue single-page application, and mock ex
 - Dependency relationship and paths are derived from CycloneDX BOM dependency graphs.
 - Dependency-Track finding attribution timestamps are preserved on grouped component instances as `attributed_on`; the project view can filter vulnerability groups by attribution date range, invert that range to find older/outside findings such as "not in the last 4 weeks," and shows each vulnerability's age since its oldest attribution in the card header.
 - Analysis states commonly include `NOT_SET`, `EXPLOITABLE`, `IN_TRIAGE`, `RESOLVED`, `FALSE_POSITIVE`, and `NOT_AFFECTED`.
+
+## Project Archives
+
+DTVP can create versioned project archives for replacing Dependency-Track with an empty instance or preserving projects that will no longer be touched by pipeline runs.
+
+- Reviewer-only export starts with `POST /api/project-archives/exports` and writes a ZIP archive containing `manifest.json`, one directory per project version, raw CycloneDX SBOMs, raw findings, full vulnerability details, and normalized assessment records.
+- The archive schema is `dtvp.project-archive/v1`. Newer DTVP versions must keep importing v1 archives. Unknown v1 fields are ignored; future major archive schemas may be rejected with a clear unsupported-version error.
+- Import starts with `POST /api/project-archives/imports`, which uploads an archive and returns a preview task. Applying the preview uses `POST /api/project-archives/imports/{task_id}/apply` with `mode=create_missing` or `mode=update`.
+- Restore matching uses project name and version first. When Dependency-Track creates new UUIDs, DTVP remaps assessments by component purl/name/version/bom-ref and vulnerability ID/name/aliases before writing the current mutable analysis state back through the Dependency-Track analysis API.
+- `create_missing` creates missing project versions from archived SBOMs and leaves existing versions untouched. `update` is required to upload SBOMs and restore assessments into existing versions.
+- Dependency-Track audit history and analysis comments are not exported or replayed. Restored assessments create fresh Dependency-Track audit entries under the restoring API identity.
+- Stored archives are listed and downloadable from `GET /api/project-archives/snapshots`. Manual exports and scheduled snapshots use `DTVP_PROJECT_ARCHIVE_PATH`.
+- Scheduled snapshots are disabled by default. When enabled, the backend periodically exports configured project names, or the locally active/cached project names when no include list is configured, and retains recent archives per project.
+- Reviewer export actions on the dashboard and project view show queued/running/completed task progress and expose the generated archive download link when the ZIP is ready.
+- When `DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED=true`, every successful export also rewrites a stable expanded project tree under `DTVP_PROJECT_ARCHIVE_EXPANDED_PATH`. This tree contains the same checksummed JSON payloads as the ZIP archive, but omits volatile export timestamp/build metadata from the Git-facing manifest so unchanged project state does not produce noisy commits. Git should archive this expanded tree, not the ZIP files.
+- The expanded tree is still shaped like a v1 project archive. To restore from Git-only storage, zip the selected project directory contents so `manifest.json` and `versions/` are at the ZIP root, then upload it through the normal project archive import flow.
 
 ## Threat-Model Rescoring
 
@@ -263,7 +283,7 @@ export DTVP_OIDC_REDIRECT_URI=http://localhost:5173/auth/callback
 export DTVP_FRONTEND_URL=http://localhost:5173
 export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
 export DTVP_VERSION_FETCH_CONCURRENCY=4
-uv run uvicorn dtvp.main:app --reload --host 127.0.0.1 --port 8000
+uv run uvicorn dtvp.boot:app --reload --host 127.0.0.1 --port 8000
 ```
 
 If you want to skip the mock OIDC login entirely during local backend work, set this before starting Uvicorn:
@@ -444,9 +464,67 @@ Fill in the real Dependency-Track and OIDC values.
 docker compose up -d
 ```
 
-The image mounts `./data` into the container so local mapping and rule files persist.
+The Compose service loads `.env` when present and mounts `./data` into `/app/data` so local mapping files, role files, cache data, tmrescore proposal cache, and project archives persist across container restarts/recreates.
 
 If you need to customize the deployment, edit `compose.yml` directly.
+
+The bundled nginx gateway intentionally stays lean and only proxies `/dtvp` to DTVP, `/api` to Dependency-Track, and everything else to the Dependency-Track frontend. The default DTVP boot entry point lets Uvicorn bind and accept HTTP before the full backend imports or runtime preprocessing finishes. It serves the native startup page while that work is running and exposes `GET /dtvp/api/startup` with `ready: false` until initialization completes. No backend can serve a page before its process is listening, so a centralized reverse proxy may still show its generic upstream fallback for the very first process-start window.
+
+### Project Archive Setup In Docker Compose
+
+Manual project archive exports work with the default Compose setup after `DTVP_DT_API_KEY` is configured. The Dependency-Track API key used by DTVP must be allowed to read projects, findings, vulnerabilities, and BOMs; imports also need BOM upload and vulnerability-analysis update permissions.
+
+By default, archives are written inside the container at `data/project_archives`, which resolves to `./data/project_archives` on the host through the Compose volume mount:
+
+```env
+DTVP_PROJECT_ARCHIVE_PATH=data/project_archives
+```
+
+To enable scheduled snapshots, set these values in `.env` before running `docker compose up -d`:
+
+```env
+DTVP_PROJECT_ARCHIVE_SNAPSHOT_ENABLED=true
+DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS=86400
+DTVP_PROJECT_ARCHIVE_RETENTION_COUNT=30
+DTVP_PROJECT_ARCHIVE_INCLUDE=Project A,Project B
+```
+
+`DTVP_PROJECT_ARCHIVE_INCLUDE` is optional. When empty, scheduled snapshots export the active/cached projects DTVP knows about. For predictable production backups, set it to the exact project names you want archived.
+
+For Git-backed archival, enable the expanded tree writer:
+
+```env
+DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED=true
+DTVP_PROJECT_ARCHIVE_EXPANDED_PATH=data/project_archives_git
+```
+
+DTVP triggers the data update whenever a manual export or scheduled snapshot completes. Git commit/push is intentionally handled outside the DTVP backend so SSH keys, deploy tokens, and remote repository access stay out of the application process.
+
+The bundled Compose file includes an optional one-shot Git client service using `alpine/git`. Configure a dedicated archive repository and deploy key in `.env`:
+
+```env
+DTVP_ARCHIVE_GIT_REMOTE=git@github.com:your-org/dtvp-project-archives.git
+DTVP_ARCHIVE_GIT_BRANCH=main
+DTVP_ARCHIVE_GIT_AUTHOR_NAME=DTVP Archive Bot
+DTVP_ARCHIVE_GIT_AUTHOR_EMAIL=dtvp-archive@example.invalid
+```
+
+Put the SSH deploy key and known-hosts file at these default paths on the host:
+
+```text
+./secrets/dtvp_archive_deploy_key
+./secrets/known_hosts
+```
+
+Then push the diffable archive tree on demand:
+
+```bash
+docker compose run --rm dtvp-archive-git-push
+```
+
+Because `dtvp-archive-git-push` is explicitly targeted, Docker Compose runs it even though it belongs to the optional `archive-git` profile. `docker compose --profile archive-git run --rm dtvp-archive-git-push` is equivalent and can be useful in tools that expose profile selection.
+
+For automatic Git archival, schedule that command from host cron, systemd timer, CI, a Compose-manager terminal, or another Compose-aware scheduler after the DTVP snapshot interval. The helper commits `./data/project_archives_git` into `project_archives/` in the remote repository and skips the commit when there are no archive changes.
 
 ## Environment Variables
 
@@ -461,6 +539,19 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH` | SQLite path for persisted grouped-vulnerability summary indexes used to seed repeat summary list loads | sibling of `DTVP_DT_CACHE_PATH` as `grouped_vuln_summary_index.sqlite` |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES` | Maximum persisted grouped-vulnerability summary indexes retained | `64` |
 | `DTVP_DT_CACHE_REFRESH_SECONDS` | Background Dependency-Track cache refresh interval | `60` |
+| `DTVP_PROJECT_ARCHIVE_PATH` | Local directory for manual project archive exports, uploaded import previews, and scheduled snapshots | `data/project_archives` |
+| `DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED` | Also write stable expanded archive trees for Git-friendly diff history | `false` |
+| `DTVP_PROJECT_ARCHIVE_EXPANDED_PATH` | Local directory for expanded archive trees | `data/project_archives_git` |
+| `DTVP_PROJECT_ARCHIVE_SNAPSHOT_ENABLED` | Enable scheduled project archive snapshots | `false` |
+| `DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS` | Interval for scheduled project archive snapshots; minimum 60 seconds | `86400` |
+| `DTVP_PROJECT_ARCHIVE_RETENTION_COUNT` | Number of recent scheduled/manual archive ZIPs retained per project name | `30` |
+| `DTVP_PROJECT_ARCHIVE_INCLUDE` | Optional comma-separated project names for scheduled snapshots; when empty, snapshots use active/cached project names | empty |
+| `DTVP_ARCHIVE_GIT_REMOTE` | Remote repository used by the optional `archive-git` Compose helper | empty |
+| `DTVP_ARCHIVE_GIT_BRANCH` | Branch pushed by the optional `archive-git` Compose helper | `main` |
+| `DTVP_ARCHIVE_GIT_AUTHOR_NAME` | Commit author name used by the optional `archive-git` Compose helper | `DTVP Archive Bot` |
+| `DTVP_ARCHIVE_GIT_AUTHOR_EMAIL` | Commit author email used by the optional `archive-git` Compose helper | `dtvp-archive@example.invalid` |
+| `DTVP_ARCHIVE_GIT_SSH_KEY_FILE` | SSH private key path inside the optional `archive-git` Compose helper container | `/ssh/dtvp_archive_deploy_key` |
+| `DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE` | SSH known-hosts path inside the optional `archive-git` Compose helper container | `/ssh/known_hosts` |
 | `DTVP_TMRESCORE_URL` | Base URL of the external or mock tmrescore service | unset |
 | `DTVP_TMRESCORE_TIMEOUT_SECONDS` | HTTP timeout for tmrescore API calls before DTVP falls back to polling `/progress` | `180` |
 | `DTVP_TMRESCORE_CACHE_PATH` | Path to the cached per-project tmrescore proposal snapshot file | `data/tmrescore_proposals.json` |
@@ -478,10 +569,12 @@ If you need to customize the deployment, edit `compose.yml` directly.
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback URL | derived from frontend URL and context path |
 | `DTVP_FRONTEND_URL` | Frontend base URL | `http://localhost:8000` |
 | `DTVP_CONTEXT_PATH` | Application mount path | `/` |
+| `DTVP_BOOT_APP` | Advanced override for the real ASGI app loaded by the early boot wrapper | `dtvp.main:app` |
 | `DTVP_SESSION_SECRET_KEY` | Session signing key | `change_me` |
 | `DTVP_CORS_ORIGINS` | Optional comma-separated extra CORS origins | unset |
 | `DTVP_API_URL` | Optional frontend API base URL override, also available as `VITE_DTVP_API_URL` during Vite development | empty |
 | `DTVP_DEFAULT_PROJECT_FILTER` | Default project filter shown on the dashboard | empty |
+| `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` | Comma-separated attribution-age filter presets shown in the project filters; entries may use an optional `d` suffix | `7d,14d,28d` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Max number of project versions fetched in parallel when building grouped views and statistics | `4` |
 | `DTVP_DEV_DISABLE_AUTH` | Disable OIDC and force the backend to return `devuser` locally | `false` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |

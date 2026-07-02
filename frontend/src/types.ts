@@ -83,7 +83,6 @@ export interface AssessmentPayload {
     instances: Instance[];
     state: string;
     details: string;
-    comment?: string;
     justification?: string;
     suppressed: boolean;
     team?: string;
@@ -115,6 +114,79 @@ export interface CacheStatus {
     cached_boms: number;
     cached_analyses: number;
     pending_updates: number;
+}
+
+export interface ProjectArchiveVersionPreview {
+    project_name: string;
+    version: string;
+    source_uuid: string;
+    target_uuid?: string | null;
+    target_exists: boolean;
+    finding_count: number;
+    vulnerability_count: number;
+    assessment_count: number;
+    restorable_assessment_count: number;
+    bom_component_count: number;
+}
+
+export interface ProjectArchivePreview {
+    schema_version: string;
+    created_at?: string | null;
+    project_name: string;
+    versions: ProjectArchiveVersionPreview[];
+    total_versions: number;
+    total_assessments: number;
+    total_restorable_assessments: number;
+    warnings: string[];
+}
+
+export interface ProjectArchiveApplyResult {
+    project_name: string;
+    mode: 'create_missing' | 'update';
+    versions: Array<{
+        version: string;
+        status: 'created' | 'updated' | 'skipped_existing';
+        target_uuid?: string | null;
+        assessment_result?: {
+            restored: number;
+            queued: number;
+            skipped_empty: number;
+            unmatched: number;
+            ambiguous: number;
+            failed: Array<Record<string, unknown>>;
+        } | null;
+    }>;
+    summary: {
+        created: number;
+        updated: number;
+        skipped_existing: number;
+        restored_assessments: number;
+        queued_assessments: number;
+        unmatched_assessments: number;
+        ambiguous_assessments: number;
+    };
+}
+
+export interface ProjectArchiveTask {
+    id: string;
+    kind: 'export' | 'import_preview' | 'import_apply' | string;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'not_found';
+    message: string;
+    progress: number;
+    created_at?: string;
+    updated_at?: string;
+    result?: any;
+    error?: string;
+    log?: string[];
+}
+
+export interface ProjectArchiveSnapshot {
+    filename: string;
+    size: number;
+    modified_at: string;
+    project_name?: string | null;
+    created_at?: string | null;
+    version_count?: number | null;
 }
 
 export interface TMRescoreScopeOption {

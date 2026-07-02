@@ -29,6 +29,8 @@ from .grouped_vuln_task_services import (
     prune_grouped_vuln_tasks as prune_grouped_vuln_tasks_impl,
 )
 from .logic import calculate_statistics, group_vulnerabilities, load_team_mapping
+from .project_archive_routes import ProjectArchiveRouteDeps
+from .project_archive_services import ProjectArchiveServiceDeps
 from .settings_routes import SettingsRouteDeps
 from .startup_services import StartupServiceDeps
 from .startup_services import build_startup_runtime_details
@@ -408,6 +410,8 @@ def build_frontend_route_deps(
     get_context_path: Callable[[], str],
     get_frontend_url: Callable[[], str],
     get_dev_disable_auth: Callable[[], bool],
+    get_default_project_filter: Callable[[], str],
+    get_attribution_age_filter_days: Callable[[], str],
     read_text: Callable[[str], str],
 ) -> FrontendRouteDeps:
     return FrontendRouteDeps(
@@ -415,6 +419,8 @@ def build_frontend_route_deps(
         get_context_path=get_context_path,
         get_frontend_url=get_frontend_url,
         get_dev_disable_auth=get_dev_disable_auth,
+        get_default_project_filter=get_default_project_filter,
+        get_attribution_age_filter_days=get_attribution_age_filter_days,
         read_text=read_text,
     )
 
@@ -474,6 +480,52 @@ def build_settings_route_deps(
         write_bytes=write_bytes,
         write_json=write_json,
         write_and_validate_json_bytes=write_and_validate_json_bytes,
+    )
+
+
+def build_project_archive_service_deps(
+    *,
+    cache_manager: Any,
+    logger: Any,
+    sort_projects_by_version: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
+    version: str,
+    build_commit: str,
+    archive_path_provider: Callable[[], str],
+) -> ProjectArchiveServiceDeps:
+    return ProjectArchiveServiceDeps(
+        cache_manager=cache_manager,
+        logger=logger,
+        sort_projects_by_version=sort_projects_by_version,
+        version=version,
+        build_commit=build_commit,
+        archive_path_provider=archive_path_provider,
+    )
+
+
+def build_project_archive_route_deps(
+    *,
+    archive_tasks: dict[str, dict[str, Any]],
+    service_deps: ProjectArchiveServiceDeps,
+    logger: Any,
+    background_tasks: set[asyncio.Task[Any]],
+    get_user_role: Callable[[str], str],
+    dt_settings_cls: Callable[[], Any],
+    get_dt_client_cls: Callable[[], type],
+    archive_path_provider: Callable[[], str],
+) -> ProjectArchiveRouteDeps:
+    return ProjectArchiveRouteDeps(
+        archive_tasks=archive_tasks,
+        service_deps=service_deps,
+        logger=logger,
+        get_user_role=get_user_role,
+        dt_settings_cls=dt_settings_cls,
+        get_dt_client_cls=get_dt_client_cls,
+        create_tracked_task=lambda coro: create_tracked_task_impl(
+            background_tasks,
+            asyncio.create_task,
+            coro,
+        ),
+        archive_path_provider=archive_path_provider,
     )
 
 

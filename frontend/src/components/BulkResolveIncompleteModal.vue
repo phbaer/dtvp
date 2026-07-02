@@ -124,7 +124,6 @@ const handleApply = async () => {
                 details: change.targetDetails,
                 suppressed: false,
                 justification: change.targetJustification,
-                comment: 'Bulk sync of incomplete analysis states',
                 comparison_mode: 'REPLACE'
             })
             console.log(`[BulkSync] ${change.id} result:`, result)

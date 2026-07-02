@@ -146,7 +146,6 @@ const expanded = ref(props.inModal ? true : false)
 const state = ref('NOT_SET')
 const details = ref('')
 const justification = ref('NOT_SET')
-const comment = ref('')
 const suppressed = ref(false)
 const selectedTeam = ref('')
 // Removed onlyTargetSelectedTeam - team selection now automatically targets team instances
@@ -869,8 +868,6 @@ const updateFormFromGroup = (force = true) => {
         const assignedBlock = mergedAssessmentData.value.blocks.find(b => b.team === teamKey)
         currentAssigned.value = assignedBlock?.assigned ? [...assignedBlock.assigned] : []
 
-        comment.value = ''
-        
         const firstSuppressed = allInstances.value.find(i => i.is_suppressed)
         suppressed.value = Boolean(firstSuppressed)
 
@@ -1166,7 +1163,6 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             rawDetailsTouched: rawDetailsTouched.value,
             rawDetails: rawDetails.value,
             mergedAssessmentFullText: mergedAssessmentData.value.fullText,
-            comment: comment.value,
             suppressed: suppressed.value,
             force,
         })
@@ -1956,16 +1952,6 @@ const teamBlockStateColor = (state?: string): string => {
                         <p class="text-xs text-gray-400 max-w-xs">
                           Global assessments are restricted to reviewers. Select a team tab above to provide an assessment.
                         </p>
-                    </div>
-
-                    <div v-if="isReviewer">
-                        <label for="assessment-comment-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Comment</label>
-                        <textarea 
-                            id="assessment-comment-textarea"
-                            v-model="comment"
-                            placeholder="Add a comment for audit trail..."
-                            class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-24"
-                        ></textarea>
                     </div>
 
                     <div v-if="isReviewer">

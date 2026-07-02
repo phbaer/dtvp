@@ -13,8 +13,10 @@ from typing import (
 from fastapi import (
     APIRouter,
     FastAPI,
+    Request,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .analysis_queue_services import (
     get_next_queued_item as get_next_queued_item_impl,
@@ -55,6 +57,8 @@ from .app_wiring import (
     build_general_api_route_deps,
     build_grouped_vuln_service_deps,
     build_prepare_tmrescore_inventory_or_raise,
+    build_project_archive_route_deps,
+    build_project_archive_service_deps,
     build_settings_route_deps,
     build_startup_service_deps,
     build_tmrescore_cache_service_deps,
@@ -110,14 +114,27 @@ from .logic import (
     load_user_roles,
     process_assessment_details,
 )
+from .project_archive_routes import create_project_archive_router
+from .project_archive_services import (
+    get_project_archive_interval_seconds,
+    get_project_archive_path,
+    project_archive_snapshots_enabled,
+    run_project_archive_snapshot_once,
+)
 from .runtime_value_services import get_env_int_with_floor
 from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
 )
 from .settings_routes import create_settings_router
 from .startup_services import (
+    StartupRuntimeTasks,
     start_application_runtime,
     stop_application_runtime,
+)
+from .startup_page_services import (
+    build_startup_page_html,
+    build_startup_status_payload,
+    contextual_path,
 )
 from .tmrescore_cache_services import (
     load_tmrescore_project_cache as load_tmrescore_project_cache_impl,
@@ -162,13 +179,97 @@ logger = logging.getLogger("dtvp")
 logger.setLevel(logging.INFO)
 
 background_tasks: set[asyncio.Task[Any]] = set()
+app_runtime_state: Dict[str, Any] = {
+    "status": "ready",
+    "message": "DTVP is ready.",
+    "error": None,
+}
+_runtime_tasks: StartupRuntimeTasks | None = None
+_startup_task: asyncio.Task[Any] | None = None
+
+
+def _set_runtime_state(status: str, message: str, error: str | None = None) -> None:
+    app_runtime_state.clear()
+    app_runtime_state.update(
+        {
+            "status": status,
+            "message": message,
+            "error": error,
+        }
+    )
+
+
+def _runtime_ready() -> bool:
+    return app_runtime_state.get("status") == "ready"
+
+
+def _path_with_context(suffix: str) -> str:
+    return contextual_path(context_path, suffix)
+
+
+def _is_startup_status_path(path: str) -> bool:
+    return path in {
+        _path_with_context("/startup"),
+        _path_with_context("/api/startup"),
+    }
+
+
+def _is_api_or_auth_path(path: str) -> bool:
+    return any(
+        path == prefix or path.startswith(f"{prefix}/")
+        for prefix in (
+            _path_with_context("/api"),
+            _path_with_context("/auth"),
+        )
+    )
+
+
+async def _initialize_application_runtime() -> None:
+    global _runtime_tasks
+    _set_runtime_state("starting", "DTVP runtime is starting.")
+    try:
+        _runtime_tasks = await start_application_runtime(startup_service_deps)
+        snapshot_task = asyncio.create_task(run_project_archive_snapshot_loop())
+        background_tasks.add(snapshot_task)
+        snapshot_task.add_done_callback(background_tasks.discard)
+        _set_runtime_state("ready", "DTVP is ready.")
+    except asyncio.CancelledError:
+        _set_runtime_state("stopped", "DTVP startup was stopped.")
+        raise
+    except Exception as exc:
+        logger.exception("DTVP runtime startup failed")
+        _set_runtime_state(
+            "failed",
+            "DTVP startup failed. Check the backend logs.",
+            str(exc),
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    runtime_tasks = await start_application_runtime(startup_service_deps)
-    yield
-    await stop_application_runtime(runtime_tasks, analysis_queue, background_tasks)
+    global _runtime_tasks, _startup_task
+    _runtime_tasks = None
+    _startup_task = asyncio.create_task(_initialize_application_runtime())
+    try:
+        try:
+            await asyncio.wait_for(asyncio.shield(_startup_task), timeout=0.25)
+        except TimeoutError:
+            pass
+        yield
+    finally:
+        if _startup_task and not _startup_task.done():
+            _startup_task.cancel()
+            try:
+                await _startup_task
+            except asyncio.CancelledError:
+                pass
+        if _runtime_tasks:
+            await stop_application_runtime(
+                _runtime_tasks,
+                analysis_queue,
+                background_tasks,
+            )
+        _set_runtime_state("ready", "DTVP is ready.")
 
 
 app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
@@ -190,6 +291,29 @@ app.add_middleware(
 
 context_path = normalize_context_path(auth_settings.CONTEXT_PATH)
 
+
+@app.middleware("http")
+async def runtime_startup_gate(request: Request, call_next):
+    if _runtime_ready() or _is_startup_status_path(request.url.path):
+        return await call_next(request)
+
+    headers = {"Cache-Control": "no-store"}
+    if _is_api_or_auth_path(request.url.path):
+        headers["Retry-After"] = "2"
+        return JSONResponse(
+            build_startup_status_payload(app_runtime_state),
+            status_code=503,
+            headers=headers,
+        )
+
+    return HTMLResponse(
+        build_startup_page_html(
+            state=app_runtime_state,
+            context_path=context_path,
+        ),
+        headers=headers,
+    )
+
 # Auth router
 app.include_router(auth_router, prefix=context_path)
 
@@ -197,7 +321,29 @@ app.include_router(auth_router, prefix=context_path)
 api_router = APIRouter(prefix="/api", tags=["api"])
 
 
+@app.get(_path_with_context("/startup"), include_in_schema=False)
+async def startup_page():
+    if _runtime_ready():
+        return RedirectResponse(url=_path_with_context("/"))
+    return HTMLResponse(
+        build_startup_page_html(
+            state=app_runtime_state,
+            context_path=context_path,
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@api_router.get("/startup", include_in_schema=False)
+async def startup_status():
+    return JSONResponse(
+        build_startup_status_payload(app_runtime_state),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 tasks = {}
+project_archive_tasks: Dict[str, Dict[str, Any]] = {}
 tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
 tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
 
@@ -322,6 +468,15 @@ assessment_service_deps = build_assessment_service_deps(
     process_assessment_details=process_assessment_details,
 )
 
+project_archive_service_deps = build_project_archive_service_deps(
+    cache_manager=cache_manager,
+    logger=logger,
+    sort_projects_by_version=sort_projects_by_version,
+    version=VERSION,
+    build_commit=BUILD_COMMIT,
+    archive_path_provider=get_project_archive_path,
+)
+
 
 api_router.include_router(
     create_app_info_router(
@@ -370,6 +525,23 @@ api_router.include_router(
         ),
         current_user_dependency=get_current_user,
         client_dependency=get_client,
+    )
+)
+
+
+api_router.include_router(
+    create_project_archive_router(
+        build_project_archive_route_deps(
+            archive_tasks=project_archive_tasks,
+            service_deps=project_archive_service_deps,
+            logger=logger,
+            background_tasks=background_tasks,
+            get_user_role=lambda user: get_user_role(user),
+            dt_settings_cls=DTSettings,
+            get_dt_client_cls=lambda: DTClient,
+            archive_path_provider=get_project_archive_path,
+        ),
+        current_user_dependency=get_current_user,
     )
 )
 
@@ -593,6 +765,32 @@ async def run_auto_analysis_sweep_loop() -> None:
         )
 
 
+async def run_project_archive_snapshot_loop() -> None:
+    while True:
+        interval_seconds = get_project_archive_interval_seconds()
+        if project_archive_snapshots_enabled():
+            try:
+                settings = DTSettings()
+                async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+                    results = await run_project_archive_snapshot_once(
+                        project_archive_service_deps,
+                        client,
+                    )
+                success_count = sum(
+                    1 for result in results if result.get("status") == "success"
+                )
+                if success_count:
+                    logger.info(
+                        "Project archive snapshot created %d archive(s)",
+                        success_count,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Project archive snapshot loop failed: %s", exc)
+        await asyncio.sleep(interval_seconds)
+
+
 startup_service_deps = build_startup_service_deps(
     logger=logger,
     version=VERSION,
@@ -635,6 +833,11 @@ register_frontend_routes(
         get_context_path=lambda: context_path,
         get_frontend_url=lambda: auth_settings.FRONTEND_URL or "",
         get_dev_disable_auth=lambda: auth_settings.DEV_DISABLE_AUTH,
+        get_default_project_filter=lambda: os.getenv("DTVP_DEFAULT_PROJECT_FILTER", ""),
+        get_attribution_age_filter_days=lambda: os.getenv(
+            "DTVP_ATTRIBUTION_AGE_FILTER_DAYS",
+            "7d,14d,28d",
+        ),
         read_text=read_text_impl,
     ),
 )
@@ -643,4 +846,4 @@ register_frontend_routes(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("dtvp.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("dtvp.boot:app", host="127.0.0.1", port=8000, reload=True)

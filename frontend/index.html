@@ -6,11 +6,80 @@
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DTVP</title>
+  <style>
+    html,
+    body,
+    #app {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      background: #09111f;
+      color: #f8fafc;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .dtvp-initial-loader {
+      min-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      box-sizing: border-box;
+      background:
+        radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 30rem),
+        linear-gradient(135deg, #09111f 0%, #111827 48%, #0f172a 100%);
+    }
+
+    .dtvp-initial-loader__panel {
+      max-width: 30rem;
+      text-align: center;
+    }
+
+    .dtvp-initial-loader__spinner {
+      width: 3.5rem;
+      height: 3.5rem;
+      margin: 0 auto 1.5rem;
+      border-radius: 999px;
+      border: 2px solid rgba(147, 197, 253, 0.28);
+      border-top-color: #93c5fd;
+      animation: dtvp-initial-loader-spin 900ms linear infinite;
+    }
+
+    .dtvp-initial-loader__title {
+      margin: 0;
+      font-size: 1.5rem;
+      line-height: 2rem;
+      font-weight: 800;
+    }
+
+    .dtvp-initial-loader__text {
+      margin: 1rem 0 0;
+      color: #cbd5e1;
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    @keyframes dtvp-initial-loader-spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
 </head>
 
 <body>
-  <div id="app"></div>
-  <script>window.__env__ = { DTVP_CONTEXT_PATH: '${DTVP_CONTEXT_PATH}', DTVP_FRONTEND_URL: '${DTVP_FRONTEND_URL}', DTVP_DEV_DISABLE_AUTH: '${DTVP_DEV_DISABLE_AUTH}', DTVP_DEFAULT_PROJECT_FILTER: '${DTVP_DEFAULT_PROJECT_FILTER}' }</script>
+  <div id="app">
+    <div class="dtvp-initial-loader" role="status" aria-live="polite">
+      <div class="dtvp-initial-loader__panel">
+        <div class="dtvp-initial-loader__spinner" aria-hidden="true"></div>
+        <h1 class="dtvp-initial-loader__title">DTVP is starting</h1>
+        <p class="dtvp-initial-loader__text">Loading the application shell.</p>
+      </div>
+    </div>
+  </div>
+  <script>window.__env__ = { DTVP_CONTEXT_PATH: '${DTVP_CONTEXT_PATH}', DTVP_FRONTEND_URL: '${DTVP_FRONTEND_URL}', DTVP_DEV_DISABLE_AUTH: '${DTVP_DEV_DISABLE_AUTH}', DTVP_DEFAULT_PROJECT_FILTER: '${DTVP_DEFAULT_PROJECT_FILTER}', DTVP_ATTRIBUTION_AGE_FILTER_DAYS: '${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}' }</script>
   <script type="module" src="/src/main.ts"></script>
 </body>
 

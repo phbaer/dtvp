@@ -185,6 +185,44 @@ async def test_get_project_versions():
         assert res is None
 
 
+@pytest.mark.asyncio
+async def test_find_project_by_name_version_matches_exact_version(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/project").respond(
+        json=[
+            {"name": "ArchiveApp", "version": "1.0.0", "uuid": "p1"},
+            {"name": "ArchiveApp", "version": "2.0.0", "uuid": "p2"},
+        ]
+    )
+
+    project = await dt_client.find_project_by_name_version("ArchiveApp", "2.0.0")
+
+    assert project == {"name": "ArchiveApp", "version": "2.0.0", "uuid": "p2"}
+
+
+@pytest.mark.asyncio
+async def test_upload_bom_auto_creates_project_version(dt_client, respx_mock):
+    respx_mock.post("http://dt.example.com/api/v1/bom").respond(
+        json={"token": "upload-token"}
+    )
+
+    result = await dt_client.upload_bom(
+        {"bomFormat": "CycloneDX", "components": []},
+        project_name="ArchiveApp",
+        project_version="1.0.0",
+        auto_create=True,
+    )
+
+    assert result == {"token": "upload-token"}
+    request = respx_mock.calls.last.request
+    body = request.content.decode("utf-8")
+    assert 'name="autoCreate"' in body
+    assert "true" in body
+    assert 'name="projectName"' in body
+    assert "ArchiveApp" in body
+    assert 'name="projectVersion"' in body
+    assert "1.0.0" in body
+
+
 def test_settings_properties():
     # Test fallbacks
     s = DTSettings(

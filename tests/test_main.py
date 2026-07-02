@@ -1,5 +1,7 @@
+import asyncio
 import importlib
 import os
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +26,82 @@ def test_get_version(client):
     assert response.status_code == 200
     assert "version" in response.json()
     assert "build" in response.json()
+
+
+def test_startup_status_endpoint_reports_runtime_state(client):
+    original_state = dict(main.app_runtime_state)
+    main.app_runtime_state.update(
+        {
+            "status": "starting",
+            "message": "Preparing runtime.",
+            "error": None,
+        }
+    )
+    try:
+        response = client.get("/api/startup")
+    finally:
+        main.app_runtime_state.clear()
+        main.app_runtime_state.update(original_state)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "starting",
+        "ready": False,
+        "message": "Preparing runtime.",
+    }
+
+
+def test_startup_gate_serves_page_for_browser_routes(client):
+    original_state = dict(main.app_runtime_state)
+    main.app_runtime_state.update(
+        {
+            "status": "starting",
+            "message": "Preparing runtime.",
+            "error": None,
+        }
+    )
+    try:
+        response = client.get("/")
+    finally:
+        main.app_runtime_state.clear()
+        main.app_runtime_state.update(original_state)
+
+    assert response.status_code == 200
+    assert "DTVP is starting" in response.text
+    assert "Preparing runtime." in response.text
+    assert '"/api/startup"' in response.text
+
+
+def test_startup_gate_returns_503_for_api_routes(client):
+    original_state = dict(main.app_runtime_state)
+    main.app_runtime_state.update(
+        {
+            "status": "starting",
+            "message": "Preparing runtime.",
+            "error": None,
+        }
+    )
+    try:
+        response = client.get("/api/version")
+    finally:
+        main.app_runtime_state.clear()
+        main.app_runtime_state.update(original_state)
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "2"
+    assert response.json()["ready"] is False
+
+
+def test_lifespan_serves_startup_page_while_runtime_initializes():
+    async def slow_initialize():
+        await asyncio.sleep(1)
+
+    with patch.object(main.cache_manager, "initialize", slow_initialize):
+        with TestClient(main.app) as startup_client:
+            response = startup_client.get("/")
+
+    assert response.status_code == 200
+    assert "DTVP is starting" in response.text
 
 
 def test_main_context_path_reload():

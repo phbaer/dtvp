@@ -50,6 +50,7 @@ describe('FilterSidebar.vue', () => {
 
     afterEach(() => {
         document.body.innerHTML = ''
+        delete (window as any).__env__
     })
 
     it('emits copy and reset actions', async () => {
@@ -132,7 +133,7 @@ describe('FilterSidebar.vue', () => {
         await nextTick()
 
         const presetButton = Array.from(document.body.querySelectorAll('button')).find((button) =>
-            button.textContent?.trim() === '30d'
+            button.textContent?.trim() === '28d'
         ) as HTMLElement | undefined
 
         expect(presetButton).toBeTruthy()
@@ -140,7 +141,27 @@ describe('FilterSidebar.vue', () => {
         await nextTick()
 
         const emitted = wrapper.emitted('update:filters')?.map(([payload]) => payload)
-        expect(emitted).toContainEqual(expect.objectContaining({ attributionAgeDays: 30 }))
+        expect(emitted).toContainEqual(expect.objectContaining({ attributionAgeDays: 28 }))
+
+        wrapper.unmount()
+    })
+
+    it('uses attribution age presets from runtime config', async () => {
+        ;(window as any).__env__ = { DTVP_ATTRIBUTION_AGE_FILTER_DAYS: '5d, 11, 21d' }
+        const wrapper = wrapperFactory()
+        const trigger = wrapper.findAll('button').find((button) => button.text().includes('Any age'))
+        expect(trigger).toBeTruthy()
+
+        await trigger?.trigger('click')
+        await nextTick()
+
+        const menuButtons = Array.from(document.body.querySelectorAll('button')).map((button) =>
+            button.textContent?.trim()
+        )
+        expect(menuButtons).toContain('5d')
+        expect(menuButtons).toContain('11d')
+        expect(menuButtons).toContain('21d')
+        expect(menuButtons).not.toContain('28d')
 
         wrapper.unmount()
     })
