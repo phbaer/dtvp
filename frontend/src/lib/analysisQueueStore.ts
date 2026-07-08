@@ -2,8 +2,11 @@ import { shallowRef, computed } from 'vue'
 import {
     analysisQueueList,
     analysisQueueSubmit,
+    analysisQueueSubmitFollowUp,
     analysisQueueGet,
     analysisQueueCancel,
+    analysisQueueClear,
+    analysisQueueCancelQueued,
 } from './api'
 import type { AnalysisQueueItem, CodeAnalysisAssessResponse } from './api'
 
@@ -15,7 +18,9 @@ const IDLE_POLL_INTERVAL = 10000
 const MAX_RESULT_CACHE_ENTRIES = 50
 
 // Callbacks keyed by queue_id for when items complete
-const completionCallbacks = new Map<string, (result: CodeAnalysisAssessResponse) => void>()
+type CompletionCallback = (result: CodeAnalysisAssessResponse, item: AnalysisQueueItem) => void
+
+const completionCallbacks = new Map<string, CompletionCallback>()
 const failureCallbacks = new Map<string, (error: string) => void>()
 
 // Cache fetched results by queue_id so they survive component unmount/remount
@@ -97,13 +102,14 @@ async function handleCompletedItem(item: AnalysisQueueItem) {
         const full = await analysisQueueGet(item.queue_id)
         if (full.result) {
             cacheResult(item.queue_id, full.result)
-            completionCallbacks.get(item.queue_id)?.(full.result)
+            completionCallbacks.get(item.queue_id)?.(full.result, full)
+            completionCallbacks.delete(item.queue_id)
+            failureCallbacks.delete(item.queue_id)
+            return
         }
     } catch {
         // Silently ignore result fetch errors
     }
-    completionCallbacks.delete(item.queue_id)
-    failureCallbacks.delete(item.queue_id)
 }
 
 function handleFailedItem(item: AnalysisQueueItem) {
@@ -118,7 +124,9 @@ function handleFailedItem(item: AnalysisQueueItem) {
 async function processStatusTransitions(previousStatuses: Map<string, AnalysisQueueItem['status']>) {
     for (const item of items.value) {
         const previousStatus = previousStatuses.get(item.queue_id)
-        if (!previousStatus || previousStatus === item.status) continue
+        const statusChanged = Boolean(previousStatus && previousStatus !== item.status)
+        const hasCallback = completionCallbacks.has(item.queue_id) || failureCallbacks.has(item.queue_id)
+        if (!statusChanged && !hasCallback) continue
 
         if (item.status === 'completed') {
             await handleCompletedItem(item)
@@ -155,20 +163,55 @@ function stopPolling() {
 async function submit(
     vulnId: string,
     componentName: string,
+    projectName?: string,
     cvssVector?: string,
     userGuidance?: string,
-    onComplete?: (result: CodeAnalysisAssessResponse) => void,
+    onComplete?: CompletionCallback,
     onError?: (error: string) => void,
+    affectedProductVersions?: string[],
 ): Promise<AnalysisQueueItem> {
     const item = await analysisQueueSubmit({
         vuln_id: vulnId,
         component_name: componentName,
+        project_name: projectName,
+        cvss_vector: cvssVector,
+        user_guidance: userGuidance,
+        affected_product_versions: affectedProductVersions,
+    })
+    if (onComplete) completionCallbacks.set(item.queue_id, onComplete)
+    if (onError) failureCallbacks.set(item.queue_id, onError)
+    const previousStatuses = new Map(items.value.map(existing => [existing.queue_id, existing.status]))
+    previousStatuses.set(item.queue_id, item.status)
+    await refresh()
+    await processStatusTransitions(previousStatuses)
+    if (!polling.value) startPolling()
+    return item
+}
+
+async function submitFollowUp(
+    parentRunId: string,
+    question: string,
+    componentName?: string,
+    projectName?: string,
+    cvssVector?: string,
+    userGuidance?: string,
+    onComplete?: CompletionCallback,
+    onError?: (error: string) => void,
+): Promise<AnalysisQueueItem> {
+    const item = await analysisQueueSubmitFollowUp({
+        parent_run_id: parentRunId,
+        question,
+        component_name: componentName,
+        project_name: projectName,
         cvss_vector: cvssVector,
         user_guidance: userGuidance,
     })
     if (onComplete) completionCallbacks.set(item.queue_id, onComplete)
     if (onError) failureCallbacks.set(item.queue_id, onError)
+    const previousStatuses = new Map(items.value.map(existing => [existing.queue_id, existing.status]))
+    previousStatuses.set(item.queue_id, item.status)
     await refresh()
+    await processStatusTransitions(previousStatuses)
     if (!polling.value) startPolling()
     return item
 }
@@ -187,6 +230,16 @@ async function dismiss(queueId: string) {
     completionCallbacks.delete(queueId)
     failureCallbacks.delete(queueId)
     resultCache.delete(queueId)
+    await refresh()
+}
+
+async function clearFinished(statuses?: string[]) {
+    await analysisQueueClear(statuses)
+    await refresh()
+}
+
+async function cancelQueued() {
+    await analysisQueueCancelQueued()
     await refresh()
 }
 
@@ -241,8 +294,11 @@ export const analysisQueueStore = {
     startPolling,
     stopPolling,
     submit,
+    submitFollowUp,
     cancel,
     dismiss,
+    clearFinished,
+    cancelQueued,
     getItemForVuln,
     getPositionForVuln,
     getCompletedForVuln,

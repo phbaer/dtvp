@@ -486,6 +486,38 @@ def test_get_team_mapping_path_env():
             del os.environ["TEAM_MAPPING_PATH"]
 
 
+def test_get_auto_analysis_guidance_path_default():
+    import os
+
+    original_env = os.environ.get("DTVP_AUTO_ANALYSIS_GUIDANCE_PATH")
+    if "DTVP_AUTO_ANALYSIS_GUIDANCE_PATH" in os.environ:
+        del os.environ["DTVP_AUTO_ANALYSIS_GUIDANCE_PATH"]
+
+    try:
+        assert (
+            logic.get_auto_analysis_guidance_path()
+            == "data/auto_analysis_guidance.json"
+        )
+    finally:
+        if original_env:
+            os.environ["DTVP_AUTO_ANALYSIS_GUIDANCE_PATH"] = original_env
+
+
+def test_get_auto_analysis_guidance_path_env():
+    import os
+
+    original_env = os.environ.get("DTVP_AUTO_ANALYSIS_GUIDANCE_PATH")
+    os.environ["DTVP_AUTO_ANALYSIS_GUIDANCE_PATH"] = "/tmp/auto-guidance.json"
+
+    try:
+        assert logic.get_auto_analysis_guidance_path() == "/tmp/auto-guidance.json"
+    finally:
+        if original_env:
+            os.environ["DTVP_AUTO_ANALYSIS_GUIDANCE_PATH"] = original_env
+        else:
+            del os.environ["DTVP_AUTO_ANALYSIS_GUIDANCE_PATH"]
+
+
 def test_load_team_mapping_file_not_found():
     mapping = logic.load_team_mapping("/non/existent/path.json")
     assert mapping == {}
@@ -497,6 +529,39 @@ def test_load_team_mapping_invalid_json(tmp_path):
 
     mapping = logic.load_team_mapping(str(p))
     assert mapping == {}
+
+
+def test_load_auto_analysis_guidance(tmp_path):
+    p = tmp_path / "auto_analysis_guidance.json"
+    p.write_text('{"components": {"keycloak-extension": "Prefer runtime evidence."}}')
+
+    guidance = logic.load_auto_analysis_guidance(str(p))
+
+    assert guidance == {"components": {"keycloak-extension": "Prefer runtime evidence."}}
+
+
+def test_load_auto_analysis_guidance_reads_modified_file(tmp_path):
+    p = tmp_path / "auto_analysis_guidance.json"
+    p.write_text('{"components": {"keycloak-extension": "Prefer runtime evidence."}}')
+
+    assert logic.load_auto_analysis_guidance(str(p)) == {
+        "components": {"keycloak-extension": "Prefer runtime evidence."}
+    }
+
+    p.write_text('{"components": {"keycloak-extension": "Also check upstream Keycloak."}}')
+
+    assert logic.load_auto_analysis_guidance(str(p)) == {
+        "components": {"keycloak-extension": "Also check upstream Keycloak."}
+    }
+
+
+def test_load_auto_analysis_guidance_invalid_json(tmp_path):
+    p = tmp_path / "invalid-auto-guidance.json"
+    p.write_text("invalid json")
+
+    guidance = logic.load_auto_analysis_guidance(str(p))
+
+    assert guidance == {}
 
 
 def test_load_team_mapping_valid(tmp_path):
@@ -889,6 +954,43 @@ def test_group_vulnerabilities_emits_dependency_chains():
     assert component["dependency_chains"] == ["libA -> TestProj"]
 
 
+def test_group_vulnerabilities_can_skip_dependency_chains_for_list_builds():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+                "component": {"name": "libA", "version": "1.0", "uuid": "comp1"},
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+    }
+
+    project_boms = {
+        "uuid1": {
+            "metadata": {"component": {"bom-ref": "root", "name": "TestProj"}},
+            "components": [
+                {"bom-ref": "root", "uuid": "root", "name": "TestProj"},
+                {"bom-ref": "libA", "uuid": "comp1", "name": "libA"},
+            ],
+            "dependencies": [
+                {"ref": "root", "dependsOn": ["libA"]},
+                {"ref": "libA", "dependsOn": []},
+            ],
+        }
+    }
+
+    grouped = logic.group_vulnerabilities(
+        [v1_data],
+        project_boms=project_boms,
+        include_dependency_paths=False,
+    )
+    component = grouped[0]["affected_versions"][0]["components"][0]
+
+    assert "dependency_chains" not in component
+    assert component["is_direct_dependency"] is True
+
+
 # --- Group-aware team mapping tests ---
 
 
@@ -920,6 +1022,165 @@ def test_tagging_name_only_key_matches_component_without_group():
     cache = BOMAnalysisCache(bom, mapping)
     tags = cache.get_tags_only("u1", "core")
     assert tags == ["CoreTeam"]
+
+
+def test_tagging_name_key_matches_case_insensitively_with_exact_case_tiebreak():
+    """Plain keys are case-insensitive, with deterministic exact-case preference."""
+    bom = {
+        "components": [
+            {"bom-ref": "ref1", "uuid": "u1", "name": "Core"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"core": "LowerTeam", "Core": "ExactTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    tags = cache.get_tags_only("u1", "Core")
+    assert tags == ["ExactTeam"]
+
+
+def test_tagging_case_sensitive_prefix_requires_exact_component_name():
+    bom = {
+        "components": [
+            {"bom-ref": "lower", "uuid": "u1", "name": "core"},
+            {"bom-ref": "exact", "uuid": "u2", "name": "Core"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"cs::Core": "ExactTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    assert cache.get_tags_only("u1", "core") == []
+    assert cache.get_tags_only("u2", "Core") == ["ExactTeam"]
+
+
+def test_tagging_nogroup_key_requires_known_empty_group():
+    bom = {
+        "components": [
+            {"bom-ref": "plain", "uuid": "u1", "name": "core"},
+            {"bom-ref": "grouped", "uuid": "u2", "name": "core", "group": "@angular"},
+        ],
+        "dependencies": [],
+    }
+    mapping = {"nogroup::core": "NoGroupTeam", "@angular:core": "AngularTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    assert cache.get_tags_only("u1", "core") == ["NoGroupTeam"]
+    assert cache.get_tags_only("u2", "core") == ["AngularTeam"]
+
+
+def test_tagging_nogroup_key_does_not_match_unknown_group_context():
+    cache = BOMAnalysisCache({}, {"nogroup::core": "NoGroupTeam", "*": "Fallback"})
+
+    assert cache.get_tags_only("", "core") == ["Fallback"]
+
+
+def test_tagging_cs_and_nogroup_can_be_component_groups():
+    bom = {
+        "components": [
+            {"bom-ref": "cs-ref", "uuid": "u1", "name": "core", "group": "cs"},
+            {
+                "bom-ref": "nogroup-ref",
+                "uuid": "u2",
+                "name": "core",
+                "group": "nogroup",
+            },
+        ],
+        "dependencies": [],
+    }
+    mapping = {"cs:core": "CaseGroupTeam", "nogroup:core": "NoGroupNameTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    assert cache.get_tags_only("u1", "core") == ["CaseGroupTeam"]
+    assert cache.get_tags_only("u2", "core") == ["NoGroupNameTeam"]
+
+
+def test_tagging_purl_key_matches_versioned_component_and_wins_over_group():
+    bom = {
+        "components": [
+            {
+                "bom-ref": "ref1",
+                "uuid": "u1",
+                "name": "core",
+                "group": "@angular",
+                "purl": "pkg:maven/org.example/core@1.2.3",
+            },
+        ],
+        "dependencies": [],
+    }
+    mapping = {
+        "@angular:core": "GroupTeam",
+        "purl::pkg:maven/org.example/core": "PurlTeam",
+    }
+
+    cache = BOMAnalysisCache(bom, mapping)
+    assert cache.get_tags_only("u1", "core") == ["PurlTeam"]
+
+
+def test_tagging_purl_key_can_match_exact_version():
+    bom = {
+        "components": [
+            {
+                "bom-ref": "ref1",
+                "uuid": "u1",
+                "name": "core",
+                "purl": "pkg:maven/org.example/core@1.2.3",
+            },
+        ],
+        "dependencies": [],
+    }
+    mapping = {
+        "purl::pkg:maven/org.example/core@9.9.9": "WrongVersionTeam",
+        "purl::pkg:maven/org.example/core@1.2.3": "ExactVersionTeam",
+    }
+
+    cache = BOMAnalysisCache(bom, mapping)
+    assert cache.get_tags_only("u1", "core") == ["ExactVersionTeam"]
+
+
+def test_tagging_case_sensitive_purl_key_requires_exact_case():
+    bom = {
+        "components": [
+            {
+                "bom-ref": "ref1",
+                "uuid": "u1",
+                "name": "Core",
+                "purl": "pkg:maven/org.example/Core@1.2.3",
+            },
+        ],
+        "dependencies": [],
+    }
+    mapping = {"cs,purl::pkg:maven/org.example/core": "LowercaseTeam"}
+
+    cache = BOMAnalysisCache(bom, mapping)
+    assert cache.get_tags_only("u1", "Core") == []
+
+
+def test_group_vulnerabilities_emits_component_purl_for_auto_targeting():
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "proj1"},
+        "vulnerabilities": [
+            {
+                "component": {
+                    "uuid": "u1",
+                    "name": "core",
+                    "version": "1.2.3",
+                    "purl": "pkg:maven/org.example/core@1.2.3",
+                },
+                "vulnerability": {
+                    "uuid": "v1",
+                    "vulnId": "CVE-2026-9999",
+                    "severity": "HIGH",
+                },
+                "analysis": {"state": "NOT_SET"},
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+
+    component = grouped[0]["affected_versions"][0]["components"][0]
+    assert component["component_purl"] == "pkg:maven/org.example/core@1.2.3"
 
 
 def test_tagging_name_only_key_does_not_match_component_with_group():

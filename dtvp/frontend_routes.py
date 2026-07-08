@@ -1,5 +1,7 @@
+import json
 import os
 from dataclasses import dataclass
+from html import escape
 from typing import Callable
 
 from fastapi import FastAPI
@@ -77,6 +79,26 @@ def register_frontend_routes(app: FastAPI, deps: FrontendRouteDeps) -> None:
     index_path = os.path.join(deps.frontend_dist_dir, "index.html")
 
     if context_path:
+
+        @app.get("/", include_in_schema=False)
+        async def redirect_root_to_context_path():
+            target = f"{context_path}/"
+            escaped_target = escape(target, quote=True)
+            target_json = json.dumps(target)
+            return HTMLResponse(
+                f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="refresh" content="0; url={escaped_target}" />
+  <title>DTVP</title>
+</head>
+<body>
+  <script>window.location.replace({target_json});</script>
+  <a href="{escaped_target}">DTVP</a>
+</body>
+</html>"""
+            )
 
         @app.get(context_path)
         async def redirect_to_context_path():

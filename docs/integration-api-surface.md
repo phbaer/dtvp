@@ -73,18 +73,24 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 
 DTVP expects the Code Analysis backend to expose the following endpoints under its configured base URL (`DTVP_CODE_ANALYSIS_URL`):
 
+The repository includes Agentyzer under `agentyzer/` as the first-party implementation of this API. Docker Compose starts it as service `agentyzer` and points DTVP at `http://agentyzer:8000` by default.
+
 - `GET /health`
   - Returns service readiness and health.
   - Expected response: `{ "status": "ok" }`.
+  - May also include model/LLM metadata such as `model`, `llm_backend`, `llm_provider`, or a nested `llm` object.
+  - May include `configuration` and `backend` objects. DTVP promotes these into `/api/code-analysis/status` so the dashboard can show analyzer config paths, repository workspace/counts, enabled features, LLM host/provider/model health, repository backend strategy, job-store details, and execution slot availability.
 
 - `POST /assess`
   - Start an assessment.
-  - Request body: JSON with at least `component_name`; optional `vuln_id`, `cvss_vector`, `user_guidance`, `focus_path`, `dependency_paths`, and `debug`.
+  - Request body: JSON with at least `component_name`; optional `vuln_id`, `cvss_vector`, `user_guidance`, `model`, `llm_backend`, `llm_provider`, `focus_path`, `dependency_paths`, and `debug`.
   - Default behavior is asynchronous: the response is a job handle.
   - Expected async response:
     - `job_id` — string
     - `status` — `pending`
     - `poll_url` — relative URL to poll for job status
+    - Optional model/LLM metadata (`model`, `llm_backend`, `llm_provider`, or `llm`) is preserved by DTVP when present.
+    - Optional `configuration` and `backend` objects are preserved for dashboard display.
 
 - `POST /assess?sync=true`
   - Start a synchronous assessment and return the finished result in the response.
@@ -92,19 +98,28 @@ DTVP expects the Code Analysis backend to expose the following endpoints under i
     - `assessment` — an `Assessment` object with top-level verdict metadata.
     - `steps` — an ordered array of `StepFindings`.
 
+- `GET /jobs`
+  - List jobs known to the analyzer process.
+  - Expected response: `{ "jobs": [...], "configuration": {...}, "backend": {...} }`, where each item follows the `JobStatusResponse` shape.
+  - Shared `configuration` and `backend` metadata should be returned once on the response envelope, not repeated on every job. Individual jobs should carry job-specific request, progress, log, and LLM metadata.
+  - `backend.jobs` should include `job_store`, `execution_model`, `known_jobs`, `status_counts`, `max_concurrent_jobs`, `running_jobs`, `queued_jobs`, and `available_slots` when known.
+
 - `GET /jobs/{job_id}`
   - Fetch the status of a previously created job.
   - Expected response: a `JobStatusResponse` object containing:
     - `job_id`, `status`, `created_at`, `finished_at`, `error`.
     - `progress` — a `JobProgress` object.
+    - Optional model/LLM metadata (`model`, `llm_backend`, `llm_provider`, `llm`), optional `configuration`/`backend` objects, and optional log output (`logs`, `events`, or `messages`).
+  - `status` is usually `pending`, `running`, `completed`, `failed`, or `cancelled`.
 
 - `GET /jobs/{job_id}/result`
   - Fetch the final result of a completed asynchronous job.
   - Expected response: an `AssessResponse` object identical in structure to the sync response.
 
 - `DELETE /jobs/{job_id}`
-  - Cancel or remove a job.
+  - Cancel a pending/running job or remove a finished job.
   - Expected response: `204 No Content` on success.
+  - Cancellation is best effort for a running job. If the analyzer cannot stop a running job, return a non-2xx response with `{ "detail": "..." }`; DTVP will keep its queue item running and surface the refusal.
 
 ### Result JSON expectations for Code Analysis
 
@@ -150,6 +165,7 @@ DTVP expects the Code Analysis backend to expose the following endpoints under i
     - `last_updated_at`
     - `active_agents` — array of active step objects
     - `step_statuses` — map of step name to status string
+    - `logs`, `events`, or `messages` — optional live log entries; entries may be strings or objects containing fields such as `timestamp`, `level`, and `message`
 
 - `JobSubmittedResponse`
   - Must contain:

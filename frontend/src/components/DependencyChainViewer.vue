@@ -2,6 +2,7 @@
 import { ref, watch, computed, onMounted, inject, type Ref } from 'vue'
 import { getDependencyChains } from '../lib/api'
 import DependencyPathList from './DependencyPathList.vue'
+import type { TeamMapping } from '../lib/team-mapping'
 
 type ChainSource = {
     projectUuid: string
@@ -10,17 +11,7 @@ type ChainSource = {
     paths?: string[]
 }
 
-const teamMapping = inject<Ref<Record<string, string | string[]>>>('teamMapping', ref({}))
-
-const teamMappedNames = computed(() => {
-    const map = new Map<string, string[]>()
-    for (const [key, val] of Object.entries(teamMapping.value)) {
-        if (key !== '*') {
-            map.set(key, Array.isArray(val) ? val : [val])
-        }
-    }
-    return map
-})
+const teamMapping = inject<Ref<TeamMapping>>('teamMapping', ref({}))
 
 const props = defineProps<{
     projectUuid?: string
@@ -129,6 +120,6 @@ onMounted(() => {
         <div v-if="loading" class="text-xs text-gray-500 italic">Loading...</div>
         <div v-else-if="error" class="text-xs text-red-500">{{ error }}</div>
         <div v-else-if="paths.length === 0 && loaded" class="text-xs text-gray-500 italic">No dependency chains found.</div>
-        <DependencyPathList v-else :paths="paths" :project-name="projectName" :team-mapped-names="teamMappedNames" />
+        <DependencyPathList v-else :paths="paths" :project-name="projectName" :team-mapping="teamMapping" />
     </div>
 </template>

@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { GroupedVuln } from '../types'
 import VulnGroupCard from './VulnGroupCard.vue'
 
 defineProps<{
     group: GroupedVuln
+    hasAutomaticAssessment?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -11,6 +13,15 @@ const emit = defineEmits<{
     (e: 'update', group?: GroupedVuln): void
     (e: 'update:assessment', data: any): void
 }>()
+
+const cardRef = ref<{ confirmApplyDraftBeforeLeave?: () => Promise<boolean> } | null>(null)
+
+const confirmApplyDraftBeforeLeave = () =>
+    cardRef.value?.confirmApplyDraftBeforeLeave?.() ?? Promise.resolve(true)
+
+defineExpose({
+    confirmApplyDraftBeforeLeave,
+})
 </script>
 
 <template>
@@ -20,8 +31,10 @@ const emit = defineEmits<{
     >
         <div class="min-h-0 grow overflow-y-auto overscroll-contain">
             <VulnGroupCard
+                ref="cardRef"
                 :group="group"
                 :inModal="true"
+                :hasAutomaticAssessment="hasAutomaticAssessment"
                 @close="emit('close')"
                 @update="(updatedGroup) => emit('update', updatedGroup)"
                 @update:assessment="(data) => emit('update:assessment', data)"

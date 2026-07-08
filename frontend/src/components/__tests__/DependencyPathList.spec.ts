@@ -136,6 +136,17 @@ describe('DependencyPathList', () => {
     expect(getGraphLabels(wrapper)).toContain('Team-A-Comp | TEAM-A | PRIMARY')
   })
 
+  it('honors case-sensitive team mapping selectors', () => {
+    const paths = ['log4j-core -> Team-A-Comp -> Impacted-Project']
+    const teamMappedNames = new Map<string, string[]>([['cs::team-a-comp', ['TEAM-A']]])
+
+    const wrapper = mount(DependencyPathList, {
+      props: { paths, teamMappedNames },
+    })
+
+    expect(getGraphLabels(wrapper)).not.toContain('TEAM-A')
+  })
+
   it('collapses consecutive duplicate nodes', () => {
     const paths = ['VulnComp -> VulnComp -> Intermediate -> Root']
     const wrapper = mount(DependencyPathList, { props: { paths } })

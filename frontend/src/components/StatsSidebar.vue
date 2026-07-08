@@ -29,6 +29,7 @@ export interface FilterState {
     sortOrder: 'asc' | 'desc'
     dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
     tmrescoreFilter: Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>
+    automaticAssessmentFilter: Array<'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'>
     idFilter: string
     tagFilter: string
     componentFilter: string
@@ -52,6 +53,7 @@ const props = defineProps<{
     dependencyCounts: DependencyCounts
     dependencyFilterCounts: DependencyCounts
     tmrescoreCounts: Record<string, number>
+    automaticAssessmentCounts: Record<string, number>
     analysisCounts: Record<string, number>
     teamTagList: TeamEntry[]
     cacheStatusState: 'cached' | 'partial' | 'unknown' | 'loading'
@@ -62,6 +64,7 @@ const props = defineProps<{
     sortOptions: ReadonlyArray<{ value: string; label: string }>
     dependencyOptions: ReadonlyArray<{ value: string; label: string }>
     tmrescoreOptions: ReadonlyArray<{ value: string; label: string }>
+    automaticAssessmentOptions: ReadonlyArray<{ value: string; label: string }>
     cvssVersionMismatchCount?: number
     attributionRangeCount?: number
 }>()
@@ -92,6 +95,14 @@ const toggleTmrescoreFilter = (value: 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') => {
     if (idx >= 0) current.splice(idx, 1)
     else current.push(value)
     updateFilter('tmrescoreFilter', current as FilterState['tmrescoreFilter'])
+}
+
+const toggleAutomaticAssessmentFilter = (value: 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT') => {
+    const current = [...props.filters.automaticAssessmentFilter]
+    const idx = current.indexOf(value)
+    if (idx >= 0) current.splice(idx, 1)
+    else current.push(value)
+    updateFilter('automaticAssessmentFilter', current as FilterState['automaticAssessmentFilter'])
 }
 
 const toggleLifecycleFilter = (val: string) => {
@@ -162,7 +173,7 @@ const handleCopy = () => {
 </script>
 
 <template>
-    <div class="w-full min-w-0 flex-shrink-0 space-y-3">
+    <div class="w-full min-w-0 flex-shrink-0 space-y-3" data-testid="stats-sidebar">
         <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl backdrop-blur-sm overflow-hidden">
             <div class="flex items-center gap-2 px-3 py-3">
                 <button
@@ -310,6 +321,28 @@ const handleCopy = () => {
                                     </div>
                                 </div>
 
+                                <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Automatic Assessment</label>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button
+                                            v-for="opt in props.automaticAssessmentOptions"
+                                            :key="opt.value"
+                                            @click="toggleAutomaticAssessmentFilter(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')
+                                                    ? opt.value === 'WITH_AUTOMATIC_ASSESSMENT' ? 'bg-cyan-500 text-white border-cyan-500' : 'bg-slate-600/60 text-white border-slate-500'
+                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+                                            ]"
+                                        >
+                                            {{ opt.label }}
+                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT') ? 'text-white' : 'text-gray-500'">
+                                                {{ props.automaticAssessmentCounts[opt.value] || 0 }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <div v-if="props.cvssVersionMismatchCount != null" class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">CVSS Version</label>
                                     <div class="flex flex-wrap gap-2">
@@ -359,7 +392,7 @@ const handleCopy = () => {
                     </div>
                 </div>
 
-                <div v-else class="space-y-3">
+                <div v-else class="space-y-3" data-testid="stats-sidebar-results">
                     <div class="relative shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                         <span v-if="copiedStats" class="absolute top-3 right-3 text-[10px] text-green-300">Copied!</span>
                         <div class="text-[10px] font-medium uppercase tracking-widest text-gray-500">Statistics</div>

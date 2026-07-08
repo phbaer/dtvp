@@ -4,6 +4,8 @@ export type ProjectHeaderViewMode = 'analysis' | 'statistics'
 
 export const projectHeaderState = {
   currentProjectName: ref<string | null>(null),
+  lastProjectName: ref<string | null>(null),
+  lastProjectPath: ref<string | null>(null),
   isAllProjects: ref(true),
   viewMode: ref<ProjectHeaderViewMode>('analysis'),
   incompleteCount: ref(0),

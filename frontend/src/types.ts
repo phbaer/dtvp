@@ -14,6 +14,8 @@ export interface Instance {
     project_version: string;
     project_uuid: string;
     component_name: string;
+    component_group?: string | null;
+    component_purl?: string | null;
     component_version: string;
     component_uuid: string;
     vulnerability_uuid: string;

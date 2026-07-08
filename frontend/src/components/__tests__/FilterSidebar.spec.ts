@@ -9,6 +9,7 @@ describe('FilterSidebar.vue', () => {
         sortOrder: 'desc',
         dependencyFilter: ['DIRECT'],
         tmrescoreFilter: ['WITH_PROPOSAL'],
+        automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
         idFilter: 'CVE-2024-0001',
         tagFilter: 'team-a',
         componentFilter: 'auth-service',

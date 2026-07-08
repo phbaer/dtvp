@@ -263,6 +263,17 @@ Details A`;
             expect(teamA).toBeDefined();
             expect(teamA?.details).toBe('My actual rationale');
         });
+
+        it('should parse review context metadata from block headers', () => {
+            const text = `--- [Team: Platform] [State: IN_TRIAGE] [Assessed By: alice] [Evidence Reviewed: yes] [Version Coverage: checked] [Ticket: SEC-42] ---
+Checked direct usage and release branches.`;
+            const blocks = parseAssessmentBlocks(text);
+            expect(blocks).toHaveLength(1);
+            expect(blocks[0].evidenceReviewed).toBe(true);
+            expect(blocks[0].versionCoverageChecked).toBe(true);
+            expect(blocks[0].ticket).toBe('SEC-42');
+            expect(blocks[0].details).toBe('Checked direct usage and release branches.');
+        });
     });
 
     describe('constructAssessmentDetails', () => {
@@ -295,6 +306,24 @@ Details A`;
 
             const approved = constructAssessmentDetails(blocks, [], false);
             expect(approved.text).not.toContain('[Status: Pending Review]');
+        });
+
+        it('should emit review context metadata in block headers', () => {
+            const blocks = [{
+                team: 'Platform',
+                state: 'IN_TRIAGE',
+                user: 'bob',
+                details: 'Reviewed.',
+                justification: 'NOT_SET',
+                evidenceReviewed: true,
+                versionCoverageChecked: true,
+                ticket: 'SEC-42\n[ignored]',
+            }];
+            const { text } = constructAssessmentDetails(blocks, [], false);
+            expect(text).toContain('[Evidence Reviewed: yes]');
+            expect(text).toContain('[Version Coverage: yes]');
+            expect(text).toContain('[Ticket: SEC-42 ignored]');
+            expect(text).toContain('Reviewed.');
         });
     });
 
@@ -344,6 +373,16 @@ Old Details`;
 Text`;
             const result = mergeTeamAssessment(initial, 'TeamA', 'NOT_SET', 'TextA', 'UserA');
             expect(result.text).toContain('[Rescored: 8.5]');
+        });
+
+        it('should preserve review context metadata through team edits', () => {
+            const initial = `--- [Team: Dev] [State: IN_TRIAGE] [Assessed By: alice] [Evidence Reviewed: yes] [Version Coverage: yes] [Ticket: SEC-77] ---
+Old details.`;
+            const { text } = mergeTeamAssessment(initial, 'Dev', 'EXPLOITABLE', 'New details.', 'bob', 'NOT_SET');
+            expect(text).toContain('[Evidence Reviewed: yes]');
+            expect(text).toContain('[Version Coverage: yes]');
+            expect(text).toContain('[Ticket: SEC-77]');
+            expect(text).toContain('New details.');
         });
     });
 

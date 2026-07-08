@@ -13,6 +13,7 @@ interface ProjectRouterLike {
 interface UseProjectVulnSelectionOptions {
     route: ProjectRouteLike
     router: ProjectRouterLike
+    isRouteActive?: () => boolean
 }
 
 const routeVulnId = (value: unknown): string | null =>
@@ -21,8 +22,14 @@ const routeVulnId = (value: unknown): string | null =>
 export function useProjectVulnSelection({
     route,
     router,
+    isRouteActive,
 }: UseProjectVulnSelectionOptions) {
     const selectedGroupId = ref<string | null>(routeVulnId(route.query.vuln))
+    const shouldSyncFromRoute = () => isRouteActive?.() ?? true
+    const syncSelectedGroupFromRoute = () => {
+        if (!shouldSyncFromRoute()) return
+        selectedGroupId.value = routeVulnId(route.query.vuln)
+    }
 
     const updateVulnQuery = (id: string | null) => {
         const query: LocationQueryRaw = { ...route.query }
@@ -41,8 +48,8 @@ export function useProjectVulnSelection({
         updateVulnQuery(null)
     }
 
-    watch(() => route.query.vuln, (value) => {
-        selectedGroupId.value = routeVulnId(value)
+    watch(() => route.query.vuln, () => {
+        syncSelectedGroupFromRoute()
     })
 
     return {
@@ -50,5 +57,6 @@ export function useProjectVulnSelection({
         selectGroup,
         closeSelectedGroup,
         updateVulnQuery,
+        syncSelectedGroupFromRoute,
     }
 }

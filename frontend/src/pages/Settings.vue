@@ -6,11 +6,14 @@ import {
     getProjectArchiveSnapshotDownloadUrl,
     getProjectArchiveTaskDownloadUrl,
     getRoles,
+    getAutoAnalysisGuidance,
     listProjectArchiveSnapshots,
     startProjectArchiveExport,
+    updateAutoAnalysisGuidance,
     updateRescoreRules,
     updateRoles,
     updateTeamMapping,
+    uploadAutoAnalysisGuidance,
     uploadProjectArchiveImport,
     uploadRescoreRules,
     uploadRoles,
@@ -32,9 +35,24 @@ const message = ref('')
 const error = ref('')
 const currentMapping = ref<Record<string, string | string[]> | null>(null)
 const mappingJson = ref('')
-const mappingRows = ref<Array<{ component: string; main: string; aliases: string }>>([])
+interface MappingRow {
+    id: string
+    component: string
+    main: string
+    aliases: string
+}
+
+let nextMappingRowId = 1
+let lastJsonFromRows = ''
+let skipNextRowsSync = false
+const mappingRows = ref<MappingRow[]>([])
 const rawJsonError = ref('')
 const savingMapping = ref(false)
+
+const createMappingRow = (values: Omit<MappingRow, 'id'>): MappingRow => ({
+    id: `mapping-row-${nextMappingRowId++}`,
+    ...values,
+})
 
 const mappingToRows = (mapping: Record<string, string | string[]> | null) => {
     if (!mapping) return []
@@ -42,17 +60,17 @@ const mappingToRows = (mapping: Record<string, string | string[]> | null) => {
         .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
         .map(([component, value]) => {
             if (Array.isArray(value)) {
-                return {
+                return createMappingRow({
                     component,
                     main: value[0] || '',
                     aliases: value.slice(1).join(', '),
-                }
+                })
             }
-            return {
+            return createMappingRow({
                 component,
                 main: value || '',
                 aliases: '',
-            }
+            })
         })
 }
 
@@ -81,11 +99,13 @@ const rowsToMapping = () => {
 }
 
 const updateMappingJsonFromRows = () => {
-    mappingJson.value = JSON.stringify(rowsToMapping(), null, 2)
+    lastJsonFromRows = JSON.stringify(rowsToMapping(), null, 2)
+    mappingJson.value = lastJsonFromRows
+    rawJsonError.value = ''
 }
 
 const addMappingRow = () => {
-    mappingRows.value.push({ component: '', main: '', aliases: '' })
+    mappingRows.value.push(createMappingRow({ component: '', main: '', aliases: '' }))
 }
 
 const removeMappingRow = (index: number) => {
@@ -110,6 +130,15 @@ const rescoreError = ref('')
 const currentRescoreRules = ref<Record<string, any> | null>(null)
 const rescoreJson = ref('')
 const savingRescore = ref(false)
+
+// Config state
+const autoGuidanceFileInput = ref<HTMLInputElement | null>(null)
+const uploadingAutoGuidance = ref(false)
+const autoGuidanceMessage = ref('')
+const autoGuidanceError = ref('')
+const currentAutoGuidance = ref<Record<string, any> | null>(null)
+const autoGuidanceJson = ref('')
+const savingAutoGuidance = ref(false)
 
 // Project archive state
 const archiveProjectName = ref('')
@@ -136,13 +165,21 @@ const loadMapping = async () => {
 }
 
 watch(mappingRows, () => {
+    if (skipNextRowsSync) {
+        skipNextRowsSync = false
+        return
+    }
     updateMappingJsonFromRows()
 }, { deep: true })
 
 watch(mappingJson, (value) => {
+    if (value === lastJsonFromRows) {
+        return
+    }
     try {
         const parsed = JSON.parse(value)
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            skipNextRowsSync = true
             mappingRows.value = mappingToRows(parsed)
             rawJsonError.value = ''
         } else {
@@ -170,6 +207,16 @@ const loadRescoreRules = async () => {
         rescoreJson.value = JSON.stringify(currentRescoreRules.value, null, 2)
     } catch (e) {
         console.error("Failed to load rescore rules", e)
+    }
+}
+
+const loadAutoGuidance = async () => {
+    if (realRole?.value !== 'REVIEWER') return
+    try {
+        currentAutoGuidance.value = await getAutoAnalysisGuidance()
+        autoGuidanceJson.value = JSON.stringify(currentAutoGuidance.value, null, 2)
+    } catch (e) {
+        console.error("Failed to load auto-analysis guidance", e)
     }
 }
 
@@ -336,6 +383,63 @@ const saveRescoreRules = async () => {
     }
 }
 
+const handleAutoGuidanceUpload = async () => {
+    if (!autoGuidanceFileInput.value?.files?.length) return
+
+    const file = autoGuidanceFileInput.value.files[0]
+    if (!file) return
+
+    uploadingAutoGuidance.value = true
+    autoGuidanceMessage.value = ''
+    autoGuidanceError.value = ''
+
+    try {
+        const res = await uploadAutoAnalysisGuidance(file)
+        if (res.status === 'success') {
+            autoGuidanceMessage.value = res.message
+            if (autoGuidanceFileInput.value) autoGuidanceFileInput.value.value = ''
+            await loadAutoGuidance()
+        } else {
+             throw new Error(res.message)
+        }
+    } catch (err: any) {
+        autoGuidanceError.value = err.message
+    } finally {
+        uploadingAutoGuidance.value = false
+    }
+}
+
+const saveAutoGuidance = async () => {
+    savingAutoGuidance.value = true
+    autoGuidanceMessage.value = ''
+    autoGuidanceError.value = ''
+
+    try {
+        let parsed = {}
+        try {
+            parsed = JSON.parse(autoGuidanceJson.value)
+        } catch (e) {
+            throw new Error("Invalid JSON format")
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error("Auto-analysis guidance JSON must be an object")
+        }
+
+        const res = await updateAutoAnalysisGuidance(parsed)
+
+        if (res.status === 'success') {
+            autoGuidanceMessage.value = res.message || 'Auto-analysis guidance saved successfully!'
+            await loadAutoGuidance()
+        } else {
+            throw new Error(res.message)
+        }
+    } catch (err: any) {
+        autoGuidanceError.value = err.message
+    } finally {
+        savingAutoGuidance.value = false
+    }
+}
+
 const updateArchiveTask = (status: ProjectArchiveTask) => {
     if (status.kind === 'export') {
         archiveExportTask.value = status
@@ -422,6 +526,7 @@ onMounted(() => {
         loadMapping()
         loadRoles()
         loadRescoreRules()
+        loadAutoGuidance()
         loadArchiveSnapshots()
     }
 })
@@ -432,6 +537,7 @@ watch(realRole, (role) => {
         loadMapping()
         loadRoles()
         loadRescoreRules()
+        loadAutoGuidance()
         loadArchiveSnapshots()
     }
 })
@@ -442,6 +548,8 @@ watch(() => activeTab.value, (newTab) => {
         loadRoles()
     } else if (newTab === 'rescore' && realRole?.value === 'REVIEWER') {
         loadRescoreRules()
+    } else if (newTab === 'config' && realRole?.value === 'REVIEWER') {
+        loadAutoGuidance()
     } else if (newTab === 'archives' && realRole?.value === 'REVIEWER') {
         loadArchiveSnapshots()
     }
@@ -481,6 +589,13 @@ watch(() => activeTab.value, (newTab) => {
         </button>
         <button
             v-if="user?.role === 'REVIEWER'"
+            @click="activeTab = 'config'"
+            :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'config' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
+        >
+            Config
+        </button>
+        <button
+            v-if="user?.role === 'REVIEWER'"
             @click="activeTab = 'archives'"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-2', activeTab === 'archives' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
@@ -495,15 +610,16 @@ watch(() => activeTab.value, (newTab) => {
         <div class="mb-6">
              <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Structured Editor</h4>
              <p class="text-gray-400 mb-2 text-xs">
-                Configure component mappings using the table below. Aliases are only used to recognize legacy team tags and are not shown in the vulnerability header.
+                Configure component mappings using deterministic SBOM selectors: name, group:name, purl::pkg:type/namespace/name for package URLs, cs::name for case-sensitive matches, nogroup::name for known components without a group, and cs,nogroup::name for both. Single-colon keys such as cs:name and nogroup:name are normal group:name selectors. More specific selectors win. Aliases are only used to recognize legacy team tags and are not shown in the vulnerability header.
             </p>
             <div class="space-y-2 mb-4">
-                <div v-for="(row, index) in mappingRows" :key="`${row.component}-${index}`" class="grid gap-2 md:grid-cols-[2fr_1fr_1fr_auto] items-end">
+                <div v-for="(row, index) in mappingRows" :key="row.id" class="grid gap-2 md:grid-cols-[2fr_1fr_1fr_auto] items-end">
                     <div>
-                        <label class="text-xs text-gray-400">Component</label>
+                        <label class="text-xs text-gray-400">Component key</label>
                         <input
                             v-model="row.component"
-                            placeholder="Component name"
+                            :data-testid="`team-mapping-component-${row.id}`"
+                            placeholder="name, group:name, purl::pkg:type/namespace/name"
                             class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
                         />
                     </div>
@@ -723,6 +839,81 @@ watch(() => activeTab.value, (newTab) => {
                 {{ rescoreError }}
             </div>
         </div>
+    </div>
+
+    <!-- Config Tab -->
+    <div v-if="activeTab === 'config' && user?.role === 'REVIEWER'" class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">
+        <h3 class="text-xl font-bold mb-4 text-gray-200">Configuration</h3>
+
+        <section class="space-y-4">
+            <div>
+                <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Code Analysis Guidance</h4>
+                <p class="text-gray-400 mb-2 text-xs">
+                    Configure static prompt additions for automatic scans and manual vulnerability-card analyses. Use a default entry for all scan targets and component-specific entries under <code>components</code>; component keys use the same name, group:name, and purl:: selectors as team mapping.
+                </p>
+                <pre class="mb-3 overflow-x-auto rounded border border-gray-700 bg-gray-950 p-3 text-xs text-gray-400">{
+  "default": "Always verify runtime reachability against code evidence.",
+  "components": {
+    "keycloak-extension": {
+      "guidance": [
+        "This component extends Keycloak.",
+        "If the extension is not affected, still consider whether upstream Keycloak itself is vulnerable."
+      ]
+    }
+  }
+}</pre>
+                <div class="relative">
+                    <textarea
+                        v-model="autoGuidanceJson"
+                        class="w-full h-80 bg-gray-900 p-4 rounded border border-gray-700 font-mono text-blue-300 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        spellcheck="false"
+                    ></textarea>
+                    <div class="absolute bottom-4 right-4 flex gap-2">
+                        <button
+                            @click="saveAutoGuidance"
+                            :disabled="savingAutoGuidance"
+                            class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-4 rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                        >
+                            {{ savingAutoGuidance ? 'Saving...' : 'Save Changes' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-4 pt-6 border-t border-gray-700">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-300 mb-2">Or Upload Guidance File (JSON)</label>
+                    <input
+                        ref="autoGuidanceFileInput"
+                        type="file"
+                        accept=".json"
+                        class="block w-full text-sm text-gray-400
+                            file:mr-4 file:py-2 file:px-4
+                            file:rounded-full file:border-0
+                            file:text-sm file:font-semibold
+                            file:bg-blue-900 file:text-blue-200
+                            hover:file:bg-blue-800
+                            cursor-pointer"
+                    />
+                </div>
+
+                <button
+                    @click="handleAutoGuidanceUpload"
+                    :disabled="uploadingAutoGuidance"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {{ uploadingAutoGuidance ? 'Uploading...' : 'Upload Guidance' }}
+                </button>
+
+                <div v-if="autoGuidanceMessage" class="p-3 bg-green-900/30 border border-green-800 text-green-400 rounded">
+                    {{ autoGuidanceMessage }}
+                </div>
+
+                <div v-if="autoGuidanceError" class="p-3 bg-red-900/30 border border-red-800 text-red-400 rounded">
+                    {{ autoGuidanceError }}
+                </div>
+            </div>
+        </section>
     </div>
 
     <!-- Project Archives Tab -->

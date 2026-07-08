@@ -25,6 +25,36 @@ async def test_get_projects_caches_results(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_get_projects_uses_stale_full_cache_when_dt_unavailable(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    cached = [
+        {"name": "TestApp", "uuid": "uuid1", "version": "1.0"},
+        {"name": "Other", "uuid": "uuid2", "version": "2.0"},
+    ]
+    manager._save_project_cache(manager._projects_path(), cached)
+    client = AsyncMock()
+    client.get_projects.side_effect = RuntimeError("dt down")
+
+    assert await manager.get_projects(client, name="") == cached
+
+
+@pytest.mark.asyncio
+async def test_get_projects_uses_stale_named_matches_when_dt_search_unavailable(
+    tmp_path,
+):
+    manager = CacheManager(base_path=str(tmp_path))
+    cached = [
+        {"name": "TestApp", "uuid": "uuid1", "version": "1.0"},
+        {"name": "Other", "uuid": "uuid2", "version": "2.0"},
+    ]
+    manager._save_project_cache(manager._projects_path(), cached)
+    client = AsyncMock()
+    client.get_projects.side_effect = RuntimeError("dt down")
+
+    assert await manager.get_projects(client, name="Test") == [cached[0]]
+
+
+@pytest.mark.asyncio
 async def test_get_vulnerabilities_caches_results(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))
     client = AsyncMock()

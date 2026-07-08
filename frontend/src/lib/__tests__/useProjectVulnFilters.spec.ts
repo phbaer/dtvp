@@ -58,6 +58,7 @@ describe('useProjectVulnFilters', () => {
                 dependency: ['direct', 'unknown'],
                 versions: '1.0.0, 2.0.0',
                 tmrescore: 'with_proposal',
+                automatic_assessment: 'with_automatic_assessment',
                 cvss_mismatch: 'true',
                 attributed_before_days: '14',
                 attribution_mode: 'younger',
@@ -80,6 +81,7 @@ describe('useProjectVulnFilters', () => {
         expect(filters.selectedDependencyFilters.value).toEqual(['DIRECT', 'UNKNOWN'])
         expect(filters.versionFilterList.value).toEqual(['1.0.0', '2.0.0'])
         expect(filters.selectedTMRescoreProposalFilters.value).toEqual(['WITH_PROPOSAL'])
+        expect(filters.selectedAutomaticAssessmentFilters.value).toEqual(['WITH_AUTOMATIC_ASSESSMENT'])
         expect(filters.cvssVersionMismatchOnly.value).toBe(true)
         expect(filters.attributionAgeDays.value).toBe(14)
         expect(filters.attributionAgeMode.value).toBe('younger')

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock API
@@ -143,18 +144,20 @@ describe('VulnGroupCard', () => {
         expect(primaryId.classes()).not.toContain('break-all')
     })
 
-    it('renders the CVSS base score directly under the vulnerability id', () => {
+    it('renders the CVSS base score as a header chip', () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
         })
 
         const primaryId = wrapper.get('[data-testid="vuln-primary-id"]').element
-        const cvssBlock = wrapper.get('[data-testid="header-cvss-block"]').element
-        const position = primaryId.compareDocumentPosition(cvssBlock)
+        const cvssBlock = wrapper.get('[data-testid="header-cvss-block"]')
+        const position = primaryId.compareDocumentPosition(cvssBlock.element)
 
         expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-        expect(wrapper.get('[data-testid="header-cvss-block"]').text()).toContain('9.8')
-        expect(wrapper.get('[data-testid="header-cvss-block"]').text()).not.toContain('CVSS Base')
+        expect(cvssBlock.classes()).toContain('rounded')
+        expect(cvssBlock.text()).toContain('CVSS')
+        expect(cvssBlock.text()).toContain('9.8')
+        expect(cvssBlock.text()).not.toContain('CVSS Base')
     })
 
     it('shows base and rescored score as base arrow rescored', () => {
@@ -250,6 +253,23 @@ describe('VulnGroupCard', () => {
         // Expanded
         expect(wrapper.text()).toContain('A bad vulnerability')
         expect(wrapper.text()).toContain('1.0') // Version should be shown
+    })
+
+    it('keeps the sticky detail bar focused on tabs and apply', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup }
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const stickyBar = wrapper.get('[data-vuln-card-sticky-nav]')
+        expect(stickyBar.text()).toContain('Overview')
+        expect(stickyBar.text()).toContain('Apply')
+        expect(stickyBar.find('[data-testid="sticky-tab-apply-button"]').exists()).toBe(true)
+        expect(stickyBar.text()).not.toContain('Global')
+        expect(stickyBar.text()).not.toContain('Synced')
+        expect(stickyBar.text()).not.toContain('CVSS 9.8')
+        expect(stickyBar.text()).not.toContain('1 target')
     })
 
     it('renders advisory descriptions as markdown', async () => {
@@ -364,8 +384,80 @@ describe('VulnGroupCard', () => {
         }))
     })
 
-    // TMRescore proposal UI was removed from VulnGroupCard during refactor
-    // (proposals are now handled at the ProjectView level)
+    it('shows tmrescore proposal inside the CVSS overview', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER', username: 'tester' }),
+                    tmrescoreProposals: ref({
+                        'CVE-2023-1234': {
+                            original_score: 9.8,
+                            rescored_score: 4.2,
+                            original_vector: mockGroup.cvss_vector,
+                            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:L/I:L/A:N',
+                            analysis: {
+                                detail: 'Threat model reduces exposure for the reviewed deployment.',
+                                response: ['Network path is constrained.'],
+                            },
+                        },
+                    }),
+                },
+                stubs: { teleport: true },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        expect(wrapper.text()).toContain('CVSS & Rescoring')
+        expect(wrapper.text()).toContain('Threat Model Proposal')
+        expect(wrapper.text()).toContain('Apply Proposal')
+        expect(wrapper.text()).toContain('Threat model reduces exposure for the reviewed deployment.')
+    })
+
+    const openReviewTab = async (wrapper: ReturnType<typeof mount>) => {
+        await wrapper.find('.cursor-pointer').trigger('click')
+        const reviewTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Review'))
+        expect(reviewTab).toBeDefined()
+        await reviewTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+    }
+
+    it('keeps ticket reference optional when only the original score is critical', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) },
+                stubs: { teleport: true },
+            },
+        })
+
+        await openReviewTab(wrapper)
+
+        const context = wrapper.get('[data-testid="review-context"]')
+        expect(context.text()).toContain('0/2 required')
+        expect(wrapper.get('[data-testid="ticket-requirement-badge"]').text()).toBe('Optional')
+        expect(context.text()).toContain('Optional unless rescoring leaves this High or Critical.')
+        expect(wrapper.get('input[placeholder="e.g. SEC-1234 or remediation ticket"]').attributes('aria-required')).toBe('false')
+    })
+
+    it('requires ticket reference for high rescored severity', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, rescored_cvss: 7.2 } },
+            global: {
+                provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) },
+                stubs: { teleport: true },
+            },
+        })
+
+        await openReviewTab(wrapper)
+
+        const context = wrapper.get('[data-testid="review-context"]')
+        expect(context.text()).toContain('0/3 required')
+        expect(wrapper.get('[data-testid="ticket-requirement-badge"]').text()).toBe('Required')
+        expect(context.text()).toContain('Required for HIGH after rescoring.')
+        expect(wrapper.get('input[placeholder="e.g. SEC-1234 or remediation ticket"]').attributes('aria-required')).toBe('true')
+    })
 
     it('handles assessment update errors', async () => {
         // Mock API failure
@@ -568,6 +660,29 @@ describe('VulnGroupCard', () => {
         expect(badge.exists()).toBe(true)
         expect(badge.text()).toBe('Open')
         expect(badge.classes()).toContain('text-red-400')
+    })
+
+    it('asks to apply an unsaved draft before leaving the card', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup, inModal: true },
+            global: { stubs: { teleport: true } }
+        })
+
+        ;(wrapper.vm as any).formTouched = true
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.get('[data-testid="header-draft-chip"]').text()).toContain('Unsaved draft')
+
+        const leavePromise = (wrapper.vm as any).confirmApplyDraftBeforeLeave()
+        await flushPromises()
+
+        expect(wrapper.text()).toContain('Apply this assessment draft before switching cards?')
+        expect(wrapper.findAll('button').some(button => button.text() === 'Apply')).toBe(true)
+
+        const stayButton = wrapper.findAll('button').find(button => button.text() === 'Stay')
+        expect(stayButton).toBeDefined()
+        await stayButton?.trigger('click')
+        await expect(leavePromise).resolves.toBe(false)
     })
 
 

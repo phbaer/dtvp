@@ -10,9 +10,13 @@ from dtvp.dt_client import DTClient
 @pytest.fixture(autouse=True)
 def reset_cache_manager(tmp_path, monkeypatch):
     cache_dir = tmp_path / "dt_cache"
+    analysis_results_path = tmp_path / "code_analysis_results.json"
     monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
+    monkeypatch.setenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", str(analysis_results_path))
     dt_cache.cache_manager.reset(str(cache_dir))
+    main.code_analysis_result_store.reset()
     yield
+    main.code_analysis_result_store.reset()
 
 
 # Mock Dependency Track Client

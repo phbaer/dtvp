@@ -1,6 +1,7 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
 import type { GroupedVuln, Instance } from '../types'
 import {
+    findTeamMappingEntryForComponent,
     getClosestAffectedTeamsForInstance,
     getClosestAffectedTeamsForInstances,
     getFirstMappedTeamOnPath,
@@ -23,10 +24,6 @@ interface UseVulnDependencyInfoOptions {
     group: ComputedRef<GroupedVuln> | Ref<GroupedVuln>
     teamMapping: Ref<Record<string, string | string[]>>
     refreshCounter?: Ref<number>
-}
-
-const normalizeComponentName = (value: string) => {
-    return value?.trim().toLowerCase() || ''
 }
 
 const sortComponentVersions = (versions: Set<string>) => {
@@ -105,26 +102,21 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
         }))
     })
 
-    const findMappingValue = (componentName: string) => {
-        const lookup = normalizeComponentName(componentName)
-        if (!lookup) return undefined
-        for (const [key, value] of Object.entries(teamMapping.value || {})) {
-            if (normalizeComponentName(key) === lookup) {
-                return value
-            }
-        }
-        return undefined
-    }
-
     const affectedTaggedComponents = computed(() => {
         const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
         for (const version of group.value.affected_versions || []) {
             for (const component of version.components || []) {
                 const name = component.component_name || 'Unknown'
-                const mappingValue = findMappingValue(name)
-                if (!mappingValue) continue
+                const mappingEntry = findTeamMappingEntryForComponent(
+                    name,
+                    teamMapping.value || {},
+                    component.component_group,
+                    'component_group' in component,
+                    component.component_purl,
+                )
+                if (!mappingEntry) continue
 
-                const tag = Array.isArray(mappingValue) ? mappingValue[0] : mappingValue
+                const tag = mappingEntry.tags[0]
                 if (!tag) continue
 
                 if (!taggedComponents.has(name)) {
@@ -158,7 +150,13 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
 
         for (const instance of allInstances.value) {
             const name = instance.component_name || 'Unknown'
-            const directTag = getPrimaryTeamForComponent(name, teamMapping.value)
+            const directTag = getPrimaryTeamForComponent(
+                name,
+                teamMapping.value,
+                instance.component_group,
+                'component_group' in instance,
+                instance.component_purl,
+            )
             if (!directTag) continue
 
             if (!taggedComponents.has(name)) {

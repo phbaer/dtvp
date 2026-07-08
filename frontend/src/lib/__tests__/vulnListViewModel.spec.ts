@@ -56,6 +56,7 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
     assigneeFilter: '',
     dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'],
     tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
+    automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
     versionFilterList: [],
     cvssVersionMismatchOnly: false,
     attributionAgeDays: null,

@@ -6,6 +6,7 @@ import {
     finalizeVulnListFacets,
 } from './vulnListFacets'
 import type {
+    AutomaticAssessmentFilter,
     DependencyRelationship,
     ParsedVulnSearchQuery,
     TMRescoreProposalFilter,
@@ -18,6 +19,7 @@ import {
     matchesCompiledDependencySelection,
     matchesCompiledLifecycleFilter,
     matchesCompiledListFilters,
+    matchesCompiledAutomaticAssessmentSelection,
     matchesCompiledStateFilters,
     matchesCompiledTMRescoreSelection,
 } from './vulnListIndex'
@@ -30,6 +32,7 @@ export interface VulnListViewFilters {
     assigneeFilter?: string
     dependencyFilter: DependencyRelationship[]
     tmrescoreProposalFilter: TMRescoreProposalFilter[]
+    automaticAssessmentFilter: AutomaticAssessmentFilter[]
     versionFilterList: readonly string[]
     cvssVersionMismatchOnly: boolean
     attributionAgeDays: number | null
@@ -56,6 +59,7 @@ export interface VulnListFilterModel extends VulnListStaticStats {
     dependencyFilterCounts: RelationshipCounts
     dependencyRelationshipCounts: RelationshipCounts
     tmrescoreProposalCounts: Record<TMRescoreProposalFilter, number>
+    automaticAssessmentCounts: Record<AutomaticAssessmentFilter, number>
     attributionAgeCount: number
     analysisCounts: Record<string, number>
 }
@@ -124,6 +128,11 @@ const createAnalysisCounts = (): Record<string, number> => ({
 const createTMRescoreCounts = (): Record<TMRescoreProposalFilter, number> => ({
     WITH_PROPOSAL: 0,
     WITHOUT_PROPOSAL: 0,
+})
+
+const createAutomaticAssessmentCounts = (): Record<AutomaticAssessmentFilter, number> => ({
+    WITH_AUTOMATIC_ASSESSMENT: 0,
+    WITHOUT_AUTOMATIC_ASSESSMENT: 0,
 })
 
 const incrementRelationship = (counts: RelationshipCounts, relationship: DependencyRelationship) => {
@@ -300,6 +309,7 @@ export const deriveVulnListFilterModel = (
     const dependencyFilterCounts = createRelationshipCounts()
     const dependencyRelationshipCounts = createRelationshipCounts()
     const tmrescoreProposalCounts = createTMRescoreCounts()
+    const automaticAssessmentCounts = createAutomaticAssessmentCounts()
     const analysisCounts = createAnalysisCounts()
     let attributionAgeCount = 0
 
@@ -311,6 +321,7 @@ export const deriveVulnListFilterModel = (
         assigneeFilter: filters.assigneeFilter,
         dependencyFilter: filters.dependencyFilter,
         tmrescoreProposalFilter: filters.tmrescoreProposalFilter,
+        automaticAssessmentFilter: filters.automaticAssessmentFilter,
         versionFilterList: filters.versionFilterList,
         cvssVersionMismatchOnly: filters.cvssVersionMismatchOnly,
         attributionAgeDays: filters.attributionAgeDays,
@@ -336,6 +347,13 @@ export const deriveVulnListFilterModel = (
                 else tmrescoreProposalCounts.WITHOUT_PROPOSAL++
 
                 if (matchesCompiledTMRescoreSelection(item, listFilterInput, true)) {
+                    if (item.hasAutomaticAssessment) automaticAssessmentCounts.WITH_AUTOMATIC_ASSESSMENT++
+                    else automaticAssessmentCounts.WITHOUT_AUTOMATIC_ASSESSMENT++
+
+                    if (!matchesCompiledAutomaticAssessmentSelection(item, listFilterInput, true)) {
+                        continue
+                    }
+
                     const matchesAge = matchesCompiledAttributionAgeFilter(item, listFilterInput)
 
                     if (listFilterInput.attributionAgeActive && matchesAge) {
@@ -366,6 +384,7 @@ export const deriveVulnListFilterModel = (
         dependencyFilterCounts,
         dependencyRelationshipCounts,
         tmrescoreProposalCounts,
+        automaticAssessmentCounts,
         attributionAgeCount,
         analysisCounts,
         needsApprovalGroups: staticStats.needsApprovalGroups,

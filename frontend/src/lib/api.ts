@@ -227,6 +227,9 @@ export interface TaskResponse {
     partial_result_available?: boolean;
     partial_versions_completed?: number;
     partial_total_versions?: number;
+    partial_publish_in_progress?: boolean;
+    versions_completed?: number;
+    versions_total?: number;
     log?: string[];
 }
 
@@ -260,6 +263,8 @@ export interface TaskVulnGroupListQuery {
     attribution_mode?: 'older' | 'younger';
     tmrescore?: string[];
     tmrescore_proposal_ids?: string[];
+    automatic_assessment?: string[];
+    automatic_assessment_ids?: string[];
     sort?: string;
     order?: 'asc' | 'desc';
     offset?: number;
@@ -287,6 +292,10 @@ export interface TaskVulnGroupListCounts {
         WITH_PROPOSAL: number;
         WITHOUT_PROPOSAL: number;
     };
+    automatic_assessment?: {
+        WITH_AUTOMATIC_ASSESSMENT: number;
+        WITHOUT_AUTOMATIC_ASSESSMENT: number;
+    };
     attribution_age?: number;
 }
 
@@ -310,6 +319,9 @@ export interface TaskVulnGroupListResponse {
     partial?: boolean;
     partial_versions_completed?: number | null;
     partial_total_versions?: number | null;
+    partial_publish_in_progress?: boolean | null;
+    versions_completed?: number | null;
+    versions_total?: number | null;
 }
 
 export const startGroupVulnTask = async (
@@ -707,6 +719,23 @@ export const updateRescoreRules = async (rules: Record<string, any>): Promise<{ 
     return res.data;
 };
 
+export const getAutoAnalysisGuidance = async (): Promise<Record<string, any>> => {
+    const res = await api.get('/settings/auto-analysis-guidance');
+    return res.data;
+};
+
+export const uploadAutoAnalysisGuidance = async (file: File): Promise<{ status: string; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post('/settings/auto-analysis-guidance', formData);
+    return res.data;
+};
+
+export const updateAutoAnalysisGuidance = async (guidance: Record<string, any>): Promise<{ status: string; message: string }> => {
+    const res = await api.put('/settings/auto-analysis-guidance', guidance);
+    return res.data;
+};
+
 export const getTMRescoreContext = async (projectName: string): Promise<TMRescoreContext> => {
     const res = await api.get(`/projects/${encodeURIComponent(projectName)}/tmrescore/context`);
     return res.data;
@@ -863,8 +892,12 @@ export interface CodeAnalysisAssessRequest {
     component_name: string;
     cvss_vector?: string;
     user_guidance?: string;
+    model?: string;
+    llm_backend?: string;
+    llm_provider?: string;
     focus_path?: string;
     dependency_paths?: string[][];
+    affected_product_versions?: string[];
     debug?: boolean;
 }
 
@@ -872,6 +905,12 @@ export interface CodeAnalysisJobSubmitted {
     job_id: string;
     status: 'pending' | 'running';
     poll_url: string;
+    model?: string | null;
+    llm_backend?: string | null;
+    llm_provider?: string | null;
+    llm?: Record<string, any> | null;
+    configuration?: CodeAnalysisServiceConfiguration | null;
+    backend?: CodeAnalysisBackendInformation | null;
 }
 
 export interface CodeAnalysisActiveAgentStatus {
@@ -894,15 +933,73 @@ export interface CodeAnalysisJobProgress {
     last_updated_at?: string;
     active_agents?: CodeAnalysisActiveAgentStatus[];
     step_statuses?: Record<string, string>;
+    logs?: string[];
+    log?: string[] | string;
+}
+
+export interface CodeAnalysisRepositoryConfiguration {
+    workspace_dir?: string | null;
+    component_count?: number | null;
+    components?: string[];
+    aliases?: string[];
+    default_template_configured?: boolean | null;
+    hot_reload?: boolean | null;
+    [key: string]: any;
+}
+
+export interface CodeAnalysisServiceConfiguration {
+    service_name?: string | null;
+    service_version?: string | null;
+    config_dir?: string | null;
+    repos_config_path?: string | null;
+    repositories?: CodeAnalysisRepositoryConfiguration | Record<string, any> | null;
+    features?: Record<string, boolean | string | number | null>;
+    [key: string]: any;
+}
+
+export interface CodeAnalysisLlmBackendInfo {
+    provider?: string | null;
+    backend?: string | null;
+    host?: string | null;
+    model?: string | null;
+    healthy?: boolean | null;
+    last_error?: string | null;
+    supports_model_override?: boolean | null;
+    [key: string]: any;
+}
+
+export interface CodeAnalysisBackendInformation {
+    llm?: CodeAnalysisLlmBackendInfo | Record<string, any> | null;
+    repositories?: Record<string, any> | null;
+    jobs?: {
+        job_store?: string;
+        execution_model?: string;
+        known_jobs?: number;
+        status_counts?: Record<string, number>;
+        max_concurrent_jobs?: number;
+        running_jobs?: number;
+        queued_jobs?: number;
+        available_slots?: number;
+        [key: string]: any;
+    } | Record<string, any> | null;
+    [key: string]: any;
 }
 
 export interface CodeAnalysisJobStatus {
     job_id: string;
-    status: 'pending' | 'running' | 'completed' | 'failed';
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
     created_at: string;
     finished_at?: string;
     error?: string;
     progress?: CodeAnalysisJobProgress;
+    request?: Record<string, any>;
+    model?: string | null;
+    llm_backend?: string | null;
+    llm_provider?: string | null;
+    llm?: Record<string, any> | null;
+    logs?: Array<string | Record<string, any>>;
+    configuration?: CodeAnalysisServiceConfiguration | null;
+    backend?: CodeAnalysisBackendInformation | null;
 }
 
 export interface CodeAnalysisAutoSweepStatus {
@@ -917,6 +1014,57 @@ export interface CodeAnalysisAutoSweepStatus {
     last_error?: string | null;
     last_trigger?: string | null;
     next_run_at?: string | null;
+}
+
+export interface CodeAnalysisExternalStatus {
+    health?: Record<string, any> | null;
+    health_error?: string | null;
+    jobs: CodeAnalysisJobStatus[];
+    jobs_error?: string | null;
+    configuration?: CodeAnalysisServiceConfiguration | null;
+    backend?: CodeAnalysisBackendInformation | null;
+    busy: boolean;
+    capacity?: number | null;
+    running_jobs?: number | null;
+    queued_jobs?: number | null;
+    available_slots?: number | null;
+}
+
+export interface CodeAnalysisDashboardStatus {
+    overall_state: 'disabled' | 'unavailable' | 'idle' | 'queued' | 'running' | string;
+    updated_at: string;
+    configured: boolean;
+    result_cache?: {
+        schema_version?: string;
+        path?: string;
+        record_count?: number;
+        max_records?: number;
+        retention_days?: number;
+        freshness_days?: number;
+        store_guidance?: boolean;
+    } | null;
+    queue: {
+        capacity: number;
+        running_count?: number;
+        available_slots?: number;
+        dtvp_worker_busy: boolean;
+        waiting_for_slot: boolean;
+        counts_by_status: Record<string, number>;
+        counts_by_source: Record<string, number>;
+        active_item?: AnalysisQueueItem | null;
+        active_items?: AnalysisQueueItem[];
+        items: AnalysisQueueItem[];
+    };
+    recent_results?: CodeAnalysisResultRecord[];
+    auto_sweep: CodeAnalysisAutoSweepStatus;
+    external: CodeAnalysisExternalStatus;
+    active_agents: CodeAnalysisActiveAgentStatus[];
+    model?: string | null;
+    model_source: 'queue' | 'settings' | 'health' | 'jobs' | 'result' | 'api' | 'not_reported' | string;
+    llm_backend?: string | null;
+    llm_backend_source: 'queue' | 'settings' | 'health' | 'jobs' | 'not_reported' | string;
+    llm_provider?: string | null;
+    llm_provider_source: 'queue' | 'settings' | 'health' | 'jobs' | 'not_reported' | string;
 }
 
 export interface CodeAnalysisCvssAdjustment {
@@ -939,11 +1087,34 @@ export interface CodeAnalysisStepFindings {
     evidence: string[];
 }
 
+export interface CodeAnalysisVersionCheck {
+    ref?: string | null;
+    ref_type?: string | null;
+    product_version?: string | null;
+    version?: string | null;
+    source?: string | null;
+    affected?: boolean | string | null;
+    notes?: string | null;
+}
+
+export interface CodeAnalysisVersionAnalysis extends Record<string, any> {
+    detected_version?: string | null;
+    version_source?: string | null;
+    checked_versions?: CodeAnalysisVersionCheck[];
+}
+
 export interface CodeAnalysisAssessment {
     affected: boolean;
     verdict: string;
     confidence: string;
     exposure: string;
+    dependency_presence?: Record<string, any> | null;
+    advisory_relevance?: Record<string, any> | null;
+    version_analysis?: CodeAnalysisVersionAnalysis | null;
+    researcher_view?: Record<string, any> | null;
+    remediation_view?: Record<string, any> | null;
+    audit_view?: Record<string, any> | null;
+    ticket_text?: string | null;
     adjusted_cvss?: CodeAnalysisCvssAdjustment;
     summary: string;
     reasoning: string;
@@ -958,11 +1129,100 @@ export interface CodeAnalysisComponentResult {
     versions_checked?: string[];
 }
 
+export interface CodeAnalysisLlmMessage {
+    role: string;
+    content?: any;
+    name?: string;
+    tool_call_id?: string;
+    tool_calls?: Array<Record<string, any>>;
+}
+
+export interface CodeAnalysisLlmConversationTurn {
+    schema_version?: string;
+    component?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+    provider?: string | null;
+    backend?: string | null;
+    host?: string | null;
+    model?: string | null;
+    request?: Record<string, any> | null;
+    messages?: CodeAnalysisLlmMessage[];
+    response?: CodeAnalysisLlmMessage | string | null;
+    usage?: Record<string, any> | null;
+    status?: string | null;
+    error?: string | null;
+}
+
 export interface CodeAnalysisAssessResponse {
     assessment: CodeAnalysisAssessment;
     steps: CodeAnalysisStepFindings[];
     versions_checked?: string[];
     component_results?: CodeAnalysisComponentResult[];
+    llm_conversation?: CodeAnalysisLlmConversationTurn[];
+}
+
+export interface CodeAnalysisResultSummary {
+    affected?: boolean | null;
+    verdict?: string;
+    confidence?: string;
+    exposure?: string;
+    analysis?: string;
+    justification?: string;
+    response?: string;
+    summary?: string;
+    reasoning?: string;
+    details?: string;
+    cvss_score?: number | null;
+    cvss_vector?: string | null;
+    original_cvss_score?: number | null;
+    original_cvss_vector?: string | null;
+    adjusted_cvss_score?: number | null;
+    adjusted_cvss_vector?: string | null;
+    cvss_summary?: string;
+    cvss_reasons?: string[];
+    versions_checked?: string[];
+    component_results?: Array<{
+        component: string;
+        verdict?: string;
+        confidence?: string;
+        exposure?: string;
+        versions_checked?: string[];
+    }>;
+    step_count?: number;
+}
+
+export interface CodeAnalysisResultRecord {
+    schema_version?: string;
+    analysis_run_id: string;
+    queue_id?: string | null;
+    job_id?: string | null;
+    parent_run_id?: string | null;
+    parent_job_id?: string | null;
+    follow_up_question?: string | null;
+    user_guidance?: string | null;
+    follow_up_user_guidance?: string | null;
+    context_mode?: string | null;
+    project_name?: string | null;
+    vuln_id: string;
+    component_name: string;
+    source?: 'manual' | 'automatic' | 'follow-up' | string;
+    submitted_by?: string | null;
+    submitted_at?: string | null;
+    started_at?: string | null;
+    finished_at?: string | null;
+    status?: string | null;
+    model?: string | null;
+    llm_backend?: string | null;
+    llm_provider?: string | null;
+    llm_metadata?: Record<string, any> | null;
+    cvss_vector?: string | null;
+    context_fingerprint?: string | null;
+    context_summary?: Record<string, any> | null;
+    summary?: CodeAnalysisResultSummary;
+    compact_context?: Record<string, any>;
+    result?: CodeAnalysisAssessResponse;
+    recorded_at?: string | null;
 }
 
 export const codeAnalysisStartAssessment = async (req: CodeAnalysisAssessRequest): Promise<CodeAnalysisJobSubmitted> => {
@@ -980,8 +1240,15 @@ export const codeAnalysisGetJobResult = async (jobId: string): Promise<CodeAnaly
     return res.data;
 };
 
-export const codeAnalysisHealth = async (): Promise<{ status: string }> => {
+export const codeAnalysisHealth = async (): Promise<Record<string, any>> => {
     const res = await api.get('/code-analysis/health');
+    return res.data;
+};
+
+export const codeAnalysisGetPrompts = async (
+    params: { include_values?: boolean; system_only?: boolean } = {},
+): Promise<Record<string, any>> => {
+    const res = await api.get('/code-analysis/prompts', { params });
     return res.data;
 };
 
@@ -990,8 +1257,62 @@ export const codeAnalysisGetAutoSweepStatus = async (): Promise<CodeAnalysisAuto
     return res.data;
 };
 
+export const codeAnalysisGetDashboardStatus = async (): Promise<CodeAnalysisDashboardStatus> => {
+    const res = await api.get('/code-analysis/status');
+    return res.data;
+};
+
 export const codeAnalysisRunAutoSweep = async (): Promise<CodeAnalysisAutoSweepStatus> => {
     const res = await api.post('/code-analysis/auto-sweep/run');
+    return res.data;
+};
+
+export interface CodeAnalysisResultListParams {
+    project_name?: string;
+    vuln_id?: string;
+    component_name?: string;
+    source?: string;
+    limit?: number;
+    include_result?: boolean;
+}
+
+export const codeAnalysisListResults = async (
+    params: CodeAnalysisResultListParams = {},
+): Promise<CodeAnalysisResultRecord[]> => {
+    const res = await api.get('/code-analysis/results', { params });
+    return res.data;
+};
+
+export const codeAnalysisGetResult = async (
+    runId: string,
+): Promise<CodeAnalysisResultRecord> => {
+    const res = await api.get(`/code-analysis/results/${encodeURIComponent(runId)}`);
+    return res.data;
+};
+
+export const codeAnalysisDeleteResult = async (
+    runId: string,
+): Promise<{ status: string; analysis_run_id: string }> => {
+    const res = await api.delete(`/code-analysis/results/${encodeURIComponent(runId)}`);
+    return res.data;
+};
+
+export const codeAnalysisCompactResult = async (
+    runId: string,
+): Promise<Record<string, any>> => {
+    const res = await api.post(`/code-analysis/results/${encodeURIComponent(runId)}/compact`);
+    return res.data;
+};
+
+export const codeAnalysisListVulnerabilityResults = async (
+    projectName: string,
+    vulnId: string,
+    params: Omit<CodeAnalysisResultListParams, 'project_name' | 'vuln_id'> = {},
+): Promise<CodeAnalysisResultRecord[]> => {
+    const res = await api.get(
+        `/projects/${encodeURIComponent(projectName)}/vulnerabilities/${encodeURIComponent(vulnId)}/analysis-results`,
+        { params },
+    );
     return res.data;
 };
 
@@ -1026,11 +1347,25 @@ export interface AnalysisQueueItem {
     queue_id: string;
     vuln_id: string;
     component_name: string;
+    project_name?: string | null;
     cvss_vector?: string;
     user_guidance?: string;
-    source?: 'manual' | 'automatic' | string;
+    affected_product_versions?: string[];
+    model?: string;
+    llm_backend?: string;
+    llm_provider?: string;
+    llm_metadata?: Record<string, any> | null;
+    parent_run_id?: string | null;
+    parent_job_id?: string | null;
+    follow_up_question?: string | null;
+    follow_up_user_guidance?: string | null;
+    context_mode?: string | null;
+    context_fingerprint?: string | null;
+    context_summary?: Record<string, any> | null;
+    source?: 'manual' | 'automatic' | 'follow-up' | string;
     submitted_by: string;
     submitted_at: string;
+    started_at?: string;
     status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
     position: number;
     job_id?: string;
@@ -1038,15 +1373,39 @@ export interface AnalysisQueueItem {
     result?: CodeAnalysisAssessResponse;
     finished_at?: string;
     progress?: CodeAnalysisJobProgress;
+    logs?: string[];
+    abort_requested?: boolean;
+    abort_error?: string;
 }
 
 export const analysisQueueSubmit = async (req: {
     vuln_id: string;
     component_name: string;
+    project_name?: string;
     cvss_vector?: string;
     user_guidance?: string;
+    affected_product_versions?: string[];
+    model?: string;
+    llm_backend?: string;
+    llm_provider?: string;
 }): Promise<AnalysisQueueItem> => {
     const res = await api.post('/analysis-queue/submit', req);
+    return res.data;
+};
+
+export const analysisQueueSubmitFollowUp = async (req: {
+    parent_run_id: string;
+    question: string;
+    component_name?: string;
+    project_name?: string;
+    cvss_vector?: string;
+    user_guidance?: string;
+    model?: string;
+    llm_backend?: string;
+    llm_provider?: string;
+    context_mode?: string;
+}): Promise<AnalysisQueueItem> => {
+    const res = await api.post('/analysis-queue/follow-up', req);
     return res.data;
 };
 
@@ -1062,5 +1421,15 @@ export const analysisQueueGet = async (queueId: string): Promise<AnalysisQueueIt
 
 export const analysisQueueCancel = async (queueId: string): Promise<{ status: string }> => {
     const res = await api.delete(`/analysis-queue/${encodeURIComponent(queueId)}`);
+    return res.data;
+};
+
+export const analysisQueueClear = async (statuses?: string[]): Promise<{ status: string; removed: number }> => {
+    const res = await api.post('/analysis-queue/clear', statuses ? { statuses } : {});
+    return res.data;
+};
+
+export const analysisQueueCancelQueued = async (): Promise<{ status: string; cancelled: number }> => {
+    const res = await api.post('/analysis-queue/cancel-queued');
     return res.data;
 };

@@ -1,4 +1,11 @@
-from dtvp.frontend_routes import FrontendRouteDeps, _render_index_html
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from dtvp.frontend_routes import (
+    FrontendRouteDeps,
+    _render_index_html,
+    register_frontend_routes,
+)
 
 
 def test_render_index_html_replaces_frontend_runtime_config(tmp_path):
@@ -30,3 +37,29 @@ def test_render_index_html_replaces_frontend_runtime_config(tmp_path):
     )
 
     assert response.body.decode() == "/ctx|https://frontend.example|true|Platform|5d,10d"
+
+
+def test_context_path_frontend_routes_redirect_root_to_context(tmp_path):
+    (tmp_path / "index.html").write_text("index", encoding="utf-8")
+    app = FastAPI()
+
+    register_frontend_routes(
+        app,
+        FrontendRouteDeps(
+            frontend_dist_dir=str(tmp_path),
+            get_context_path=lambda: "/dtvp-stage",
+            get_frontend_url=lambda: "https://frontend.example",
+            get_dev_disable_auth=lambda: False,
+            get_default_project_filter=lambda: "",
+            get_attribution_age_filter_days=lambda: "7d,14d,28d",
+            read_text=lambda path: (tmp_path / "index.html").read_text(
+                encoding="utf-8"
+            ),
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 200
+    assert "/dtvp-stage/" in response.text

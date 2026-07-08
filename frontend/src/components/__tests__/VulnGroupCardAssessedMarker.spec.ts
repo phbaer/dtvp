@@ -41,7 +41,15 @@ vi.mock('lucide-vue-next', () => ({
     GitBranch: { template: '<span class="icon-git-branch" />' },
     Eye: { template: '<span class="icon-eye" />' },
     ClipboardCopy: { template: '<span />' },
-    Plus: { template: '<span />' }
+    Plus: { template: '<span />' },
+    Loader2: { template: '<span />' },
+    XCircle: { template: '<span />' },
+    Clock: { template: '<span />' },
+    ClipboardCheck: { template: '<span />' },
+    Send: { template: '<span />' },
+    Ban: { template: '<span />' },
+    FileText: { template: '<span />' },
+    X: { template: '<span />' }
 }))
 
 describe('VulnGroupCard Assessment Markers', () => {

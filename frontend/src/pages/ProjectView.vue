@@ -9,10 +9,11 @@ import {
     getTaskStatistics,
     getTeamMapping,
     getTMRescoreProposals,
+    codeAnalysisListResults,
     startProjectArchiveExport,
     waitForProjectArchiveTask,
 } from '../lib/api'
-import type { TaskVulnGroupListQuery } from '../lib/api'
+import type { CodeAnalysisResultRecord, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import type { GroupedVuln, ProjectArchiveTask, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
@@ -29,7 +30,13 @@ import { useProjectVulnSelection } from '../lib/useProjectVulnSelection'
 import { useTaskGroupDetails } from '../lib/useTaskGroupDetails'
 import { useTaskGroupWindows } from '../lib/useTaskGroupWindows'
 import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
-import type { DependencyRelationship, TMRescoreProposalFilter } from '../lib/vulnListIndex'
+import {
+    hasAutomaticAssessmentForGroup,
+    normalizeVulnIdentifier,
+    type AutomaticAssessmentFilter,
+    type DependencyRelationship,
+    type TMRescoreProposalFilter,
+} from '../lib/vulnListIndex'
 import {
     buildMeaningfulTMRescoreProposalIds,
     buildTaskVulnGroupListQuery,
@@ -61,18 +68,55 @@ const TASK_LIST_WINDOW_LIMIT = 250
 
 const route = useRoute()
 const router = useRouter()
+
+const routeProjectName = () => {
+    const value = route.params.name
+    if (Array.isArray(value)) return value[0] || ''
+    return typeof value === 'string' ? value : ''
+}
+
+const isProjectReviewRouteActive = () => {
+    const name = routeProjectName()
+    if (!name) return false
+
+    const path = route.path || ''
+    if (!path) return true
+    return /^\/project\/[^/]+\/?$/.test(path) || /^\/projects\/[^/]+\/[^/]+\/?$/.test(path)
+}
+
 const {
     selectedGroupId,
     selectGroup,
     closeSelectedGroup,
+    syncSelectedGroupFromRoute,
 } = useProjectVulnSelection({
     route,
     router,
+    isRouteActive: isProjectReviewRouteActive,
 })
+const detailInspectorRef = ref<{ confirmApplyDraftBeforeLeave?: () => Promise<boolean> } | null>(null)
+
+const confirmSelectedDraftBeforeLeave = async () =>
+    detailInspectorRef.value?.confirmApplyDraftBeforeLeave?.() ?? true
+
+const selectGroupWithDraftGuard = async (group: GroupedVuln) => {
+    if (selectedGroupId.value && selectedGroupId.value !== group.id) {
+        const canLeave = await confirmSelectedDraftBeforeLeave()
+        if (!canLeave) return
+    }
+    selectGroup(group)
+}
+
+const closeSelectedGroupWithDraftGuard = async () => {
+    if (!await confirmSelectedDraftBeforeLeave()) return
+    closeSelectedGroup()
+}
 const user = inject<any>('user', { role: 'ANALYST' })
 const currentUserRole = computed(() => (user?.value ?? user)?.role || 'ANALYST')
 const groups = ref<GroupedVuln[]>([])
 const currentVulnTaskId = ref<string | null>(null)
+const loadedProjectName = ref<string | null>(null)
+const loadingProjectName = ref<string | null>(null)
 const loading = ref(true)
 const error = ref('')
 const loadingMessage = ref('Initializing...')
@@ -105,10 +149,28 @@ provide('rescoreRules', rescoreRules)
 const tmrescoreProposalSnapshot = ref<TMRescoreProposalSnapshot | null>(null)
 const emptyTMRescoreProposals: Record<string, TMRescoreProposal> = {}
 const tmrescoreProposals = computed(() => tmrescoreProposalSnapshot.value?.proposals || emptyTMRescoreProposals)
+const automaticAssessmentResults = ref<CodeAnalysisResultRecord[]>([])
 const listItemCache = createVulnListItemCache()
 provide('tmrescoreProposals', tmrescoreProposals)
 
 const showBulkApproveModal = ref(false)
+
+const appendLoadingLog = (message: string) => {
+    if (!message) return
+    if (loadingLog.value[loadingLog.value.length - 1] === message) return
+    loadingLog.value.push(message)
+}
+
+const setLoadingStep = (message: string, progress?: number) => {
+    loadingMessage.value = message
+    if (typeof progress === 'number') {
+        loadingProgress.value = Math.max(
+            loadingProgress.value || 0,
+            Math.max(0, Math.min(100, Math.round(progress))),
+        )
+    }
+    appendLoadingLog(message)
+}
 
 const archiveExportProgress = computed(() => {
     const progress = archiveExportTask.value?.progress ?? 0
@@ -123,6 +185,10 @@ const archiveExportDownloadUrl = computed(() => {
 const TMRESCORE_FILTER_OPTIONS = [
     { value: 'WITH_PROPOSAL', label: 'with' },
     { value: 'WITHOUT_PROPOSAL', label: 'without' },
+]
+const AUTOMATIC_ASSESSMENT_FILTER_OPTIONS: Array<{ value: AutomaticAssessmentFilter; label: string }> = [
+    { value: 'WITH_AUTOMATIC_ASSESSMENT', label: 'available' },
+    { value: 'WITHOUT_AUTOMATIC_ASSESSMENT', label: 'missing' },
 ]
 
 const fetchTeamMapping = async () => {
@@ -142,7 +208,7 @@ const fetchRescoreRules = async () => {
 }
 
 const consumeThreatModelRefreshSignal = () => {
-    const name = route.params.name as string
+    const name = routeProjectName()
     const sessionStorage = globalThis.window?.sessionStorage
     if (!name || name === '_all_' || !sessionStorage) {
         return false
@@ -164,7 +230,7 @@ const refreshThreatModelProposalsIfNeeded = async () => {
 }
 
 const fetchTMRescoreProposals = async () => {
-    const name = route.params.name as string
+    const name = routeProjectName()
     if (!name || name === '_all_') {
         tmrescoreProposalSnapshot.value = null
         return
@@ -182,6 +248,26 @@ const fetchTMRescoreProposals = async () => {
     }
 }
 
+const fetchAutomaticAssessmentResults = async () => {
+    const name = routeProjectName()
+    if (!name) {
+        automaticAssessmentResults.value = []
+        return
+    }
+
+    try {
+        automaticAssessmentResults.value = await codeAnalysisListResults({
+            project_name: name === '_all_' ? undefined : name,
+            source: 'automatic',
+            limit: 500,
+            include_result: false,
+        })
+    } catch (err) {
+        console.error('Failed to fetch automatic code-analysis results:', err)
+        automaticAssessmentResults.value = []
+    }
+}
+
 onMounted(() => {
     fetchTeamMapping()
     fetchRescoreRules()
@@ -189,12 +275,13 @@ onMounted(() => {
 
 onActivated(() => {
     void refreshThreatModelProposalsIfNeeded()
+    void fetchAutomaticAssessmentResults()
 })
 
 const processFetchedGroups = async (data: GroupedVuln[]): Promise<GroupedVuln[]> => {
     if (!data || data.length === 0) return data
 
-    loadingMessage.value = 'Finalizing vulnerability data...'
+    setLoadingStep('Finalizing vulnerability data...', 90)
     const total = data.length
     const batchSize = Math.max(1, Math.ceil(total / 12))
     const result: GroupedVuln[] = []
@@ -216,20 +303,30 @@ const processFetchedGroups = async (data: GroupedVuln[]): Promise<GroupedVuln[]>
         })
 
         result.push(...batch)
-        loadingProgress.value = 90 + Math.round(((start + batch.length) / total) * 10)
+        const completed = Math.min(total, start + batch.length)
+        setLoadingStep(
+            `Finalized ${completed}/${total} vulnerabilities...`,
+            90 + Math.round((completed / total) * 10),
+        )
         await nextTick()
     }
 
     return result
 }
 
+let fetchVulnsRequestId = 0
+
 const fetchVulns = async () => {
-    let name = route.params.name as string
-    if (!name) return
+    const name = routeProjectName()
+    if (!name || !isProjectReviewRouteActive()) return
     
     const isAllProjects = name === '_all_'
     const apiName = isAllProjects ? '' : name
+    const requestId = ++fetchVulnsRequestId
+    const isCurrentRequest = () => requestId === fetchVulnsRequestId
 
+    loadingProjectName.value = name
+    loadedProjectName.value = null
     loading.value = true
     error.value = ''
     loadingMessage.value = isAllProjects ? 'Starting global search...' : 'Starting search...'
@@ -241,14 +338,59 @@ const fetchVulns = async () => {
     let releasedPartialList = false
     let reloadedCompletedList = false
     let lastPartialWindowVersionCount: number | null = null
+    let partialWindowRefreshInFlight = false
+    let queuedPartialWindow: { taskId: string; status: TaskResponse } | null = null
+    const loadInitialTaskWindow = async (message: string, progress: number) => {
+        setLoadingStep(message, progress)
+        await loadTaskGroupWindow({ reset: true })
+    }
     const reloadCompletedTaskWindow = async (taskId: string | null) => {
         if (!taskId || currentVulnTaskId.value !== taskId) return
-        await loadTaskGroupWindow({ reset: true })
         reloadedCompletedList = true
+        await loadInitialTaskWindow('Loading final vulnerability list window...', 96)
+    }
+    const runQueuedPartialWindowRefresh = () => {
+        if (partialWindowRefreshInFlight) return
+        partialWindowRefreshInFlight = true
+        void (async () => {
+            try {
+                while (queuedPartialWindow && !reloadedCompletedList) {
+                    const request = queuedPartialWindow
+                    queuedPartialWindow = null
+                    if (!currentVulnTaskId.value || currentVulnTaskId.value !== request.taskId) {
+                        continue
+                    }
+                    await loadInitialTaskWindow(
+                        'Loading partial vulnerability list window...',
+                        Math.max(1, request.status.progress ?? loadingProgress.value),
+                    )
+                    if (!currentVulnTaskId.value || currentVulnTaskId.value !== request.taskId || reloadedCompletedList) {
+                        continue
+                    }
+                    lastPartialWindowVersionCount = taskListPartialVersionsCompleted.value
+                        ?? request.status.partial_versions_completed
+                        ?? null
+                    releasedPartialList = true
+                    loading.value = false
+                }
+            } finally {
+                partialWindowRefreshInFlight = false
+            }
+        })()
+    }
+    const schedulePartialWindowRefresh = (taskId: string, status: TaskResponse) => {
+        if (!currentVulnTaskId.value || currentVulnTaskId.value !== taskId) return
+        const completed = status.partial_versions_completed ?? null
+        if (releasedPartialList && completed !== null && completed === lastPartialWindowVersionCount) {
+            return
+        }
+        queuedPartialWindow = { taskId, status }
+        runQueuedPartialWindowRefresh()
     }
 
     try {
         const rawData = await getGroupedVulns(apiName, undefined, (msg, progress, log) => {
+            if (!isCurrentRequest()) return
             loadingMessage.value = msg
             loadingProgress.value = progress
             if (log && log.length > 0) {
@@ -263,26 +405,24 @@ const fetchVulns = async () => {
             useEventStream: true,
             taskWindowLimit: TASK_LIST_WINDOW_LIMIT,
             onTaskId: (taskId) => {
+                if (!isCurrentRequest()) return
                 setCurrentVulnTaskId(taskId)
             },
-            onPartialResultAvailable: async (taskId, status) => {
+            onPartialResultAvailable: (taskId, status) => {
+                if (!isCurrentRequest()) return
                 if (!currentVulnTaskId.value || currentVulnTaskId.value !== taskId) return
                 updateTaskGroupWindowStatus(status)
-                const completed = status.partial_versions_completed ?? null
-                if (releasedPartialList && completed !== null && completed === lastPartialWindowVersionCount) {
-                    return
-                }
-                await loadTaskGroupWindow({ reset: true })
-                lastPartialWindowVersionCount = taskListPartialVersionsCompleted.value ?? completed
-                releasedPartialList = true
-                loading.value = false
+                schedulePartialWindowRefresh(taskId, status)
             },
             onTaskCompleted: async (taskId, status) => {
+                if (!isCurrentRequest()) return
                 updateTaskGroupWindowStatus(status)
+                queuedPartialWindow = null
                 await reloadCompletedTaskWindow(taskId)
             },
         })
 
+        if (!isCurrentRequest()) return
         if (currentVulnTaskId.value) {
             if (!reloadedCompletedList) {
                 await reloadCompletedTaskWindow(currentVulnTaskId.value)
@@ -290,20 +430,26 @@ const fetchVulns = async () => {
         } else {
             groups.value = await processFetchedGroups(rawData)
         }
+        if (!isCurrentRequest()) return
+        loadedProjectName.value = name
         if (selectedGroupId.value) {
             void hydrateVisibleGroup(selectedGroupId.value)
         }
         await fetchCacheStatus()
     } catch (err: any) {
+        if (!isCurrentRequest()) return
         error.value = 'Failed to load vulnerabilities: ' + (err.message || err)
         console.error(err)
     } finally {
-        loading.value = false
+        if (isCurrentRequest()) {
+            loading.value = false
+            loadingProjectName.value = null
+        }
     }
 }
 
 const fetchStats = async () => {
-    let name = route.params.name as string
+    const name = routeProjectName()
     if (!name || name === '_all_') return
 
     statsLoading.value = true
@@ -369,6 +515,7 @@ const {
     versionFilterList,
     selectedDependencyFilters,
     selectedTMRescoreProposalFilters,
+    selectedAutomaticAssessmentFilters,
     copiedUrl,
     copyFilterUrl,
     resetFilters,
@@ -376,6 +523,7 @@ const {
     handleFilterUpdate,
     defaultLifecycleFilters,
     defaultAnalysisFilters,
+    automaticAssessmentFilter,
 } = useProjectVulnFilters({
     route,
     router,
@@ -386,11 +534,23 @@ const meaningfulTMRescoreProposalIds = computed(() =>
     buildMeaningfulTMRescoreProposalIds(tmrescoreProposals.value)
 )
 
+const automaticAssessmentIdSet = computed(() => {
+    const ids = new Set<string>()
+    for (const record of automaticAssessmentResults.value) {
+        const normalized = normalizeVulnIdentifier(record.vuln_id)
+        if (normalized) ids.add(normalized)
+    }
+    return ids
+})
+
+const automaticAssessmentIds = computed(() => Array.from(automaticAssessmentIdSet.value))
+
 const listItems = computed(() => {
     return listItemCache.build(
         groups.value,
         teamMapping.value,
         tmrescoreProposals.value,
+        automaticAssessmentIdSet.value,
     )
 })
 
@@ -426,6 +586,7 @@ const allLifecycleFilterValues = computed(() => LIFECYCLE_OPTIONS.map(option => 
 const allAnalysisFilterValues = computed(() => ANALYSIS_OPTIONS.map(option => option.value))
 const allDependencyFilterValues = computed(() => DEPENDENCY_OPTIONS.map(option => option.value as DependencyRelationship))
 const allTMRescoreFilterValues = computed(() => TMRESCORE_FILTER_OPTIONS.map(option => option.value as TMRescoreProposalFilter))
+const allAutomaticAssessmentFilterValues = computed(() => AUTOMATIC_ASSESSMENT_FILTER_OPTIONS.map(option => option.value))
 
 const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnGroupListQuery({
     parsedSearch: parsedSmartSearch.value,
@@ -446,6 +607,9 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     tmrescoreFilters: selectedTMRescoreProposalFilters.value,
     allTMRescoreFilterValues: allTMRescoreFilterValues.value,
     meaningfulTMRescoreProposalIds: meaningfulTMRescoreProposalIds.value,
+    automaticAssessmentFilters: selectedAutomaticAssessmentFilters.value,
+    allAutomaticAssessmentFilterValues: allAutomaticAssessmentFilterValues.value,
+    automaticAssessmentIds: automaticAssessmentIds.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
 }))
@@ -459,6 +623,9 @@ const {
     partial: taskListPartial,
     partialVersionsCompleted: taskListPartialVersionsCompleted,
     partialVersionsTotal: taskListPartialVersionsTotal,
+    partialPublishInProgress: taskListPartialPublishInProgress,
+    versionsCompleted: taskListVersionsCompleted,
+    versionsTotal: taskListVersionsTotal,
     windowLoading: taskListWindowLoading,
     appendLoading: taskListAppendLoading,
     windowError: taskListWindowError,
@@ -529,6 +696,7 @@ const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
     assigneeFilter: assigneeFilter.value,
     dependencyFilter: selectedDependencyFilters.value,
     tmrescoreProposalFilter: selectedTMRescoreProposalFilters.value,
+    automaticAssessmentFilter: selectedAutomaticAssessmentFilters.value,
     versionFilterList: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     attributionAgeDays: attributionAgeDays.value,
@@ -562,8 +730,8 @@ const totalGroupCount = computed(() =>
 )
 
 const taskListPartialProgress = computed(() => {
-    const completed = taskListPartialVersionsCompleted.value
-    const total = taskListPartialVersionsTotal.value
+    const completed = taskListVersionsCompleted.value ?? taskListPartialVersionsCompleted.value
+    const total = taskListVersionsTotal.value ?? taskListPartialVersionsTotal.value
     if (completed == null || total == null || total <= 0) return null
     return Math.min(100, Math.round((completed / total) * 100))
 })
@@ -578,8 +746,51 @@ const loadingProgressTitle = computed(() =>
         : loadingMessage.value
 )
 
+const preparingListDetailMessage = computed(() => {
+    if (taskListWindowLoading.value) {
+        return loadingMessage.value || 'Loading vulnerability list window...'
+    }
+    return loadingMessage.value || 'Preparing vulnerability list...'
+})
+
+const preparingListLog = computed(() =>
+    loadingLog.value
+        .filter(entry => entry && entry !== preparingListDetailMessage.value)
+        .slice(-3)
+)
+
+const preparingListProgressLabel = computed(() => {
+    if (taskListPartialProgress.value !== null) {
+        return `${taskListPartialProgress.value}%`
+    }
+    if (loadingProgressPercent.value > 1 && loadingProgressPercent.value < 100) {
+        return `${loadingProgressPercent.value}%`
+    }
+    return ''
+})
+
+const preparingListProgressWidth = computed(() => {
+    if (taskListPartialProgress.value !== null) {
+        return taskListPartialProgress.value
+    }
+    if (loadingProgressPercent.value > 1 && loadingProgressPercent.value < 100) {
+        return loadingProgressPercent.value
+    }
+    return null
+})
+
+const showPreparingListStatus = computed(() =>
+    viewMode.value === 'analysis'
+    && filteredGroupCount.value === 0
+    && loading.value
+    && !error.value
+)
+
 const showLoadingStatus = computed(() =>
-    viewMode.value === 'analysis' && loading.value && !error.value
+    viewMode.value === 'analysis'
+    && loading.value
+    && !error.value
+    && !showPreparingListStatus.value
 )
 
 const showTaskListStatus = computed(() =>
@@ -590,15 +801,52 @@ const showTaskListStatus = computed(() =>
 
 const taskListStatusMessage = computed(() => {
     if (taskListWindowLoading.value) {
-        return 'Refreshing filtered results...'
+        const fetched = taskListVersionsCompleted.value
+        const fetchedTotal = taskListVersionsTotal.value ?? taskListPartialVersionsTotal.value
+        const completed = taskListPartialVersionsCompleted.value
+        const total = taskListPartialVersionsTotal.value
+        if (
+            taskListPartial.value
+            && completed != null
+            && total != null
+            && completed >= total
+        ) {
+            return 'All project-version snapshots are loaded; preparing the final grouped result.'
+        }
+        if (taskListPartial.value && fetched != null && fetchedTotal != null) {
+            return `Preparing the visible partial result window. `
+                + `Backend has loaded ${fetched} of ${fetchedTotal} project versions.`
+        }
+        if (taskListPartial.value && completed != null && total != null) {
+            return `Preparing the visible partial result window for ${completed} of ${total} project versions.`
+        }
+        return 'Preparing the visible vulnerability window...'
     }
     if (taskListPartial.value) {
         const completed = taskListPartialVersionsCompleted.value
         const total = taskListPartialVersionsTotal.value
         if (completed != null && total != null) {
-            return `Grouping still running. Counts are based on ${completed}/${total} versions.`
+            if (completed >= total) {
+                return 'All project-version snapshots are loaded; preparing the final grouped result.'
+            }
+            const fetched = taskListVersionsCompleted.value
+            const fetchedTotal = taskListVersionsTotal.value ?? total
+            if (fetched != null && fetchedTotal === total && fetched >= total) {
+                return `Visible results cover ${completed} of ${total} project versions. `
+                    + 'All version snapshots are loaded; preparing the final grouped result.'
+            }
+            if (fetched != null && fetchedTotal === total && fetched > completed) {
+                return `Visible results cover ${completed} of ${total} project versions. `
+                    + `Backend has loaded ${fetched} of ${total}; preparing the next visible window.`
+            }
+            if (taskListPartialPublishInProgress.value) {
+                return `Preparing a visible result window for ${completed} of ${total} project versions.`
+            }
+            const remaining = Math.max(0, total - completed)
+            return `Visible results cover ${completed} of ${total} project versions. `
+                + `${remaining} project-version snapshots are still loading.`
         }
-        return 'Grouping still running. Counts will update automatically.'
+        return 'Vulnerability grouping is still loading project-version snapshots.'
     }
     return ''
 })
@@ -650,6 +898,12 @@ const tmrescoreProposalCounts = computed(() =>
         : listView.value.tmrescoreProposalCounts
 )
 
+const automaticAssessmentCounts = computed(() =>
+    currentVulnTaskId.value && taskListCounts.value?.filtered.automatic_assessment
+        ? taskListCounts.value.filtered.automatic_assessment
+        : listView.value.automaticAssessmentCounts
+)
+
 const attributionAgeCount = computed(() =>
     currentVulnTaskId.value && taskListCounts.value?.filtered.attribution_age != null
         ? taskListCounts.value.filtered.attribution_age
@@ -688,6 +942,12 @@ const {
     selectedListGroup,
     findListGroup,
 })
+
+const selectedGroupHasAutomaticAssessment = computed(() =>
+    selectedGroup.value
+        ? hasAutomaticAssessmentForGroup(selectedGroup.value, automaticAssessmentIdSet.value)
+        : false
+)
 
 const {
     handleLocalAssessmentUpdate,
@@ -731,7 +991,7 @@ const handleBulkApproveModalUpdates = (updates: Array<{ id: string; data: any }>
 }
 
 const exportCurrentProjectArchive = async () => {
-    const name = route.params.name as string
+    const name = routeProjectName()
     if (!name || name === '_all_') return
     archiveExporting.value = true
     archiveExportError.value = ''
@@ -855,6 +1115,8 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     versionFilters: versionFilterList.value,
     tmrescoreFilters: selectedTMRescoreProposalFilters.value,
     tmrescoreOptions: TMRESCORE_FILTER_OPTIONS,
+    automaticAssessmentFilters: selectedAutomaticAssessmentFilters.value,
+    automaticAssessmentOptions: AUTOMATIC_ASSESSMENT_FILTER_OPTIONS,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
@@ -889,6 +1151,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'tmrescore':
             tmrescoreProposalFilter.value = allTMRescoreFilterValues.value
             break
+        case 'automaticAssessment':
+            automaticAssessmentFilter.value = allAutomaticAssessmentFilterValues.value
+            break
         case 'cvss':
             cvssVersionMismatchOnly.value = false
             break
@@ -918,6 +1183,8 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     defaultDependencyFilters: allDependencyFilterValues.value,
     tmrescoreFilters: selectedTMRescoreProposalFilters.value,
     defaultTMRescoreFilters: allTMRescoreFilterValues.value,
+    automaticAssessmentFilters: selectedAutomaticAssessmentFilters.value,
+    defaultAutomaticAssessmentFilters: allAutomaticAssessmentFilterValues.value,
 }))
 
 const filterSidebarProps = computed(() => ({
@@ -931,6 +1198,7 @@ const filterSidebarProps = computed(() => ({
     dependencyCounts: dependencyRelationshipCounts.value,
     dependencyFilterCounts: dependencyFilterCounts.value,
     tmrescoreCounts: tmrescoreProposalCounts.value,
+    automaticAssessmentCounts: automaticAssessmentCounts.value,
     analysisCounts: analysisCounts.value,
     teamTagList: teamTagList.value,
     cacheStatusState: cacheStatusState.value,
@@ -941,28 +1209,78 @@ const filterSidebarProps = computed(() => ({
     sortOptions: SORT_OPTIONS,
     dependencyOptions: DEPENDENCY_OPTIONS,
     tmrescoreOptions: TMRESCORE_FILTER_OPTIONS,
+    automaticAssessmentOptions: AUTOMATIC_ASSESSMENT_FILTER_OPTIONS,
     cvssVersionMismatchCount: cvssVersionMismatchCount.value,
     attributionRangeCount: attributionAgeCount.value,
 }))
 
 const syncProjectHeaderState = () => {
-    const name = route.params.name as string
-    projectHeaderState.currentProjectName.value = name === '_all_' ? null : name
-    projectHeaderState.isAllProjects.value = name === '_all_'
+    const name = routeProjectName()
+    const isAllProjects = name === '_all_'
+    projectHeaderState.currentProjectName.value = isAllProjects ? null : name
+    projectHeaderState.isAllProjects.value = isAllProjects
+    if (!isAllProjects && name) {
+        projectHeaderState.lastProjectName.value = name
+        projectHeaderState.lastProjectPath.value = route.fullPath || `/project/${name}`
+    }
     projectHeaderState.isReviewer.value = currentUserRole.value === 'REVIEWER'
     projectHeaderState.incompleteCount.value = needsApprovalGroups.value.length
 }
 
-watch(() => route.params.name, () => {
-    syncProjectHeaderState()
-    fetchVulns()
-    fetchTMRescoreProposals()
+const hydrateSelectedRouteGroup = () => {
+    if (selectedGroupId.value) {
+        void hydrateVisibleGroup(selectedGroupId.value)
+    }
+}
+
+const syncStatsForProjectRoute = () => {
     if (viewMode.value === 'statistics') {
         fetchStats()
     } else {
         stats.value = null // Reset stats to force refresh if they toggle back
     }
+}
+
+const loadProjectRouteState = () => {
+    if (!isProjectReviewRouteActive()) return
+
+    const name = routeProjectName()
+    syncSelectedGroupFromRoute()
+    if (route.query.vuln) {
+        viewMode.value = 'analysis'
+    }
+    syncProjectHeaderState()
+
+    if (loadedProjectName.value === name && !error.value) {
+        hydrateSelectedRouteGroup()
+        syncStatsForProjectRoute()
+        return
+    }
+
+    if (loadingProjectName.value === name) {
+        hydrateSelectedRouteGroup()
+        return
+    }
+
+    void fetchVulns()
+    void fetchTMRescoreProposals()
+    void fetchAutomaticAssessmentResults()
+    syncStatsForProjectRoute()
+}
+
+watch([() => route.path, () => route.params.name], () => {
+    loadProjectRouteState()
 }, { immediate: true })
+
+watch(() => route.query.vuln, (vulnId) => {
+    if (!isProjectReviewRouteActive()) return
+    syncSelectedGroupFromRoute()
+    if (vulnId) {
+        viewMode.value = 'analysis'
+    }
+    syncProjectHeaderState()
+    hydrateSelectedRouteGroup()
+})
 
 watch(() => needsApprovalGroups.value.length, (length) => {
     projectHeaderState.incompleteCount.value = length
@@ -1103,6 +1421,7 @@ watch(currentUserRole, (role) => {
                 v-if="showLoadingStatus"
                 class="rounded-xl border border-blue-400/20 bg-blue-500/10 p-3 text-sm text-blue-100"
                 role="status"
+                data-testid="loading-status"
                 :title="loadingProgressTitle"
             >
                 <div class="flex flex-wrap items-center justify-between gap-3">
@@ -1300,7 +1619,7 @@ watch(currentUserRole, (role) => {
                                     :item="item"
                                     :selected="selectedGroupId === item.id"
                                     :data-group-id="item.id"
-                                    @select="selectGroup"
+                                    @select="selectGroupWithDraftGuard"
                                     @update="handleTeamMappingUpdated"
                                     @update:assessment="(data) => handleLocalAssessmentUpdate(item.group, data)"
                                 />
@@ -1329,11 +1648,49 @@ watch(currentUserRole, (role) => {
                             </div>
                         </template>
                         <div
-                            v-if="filteredGroupCount === 0 && loading"
+                            v-if="showPreparingListStatus"
                             class="flex min-h-[20rem] w-full min-w-full flex-col items-center justify-center gap-3 py-16 text-center text-gray-400"
+                            role="status"
+                            data-testid="preparing-list-status"
                         >
                             <Loader2 :size="28" class="animate-spin text-blue-300" />
-                            <div class="text-sm font-semibold uppercase tracking-wider text-gray-300">Preparing vulnerability list...</div>
+                            <div class="text-sm font-semibold uppercase tracking-wider text-gray-300">
+                                Preparing vulnerability list...
+                            </div>
+                            <div class="max-w-xl text-sm text-blue-100">
+                                {{ preparingListDetailMessage }}
+                            </div>
+                            <div class="w-full max-w-xl">
+                                <div class="mb-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                                    <span>Progress</span>
+                                    <span v-if="preparingListProgressLabel" class="text-blue-100">
+                                        {{ preparingListProgressLabel }}
+                                    </span>
+                                </div>
+                                <div class="h-2 overflow-hidden rounded bg-black/30">
+                                    <div
+                                        v-if="preparingListProgressWidth === null"
+                                        class="h-full w-1/3 animate-pulse rounded-full bg-blue-300/70"
+                                    ></div>
+                                    <div
+                                        v-else
+                                        class="h-full rounded-full bg-blue-300 transition-all duration-300"
+                                        :style="{ width: `${preparingListProgressWidth}%` }"
+                                    ></div>
+                                </div>
+                            </div>
+                            <div
+                                v-if="preparingListLog.length > 0"
+                                class="max-w-xl space-y-1 text-xs text-gray-500"
+                            >
+                                <div
+                                    v-for="entry in preparingListLog"
+                                    :key="entry"
+                                    class="truncate"
+                                >
+                                    {{ entry }}
+                                </div>
+                            </div>
                         </div>
                         <div v-else-if="filteredGroupCount === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
                     </div>
@@ -1363,9 +1720,11 @@ watch(currentUserRole, (role) => {
             </div>
             <VulnDetailInspector
                 v-else-if="selectedGroup"
+                ref="detailInspectorRef"
                 :group="selectedGroup"
+                :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
                 class="h-full"
-                @close="closeSelectedGroup"
+                @close="closeSelectedGroupWithDraftGuard"
                 @update="handleTeamMappingUpdated"
                 @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
             />
@@ -1385,8 +1744,10 @@ watch(currentUserRole, (role) => {
             </div>
             <VulnDetailInspector
                 v-else-if="selectedGroup"
+                ref="detailInspectorRef"
                 :group="selectedGroup"
-                @close="closeSelectedGroup"
+                :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
+                @close="closeSelectedGroupWithDraftGuard"
                 @update="handleTeamMappingUpdated"
                 @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
             />

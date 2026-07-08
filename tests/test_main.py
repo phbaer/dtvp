@@ -494,6 +494,26 @@ def test_get_team_mapping_forbidden_for_analyst(client):
         assert "Only reviewers" in response.json()["detail"]
 
 
+def test_get_auto_analysis_guidance(client):
+    from unittest.mock import patch
+
+    guidance = {"components": {"keycloak-extension": "Prefer runtime evidence."}}
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        with patch("dtvp.main.load_auto_analysis_guidance", return_value=guidance):
+            response = client.get("/api/settings/auto-analysis-guidance")
+            assert response.status_code == 200
+            assert response.json() == guidance
+
+
+def test_get_auto_analysis_guidance_forbidden_for_analyst(client):
+    from unittest.mock import patch
+
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        response = client.get("/api/settings/auto-analysis-guidance")
+        assert response.status_code == 403
+        assert "Only reviewers" in response.json()["detail"]
+
+
 def test_upload_mapping_forbidden_for_analyst(client):
     from unittest.mock import patch
 

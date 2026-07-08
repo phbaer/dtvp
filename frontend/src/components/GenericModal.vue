@@ -15,13 +15,13 @@
             @click="$emit('response', false)"
             class="px-4 py-2 rounded bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold transition-colors"
           >
-            Cancel
+            {{ cancelLabel || 'Cancel' }}
           </button>
           <button
             @click="$emit('response', true)"
             class="px-6 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-900/20 transition-all active:scale-95"
           >
-            {{ confirmOnly ? 'Close' : 'Confirm' }}
+            {{ confirmOnly ? (confirmLabel || 'Close') : (confirmLabel || 'Confirm') }}
           </button>
         </div>
       </div>
@@ -36,6 +36,8 @@ const props = defineProps<{
   title: string
   message: string
   confirmOnly: boolean
+  confirmLabel?: string
+  cancelLabel?: string
 }>()
 
 const emit = defineEmits<{

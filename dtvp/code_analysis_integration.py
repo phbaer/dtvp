@@ -14,6 +14,22 @@ class CodeAnalysisSettings(BaseSettings):
         alias="DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS",
         default=300.0,
     )
+    DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS: float = Field(
+        alias="DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS",
+        default=5.0,
+    )
+    DTVP_CODE_ANALYSIS_MODEL: str = Field(
+        alias="DTVP_CODE_ANALYSIS_MODEL",
+        default="",
+    )
+    DTVP_CODE_ANALYSIS_LLM_BACKEND: str = Field(
+        alias="DTVP_CODE_ANALYSIS_LLM_BACKEND",
+        default="",
+    )
+    DTVP_CODE_ANALYSIS_LLM_PROVIDER: str = Field(
+        alias="DTVP_CODE_ANALYSIS_LLM_PROVIDER",
+        default="",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -53,14 +69,34 @@ class CodeAnalysisClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_prompts(
+        self,
+        *,
+        include_values: bool = False,
+        system_only: bool = True,
+    ) -> Dict[str, Any]:
+        response = await self.client.get(
+            f"{self.settings.base_url}/prompts",
+            params={
+                "include_values": str(include_values).lower(),
+                "system_only": str(system_only).lower(),
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def start_assessment(
         self,
         vuln_id: str,
         component_name: str,
         cvss_vector: Optional[str] = None,
         user_guidance: Optional[str] = None,
+        model: Optional[str] = None,
+        llm_backend: Optional[str] = None,
+        llm_provider: Optional[str] = None,
         focus_path: Optional[str] = None,
         dependency_paths: Optional[list] = None,
+        affected_product_versions: Optional[list[str]] = None,
         debug: bool = False,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"component_name": component_name}
@@ -70,14 +106,80 @@ class CodeAnalysisClient:
             payload["cvss_vector"] = cvss_vector
         if user_guidance:
             payload["user_guidance"] = user_guidance
+        selected_model = model or self.settings.DTVP_CODE_ANALYSIS_MODEL
+        selected_backend = (
+            llm_backend or self.settings.DTVP_CODE_ANALYSIS_LLM_BACKEND
+        )
+        selected_provider = (
+            llm_provider or self.settings.DTVP_CODE_ANALYSIS_LLM_PROVIDER
+        )
+        if selected_model:
+            payload["model"] = selected_model
+        if selected_backend:
+            payload["llm_backend"] = selected_backend
+        if selected_provider:
+            payload["llm_provider"] = selected_provider
         if focus_path:
             payload["focus_path"] = focus_path
         if dependency_paths:
             payload["dependency_paths"] = dependency_paths
+        if affected_product_versions:
+            payload["affected_product_versions"] = affected_product_versions
         payload["debug"] = debug
 
         response = await self.client.post(
             f"{self.settings.base_url}/assess",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def compact_job(self, job_id: str) -> Dict[str, Any]:
+        response = await self.client.post(
+            f"{self.settings.base_url}/jobs/{job_id}/compact"
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def start_follow_up(
+        self,
+        job_id: str,
+        question: str,
+        user_guidance: Optional[str] = None,
+        component_name: Optional[str] = None,
+        vuln_id: Optional[str] = None,
+        cvss_vector: Optional[str] = None,
+        model: Optional[str] = None,
+        llm_backend: Optional[str] = None,
+        llm_provider: Optional[str] = None,
+        debug: bool = False,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"question": question}
+        if user_guidance:
+            payload["user_guidance"] = user_guidance
+        if component_name:
+            payload["component_name"] = component_name
+        if vuln_id:
+            payload["vuln_id"] = vuln_id
+        if cvss_vector:
+            payload["cvss_vector"] = cvss_vector
+        selected_model = model or self.settings.DTVP_CODE_ANALYSIS_MODEL
+        selected_backend = (
+            llm_backend or self.settings.DTVP_CODE_ANALYSIS_LLM_BACKEND
+        )
+        selected_provider = (
+            llm_provider or self.settings.DTVP_CODE_ANALYSIS_LLM_PROVIDER
+        )
+        if selected_model:
+            payload["model"] = selected_model
+        if selected_backend:
+            payload["llm_backend"] = selected_backend
+        if selected_provider:
+            payload["llm_provider"] = selected_provider
+        payload["debug"] = debug
+
+        response = await self.client.post(
+            f"{self.settings.base_url}/jobs/{job_id}/follow-up",
             json=payload,
         )
         response.raise_for_status()
@@ -89,6 +191,9 @@ class CodeAnalysisClient:
         component_name: str,
         cvss_vector: Optional[str] = None,
         user_guidance: Optional[str] = None,
+        model: Optional[str] = None,
+        llm_backend: Optional[str] = None,
+        llm_provider: Optional[str] = None,
         focus_path: Optional[str] = None,
         dependency_paths: Optional[list] = None,
         debug: bool = False,
@@ -100,6 +205,19 @@ class CodeAnalysisClient:
             payload["cvss_vector"] = cvss_vector
         if user_guidance:
             payload["user_guidance"] = user_guidance
+        selected_model = model or self.settings.DTVP_CODE_ANALYSIS_MODEL
+        selected_backend = (
+            llm_backend or self.settings.DTVP_CODE_ANALYSIS_LLM_BACKEND
+        )
+        selected_provider = (
+            llm_provider or self.settings.DTVP_CODE_ANALYSIS_LLM_PROVIDER
+        )
+        if selected_model:
+            payload["model"] = selected_model
+        if selected_backend:
+            payload["llm_backend"] = selected_backend
+        if selected_provider:
+            payload["llm_provider"] = selected_provider
         if focus_path:
             payload["focus_path"] = focus_path
         if dependency_paths:
@@ -116,6 +234,11 @@ class CodeAnalysisClient:
 
     async def get_job_status(self, job_id: str) -> Dict[str, Any]:
         response = await self.client.get(f"{self.settings.base_url}/jobs/{job_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def list_jobs(self) -> Dict[str, Any]:
+        response = await self.client.get(f"{self.settings.base_url}/jobs")
         response.raise_for_status()
         return response.json()
 

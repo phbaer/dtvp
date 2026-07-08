@@ -31,6 +31,9 @@ const baseInput = (overrides: Partial<BuildTaskVulnGroupListQueryInput> = {}): B
     tmrescoreFilters: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
     allTMRescoreFilterValues: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
     meaningfulTMRescoreProposalIds: ['CVE-2026-0001'],
+    automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+    allAutomaticAssessmentFilterValues: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+    automaticAssessmentIds: ['cve-2026-auto'],
     sortBy: 'rescored-severity',
     sortOrder: 'desc',
     ...overrides,
@@ -82,6 +85,8 @@ describe('projectVulnTaskQuery', () => {
             attribution_mode: 'younger',
             tmrescore: ['WITH_PROPOSAL'],
             tmrescore_proposal_ids: ['CVE-2026-0001'],
+            automatic_assessment: [],
+            automatic_assessment_ids: ['cve-2026-auto'],
             sort: 'id',
             order: 'asc',
         })
@@ -114,6 +119,18 @@ describe('projectVulnTaskQuery', () => {
 
         expect(query.tmrescore).toEqual([])
         expect(query.tmrescore_proposal_ids).toEqual([])
+    })
+
+    it('passes automatic assessment ids and only restricts when selection is customized', () => {
+        const unrestricted = buildTaskVulnGroupListQuery(baseInput())
+        expect(unrestricted.automatic_assessment).toEqual([])
+        expect(unrestricted.automatic_assessment_ids).toEqual(['cve-2026-auto'])
+
+        const restricted = buildTaskVulnGroupListQuery(baseInput({
+            automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT'],
+        }))
+        expect(restricted.automatic_assessment).toEqual(['WITH_AUTOMATIC_ASSESSMENT'])
+        expect(restricted.automatic_assessment_ids).toEqual(['cve-2026-auto'])
     })
 
     it('deduplicates meaningful proposal IDs and ignores no-op proposals', () => {

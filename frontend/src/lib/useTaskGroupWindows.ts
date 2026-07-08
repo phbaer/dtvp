@@ -29,6 +29,9 @@ export function useTaskGroupWindows({
     const partial = ref(false)
     const partialVersionsCompleted = ref<number | null>(null)
     const partialVersionsTotal = ref<number | null>(null)
+    const partialPublishInProgress = ref(false)
+    const versionsCompleted = ref<number | null>(null)
+    const versionsTotal = ref<number | null>(null)
     const windowLoading = ref(false)
     const appendLoading = ref(false)
     const windowError = ref('')
@@ -48,6 +51,9 @@ export function useTaskGroupWindows({
         partial.value = false
         partialVersionsCompleted.value = null
         partialVersionsTotal.value = null
+        partialPublishInProgress.value = false
+        versionsCompleted.value = null
+        versionsTotal.value = null
         windowError.value = ''
     }
 
@@ -66,13 +72,20 @@ export function useTaskGroupWindows({
         requestId++
     }
 
-    const updateFromTaskStatus = (status: Pick<TaskResponse, 'status' | 'partial_result_available' | 'partial_versions_completed' | 'partial_total_versions'>) => {
+    const updateFromTaskStatus = (status: Pick<TaskResponse, 'status' | 'partial_result_available' | 'partial_versions_completed' | 'partial_total_versions' | 'partial_publish_in_progress' | 'versions_completed' | 'versions_total'>) => {
         if (status.status === 'completed' || status.status === 'failed') {
             partial.value = false
             partialVersionsCompleted.value = null
             partialVersionsTotal.value = null
+            partialPublishInProgress.value = false
+            versionsCompleted.value = status.versions_completed ?? null
+            versionsTotal.value = status.versions_total ?? null
             return
         }
+
+        versionsCompleted.value = status.versions_completed ?? versionsCompleted.value
+        versionsTotal.value = status.versions_total ?? versionsTotal.value
+        partialPublishInProgress.value = !!status.partial_publish_in_progress
 
         if (!status.partial_result_available) return
 
@@ -125,6 +138,9 @@ export function useTaskGroupWindows({
             partial.value = !!window.partial
             partialVersionsCompleted.value = window.partial_versions_completed ?? null
             partialVersionsTotal.value = window.partial_total_versions ?? null
+            partialPublishInProgress.value = !!window.partial_publish_in_progress
+            versionsCompleted.value = window.versions_completed ?? versionsCompleted.value
+            versionsTotal.value = window.versions_total ?? versionsTotal.value
             if (shouldReset) onResetVisibleItems?.()
         } catch (err: any) {
             if (activeRequestId !== requestId) return
@@ -147,6 +163,9 @@ export function useTaskGroupWindows({
         partial,
         partialVersionsCompleted,
         partialVersionsTotal,
+        partialPublishInProgress,
+        versionsCompleted,
+        versionsTotal,
         windowLoading,
         appendLoading,
         windowError,

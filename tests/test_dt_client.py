@@ -265,7 +265,7 @@ async def test_get_client():
 
 
 @pytest.mark.asyncio
-async def test_get_client_forwarding():
+async def test_get_client_does_not_forward_request_credentials():
     from unittest.mock import MagicMock
 
     with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
@@ -278,9 +278,8 @@ async def test_get_client_forwarding():
         mock_request.cookies = {"test_cookie": "test_val"}
 
         async for c in get_client(mock_request):
-            assert c.headers["Authorization"] == "Bearer test_token"
-            # Verify cookies are passed to the httpx client
-            assert c.client.cookies["test_cookie"] == "test_val"
+            assert "Authorization" not in c.headers
+            assert "test_cookie" not in c.client.cookies
             break
 
 

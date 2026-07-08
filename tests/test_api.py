@@ -644,6 +644,99 @@ def test_get_task_groups_filters_by_tmrescore_proposal_ids_and_aliases(client):
     ]
 
 
+def test_get_task_groups_filters_by_automatic_assessment_ids_and_aliases(client):
+    task_id = "task-list-query-auto-assessment"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-2026-AUTO",
+                "title": "Direct automatic assessment",
+                "aliases": [],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-AUTO-ALIAS",
+                "title": "Alias automatic assessment",
+                "aliases": ["GHSA-auto-assessment"],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-MANUAL",
+                "title": "No automatic assessment",
+                "aliases": [],
+                "list_metadata": {
+                    "lifecycle": "OPEN",
+                    "is_open": True,
+                    "is_pending": False,
+                    "technical_state": "NOT_SET",
+                },
+                "affected_versions": [],
+            },
+        ],
+    }
+
+    try:
+        with_response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "automatic_assessment": "WITH_AUTOMATIC_ASSESSMENT",
+                "automatic_assessment_ids": [
+                    "CVE-2026-AUTO",
+                    "GHSA-auto-assessment",
+                ],
+                "sort": "id",
+                "order": "asc",
+            },
+        )
+        without_response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "automatic_assessment": "WITHOUT_AUTOMATIC_ASSESSMENT",
+                "automatic_assessment_ids": [
+                    "CVE-2026-AUTO",
+                    "GHSA-auto-assessment",
+                ],
+                "sort": "id",
+                "order": "asc",
+            },
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert with_response.status_code == 200
+    with_data = with_response.json()
+    assert [item["id"] for item in with_data["items"]] == [
+        "CVE-2026-AUTO",
+        "CVE-2026-AUTO-ALIAS",
+    ]
+    assert with_data["counts"]["all"]["automatic_assessment"] == {
+        "WITH_AUTOMATIC_ASSESSMENT": 2,
+        "WITHOUT_AUTOMATIC_ASSESSMENT": 1,
+    }
+    assert with_data["counts"]["filtered"]["automatic_assessment"] == {
+        "WITH_AUTOMATIC_ASSESSMENT": 2,
+        "WITHOUT_AUTOMATIC_ASSESSMENT": 0,
+    }
+    assert without_response.status_code == 200
+    assert [item["id"] for item in without_response.json()["items"]] == [
+        "CVE-2026-MANUAL",
+    ]
+
+
 def test_get_task_groups_rejects_incomplete_task(client):
     task_id = "task-list-running"
     main.tasks[task_id] = {"status": "running", "result": []}
@@ -852,7 +945,7 @@ async def test_get_grouped_vulns_summary_mode_keeps_detail_lookup(
     full_component = full_group["affected_versions"][0]["components"][0]
     assert "Full reviewer notes" in full_component["analysis_details"]
     assert full_component["analysis_comments"][0]["comment"] == "heavy comment"
-    assert "dependency_chains" in full_component
+    assert full_component["dependency_chains"] == ["library-a"]
 
 
 @pytest.mark.asyncio

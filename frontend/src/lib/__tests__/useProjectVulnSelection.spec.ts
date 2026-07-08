@@ -1,12 +1,15 @@
 import { mount } from '@vue/test-utils'
-import { defineComponent, nextTick, reactive } from 'vue'
+import { defineComponent, nextTick, reactive, ref } from 'vue'
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
 import { useProjectVulnSelection } from '../useProjectVulnSelection'
 
 type ProjectVulnSelection = ReturnType<typeof useProjectVulnSelection>
 
-const mountHarness = (query: LocationQuery = {}) => {
+const mountHarness = (
+    query: LocationQuery = {},
+    options: { isRouteActive?: () => boolean } = {},
+) => {
     const route = reactive({
         query: { ...query },
     })
@@ -20,6 +23,7 @@ const mountHarness = (query: LocationQuery = {}) => {
             selection = useProjectVulnSelection({
                 route,
                 router,
+                isRouteActive: options.isRouteActive,
             })
             return {}
         },
@@ -49,6 +53,27 @@ describe('useProjectVulnSelection', () => {
 
         delete route.query.vuln
         await nextTick()
+
+        expect(selection.selectedGroupId.value).toBeNull()
+
+        wrapper.unmount()
+    })
+
+    it('does not clear cached selection while the owning route is inactive', async () => {
+        const active = ref(true)
+        const { route, selection, wrapper } = mountHarness(
+            { vuln: 'CVE-1' },
+            { isRouteActive: () => active.value },
+        )
+
+        active.value = false
+        delete route.query.vuln
+        await nextTick()
+
+        expect(selection.selectedGroupId.value).toBe('CVE-1')
+
+        active.value = true
+        selection.syncSelectedGroupFromRoute()
 
         expect(selection.selectedGroupId.value).toBeNull()
 

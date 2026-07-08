@@ -305,6 +305,8 @@ def _run_job_async(job_id: str, req: AssessRequest) -> None:
             job = jobs.get(job_id)
             if not job:
                 return
+            if job["status"] == "cancelled":
+                return
             job["status"] = "running"
 
         time.sleep(2)  # more processing
@@ -313,6 +315,8 @@ def _run_job_async(job_id: str, req: AssessRequest) -> None:
         with _lock:
             job = jobs.get(job_id)
             if not job:
+                return
+            if job["status"] == "cancelled":
                 return
             job["status"] = "completed"
             job["finished_at"] = _now_iso()
@@ -412,10 +416,11 @@ async def delete_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job["status"] in ("pending", "running"):
-        raise HTTPException(
-            status_code=409,
-            detail="The job is still running and cannot be deleted yet.",
-        )
+        with _lock:
+            job["status"] = "cancelled"
+            job["finished_at"] = _now_iso()
+            job["error"] = "Cancelled by request."
+        return Response(status_code=204)
     with _lock:
         jobs.pop(job_id, None)
     return Response(status_code=204)

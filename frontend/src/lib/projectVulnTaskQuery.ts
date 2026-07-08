@@ -2,6 +2,7 @@ import type { TaskVulnGroupListQuery } from './api'
 import type { TMRescoreProposal } from '../types'
 import {
     isMeaningfulTMRescoreProposalCandidate,
+    type AutomaticAssessmentFilter,
     type DependencyRelationship,
     type ParsedVulnSearchQuery,
     type TMRescoreProposalFilter,
@@ -28,6 +29,9 @@ export interface BuildTaskVulnGroupListQueryInput {
     tmrescoreFilters: readonly TMRescoreProposalFilter[]
     allTMRescoreFilterValues: readonly TMRescoreProposalFilter[]
     meaningfulTMRescoreProposalIds: readonly string[]
+    automaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
+    allAutomaticAssessmentFilterValues: readonly AutomaticAssessmentFilter[]
+    automaticAssessmentIds: readonly string[]
     sortBy: string
     sortOrder: 'asc' | 'desc'
 }
@@ -102,6 +106,9 @@ export function buildTaskVulnGroupListQuery({
     tmrescoreFilters,
     allTMRescoreFilterValues,
     meaningfulTMRescoreProposalIds,
+    automaticAssessmentFilters,
+    allAutomaticAssessmentFilterValues,
+    automaticAssessmentIds,
     sortBy,
     sortOrder,
 }: BuildTaskVulnGroupListQueryInput): TaskVulnGroupListQuery {
@@ -116,6 +123,8 @@ export function buildTaskVulnGroupListQuery({
     const dependency = noMatchWhenEmpty(intersectIfRestricted(dependencyFilters, parsedSearch.dependencyTerms))
     const tmrescore = noMatchWhenEmpty(intersectIfRestricted(tmrescoreFilters, parsedSearch.tmrescoreTerms))
     const isTMRescoreRestricted = !hasSameStringSet(tmrescore, allTMRescoreFilterValues)
+    const automaticAssessment = noMatchWhenEmpty(automaticAssessmentFilters)
+    const isAutomaticAssessmentRestricted = !hasSameStringSet(automaticAssessment, allAutomaticAssessmentFilterValues)
 
     return {
         q: parsedSearch.textTerms.join(' '),
@@ -132,6 +141,8 @@ export function buildTaskVulnGroupListQuery({
         attribution_mode: attributionAgeMode,
         tmrescore: isTMRescoreRestricted ? tmrescore : [],
         tmrescore_proposal_ids: isTMRescoreRestricted ? [...meaningfulTMRescoreProposalIds] : [],
+        automatic_assessment: isAutomaticAssessmentRestricted ? automaticAssessment : [],
+        automatic_assessment_ids: [...automaticAssessmentIds],
         sort: sortBy,
         order: sortOrder,
     }

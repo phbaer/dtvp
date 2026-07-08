@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { DEFAULT_REPRESENTATIVE_PATH_LIMIT, getFirstMappedTeamOnPath, getPathParts, selectRepresentativePaths } from '../lib/dependency-team-selection'
+import { getTeamMappingTags, type TeamMapping } from '../lib/team-mapping'
 
 const props = defineProps<{
   paths: string[]
   projectName?: string
   teamMappedNames?: Map<string, string[]>
+  teamMapping?: TeamMapping
 }>()
 
 type GraphNode = {
@@ -70,23 +72,25 @@ const ROW_GAP = 34
 const TOOLTIP_WIDTH = 360
 const TOOLTIP_HEIGHT = 190
 
-const normalizedTeamMappedNames = computed(() => {
-  const map = new Map<string, string[]>()
-  if (!props.teamMappedNames) return map
-
-  for (const [key, val] of props.teamMappedNames.entries()) {
-    map.set(normalizeName(key), Array.isArray(val) ? val : [val])
-  }
-  return map
-})
-
 const containerRef = ref<HTMLElement | null>(null)
 const hoveredPreview = ref<HoveredPreview | null>(null)
 
-const getTeamNames = (name: string): string[] => {
-  const teams = normalizedTeamMappedNames.value.get(normalizeName(name))
-  return teams ? [...teams] : []
-}
+const teamMappingRecord = computed<TeamMapping>(() => {
+  if (props.teamMapping) return props.teamMapping
+  const record: TeamMapping = {}
+  for (const [key, val] of props.teamMappedNames?.entries() || []) {
+    record[key] = val
+  }
+  return record
+})
+
+const getTeamNames = (name: string): string[] => getTeamMappingTags(
+  teamMappingRecord.value,
+  {
+    name,
+    groupKnown: false,
+  },
+)
 
 const getTeamLabel = (teamNames: string[]): string => {
   if (teamNames.length === 0) return ''
@@ -97,14 +101,6 @@ const getTeamLabel = (teamNames: string[]): string => {
 const toPreviewPart = (name: string): PreviewPart => ({
   name,
   teamNames: getTeamNames(name),
-})
-
-const teamMappingRecord = computed(() => {
-  const record: Record<string, string[]> = {}
-  for (const [key, val] of normalizedTeamMappedNames.value.entries()) {
-    record[key] = val
-  }
-  return record
 })
 
 const uniquePathCount = computed(() => {

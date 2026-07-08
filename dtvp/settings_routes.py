@@ -11,9 +11,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 class SettingsRouteDeps:
     get_user_role: Callable[[str], str]
     load_team_mapping: Callable[[], dict[str, Any]]
+    load_auto_analysis_guidance: Callable[[], dict[str, Any]]
     load_user_roles: Callable[[], dict[str, Any] | None]
     load_rescore_rules: Callable[[], dict[str, Any] | None]
     get_team_mapping_path: Callable[[], str]
+    get_auto_analysis_guidance_path: Callable[[], str]
     get_user_roles_path: Callable[[], str]
     get_rescore_rules_path: Callable[[], str]
     write_bytes: Callable[[str, bytes], None]
@@ -154,6 +156,81 @@ def _register_role_routes(
         return sorted(roles.keys())
 
 
+def _register_auto_analysis_guidance_routes(
+    router: APIRouter,
+    deps: SettingsRouteDeps,
+    forbidden_response: dict[int | str, dict[str, Any]],
+    current_user_dependency: Callable[..., Any],
+) -> None:
+    CurrentUser = Annotated[str, Depends(current_user_dependency)]
+
+    @router.get("/settings/auto-analysis-guidance", responses=forbidden_response)
+    async def get_auto_analysis_guidance(user: CurrentUser):
+        _require_reviewer(
+            deps,
+            user,
+            "Only reviewers can view auto-analysis guidance",
+        )
+        return deps.load_auto_analysis_guidance()
+
+    @router.post("/settings/auto-analysis-guidance", responses=forbidden_response)
+    async def upload_auto_analysis_guidance(
+        file: Annotated[UploadFile, File(...)],
+        *,
+        user: CurrentUser,
+    ):
+        _require_reviewer(
+            deps,
+            user,
+            "Only reviewers can modify auto-analysis guidance",
+        )
+        target_path = deps.get_auto_analysis_guidance_path()
+        _ensure_parent_dir(target_path)
+
+        try:
+            content = await file.read()
+            try:
+                payload = json.loads(content)
+            except json.JSONDecodeError:
+                return {"status": "error", "message": "Invalid JSON"}
+            if not isinstance(payload, dict):
+                return {
+                    "status": "error",
+                    "message": "Auto-analysis guidance JSON must be an object",
+                }
+
+            await asyncio.to_thread(deps.write_json, target_path, payload)
+            return {
+                "status": "success",
+                "message": f"Auto-analysis guidance updated at {target_path}",
+            }
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
+    @router.put("/settings/auto-analysis-guidance", responses=forbidden_response)
+    async def update_auto_analysis_guidance(
+        guidance: dict[str, Any],
+        *,
+        user: CurrentUser,
+    ):
+        _require_reviewer(
+            deps,
+            user,
+            "Only reviewers can modify auto-analysis guidance",
+        )
+        target_path = deps.get_auto_analysis_guidance_path()
+        _ensure_parent_dir(target_path)
+
+        try:
+            await asyncio.to_thread(deps.write_json, target_path, guidance)
+            return {
+                "status": "success",
+                "message": f"Auto-analysis guidance updated at {target_path}",
+            }
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
+
 def _register_rescore_rule_routes(
     router: APIRouter,
     deps: SettingsRouteDeps,
@@ -224,6 +301,12 @@ def create_settings_router(
 
     _register_mapping_routes(router, deps, forbidden_response, current_user_dependency)
     _register_role_routes(router, deps, forbidden_response, current_user_dependency)
+    _register_auto_analysis_guidance_routes(
+        router,
+        deps,
+        forbidden_response,
+        current_user_dependency,
+    )
     _register_rescore_rule_routes(
         router,
         deps,

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 
 const mockProjects = [
     { name: 'TestProject', uuid: 'p1', version: '2.0.0', classifier: 'APPLICATION' },
@@ -60,14 +60,49 @@ const mockStatistics = {
     },
 }
 
+const mockCodeAnalysisResults = [
+    {
+        analysis_run_id: 'docs-auto-parser-wrapper',
+        queue_id: 'docs-dashboard-completed',
+        job_id: 'agentyzer-job-40',
+        project_name: 'TestProject',
+        vuln_id: 'CVE-2024-4002',
+        component_name: 'parser-wrapper',
+        source: 'automatic',
+        submitted_by: 'auto-sweep',
+        submitted_at: '2026-05-02T11:40:00Z',
+        finished_at: '2026-05-02T11:48:00Z',
+        status: 'completed',
+        summary: {
+            affected: false,
+            verdict: 'Not Affected',
+            confidence: 'Medium',
+            exposure: 'Job runner only',
+            text: 'The vulnerable parser-wrapper path is limited to a disabled batch import pipeline.',
+        },
+        result: {
+            versions_checked: ['2.0.0'],
+            assessment: {
+                affected: false,
+                verdict: 'Not Affected',
+                confidence: 'Medium',
+                exposure: 'Job runner only',
+                summary: 'The vulnerable parser-wrapper path is limited to a disabled batch import pipeline.',
+                reasoning: 'No production-facing route references the affected import flow in the current deployment.',
+            },
+        },
+    },
+]
+
 const README_CAPTURE_BACKGROUND = '#0f172a'
 
 async function captureWithPadding(
-    locator: Parameters<typeof test>[0]['page']['locator'],
+    locator: Locator,
     path: string,
     padding = 24,
 ) {
-    await locator.scrollIntoViewIfNeeded()
+    await locator.waitFor({ state: 'visible', timeout: 10000 })
+    await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => undefined)
     await locator.evaluate((element, { background, capturePadding }) => {
         const htmlElement = element as HTMLElement
         htmlElement.dataset.docsOriginalStyle = htmlElement.getAttribute('style') ?? ''
@@ -77,7 +112,7 @@ async function captureWithPadding(
     }, { background: README_CAPTURE_BACKGROUND, capturePadding: padding })
 
     try {
-        await locator.screenshot({ path })
+        await locator.screenshot({ path, timeout: 20000 })
     } finally {
         await locator.evaluate((element) => {
             const htmlElement = element as HTMLElement
@@ -93,7 +128,7 @@ async function captureWithPadding(
 }
 
 async function mockAnalysisQueue(
-    page: Parameters<typeof test.beforeEach>[0]['page'],
+    page: Page,
     {
         items,
         results = {},
@@ -156,16 +191,251 @@ async function mockAnalysisQueue(
     })
 }
 
-async function openProjectCard(page: Parameters<typeof test>[0]['page'], groupId: string) {
-    const card = page.locator(`.vuln-card[data-group-id="${groupId}"]`)
-    await expect(card).toBeVisible({ timeout: 20000 })
-    const cardBox = await card.boundingBox()
-    if (!cardBox) throw new Error(`Expected bounding box for ${groupId}`)
-    await page.mouse.click(cardBox.x + 120, cardBox.y + 40)
-    return card
+async function mockCodeAnalysisDashboardStatus(page: Page) {
+    const runningProgress = {
+        percent: 64,
+        current_step: 'semantic-validation',
+        current_title: 'Semantic validation',
+        current_agent: 'ReachabilityAgent',
+        current_activity: 'Tracing request entrypoints and guard conditions',
+        completed_steps: 7,
+        total_steps: 11,
+        last_updated_at: '2026-05-02T12:12:40Z',
+        active_agents: [
+            {
+                step: 'source-scan',
+                title: 'Source scan',
+                agent: 'RepositoryAgent',
+                activity: 'Indexed platform-gateway and parser-wrapper references',
+                status: 'completed',
+            },
+            {
+                step: 'semantic-validation',
+                title: 'Semantic validation',
+                agent: 'ReachabilityAgent',
+                activity: 'Reviewing inbound handlers and runtime guards',
+                status: 'running',
+            },
+            {
+                step: 'cvss-adjustment',
+                title: 'CVSS adjustment',
+                agent: 'ScoringAgent',
+                activity: 'Waiting for reachability evidence',
+                status: 'pending',
+            },
+        ],
+    }
+    const queueItems = [
+        {
+            queue_id: 'docs-dashboard-running',
+            vuln_id: 'CVE-2024-9999',
+            component_name: 'platform-gateway',
+            cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+            model: 'qwen2.5-coder:14b',
+            llm_backend: 'http://ollama:11434',
+            llm_provider: 'ollama',
+            source: 'automatic',
+            submitted_by: 'auto-sweep',
+            submitted_at: '2026-05-02T12:10:00Z',
+            started_at: '2026-05-02T12:11:00Z',
+            status: 'running',
+            position: 0,
+            job_id: 'agentyzer-job-42',
+            progress: runningProgress,
+            logs: [
+                '2026-05-02T12:11:03Z INFO DTVP: Submitted scan to Agentyzer job agentyzer-job-42',
+                '2026-05-02T12:11:11Z RUN RepositoryAgent: Indexed 148 source files and 19 manifests',
+                '2026-05-02T12:11:36Z WAIT Analyzer: Waiting for the single LLM backend slot',
+                '2026-05-02T12:12:08Z RUN ReachabilityAgent: Tracing request entrypoints and guard conditions',
+                '2026-05-02T12:12:28Z WARN ScoringAgent: CVSS adjustment blocked until reachability evidence is complete',
+            ],
+        },
+        {
+            queue_id: 'docs-dashboard-queued',
+            vuln_id: 'CVE-2024-3001',
+            component_name: 'api-gateway',
+            model: 'qwen2.5-coder:14b',
+            llm_backend: 'http://ollama:11434',
+            llm_provider: 'ollama',
+            source: 'manual',
+            submitted_by: 'reviewer',
+            submitted_at: '2026-05-02T12:09:00Z',
+            status: 'queued',
+            position: 1,
+            logs: ['2026-05-02T12:09:00Z WAIT DTVP: Queued behind running analysis docs-dashboard-running'],
+        },
+        {
+            queue_id: 'docs-dashboard-completed',
+            vuln_id: 'CVE-2024-4002',
+            component_name: 'parser-wrapper',
+            source: 'automatic',
+            submitted_by: 'auto-sweep',
+            submitted_at: '2026-05-02T11:40:00Z',
+            started_at: '2026-05-02T11:41:00Z',
+            finished_at: '2026-05-02T11:48:00Z',
+            status: 'completed',
+            position: 0,
+            job_id: 'agentyzer-job-40',
+            logs: ['2026-05-02T11:48:00Z DONE Analyzer: Completed with a not-affected recommendation'],
+        },
+    ]
+    const configuration = {
+        service_name: 'agentyzer',
+        service_version: '0.3.0',
+        config_dir: '/app/config',
+        repos_config_path: '/app/config/repos.yaml',
+        repositories: {
+            workspace_dir: '/workspace/repositories',
+            component_count: 7,
+            default_template_configured: true,
+            hot_reload: true,
+        },
+        features: {
+            queue_control: true,
+            scan_logs: true,
+            model_override: true,
+            deterministic_targets: true,
+        },
+    }
+    const backend = {
+        llm: {
+            provider: 'ollama',
+            backend: 'ollama',
+            host: 'http://ollama:11434',
+            model: 'qwen2.5-coder:14b',
+            healthy: true,
+            supports_model_override: true,
+        },
+        repositories: {
+            workspace_dir: '/workspace/repositories',
+            reuse_strategy: 'reuse_existing',
+            update_strategy: 'pull_before_scan',
+        },
+        jobs: {
+            job_store: 'memory',
+            execution_model: 'single-llm-backend',
+            known_jobs: 3,
+            status_counts: { running: 1, pending: 1, completed: 1 },
+            max_concurrent_jobs: 1,
+            running_jobs: 1,
+            queued_jobs: 1,
+            available_slots: 0,
+        },
+    }
+    const body = {
+        overall_state: 'running',
+        updated_at: '2026-05-02T12:12:45Z',
+        configured: true,
+        queue: {
+            capacity: 1,
+            running_count: 1,
+            available_slots: 0,
+            dtvp_worker_busy: true,
+            waiting_for_slot: true,
+            counts_by_status: { running: 1, queued: 1, completed: 1 },
+            counts_by_source: { automatic: 2, manual: 1 },
+            active_item: queueItems[0],
+            active_items: [queueItems[0]],
+            items: queueItems,
+        },
+        auto_sweep: {
+            enabled: true,
+            code_analysis_configured: true,
+            active: true,
+            interval_seconds: 900,
+            running: false,
+            last_started_at: '2026-05-02T12:00:00Z',
+            last_finished_at: '2026-05-02T12:00:09Z',
+            last_queued_count: 2,
+            last_trigger: 'interval',
+            next_run_at: '2026-05-02T12:15:00Z',
+        },
+        external: {
+            health: {
+                status: 'ok',
+                service_name: 'agentyzer',
+                service_version: '0.3.0',
+                configuration,
+                backend,
+            },
+            health_error: null,
+            jobs: [
+                {
+                    job_id: 'agentyzer-job-42',
+                    status: 'running',
+                    created_at: '2026-05-02T12:11:03Z',
+                    progress: runningProgress,
+                    request: {
+                        vuln_id: 'CVE-2024-9999',
+                        component_name: 'platform-gateway',
+                    },
+                    model: 'qwen2.5-coder:14b',
+                    llm_backend: 'http://ollama:11434',
+                    llm_provider: 'ollama',
+                    configuration,
+                    backend,
+                },
+                {
+                    job_id: 'agentyzer-job-41',
+                    status: 'pending',
+                    created_at: '2026-05-02T12:09:05Z',
+                    request: {
+                        vuln_id: 'CVE-2024-3001',
+                        component_name: 'api-gateway',
+                    },
+                    model: 'qwen2.5-coder:14b',
+                },
+            ],
+            jobs_error: null,
+            configuration,
+            backend,
+            busy: true,
+            capacity: 1,
+            running_jobs: 1,
+            queued_jobs: 1,
+            available_slots: 0,
+        },
+        active_agents: runningProgress.active_agents,
+        model: 'qwen2.5-coder:14b',
+        model_source: 'queue',
+        llm_backend: 'http://ollama:11434',
+        llm_backend_source: 'queue',
+        llm_provider: 'ollama',
+        llm_provider_source: 'queue',
+    }
+
+    await page.unroute('**/api/code-analysis/status')
+    await page.route('**/api/code-analysis/status', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(body),
+        })
+    })
 }
 
-async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page']) {
+async function openProjectCard(page: Page, groupId: string) {
+    const listCard = page.locator(`.vuln-card[data-group-id="${groupId}"]`)
+    await expect(listCard).toBeVisible({ timeout: 20000 })
+    await listCard.click()
+
+    const inspector = page.getByTestId('vuln-detail-inspector')
+    await expect(inspector).toBeVisible({ timeout: 10000 })
+
+    const detailCard = inspector.locator('.vuln-card').first()
+    await expect(detailCard.getByRole('tab', { name: 'Overview' })).toBeVisible({ timeout: 10000 })
+    await expect(detailCard.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
+    return detailCard
+}
+
+async function selectDetailTab(card: Locator, name: string) {
+    const tab = card.getByRole('tab', { name })
+    await expect(tab).toBeVisible({ timeout: 10000 })
+    await tab.click()
+    await expect(tab).toHaveAttribute('aria-selected', 'true', { timeout: 10000 })
+}
+
+async function mockCommonShell(page: Page) {
     await page.setViewportSize({ width: 1800, height: 1400 })
 
     await page.route('**/auth/me', async (route) => {
@@ -203,6 +473,23 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({ content: '## Changelog\n\nDocumentation screenshot refresh.' }),
+        })
+    })
+
+    await page.route('**/api/cache-status', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                fully_cached: true,
+                last_refreshed_at: '2026-05-02T12:00:00Z',
+                projects: 3,
+                active_projects: 3,
+                cached_findings: 32,
+                cached_boms: 7,
+                cached_analyses: 18,
+                pending_updates: 0,
+            }),
         })
     })
 
@@ -260,6 +547,31 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
         })
     })
 
+    await page.route('**/api/project-archives/snapshots', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify([
+                {
+                    filename: 'TestProject-2026-05-02.dtvp-project-archive.zip',
+                    size: 245760,
+                    modified_at: '2026-05-02T12:00:00Z',
+                    project_name: 'TestProject',
+                    created_at: '2026-05-02T12:00:00Z',
+                    version_count: 3,
+                },
+                {
+                    filename: 'BillingAPI-2026-05-01.dtvp-project-archive.zip',
+                    size: 184320,
+                    modified_at: '2026-05-01T18:30:00Z',
+                    project_name: 'BillingAPI',
+                    created_at: '2026-05-01T18:30:00Z',
+                    version_count: 2,
+                },
+            ]),
+        })
+    })
+
     await page.route('**/api/known-users', async (route) => {
         await route.fulfill({
             status: 200,
@@ -268,11 +580,132 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
         })
     })
 
+    await page.route('**/api/projects/*/tmrescore/context', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                enabled: true,
+                project_name: 'TestProject',
+                latest_version: '2.0.0',
+                versions: ['1.0.0', '1.1.0', '2.0.0'],
+                recommended_scope: 'merged_versions',
+                scopes: [
+                    {
+                        id: 'merged_versions',
+                        label: 'Merged multi-version',
+                        description: 'Build one synthetic SBOM across all discovered versions before rescoring.',
+                    },
+                    {
+                        id: 'latest_only',
+                        label: 'Latest only',
+                        description: 'Analyze only the newest Dependency-Track project version.',
+                    },
+                ],
+                warnings: [
+                    'Merged mode keeps historical vulnerabilities attached to the versioned components that carried them.',
+                    'Latest-only mode is faster but may hide vulnerabilities that were already fixed in newer releases.',
+                ],
+                llm_enrichment: {
+                    available: true,
+                    status: 'available',
+                    default_model: 'qwen2.5:7b',
+                    host_configured: true,
+                    warning: null,
+                },
+            }),
+        })
+    })
+
+    await page.route('**/api/projects/*/tmrescore/state', async (route) => {
+        await route.fulfill({
+            status: 404,
+            contentType: 'application/json',
+            body: JSON.stringify({ detail: 'No cached tmrescore session' }),
+        })
+    })
+
+    await page.route('**/api/projects/*/tmrescore/sbom/summary**', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                scope: 'merged_versions',
+                latest_version: '2.0.0',
+                analyzed_versions: ['1.0.0', '1.1.0', '2.0.0'],
+                component_count: 42,
+                vulnerability_count: 18,
+                strategy_note: 'The analysis SBOM keeps version-specific component identities while presenting tmrescore with one reviewable input.',
+            }),
+        })
+    })
+
     await page.route('**/api/projects/*/tmrescore/proposals', async (route) => {
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({ proposals: {} }),
+        })
+    })
+
+    await page.route('**/api/code-analysis/auto-sweep', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                enabled: true,
+                code_analysis_configured: true,
+                active: true,
+                interval_seconds: 900,
+                running: false,
+                last_started_at: '2026-05-02T12:00:00Z',
+                last_finished_at: '2026-05-02T12:00:09Z',
+                last_queued_count: 2,
+                last_error: null,
+                last_trigger: route.request().method() === 'POST' ? 'manual' : 'interval',
+                next_run_at: '2026-05-02T12:15:00Z',
+            }),
+        })
+    })
+
+    const listCodeAnalysisResults = (url: URL, pathVulnId?: string) => {
+        const projectName = (url.searchParams.get('project_name') || '').toLowerCase()
+        const vulnId = (pathVulnId || url.searchParams.get('vuln_id') || '').toLowerCase()
+        const componentName = (url.searchParams.get('component_name') || '').toLowerCase()
+        const source = (url.searchParams.get('source') || '').toLowerCase()
+        const includeResult = url.searchParams.get('include_result') === 'true'
+        const limit = Math.max(1, Math.min(Number(url.searchParams.get('limit') || 100), 500))
+
+        return mockCodeAnalysisResults
+            .filter((record) => !projectName || String(record.project_name || '').toLowerCase() === projectName)
+            .filter((record) => !vulnId || String(record.vuln_id || '').toLowerCase() === vulnId)
+            .filter((record) => !componentName || String(record.component_name || '').toLowerCase() === componentName)
+            .filter((record) => !source || String(record.source || '').toLowerCase() === source)
+            .slice(0, limit)
+            .map((record) => {
+                if (includeResult) return { ...record }
+                const { result, ...payload } = record
+                return payload
+            })
+    }
+
+    await page.route('**/api/code-analysis/results**', async (route) => {
+        const url = new URL(route.request().url())
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(listCodeAnalysisResults(url)),
+        })
+    })
+
+    await page.route('**/api/projects/*/vulnerabilities/*/analysis-results**', async (route) => {
+        const url = new URL(route.request().url())
+        const pathParts = url.pathname.split('/').map(part => decodeURIComponent(part))
+        const vulnId = pathParts[pathParts.indexOf('vulnerabilities') + 1] || ''
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(listCodeAnalysisResults(url, vulnId)),
         })
     })
 
@@ -292,47 +725,7 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
         })
     })
 
-    let taskPollCount = 0
-    await page.route('**/api/tasks/task-docs**', async (route) => {
-        taskPollCount += 1
-        console.log('mock route: task-docs attempt', taskPollCount, route.request().method(), route.request().url())
-        if (taskPollCount === 1) {
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({
-                    status: 'running',
-                    progress: 55,
-                    message: 'Processed version 1.1.0 (2/3)...',
-                    log: [
-                        'Starting...',
-                        'Fetching projects...',
-                        'Found 3 versions. Fetching vulnerabilities...',
-                        'Processed version 1.0.0 (1/3)...',
-                        'Processed version 1.1.0 (2/3)...',
-                    ],
-                }),
-            })
-            return
-        }
-
-        await route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({
-                status: 'completed',
-                progress: 100,
-                message: 'Grouping vulnerabilities...',
-                log: [
-                    'Starting...',
-                    'Fetching projects...',
-                    'Found 3 versions. Fetching vulnerabilities...',
-                    'Processed version 1.0.0 (1/3)...',
-                    'Processed version 1.1.0 (2/3)...',
-                    'Processed version 2.0.0 (3/3)...',
-                    'Grouping vulnerabilities...',
-                ],
-                result: [
+    const docsGroupedVulns = [
                     {
                         id: 'CVE-2024-9999',
                         title: 'Critical dependency issue in shared parser',
@@ -341,6 +734,8 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
                         cvss: 9.8,
                         cvss_score: 9.8,
                         cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+                        rescored_cvss: 8.8,
+                        rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MPR:L',
                         tags: ['PlatformTeam', 'LegacyPlatformAlias'],
                         affected_versions: [
                             {
@@ -616,7 +1011,172 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
                             },
                         ],
                     },
-                ],
+    ]
+
+    const automaticAssessmentIds = new Set(
+        mockCodeAnalysisResults
+            .filter(record => record.source === 'automatic')
+            .map(record => String(record.vuln_id || '').trim().toLowerCase())
+            .filter(Boolean),
+    )
+    const groupHasAutomaticAssessment = (group: any) =>
+        [group.id, ...(group.aliases || [])]
+            .map(candidate => String(candidate || '').trim().toLowerCase())
+            .some(candidate => automaticAssessmentIds.has(candidate))
+    const automaticAssessmentCountsFor = (items: any[]) => ({
+        WITH_AUTOMATIC_ASSESSMENT: items.filter(groupHasAutomaticAssessment).length,
+        WITHOUT_AUTOMATIC_ASSESSMENT: items.filter(group => !groupHasAutomaticAssessment(group)).length,
+    })
+
+    const docsGroupCounts = {
+        total: docsGroupedVulns.length,
+        lifecycle: {
+            OPEN: 2,
+            ASSESSED: 2,
+            ASSESSED_LEGACY: 0,
+            INCOMPLETE: 1,
+            INCONSISTENT: 1,
+            NEEDS_APPROVAL: 1,
+        },
+        analysis: {
+            NOT_SET: 2,
+            EXPLOITABLE: 0,
+            IN_TRIAGE: 3,
+            RESOLVED: 0,
+            FALSE_POSITIVE: 1,
+            NOT_AFFECTED: 2,
+        },
+        dependency_relationship: {
+            direct: 4,
+            transitive: 4,
+            unknown: 0,
+        },
+        cvss_version_mismatch: 0,
+        ids: Object.fromEntries(docsGroupedVulns.map((group) => [group.id, 1])),
+        versions: { '1.0.0': 1, '1.1.0': 1, '2.0.0': docsGroupedVulns.length },
+        tags: { PlatformTeam: 4, EdgeTeam: 2, RuntimeTeam: 1, UXTeam: 2 },
+        assignees: { analyst: 1, dev_lead: 1, security_team: 1, reviewer: 1 },
+        components: {
+            'platform-gateway': 1,
+            'frontend-shell': 2,
+            'logging-core': 1,
+            'api-gateway': 1,
+            'parser-wrapper': 1,
+            'validation-core': 1,
+        },
+        team_tags: {
+            PlatformTeam: { open: 2, assessed: 1 },
+            EdgeTeam: { open: 1, assessed: 1 },
+            RuntimeTeam: { open: 1, assessed: 0 },
+            UXTeam: { open: 1, assessed: 1 },
+        },
+        tmrescore: { WITH_PROPOSAL: 0, WITHOUT_PROPOSAL: docsGroupedVulns.length },
+        automatic_assessment: automaticAssessmentCountsFor(docsGroupedVulns),
+        attribution_age: 30,
+    }
+    const docsTaskLog = [
+        'Starting...',
+        'Fetching projects...',
+        'Found 3 versions. Fetching vulnerabilities...',
+        'Processed version 1.0.0 (1/3)...',
+        'Processed version 1.1.0 (2/3)...',
+        'Processed version 2.0.0 (3/3)...',
+        'Grouping vulnerabilities...',
+    ]
+    const docsTaskWindowResponse = (url: URL, items = docsGroupedVulns) => {
+        const automaticAssessmentFilter = url.searchParams.getAll('automatic_assessment')
+        const filteredItems = automaticAssessmentFilter.includes('WITH_AUTOMATIC_ASSESSMENT') &&
+            !automaticAssessmentFilter.includes('WITHOUT_AUTOMATIC_ASSESSMENT')
+            ? items.filter(groupHasAutomaticAssessment)
+            : automaticAssessmentFilter.includes('WITHOUT_AUTOMATIC_ASSESSMENT') &&
+                !automaticAssessmentFilter.includes('WITH_AUTOMATIC_ASSESSMENT')
+                ? items.filter(group => !groupHasAutomaticAssessment(group))
+                : items
+        const filteredCounts = {
+            ...docsGroupCounts,
+            total: filteredItems.length,
+            automatic_assessment: automaticAssessmentCountsFor(filteredItems),
+        }
+
+        return {
+            items: filteredItems,
+            total: docsGroupedVulns.length,
+            filtered: filteredItems.length,
+            counts: {
+                all: docsGroupCounts,
+                filtered: filteredCounts,
+            },
+            offset: Number(url.searchParams.get('offset') || 0),
+            limit: Number(url.searchParams.get('limit') || 250),
+            cursor: null,
+            next_cursor: null,
+            has_more: false,
+            sort: url.searchParams.get('sort') || 'rescored-severity',
+            order: url.searchParams.get('order') === 'asc' ? 'asc' : 'desc',
+            result_mode: 'summary',
+            source_result_mode: 'summary',
+            partial: false,
+            partial_versions_completed: null,
+            partial_total_versions: null,
+        }
+    }
+
+    let taskPollCount = 0
+    await page.route('**/api/tasks/task-docs**', async (route) => {
+        const url = new URL(route.request().url())
+        const groupMatch = url.pathname.match(/\/groups\/([^/]+)$/)
+
+        if (groupMatch) {
+            const groupId = decodeURIComponent(groupMatch[1] || '')
+            const group = docsGroupedVulns.find((entry) => entry.id === groupId)
+            await route.fulfill({
+                status: group ? 200 : 404,
+                contentType: 'application/json',
+                body: JSON.stringify(group || { detail: 'Not found' }),
+            })
+            return
+        }
+
+        if (url.pathname.endsWith('/groups') || url.pathname.endsWith('/group-details')) {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify(docsTaskWindowResponse(url)),
+            })
+            return
+        }
+
+        taskPollCount += 1
+        if (taskPollCount === 1) {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    status: 'running',
+                    progress: 55,
+                    message: 'Processed version 1.1.0 (2/3)...',
+                    partial_result_available: true,
+                    partial_versions_completed: 2,
+                    partial_total_versions: 3,
+                    log: docsTaskLog.slice(0, 5),
+                }),
+            })
+            return
+        }
+
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                status: 'completed',
+                progress: 100,
+                message: 'Grouping vulnerabilities...',
+                result_mode: 'summary',
+                partial_result_available: true,
+                partial_versions_completed: 3,
+                partial_total_versions: 3,
+                log: docsTaskLog,
+                result: docsGroupedVulns,
             }),
         })
     })
@@ -683,6 +1243,7 @@ async function mockCommonShell(page: Parameters<typeof test.beforeEach>[0]['page
     })
 
     await mockAnalysisQueue(page, { items: [] })
+    await mockCodeAnalysisDashboardStatus(page)
 }
 
 test.describe('Capture README screenshots', () => {
@@ -713,9 +1274,10 @@ test.describe('Capture README screenshots', () => {
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
 
-        await expect(page.getByRole('heading', { name: 'Global Assessment' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('tab', { name: 'CVSS & Rescoring' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('tab', { name: 'Team Mapping' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
         await expect(page.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
-        await expect(page.locator('text=Legacy alias assessment block retained for compatibility.').first()).toBeVisible({ timeout: 10000 })
 
         const chainsButton = page.getByRole('button', { name: /^chains$/ }).first()
         await chainsButton.click()
@@ -731,7 +1293,21 @@ test.describe('Capture README screenshots', () => {
         }
 
         await page.setViewportSize({ width: 2200, height: 1800 })
-        await captureWithPadding(card, '../docs/screenshots/project-view-dependencies.png')
+        await captureWithPadding(card, '../docs/screenshots/vuln-card-overview.png')
+    })
+
+    test('capture CVSS and rescoring tab screenshot', async ({ page }) => {
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-6004')
+        await selectDetailTab(card, 'CVSS & Rescoring')
+        await expect(card.getByText('CVSS Calculator')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('heading', { name: 'CVSS & Rescoring' })).toBeVisible({ timeout: 10000 })
+        await expect(card.locator('#cvss-vector-input')).toBeVisible({ timeout: 10000 })
+
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await captureWithPadding(card, '../docs/screenshots/vuln-card-cvss-rescoring.png')
     })
 
     test('capture statistics screenshot', async ({ page }) => {
@@ -750,6 +1326,30 @@ test.describe('Capture README screenshots', () => {
         await expect(page.locator('textarea')).toBeVisible({ timeout: 10000 })
 
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/settings.png')
+    })
+
+    test('capture settings archives screenshot', async ({ page }) => {
+        await page.goto('/settings')
+        await page.waitForLoadState('networkidle')
+
+        await page.getByRole('button', { name: /Archives/ }).click()
+        await expect(page.getByText('Project Archives')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('Stored Archives')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByRole('cell', { name: 'TestProject' })).toBeVisible({ timeout: 10000 })
+
+        await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/settings-archives.png')
+    })
+
+    test('capture threat-model rescoring screenshot', async ({ page }) => {
+        await page.goto('/project/TestProject/tmrescore')
+        await page.waitForLoadState('networkidle')
+
+        await expect(page.getByRole('heading', { name: /Threat-Model Analysis for TestProject/ })).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('scope-merged_versions')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByTestId('analysis-sbom-summary-components')).toHaveText('42', { timeout: 10000 })
+
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/tmrescore.png')
     })
 
     test('capture lifecycle badges screenshot', async ({ page }) => {
@@ -775,8 +1375,7 @@ test.describe('Capture README screenshots', () => {
 
         // Verify assignee chips are visible on the card header
         await expect(needsApprovalCard.locator('[data-testid="assignee-chip"]').first()).toBeVisible({ timeout: 5000 })
-        // Verify the approve button is visible (reviewer role + pending review)
-        await expect(needsApprovalCard.locator('[data-testid="approve-btn"]')).toBeVisible({ timeout: 5000 })
+        await expect(needsApprovalCard.getByText('Needs Approval')).toBeVisible({ timeout: 5000 })
 
         await captureWithPadding(needsApprovalCard, '../docs/screenshots/assignee-chips-approve.png')
     })
@@ -802,6 +1401,7 @@ test.describe('Capture README screenshots', () => {
 
         // Expand the NEEDS_APPROVAL card to see the assignment form
         const card = await openProjectCard(page, 'CVE-2024-3001')
+        await selectDetailTab(card, 'Review')
 
         // Wait for the expanded section
         await expect(page.getByText('Assigned Users').first()).toBeVisible({ timeout: 10000 })
@@ -826,18 +1426,20 @@ test.describe('Capture README screenshots', () => {
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
         await page.waitForTimeout(1000)
 
-        // Click the Statistics tab in the sidebar
-        const statsTab = page.getByText('Statistics', { exact: true }).first()
+        // Click the Results tab in the sidebar to show the compact statistics panel.
+        const statsTab = page.getByRole('button', { name: 'Results' }).first()
         await expect(statsTab).toBeVisible({ timeout: 5000 })
         await statsTab.click()
         await page.waitForTimeout(500)
 
-        // Verify the statistics content is visible
-        await expect(page.getByText('Findings', { exact: false }).first()).toBeVisible({ timeout: 5000 })
+        const sidebar = page.getByTestId('stats-sidebar')
+        const resultsPanel = page.getByTestId('stats-sidebar-results')
+        await expect(resultsPanel).toBeVisible({ timeout: 5000 })
+        await expect(resultsPanel.getByText('7 Findings')).toBeVisible({ timeout: 5000 })
+        await expect(resultsPanel.getByText('Per Team')).toBeVisible({ timeout: 5000 })
+        await expect(resultsPanel.getByText('Cache Status')).toBeVisible({ timeout: 5000 })
 
-        // Capture just the sidebar area
-        const sidebar = page.locator('[class*="sticky"]').filter({ hasText: 'Statistics' }).first()
-        await captureWithPadding(sidebar, '../docs/screenshots/statistics-sidebar.png')
+        await captureWithPadding(sidebar, '../docs/screenshots/statistics-sidebar.png', 0)
     })
 
     test('capture assignee filter screenshot', async ({ page }) => {
@@ -857,12 +1459,33 @@ test.describe('Capture README screenshots', () => {
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/assignee-filter.png')
     })
 
+    test('capture automatic assessment filter screenshot', async ({ page }) => {
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+
+        const autoCard = page.locator('.vuln-card').filter({ hasText: /CVE-2024-4002/ }).first()
+        await expect(autoCard).toBeVisible({ timeout: 20000 })
+        await expect(autoCard.locator('[data-testid="automatic-assessment-badge"]')).toBeVisible({ timeout: 10000 })
+
+        const sidebar = page.getByTestId('stats-sidebar')
+        await expect(sidebar.getByText('Automatic Assessment')).toBeVisible({ timeout: 10000 })
+
+        const missingButton = sidebar.getByRole('button', { name: /missing/i }).first()
+        await missingButton.click()
+        await expect(page.locator('span.truncate').filter({ hasText: /^Auto: available$/ }).first()).toBeVisible({ timeout: 10000 })
+        await expect(autoCard).toBeVisible({ timeout: 10000 })
+        await page.waitForTimeout(500)
+
+        await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/automatic-assessment-filter.png')
+    })
+
     test('capture expanded card with assessment details screenshot', async ({ page }) => {
         await page.goto('/project/TestProject')
         await page.waitForLoadState('networkidle')
 
         // Expand the inconsistent card to show conflicting team assessments
         const card = await openProjectCard(page, 'CVE-2024-5003')
+        await selectDetailTab(card, 'Assessments')
 
         // Wait for assessment details to load
         await page.waitForTimeout(2000)
@@ -879,11 +1502,12 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         // Expand the rescored card to access the calculator
-        await openProjectCard(page, 'CVE-2024-6004')
+        const card = await openProjectCard(page, 'CVE-2024-6004')
+        await selectDetailTab(card, 'CVSS & Rescoring')
 
         // Wait for expanded state and find the calculator button
         await page.waitForTimeout(1500)
-        const calcButton = page.locator('button').filter({ hasText: /calculator/i }).first()
+        const calcButton = card.getByRole('button', { name: /Visual Calculator/i }).first()
         if (await calcButton.isVisible({ timeout: 5000 })) {
             await calcButton.click()
             await page.waitForTimeout(500)
@@ -897,47 +1521,16 @@ test.describe('Capture README screenshots', () => {
         }
     })
 
-    test('capture bulk approve modal screenshot', async ({ page }) => {
-        // We need to trigger the bulk approve modal programmatically since
-        // there's no direct button in the header for it
+    test('capture bulk sync modal screenshot', async ({ page }) => {
         await page.goto('/project/TestProject')
         await page.waitForLoadState('networkidle')
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
-        await page.waitForTimeout(1000)
 
-        // Trigger the bulk approve modal via evaluate
-        await page.evaluate(() => {
-            // Find the Vue app instance and trigger the modal
-            const el = document.querySelector('[data-v-app]') || document.getElementById('app')
-            if (el && (el as any).__vue_app__) {
-                // Walk through to find the ProjectView component
-                const walkComponents = (instance: any): any => {
-                    if (instance?.proxy?.showBulkApproveModal !== undefined) return instance.proxy
-                    if (instance.subTree?.component) {
-                        const found = walkComponents(instance.subTree.component)
-                        if (found) return found
-                    }
-                    if (instance.subTree?.children) {
-                        for (const child of instance.subTree.children) {
-                            if (child?.component) {
-                                const found = walkComponents(child.component)
-                                if (found) return found
-                            }
-                        }
-                    }
-                    return null
-                }
-                const root = (el as any).__vue_app__._instance
-                const proxy = walkComponents(root)
-                if (proxy) proxy.showBulkApproveModal = true
-            }
-        })
-        await page.waitForTimeout(500)
+        await page.getByRole('button', { name: /Bulk Sync/ }).click()
 
-        const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Bulk Approve' }).first()
-        if (await modal.isVisible({ timeout: 3000 })) {
-            await captureWithPadding(modal, '../docs/screenshots/bulk-approve-modal.png')
-        }
+        const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Confirm Bulk Sync' }).first()
+        await expect(modal).toBeVisible({ timeout: 10000 })
+        await captureWithPadding(modal, '../docs/screenshots/bulk-sync-modal.png')
     })
 
     test('capture conflict resolution modal screenshot', async ({ page }) => {
@@ -948,6 +1541,7 @@ test.describe('Capture README screenshots', () => {
 
         // Expand the inconsistent card and force a conflict via the API response.
         const card = await openProjectCard(page, 'CVE-2024-5003')
+        await selectDetailTab(card, 'Review')
         await page.waitForTimeout(1000)
 
         await page.route('**/api/assessment', async (route) => {
@@ -994,6 +1588,49 @@ test.describe('Capture README screenshots', () => {
         await captureWithPadding(dialog, '../docs/screenshots/conflict-resolution.png')
     })
 
+    test('capture review context screenshot', async ({ page }) => {
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await selectDetailTab(card, 'Review')
+        await expect(card.getByText('Review Context')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('ticket-requirement-badge')).toHaveText('Required', { timeout: 10000 })
+
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await captureWithPadding(card, '../docs/screenshots/vuln-card-review-context.png')
+    })
+
+    test('capture team mapping screenshot', async ({ page }) => {
+        await page.goto('/project/TestProject')
+        await page.waitForLoadState('networkidle')
+
+        const card = await openProjectCard(page, 'CVE-2024-9999')
+        await selectDetailTab(card, 'Team Mapping')
+        await expect(card.getByText('Component Team Mapping')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('component-team-mapping-row').first()).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('platform-gateway').first()).toBeVisible({ timeout: 10000 })
+
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await captureWithPadding(card, '../docs/screenshots/vuln-card-team-mapping.png')
+    })
+
+    test('capture code analysis dashboard screenshot', async ({ page }) => {
+        await page.goto('/code-analysis')
+        await page.waitForLoadState('networkidle')
+
+        await expect(page.getByRole('heading', { name: 'Code Analysis' })).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('DTVP Queue')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('Analyzer Configuration')).toBeVisible({ timeout: 10000 })
+
+        await page.getByTestId('queue-log-toggle-docs-dashboard-running').click()
+        await expect(page.getByTestId('queue-log-panel-docs-dashboard-running')).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('ReachabilityAgent', { exact: true }).first()).toBeVisible({ timeout: 10000 })
+
+        await page.setViewportSize({ width: 2200, height: 1900 })
+        await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/code-analysis-dashboard.png')
+    })
+
     test('capture code analysis running screenshot', async ({ page }) => {
         await mockAnalysisQueue(page, {
             items: [
@@ -1034,9 +1671,9 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
-        await expect(card.getByText('Code Analysis')).toBeVisible({ timeout: 10000 })
+        await selectDetailTab(card, 'Code Analysis')
         await expect(card.getByText('Analyzing…')).toBeVisible({ timeout: 10000 })
-        await expect(card.getByRole('button', { name: 'Running…' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('running', { exact: true })).toBeVisible({ timeout: 10000 })
 
         await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/code-analysis-running.png')
@@ -1099,14 +1736,14 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
-        await expect(card.getByText('Code Analysis')).toBeVisible({ timeout: 10000 })
+        await selectDetailTab(card, 'Code Analysis')
         await expect(card.getByText('platform-gateway exposes a reachable parser initialization path used by external requests.')).toBeVisible({ timeout: 10000 })
-        await expect(card.getByText('Apply to Assessment (code_analysis)')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('Use as Assessment Draft')).toBeVisible({ timeout: 10000 })
 
-        await card.getByRole('button', { name: /Pipeline Steps \(2\)/ }).click()
+        await card.getByRole('button', { name: /Pipeline Evidence/ }).click()
         await expect(card.getByText('Reachability scan')).toBeVisible({ timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
+        await page.setViewportSize({ width: 2200, height: 3400 })
         await captureWithPadding(card, '../docs/screenshots/code-analysis-result.png')
     })
 
@@ -1180,13 +1817,13 @@ test.describe('Capture README screenshots', () => {
         await page.goto('/project/TestProject')
         await page.waitForLoadState('networkidle')
 
-        const queueButton = page.getByTitle('Analysis Queue')
+        const queueButton = page.getByTestId('analysis-queue-trigger')
         await expect(queueButton).toBeVisible({ timeout: 10000 })
         await queueButton.click()
 
-        const dropdown = page.locator('.absolute.right-0.top-full.mt-2.w-96').first()
+        const dropdown = page.getByTestId('analysis-queue-panel')
         await expect(dropdown).toBeVisible({ timeout: 10000 })
-        const queueRows = dropdown.locator('.max-h-96 > div')
+        const queueRows = dropdown.locator('.min-h-0 > div')
         await expect(queueRows.first()).toContainText('CVE-2024-9999')
         await expect(queueRows.nth(1)).toContainText('CVE-2023-1111')
 

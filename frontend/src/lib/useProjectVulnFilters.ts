@@ -7,6 +7,7 @@ import {
     parseVulnSearchQuery,
 } from './vulnListIndex'
 import type { DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
+import type { AutomaticAssessmentFilter } from './vulnListIndex'
 import { useDebouncedValue } from './useDebouncedValue'
 
 export const DEFAULT_REVIEWER_LIFECYCLE_FILTERS = [
@@ -70,6 +71,8 @@ const FILTER_QUERY_KEYS = new Set([
     'sort',
     'order',
     'tmrescore',
+    'automatic_assessment',
+    'auto_assessment',
     'cvss_mismatch',
     'attributed_before_days',
     'attribution_mode',
@@ -98,6 +101,7 @@ export function useProjectVulnFilters({
     const assigneeFilter = ref('')
     const dependencyFilter = ref<DependencyRelationship[]>(['DIRECT', 'TRANSITIVE', 'UNKNOWN'])
     const tmrescoreProposalFilter = ref<TMRescoreProposalFilter[]>(['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'])
+    const automaticAssessmentFilter = ref<AutomaticAssessmentFilter[]>(['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'])
     const cvssVersionMismatchOnly = ref(false)
     const attributionAgeDays = ref<number | null>(null)
     const attributionAgeMode = ref<'older' | 'younger'>('older')
@@ -127,6 +131,7 @@ export function useProjectVulnFilters({
 
     const selectedDependencyFilters = computed(() => normalizeFilterSelection(dependencyFilter.value))
     const selectedTMRescoreProposalFilters = computed(() => normalizeFilterSelection(tmrescoreProposalFilter.value))
+    const selectedAutomaticAssessmentFilters = computed(() => normalizeFilterSelection(automaticAssessmentFilter.value))
 
     const resetFilters = () => {
         analysisFilters.value = [...DEFAULT_ANALYSIS_FILTERS]
@@ -140,6 +145,7 @@ export function useProjectVulnFilters({
         assigneeFilter.value = ''
         dependencyFilter.value = ['DIRECT', 'TRANSITIVE', 'UNKNOWN']
         tmrescoreProposalFilter.value = ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL']
+        automaticAssessmentFilter.value = ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT']
         versionFilterInput.value = ''
         cvssVersionMismatchOnly.value = false
         attributionAgeDays.value = null
@@ -195,6 +201,11 @@ export function useProjectVulnFilters({
             tmrescoreProposalFilter.value = queryStringList(q.tmrescore)
                 .map(v => v.toUpperCase() as TMRescoreProposalFilter)
         }
+        const automaticAssessmentQuery = q.automatic_assessment ?? q.auto_assessment
+        if (automaticAssessmentQuery) {
+            automaticAssessmentFilter.value = queryStringList(automaticAssessmentQuery)
+                .map(v => v.toUpperCase() as AutomaticAssessmentFilter)
+        }
         if (q.cvss_mismatch === 'true') cvssVersionMismatchOnly.value = true
         const legacyDays = normalizeAttributionAgeDays(
             firstQueryValue(q.attributed_before_days ?? q.attribution_age_days ?? q.age_days),
@@ -223,6 +234,10 @@ export function useProjectVulnFilters({
 
         if (selectedTMRescoreProposalFilters.value.length > 0) query.tmrescore = selectedTMRescoreProposalFilters.value
         else delete query.tmrescore
+
+        if (selectedAutomaticAssessmentFilters.value.length > 0) query.automatic_assessment = selectedAutomaticAssessmentFilters.value
+        else delete query.automatic_assessment
+        delete query.auto_assessment
 
         if (attributionAgeDays.value == null) {
             delete query.attributed_before_days
@@ -306,6 +321,10 @@ export function useProjectVulnFilters({
         if (selectedTMRescoreProposalFilters.value.length > 0) query.tmrescore = selectedTMRescoreProposalFilters.value
         else delete query.tmrescore
 
+        if (selectedAutomaticAssessmentFilters.value.length > 0) query.automatic_assessment = selectedAutomaticAssessmentFilters.value
+        else delete query.automatic_assessment
+        delete query.auto_assessment
+
         if (cvssVersionMismatchOnly.value) query.cvss_mismatch = 'true'
         else delete query.cvss_mismatch
 
@@ -333,6 +352,7 @@ export function useProjectVulnFilters({
         sortOrder: sortOrder.value,
         dependencyFilter: selectedDependencyFilters.value,
         tmrescoreFilter: selectedTMRescoreProposalFilters.value,
+        automaticAssessmentFilter: selectedAutomaticAssessmentFilters.value,
         idFilter: idFilter.value,
         tagFilter: tagFilter.value,
         componentFilter: componentFilter.value,
@@ -350,6 +370,7 @@ export function useProjectVulnFilters({
         sortOrder.value = newFilters.sortOrder
         dependencyFilter.value = newFilters.dependencyFilter
         tmrescoreProposalFilter.value = newFilters.tmrescoreFilter
+        automaticAssessmentFilter.value = newFilters.automaticAssessmentFilter
         idFilter.value = newFilters.idFilter
         tagFilter.value = newFilters.tagFilter
         componentFilter.value = newFilters.componentFilter
@@ -381,6 +402,7 @@ export function useProjectVulnFilters({
         assigneeFilter,
         dependencyFilter,
         tmrescoreProposalFilter,
+        automaticAssessmentFilter,
         versionFilterInput,
         cvssVersionMismatchOnly,
         attributionAgeDays,
@@ -416,6 +438,7 @@ export function useProjectVulnFilters({
         assigneeFilter,
         dependencyFilter,
         tmrescoreProposalFilter,
+        automaticAssessmentFilter,
         cvssVersionMismatchOnly,
         attributionAgeDays,
         attributionAgeMode,
@@ -428,6 +451,7 @@ export function useProjectVulnFilters({
         versionFilterList,
         selectedDependencyFilters,
         selectedTMRescoreProposalFilters,
+        selectedAutomaticAssessmentFilters,
         copiedUrl,
         filterUrl,
         copyFilterUrl,

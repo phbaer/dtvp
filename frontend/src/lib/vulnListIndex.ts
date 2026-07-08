@@ -11,7 +11,12 @@ import type { FilterCounts, TeamCounts } from './group-classifier'
 
 export type DependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
 export type TMRescoreProposalFilter = 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'
+export type AutomaticAssessmentFilter = 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'
 export const DEFAULT_ATTRIBUTION_AGE_DAYS = 28
+const DEFAULT_AUTOMATIC_ASSESSMENT_FILTER: AutomaticAssessmentFilter[] = [
+    'WITH_AUTOMATIC_ASSESSMENT',
+    'WITHOUT_AUTOMATIC_ASSESSMENT',
+]
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface VulnListItem {
@@ -35,6 +40,7 @@ export interface VulnListItem {
     searchableTextLower: string
     dependencyRelationship: DependencyRelationship
     hasTmrescoreProposal: boolean
+    hasAutomaticAssessment: boolean
     cvssVersionMismatch: boolean
     lifecycle: string
     isPending: boolean
@@ -64,6 +70,7 @@ export interface VulnListFilterInput {
     assigneeFilter?: string
     dependencyFilter?: FilterSelection<DependencyRelationship>
     tmrescoreProposalFilter?: FilterSelection<TMRescoreProposalFilter>
+    automaticAssessmentFilter?: FilterSelection<AutomaticAssessmentFilter>
     versionFilterList?: readonly string[]
     cvssVersionMismatchOnly?: boolean
     attributionAgeDays?: number | string | null
@@ -78,6 +85,10 @@ export interface CompiledVulnListFilters {
     tmrescoreProposalFilterSet: Set<TMRescoreProposalFilter>
     includesTmrescoreProposal: boolean
     includesNoTmrescoreProposal: boolean
+    automaticAssessmentFilter: AutomaticAssessmentFilter[]
+    automaticAssessmentFilterSet: Set<AutomaticAssessmentFilter>
+    includesAutomaticAssessment: boolean
+    includesNoAutomaticAssessment: boolean
     tagFilterLower: string
     idFilterLower: string
     componentFilterLower: string
@@ -516,10 +527,27 @@ export function hasTMRescoreProposalForGroup(
     })
 }
 
+export function normalizeVulnIdentifier(value: unknown): string {
+    return lower(value)
+}
+
+export function hasAutomaticAssessmentForGroup(
+    group: GroupedVuln,
+    automaticAssessmentIds: ReadonlySet<string> = new Set(),
+): boolean {
+    if (automaticAssessmentIds.size === 0) return false
+    const candidateIds = [group.id, ...(group.aliases || [])]
+    return candidateIds.some(candidateId => {
+        const normalized = normalizeVulnIdentifier(candidateId)
+        return normalized.length > 0 && automaticAssessmentIds.has(normalized)
+    })
+}
+
 export function buildVulnListItem(
     group: GroupedVuln,
     teamMapping: Record<string, any>,
     proposals: Record<string, TMRescoreProposal> = {},
+    automaticAssessmentIds: ReadonlySet<string> = new Set(),
 ): VulnListItem {
     const metadata = group.list_metadata
     const rawTags = (group.tags || []).map(tagToString).filter(Boolean)
@@ -620,6 +648,7 @@ export function buildVulnListItem(
         dependencyRelationship: metadataDependencyRelationship(metadata?.dependency_relationship)
             ?? getGroupDependencyRelationship(group),
         hasTmrescoreProposal: hasTMRescoreProposalForGroup(group, proposals),
+        hasAutomaticAssessment: hasAutomaticAssessmentForGroup(group, automaticAssessmentIds),
         cvssVersionMismatch: typeof metadata?.cvss_version_mismatch === 'boolean'
             ? metadata.cvss_version_mismatch
             : hasCvssVersionMismatch(group),
@@ -654,8 +683,9 @@ export function buildVulnListItems(
     groups: GroupedVuln[],
     teamMapping: Record<string, any>,
     proposals: Record<string, TMRescoreProposal> = {},
+    automaticAssessmentIds: ReadonlySet<string> = new Set(),
 ): VulnListItem[] {
-    return groups.map(group => buildVulnListItem(group, teamMapping, proposals))
+    return groups.map(group => buildVulnListItem(group, teamMapping, proposals, automaticAssessmentIds))
 }
 
 const everyTermMatches = (terms: readonly string[], values: readonly string[]) => {
@@ -696,6 +726,10 @@ export function compileVulnListFilters(
     const dependencyFilter = normalizeFilterSelection(filters.dependencyFilter)
     const tmrescoreProposalFilter = normalizeFilterSelection(filters.tmrescoreProposalFilter)
     const tmrescoreProposalFilterSet = new Set(tmrescoreProposalFilter)
+    const automaticAssessmentFilter = filters.automaticAssessmentFilter == null
+        ? [...DEFAULT_AUTOMATIC_ASSESSMENT_FILTER]
+        : normalizeFilterSelection(filters.automaticAssessmentFilter)
+    const automaticAssessmentFilterSet = new Set(automaticAssessmentFilter)
 
     return {
         smartSearch: filters.smartSearch,
@@ -705,6 +739,10 @@ export function compileVulnListFilters(
         tmrescoreProposalFilterSet,
         includesTmrescoreProposal: tmrescoreProposalFilterSet.has('WITH_PROPOSAL'),
         includesNoTmrescoreProposal: tmrescoreProposalFilterSet.has('WITHOUT_PROPOSAL'),
+        automaticAssessmentFilter,
+        automaticAssessmentFilterSet,
+        includesAutomaticAssessment: automaticAssessmentFilterSet.has('WITH_AUTOMATIC_ASSESSMENT'),
+        includesNoAutomaticAssessment: automaticAssessmentFilterSet.has('WITHOUT_AUTOMATIC_ASSESSMENT'),
         tagFilterLower: lower(filters.tagFilter),
         idFilterLower: lower(filters.idFilter),
         componentFilterLower: lower(filters.componentFilter),
@@ -746,6 +784,16 @@ export function matchesCompiledTMRescoreSelection(
     if (filters.tmrescoreProposalFilterSet.size === 0) return emptyMatches
     return (filters.includesTmrescoreProposal && item.hasTmrescoreProposal) ||
         (filters.includesNoTmrescoreProposal && !item.hasTmrescoreProposal)
+}
+
+export function matchesCompiledAutomaticAssessmentSelection(
+    item: VulnListItem,
+    filters: CompiledVulnListFilters,
+    emptyMatches = false,
+): boolean {
+    if (filters.automaticAssessmentFilterSet.size === 0) return emptyMatches
+    return (filters.includesAutomaticAssessment && item.hasAutomaticAssessment) ||
+        (filters.includesNoAutomaticAssessment && !item.hasAutomaticAssessment)
 }
 
 export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQuery | string | undefined): boolean {
@@ -807,6 +855,10 @@ export function matchesCompiledListFilters(
     }
 
     if (!matchesCompiledTMRescoreSelection(item, filters)) {
+        return false
+    }
+
+    if (!matchesCompiledAutomaticAssessmentSelection(item, filters)) {
         return false
     }
 

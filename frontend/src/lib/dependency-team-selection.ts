@@ -1,7 +1,11 @@
 import type { Instance, TagValue, Tags } from '../types'
 import { tagToString } from './assessment-helpers'
+import {
+    findTeamMappingMatch,
+    getPrimaryTeamForComponent as getPrimaryTeamForComponentFromMapping,
+    type TeamMapping,
+} from './team-mapping'
 
-export type TeamMapping = Record<string, string | string[]>
 export const DEFAULT_REPRESENTATIVE_PATH_LIMIT = 10
 
 const normalizeName = (name: string): string => name.trim().toLowerCase()
@@ -9,18 +13,17 @@ const normalizeName = (name: string): string => name.trim().toLowerCase()
 export const getPrimaryTeamForComponent = (
     componentName: string | undefined,
     teamMapping: TeamMapping | undefined,
+    componentGroup?: string | null,
+    groupKnown = false,
+    componentPurl?: string | null,
 ): string => {
-    if (!componentName || !teamMapping) return ''
-
-    const targetName = normalizeName(componentName)
-    for (const [key, value] of Object.entries(teamMapping)) {
-        if (key === '*') continue
-        if (normalizeName(key) !== targetName) continue
-        if (Array.isArray(value)) return value[0] || ''
-        return typeof value === 'string' ? value : ''
-    }
-
-    return ''
+    return getPrimaryTeamForComponentFromMapping(
+        componentName,
+        teamMapping,
+        componentGroup,
+        groupKnown,
+        componentPurl,
+    )
 }
 
 export const getPathParts = (path: string): string[] => {
@@ -171,17 +174,23 @@ export const getAffectedTeamsFromPaths = (
 }
 
 export const getClosestAffectedTeamsForInstance = (
-    inst: Pick<Instance, 'component_name' | 'dependency_chains'>,
+    inst: Pick<Instance, 'component_name' | 'component_group' | 'component_purl' | 'dependency_chains'>,
     teamMapping: TeamMapping | undefined,
 ): string[] => {
-    const directTeam = getPrimaryTeamForComponent(inst.component_name, teamMapping)
+    const directTeam = getPrimaryTeamForComponent(
+        inst.component_name,
+        teamMapping,
+        inst.component_group,
+        'component_group' in inst,
+        inst.component_purl,
+    )
     if (directTeam) return [directTeam]
 
     return getAffectedTeamsFromPaths(inst.dependency_chains, teamMapping)
 }
 
 export const getClosestAffectedTeamsForInstances = (
-    instances: Array<Pick<Instance, 'component_name' | 'dependency_chains'>>,
+    instances: Array<Pick<Instance, 'component_name' | 'component_group' | 'component_purl' | 'dependency_chains'>>,
     teamMapping: TeamMapping | undefined,
 ): string[] => {
     const teams = new Set<string>()
@@ -192,7 +201,7 @@ export const getClosestAffectedTeamsForInstances = (
 }
 
 export const getDerivedGroupTags = (
-    group: Pick<Instance, 'component_name' | 'dependency_chains'>[] | undefined,
+    group: Pick<Instance, 'component_name' | 'component_group' | 'component_purl' | 'dependency_chains'>[] | undefined,
     teamMapping: TeamMapping | undefined,
 ): string[] => {
     return getClosestAffectedTeamsForInstances(group || [], teamMapping)
@@ -211,17 +220,34 @@ export const normalizeLegacyTags = (
         if (!strTag) return
 
         let foundPrimary = strTag
-        for (const [, mappingVal] of Object.entries(teamMapping)) {
-            if (Array.isArray(mappingVal) && mappingVal.length > 1) {
-                const primary = mappingVal[0]
-                const aliases = mappingVal.slice(1)
-                if (aliases.includes(strTag)) {
-                    foundPrimary = primary
-                    break
-                }
+        for (const mappingVal of Object.values(teamMapping)) {
+            if (!Array.isArray(mappingVal) || mappingVal.length <= 1) {
+                continue
+            }
+            const primary = mappingVal[0]
+            const aliases = mappingVal.slice(1)
+            if (aliases.includes(strTag)) {
+                foundPrimary = primary
+                break
             }
         }
         result.add(foundPrimary)
     })
     return Array.from(result)
 }
+
+export const findTeamMappingEntryForComponent = (
+    componentName: string | undefined,
+    teamMapping: TeamMapping | undefined,
+    componentGroup?: string | null,
+    groupKnown = false,
+    componentPurl?: string | null,
+) => findTeamMappingMatch(
+    teamMapping,
+    {
+        name: componentName,
+        group: componentGroup,
+        purl: componentPurl,
+        groupKnown,
+    },
+)
