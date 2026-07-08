@@ -2,9 +2,11 @@ services:
   nginx:
     image: nginx:alpine
     ports:
-      - "80:80"
+      - "${DTVP_HTTP_PORT:-80}:80"
+    environment:
+      DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
     depends_on:
       - dtvp
       - dtrack-frontend
@@ -47,7 +49,7 @@ services:
       - path: .env
         required: false
     environment:
-      DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8081}
+      DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}
       DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-change_me} # Generate this in Dependency-Track and update it.
       DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
@@ -63,10 +65,42 @@ services:
       DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS: ${DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS:-86400}
       DTVP_PROJECT_ARCHIVE_RETENTION_COUNT: ${DTVP_PROJECT_ARCHIVE_RETENTION_COUNT:-30}
       DTVP_PROJECT_ARCHIVE_INCLUDE: ${DTVP_PROJECT_ARCHIVE_INCLUDE:-}
+      DTVP_CODE_ANALYSIS_URL: ${DTVP_CODE_ANALYSIS_URL:-http://agentyzer:8000}
+      DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS: ${DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS:-300}
+      DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS: ${DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS:-5}
+      DTVP_ANALYSIS_QUEUE_CAPACITY: ${DTVP_ANALYSIS_QUEUE_CAPACITY:-1}
     volumes:
       - ./data:/app/data
     depends_on:
       - dtrack-apiserver
+      - agentyzer
+    restart: unless-stopped
+
+  agentyzer:
+    build:
+      context: ./agentyzer
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AGENTYZER_CONFIG_DIR: /app/config
+      AGENTYZER_REPOS_DIR: /app/repos
+      LLM_BACKEND: ${AGENTYZER_LLM_BACKEND:-ollama}
+      OLLAMA_HOST: ${AGENTYZER_OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${AGENTYZER_OLLAMA_MODEL:-mistral}
+      OPENWEBUI_HOST: ${AGENTYZER_OPENWEBUI_HOST:-http://host.docker.internal:3000}
+      OPENWEBUI_MODEL: ${AGENTYZER_OPENWEBUI_MODEL:-mistral}
+      OPENWEBUI_API_KEY: ${AGENTYZER_OPENWEBUI_API_KEY:-}
+      OPENWEBUI_TOOL_CALLS: ${AGENTYZER_OPENWEBUI_TOOL_CALLS:-auto}
+      AGENTYZER_MAX_CONCURRENT_JOBS: ${AGENTYZER_MAX_CONCURRENT_JOBS:-1}
+      LOG_LEVEL: ${AGENTYZER_LOG_LEVEL:-INFO}
+    ports:
+      - "${AGENTYZER_PORT:-8095}:8000"
+    volumes:
+      - agentyzer-repos:/app/repos
+      - ./agentyzer/config/repos.yaml:/app/config/repos.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   dtvp-archive-git-push:
@@ -136,3 +170,4 @@ services:
 volumes:
   postgres-data:
   archive-git-repo:
+  agentyzer-repos:

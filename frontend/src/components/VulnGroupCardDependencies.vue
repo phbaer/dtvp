@@ -3,10 +3,17 @@ import { computed, ref, toRefs, inject, type Ref } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import DependencyChainViewer from './DependencyChainViewer.vue'
 import { updateTeamMapping } from '../lib/api'
-import { getClosestAffectedTeamsForInstance, getPathParts } from '../lib/dependency-team-selection'
+import {
+  findTeamMappingEntryForComponent,
+  getClosestAffectedTeamsForInstance,
+  getPathParts,
+} from '../lib/dependency-team-selection'
 
 const props = defineProps<{
   instances: any[]
+  mode?: 'dependencies' | 'mapping'
+  embedded?: boolean
+  showTitle?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -19,6 +26,8 @@ const canEditMapping = computed(() => {
   const currentUser = user?.value ?? user
   return currentUser?.role === 'REVIEWER'
 })
+const isMappingMode = computed(() => props.mode === 'mapping')
+const showMappingControls = computed(() => canEditMapping.value && isMappingMode.value)
 
 const getAssignedTeams = (inst: any) => {
   return getClosestAffectedTeamsForInstance(inst, teamMapping.value || {}).join(', ')
@@ -29,81 +38,133 @@ const tagInput = ref('')
 const savingTag = ref(false)
 const tagMessage = ref('')
 const tagError = ref('')
-const newMappingComponent = ref('')
-const newMappingTag = ref('')
-const savingNewMapping = ref(false)
-const newMappingMessage = ref('')
-const newMappingError = ref('')
 
 const { instances } = toRefs(props)
 const expandedChains = ref(new Set<string>())
 
-const normalizeName = (value: string) => value.trim().toLowerCase()
+const hasOwn = (value: any, key: string) => Object.prototype.hasOwnProperty.call(value || {}, key)
 
 const getComponentKey = (prefix: string, inst: any) => {
   const uuidPart = inst.component_uuid || inst.project_uuid || ''
   return `${prefix}-${uuidPart}-${inst.component_name}-${inst.component_version}`
 }
 
-const findMappingEntry = (componentName: string) => {
-  const targetName = normalizeName(componentName)
-  for (const [key, value] of Object.entries(teamMapping.value || {})) {
-    if (normalizeName(key) === targetName) {
-      return { key, value }
-    }
-  }
-  return null
+const buildMappingKey = (
+  componentName: string,
+  componentGroup?: string | null,
+  groupKnown = false,
+) => {
+  const name = componentName.trim()
+  const group = String(componentGroup || '').trim()
+  if (groupKnown && group) return `${group}:${name}`
+  return name
 }
 
-const getCurrentMainTag = (componentName: string) => {
-  const existing = findMappingEntry(componentName)?.value
+const findMappingEntry = (
+  componentName: string,
+  componentGroup?: string | null,
+  groupKnown = false,
+  componentPurl?: string | null,
+) => findTeamMappingEntryForComponent(
+  componentName,
+  teamMapping.value || {},
+  componentGroup,
+  groupKnown,
+  componentPurl,
+)
+
+const getCurrentMainTag = (
+  componentName: string,
+  componentGroup?: string | null,
+  groupKnown = false,
+  componentPurl?: string | null,
+) => {
+  const existing = findMappingEntry(componentName, componentGroup, groupKnown, componentPurl)?.value
   if (Array.isArray(existing)) {
     return existing[0] || ''
   }
   return typeof existing === 'string' ? existing : ''
 }
 
-const getCurrentAliases = (componentName: string) => {
-  const existing = findMappingEntry(componentName)?.value
+const getCurrentAliases = (
+  componentName: string,
+  componentGroup?: string | null,
+  groupKnown = false,
+  componentPurl?: string | null,
+) => {
+  const existing = findMappingEntry(componentName, componentGroup, groupKnown, componentPurl)?.value
   return Array.isArray(existing) ? existing.slice(1) : []
 }
 
 const vulnScopedComponents = computed(() => {
   const seen = new Set<string>()
-  const collected: string[] = []
+  const collected: Array<{
+    key: string
+    label: string
+    mappingKey: string
+    name: string
+    group?: string | null
+    purl?: string | null
+    groupKnown: boolean
+  }> = []
+
+  const addComponent = (
+    componentName: any,
+    componentGroup?: any,
+    groupKnown = false,
+    componentPurl?: any,
+  ) => {
+    const name = String(componentName || '').trim()
+    if (!name) return
+    const group = String(componentGroup || '').trim()
+    const mappingKey = buildMappingKey(name, group || null, groupKnown)
+    const key = `${groupKnown ? group || '<nogroup>' : '<unknown>'}:${name}`.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    collected.push({
+      key,
+      label: mappingKey,
+      mappingKey,
+      name,
+      group: group || null,
+      purl: String(componentPurl || '').trim() || null,
+      groupKnown,
+    })
+  }
 
   instances.value.forEach((inst) => {
     if (inst.component_name) {
-      collected.push(inst.component_name)
+      addComponent(
+        inst.component_name,
+        inst.component_group,
+        hasOwn(inst, 'component_group'),
+        inst.component_purl,
+      )
     }
 
     ;(inst.dependency_chains || []).forEach((path: string) => {
       const parts = getPathParts(path)
       parts.forEach((part, index) => {
+        if (index === 0) return
         if (index === parts.length - 1) return
-        collected.push(part)
+        addComponent(part)
       })
     })
   })
 
   return collected
-    .filter((componentName): componentName is string => !!componentName)
-    .filter((componentName) => {
-      const key = normalizeName(componentName)
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    .sort((left, right) => left.localeCompare(right))
+    .sort((left, right) => left.label.localeCompare(right.label))
 })
 
-const availableUnmappedComponents = computed(() => {
-  return vulnScopedComponents.value.filter(componentName => !getCurrentMainTag(componentName))
-})
-
-const beginTagEdit = (componentKey: string, componentName: string) => {
+const beginTagEdit = (
+  componentKey: string,
+  componentName: string,
+  componentGroup?: string | null,
+  groupKnown = false,
+  componentPurl?: string | null,
+) => {
   editingComponentKey.value = componentKey
-  tagInput.value = getCurrentMainTag(componentName)
+  tagInput.value = getCurrentMainTag(componentName, componentGroup, groupKnown, componentPurl)
   tagMessage.value = ''
   tagError.value = ''
 }
@@ -115,22 +176,30 @@ const cancelTagEdit = () => {
   tagError.value = ''
 }
 
-const saveComponentTeamTag = async (_componentKey: string, componentName: string) => {
-  if (!canEditMapping) return
+const saveComponentTeamTag = async (
+  _componentKey: string,
+  componentName: string,
+  componentGroup?: string | null,
+  groupKnown = false,
+  componentPurl?: string | null,
+) => {
+  if (!canEditMapping.value) return
 
   savingTag.value = true
   tagMessage.value = ''
   tagError.value = ''
 
   try {
-    const aliases = getCurrentAliases(componentName)
+    const existingEntry = findMappingEntry(componentName, componentGroup, groupKnown, componentPurl)
+    const mappingKey = existingEntry?.key || buildMappingKey(componentName, componentGroup, groupKnown)
+    const aliases = getCurrentAliases(componentName, componentGroup, groupKnown, componentPurl)
     const mainTag = tagInput.value.trim()
     const updatedMapping = { ...teamMapping.value }
 
     if (mainTag) {
-      updatedMapping[componentName] = aliases.length > 0 ? [mainTag, ...aliases] : mainTag
+      updatedMapping[mappingKey] = aliases.length > 0 ? [mainTag, ...aliases] : mainTag
     } else {
-      delete updatedMapping[componentName]
+      delete updatedMapping[mappingKey]
     }
 
     const res = await updateTeamMapping(updatedMapping)
@@ -149,48 +218,10 @@ const saveComponentTeamTag = async (_componentKey: string, componentName: string
   }
 }
 
-const saveNewComponentTeamTag = async () => {
-  if (!canEditMapping) return
-
-  const componentName = newMappingComponent.value.trim()
-  const teamTag = newMappingTag.value.trim()
-
-  newMappingMessage.value = ''
-  newMappingError.value = ''
-
-  if (!componentName) {
-    newMappingError.value = 'Select a component first.'
-    return
-  }
-
-  if (!teamTag) {
-    newMappingError.value = 'Enter a team tag first.'
-    return
-  }
-
-  savingNewMapping.value = true
-
-  try {
-    const updatedMapping = { ...teamMapping.value, [componentName]: teamTag }
-    const res = await updateTeamMapping(updatedMapping)
-    if (res.status === 'success') {
-      teamMapping.value = updatedMapping
-      newMappingMessage.value = 'Component team tag saved.'
-      newMappingComponent.value = ''
-      newMappingTag.value = ''
-      emit('mapping-updated')
-    } else {
-      throw new Error(res.message)
-    }
-  } catch (err: any) {
-    newMappingError.value = err.message || 'Failed to save component team tag.'
-  } finally {
-    savingNewMapping.value = false
-  }
-}
-
 const partitionByRelationship = (instances: Array<{
   component_name: string
+  component_group?: string | null
+  component_purl?: string | null
   component_version: string
   component_uuid?: string
   project_uuid?: string
@@ -219,7 +250,7 @@ const partitionByRelationship = (instances: Array<{
   return { direct, transitive, unknown }
 }
 
-const getUniqueComponentInstances = (instances: { component_name: string; component_version: string; component_uuid: string; project_uuid: string; project_name: string; dependency_chains?: string[] }[]) => {
+const getUniqueComponentInstances = (instances: { component_name: string; component_purl?: string | null; component_version: string; component_uuid: string; project_uuid: string; project_name: string; dependency_chains?: string[] }[]) => {
   const seen = new Set<string>()
   return instances.filter(i => {
     const key = i.component_uuid
@@ -256,53 +287,81 @@ const isChainExpanded = (id: string) => {
 </script>
 
 <template>
-  <div class="mt-4 pt-2 border-t border-gray-800/50">
-    <div class="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2">
-      Dependencies
+  <div v-if="isMappingMode" class="rounded border border-gray-700 bg-gray-900/45 p-3">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h5 class="text-xs font-bold uppercase tracking-wider text-gray-400">Component Team Mapping</h5>
+        <p class="mt-1 text-[10px] text-gray-500">Reviewer-only ownership tags for components seen in this vulnerability.</p>
+      </div>
+      <span class="text-[10px] font-semibold text-gray-500">{{ vulnScopedComponents.length }} component{{ vulnScopedComponents.length === 1 ? '' : 's' }}</span>
     </div>
-    <div v-if="canEditMapping" class="mb-3 rounded-md border border-gray-800/70 bg-gray-900/40 p-3">
-      <div class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">
-        Add Component Team Tag
-      </div>
-      <div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
-        <div>
-          <label class="text-[9px] text-gray-400">Component</label>
-          <select
-            v-model="newMappingComponent"
-            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-          >
-            <option value="">Select an unmapped component</option>
-            <option
-              v-for="componentName in availableUnmappedComponents"
-              :key="componentName"
-              :value="componentName"
-            >
-              {{ componentName }}
-            </option>
-          </select>
-        </div>
-        <div>
-          <label class="text-[9px] text-gray-400">Team tag</label>
-          <input
-            v-model="newMappingTag"
-            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-            placeholder="Primary tag"
-          />
-        </div>
-        <button
-          type="button"
-          @click="saveNewComponentTeamTag"
-          :disabled="savingNewMapping || availableUnmappedComponents.length === 0"
-          class="rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 transition-colors"
+
+    <div v-if="showMappingControls" class="space-y-3">
+      <div class="max-h-96 overflow-y-auto divide-y divide-gray-800 rounded border border-gray-800 bg-gray-950/35">
+        <div
+          v-for="component in vulnScopedComponents"
+          :key="component.key"
+          data-testid="component-team-mapping-row"
+          class="p-2"
         >
-          Add tag
-        </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="min-w-0 flex-1 truncate font-mono text-xs text-gray-200">{{ component.label }}</span>
+            <span class="text-[9px] text-gray-500">Team:</span>
+            <span class="rounded border border-blue-800/40 bg-blue-950/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-blue-300">
+              {{ getCurrentMainTag(component.name, component.group, component.groupKnown, component.purl) || 'none' }}
+            </span>
+            <button
+              type="button"
+              @click.stop="beginTagEdit(component.key, component.name, component.group, component.groupKnown, component.purl)"
+              class="text-[10px] font-semibold text-blue-400 transition-colors hover:text-blue-300"
+            >
+              Edit tag
+            </button>
+          </div>
+          <div v-if="editingComponentKey === component.key" class="mt-2 grid gap-2 md:grid-cols-[1fr_auto] items-end">
+            <div>
+              <label class="text-[9px] text-gray-400">Main team tag</label>
+              <input
+                v-model="tagInput"
+                class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
+                placeholder="Primary tag"
+              />
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                @click="saveComponentTeamTag(component.key, component.name, component.group, component.groupKnown, component.purl)"
+                :disabled="savingTag"
+                class="rounded bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-2 transition-colors"
+              >
+                Save
+              </button>
+              <button
+                @click="cancelTagEdit"
+                type="button"
+                class="rounded bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold px-3 py-2 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            <div class="col-span-full text-xs text-green-300" v-if="tagMessage && editingComponentKey === component.key">{{ tagMessage }}</div>
+            <div class="col-span-full text-xs text-red-400" v-if="tagError && editingComponentKey === component.key">{{ tagError }}</div>
+          </div>
+        </div>
+        <div v-if="vulnScopedComponents.length === 0" class="px-3 py-4 text-xs text-gray-500">
+          No component identities are available for this vulnerability.
+        </div>
       </div>
-      <div v-if="availableUnmappedComponents.length === 0" class="mt-2 text-[10px] text-gray-500 italic">
-        All components in this vulnerability already have a team tag mapping.
-      </div>
-      <div v-if="newMappingMessage" class="mt-2 text-xs text-green-300">{{ newMappingMessage }}</div>
-      <div v-if="newMappingError" class="mt-2 text-xs text-red-400">{{ newMappingError }}</div>
+      <div v-if="tagMessage && !editingComponentKey" class="text-xs text-green-300">{{ tagMessage }}</div>
+    </div>
+
+    <div v-else class="text-xs text-gray-500">
+      Team mapping edits are available to reviewers.
+    </div>
+  </div>
+
+  <div v-else :class="[props.embedded !== false ? 'mt-4 pt-2 border-t border-gray-800/50' : '']">
+    <div v-if="props.showTitle !== false" class="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-2">
+      Dependencies
     </div>
     <template v-for="(rel, relIdx) in [partitionByRelationship(instances)]" :key="relIdx">
       <template v-if="rel.direct.length > 0">
@@ -320,14 +379,6 @@ const isChainExpanded = (id: string) => {
                   {{ getAssignedTeams(inst) || 'none' }}
                 </span>
                 <button
-                  v-if="canEditMapping"
-                  type="button"
-                  @click.stop="beginTagEdit(getComponentKey('d', inst), inst.component_name)"
-                  class="text-[9px] text-blue-400 hover:text-blue-300 font-semibold transition-colors"
-                >
-                  Edit tag
-                </button>
-                <button
                   @click.stop="toggleChainForComponent(getComponentKey('d', inst))"
                   class="text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
                   title="Show dependency chains"
@@ -336,34 +387,6 @@ const isChainExpanded = (id: string) => {
                   chains
                 </button>
               </div>
-            </div>
-            <div v-if="editingComponentKey === getComponentKey('d', inst)" class="ml-6 grid gap-2 md:grid-cols-[1fr_auto] items-end">
-              <div>
-                <label class="text-[9px] text-gray-400">Main team tag</label>
-                <input
-                  v-model="tagInput"
-                  class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-                  placeholder="Primary tag"
-                />
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  @click="saveComponentTeamTag(getComponentKey('d', inst), inst.component_name)"
-                  :disabled="savingTag"
-                  class="rounded bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-2 transition-colors"
-                >
-                  Save
-                </button>
-                <button
-                  @click="cancelTagEdit"
-                  type="button"
-                  class="rounded bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold px-3 py-2 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-              <div class="col-span-full text-xs text-green-300" v-if="tagMessage && editingComponentKey === getComponentKey('d', inst)">{{ tagMessage }}</div>
-              <div class="col-span-full text-xs text-red-400" v-if="tagError && editingComponentKey === getComponentKey('d', inst)">{{ tagError }}</div>
             </div>
           </div>
           <div v-if="isChainExpanded(getComponentKey('d', inst))" class="ml-4 mt-1">
@@ -390,14 +413,6 @@ const isChainExpanded = (id: string) => {
                   {{ getAssignedTeams(inst) || 'none' }}
                 </span>
                 <button
-                  v-if="canEditMapping"
-                  type="button"
-                  @click.stop="beginTagEdit(getComponentKey('t', inst), inst.component_name)"
-                  class="text-[9px] text-blue-400 hover:text-blue-300 font-semibold transition-colors"
-                >
-                  Edit tag
-                </button>
-                <button
                   @click.stop="toggleChainForComponent(getComponentKey('t', inst))"
                   class="text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
                   title="Show dependency chains"
@@ -406,34 +421,6 @@ const isChainExpanded = (id: string) => {
                   chains
                 </button>
               </div>
-            </div>
-            <div v-if="editingComponentKey === getComponentKey('t', inst)" class="ml-6 grid gap-2 md:grid-cols-[1fr_auto] items-end">
-              <div>
-                <label class="text-[9px] text-gray-400">Main team tag</label>
-                <input
-                  v-model="tagInput"
-                  class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-                  placeholder="Primary tag"
-                />
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  @click="saveComponentTeamTag(getComponentKey('t', inst), inst.component_name)"
-                  :disabled="savingTag"
-                  class="rounded bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-2 transition-colors"
-                >
-                  Save
-                </button>
-                <button
-                  @click="cancelTagEdit"
-                  type="button"
-                  class="rounded bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold px-3 py-2 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-              <div class="col-span-full text-xs text-green-300" v-if="tagMessage && editingComponentKey === getComponentKey('t', inst)">{{ tagMessage }}</div>
-              <div class="col-span-full text-xs text-red-400" v-if="tagError && editingComponentKey === getComponentKey('t', inst)">{{ tagError }}</div>
             </div>
           </div>
           <div v-if="isChainExpanded(getComponentKey('t', inst))" class="ml-4 mt-1">
@@ -460,14 +447,6 @@ const isChainExpanded = (id: string) => {
                   {{ getAssignedTeams(inst) || 'none' }}
                 </span>
                 <button
-                  v-if="canEditMapping"
-                  type="button"
-                  @click.stop="beginTagEdit(getComponentKey('u', inst), inst.component_name)"
-                  class="text-[9px] text-blue-400 hover:text-blue-300 font-semibold transition-colors"
-                >
-                  Edit tag
-                </button>
-                <button
                   @click.stop="toggleChainForComponent(getComponentKey('u', inst))"
                   class="text-[9px] text-blue-500 hover:text-blue-400 font-semibold flex items-center gap-0.5 shrink-0"
                   title="Show dependency chains"
@@ -476,34 +455,6 @@ const isChainExpanded = (id: string) => {
                   chains
                 </button>
               </div>
-            </div>
-            <div v-if="editingComponentKey === getComponentKey('u', inst)" class="ml-6 grid gap-2 md:grid-cols-[1fr_auto] items-end">
-              <div>
-                <label class="text-[9px] text-gray-400">Main team tag</label>
-                <input
-                  v-model="tagInput"
-                  class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
-                  placeholder="Primary tag"
-                />
-              </div>
-              <div class="flex items-center gap-2">
-                <button
-                  @click="saveComponentTeamTag(getComponentKey('u', inst), inst.component_name)"
-                  :disabled="savingTag"
-                  class="rounded bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-2 transition-colors"
-                >
-                  Save
-                </button>
-                <button
-                  @click="cancelTagEdit"
-                  type="button"
-                  class="rounded bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold px-3 py-2 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-              <div class="col-span-full text-xs text-green-300" v-if="tagMessage && editingComponentKey === getComponentKey('u', inst)">{{ tagMessage }}</div>
-              <div class="col-span-full text-xs text-red-400" v-if="tagError && editingComponentKey === getComponentKey('u', inst)">{{ tagError }}</div>
             </div>
           </div>
           <div v-if="isChainExpanded(getComponentKey('u', inst))" class="ml-4 mt-1">

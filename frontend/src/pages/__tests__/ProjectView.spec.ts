@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
-import { drainTaskVulnGroupDetails, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroup, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
+import { codeAnalysisListResults, drainTaskVulnGroupDetails, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroup, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
 import { projectHeaderState } from '../../lib/projectHeaderStore'
 import { useRoute } from 'vue-router'
 import { defaultAnalysisFilters, defaultLifecycleFilters, defaultStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
@@ -44,6 +44,7 @@ vi.mock('../../lib/api', () => ({
         major_version_details: {},
     })),
     getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
+    codeAnalysisListResults: vi.fn(() => Promise.resolve([])),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
@@ -99,6 +100,8 @@ describe('ProjectView.vue', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         projectHeaderState.viewMode.value = 'analysis'
+        projectHeaderState.lastProjectName.value = null
+        projectHeaderState.lastProjectPath.value = null
         projectHeaderState.bulkSyncHandler.value = null
         Object.defineProperty(navigator, 'clipboard', {
             value: { writeText: writeTextSpy },
@@ -148,6 +151,43 @@ describe('ProjectView.vue', () => {
         const wrapper = await mountProjectView({ routeName: 'TestProject' })
 
         expect(wrapper.text()).toContain('No vulnerabilities found')
+    })
+
+    it('marks and filters vulnerabilities with automatic assessment results', async () => {
+        vi.mocked(codeAnalysisListResults).mockResolvedValue([
+            {
+                analysis_run_id: 'run-auto-1',
+                vuln_id: 'GHSA-AUTO',
+                component_name: 'CompA',
+                source: 'automatic',
+            } as any,
+        ])
+        vi.mocked(getGroupedVulns).mockResolvedValue([
+            {
+                id: 'CVE-AUTO',
+                aliases: ['GHSA-AUTO'],
+                affected_versions: [{ components: [{ component_name: 'CompA', analysis_state: 'NOT_SET' }] }],
+            },
+            {
+                id: 'CVE-MANUAL',
+                affected_versions: [{ components: [{ component_name: 'CompB', analysis_state: 'NOT_SET' }] }],
+            },
+        ] as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        const autoItem = (wrapper.vm as any).listItems.find((item: any) => item.id === 'CVE-AUTO')
+        expect(autoItem.hasAutomaticAssessment).toBe(true)
+
+        ;(wrapper.vm as any).automaticAssessmentFilter = ['WITH_AUTOMATIC_ASSESSMENT']
+        await wrapper.vm.$nextTick()
+        expect((wrapper.vm as any).filteredGroups.map((group: any) => group.id)).toEqual(['CVE-AUTO'])
+
+        ;(wrapper.vm as any).automaticAssessmentFilter = ['WITHOUT_AUTOMATIC_ASSESSMENT']
+        await wrapper.vm.$nextTick()
+        expect((wrapper.vm as any).filteredGroups.map((group: any) => group.id)).toEqual(['CVE-MANUAL'])
     })
 
     it('filters by direct dependency and versions', async () => {
@@ -522,16 +562,67 @@ describe('ProjectView.vue', () => {
         })
         vi.mocked(getTaskVulnGroups)
             .mockResolvedValueOnce(taskWindow('CVE-PARTIAL-12', 12, true, 12) as any)
-            .mockResolvedValueOnce(taskWindow('CVE-PARTIAL-13', 13, true, 13) as any)
             .mockResolvedValueOnce(taskWindow('CVE-COMPLETE', 29, false) as any)
 
         const wrapper = await mountProjectView({ routeName: 'TestProject' })
         await flushPromises()
         await wrapper.vm.$nextTick()
 
-        expect(getTaskVulnGroups).toHaveBeenCalledTimes(3)
-        expect(wrapper.text()).not.toContain('Grouping still running')
+        expect(getTaskVulnGroups).toHaveBeenCalledTimes(2)
+        expect(wrapper.text()).not.toContain('Results and counts will keep updating')
         expect(wrapper.text()).toContain('29')
+    })
+
+    it('does not describe a 29 of 29 partial window as still loading snapshots', async () => {
+        const counts = {
+            total: 29,
+            lifecycle: { OPEN: 29 },
+            analysis: { NOT_SET: 29 },
+            dependency_relationship: { direct: 0, transitive: 0, unknown: 29 },
+            cvss_version_mismatch: 0,
+            versions: {},
+            tags: {},
+            assignees: {},
+            components: {},
+        }
+
+        vi.mocked(getGroupedVulns).mockImplementation((_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-full-partial')
+            options?.onPartialResultAvailable?.('task-full-partial', {
+                status: 'running',
+                message: 'Published partial vulnerability window for 29/29 project versions.',
+                progress: 90,
+                partial_result_available: true,
+                partial_versions_completed: 29,
+                partial_total_versions: 29,
+                versions_completed: 29,
+                versions_total: 29,
+            })
+            return new Promise(() => {}) as any
+        })
+        vi.mocked(getTaskVulnGroups).mockResolvedValue({
+            items: [],
+            total: 29,
+            filtered: 29,
+            counts: { all: counts, filtered: counts },
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+            partial: true,
+            partial_versions_completed: 29,
+            partial_total_versions: 29,
+            versions_completed: 29,
+            versions_total: 29,
+        } as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject', flush: false })
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.text()).toContain('All project-version snapshots are loaded')
+        expect(wrapper.text()).not.toContain('0 still')
+        expect(wrapper.text()).not.toContain('0 project-version snapshots are still loading')
     })
 
     it('displays backend-filtered task windows without a second local filter pass', async () => {
@@ -652,6 +743,45 @@ describe('ProjectView.vue', () => {
         }))
         expect(lastCall?.[1]?.tmrescore_proposal_ids).not.toContain('V1')
         expect(drainTaskVulnGroupDetails).not.toHaveBeenCalled()
+    })
+
+    it('passes automatic assessment result ids to backend task windows', async () => {
+        vi.mocked(codeAnalysisListResults).mockResolvedValue([
+            {
+                analysis_run_id: 'run-auto-1',
+                vuln_id: 'CVE-AUTO',
+                component_name: 'CompA',
+                source: 'automatic',
+            } as any,
+        ])
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-auto-window')
+            return [] as any
+        })
+        vi.mocked(getTaskVulnGroups).mockResolvedValue({
+            items: [],
+            total: 2,
+            filtered: 1,
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+        } as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await flushPromises()
+        vi.mocked(getTaskVulnGroups).mockClear()
+
+        ;(wrapper.vm as any).automaticAssessmentFilter = ['WITH_AUTOMATIC_ASSESSMENT']
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        const lastCall = vi.mocked(getTaskVulnGroups).mock.calls.at(-1)
+        expect(lastCall?.[0]).toBe('task-auto-window')
+        expect(lastCall?.[1]).toEqual(expect.objectContaining({
+            automatic_assessment: ['WITH_AUTOMATIC_ASSESSMENT'],
+            automatic_assessment_ids: ['cve-auto'],
+        }))
     })
 
     it('prepares bulk sync from backend incomplete full-detail windows', async () => {

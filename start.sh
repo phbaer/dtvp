@@ -18,19 +18,36 @@ DTVP_DEFAULT_PROJECT_FILTER=${DTVP_DEFAULT_PROJECT_FILTER:-}
 # Default attribution-age filter presets if not set (used by Project filters)
 DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
 
-echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}, DTVP_DEFAULT_PROJECT_FILTER=${DTVP_DEFAULT_PROJECT_FILTER}, DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}"
+# Default dev-disable-auth flag if not set (used by frontend bootstrap)
+DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH:-false}
 
-# Replace placeholders in index.html
-# We use a temp file to avoid issues with sed in-place
-if [ -f "/app/frontend/dist/index.html" ]; then
+echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}, DTVP_DEFAULT_PROJECT_FILTER=${DTVP_DEFAULT_PROJECT_FILTER}, DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}, DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH}"
+
+# Render frontend runtime config from the immutable build template on every
+# container start. Rendering index.html in place is not restart-safe because
+# placeholders disappear after the first boot.
+INDEX_TEMPLATE="/app/frontend/dist/index.html.template"
+INDEX_TARGET="/app/frontend/dist/index.html"
+
+if [ -f "${INDEX_TEMPLATE}" ]; then
     sed -e "s|\${DTVP_CONTEXT_PATH}|${DTVP_CONTEXT_PATH}|g" \
         -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
+        -e "s|\${DTVP_DEV_DISABLE_AUTH}|${DTVP_DEV_DISABLE_AUTH}|g" \
         -e "s|\${DTVP_DEFAULT_PROJECT_FILTER}|${DTVP_DEFAULT_PROJECT_FILTER}|g" \
         -e "s|\${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|g" \
-        /app/frontend/dist/index.html > /app/frontend/dist/index.html.tmp && \
-    mv /app/frontend/dist/index.html.tmp /app/frontend/dist/index.html
+        "${INDEX_TEMPLATE}" > "${INDEX_TARGET}.tmp" && \
+    mv "${INDEX_TARGET}.tmp" "${INDEX_TARGET}"
+elif [ -f "${INDEX_TARGET}" ]; then
+    echo "Warning: ${INDEX_TEMPLATE} not found, rendering existing index.html once"
+    sed -e "s|\${DTVP_CONTEXT_PATH}|${DTVP_CONTEXT_PATH}|g" \
+        -e "s|\${DTVP_FRONTEND_URL}|${DTVP_FRONTEND_URL}|g" \
+        -e "s|\${DTVP_DEV_DISABLE_AUTH}|${DTVP_DEV_DISABLE_AUTH}|g" \
+        -e "s|\${DTVP_DEFAULT_PROJECT_FILTER}|${DTVP_DEFAULT_PROJECT_FILTER}|g" \
+        -e "s|\${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}|g" \
+        "${INDEX_TARGET}" > "${INDEX_TARGET}.tmp" && \
+    mv "${INDEX_TARGET}.tmp" "${INDEX_TARGET}"
 else
-    echo "Warning: /app/frontend/dist/index.html not found, skipping frontend configuration"
+    echo "Warning: ${INDEX_TARGET} not found, skipping frontend configuration"
 fi
 
 # Run the boot wrapper so Uvicorn can bind before the full DTVP app imports.

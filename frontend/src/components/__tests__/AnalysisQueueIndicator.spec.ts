@@ -15,6 +15,7 @@ describe('AnalysisQueueIndicator', () => {
             global: {
                 stubs: {
                     teleport: false,
+                    RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] },
                 },
             },
         })
@@ -54,6 +55,7 @@ describe('AnalysisQueueIndicator', () => {
             global: {
                 stubs: {
                     teleport: false,
+                    RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] },
                 },
             },
         })
@@ -66,6 +68,28 @@ describe('AnalysisQueueIndicator', () => {
         await nextTick()
 
         expect(document.body.querySelector('[data-testid="analysis-queue-panel"]')).toBeNull()
+
+        wrapper.unmount()
+    })
+
+    it('links from the popup to the full code analysis dashboard', async () => {
+        const wrapper = mount(AnalysisQueueIndicator, {
+            attachTo: document.body,
+            global: {
+                stubs: {
+                    teleport: false,
+                    RouterLink: { template: '<a :href="to"><slot /></a>', props: ['to'] },
+                },
+            },
+        })
+
+        await wrapper.find('[data-testid="analysis-queue-trigger"]').trigger('click')
+        await nextTick()
+
+        const panel = document.body.querySelector('[data-testid="analysis-queue-panel"]')
+        const link = panel?.querySelector('a[href="/code-analysis"]')
+
+        expect(link?.textContent).toContain('Open Code Analysis Dashboard')
 
         wrapper.unmount()
     })

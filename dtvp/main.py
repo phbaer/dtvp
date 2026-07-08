@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import socket
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import (
@@ -71,17 +72,17 @@ from .auth import auth_settings, get_current_user
 from .auth import router as auth_router
 from .auto_analysis_services import (
     AutoAnalysisSweepDeps,
+    apply_auto_analysis_sweep_plan,
+    build_existing_open_vulnerability_sweep_plan,
     get_auto_code_analysis_enabled,
-)
-from .auto_analysis_services import (
-    queue_existing_open_vulnerabilities_for_analysis as queue_existing_open_vulnerabilities_for_analysis_impl,
 )
 from .auto_analysis_services import (
     queue_open_vulnerabilities_for_analysis as queue_open_vulnerabilities_for_analysis_impl,
 )
 from .code_analysis_integration import CodeAnalysisClient, CodeAnalysisSettings
+from .code_analysis_result_services import CodeAnalysisResultStore
 from .code_analysis_routes import create_code_analysis_router
-from .dt_cache import cache_manager
+from .dt_cache import CacheManager, cache_manager
 from .dt_client import DTClient, DTSettings, get_client
 from .file_io_services import read_text as read_text_impl
 from .file_io_services import (
@@ -104,11 +105,13 @@ from .logic import (
     DEFAULT_DEPENDENCY_CHAIN_LIMIT,
     BOMAnalysisCache,
     calculate_aggregated_state,
+    get_auto_analysis_guidance_path,
     get_rescore_rules_path,
     get_team_mapping_path,
     get_user_role,
     get_user_roles_path,
     group_vulnerabilities,
+    load_auto_analysis_guidance,
     load_rescore_rules,
     load_team_mapping,
     load_user_roles,
@@ -383,6 +386,9 @@ grouped_vuln_service_deps = build_grouped_vuln_service_deps(
             team_mapping=team_mapping,
             enabled=_is_auto_code_analysis_active(),
             logger=logger,
+            tmrescore_project_cache=tmrescore_project_cache,
+            result_store=code_analysis_result_store,
+            auto_analysis_guidance=load_auto_analysis_guidance(),
         )
     ),
     summary_index=grouped_vuln_summary_index,
@@ -476,6 +482,8 @@ project_archive_service_deps = build_project_archive_service_deps(
     build_commit=BUILD_COMMIT,
     archive_path_provider=get_project_archive_path,
 )
+
+code_analysis_result_store = CodeAnalysisResultStore(logger=logger)
 
 
 api_router.include_router(
@@ -574,9 +582,11 @@ api_router.include_router(
         build_settings_route_deps(
             get_user_role=lambda user: get_user_role(user),
             load_team_mapping=lambda: load_team_mapping(),
+            load_auto_analysis_guidance=lambda: load_auto_analysis_guidance(),
             load_user_roles=lambda: load_user_roles(),
             load_rescore_rules=lambda: load_rescore_rules(),
             get_team_mapping_path=lambda: get_team_mapping_path(),
+            get_auto_analysis_guidance_path=lambda: get_auto_analysis_guidance_path(),
             get_user_roles_path=lambda: get_user_roles_path(),
             get_rescore_rules_path=lambda: get_rescore_rules_path(),
             write_bytes=write_bytes_impl,
@@ -589,7 +599,7 @@ api_router.include_router(
 )
 
 
-# ── Analysis Queue (global, one-at-a-time) ───────────────────────────────────
+# ── Analysis Queue ───────────────────────────────────────────────────────────
 analysis_queue_runtime_deps = build_analysis_queue_runtime_deps(logger=logger)
 
 
@@ -609,6 +619,12 @@ analysis_queue = build_analysis_queue(
         minimum=60,
         logger=logger,
     ),
+    get_analysis_queue_capacity=lambda: get_env_int_with_floor(
+        "DTVP_ANALYSIS_QUEUE_CAPACITY",
+        default=1,
+        minimum=1,
+        logger=logger,
+    ),
     parse_iso_timestamp=parse_iso_timestamp_impl,
     utc_now=lambda: datetime.now(UTC),
     reindex_queue_items=reindex_queue_items,
@@ -618,43 +634,92 @@ analysis_queue = build_analysis_queue(
     process_analysis_queue_item=process_analysis_queue_item,
     run_analysis_queue_cleanup_loop=run_analysis_queue_cleanup_loop,
     run_analysis_queue_worker=run_analysis_queue_worker,
+    record_completed_result=lambda item: code_analysis_result_store.record_queue_item_result(
+        item,
+        item.result or {},
+    ),
 )
 
 
-def _queue_sweep_grouped_vulnerabilities(
-    grouped: list[dict[str, Any]],
-    team_mapping: dict[str, Any],
-    handled_vulnerability_ids: set[str] | None = None,
-) -> int:
-    return queue_open_vulnerabilities_for_analysis_impl(
-        analysis_queue=analysis_queue,
-        grouped_vulns=grouped,
-        team_mapping=team_mapping,
-        enabled=True,
+_auto_analysis_sweep_executor: ThreadPoolExecutor | None = None
+auto_analysis_sweep_task: asyncio.Task[Any] | None = None
+
+
+def _get_auto_analysis_sweep_executor() -> ThreadPoolExecutor:
+    global _auto_analysis_sweep_executor
+    if _auto_analysis_sweep_executor is None:
+        _auto_analysis_sweep_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="dtvp-auto-analysis",
+        )
+    return _auto_analysis_sweep_executor
+
+
+def shutdown_auto_analysis_sweep_executor() -> None:
+    global _auto_analysis_sweep_executor
+    if _auto_analysis_sweep_executor is None:
+        return
+    _auto_analysis_sweep_executor.shutdown(wait=False, cancel_futures=True)
+    _auto_analysis_sweep_executor = None
+
+
+def _build_auto_analysis_sweep_worker_deps() -> AutoAnalysisSweepDeps:
+    worker_cache_manager = CacheManager(
+        base_path=cache_manager.base_path,
+        refresh_interval_seconds=cache_manager.refresh_interval_seconds,
+    )
+    worker_cache_manager.load_persisted_runtime_state()
+    worker_grouped_vuln_service_deps = build_grouped_vuln_service_deps(
+        cache_manager=worker_cache_manager,
         logger=logger,
-        handled_vulnerability_ids=handled_vulnerability_ids,
+        tasks={},
+        bom_analysis_cache_cls=BOMAnalysisCache,
+        get_version_fetch_concurrency=lambda: get_version_fetch_concurrency_impl(
+            logger
+        ),
+        merge_vulnerability_details=merge_vulnerability_details_impl,
+        sort_projects_by_version=sort_projects_by_version,
+        load_team_mapping=lambda: load_team_mapping(),
+        group_vulnerabilities=group_vulnerabilities,
+        queue_open_vulnerabilities_for_analysis=None,
+    )
+    return AutoAnalysisSweepDeps(
+        cache_manager=worker_cache_manager,
+        logger=logger,
+        sort_projects_by_version=sort_projects_by_version,
+        load_team_mapping=lambda: load_team_mapping(),
+        load_auto_analysis_guidance=lambda: load_auto_analysis_guidance(),
+        collect_version_snapshots=lambda versions, client, cve, team_mapping: (
+            collect_grouped_vuln_version_snapshots(
+                worker_grouped_vuln_service_deps,
+                versions,
+                client,
+                cve,
+                team_mapping,
+            )
+        ),
+        bom_analysis_cache_cls=BOMAnalysisCache,
+        merge_vulnerability_details=merge_vulnerability_details_impl,
+        group_vulnerabilities=group_vulnerabilities,
+        queue_grouped_vulnerabilities_for_analysis=lambda *_args: 0,
+        tmrescore_project_cache=tmrescore_project_cache,
+        result_store=code_analysis_result_store,
     )
 
 
-auto_analysis_sweep_deps = AutoAnalysisSweepDeps(
-    cache_manager=cache_manager,
-    logger=logger,
-    sort_projects_by_version=sort_projects_by_version,
-    load_team_mapping=lambda: load_team_mapping(),
-    collect_version_snapshots=lambda versions, client, cve, team_mapping: (
-        collect_grouped_vuln_version_snapshots(
-            grouped_vuln_service_deps,
-            versions,
-            client,
-            cve,
-            team_mapping,
-        )
-    ),
-    bom_analysis_cache_cls=BOMAnalysisCache,
-    merge_vulnerability_details=merge_vulnerability_details_impl,
-    group_vulnerabilities=group_vulnerabilities,
-    queue_grouped_vulnerabilities_for_analysis=_queue_sweep_grouped_vulnerabilities,
-)
+def _run_auto_analysis_sweep_worker():
+    async def _run():
+        settings = DTSettings()
+        async with DTClient(
+            settings.api_url,
+            api_key=settings.api_key,
+        ) as client:
+            return await build_existing_open_vulnerability_sweep_plan(
+                _build_auto_analysis_sweep_worker_deps(),
+                client,
+            )
+
+    return asyncio.run(_run())
 
 
 auto_analysis_sweep_state: dict[str, Any] = {
@@ -717,15 +782,16 @@ async def run_auto_analysis_sweep_once(trigger: str) -> dict[str, Any]:
         )
 
         try:
-            settings = DTSettings()
-            async with DTClient(
-                settings.api_url,
-                api_key=settings.api_key,
-            ) as client:
-                queued_count = await queue_existing_open_vulnerabilities_for_analysis_impl(
-                    auto_analysis_sweep_deps,
-                    client,
-                )
+            loop = asyncio.get_running_loop()
+            plan = await loop.run_in_executor(
+                _get_auto_analysis_sweep_executor(),
+                _run_auto_analysis_sweep_worker,
+            )
+            queued_count = apply_auto_analysis_sweep_plan(
+                analysis_queue=analysis_queue,
+                plan=plan,
+                logger=logger,
+            )
             auto_analysis_sweep_state["last_queued_count"] = queued_count
             if queued_count:
                 logger.info(
@@ -748,21 +814,40 @@ async def run_auto_analysis_sweep_once(trigger: str) -> dict[str, Any]:
         return get_auto_analysis_sweep_status()
 
 
+def _track_auto_analysis_sweep_task(task: asyncio.Task[Any]) -> None:
+    global auto_analysis_sweep_task
+    auto_analysis_sweep_task = task
+    background_tasks.add(task)
+
+    def _clear(completed_task: asyncio.Task[Any]) -> None:
+        global auto_analysis_sweep_task
+        background_tasks.discard(completed_task)
+        if auto_analysis_sweep_task is completed_task:
+            auto_analysis_sweep_task = None
+
+    task.add_done_callback(_clear)
+
+
 async def run_auto_analysis_sweep_now() -> dict[str, Any]:
-    return await run_auto_analysis_sweep_once("manual")
+    if auto_analysis_sweep_task and not auto_analysis_sweep_task.done():
+        return get_auto_analysis_sweep_status()
+
+    task = asyncio.create_task(run_auto_analysis_sweep_once("manual"))
+    _track_auto_analysis_sweep_task(task)
+    await asyncio.sleep(0)
+    return get_auto_analysis_sweep_status()
 
 
 async def run_auto_analysis_sweep_loop() -> None:
-    while True:
-        interval_seconds = _get_auto_analysis_sweep_interval_seconds()
-        auto_analysis_sweep_state["next_run_at"] = _utc_now_iso()
-        await run_auto_analysis_sweep_once("scheduled")
-        interval_seconds = _get_auto_analysis_sweep_interval_seconds()
-        auto_analysis_sweep_state["next_run_at"] = _utc_after_iso(interval_seconds)
+    try:
+        while True:
+            interval_seconds = _get_auto_analysis_sweep_interval_seconds()
+            auto_analysis_sweep_state["next_run_at"] = _utc_after_iso(interval_seconds)
+            await asyncio.sleep(interval_seconds)
 
-        await asyncio.sleep(
-            interval_seconds
-        )
+            await run_auto_analysis_sweep_once("scheduled")
+    finally:
+        shutdown_auto_analysis_sweep_executor()
 
 
 async def run_project_archive_snapshot_loop() -> None:
@@ -812,6 +897,8 @@ api_router.include_router(
             code_analysis_settings_cls=CodeAnalysisSettings,
             code_analysis_client_cls=CodeAnalysisClient,
             analysis_queue=analysis_queue,
+            result_store=code_analysis_result_store,
+            load_auto_analysis_guidance=lambda: load_auto_analysis_guidance(),
             get_auto_analysis_sweep_status=get_auto_analysis_sweep_status,
             run_auto_analysis_sweep_now=run_auto_analysis_sweep_now,
             code_analysis_not_configured_detail=CODE_ANALYSIS_NOT_CONFIGURED_DETAIL,

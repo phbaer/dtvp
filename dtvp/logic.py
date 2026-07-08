@@ -4,6 +4,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .team_mapping import compile_team_mapping, get_team_mapping_tags
+
 logger = logging.getLogger(__name__)
 
 # Pre-compile regex patterns
@@ -91,6 +93,13 @@ def get_team_mapping_path() -> str:
     return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
 
 
+def get_auto_analysis_guidance_path() -> str:
+    return os.getenv(
+        "DTVP_AUTO_ANALYSIS_GUIDANCE_PATH",
+        "data/auto_analysis_guidance.json",
+    )
+
+
 STATE_PRIORITY = {
     "EXPLOITABLE": 0,
     "IN_TRIAGE": 1,
@@ -112,6 +121,21 @@ def load_team_mapping(path: str = None) -> Dict[str, str]:
             return json.load(f)
     except Exception as e:
         logger.warning(f"Failed to load team mapping from {path}: {e}")
+        return {}
+
+
+def load_auto_analysis_guidance(path: str = None) -> Dict[str, Any]:
+    if path is None:
+        path = get_auto_analysis_guidance_path()
+
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
+    except Exception as e:
+        logger.warning(f"Failed to load auto-analysis guidance from {path}: {e}")
         return {}
 
 
@@ -224,33 +248,26 @@ class BOMAnalysisCache:
 
     def __init__(self, bom: Dict[str, Any], mapping: Dict[str, str]):
         self.bom = bom
-        self.mapping = mapping
+        self.mapping = compile_team_mapping(mapping)
         self.parent_map = build_parent_map(bom)
         self.comp_map = {}  # ref -> comp
-        self.direct_tags_by_name = {}
-        self.direct_tags_by_group_name = {}  # (group, name) -> tuple(tags)
 
         # Caches
         self.uuid_to_ref = {}
         self.name_to_ref_candidates = {}  # name -> list of refs (in case of dupes, though rare)
+        self.purl_to_ref_candidates = {}
+        self.direct_tags_cache = {}  # component identity -> tuple(tags)
         self.tags_cache = {}  # ref -> tuple(tags)
-        self.path_cache = {}  # ref -> tuple(paths)
-        self.analysis_cache = {}  # (component_uuid, component_name) -> (tags, paths)
+        self.path_cache = {}  # (ref, max_paths) -> (tuple(paths), truncated)
+        self.analysis_cache = {}  # (component_uuid, component_name, purl) -> (tags, paths)
+        self.team_mapped_ref_cache = {}  # ref -> bool
         self.ref_to_name = {}  # ref -> human-readable name (includes metadata component)
         self.ref_to_group = {}  # ref -> group (CycloneDX component group)
+        self.ref_to_purl = {}  # ref -> package URL
 
         self._preprocess_components()
 
     def _preprocess_components(self):
-        for key, tag_val in self.mapping.items():
-            tags = self._normalize_tags(tag_val)
-            # Support "group:name" composite keys for disambiguation
-            if ":" in key and key != "*":
-                group_part, name_part = key.split(":", 1)
-                self.direct_tags_by_group_name[(group_part, name_part)] = tags
-            else:
-                self.direct_tags_by_name[key] = tags
-
         if not self.bom:
             return
 
@@ -266,6 +283,9 @@ class BOMAnalysisCache:
             meta_group = meta_comp.get("group")
             if meta_group:
                 self.ref_to_group[meta_ref] = meta_group
+            meta_purl = meta_comp.get("purl")
+            if meta_purl:
+                self.ref_to_purl[meta_ref] = meta_purl
 
         for comp in self.bom.get("components", []):
             ref = comp.get("bom-ref")
@@ -277,6 +297,7 @@ class BOMAnalysisCache:
             c_uuid = comp.get("uuid")
             c_name = comp.get("name")
             c_group = comp.get("group")
+            c_purl = comp.get("purl")
 
             if c_uuid:
                 self.uuid_to_ref[c_uuid] = ref
@@ -290,35 +311,54 @@ class BOMAnalysisCache:
             if c_group:
                 self.ref_to_group[ref] = c_group
 
-    def _normalize_tags(self, tag_val: Any) -> Tuple[str, ...]:
-        if isinstance(tag_val, list):
-            normalized = []
-            seen = set()
-            for tag in tag_val:
-                if not tag:
-                    continue
-                tag_str = str(tag).strip()
-                if tag_str and tag_str not in seen:
-                    normalized.append(tag_str)
-                    seen.add(tag_str)
-            return tuple(normalized)
-        if tag_val:
-            return (str(tag_val).strip(),)
-        return ()
+            if c_purl:
+                self.ref_to_purl[ref] = c_purl
+                if c_purl not in self.purl_to_ref_candidates:
+                    self.purl_to_ref_candidates[c_purl] = []
+                self.purl_to_ref_candidates[c_purl].append(ref)
 
     def _get_component_group(self, ref: str) -> Optional[str]:
         """Return the CycloneDX group for a BOM ref, if known."""
         return self.ref_to_group.get(ref)
 
-    def _get_direct_tags(self, component_name: Optional[str], component_group: Optional[str] = None) -> Set[str]:
-        if not component_name:
+    def _get_component_purl(self, ref: str) -> Optional[str]:
+        """Return the package URL for a BOM ref, if known."""
+        return self.ref_to_purl.get(ref)
+
+    def _get_direct_tags(
+        self,
+        component_name: Optional[str],
+        component_group: Optional[str] = None,
+        component_purl: Optional[str] = None,
+        *,
+        group_known: bool = False,
+        include_wildcard: bool = False,
+    ) -> Set[str]:
+        if not component_name and not component_purl:
             return set()
-        if component_group is not None:
-            # Component has a group → only match group:name keys
-            group_key = (component_group, component_name)
-            return set(self.direct_tags_by_group_name.get(group_key, ()))
-        # Component has no group → match name-only keys
-        return set(self.direct_tags_by_name.get(component_name, ()))
+        cache_key = (
+            str(component_name or ""),
+            str(component_group or ""),
+            str(component_purl or ""),
+            group_known,
+            include_wildcard,
+        )
+        cached = self.direct_tags_cache.get(cache_key)
+        if cached is not None:
+            return set(cached)
+
+        tags = tuple(
+            get_team_mapping_tags(
+                self.mapping,
+                component_name,
+                component_group,
+                component_purl,
+                group_known=group_known,
+                include_wildcard=include_wildcard,
+            )
+        )
+        self.direct_tags_cache[cache_key] = tags
+        return set(tags)
 
     def _get_component_name(self, ref: str) -> str:
         # Fast path: pre-built ref→name mapping (covers components + metadata)
@@ -356,13 +396,18 @@ class BOMAnalysisCache:
 
     def _is_team_mapped_ref(self, ref: str) -> bool:
         """Check whether a BOM ref corresponds to a component with an explicit team mapping."""
+        if ref in self.team_mapped_ref_cache:
+            return self.team_mapped_ref_cache[ref]
+
         name = self._get_component_name(ref)
         if not name:
+            self.team_mapped_ref_cache[ref] = False
             return False
         group = self._get_component_group(ref)
-        if group is not None:
-            return (group, name) in self.direct_tags_by_group_name
-        return bool(name in self.direct_tags_by_name and name != "*")
+        purl = self._get_component_purl(ref)
+        is_mapped = bool(self._get_direct_tags(name, group, purl, group_known=True))
+        self.team_mapped_ref_cache[ref] = is_mapped
+        return is_mapped
 
     def is_direct_dependency(
         self,
@@ -399,7 +444,14 @@ class BOMAnalysisCache:
         if ref in self.tags_cache:
             return list(self.tags_cache[ref])
 
-        direct_tags = list(self._get_direct_tags(self._get_component_name(ref), self._get_component_group(ref)))
+        direct_tags = list(
+            self._get_direct_tags(
+                self._get_component_name(ref),
+                self._get_component_group(ref),
+                self._get_component_purl(ref),
+                group_known=True,
+            )
+        )
         if direct_tags:
             unique_tags = list(dict.fromkeys(tag for tag in direct_tags if tag))
             self.tags_cache[ref] = tuple(unique_tags)
@@ -417,7 +469,15 @@ class BOMAnalysisCache:
 
                 parent_name = self._get_component_name(parent_ref)
                 parent_group = self._get_component_group(parent_ref)
-                parent_tags = list(self._get_direct_tags(parent_name, parent_group))
+                parent_purl = self._get_component_purl(parent_ref)
+                parent_tags = list(
+                    self._get_direct_tags(
+                        parent_name,
+                        parent_group,
+                        parent_purl,
+                        group_known=True,
+                    )
+                )
                 if parent_tags:
                     for tag in parent_tags:
                         if tag and tag not in tag_seen:
@@ -436,20 +496,21 @@ class BOMAnalysisCache:
         visiting: Optional[Set[str]] = None,
         max_paths: Optional[int] = None,
     ) -> Tuple[Tuple[str, ...], bool]:
-        if ref in self.path_cache and max_paths is None:
-            return self.path_cache[ref], False
-
         if visiting is None:
             visiting = set()
         if ref in visiting:
             return (), False
 
+        cache_key = (ref, max_paths)
+        cached = self.path_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         parent_refs = self._get_parent_refs(ref)
         current_name = self._get_component_name(ref)
         if not parent_refs:
             paths = (current_name,)
-            if max_paths is None:
-                self.path_cache[ref] = paths
+            self.path_cache[cache_key] = (paths, False)
             return paths, False
 
         visiting.add(ref)
@@ -474,14 +535,20 @@ class BOMAnalysisCache:
         unique_paths = sorted(set(found_paths))
         if max_paths is None:
             cached_paths = tuple(unique_paths)
-            self.path_cache[ref] = cached_paths
+            self.path_cache[cache_key] = (cached_paths, False)
             return cached_paths, False
 
-        return tuple(unique_paths[:max_paths]), truncated or len(
-            unique_paths
-        ) > max_paths
+        limited_paths = tuple(unique_paths[:max_paths])
+        result = (limited_paths, truncated or len(unique_paths) > max_paths)
+        self.path_cache[cache_key] = result
+        return result
 
-    def get_target_ref(self, component_uuid: str, component_name: str) -> str:
+    def get_target_ref(
+        self,
+        component_uuid: str,
+        component_name: str,
+        component_purl: Optional[str] = None,
+    ) -> str:
         # 1. Match by UUID
         if component_uuid and component_uuid in self.uuid_to_ref:
             return self.uuid_to_ref[component_uuid]
@@ -490,28 +557,84 @@ class BOMAnalysisCache:
         if component_uuid and component_uuid in self.comp_map:
             return component_uuid
 
-        # 3. Match by Name
+        # 3. Match by package URL
+        if component_purl and component_purl in self.purl_to_ref_candidates:
+            return self.purl_to_ref_candidates[component_purl][0]
+
+        # 4. Match by Name
         if component_name and component_name in self.name_to_ref_candidates:
             # Return first match. Logic could be improved if name collisions matter.
             return self.name_to_ref_candidates[component_name][0]
 
         return None
 
-    def get_tags_only(self, component_uuid: str, component_name: str) -> List[str]:
-        cache_key = (component_uuid or "", component_name or "")
+    def get_component_group(
+        self,
+        component_uuid: str,
+        component_name: str,
+        component_purl: Optional[str] = None,
+    ) -> Optional[str]:
+        target_ref = self.get_target_ref(component_uuid, component_name, component_purl)
+        if not target_ref:
+            return None
+        return self._get_component_group(target_ref)
+
+    def get_component_purl(
+        self,
+        component_uuid: str,
+        component_name: str,
+        component_purl: Optional[str] = None,
+    ) -> Optional[str]:
+        target_ref = self.get_target_ref(component_uuid, component_name, component_purl)
+        if not target_ref:
+            return component_purl
+        return self._get_component_purl(target_ref) or component_purl
+
+    def get_tags_only(
+        self,
+        component_uuid: str,
+        component_name: str,
+        component_purl: Optional[str] = None,
+    ) -> List[str]:
+        cache_key = (component_uuid or "", component_name or "", component_purl or "")
         cached = self.analysis_cache.get(cache_key)
         if cached and cached[0] is not None:
             return list(cached[0])
 
-        found_tags = list(self._get_direct_tags(component_name))
-
-        target_ref = self.get_target_ref(component_uuid, component_name)
+        target_ref = self.get_target_ref(component_uuid, component_name, component_purl)
+        found_tags: List[str] = []
 
         if target_ref:
             found_tags = self._get_tags_for_ref(target_ref)
+        else:
+            found_tags = list(
+                self._get_direct_tags(
+                    component_name,
+                    component_purl=component_purl,
+                    group_known=False,
+                )
+            )
 
-        if not found_tags and "*" in self.mapping:
-            found_tags = list(self.direct_tags_by_name.get("*", ()))
+        if not found_tags:
+            if target_ref:
+                found_tags = list(
+                    self._get_direct_tags(
+                        self._get_component_name(target_ref),
+                        self._get_component_group(target_ref),
+                        self._get_component_purl(target_ref),
+                        group_known=True,
+                        include_wildcard=True,
+                    )
+                )
+            else:
+                found_tags = list(
+                    self._get_direct_tags(
+                        component_name,
+                        component_purl=component_purl,
+                        group_known=False,
+                        include_wildcard=True,
+                    )
+                )
 
         tag_list = found_tags
         self.analysis_cache[cache_key] = (
@@ -526,18 +649,19 @@ class BOMAnalysisCache:
         component_name: str,
         max_paths: Optional[int] = None,
         return_truncated: bool = False,
+        component_purl: Optional[str] = None,
     ):
         """
         Returns dependency paths, optionally limited to max_paths.
         """
-        cache_key = (component_uuid or "", component_name or "")
+        cache_key = (component_uuid or "", component_name or "", component_purl or "")
         cached = self.analysis_cache.get(cache_key)
         if cached and cached[1] is not None and max_paths is None:
             return list(cached[1]) if not return_truncated else (list(cached[1]), False)
 
         found_paths = set()
         truncated = False
-        target_ref = self.get_target_ref(component_uuid, component_name)
+        target_ref = self.get_target_ref(component_uuid, component_name, component_purl)
 
         start_name = component_name
         if target_ref:
@@ -570,6 +694,7 @@ def group_vulnerabilities(
     versions_data: List[Dict[str, Any]],
     project_boms: Dict[str, Any] = None,
     processed_boms: Dict[str, "BOMAnalysisCache"] = None,
+    include_dependency_paths: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Groups vulnerabilities across multiple project versions.
@@ -719,11 +844,21 @@ def group_vulnerabilities(
             comp_uuid = component.get("uuid")
             comp_name = component.get("name")
             comp_ver = component.get("version")
+            comp_group = component.get("group")
+            comp_purl = component.get("purl")
 
             # Calculate Tags only
             tags = []
             if processor:
-                tags = processor.get_tags_only(comp_uuid, comp_name)
+                tags = processor.get_tags_only(comp_uuid, comp_name, comp_purl)
+                comp_group = (
+                    processor.get_component_group(comp_uuid, comp_name, comp_purl)
+                    or comp_group
+                )
+                comp_purl = (
+                    processor.get_component_purl(comp_uuid, comp_name, comp_purl)
+                    or comp_purl
+                )
 
             for tag in tags:
                 if tag not in groups[canonical_id]["tags"]:
@@ -804,6 +939,8 @@ def group_vulnerabilities(
                 "project_name": version_info.get("name"),
                 "project_version": version_info.get("version"),
                 "component_name": comp_name,
+                "component_group": comp_group,
+                "component_purl": comp_purl,
                 "component_version": comp_ver,
                 "component_uuid": comp_uuid,
                 "vulnerability_uuid": vuln.get("uuid"),
@@ -819,18 +956,17 @@ def group_vulnerabilities(
                 "is_suppressed": analysis.get("isSuppressed", False)
                 or analysis.get("suppressed", False),
                 "is_direct_dependency": None,
-                "dependency_chains": [],
-                "dependency_chains_truncated": False,
                 "tags": tags,
             }
 
-            if proj_uuid in bom_processors and comp_uuid:
+            if include_dependency_paths and proj_uuid in bom_processors and comp_uuid:
                 try:
                     paths, truncated = bom_processors[proj_uuid].get_dependency_paths(
                         comp_uuid,
                         comp_name,
                         max_paths=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
                         return_truncated=True,
+                        component_purl=comp_purl,
                     )
                     component_info["dependency_chains"] = paths
                     component_info["dependency_chains_truncated"] = truncated
@@ -903,6 +1039,44 @@ def group_vulnerabilities(
     )
 
     return result
+
+
+def populate_group_dependency_chains(
+    group: Dict[str, Any],
+    processed_boms: Dict[str, "BOMAnalysisCache"] | None,
+    max_paths: int = DEFAULT_DEPENDENCY_CHAIN_LIMIT,
+) -> Dict[str, Any]:
+    if not processed_boms:
+        return group
+
+    for affected_version in group.get("affected_versions") or []:
+        project_uuid = affected_version.get("project_uuid")
+        processor = processed_boms.get(project_uuid)
+        if not processor:
+            continue
+        for component in affected_version.get("components") or []:
+            if "dependency_chains" in component:
+                continue
+            component_uuid = component.get("component_uuid")
+            component_name = component.get("component_name")
+            if not component_uuid:
+                component["dependency_chains"] = []
+                component["dependency_chains_truncated"] = False
+                continue
+            try:
+                paths, truncated = processor.get_dependency_paths(
+                    component_uuid,
+                    component_name,
+                    max_paths=max_paths,
+                    return_truncated=True,
+                    component_purl=component.get("component_purl"),
+                )
+                component["dependency_chains"] = paths
+                component["dependency_chains_truncated"] = truncated
+            except Exception:
+                component["dependency_chains"] = []
+                component["dependency_chains_truncated"] = False
+    return group
 
 
 def calculate_statistics(grouped_vulns: List[Dict[str, Any]]) -> Dict[str, Any]:

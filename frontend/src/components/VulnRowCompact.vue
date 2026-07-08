@@ -138,6 +138,7 @@ const handleClick = () => emit('select', group.value)
                 :instanceCountOverride="listItem.instanceCount"
                 :oldestAttributedOnMsOverride="listItem.oldestAttributedOnMs"
                 :componentSummaryOverride="listItem.componentSummary"
+                :hasAutomaticAssessment="listItem.hasAutomaticAssessment"
                 compact
             />
         </div>

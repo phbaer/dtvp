@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
     getTaskVulnGroups: vi.fn(),
     getTaskStatistics: vi.fn(() => Promise.resolve({ severity_counts: {}, state_counts: {}, total_unique: 0, total_findings: 0, affected_projects_count: 0, version_counts: {} })),
     getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
+    codeAnalysisListResults: vi.fn(() => Promise.resolve([])),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
@@ -159,6 +160,8 @@ describe('ProjectView Coverage Extras', () => {
         // At start, loading is true
         expect(wrapper.text()).toContain('Starting search...')
         expect(wrapper.text()).toContain('Preparing vulnerability list...')
+        expect(wrapper.find('[data-testid="preparing-list-status"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="loading-status"]').exists()).toBe(false)
 
         // Verify callback updates state WHILE still loading (promise not resolved)
         // Wait for next tick to ensure onMounted started

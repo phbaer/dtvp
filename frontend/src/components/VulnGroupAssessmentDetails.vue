@@ -4,10 +4,13 @@ import { History, ClipboardCopy, Plus } from 'lucide-vue-next'
 import { parseAssessmentBlocks, type AssessmentBlock } from '../lib/assessment-helpers'
 import VulnGroupCardDependencies from './VulnGroupCardDependencies.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   assessment: any
   isReviewer?: boolean
-}>()
+  showDependencies?: boolean
+}>(), {
+  showDependencies: true,
+})
 
 const emit = defineEmits<{
   (e: 'apply-all', details: string, state: string, justification: string): void
@@ -163,7 +166,11 @@ const parsedBlocks = computed(() => parseAssessmentBlocks(props.assessment.detai
       </div>
       <div v-else class="text-[10px] text-gray-600 italic">No assessment recorded.</div>
 
-      <VulnGroupCardDependencies :instances="props.assessment.instances" @mapping-updated="emit('mapping-updated')" />
+      <VulnGroupCardDependencies
+        v-if="props.showDependencies"
+        :instances="props.assessment.instances"
+        @mapping-updated="emit('mapping-updated')"
+      />
     </div>
   </div>
 </template>

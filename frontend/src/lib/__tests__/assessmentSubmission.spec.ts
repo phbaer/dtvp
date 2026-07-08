@@ -28,8 +28,19 @@ describe('assessmentSubmission', () => {
             details: 'Current team details',
             justification: 'NOT_SET',
             currentAssigned: ['alice'],
+            evidenceReviewed: true,
+            versionCoverageChecked: true,
+            ticket: 'SEC-1234',
             teamDrafts: new Map([
-                ['TeamB', { state: 'NOT_AFFECTED', details: 'Other team details', justification: 'CODE_NOT_PRESENT', assigned: ['bob'] }],
+                ['TeamB', {
+                    state: 'NOT_AFFECTED',
+                    details: 'Other team details',
+                    justification: 'CODE_NOT_PRESENT',
+                    assigned: ['bob'],
+                    evidenceReviewed: false,
+                    versionCoverageChecked: true,
+                    ticket: 'APP-9',
+                }],
             ]),
             isReviewer: true,
             pendingVector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
@@ -54,8 +65,14 @@ describe('assessmentSubmission', () => {
             details: 'Current team details',
             justification: 'NOT_SET',
             assigned: ['alice'],
+            evidenceReviewed: true,
+            versionCoverageChecked: true,
+            ticket: 'SEC-1234',
         })
         expect(prepared.reviewText).toContain('--- [Team: TeamA] [State: EXPLOITABLE]')
+        expect(prepared.reviewText).toContain('[Evidence Reviewed: yes]')
+        expect(prepared.reviewText).toContain('[Version Coverage: yes]')
+        expect(prepared.reviewText).toContain('[Ticket: SEC-1234]')
         expect(prepared.reviewText).toContain('[Rescored: 9.8]')
         expect(prepared.reviewText).toContain('[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H]')
         expect(prepared.payload.team).toBe('TeamA')
@@ -74,6 +91,9 @@ describe('assessmentSubmission', () => {
             details: 'Ignored form details',
             justification: 'CODE_NOT_PRESENT',
             currentAssigned: [],
+            evidenceReviewed: false,
+            versionCoverageChecked: false,
+            ticket: '',
             teamDrafts: new Map(),
             isReviewer: false,
             pendingVector: '',

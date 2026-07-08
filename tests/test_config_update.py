@@ -77,6 +77,36 @@ def test_update_roles_analyst_forbidden(client):
         assert "Only reviewers" in response.json()["detail"]
 
 
+def test_update_auto_analysis_guidance_reviewer(client):
+    guidance = {"components": {"keycloak-extension": "Check upstream Keycloak too."}}
+
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        with patch(
+            "dtvp.main.get_auto_analysis_guidance_path",
+            return_value="/tmp/test_auto_guidance.json",
+        ):
+            with patch("builtins.open", mock_open()) as mocked_file:
+                response = client.put(
+                    "/api/settings/auto-analysis-guidance",
+                    json=guidance,
+                )
+
+                assert response.status_code == 200
+                assert response.json()["status"] == "success"
+                mocked_file.assert_called_with("/tmp/test_auto_guidance.json", "w")
+
+
+def test_update_auto_analysis_guidance_analyst_forbidden(client):
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        response = client.put(
+            "/api/settings/auto-analysis-guidance",
+            json={"components": {}},
+        )
+
+        assert response.status_code == 403
+        assert "Only reviewers" in response.json()["detail"]
+
+
 def test_update_team_mapping_analyst_forbidden(client):
     new_mapping = {"comp1": "team1"}
 

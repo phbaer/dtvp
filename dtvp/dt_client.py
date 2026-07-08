@@ -397,17 +397,5 @@ class DTSettings(BaseSettings):
 async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
     settings = DTSettings()
 
-    # Check for credentials in the incoming request to forward to DT
-    token = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-
-    # We can also forward specific cookies if needed, e.g., DT session cookies
-    # For now, we forward all cookies to be safe, or we could filter them
-    cookies = dict(request.cookies)
-
-    async with DTClient(
-        settings.api_url, api_key=settings.api_key, token=token, cookies=cookies
-    ) as client:
+    async with DTClient(settings.api_url, api_key=settings.api_key) as client:
         yield client

@@ -3,8 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../api', () => ({
     analysisQueueList: vi.fn(),
     analysisQueueSubmit: vi.fn(),
+    analysisQueueSubmitFollowUp: vi.fn(),
     analysisQueueGet: vi.fn(),
     analysisQueueCancel: vi.fn(),
+    analysisQueueClear: vi.fn(),
+    analysisQueueCancelQueued: vi.fn(),
 }))
 
 describe('analysisQueueStore', () => {
@@ -109,17 +112,110 @@ describe('analysisQueueStore', () => {
         const onComplete = vi.fn()
         const { analysisQueueStore } = await import('../analysisQueueStore')
 
-        await analysisQueueStore.submit('CVE-1', 'component', undefined, undefined, onComplete)
+        await analysisQueueStore.submit('CVE-1', 'component', undefined, undefined, undefined, onComplete)
 
         await vi.advanceTimersByTimeAsync(3000)
         vi.runAllTicks()
         await vi.advanceTimersByTimeAsync(3000)
         vi.runAllTicks()
 
-        expect(onComplete).toHaveBeenCalledWith({ summary: 'done' })
+        expect(onComplete).toHaveBeenCalledWith(
+            { summary: 'done' },
+            expect.objectContaining({ queue_id: 'queue-1' }),
+        )
         expect(analysisQueueStore.getCachedResult('queue-1')).toEqual({ summary: 'done' })
 
         analysisQueueStore.stopPolling()
+    })
+
+    it('notifies completion callbacks when an item is already completed on the first post-submit refresh', async () => {
+        const api = await import('../api')
+        const listMock = vi.mocked(api.analysisQueueList)
+        const submitMock = vi.mocked(api.analysisQueueSubmit)
+        const getMock = vi.mocked(api.analysisQueueGet)
+
+        submitMock.mockResolvedValue({
+            queue_id: 'queue-fast',
+            vuln_id: 'CVE-1',
+            component_name: 'component',
+            submitted_by: 'tester',
+            submitted_at: 'now',
+            status: 'queued',
+            position: 1,
+        } as any)
+        listMock.mockResolvedValue([
+            {
+                queue_id: 'queue-fast',
+                vuln_id: 'CVE-1',
+                component_name: 'component',
+                submitted_by: 'tester',
+                submitted_at: 'now',
+                status: 'completed',
+                position: 0,
+            },
+        ] as any)
+        getMock.mockResolvedValue({
+            queue_id: 'queue-fast',
+            vuln_id: 'CVE-1',
+            component_name: 'component',
+            submitted_by: 'tester',
+            submitted_at: 'now',
+            status: 'completed',
+            position: 0,
+            result: { summary: 'fast result' } as any,
+        } as any)
+
+        const onComplete = vi.fn()
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+
+        await analysisQueueStore.submit('CVE-1', 'component', undefined, undefined, undefined, onComplete)
+
+        expect(onComplete).toHaveBeenCalledWith(
+            { summary: 'fast result' },
+            expect.objectContaining({ queue_id: 'queue-fast' }),
+        )
+        expect(analysisQueueStore.getCachedResult('queue-fast')).toEqual({ summary: 'fast result' })
+
+        analysisQueueStore.stopPolling()
+    })
+
+    it('submits follow-up queue items with parent context', async () => {
+        const api = await import('../api')
+        const listMock = vi.mocked(api.analysisQueueList)
+        const followUpMock = vi.mocked(api.analysisQueueSubmitFollowUp)
+
+        listMock.mockResolvedValue([])
+        followUpMock.mockResolvedValue({
+            queue_id: 'queue-follow',
+            vuln_id: 'CVE-1',
+            component_name: 'keycloak',
+            submitted_by: 'tester',
+            submitted_at: 'now',
+            status: 'queued',
+            position: 1,
+            parent_run_id: 'run-parent',
+            follow_up_question: 'Is Keycloak itself vulnerable?',
+            source: 'follow-up',
+        } as any)
+
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+
+        const item = await analysisQueueStore.submitFollowUp(
+            'run-parent',
+            'Is Keycloak itself vulnerable?',
+            'keycloak',
+            'ExampleApp',
+        )
+
+        expect(item.queue_id).toBe('queue-follow')
+        expect(followUpMock).toHaveBeenCalledWith({
+            parent_run_id: 'run-parent',
+            question: 'Is Keycloak itself vulnerable?',
+            component_name: 'keycloak',
+            project_name: 'ExampleApp',
+            cvss_vector: undefined,
+            user_guidance: undefined,
+        })
     })
 
     it('keeps queue items ordered by newest submission first after refresh', async () => {

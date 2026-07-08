@@ -41,7 +41,18 @@ vi.mock('lucide-vue-next', () => ({
     GitBranch: { template: '<span />' },
     Eye: { template: '<span />' },
     ClipboardCopy: { template: '<span />' },
-    Plus: { template: '<span />' }
+    Plus: { template: '<span />' },
+    Loader2: { template: '<span />' },
+    XCircle: { template: '<span />' },
+    Clock: { template: '<span />' },
+    ClipboardCheck: { template: '<span />' },
+    Send: { template: '<span />' },
+    Ban: { template: '<span />' },
+    FileText: { template: '<span />' },
+    ClipboardList: { template: '<span />' },
+    Bot: { template: '<span />' },
+    Tags: { template: '<span />' },
+    X: { template: '<span />' }
 }))
 
 describe('VulnGroupCard Branch Coverage', () => {

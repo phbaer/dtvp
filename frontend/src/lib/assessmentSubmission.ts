@@ -12,6 +12,9 @@ export interface AssessmentDraft {
     details: string
     justification: string
     assigned: string[]
+    evidenceReviewed: boolean
+    versionCoverageChecked: boolean
+    ticket: string
 }
 
 interface PrepareAssessmentSubmissionInput {
@@ -22,6 +25,9 @@ interface PrepareAssessmentSubmissionInput {
     details: string
     justification: string
     currentAssigned: string[]
+    evidenceReviewed: boolean
+    versionCoverageChecked: boolean
+    ticket: string
     teamDrafts: Map<string, AssessmentDraft>
     isReviewer: boolean
     pendingVector: string
@@ -194,6 +200,9 @@ export const prepareAssessmentSubmission = (
         details: input.details,
         justification: input.justification,
         assigned: [...input.currentAssigned],
+        evidenceReviewed: input.evidenceReviewed,
+        versionCoverageChecked: input.versionCoverageChecked,
+        ticket: input.ticket.trim(),
     })
 
     const currentFullDetails = collectCurrentFullDetails(input.allInstances, input.originalAnalysis)
@@ -228,6 +237,11 @@ export const prepareAssessmentSubmission = (
                 teamName === targetTeam ? rescoredTags : undefined,
                 !input.isApprove,
                 draft.assigned,
+                {
+                    evidenceReviewed: draft.evidenceReviewed,
+                    versionCoverageChecked: draft.versionCoverageChecked,
+                    ticket: draft.ticket,
+                },
             )
             mergedText = result.text
             mergedState = result.aggregatedState

@@ -2,12 +2,12 @@ server {
     listen 80;
     server_name localhost;
 
-    # Proxy DTVP backend and SPA served under /dtvp
-    location = /dtvp {
-        return 301 /dtvp/;
+    # Proxy DTVP backend and SPA under the configured context path.
+    location = ${DTVP_CONTEXT_PATH} {
+        return 301 ${DTVP_CONTEXT_PATH}/;
     }
 
-    location /dtvp/ {
+    location ${DTVP_CONTEXT_PATH}/ {
         proxy_pass http://dtvp:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -15,16 +15,16 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Proxy Dependency-Track API requests to the apiserver
+    # Proxy Dependency-Track API requests to the apiserver.
     location /api/ {
-        proxy_pass http://dtrack-apiserver:8081/api/;
+        proxy_pass http://dtrack-apiserver:8080/api/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Route all other traffic to the Dependency-Track frontend
+    # Route all other traffic to the Dependency-Track frontend.
     location / {
         proxy_pass http://dtrack-frontend:8080;
         proxy_set_header Host $host;

@@ -3,6 +3,7 @@ import os
 import platform
 import socket
 import sys
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Coroutine, Mapping
@@ -140,6 +141,7 @@ def create_tracked_task(
 async def start_application_runtime(
     deps: StartupServiceDeps,
 ) -> StartupRuntimeTasks:
+    startup_started_at = time.perf_counter()
     deps.analysis_queue.reset_runtime_state()
     details = deps.runtime_details_provider()
     for line in build_startup_console_lines(
@@ -163,9 +165,34 @@ async def start_application_runtime(
             "DTVP environment: %s",
             format_startup_details(environment_details),
         )
+
+    tmrescore_cache_started_at = time.perf_counter()
     deps.tmrescore_project_cache.clear()
-    deps.tmrescore_project_cache.update(deps.load_tmrescore_project_cache())
+    tmrescore_cache = await asyncio.to_thread(deps.load_tmrescore_project_cache)
+    deps.tmrescore_project_cache.update(tmrescore_cache)
+    tmrescore_cache_line = (
+        "DTVP startup step completed: tmrescore cache loaded "
+        f"in {(time.perf_counter() - tmrescore_cache_started_at) * 1000:.1f} ms "
+        f"(projects={len(tmrescore_cache)})"
+    )
+    deps.console_writer(tmrescore_cache_line)
+    deps.logger.info(tmrescore_cache_line)
+
+    dt_cache_started_at = time.perf_counter()
     await deps.initialize_cache_manager()
+    dt_cache_line = (
+        "DTVP startup step completed: Dependency-Track cache initialized "
+        f"in {(time.perf_counter() - dt_cache_started_at) * 1000:.1f} ms"
+    )
+    deps.console_writer(dt_cache_line)
+    deps.logger.info(dt_cache_line)
+
+    ready_line = (
+        "DTVP startup ready: runtime tasks starting "
+        f"after {(time.perf_counter() - startup_started_at) * 1000:.1f} ms"
+    )
+    deps.console_writer(ready_line)
+    deps.logger.info(ready_line)
     return StartupRuntimeTasks(
         sync_task=deps.create_task(deps.run_background_sync_loop()),
         auto_analysis_task=deps.create_task(deps.run_auto_analysis_sweep_loop()),

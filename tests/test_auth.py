@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from jose import jwt
 from dtvp.auth import auth_settings, get_oidc_config
@@ -227,35 +227,39 @@ async def test_get_current_user_dev_disable_auth():
         headers = {}
 
     with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", new=True):
-        user = await get_current_user(DummyRequest(), client_gen=AsyncMock())
+        user = await get_current_user(DummyRequest())
         assert user == "devuser"
 
 
 @pytest.mark.asyncio
-async def test_get_current_user_auto_login_with_dt_profile():
+async def test_get_current_user_rejects_request_without_dtvp_session():
     from dtvp.auth import get_current_user
 
     class DummyRequest:
-        cookies = {"session_token": ""}
-        headers = {"Authorization": "Bearer test-token"}
-
-    async def fake_client_gen():
-        class FakeClient:
-            def __init__(self):
-                self.headers = {"Authorization": "Bearer test-token"}
-                self.client = MagicMock(cookies={"session_token": "cookie-value"})
-
-            async def get_current_user_profile(self):
-                return {"username": "dt_user"}
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc_val, exc_tb):
-                return None
-
-        yield FakeClient()
+        cookies = {}
+        headers = {}
 
     with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", new=False):
-        user = await get_current_user(DummyRequest(), client_gen=fake_client_gen())
-        assert user == "dt_user"
+        with pytest.raises(HTTPException) as exc:
+            await get_current_user(DummyRequest())
+
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_get_current_user_ignores_dependency_track_identity_material():
+    from dtvp.auth import get_current_user
+
+    class DummyRequest:
+        cookies = {
+            "corporate_sso": "cookie-value",
+            "dt_session": "legacy-dt-cookie",
+            "session_token": "",
+        }
+        headers = {"Authorization": "Bearer dependency-track-token"}
+
+    with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", new=False):
+        with pytest.raises(HTTPException) as exc:
+            await get_current_user(DummyRequest())
+
+    assert exc.value.status_code == 401

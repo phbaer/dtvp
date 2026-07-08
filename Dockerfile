@@ -9,8 +9,8 @@ WORKDIR /app/frontend
 # Copy frontend package files
 COPY frontend/package*.json ./
 
-# Install frontend dependencies
-RUN npm ci
+# Install frontend dependencies, including native optional packages used by Vite/Rolldown.
+RUN npm ci --include=optional
 
 # Copy frontend source code
 COPY frontend/ ./
@@ -46,6 +46,7 @@ RUN chmod +x start.sh
 
 # Copy the built frontend from the frontend-build stage
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
+RUN cp ./frontend/dist/index.html ./frontend/dist/index.html.template
 
 # Expose the port
 EXPOSE 8000

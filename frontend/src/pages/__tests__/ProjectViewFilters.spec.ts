@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import ProjectView from '../ProjectView.vue'
 import { getGroupedVulns, getTMRescoreProposals } from '../../lib/api'
 import { mountWithRouter } from './routerTestUtils'
@@ -14,6 +15,7 @@ vi.mock('../../lib/api', () => ({
     getTaskStatistics: vi.fn(() => Promise.resolve({ severity_counts: {}, state_counts: {}, total_unique: 0, total_findings: 0, affected_projects_count: 0, version_counts: {} })),
     updateAssessment: vi.fn(),
     getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
+    codeAnalysisListResults: vi.fn(() => Promise.resolve([])),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} })),
@@ -26,6 +28,14 @@ vi.mock('../../components/VulnRowCompact.vue', () => ({
         template: '<div class="vuln-card" :data-id="item.group.id">{{ item.group.id }}</div>',
         props: ['item']
     }
+}))
+
+vi.mock('../../components/VulnDetailInspector.vue', () => ({
+    default: {
+        name: 'VulnDetailInspector',
+        template: '<aside data-testid="detail-inspector">{{ group.id }}</aside>',
+        props: ['group'],
+    },
 }))
 
 describe('ProjectView Filters', () => {
@@ -228,6 +238,57 @@ describe('ProjectView Filters', () => {
         expect(cards.length).toBe(0) // None are INCOMPLETE
     })
 
+    it('reuses the cached project list when returning from code analysis to a vulnerability card', async () => {
+        ;(getGroupedVulns as any).mockResolvedValue([
+            {
+                id: 'V1',
+                severity: 'HIGH',
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        project_name: 'TestProject',
+                        project_uuid: 'p1',
+                        project_version: '1.0',
+                        components: [
+                            {
+                                component_name: 'CompA',
+                                analysis_state: 'NOT_SET',
+                                analysis_details: '',
+                            },
+                        ],
+                    },
+                ],
+            },
+        ])
+
+        const { wrapper, router } = await mountWithRouter(ProjectView, {
+            initialPath: '/project/TestProject',
+            routes: [
+                { path: '/code-analysis', component: { template: '<div />' } },
+                { path: '/project/:name', component: ProjectView },
+            ],
+            mountOptions: {
+                global: {
+                    provide: {
+                        user: { value: { role: 'REVIEWER' } },
+                    },
+                },
+            },
+        })
+
+        expect(getGroupedVulns).toHaveBeenCalledTimes(1)
+
+        await router.push('/code-analysis')
+        await flushPromises()
+        expect(getGroupedVulns).toHaveBeenCalledTimes(1)
+
+        await router.push('/project/TestProject?vuln=V1')
+        await flushPromises()
+
+        expect(getGroupedVulns).toHaveBeenCalledTimes(1)
+        expect(wrapper.get('[data-testid="detail-inspector"]').text()).toContain('V1')
+    })
+
     it('ANDs lifecycle and analysis filters strictly', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
         const wrapper = await mountProjectViewRoute()
@@ -331,6 +392,7 @@ describe('ProjectView Filters', () => {
     it('filters vulnerabilities by project attribution age', async () => {
         const now = Date.UTC(2026, 5, 29, 12)
         const dayMs = 24 * 60 * 60 * 1000
+        const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now)
         ;(getGroupedVulns as any).mockResolvedValue([
             {
                 id: 'V-OLD',
@@ -396,6 +458,8 @@ describe('ProjectView Filters', () => {
         cards = wrapper.findAll('.vuln-card')
         expect(cards.length).toBe(1)
         expect(cards[0]?.text()).toContain('V-OLD')
+
+        dateNowSpy.mockRestore()
     })
 
     it('shows "Pending Review" vulnerabilities regardless of filters', async () => {

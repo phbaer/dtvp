@@ -7,6 +7,7 @@ const routes = [
     { path: '/login', component: () => import('./pages/Login.vue') },
     { path: '/', component: () => import('./pages/Dashboard.vue') },
     { path: '/settings', component: () => import('./pages/Settings.vue'), meta: { role: 'REVIEWER' } },
+    { path: '/code-analysis', component: () => import('./pages/CodeAnalysisDashboard.vue') },
     { path: '/project/:name', component: () => import('./pages/ProjectView.vue') },
     { path: '/project/:name/tmrescore', component: () => import('./pages/TMRescore.vue'), meta: { role: 'REVIEWER' } },
     { path: '/statistics', component: () => import('./pages/Statistics.vue') },

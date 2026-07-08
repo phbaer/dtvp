@@ -318,6 +318,16 @@ watch(open, (isOpen) => {
                 </div>
             </div>
 
+            <div class="p-3 border-b border-gray-700/50 bg-gray-950/20">
+                <RouterLink
+                    to="/code-analysis"
+                    class="flex h-8 items-center justify-center rounded border border-cyan-700/40 bg-cyan-600/10 text-[10px] font-bold uppercase tracking-wider text-cyan-200 transition-colors hover:bg-cyan-600/20"
+                    @click="close"
+                >
+                    Open Code Analysis Dashboard
+                </RouterLink>
+            </div>
+
             <div v-if="analysisQueueStore.items.value.length === 0" class="p-4 text-center text-xs text-gray-500">
                 No analyses in queue
             </div>

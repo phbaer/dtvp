@@ -3,11 +3,13 @@ import type { VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App.vue'
 import { getUserInfo, getVersion } from '../lib/api'
+import { projectHeaderState } from '../lib/projectHeaderStore'
 
 const mocks = vi.hoisted(() => ({
     route: {
         path: '/',
         fullPath: '/',
+        query: {} as Record<string, unknown>,
         meta: {} as Record<string, unknown>,
     },
     router: {
@@ -85,10 +87,17 @@ describe('App bootstrap state', () => {
         vi.clearAllMocks()
         mocks.route.path = '/'
         mocks.route.fullPath = '/'
+        mocks.route.query = {}
         mocks.route.meta = {}
         mocks.router.replace.mockResolvedValue(undefined)
+        mocks.router.push.mockResolvedValue(undefined)
         mocks.getChangelog.mockResolvedValue({ content: '' })
         mocks.getUserInfo.mockResolvedValue({ username: 'reviewer', role: 'REVIEWER' })
+        projectHeaderState.currentProjectName.value = null
+        projectHeaderState.lastProjectName.value = null
+        projectHeaderState.lastProjectPath.value = null
+        projectHeaderState.isAllProjects.value = true
+        projectHeaderState.viewMode.value = 'analysis'
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
         vi.stubGlobal('localStorage', createLocalStorageMock())
     })
@@ -128,5 +137,44 @@ describe('App bootstrap state', () => {
         expect(getUserInfo).toHaveBeenCalled()
         expect(wrapper.find('[data-testid="app-bootstrap-state"]').exists()).toBe(false)
         expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(true)
+    })
+
+    it('offers a return to the last vulnerability list from code analysis', async () => {
+        mocks.getVersion.mockResolvedValue({ version: '1.2.3', build: 'abc123' })
+        mocks.route.path = '/code-analysis'
+        mocks.route.fullPath = '/code-analysis'
+        projectHeaderState.lastProjectName.value = 'Example App'
+        projectHeaderState.lastProjectPath.value = '/project/Example%20App?id=CVE-2026-1'
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        const button = wrapper.findAll('button')
+            .find(candidate => candidate.text().includes('Vuln List'))
+        expect(button).toBeTruthy()
+
+        await button?.trigger('click')
+
+        expect(mocks.router.push).toHaveBeenCalledWith('/project/Example%20App?id=CVE-2026-1')
+    })
+
+    it('labels the project statistics toggle as a vulnerability-list return', async () => {
+        mocks.getVersion.mockResolvedValue({ version: '1.2.3', build: 'abc123' })
+        mocks.route.path = '/project/ExampleApp'
+        mocks.route.fullPath = '/project/ExampleApp'
+        projectHeaderState.currentProjectName.value = 'ExampleApp'
+        projectHeaderState.isAllProjects.value = false
+        projectHeaderState.viewMode.value = 'statistics'
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        const button = wrapper.findAll('button')
+            .find(candidate => candidate.text().includes('Vuln List'))
+        expect(button).toBeTruthy()
+
+        await button?.trigger('click')
+
+        expect(projectHeaderState.viewMode.value).toBe('analysis')
     })
 })

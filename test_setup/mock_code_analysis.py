@@ -5,11 +5,12 @@ Implements the same API surface as the real Code Analysis service:
   GET  /jobs             – list all jobs
   GET  /jobs/{id}        – poll job status
   GET  /jobs/{id}/result – fetch completed result
-  DELETE /jobs/{id}      – remove a finished job
+  DELETE /jobs/{id}      – cancel a running job or remove a finished job
   GET  /health           – liveness probe
 """
 
 import hashlib
+import os
 import threading
 import time
 import uuid
@@ -31,6 +32,17 @@ app = FastAPI(
 
 jobs: Dict[str, Dict[str, Any]] = {}
 _lock = threading.Lock()
+_DEFAULT_MODEL = "gpt-4o"
+_DEFAULT_LLM_BACKEND = "mock-openai-compatible"
+_DEFAULT_LLM_PROVIDER = "mock"
+try:
+    _MAX_CONCURRENT_JOBS = max(
+        1,
+        int(os.getenv("MOCK_CODE_ANALYSIS_MAX_CONCURRENT_JOBS", "1")),
+    )
+except (TypeError, ValueError):
+    _MAX_CONCURRENT_JOBS = 1
+_analysis_slots = threading.BoundedSemaphore(_MAX_CONCURRENT_JOBS)
 
 
 def _now_iso() -> str:
@@ -44,6 +56,9 @@ class AssessRequest(BaseModel):
     vuln_id: Optional[str] = None
     cvss_vector: Optional[str] = None
     component_name: str
+    model: Optional[str] = None
+    llm_backend: Optional[str] = None
+    llm_provider: Optional[str] = None
     focus_path: Optional[str] = None
     dependency_paths: Optional[List[List[str]]] = None
     user_guidance: Optional[str] = None
@@ -157,6 +172,90 @@ def _deterministic_index(seed: str, n: int) -> int:
     return int(h, 16) % n
 
 
+def _llm_metadata(req: AssessRequest) -> Dict[str, str]:
+    return {
+        "model": req.model or _DEFAULT_MODEL,
+        "backend": req.llm_backend or _DEFAULT_LLM_BACKEND,
+        "provider": req.llm_provider or _DEFAULT_LLM_PROVIDER,
+    }
+
+
+def _service_configuration() -> Dict[str, Any]:
+    return {
+        "service_name": "Mock Code Analysis",
+        "service_version": app.version,
+        "config_dir": "test_setup",
+        "repos_config_path": "test_setup/mock-repositories.yaml",
+        "repositories": {
+            "workspace_dir": "/tmp/dtvp-mock-code-analysis",
+            "component_count": 3,
+            "components": ["owned-service", "owned-worker", "owned-ui"],
+            "aliases": ["libA", "libB"],
+            "default_template_configured": True,
+            "hot_reload": False,
+        },
+        "features": {
+            "job_logs": True,
+            "model_override": True,
+            "running_abort": True,
+        },
+    }
+
+
+def _status_counts(job_snapshot: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for job in job_snapshot:
+        status = str(job.get("status") or "unknown")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _backend_information(
+    *,
+    model: str = _DEFAULT_MODEL,
+    llm_backend: str = _DEFAULT_LLM_BACKEND,
+    llm_provider: str = _DEFAULT_LLM_PROVIDER,
+    job_snapshot: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    snapshot = job_snapshot or []
+    status_counts = _status_counts(snapshot)
+    running_jobs = status_counts.get("running", 0)
+    queued_jobs = status_counts.get("pending", 0)
+    return {
+        "llm": {
+            "provider": llm_provider,
+            "backend": llm_backend,
+            "host": "mock://code-analysis/llm",
+            "model": model,
+            "healthy": True,
+            "last_error": None,
+            "supports_model_override": True,
+        },
+        "repositories": {
+            "workspace_dir": "/tmp/dtvp-mock-code-analysis",
+            "reuse_strategy": "mock-fixtures",
+            "update_strategy": "none",
+            "parallel_safety": "thread-lock",
+        },
+        "jobs": {
+            "job_store": "in-memory",
+            "execution_model": "bounded thread-per-job",
+            "known_jobs": len(snapshot),
+            "max_concurrent_jobs": _MAX_CONCURRENT_JOBS,
+            "running_jobs": running_jobs,
+            "queued_jobs": queued_jobs,
+            "available_slots": max(0, _MAX_CONCURRENT_JOBS - running_jobs),
+            "status_counts": status_counts,
+        },
+    }
+
+
+def _append_job_log(job: Dict[str, Any], message: str, level: str = "info") -> None:
+    logs = job.setdefault("logs", [])
+    logs.append({"timestamp": _now_iso(), "level": level, "message": message})
+    del logs[:-200]
+
+
 def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
     seed = f"{req.vuln_id or ''}|{req.component_name}"
     verdict_template = _VERDICTS[_deterministic_index(seed, len(_VERDICTS))]
@@ -179,7 +278,11 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
             if step_tmpl["step"] in ("code_reachability", "llm_analysis")
             else True
         )
-        findings = step_tmpl["pass_findings"] if is_pass else step_tmpl["fail_findings"]
+        findings = dict(
+            step_tmpl["pass_findings"] if is_pass else step_tmpl["fail_findings"]
+        )
+        if step_tmpl["step"] == "llm_analysis":
+            findings.update(_llm_metadata(req))
         evidence = step_tmpl["pass_evidence"] if is_pass else step_tmpl["fail_evidence"]
         evidence = [e.format(component=req.component_name) for e in evidence]
         steps.append(
@@ -272,6 +375,10 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
         reasoning += f" (User guidance considered: {req.user_guidance})"
 
     return {
+        "llm": _llm_metadata(req),
+        "model": req.model or _DEFAULT_MODEL,
+        "llm_backend": req.llm_backend or _DEFAULT_LLM_BACKEND,
+        "llm_provider": req.llm_provider or _DEFAULT_LLM_PROVIDER,
         "assessment": {
             "affected": affected,
             "verdict": verdict_template["verdict"],
@@ -439,51 +546,73 @@ def _run_job_async(job_id: str, req: AssessRequest) -> None:
     total_steps = len(_PIPELINE_STEPS)
 
     def worker():
-        # Initial pending delay
-        time.sleep(1)
+        with _analysis_slots:
+            # Initial pending delay
+            time.sleep(1)
 
-        with _lock:
-            job = jobs.get(job_id)
-            if not job:
-                return
-            job["status"] = "running"
-            job["progress"] = _build_progress(0, total_steps, 0, {})
-
-        step_statuses: Dict[str, str] = {}
-
-        # Walk through each pipeline step with a short delay
-        for i, step_def in enumerate(_PIPELINE_STEPS):
-            step_statuses[step_def["step"]] = "running"
             with _lock:
                 job = jobs.get(job_id)
                 if not job:
                     return
+                if job["status"] == "cancelled":
+                    return
+                job["status"] = "running"
+                job["progress"] = _build_progress(0, total_steps, 0, {})
+                _append_job_log(job, "Analyzer started scan")
+
+            step_statuses: Dict[str, str] = {}
+
+            # Walk through each pipeline step with a short delay
+            for i, step_def in enumerate(_PIPELINE_STEPS):
+                step_statuses[step_def["step"]] = "running"
+                with _lock:
+                    job = jobs.get(job_id)
+                    if not job:
+                        return
+                    if job["status"] == "cancelled":
+                        return
+                    job["progress"] = _build_progress(
+                        i, total_steps, i, dict(step_statuses)
+                    )
+                    activity = _STEP_ACTIVITIES.get(step_def["step"], "Processing")
+                    _append_job_log(job, f"{step_def['agent']}: {activity}")
+
+                # Simulate variable processing time per step
+                if step_def["step"] in ("llm_analysis", "code_reachability"):
+                    time.sleep(1.5)
+                elif step_def["step"] in (
+                    "scan_dependencies",
+                    "scan_code",
+                    "prepare_repo",
+                ):
+                    time.sleep(1.0)
+                else:
+                    time.sleep(0.5)
+
+                step_statuses[step_def["step"]] = "completed"
+                with _lock:
+                    job = jobs.get(job_id)
+                    if not job:
+                        return
+                    if job["status"] == "cancelled":
+                        return
+                    _append_job_log(job, f"Completed {step_def['title']}")
+
+            # Finalize
+            result = _build_assessment(req)
+            with _lock:
+                job = jobs.get(job_id)
+                if not job:
+                    return
+                if job["status"] == "cancelled":
+                    return
+                job["status"] = "completed"
+                job["finished_at"] = _now_iso()
+                job["result"] = result
                 job["progress"] = _build_progress(
-                    i, total_steps, i, dict(step_statuses)
+                    total_steps, total_steps, total_steps, step_statuses
                 )
-
-            # Simulate variable processing time per step
-            if step_def["step"] in ("llm_analysis", "code_reachability"):
-                time.sleep(1.5)
-            elif step_def["step"] in ("scan_dependencies", "scan_code", "prepare_repo"):
-                time.sleep(1.0)
-            else:
-                time.sleep(0.5)
-
-            step_statuses[step_def["step"]] = "completed"
-
-        # Finalize
-        result = _build_assessment(req)
-        with _lock:
-            job = jobs.get(job_id)
-            if not job:
-                return
-            job["status"] = "completed"
-            job["finished_at"] = _now_iso()
-            job["result"] = result
-            job["progress"] = _build_progress(
-                total_steps, total_steps, total_steps, step_statuses
-            )
+                _append_job_log(job, "Assessment complete")
 
     t = threading.Thread(target=worker, daemon=True)
     t.start()
@@ -494,7 +623,21 @@ def _run_job_async(job_id: str, req: AssessRequest) -> None:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    with _lock:
+        job_snapshot = list(jobs.values())
+    return {
+        "status": "ok",
+        "model": _DEFAULT_MODEL,
+        "llm_backend": _DEFAULT_LLM_BACKEND,
+        "llm_provider": _DEFAULT_LLM_PROVIDER,
+        "llm": {
+            "model": _DEFAULT_MODEL,
+            "backend": _DEFAULT_LLM_BACKEND,
+            "provider": _DEFAULT_LLM_PROVIDER,
+        },
+        "configuration": _service_configuration(),
+        "backend": _backend_information(job_snapshot=job_snapshot),
+    }
 
 
 @app.post("/assess")
@@ -514,6 +657,18 @@ async def assess(req: AssessRequest, sync: bool = Query(default=False)):
         "error": None,
         "result": None,
         "request": req.model_dump(),
+        "model": req.model or _DEFAULT_MODEL,
+        "llm_backend": req.llm_backend or _DEFAULT_LLM_BACKEND,
+        "llm_provider": req.llm_provider or _DEFAULT_LLM_PROVIDER,
+        "llm": _llm_metadata(req),
+        "configuration": _service_configuration(),
+        "logs": [
+            {
+                "timestamp": _now_iso(),
+                "level": "info",
+                "message": "Queued scan",
+            }
+        ],
         "progress": {
             "completed_steps": 0,
             "total_steps": len(_PIPELINE_STEPS),
@@ -522,6 +677,7 @@ async def assess(req: AssessRequest, sync: bool = Query(default=False)):
     }
     with _lock:
         jobs[job_id] = job
+        job_snapshot = list(jobs.values())
 
     _run_job_async(job_id, req)
 
@@ -529,12 +685,24 @@ async def assess(req: AssessRequest, sync: bool = Query(default=False)):
         "job_id": job_id,
         "status": "pending",
         "poll_url": f"/jobs/{job_id}",
+        "model": req.model or _DEFAULT_MODEL,
+        "llm_backend": req.llm_backend or _DEFAULT_LLM_BACKEND,
+        "llm_provider": req.llm_provider or _DEFAULT_LLM_PROVIDER,
+        "llm": _llm_metadata(req),
+        "configuration": _service_configuration(),
+        "backend": _backend_information(
+            model=req.model or _DEFAULT_MODEL,
+            llm_backend=req.llm_backend or _DEFAULT_LLM_BACKEND,
+            llm_provider=req.llm_provider or _DEFAULT_LLM_PROVIDER,
+            job_snapshot=job_snapshot,
+        ),
     }
 
 
 @app.get("/jobs")
 async def list_jobs():
     with _lock:
+        job_snapshot = list(jobs.values())
         return {
             "jobs": [
                 {
@@ -543,6 +711,12 @@ async def list_jobs():
                     "created_at": j["created_at"],
                     "finished_at": j["finished_at"],
                     "error": j["error"],
+                    "request": j.get("request"),
+                    "model": j.get("model"),
+                    "llm_backend": j.get("llm_backend"),
+                    "llm_provider": j.get("llm_provider"),
+                    "llm": j.get("llm"),
+                    "logs": j.get("logs", [])[-50:],
                     "progress": j.get(
                         "progress",
                         {
@@ -553,7 +727,9 @@ async def list_jobs():
                     ),
                 }
                 for j in jobs.values()
-            ]
+            ],
+            "configuration": _service_configuration(),
+            "backend": _backend_information(job_snapshot=job_snapshot),
         }
 
 
@@ -561,6 +737,7 @@ async def list_jobs():
 async def get_job_status(job_id: str):
     with _lock:
         job = jobs.get(job_id)
+        job_snapshot = list(jobs.values())
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return {
@@ -569,6 +746,19 @@ async def get_job_status(job_id: str):
         "created_at": job["created_at"],
         "finished_at": job["finished_at"],
         "error": job["error"],
+        "request": job.get("request"),
+        "model": job.get("model"),
+        "llm_backend": job.get("llm_backend"),
+        "llm_provider": job.get("llm_provider"),
+        "llm": job.get("llm"),
+        "configuration": job.get("configuration") or _service_configuration(),
+        "backend": _backend_information(
+            model=job.get("model") or _DEFAULT_MODEL,
+            llm_backend=job.get("llm_backend") or _DEFAULT_LLM_BACKEND,
+            llm_provider=job.get("llm_provider") or _DEFAULT_LLM_PROVIDER,
+            job_snapshot=job_snapshot,
+        ),
+        "logs": job.get("logs", [])[-100:],
         "progress": job.get(
             "progress",
             {
@@ -588,6 +778,8 @@ async def get_job_result(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     if job["status"] == "pending" or job["status"] == "running":
         raise HTTPException(status_code=409, detail="The job has not completed yet.")
+    if job["status"] == "cancelled":
+        raise HTTPException(status_code=409, detail="The job was cancelled.")
     if job["status"] == "failed":
         raise HTTPException(status_code=500, detail=job["error"] or "Job failed")
     return job["result"]
@@ -600,10 +792,12 @@ async def delete_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job["status"] in ("pending", "running"):
-        raise HTTPException(
-            status_code=409,
-            detail="The job is still running and cannot be deleted yet.",
-        )
+        with _lock:
+            job["status"] = "cancelled"
+            job["finished_at"] = _now_iso()
+            job["error"] = "Cancelled by request."
+            _append_job_log(job, "Cancelled by request.", level="warning")
+        return Response(status_code=204)
     with _lock:
         jobs.pop(job_id, None)
     return Response(status_code=204)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, toRefs } from 'vue'
-import { CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
+import { Bot, CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
 import { parseAttributionTimestamp } from '../lib/vulnListIndex'
 
@@ -24,9 +24,12 @@ const props = defineProps<{
   showExpandToggle?: boolean
   baseScoreDisplayOverride?: string
   rescoredScoreDisplayOverride?: string
+  scoreTitle?: string
+  hasUnsavedDraft?: boolean
   instanceCountOverride?: number
   oldestAttributedOnMsOverride?: number | null
   componentSummaryOverride?: string
+  hasAutomaticAssessment?: boolean
 }>()
 
 const {
@@ -227,7 +230,8 @@ const componentSummary = computed(() => {
           {{ group.id }}
         </span>
 
-        <span v-if="compact" class="inline-flex shrink-0 items-center gap-1 rounded border border-gray-700/70 bg-gray-950/40 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-200" data-testid="header-cvss-block" title="CVSS base score">
+        <span v-if="compact" class="inline-flex shrink-0 items-center gap-1 rounded border border-gray-700/70 bg-gray-950/40 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-200" data-testid="header-cvss-block" :title="props.scoreTitle || 'CVSS base score'">
+          <span class="text-gray-500">CVSS</span>
           <span data-testid="base-score-value">{{ baseScoreDisplay }}</span>
           <template v-if="isRescoredOrModified">
             <span class="text-gray-600" data-testid="rescored-arrow">&rarr;</span>
@@ -263,6 +267,22 @@ const componentSummary = computed(() => {
 
         <span class="w-px h-3.5 bg-gray-700 mx-0.5 shrink-0"></span>
 
+        <span
+          v-if="!compact"
+          class="inline-flex items-center gap-1 rounded border border-gray-700/70 bg-gray-950/50 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-gray-200 shrink-0"
+          data-testid="header-cvss-block"
+          :title="props.scoreTitle || 'CVSS base score'"
+        >
+          <span class="text-gray-500">CVSS</span>
+          <span data-testid="base-score-value">{{ baseScoreDisplay }}</span>
+          <template v-if="isRescoredOrModified">
+            <span class="text-gray-600" data-testid="rescored-arrow">&rarr;</span>
+            <span :class="pendingScore !== null ? 'text-purple-400' : 'text-purple-500'" data-testid="rescored-value-badge" title="Rescored CVSS score after contextual analysis">
+              {{ rescoredScoreDisplay }}
+            </span>
+          </template>
+        </span>
+
         <!-- Meta badges -->
         <span v-if="dependencyRelationship !== 'UNKNOWN'"
           :class="['inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1 py-0.5 rounded border shrink-0',
@@ -287,6 +307,26 @@ const componentSummary = computed(() => {
         <span v-if="isPendingReview && !canApprove" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
           <Eye :size="9" />
           Review
+        </span>
+
+        <span
+          v-if="props.hasAutomaticAssessment"
+          class="inline-flex items-center gap-1 rounded border border-cyan-500/25 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-300 shrink-0"
+          data-testid="automatic-assessment-badge"
+          title="Automatic code-analysis assessment is available"
+        >
+          <Bot :size="9" />
+          Auto
+        </span>
+
+        <span
+          v-if="props.hasUnsavedDraft"
+          class="inline-flex items-center gap-1 rounded border border-amber-700/40 bg-amber-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-200 shrink-0"
+          data-testid="header-draft-chip"
+          title="This expanded card has local assessment edits that have not been applied"
+        >
+          <AlertTriangle :size="9" />
+          Unsaved draft
         </span>
 
         <template v-if="compact">
@@ -323,17 +363,6 @@ const componentSummary = computed(() => {
           <CheckCircle :size="9" />
           Approve
         </button>
-      </div>
-
-      <!-- Score row -->
-      <div v-if="!compact" class="flex items-center gap-1.5 mt-1" data-testid="header-cvss-block" title="CVSS base score">
-        <span class="text-sm font-black text-gray-100 tabular-nums" data-testid="base-score-value">{{ baseScoreDisplay }}</span>
-        <template v-if="isRescoredOrModified">
-          <span class="text-[10px] text-gray-600" data-testid="rescored-arrow">&rarr;</span>
-          <span :class="['text-sm font-black tabular-nums', pendingScore !== null ? 'text-purple-400' : 'text-purple-500']" data-testid="rescored-value-badge" title="Rescored CVSS score after contextual analysis">
-            {{ rescoredScoreDisplay }}
-          </span>
-        </template>
       </div>
 
       <!-- Team tags row -->

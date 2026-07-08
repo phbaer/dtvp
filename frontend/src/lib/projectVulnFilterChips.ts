@@ -1,4 +1,4 @@
-import type { DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
+import type { AutomaticAssessmentFilter, DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
 
 export type ActiveFilterChipKey =
     | 'lifecycle'
@@ -10,6 +10,7 @@ export type ActiveFilterChipKey =
     | 'assignee'
     | 'versions'
     | 'tmrescore'
+    | 'automaticAssessment'
     | 'cvss'
     | 'attributionAge'
 
@@ -37,6 +38,8 @@ export interface BuildActiveFilterChipsInput {
     versionFilters: readonly string[]
     tmrescoreFilters: readonly TMRescoreProposalFilter[]
     tmrescoreOptions: readonly ProjectVulnFilterOption[]
+    automaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
+    automaticAssessmentOptions: readonly ProjectVulnFilterOption[]
     cvssVersionMismatchOnly: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
@@ -61,6 +64,8 @@ export interface HasCustomProjectVulnFilterStateInput {
     defaultDependencyFilters: readonly DependencyRelationship[]
     tmrescoreFilters: readonly TMRescoreProposalFilter[]
     defaultTMRescoreFilters: readonly TMRescoreProposalFilter[]
+    automaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
+    defaultAutomaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
 }
 
 export const optionLabel = (
@@ -107,6 +112,8 @@ export function buildActiveFilterChips({
     versionFilters,
     tmrescoreFilters,
     tmrescoreOptions,
+    automaticAssessmentFilters,
+    automaticAssessmentOptions,
     cvssVersionMismatchOnly,
     attributionAgeDays,
     attributionAgeMode,
@@ -130,6 +137,9 @@ export function buildActiveFilterChips({
     if (versionFilters.length) chips.push({ key: 'versions', label: `Versions: ${versionFilters.join(', ')}` })
     if (tmrescoreFilters.length !== tmrescoreOptions.length) {
         chips.push({ key: 'tmrescore', label: `TM: ${summarizedSelection(tmrescoreFilters, tmrescoreOptions, 'All proposals')}` })
+    }
+    if (automaticAssessmentFilters.length !== automaticAssessmentOptions.length) {
+        chips.push({ key: 'automaticAssessment', label: `Auto: ${summarizedSelection(automaticAssessmentFilters, automaticAssessmentOptions, 'All automatic assessments')}` })
     }
     if (cvssVersionMismatchOnly) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
     if (attributionAgeDays != null) {
@@ -159,6 +169,8 @@ export function hasCustomProjectVulnFilterState({
     defaultDependencyFilters,
     tmrescoreFilters,
     defaultTMRescoreFilters,
+    automaticAssessmentFilters,
+    defaultAutomaticAssessmentFilters,
 }: HasCustomProjectVulnFilterStateInput): boolean {
     return !!smartSearchInput.trim()
         || !!idFilter
@@ -174,4 +186,5 @@ export function hasCustomProjectVulnFilterState({
         || !sameStringSet(analysisFilters, defaultAnalysisFilters)
         || !sameStringSet(dependencyFilters, defaultDependencyFilters)
         || !sameStringSet(tmrescoreFilters, defaultTMRescoreFilters)
+        || !sameStringSet(automaticAssessmentFilters, defaultAutomaticAssessmentFilters)
 }

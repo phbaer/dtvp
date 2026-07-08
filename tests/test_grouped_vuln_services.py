@@ -1,9 +1,100 @@
-from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
+import asyncio
+
+from dtvp.grouped_vuln_services import (
+    GroupedVulnServiceDeps,
+    _build_grouped_vuln_task_artifacts,
+    collect_version_snapshots,
+    summarize_grouped_vulnerabilities,
+)
 from dtvp.task_group_query_services import (
     build_task_group_query_index,
     decode_task_group_cursor,
     query_task_groups,
 )
+
+
+def test_collect_version_snapshots_throttles_partial_publications():
+    versions = [
+        {"name": "Example", "version": str(index), "uuid": f"version-{index}"}
+        for index in range(25)
+    ]
+    progress_updates: list[int] = []
+    partial_sizes: list[int] = []
+
+    class FakeCacheManager:
+        async def get_vulnerabilities(self, client, project_uuid, cve=None):
+            return [
+                {
+                    "vulnerability": {
+                        "vulnId": f"CVE-{project_uuid}",
+                        "severity": "HIGH",
+                    }
+                }
+            ]
+
+        async def get_project_vulnerabilities(self, client, project_uuid):
+            return []
+
+        async def get_bom(self, client, project_uuid):
+            return {}
+
+    deps = GroupedVulnServiceDeps(
+        cache_manager=FakeCacheManager(),
+        logger=None,
+        tasks={},
+        bom_analysis_cache_cls=lambda bom, team_mapping: object(),
+        get_version_fetch_concurrency=lambda: 25,
+        merge_vulnerability_details=lambda findings, full_vulns: {
+            "HIGH": len(findings)
+        },
+        sort_projects_by_version=lambda values: values,
+        load_team_mapping=lambda: {},
+        group_vulnerabilities=lambda combined_data, **kwargs: [],
+    )
+
+    def record_progress(completed, total, version):
+        progress_updates.append(completed)
+
+    def record_partial(partial_data, bom_map, severity_counts):
+        partial_sizes.append(len(partial_data))
+
+    asyncio.run(
+        collect_version_snapshots(
+            deps,
+            versions,
+            client=object(),
+            cve=None,
+            team_mapping={},
+            progress_callback=record_progress,
+            partial_callback=record_partial,
+        )
+    )
+
+    assert sorted(progress_updates) == list(range(1, 26))
+    assert partial_sizes[0] == 1
+    assert partial_sizes[-1] == 25
+    assert len(partial_sizes) < len(versions)
+
+
+def test_summary_artifact_build_skips_dependency_chain_expansion():
+    call_kwargs = {}
+
+    def group_vulnerabilities(combined_data, **kwargs):
+        call_kwargs.update(kwargs)
+        return []
+
+    artifacts = _build_grouped_vuln_task_artifacts(
+        group_vulnerabilities,
+        combined_data=[],
+        bom_cache_map={},
+        team_mapping={},
+        versions_for_rollup=[],
+        version_severity_counts={},
+        response_mode="summary",
+    )
+
+    assert artifacts["full_result"] == []
+    assert call_kwargs["include_dependency_paths"] is False
 
 
 def test_summary_list_metadata_includes_row_rollups():

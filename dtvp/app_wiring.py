@@ -384,6 +384,8 @@ def build_code_analysis_route_deps(
     code_analysis_settings_cls: Callable[[], Any],
     code_analysis_client_cls: type,
     analysis_queue: Any,
+    result_store: Any,
+    load_auto_analysis_guidance: Callable[[], dict[str, Any]],
     get_auto_analysis_sweep_status: Callable[[], dict[str, Any]],
     run_auto_analysis_sweep_now: Callable[[], Any],
     code_analysis_not_configured_detail: str,
@@ -395,6 +397,8 @@ def build_code_analysis_route_deps(
         code_analysis_settings_cls=code_analysis_settings_cls,
         code_analysis_client_cls=code_analysis_client_cls,
         analysis_queue=analysis_queue,
+        result_store=result_store,
+        load_auto_analysis_guidance=load_auto_analysis_guidance,
         get_auto_analysis_sweep_status=get_auto_analysis_sweep_status,
         run_auto_analysis_sweep_now=run_auto_analysis_sweep_now,
         code_analysis_not_configured_detail=code_analysis_not_configured_detail,
@@ -460,9 +464,11 @@ def build_settings_route_deps(
     *,
     get_user_role: Callable[[str], str],
     load_team_mapping: Callable[[], dict[str, Any]],
+    load_auto_analysis_guidance: Callable[[], dict[str, Any]],
     load_user_roles: Callable[[], dict[str, Any] | None],
     load_rescore_rules: Callable[[], dict[str, Any] | None],
     get_team_mapping_path: Callable[[], str],
+    get_auto_analysis_guidance_path: Callable[[], str],
     get_user_roles_path: Callable[[], str],
     get_rescore_rules_path: Callable[[], str],
     write_bytes: Callable[[str, bytes], None],
@@ -472,9 +478,11 @@ def build_settings_route_deps(
     return SettingsRouteDeps(
         get_user_role=get_user_role,
         load_team_mapping=load_team_mapping,
+        load_auto_analysis_guidance=load_auto_analysis_guidance,
         load_user_roles=load_user_roles,
         load_rescore_rules=load_rescore_rules,
         get_team_mapping_path=get_team_mapping_path,
+        get_auto_analysis_guidance_path=get_auto_analysis_guidance_path,
         get_user_roles_path=get_user_roles_path,
         get_rescore_rules_path=get_rescore_rules_path,
         write_bytes=write_bytes,
@@ -561,6 +569,7 @@ def build_analysis_queue(
     runtime_deps: AnalysisQueueRuntimeDeps,
     service_deps: AnalysisQueueServiceDeps,
     get_analysis_queue_ttl_seconds: Callable[[], int],
+    get_analysis_queue_capacity: Callable[[], int],
     parse_iso_timestamp: Callable[[str | None], float | None],
     utc_now: Callable[[], Any],
     reindex_queue_items: Callable[..., None],
@@ -570,12 +579,14 @@ def build_analysis_queue(
     process_analysis_queue_item: Callable[..., Any],
     run_analysis_queue_cleanup_loop: Callable[..., Any],
     run_analysis_queue_worker: Callable[..., Any],
+    record_completed_result: Callable[[Any], None] | None = None,
 ) -> AnalysisQueue:
     return AnalysisQueue(
         AnalysisQueueDeps(
             runtime_deps=runtime_deps,
             service_deps=service_deps,
             get_analysis_queue_ttl_seconds=get_analysis_queue_ttl_seconds,
+            get_analysis_queue_capacity=get_analysis_queue_capacity,
             parse_iso_timestamp=parse_iso_timestamp,
             utc_now=utc_now,
             reindex_queue_items=reindex_queue_items,
@@ -587,6 +598,7 @@ def build_analysis_queue(
             run_analysis_queue_worker=run_analysis_queue_worker,
             create_event=asyncio.Event,
             create_lock=asyncio.Lock,
+            record_completed_result=record_completed_result or (lambda _item: None),
         )
     )
 

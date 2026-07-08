@@ -14,6 +14,7 @@ from .grouped_vuln_services import (
     build_grouped_vuln_statistics_rollup,
     summarize_grouped_vulnerabilities,
 )
+from .logic import populate_group_dependency_chains
 from .task_group_query_services import (
     build_task_group_query_index,
     get_or_build_task_group_query_index,
@@ -397,6 +398,8 @@ def _register_task_routes(
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
         tmrescore_proposal_ids: list[str] | None = Query(default=None),
+        automatic_assessment: list[str] | None = Query(default=None),
+        automatic_assessment_ids: list[str] | None = Query(default=None),
         sort: str = Query("rescored-severity"),
         order: str = Query("desc", pattern="^(asc|desc)$"),
         offset: int = Query(0, ge=0),
@@ -417,30 +420,32 @@ def _register_task_routes(
         if task.get("status") != "completed" and not is_partial_summary:
             raise HTTPException(status_code=409, detail="Task is not completed")
 
-        query_index = get_or_build_task_group_query_index(task)
-
         try:
-            response = query_task_groups(
-                query_index,
-                q=q,
-                lifecycle=split_query_values(lifecycle),
-                analysis=split_query_values(analysis),
-                tag=tag,
-                vuln_id=vuln_id,
-                component=component,
-                assignee=assignee,
-                dependency=split_query_values(dependency),
-                versions=split_query_values(versions),
-                cvss_mismatch=cvss_mismatch,
-                attributed_before_days=attributed_before_days,
-                attribution_mode=attribution_mode,
-                tmrescore=split_query_values(tmrescore),
-                tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
-                sort_by=sort,
-                sort_order=order,
-                offset=offset,
-                limit=limit,
-                cursor=cursor,
+            response = await asyncio.to_thread(
+                lambda: query_task_groups(
+                    get_or_build_task_group_query_index(task),
+                    q=q,
+                    lifecycle=split_query_values(lifecycle),
+                    analysis=split_query_values(analysis),
+                    tag=tag,
+                    vuln_id=vuln_id,
+                    component=component,
+                    assignee=assignee,
+                    dependency=split_query_values(dependency),
+                    versions=split_query_values(versions),
+                    cvss_mismatch=cvss_mismatch,
+                    attributed_before_days=attributed_before_days,
+                    attribution_mode=attribution_mode,
+                    tmrescore=split_query_values(tmrescore),
+                    tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
+                    automatic_assessment=split_query_values(automatic_assessment),
+                    automatic_assessment_ids=split_query_values(automatic_assessment_ids),
+                    sort_by=sort,
+                    sort_order=order,
+                    offset=offset,
+                    limit=limit,
+                    cursor=cursor,
+                )
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -448,6 +453,11 @@ def _register_task_routes(
         response["partial"] = task.get("status") != "completed"
         response["partial_versions_completed"] = task.get("partial_versions_completed")
         response["partial_total_versions"] = task.get("partial_total_versions")
+        response["partial_publish_in_progress"] = task.get(
+            "partial_publish_in_progress"
+        )
+        response["versions_completed"] = task.get("versions_completed")
+        response["versions_total"] = task.get("versions_total")
         return response
 
     @router.get("/tasks/{task_id}/group-details")
@@ -467,6 +477,8 @@ def _register_task_routes(
         attribution_mode: str = Query("older", pattern="^(older|younger)$"),
         tmrescore: list[str] | None = Query(default=None),
         tmrescore_proposal_ids: list[str] | None = Query(default=None),
+        automatic_assessment: list[str] | None = Query(default=None),
+        automatic_assessment_ids: list[str] | None = Query(default=None),
         sort: str = Query("rescored-severity"),
         order: str = Query("desc", pattern="^(asc|desc)$"),
         offset: int = Query(0, ge=0),
@@ -482,29 +494,32 @@ def _register_task_routes(
         if task.get("status") != "completed":
             raise HTTPException(status_code=409, detail="Task is not completed")
 
-        query_index = get_or_build_task_group_query_index(task)
         try:
-            response = query_task_groups(
-                query_index,
-                q=q,
-                lifecycle=split_query_values(lifecycle),
-                analysis=split_query_values(analysis),
-                tag=tag,
-                vuln_id=vuln_id,
-                component=component,
-                assignee=assignee,
-                dependency=split_query_values(dependency),
-                versions=split_query_values(versions),
-                cvss_mismatch=cvss_mismatch,
-                attributed_before_days=attributed_before_days,
-                attribution_mode=attribution_mode,
-                tmrescore=split_query_values(tmrescore),
-                tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
-                sort_by=sort,
-                sort_order=order,
-                offset=offset,
-                limit=limit,
-                cursor=cursor,
+            response = await asyncio.to_thread(
+                lambda: query_task_groups(
+                    get_or_build_task_group_query_index(task),
+                    q=q,
+                    lifecycle=split_query_values(lifecycle),
+                    analysis=split_query_values(analysis),
+                    tag=tag,
+                    vuln_id=vuln_id,
+                    component=component,
+                    assignee=assignee,
+                    dependency=split_query_values(dependency),
+                    versions=split_query_values(versions),
+                    cvss_mismatch=cvss_mismatch,
+                    attributed_before_days=attributed_before_days,
+                    attribution_mode=attribution_mode,
+                    tmrescore=split_query_values(tmrescore),
+                    tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
+                    automatic_assessment=split_query_values(automatic_assessment),
+                    automatic_assessment_ids=split_query_values(automatic_assessment_ids),
+                    sort_by=sort,
+                    sort_order=order,
+                    offset=offset,
+                    limit=limit,
+                    cursor=cursor,
+                )
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -533,6 +548,7 @@ def _register_task_routes(
         group = full_by_id.get(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail="Vulnerability group not found")
+        populate_group_dependency_chains(group, task.get("_bom_cache_map") or {})
         return group
 
     @router.get("/tasks/{task_id}/statistics")

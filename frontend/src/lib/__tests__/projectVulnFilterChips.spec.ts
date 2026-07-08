@@ -35,6 +35,11 @@ const tmrescoreOptions = [
     { value: 'WITHOUT_PROPOSAL', label: 'without' },
 ]
 
+const automaticAssessmentOptions = [
+    { value: 'WITH_AUTOMATIC_ASSESSMENT', label: 'available' },
+    { value: 'WITHOUT_AUTOMATIC_ASSESSMENT', label: 'missing' },
+]
+
 describe('projectVulnFilterChips', () => {
     it('builds labels for only the active non-default filters', () => {
         const chips = buildActiveFilterChips({
@@ -51,6 +56,8 @@ describe('projectVulnFilterChips', () => {
             versionFilters: ['1.0.0', '2.0.0'],
             tmrescoreFilters: ['WITH_PROPOSAL'],
             tmrescoreOptions,
+            automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT'],
+            automaticAssessmentOptions,
             cvssVersionMismatchOnly: true,
             attributionAgeDays: 14,
             attributionAgeMode: 'younger',
@@ -64,6 +71,7 @@ describe('projectVulnFilterChips', () => {
             { key: 'assignee', label: 'Assignee: alice' },
             { key: 'versions', label: 'Versions: 1.0.0, 2.0.0' },
             { key: 'tmrescore', label: 'TM: with' },
+            { key: 'automaticAssessment', label: 'Auto: available' },
             { key: 'cvss', label: 'CVSS mismatch' },
             { key: 'attributionAge', label: 'Attributed younger than 14d' },
         ])
@@ -89,6 +97,8 @@ describe('projectVulnFilterChips', () => {
             defaultDependencyFilters: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'] as const,
             tmrescoreFilters: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'] as const,
             defaultTMRescoreFilters: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'] as const,
+            automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'] as const,
+            defaultAutomaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'] as const,
         }
 
         expect(hasCustomProjectVulnFilterState(defaultInput)).toBe(false)
@@ -99,6 +109,10 @@ describe('projectVulnFilterChips', () => {
         expect(hasCustomProjectVulnFilterState({
             ...defaultInput,
             lifecycleFilters: ['OPEN'],
+        })).toBe(true)
+        expect(hasCustomProjectVulnFilterState({
+            ...defaultInput,
+            automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT'],
         })).toBe(true)
     })
 

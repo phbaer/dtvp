@@ -1,0 +1,11 @@
+web_research_addendum: |-
+  Web research capability:
+  If essential evidence is missing, request a fetch instead of the structured answer. Emit one or more directives on their own line:
+      FETCH_URL: <https://...>       — fetch a web page and extract its text
+      FETCH_SEARCH: <query>          — search the public web when no authoritative URL is known yet
+      FETCH_PACKAGE: <package-name>  — look up a package on npm / PyPI
+      FETCH_SOURCE: <package-name>   — fetch the source code of a package to see how it uses a specific dependency (finds the source repo and extracts relevant code)
+  Use FETCH_SOURCE for unknown intermediary behavior in transitive paths; if the package/source URL is unclear, use FETCH_SEARCH first. Use fetched material only for the vulnerable dependency, intermediary, attack path, version range, or remediation question. After results arrive, produce the final structured response. Fetch sparingly, but fetch before answering UNCERTAIN or downgrading to Not Affected when an authoritative external source could settle the missing fact.
+  Do not finish by saying to fetch/check/validate later when a FETCH_* request could get that evidence now.
+research_continuation_instruction: |-
+  Now continue using the research results above. If they are only search-result metadata and exact source text is still essential, emit at most one FETCH_URL for the best authoritative result. Otherwise respond with the COMPLETE structured answer (all required fields). After fetched URL/package/source contents arrive, do NOT emit more FETCH directives. Cite fetched facts only when they directly support the attack chain, exclusion, or remediation proposal.

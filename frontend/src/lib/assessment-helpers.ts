@@ -8,6 +8,9 @@ export interface AssessmentBlock {
     justification: string;
     timestamp?: number;
     assigned?: string[];
+    evidenceReviewed?: boolean;
+    versionCoverageChecked?: boolean;
+    ticket?: string;
 }
 
 export const STATE_PRIORITY: Record<string, number> = {
@@ -25,6 +28,15 @@ const cloneAssessmentBlock = (block: AssessmentBlock): AssessmentBlock => ({
     ...block,
     assigned: block.assigned ? [...block.assigned] : [],
 });
+
+export interface AssessmentReviewMetadata {
+    evidenceReviewed?: boolean;
+    versionCoverageChecked?: boolean;
+    ticket?: string;
+}
+
+const formatAssessmentHeaderValue = (value: string): string =>
+    value.replace(/[\r\n\[\]]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 const cloneAssessmentBlocks = (blocks: readonly AssessmentBlock[]): AssessmentBlock[] => {
     return blocks.map(cloneAssessmentBlock);
@@ -229,6 +241,10 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const assigned: string[] = assignedMatch
             ? assignedMatch[1].split(',').map(u => u.trim()).filter(u => u.length > 0)
             : [];
+        const evidenceReviewed = /\[Evidence Reviewed:\s*(?:yes|true|checked)\]/i.test(headerText);
+        const versionCoverageChecked = /\[Version Coverage:\s*(?:yes|true|checked)\]/i.test(headerText);
+        const ticketMatch = headerText.match(/\[Ticket:\s*([^\]]+)\]/);
+        const ticket = ticketMatch?.[1]?.trim() || '';
 
         const startOfContent = match.index + match[0].length;
 
@@ -245,6 +261,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         // Cleanup all metadata from content to prevent leakage
         content = content
             .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date|Assigned):\s*[^\]]*\]/g, '')
+            .replace(/\[(Evidence Reviewed|Version Coverage|Ticket):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .replace(/\[Comment\]/g, '')
             .replace(/\bAssessed\s*--\s*\S+/g, '')
@@ -264,7 +281,10 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
             details: content,
             justification,
             timestamp,
-            assigned
+            assigned,
+            evidenceReviewed,
+            versionCoverageChecked,
+            ticket,
         });
     }
 
@@ -288,7 +308,10 @@ export function constructAssessmentDetails(
     for (const b of blocks) {
         const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
         const assignedStr = b.assigned && b.assigned.length > 0 ? ` [Assigned: ${b.assigned.join(', ')}]` : '';
-        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr} ---`;
+        const evidenceStr = b.evidenceReviewed ? ' [Evidence Reviewed: yes]' : '';
+        const versionCoverageStr = b.versionCoverageChecked ? ' [Version Coverage: yes]' : '';
+        const ticketStr = b.ticket?.trim() ? ` [Ticket: ${formatAssessmentHeaderValue(b.ticket)}]` : '';
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr} ---`;
         parts.push(header);
         if (b.details) parts.push(b.details);
     }
@@ -488,15 +511,21 @@ export function mergeTeamAssessment(
     newJustification: string = 'NOT_SET',
     rescoredTags?: string[],
     isPending: boolean = true,
-    newAssigned?: string[]
+    newAssigned?: string[],
+    reviewMetadata?: AssessmentReviewMetadata
 ): { text: string, aggregatedState: string } {
     // 1. Parse existing
     const blocks = parseAssessmentBlocks(currentFullText);
 
     // 2. Update, Create, or Remove block for this team
     const targetIndex = blocks.findIndex(b => b.team === team);
-    const hasAssignees = newAssigned !== undefined ? newAssigned.length > 0 : (targetIndex >= 0 && (blocks[targetIndex].assigned?.length ?? 0) > 0);
-    const isCleared = newState === 'NOT_SET' && !newDetails.trim() && (!newJustification || newJustification === 'NOT_SET') && !hasAssignees;
+    const existingBlock = targetIndex >= 0 ? blocks[targetIndex] : undefined;
+    const hasAssignees = newAssigned !== undefined ? newAssigned.length > 0 : ((existingBlock?.assigned?.length ?? 0) > 0);
+    const finalEvidenceReviewed = reviewMetadata?.evidenceReviewed ?? existingBlock?.evidenceReviewed ?? false;
+    const finalVersionCoverageChecked = reviewMetadata?.versionCoverageChecked ?? existingBlock?.versionCoverageChecked ?? false;
+    const finalTicket = reviewMetadata?.ticket !== undefined ? reviewMetadata.ticket.trim() : (existingBlock?.ticket || '');
+    const hasReviewMetadata = finalEvidenceReviewed || finalVersionCoverageChecked || Boolean(finalTicket);
+    const isCleared = newState === 'NOT_SET' && !newDetails.trim() && (!newJustification || newJustification === 'NOT_SET') && !hasAssignees && !hasReviewMetadata;
 
     if (isCleared) {
         // Remove the block entirely when all fields are cleared
@@ -505,7 +534,7 @@ export function mergeTeamAssessment(
         }
     } else {
         // Preserve existing assigned if not explicitly provided
-        const existingAssigned = targetIndex >= 0 ? blocks[targetIndex].assigned : undefined;
+        const existingAssigned = existingBlock?.assigned;
         const finalAssigned = newAssigned !== undefined ? newAssigned : (existingAssigned || []);
 
         const newBlock: AssessmentBlock = {
@@ -515,7 +544,10 @@ export function mergeTeamAssessment(
             details: newDetails.trim(),
             justification: newJustification,
             timestamp: Date.now(),
-            assigned: finalAssigned
+            assigned: finalAssigned,
+            evidenceReviewed: finalEvidenceReviewed,
+            versionCoverageChecked: finalVersionCoverageChecked,
+            ticket: finalTicket,
         };
 
         if (targetIndex >= 0) {

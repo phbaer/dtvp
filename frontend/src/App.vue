@@ -153,8 +153,46 @@ const goTo = (path: string) => {
 
 const goToAllProjects = () => {
     projectHeaderState.currentProjectName.value = null
+    projectHeaderState.lastProjectName.value = null
+    projectHeaderState.lastProjectPath.value = null
     projectHeaderState.isAllProjects.value = true
     router.push('/')
+}
+
+const projectListPath = (name: string) => `/project/${encodeURIComponent(name)}`
+
+const firstQueryValue = (value: unknown) => Array.isArray(value) ? value[0] : value
+
+const statisticsProjectName = computed(() => {
+    if (route.path !== '/statistics') return ''
+    return String(firstQueryValue(route.query?.name) || '').trim()
+})
+
+const returnProjectName = computed(() =>
+    statisticsProjectName.value || projectHeaderState.lastProjectName.value || ''
+)
+
+const returnProjectPath = computed(() => {
+    const name = returnProjectName.value
+    if (!name) return ''
+    if (
+        projectHeaderState.lastProjectName.value === name
+        && projectHeaderState.lastProjectPath.value
+    ) {
+        return projectHeaderState.lastProjectPath.value
+    }
+    return projectListPath(name)
+})
+
+const showVulnListReturn = computed(() =>
+    (route.path === '/code-analysis' || route.path === '/statistics')
+    && !!returnProjectPath.value
+)
+
+const goToVulnList = () => {
+    if (!returnProjectPath.value) return
+    projectHeaderState.viewMode.value = 'analysis'
+    router.push(returnProjectPath.value)
 }
 
 const toggleProjectView = () => {
@@ -184,6 +222,10 @@ watch(() => route.path, (path) => {
     if (!path.startsWith('/project/')) {
         projectHeaderState.currentProjectName.value = null
         projectHeaderState.isAllProjects.value = true
+        if (path === '/') {
+            projectHeaderState.lastProjectName.value = null
+            projectHeaderState.lastProjectPath.value = null
+        }
     }
 }, { immediate: true })
 
@@ -278,6 +320,21 @@ const acknowledgeChangelog = () => {
                         Statistics
                     </button>
                     <button
+                        type="button"
+                        @click="goTo('/code-analysis')"
+                        :class="[headerButtonBase, isActive('/code-analysis') ? headerButtonActive : headerButtonDefault]"
+                    >
+                        Code Analysis
+                    </button>
+                    <button
+                        v-if="showVulnListReturn"
+                        type="button"
+                        @click="goToVulnList"
+                        :class="[headerButtonBase, headerButtonContext]"
+                    >
+                        Vuln List
+                    </button>
+                    <button
                         v-if="realRole === 'REVIEWER'"
                         type="button"
                         @click="goTo('/settings')"
@@ -295,7 +352,7 @@ const acknowledgeChangelog = () => {
                             @click="toggleProjectView"
                             :class="[headerButtonBase, projectHeaderState.viewMode.value === 'analysis' ? headerButtonContext : headerButtonDefault]"
                         >
-                            {{ projectHeaderState.viewMode.value === 'analysis' ? 'Project Statistics' : 'Analysis' }}
+                            {{ projectHeaderState.viewMode.value === 'analysis' ? 'Project Statistics' : 'Vuln List' }}
                         </button>
                         <button
                             v-if="projectHeaderState.isReviewer.value && projectHeaderState.incompleteCount.value > 0"

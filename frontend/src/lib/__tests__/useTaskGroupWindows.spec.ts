@@ -55,6 +55,9 @@ describe('useTaskGroupWindows', () => {
             partial: true,
             partial_versions_completed: 2,
             partial_total_versions: 5,
+            partial_publish_in_progress: true,
+            versions_completed: 3,
+            versions_total: 5,
         })
 
         const taskId = ref('task-1')
@@ -90,6 +93,9 @@ describe('useTaskGroupWindows', () => {
         expect(taskWindows.partial.value).toBe(true)
         expect(taskWindows.partialVersionsCompleted.value).toBe(2)
         expect(taskWindows.partialVersionsTotal.value).toBe(5)
+        expect(taskWindows.partialPublishInProgress.value).toBe(true)
+        expect(taskWindows.versionsCompleted.value).toBe(3)
+        expect(taskWindows.versionsTotal.value).toBe(5)
         expect(taskWindows.windowLoading.value).toBe(false)
         expect(resetVisibleItems).toHaveBeenCalledTimes(1)
     })
@@ -107,30 +113,47 @@ describe('useTaskGroupWindows', () => {
             partial_result_available: true,
             partial_versions_completed: 12,
             partial_total_versions: 29,
+            partial_publish_in_progress: true,
+            versions_completed: 16,
+            versions_total: 29,
         })
 
         expect(taskWindows.partial.value).toBe(true)
         expect(taskWindows.partialVersionsCompleted.value).toBe(12)
         expect(taskWindows.partialVersionsTotal.value).toBe(29)
+        expect(taskWindows.partialPublishInProgress.value).toBe(true)
+        expect(taskWindows.versionsCompleted.value).toBe(16)
+        expect(taskWindows.versionsTotal.value).toBe(29)
 
         taskWindows.updateFromTaskStatus({
             status: 'running',
             partial_result_available: true,
             partial_versions_completed: 13,
             partial_total_versions: 29,
+            partial_publish_in_progress: false,
+            versions_completed: 17,
+            versions_total: 29,
         })
 
         expect(taskWindows.partialVersionsCompleted.value).toBe(13)
         expect(taskWindows.partialVersionsTotal.value).toBe(29)
+        expect(taskWindows.partialPublishInProgress.value).toBe(false)
+        expect(taskWindows.versionsCompleted.value).toBe(17)
+        expect(taskWindows.versionsTotal.value).toBe(29)
 
         taskWindows.updateFromTaskStatus({
             status: 'completed',
             partial_result_available: false,
+            versions_completed: 29,
+            versions_total: 29,
         })
 
         expect(taskWindows.partial.value).toBe(false)
         expect(taskWindows.partialVersionsCompleted.value).toBeNull()
         expect(taskWindows.partialVersionsTotal.value).toBeNull()
+        expect(taskWindows.partialPublishInProgress.value).toBe(false)
+        expect(taskWindows.versionsCompleted.value).toBe(29)
+        expect(taskWindows.versionsTotal.value).toBe(29)
     })
 
     it('appends the next window using the backend cursor when available', async () => {

@@ -9,6 +9,7 @@ export interface FilterState {
     sortOrder: 'asc' | 'desc'
     dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
     tmrescoreFilter: Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>
+    automaticAssessmentFilter: Array<'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'>
     idFilter: string
     tagFilter: string
     componentFilter: string

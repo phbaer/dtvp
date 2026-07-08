@@ -239,6 +239,25 @@ class CacheManager:
             {"fully_cached": False, "last_refreshed_at": None},
         ) or {"fully_cached": False, "last_refreshed_at": None}
 
+    def _read_startup_cache_state(
+        self,
+    ) -> tuple[List[Dict[str, Any]], List[str], Dict[str, Any]]:
+        meta_default = {"fully_cached": False, "last_refreshed_at": None}
+        pending = _read_json(self._pending_path(), []) or []
+        active = _read_json(self._active_projects_path(), []) or []
+        meta = _read_json(self._projects_meta_path(), meta_default) or meta_default
+        return pending, active, meta
+
+    def _remember_startup_cache_state(
+        self,
+        pending: List[Dict[str, Any]],
+        active: List[str],
+        meta: Dict[str, Any],
+    ) -> None:
+        self._memory_cache[self._pending_path()] = pending
+        self._memory_cache[self._active_projects_path()] = active
+        self._memory_cache[self._projects_meta_path()] = meta
+
     def _save_projects_meta(self, meta: Dict[str, Any]) -> None:
         self._save_cache_file(self._projects_meta_path(), meta, touch_meta=False)
 
@@ -389,6 +408,21 @@ class CacheManager:
         self._memory_cache = {}
         self._ensure_directories()
 
+    def load_persisted_runtime_state(self) -> None:
+        (
+            pending_updates,
+            active_project_uuids,
+            cache_meta,
+        ) = self._read_startup_cache_state()
+        self.pending_updates = pending_updates
+        self.active_project_uuids = set(active_project_uuids)
+        self.cache_meta = cache_meta
+        self._remember_startup_cache_state(
+            pending_updates,
+            active_project_uuids,
+            cache_meta,
+        )
+
     def _load_cache_file(self, path: str, default: Any = None) -> Any:
         if path in self._memory_cache:
             return self._memory_cache[path]
@@ -410,10 +444,18 @@ class CacheManager:
         return self._load_cache_file(path, default)
 
     async def initialize(self) -> None:
+        pending_updates, active_project_uuids, cache_meta = await asyncio.to_thread(
+            self._read_startup_cache_state
+        )
         async with self.lock:
-            self.pending_updates = self._load_pending_updates()
-            self.active_project_uuids = set(self._load_active_projects())
-            self.cache_meta = self._load_projects_meta()
+            self.pending_updates = pending_updates
+            self.active_project_uuids = set(active_project_uuids)
+            self.cache_meta = cache_meta
+            self._remember_startup_cache_state(
+                pending_updates,
+                active_project_uuids,
+                cache_meta,
+            )
 
         settings = DTSettings()
         try:
@@ -474,12 +516,22 @@ class CacheManager:
             projects_meta = self.cache_meta
 
         if not name:
-            projects = await client.get_projects("")
-            async with self.lock:
-                self._save_project_cache(self._projects_path(), projects)
-                self.cache_meta["fully_cached"] = True
-                self._touch_cache_meta()
-            return projects
+            try:
+                projects = await client.get_projects("")
+                async with self.lock:
+                    self._save_project_cache(self._projects_path(), projects)
+                    self.cache_meta["fully_cached"] = True
+                    self._touch_cache_meta()
+                return projects
+            except Exception:
+                if projects:
+                    logger.warning(
+                        "Dependency-Track project list unavailable; using stale "
+                        "cached project list with %d entries",
+                        len(projects),
+                    )
+                    return projects
+                raise
 
         if projects_meta.get("fully_cached"):
             return [
@@ -491,7 +543,24 @@ class CacheManager:
         if name in self.project_query_cache:
             return self.project_query_cache[name]
 
-        results = await client.get_projects(name)
+        try:
+            results = await client.get_projects(name)
+        except Exception:
+            cached_matches = [
+                project
+                for project in projects
+                if name.lower() in (project.get("name", "") or "").lower()
+            ]
+            if cached_matches:
+                logger.warning(
+                    "Dependency-Track project search for %r unavailable; using "
+                    "stale cached matches with %d entries",
+                    name,
+                    len(cached_matches),
+                )
+                return cached_matches
+            raise
+
         self.project_query_cache[name] = results
         if results:
             async with self.lock:

@@ -1,12 +1,11 @@
 import base64
 import json
 from datetime import datetime
-from functools import cmp_to_key
 from typing import Any
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 2
+TASK_GROUP_QUERY_INDEX_VERSION = 4
 TASK_GROUP_QUERY_CACHE_LIMIT = 64
 TASK_GROUP_CURSOR_VERSION = 1
 ANALYSIS_STATE_ORDER = {
@@ -173,9 +172,12 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
     metadata = group.get("list_metadata") or {}
     tags = _string_list(group.get("tags") or [])
     aliases = _string_list(group.get("aliases") or [])
+    aliases_lower = [_lower(value) for value in aliases]
     assignees = _string_list(group.get("assignees") or [])
     component_names = _component_names_for_group(group)
     versions = _versions_for_group(group)
+    versions_lower = [_lower(value) for value in versions]
+    id_lower = _lower(group.get("id"))
     base_score = group.get("cvss_score")
     if base_score is None:
         base_score = group.get("cvss", 0)
@@ -203,9 +205,12 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "id": str(group.get("id") or ""),
-        "id_lower": _lower(group.get("id")),
+        "id_lower": id_lower,
         "aliases": aliases,
-        "aliases_lower": [_lower(value) for value in aliases],
+        "aliases_lower": aliases_lower,
+        "candidate_ids_lower": {
+            value for value in [id_lower, *aliases_lower] if value
+        },
         "tags": tags,
         "tags_lower": [_lower(value) for value in tags],
         "first_tag": tags[0] if tags else "",
@@ -214,6 +219,8 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "assignees": assignees,
         "assignees_lower": [_lower(value) for value in assignees],
         "versions": versions,
+        "versions_lower": versions_lower,
+        "versions_lower_set": set(versions_lower),
         "searchable_text": searchable_text,
         "lifecycle": str(metadata.get("lifecycle") or "OPEN"),
         "is_open": bool(metadata.get("is_open")),
@@ -229,18 +236,17 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _matches_lifecycle(fields: dict[str, Any], filters: list[str]) -> bool:
+def _matches_lifecycle(fields: dict[str, Any], filters: set[str]) -> bool:
     if not filters:
         return True
-    normalized = {item.upper() for item in filters}
     lifecycle = fields["lifecycle"]
     return (
-        ("OPEN" in normalized and fields["is_open"])
-        or ("ASSESSED" in normalized and lifecycle == "ASSESSED")
-        or ("ASSESSED_LEGACY" in normalized and lifecycle == "ASSESSED_LEGACY")
-        or ("INCOMPLETE" in normalized and lifecycle == "INCOMPLETE")
-        or ("INCONSISTENT" in normalized and lifecycle == "INCONSISTENT")
-        or ("NEEDS_APPROVAL" in normalized and fields["is_pending"])
+        ("OPEN" in filters and fields["is_open"])
+        or ("ASSESSED" in filters and lifecycle == "ASSESSED")
+        or ("ASSESSED_LEGACY" in filters and lifecycle == "ASSESSED_LEGACY")
+        or ("INCOMPLETE" in filters and lifecycle == "INCOMPLETE")
+        or ("INCONSISTENT" in filters and lifecycle == "INCONSISTENT")
+        or ("NEEDS_APPROVAL" in filters and fields["is_pending"])
     )
 
 
@@ -259,83 +265,106 @@ def _matches_attribution_age(
     return any(value < cutoff for value in values)
 
 
-def _matches_all_terms(values: list[str], query: str) -> bool:
-    terms = _lower(query).split()
+def _matches_all_terms(values: list[str], terms: tuple[str, ...]) -> bool:
     if not terms:
         return True
     return all(any(term in value for value in values) for term in terms)
 
 
-def _matches_versions(values: list[str], filters: list[str]) -> bool:
+def _matches_versions(values: set[str], filters: set[str]) -> bool:
     if not filters:
         return True
-    normalized_values = {value.lower() for value in values}
-    return any(version.lower() in normalized_values for version in filters)
+    return not values.isdisjoint(filters)
 
 
 def _matches_tmrescore_proposal(
     fields: dict[str, Any],
-    filters: list[str],
-    proposal_ids: list[str],
+    filters: set[str],
+    proposal_id_set: set[str],
 ) -> bool:
     if not filters:
         return True
 
-    normalized_filters = {item.upper() for item in filters}
-    if {"WITH_PROPOSAL", "WITHOUT_PROPOSAL"}.issubset(normalized_filters):
+    if {"WITH_PROPOSAL", "WITHOUT_PROPOSAL"}.issubset(filters):
         return True
 
-    proposal_id_set = {_lower(value) for value in proposal_ids if _lower(value)}
-    candidate_ids = {fields["id_lower"], *fields["aliases_lower"]}
-    has_proposal = any(candidate_id in proposal_id_set for candidate_id in candidate_ids)
+    has_proposal = not fields["candidate_ids_lower"].isdisjoint(proposal_id_set)
 
     return (
-        ("WITH_PROPOSAL" in normalized_filters and has_proposal)
-        or ("WITHOUT_PROPOSAL" in normalized_filters and not has_proposal)
+        ("WITH_PROPOSAL" in filters and has_proposal)
+        or ("WITHOUT_PROPOSAL" in filters and not has_proposal)
+    )
+
+
+def _matches_automatic_assessment(
+    fields: dict[str, Any],
+    filters: set[str],
+    automatic_assessment_id_set: set[str],
+) -> bool:
+    if not filters:
+        return True
+
+    if {"WITH_AUTOMATIC_ASSESSMENT", "WITHOUT_AUTOMATIC_ASSESSMENT"}.issubset(filters):
+        return True
+
+    has_automatic_assessment = not fields["candidate_ids_lower"].isdisjoint(
+        automatic_assessment_id_set
+    )
+
+    return (
+        "WITH_AUTOMATIC_ASSESSMENT" in filters
+        and has_automatic_assessment
+    ) or (
+        "WITHOUT_AUTOMATIC_ASSESSMENT" in filters
+        and not has_automatic_assessment
     )
 
 
 def _matches_task_group_fields(
     fields: dict[str, Any],
     *,
-    q: str,
-    lifecycle: list[str],
-    analysis: list[str],
-    tag: str,
-    vuln_id: str,
-    component: str,
-    assignee: str,
-    dependency: list[str],
-    versions: list[str],
+    q_terms: tuple[str, ...],
+    lifecycle: set[str],
+    analysis: set[str],
+    tag_terms: tuple[str, ...],
+    vuln_id_terms: tuple[str, ...],
+    component_terms: tuple[str, ...],
+    assignee_terms: tuple[str, ...],
+    dependency: set[str],
+    versions: set[str],
     cvss_mismatch: bool,
     attributed_before_days: int | None,
     attribution_mode: str,
-    tmrescore: list[str],
-    tmrescore_proposal_ids: list[str],
+    tmrescore: set[str],
+    tmrescore_proposal_id_set: set[str],
+    automatic_assessment: set[str],
+    automatic_assessment_id_set: set[str],
     now_ms: int,
 ) -> bool:
-    if q and not all(term in fields["searchable_text"] for term in _lower(q).split()):
+    if q_terms and not all(term in fields["searchable_text"] for term in q_terms):
         return False
     if not _matches_lifecycle(fields, lifecycle):
         return False
-    if analysis and fields["technical_state"] not in {item.upper() for item in analysis}:
+    if analysis and fields["technical_state"] not in analysis:
         return False
-    if tag and not _matches_all_terms(fields["tags_lower"], tag):
+    if tag_terms and not _matches_all_terms(fields["tags_lower"], tag_terms):
         return False
-    if vuln_id and not _matches_all_terms(
+    if vuln_id_terms and not _matches_all_terms(
         [fields["id_lower"], *fields["aliases_lower"]],
-        vuln_id,
+        vuln_id_terms,
     ):
         return False
-    if component and not _matches_all_terms(fields["component_names_lower"], component):
+    if component_terms and not _matches_all_terms(
+        fields["component_names_lower"], component_terms
+    ):
         return False
-    if assignee and not _matches_all_terms(fields["assignees_lower"], assignee):
+    if assignee_terms and not _matches_all_terms(
+        fields["assignees_lower"], assignee_terms
+    ):
         return False
-    if dependency and fields["dependency_relationship"] not in {
-        item.upper() for item in dependency
-    }:
+    if dependency and fields["dependency_relationship"] not in dependency:
         return False
-    if not _matches_versions(fields["versions"], versions):
+    if not _matches_versions(fields["versions_lower_set"], versions):
         return False
     if cvss_mismatch and not fields["cvss_version_mismatch"]:
         return False
@@ -346,44 +375,36 @@ def _matches_task_group_fields(
         now_ms,
     ):
         return False
-    if not _matches_tmrescore_proposal(fields, tmrescore, tmrescore_proposal_ids):
+    if not _matches_tmrescore_proposal(fields, tmrescore, tmrescore_proposal_id_set):
+        return False
+    if not _matches_automatic_assessment(
+        fields,
+        automatic_assessment,
+        automatic_assessment_id_set,
+    ):
         return False
     return True
 
 
-def _compare_task_group_fields(
-    a: dict[str, Any],
-    b: dict[str, Any],
-    sort_by: str,
-) -> int:
-    comparison = 0
-
+def _task_group_sort_key(row: dict[str, Any], sort_by: str) -> tuple[Any, str]:
+    fields = row["fields"]
     if sort_by == "analysis":
-        comparison = ANALYSIS_STATE_ORDER.get(
-            a["technical_state"], 99
-        ) - ANALYSIS_STATE_ORDER.get(b["technical_state"], 99)
+        primary: Any = ANALYSIS_STATE_ORDER.get(fields["technical_state"], 99)
     elif sort_by == "tags":
-        comparison = (a["first_tag"] > b["first_tag"]) - (
-            a["first_tag"] < b["first_tag"]
-        )
+        primary = fields["first_tag"]
     elif sort_by == "severity":
-        comparison = b["base_severity_rank"] - a["base_severity_rank"]
+        primary = -fields["base_severity_rank"]
     elif sort_by == "rescored-severity":
-        comparison = b["rescored_severity_rank"] - a["rescored_severity_rank"]
+        primary = -fields["rescored_severity_rank"]
     elif sort_by == "score":
-        comparison = (a["base_score"] > b["base_score"]) - (
-            a["base_score"] < b["base_score"]
-        )
+        primary = fields["base_score"]
     elif sort_by == "rescored":
-        comparison = (a["rescored_score"] > b["rescored_score"]) - (
-            a["rescored_score"] < b["rescored_score"]
-        )
+        primary = fields["rescored_score"]
     elif sort_by == "id":
-        comparison = (a["id"] > b["id"]) - (a["id"] < b["id"])
-
-    if comparison == 0:
-        comparison = (a["id"] > b["id"]) - (a["id"] < b["id"])
-    return comparison
+        primary = fields["id"]
+    else:
+        primary = ""
+    return primary, fields["id"]
 
 
 def _empty_lifecycle_counts() -> dict[str, int]:
@@ -416,16 +437,41 @@ def _empty_tmrescore_counts() -> dict[str, int]:
     return {"WITH_PROPOSAL": 0, "WITHOUT_PROPOSAL": 0}
 
 
+def _empty_automatic_assessment_counts() -> dict[str, int]:
+    return {
+        "WITH_AUTOMATIC_ASSESSMENT": 0,
+        "WITHOUT_AUTOMATIC_ASSESSMENT": 0,
+    }
+
+
 def _increment(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
 
 
 def _normalized_upper_tuple(values: list[str]) -> tuple[str, ...]:
-    return tuple(sorted(str(value or "").strip().upper() for value in values if str(value or "").strip()))
+    return tuple(
+        sorted(
+            str(value or "").strip().upper()
+            for value in values
+            if str(value or "").strip()
+        )
+    )
 
 
 def _normalized_lower_tuple(values: list[str]) -> tuple[str, ...]:
     return tuple(sorted(_lower(value) for value in values if _lower(value)))
+
+
+def _normalized_upper_set(values: list[str]) -> set[str]:
+    return {
+        str(value or "").strip().upper()
+        for value in values
+        if str(value or "").strip()
+    }
+
+
+def _normalized_lower_set(values: list[str]) -> set[str]:
+    return {_lower(value) for value in values if _lower(value)}
 
 
 def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -518,34 +564,59 @@ def _copy_counts(counts: dict[str, Any]) -> dict[str, Any]:
 
 def _has_tmrescore_proposal(
     fields: dict[str, Any],
-    proposal_ids: list[str],
+    proposal_id_set: set[str],
 ) -> bool:
-    proposal_id_set = {_lower(value) for value in proposal_ids if _lower(value)}
     if not proposal_id_set:
         return False
-    candidate_ids = {fields["id_lower"], *fields["aliases_lower"]}
-    return any(candidate_id in proposal_id_set for candidate_id in candidate_ids)
+    return not fields["candidate_ids_lower"].isdisjoint(proposal_id_set)
+
+
+def _has_automatic_assessment(
+    fields: dict[str, Any],
+    automatic_assessment_id_set: set[str],
+) -> bool:
+    if not automatic_assessment_id_set:
+        return False
+    return not fields["candidate_ids_lower"].isdisjoint(automatic_assessment_id_set)
 
 
 def _add_dynamic_counts(
     counts: dict[str, Any],
     rows: list[dict[str, Any]],
     *,
-    tmrescore_proposal_ids: list[str],
+    tmrescore_proposal_id_set: set[str],
+    automatic_assessment_id_set: set[str],
     attributed_before_days: int | None,
     attribution_mode: str,
     now_ms: int,
 ) -> dict[str, Any]:
     result = _copy_counts(counts)
     tmrescore_counts = _empty_tmrescore_counts()
+    automatic_assessment_counts = _empty_automatic_assessment_counts()
     attribution_age_count = 0
+
+    if (
+        not tmrescore_proposal_id_set
+        and not automatic_assessment_id_set
+        and attributed_before_days is None
+    ):
+        tmrescore_counts["WITHOUT_PROPOSAL"] = len(rows)
+        automatic_assessment_counts["WITHOUT_AUTOMATIC_ASSESSMENT"] = len(rows)
+        result["tmrescore"] = tmrescore_counts
+        result["automatic_assessment"] = automatic_assessment_counts
+        result["attribution_age"] = attribution_age_count
+        return result
 
     for row in rows:
         fields = row["fields"]
-        if _has_tmrescore_proposal(fields, tmrescore_proposal_ids):
+        if _has_tmrescore_proposal(fields, tmrescore_proposal_id_set):
             tmrescore_counts["WITH_PROPOSAL"] += 1
         else:
             tmrescore_counts["WITHOUT_PROPOSAL"] += 1
+        if _has_automatic_assessment(fields, automatic_assessment_id_set):
+            automatic_assessment_counts["WITH_AUTOMATIC_ASSESSMENT"] += 1
+        else:
+            automatic_assessment_counts["WITHOUT_AUTOMATIC_ASSESSMENT"] += 1
         if attributed_before_days is not None and _matches_attribution_age(
             fields,
             attributed_before_days,
@@ -555,6 +626,7 @@ def _add_dynamic_counts(
             attribution_age_count += 1
 
     result["tmrescore"] = tmrescore_counts
+    result["automatic_assessment"] = automatic_assessment_counts
     result["attribution_age"] = attribution_age_count
     return result
 
@@ -610,6 +682,8 @@ def _query_cache_key(
     attribution_mode: str,
     tmrescore: list[str],
     tmrescore_proposal_ids: list[str],
+    automatic_assessment: list[str],
+    automatic_assessment_ids: list[str],
     sort_by: str,
     sort_order: str,
     now_ms: int,
@@ -635,6 +709,8 @@ def _query_cache_key(
         attribution_day_bucket,
         _normalized_upper_tuple(tmrescore),
         _normalized_lower_tuple(tmrescore_proposal_ids),
+        _normalized_upper_tuple(automatic_assessment),
+        _normalized_lower_tuple(automatic_assessment_ids),
         sort_by,
         sort_order,
     )
@@ -679,6 +755,8 @@ def query_task_groups(
     offset: int,
     limit: int,
     cursor: str = "",
+    automatic_assessment: list[str] | None = None,
+    automatic_assessment_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     now_ms = int(datetime.now().timestamp() * 1000)
     effective_offset = decode_task_group_cursor(cursor) if cursor else offset
@@ -705,6 +783,8 @@ def query_task_groups(
         attribution_mode=normalized_mode,
         tmrescore=tmrescore,
         tmrescore_proposal_ids=tmrescore_proposal_ids,
+        automatic_assessment=automatic_assessment or [],
+        automatic_assessment_ids=automatic_assessment_ids or [],
         sort_by=sort_by,
         sort_order=sort_order,
         now_ms=now_ms,
@@ -715,54 +795,76 @@ def query_task_groups(
         filtered_indices = cached["indices"]
         counts = cached["counts"]
     else:
+        q_terms = tuple(_lower(q).split())
+        lifecycle_set = _normalized_upper_set(lifecycle)
+        analysis_set = _normalized_upper_set(analysis)
+        tag_terms = tuple(_lower(tag).split())
+        vuln_id_terms = tuple(_lower(vuln_id).split())
+        component_terms = tuple(_lower(component).split())
+        assignee_terms = tuple(_lower(assignee).split())
+        dependency_set = _normalized_upper_set(dependency)
+        version_set = _normalized_lower_set(versions)
+        tmrescore_set = _normalized_upper_set(tmrescore)
+        tmrescore_proposal_id_set = _normalized_lower_set(tmrescore_proposal_ids)
+        automatic_assessment_set = _normalized_upper_set(automatic_assessment or [])
+        automatic_assessment_id_set = _normalized_lower_set(
+            automatic_assessment_ids or []
+        )
         filtered_with_indices = [
             (index, row)
             for index, row in enumerate(rows)
             if _matches_task_group_fields(
                 row["fields"],
-                q=q,
-                lifecycle=lifecycle,
-                analysis=analysis,
-                tag=_lower(tag),
-                vuln_id=_lower(vuln_id),
-                component=_lower(component),
-                assignee=_lower(assignee),
-                dependency=dependency,
-                versions=versions,
+                q_terms=q_terms,
+                lifecycle=lifecycle_set,
+                analysis=analysis_set,
+                tag_terms=tag_terms,
+                vuln_id_terms=vuln_id_terms,
+                component_terms=component_terms,
+                assignee_terms=assignee_terms,
+                dependency=dependency_set,
+                versions=version_set,
                 cvss_mismatch=cvss_mismatch,
                 attributed_before_days=attributed_before_days,
                 attribution_mode=normalized_mode,
-                tmrescore=tmrescore,
-                tmrescore_proposal_ids=tmrescore_proposal_ids,
+                tmrescore=tmrescore_set,
+                tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                automatic_assessment=automatic_assessment_set,
+                automatic_assessment_id_set=automatic_assessment_id_set,
                 now_ms=now_ms,
             )
         ]
-        direction = 1 if sort_order == "asc" else -1
         filtered_with_indices.sort(
-            key=cmp_to_key(
-                lambda left, right: direction
-                * _compare_task_group_fields(left[1]["fields"], right[1]["fields"], sort_by)
-            )
+            key=lambda item: _task_group_sort_key(item[1], sort_by),
+            reverse=sort_order != "asc",
         )
         filtered_indices = [index for index, _ in filtered_with_indices]
         filtered = [row for _, row in filtered_with_indices]
-        counts = {
-            "all": _add_dynamic_counts(
-                index["counts"],
-                rows,
-                tmrescore_proposal_ids=tmrescore_proposal_ids,
-                attributed_before_days=attributed_before_days,
-                attribution_mode=normalized_mode,
-                now_ms=now_ms,
-            ),
-            "filtered": _add_dynamic_counts(
+        all_counts = _add_dynamic_counts(
+            index["counts"],
+            rows,
+            tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+            automatic_assessment_id_set=automatic_assessment_id_set,
+            attributed_before_days=attributed_before_days,
+            attribution_mode=normalized_mode,
+            now_ms=now_ms,
+        )
+        filtered_counts = (
+            all_counts
+            if len(filtered_indices) == len(rows)
+            else _add_dynamic_counts(
                 _build_counts(filtered),
                 filtered,
-                tmrescore_proposal_ids=tmrescore_proposal_ids,
+                tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                automatic_assessment_id_set=automatic_assessment_id_set,
                 attributed_before_days=attributed_before_days,
                 attribution_mode=normalized_mode,
                 now_ms=now_ms,
-            ),
+            )
+        )
+        counts = {
+            "all": all_counts,
+            "filtered": filtered_counts,
         }
         _remember_query_cache_entry(
             cache,
@@ -773,18 +875,19 @@ def query_task_groups(
             },
         )
 
-    filtered = [rows[index] for index in filtered_indices]
-    window = filtered[effective_offset : effective_offset + limit]
-    next_offset = effective_offset + len(window)
+    filtered_count = len(filtered_indices)
+    window_indices = filtered_indices[effective_offset : effective_offset + limit]
+    window = [rows[index] for index in window_indices]
+    next_offset = effective_offset + len(window_indices)
     next_cursor = (
         encode_task_group_cursor(next_offset)
-        if window and next_offset < len(filtered)
+        if window_indices and next_offset < filtered_count
         else None
     )
     return {
         "items": [row["group"] for row in window],
         "total": index["total"],
-        "filtered": len(filtered),
+        "filtered": filtered_count,
         "counts": counts,
         "offset": effective_offset,
         "limit": limit,
