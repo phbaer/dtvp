@@ -2,6 +2,21 @@ import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 
 export type CvssVersion = '4.0' | '3.1' | '3.0' | '2.0'
 
+export interface CvssMetricRelationship {
+    base: string
+    modified?: string
+    requirement?: string
+}
+
+export interface CvssMetricRule {
+    undefined_values: string[]
+    base_metrics: string[]
+    metric_order: string[]
+    relationships: CvssMetricRelationship[]
+}
+
+export type CvssMetricRules = Partial<Record<CvssVersion, CvssMetricRule>>
+
 interface CvssComponentLike {
     shortName: string
 }
@@ -66,23 +81,14 @@ const getComponentSafe = (instance: CvssInstanceLike, name: string) => {
     }
 }
 
-const REQUIREMENT_KEYS = new Set(['CR', 'IR', 'AR'])
+const undefinedValues = (metricRule?: CvssMetricRule) =>
+    new Set(metricRule?.undefined_values?.length ? metricRule.undefined_values : ['X', 'ND'])
 
-const isDefinedMetricValue = (value?: string | null) => Boolean(value && value !== 'X' && value !== 'ND')
+const isDefinedMetricValue = (value?: string | null, metricRule?: CvssMetricRule) =>
+    Boolean(value && !undefinedValues(metricRule).has(value))
 
 const getComponentValue = (instance: CvssInstanceLike, key: string) =>
     getComponentSafe(instance, key)?.shortName ?? null
-
-const requirementMetricKeys = (version: CvssVersion, requirementKey: string) => {
-    const impactKey = requirementKey.charAt(0)
-    if (version === '4.0') {
-        return { baseKey: `V${impactKey}`, modifiedKey: `MV${impactKey}` }
-    }
-    if (version === '2.0') {
-        return { baseKey: impactKey, modifiedKey: null }
-    }
-    return { baseKey: impactKey, modifiedKey: `M${impactKey}` }
-}
 
 const applyComponent = (instance: CvssInstanceLike, key: string, value: string) => {
     try {
@@ -94,45 +100,61 @@ const applyComponent = (instance: CvssInstanceLike, key: string, value: string) 
 
 const applyModifiedAction = (
     instance: CvssInstanceLike,
-    key: string,
+    relationship: CvssMetricRelationship,
     value: string,
+    metricRule?: CvssMetricRule,
 ) => {
-    const baseValue = getComponentValue(instance, key.slice(1))
-    if (!isDefinedMetricValue(baseValue)) return
+    if (!relationship.modified) return
+    const baseValue = getComponentValue(instance, relationship.base)
+    if (!isDefinedMetricValue(baseValue, metricRule)) return
 
     // A modified value equal to its base value is redundant. Clearing an old
     // override here also lets the same rule repair already-rescored vectors.
-    applyComponent(instance, key, baseValue === value ? 'X' : value)
+    applyComponent(
+        instance,
+        relationship.modified,
+        baseValue === value ? (metricRule?.undefined_values?.[0] || 'X') : value,
+    )
 }
 
 const applyRequirementAction = (
     instance: CvssInstanceLike,
-    version: CvssVersion,
-    key: string,
+    relationship: CvssMetricRelationship,
     value: string,
+    metricRule?: CvssMetricRule,
 ) => {
-    const { baseKey, modifiedKey } = requirementMetricKeys(version, key)
-    const baseValue = getComponentValue(instance, baseKey)
+    if (!relationship.requirement) return
+    const baseValue = getComponentValue(instance, relationship.base)
 
-    // CVSS v2 requirements weight the base CIA metrics directly. CVSS v3/v4
-    // requirements are kept only when the corresponding modified impact is
-    // effective, so rescored vectors never retain an orphaned requirement.
-    const hasApplicableMetric = version === '2.0'
-        ? isDefinedMetricValue(baseValue)
+    // A relationship without a modified metric (CVSS v2 in the default
+    // configuration) applies its requirement to the base metric. Otherwise,
+    // a requirement is retained only while the configured modified metric is
+    // an effective override.
+    const hasApplicableMetric = !relationship.modified
+        ? isDefinedMetricValue(baseValue, metricRule)
         : Boolean(
-            isDefinedMetricValue(baseValue) &&
-            modifiedKey &&
-            isDefinedMetricValue(getComponentValue(instance, modifiedKey)) &&
-            getComponentValue(instance, modifiedKey) !== baseValue,
+            isDefinedMetricValue(baseValue, metricRule) &&
+            isDefinedMetricValue(getComponentValue(instance, relationship.modified), metricRule) &&
+            getComponentValue(instance, relationship.modified) !== baseValue,
         )
 
-    applyComponent(instance, key, hasApplicableMetric ? value : (version === '2.0' ? 'ND' : 'X'))
+    applyComponent(
+        instance,
+        relationship.requirement,
+        hasApplicableMetric ? value : (metricRule?.undefined_values?.[0] || 'X'),
+    )
 }
 
-const toDefinedVector = (instance: CvssInstanceLike) => instance.toString()
+const toDefinedVector = (instance: CvssInstanceLike, metricRule?: CvssMetricRule) => {
+    const unresolved = undefinedValues(metricRule)
+    return instance.toString()
     .split('/')
-    .filter((part: string) => !part.endsWith(':X') && !part.endsWith(':ND'))
+    .filter((part: string) => {
+        const value = part.includes(':') ? part.slice(part.lastIndexOf(':') + 1) : ''
+        return !unresolved.has(value)
+    })
     .join('/')
+}
 
 const getTransitionActions = (
     rules: Array<Record<string, any>>,
@@ -153,11 +175,13 @@ const getTransitionActions = (
 
 export const buildRescoredVectorForState = ({
     rules,
+    metricRules,
     targetState,
     currentVector,
     fallbackVersion,
 }: {
     rules: Array<Record<string, any>>
+    metricRules?: CvssMetricRules
     targetState: string
     currentVector: string
     fallbackVersion: CvssVersion
@@ -170,77 +194,82 @@ export const buildRescoredVectorForState = ({
     }
 
     const { instance, version } = createCvssInstance(currentVector, fallbackVersion)
+    const metricRule = metricRules?.[version]
+    const relationships = metricRule?.relationships || []
+    const requirementRelationships = new Map(
+        relationships
+            .filter(relationship => relationship.requirement)
+            .map(relationship => [relationship.requirement as string, relationship]),
+    )
+    const modifiedRelationships = new Map(
+        relationships
+            .filter(relationship => relationship.modified)
+            .map(relationship => [relationship.modified as string, relationship]),
+    )
 
     const requirementActions: Array<[string, string]> = []
     for (const [key, value] of Object.entries(actions)) {
-        if (REQUIREMENT_KEYS.has(key)) {
+        if (requirementRelationships.has(key)) {
             requirementActions.push([key, value])
-        } else if (key.startsWith('M') && key.length > 1) {
-            applyModifiedAction(instance, key, value)
+        } else if (modifiedRelationships.has(key)) {
+            applyModifiedAction(instance, modifiedRelationships.get(key)!, value, metricRule)
         } else {
             applyComponent(instance, key, value)
         }
     }
     for (const [key, value] of requirementActions) {
-        applyRequirementAction(instance, version, key, value)
+        applyRequirementAction(instance, requirementRelationships.get(key)!, value, metricRule)
     }
 
-    const vector = toDefinedVector(instance)
+    const vector = toDefinedVector(instance, metricRule)
     return { vector, version }
 }
 
-export const normalizeCvssVectorInstance = (instance: CvssInstanceLike) => {
-    const modifiedPairs: Array<[string, string]> = [
-        ['MAV', 'AV'], ['MAC', 'AC'], ['MAT', 'AT'], ['MPR', 'PR'], ['MUI', 'UI'],
-        ['MVC', 'VC'], ['MVI', 'VI'], ['MVA', 'VA'], ['MSC', 'SC'], ['MSI', 'SI'], ['MSA', 'SA'],
-        ['MC', 'C'], ['MI', 'I'], ['MA', 'A'],
-    ]
-
-    for (const [modifiedKey, baseKey] of modifiedPairs) {
+export const normalizeCvssVectorInstance = (
+    instance: CvssInstanceLike,
+    metricRule?: CvssMetricRule,
+) => {
+    const relationships = metricRule?.relationships || []
+    for (const relationship of relationships) {
+        const modifiedKey = relationship.modified
+        if (!modifiedKey) continue
+        const baseKey = relationship.base
         const modifiedComponent = getComponentSafe(instance, modifiedKey)
         const baseComponent = getComponentSafe(instance, baseKey)
         if (!modifiedComponent || !baseComponent) continue
 
         const modifiedValue = modifiedComponent.shortName
         const baseValue = baseComponent.shortName
-        if (modifiedValue === 'X' || baseValue === 'X') continue
+        if (!isDefinedMetricValue(modifiedValue, metricRule) || !isDefinedMetricValue(baseValue, metricRule)) continue
         if (modifiedValue === baseValue) {
-            instance.applyComponentString(modifiedKey, 'X')
+            instance.applyComponentString(modifiedKey, metricRule?.undefined_values?.[0] || 'X')
         }
     }
 
-    const requirementMap: Record<string, { baseKeys: string[], modifiedKeys: string[] }> = {
-        CR: { baseKeys: ['C', 'VC'], modifiedKeys: ['MC', 'MVC'] },
-        IR: { baseKeys: ['I', 'VI'], modifiedKeys: ['MI', 'MVI'] },
-        AR: { baseKeys: ['A', 'VA'], modifiedKeys: ['MA', 'MVA'] },
-    }
-
-    for (const [requirementKey, metricKeys] of Object.entries(requirementMap)) {
+    for (const relationship of relationships) {
+        const requirementKey = relationship.requirement
+        if (!requirementKey) continue
         const requirementComponent = getComponentSafe(instance, requirementKey)
-        if (!requirementComponent || !isDefinedMetricValue(requirementComponent.shortName)) continue
+        if (!requirementComponent || !isDefinedMetricValue(requirementComponent.shortName, metricRule)) continue
 
-        const baseComponent = metricKeys.baseKeys
-            .map(baseKey => getComponentSafe(instance, baseKey))
-            .find(component => component !== null)
+        const baseComponent = getComponentSafe(instance, relationship.base)
         if (!baseComponent) continue
 
-        const modifiedComponent = metricKeys.modifiedKeys
-            .map(modifiedKey => getComponentSafe(instance, modifiedKey))
-            .find(component => component !== null)
+        const modifiedComponent = relationship.modified
+            ? getComponentSafe(instance, relationship.modified)
+            : null
 
         if (modifiedComponent) {
-            const hasEffectiveModifiedMetric = isDefinedMetricValue(baseComponent.shortName) &&
-                isDefinedMetricValue(modifiedComponent.shortName) &&
+            const hasEffectiveModifiedMetric = isDefinedMetricValue(baseComponent.shortName, metricRule) &&
+                isDefinedMetricValue(modifiedComponent.shortName, metricRule) &&
                 modifiedComponent.shortName !== baseComponent.shortName
             if (!hasEffectiveModifiedMetric) {
-                instance.applyComponentString(requirementKey, 'X')
+                instance.applyComponentString(requirementKey, metricRule?.undefined_values?.[0] || 'X')
             }
-        } else if (!isDefinedMetricValue(baseComponent.shortName)) {
-            // CVSS v2 has no modified CIA metrics; its requirements apply to
-            // the corresponding base metric and use ND as the undefined value.
-            instance.applyComponentString(requirementKey, 'ND')
+        } else if (!isDefinedMetricValue(baseComponent.shortName, metricRule)) {
+            instance.applyComponentString(requirementKey, metricRule?.undefined_values?.[0] || 'X')
         }
     }
 
-    return toDefinedVector(instance)
+    return toDefinedVector(instance, metricRule)
 }

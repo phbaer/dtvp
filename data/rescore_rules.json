@@ -1,4 +1,64 @@
 {
+  "metric_rules": {
+    "4.0": {
+      "undefined_values": ["X"],
+      "base_metrics": ["AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA"],
+      "metric_order": ["AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA", "E", "CR", "IR", "AR", "MAV", "MAC", "MAT", "MPR", "MUI", "MVC", "MVI", "MVA", "MSC", "MSI", "MSA", "S", "AU", "R", "V", "RE", "U"],
+      "relationships": [
+        { "base": "AV", "modified": "MAV" },
+        { "base": "AC", "modified": "MAC" },
+        { "base": "AT", "modified": "MAT" },
+        { "base": "PR", "modified": "MPR" },
+        { "base": "UI", "modified": "MUI" },
+        { "base": "VC", "modified": "MVC", "requirement": "CR" },
+        { "base": "VI", "modified": "MVI", "requirement": "IR" },
+        { "base": "VA", "modified": "MVA", "requirement": "AR" },
+        { "base": "SC", "modified": "MSC" },
+        { "base": "SI", "modified": "MSI" },
+        { "base": "SA", "modified": "MSA" }
+      ]
+    },
+    "3.1": {
+      "undefined_values": ["X"],
+      "base_metrics": ["AV", "AC", "PR", "UI", "S", "C", "I", "A"],
+      "metric_order": ["AV", "AC", "PR", "UI", "S", "C", "I", "A", "E", "RL", "RC", "CR", "IR", "AR", "MAV", "MAC", "MPR", "MUI", "MS", "MC", "MI", "MA"],
+      "relationships": [
+        { "base": "AV", "modified": "MAV" },
+        { "base": "AC", "modified": "MAC" },
+        { "base": "PR", "modified": "MPR" },
+        { "base": "UI", "modified": "MUI" },
+        { "base": "S", "modified": "MS" },
+        { "base": "C", "modified": "MC", "requirement": "CR" },
+        { "base": "I", "modified": "MI", "requirement": "IR" },
+        { "base": "A", "modified": "MA", "requirement": "AR" }
+      ]
+    },
+    "3.0": {
+      "undefined_values": ["X"],
+      "base_metrics": ["AV", "AC", "PR", "UI", "S", "C", "I", "A"],
+      "metric_order": ["AV", "AC", "PR", "UI", "S", "C", "I", "A", "E", "RL", "RC", "CR", "IR", "AR", "MAV", "MAC", "MPR", "MUI", "MS", "MC", "MI", "MA"],
+      "relationships": [
+        { "base": "AV", "modified": "MAV" },
+        { "base": "AC", "modified": "MAC" },
+        { "base": "PR", "modified": "MPR" },
+        { "base": "UI", "modified": "MUI" },
+        { "base": "S", "modified": "MS" },
+        { "base": "C", "modified": "MC", "requirement": "CR" },
+        { "base": "I", "modified": "MI", "requirement": "IR" },
+        { "base": "A", "modified": "MA", "requirement": "AR" }
+      ]
+    },
+    "2.0": {
+      "undefined_values": ["ND"],
+      "base_metrics": ["AV", "AC", "Au", "C", "I", "A"],
+      "metric_order": ["AV", "AC", "Au", "C", "I", "A", "E", "RL", "RC", "CDP", "TD", "CR", "IR", "AR"],
+      "relationships": [
+        { "base": "C", "requirement": "CR" },
+        { "base": "I", "requirement": "IR" },
+        { "base": "A", "requirement": "AR" }
+      ]
+    }
+  },
   "transitions": [
     {
       "trigger": {

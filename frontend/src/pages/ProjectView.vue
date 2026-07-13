@@ -5,6 +5,7 @@ import {
     getGroupedVulns,
     getProjectArchiveTaskDownloadUrl,
     getRescoreRules,
+    previewRescoreRuleSync,
     getStatistics,
     getTaskStatistics,
     getTeamMapping,
@@ -13,7 +14,7 @@ import {
     startProjectArchiveExport,
     waitForProjectArchiveTask,
 } from '../lib/api'
-import type { AssessmentRestoreApplyResponse, CodeAnalysisResultRecord, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
+import type { AssessmentRestoreApplyResponse, CodeAnalysisResultRecord, RescoreRuleSyncApplyResponse, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import type { GroupedVuln, ProjectArchiveTask, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
@@ -61,6 +62,7 @@ import VulnRowCompact from '../components/VulnRowCompact.vue'
 import VulnDetailInspector from '../components/VulnDetailInspector.vue'
 import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal.vue'
 import BulkRestoreAssessmentModal from '../components/BulkRestoreAssessmentModal.vue'
+import BulkRescoreRuleSyncModal from '../components/BulkRescoreRuleSyncModal.vue'
 import BulkApproveModal from '../components/BulkApproveModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
@@ -157,6 +159,29 @@ provide('tmrescoreProposals', tmrescoreProposals)
 
 const showBulkApproveModal = ref(false)
 const showAssessmentRestoreModal = ref(false)
+const showRescoreRuleSyncModal = ref(false)
+const rescoreRuleSyncCount = ref(0)
+let rescoreRulePreviewRequestId = 0
+
+const refreshRescoreRuleSyncCount = async (taskId = currentVulnTaskId.value) => {
+    const requestId = ++rescoreRulePreviewRequestId
+    if (!taskId || currentUserRole.value !== 'REVIEWER') {
+        rescoreRuleSyncCount.value = 0
+        projectHeaderState.rescoreRuleSyncCount.value = 0
+        return
+    }
+    try {
+        const result = await previewRescoreRuleSync(taskId)
+        if (requestId !== rescoreRulePreviewRequestId || taskId !== currentVulnTaskId.value) return
+        rescoreRuleSyncCount.value = result.summary.groups || 0
+        projectHeaderState.rescoreRuleSyncCount.value = rescoreRuleSyncCount.value
+    } catch (err) {
+        if (requestId !== rescoreRulePreviewRequestId) return
+        rescoreRuleSyncCount.value = 0
+        projectHeaderState.rescoreRuleSyncCount.value = 0
+        console.error('Failed to preview CVSS rule synchronization:', err)
+    }
+}
 
 const appendLoadingLog = (message: string) => {
     if (!message) return
@@ -422,6 +447,7 @@ const fetchVulns = async () => {
                 updateTaskGroupWindowStatus(status)
                 queuedPartialWindow = null
                 await reloadCompletedTaskWindow(taskId)
+                void refreshRescoreRuleSyncCount(taskId)
             },
         })
 
@@ -476,6 +502,9 @@ watch(() => viewMode.value, (newMode) => {
 
 onUnmounted(() => {
     listItemCache.clear()
+    rescoreRulePreviewRequestId++
+    projectHeaderState.rescoreRuleSyncCount.value = 0
+    projectHeaderState.rescoreRuleSyncHandler.value = null
 })
 
 // Expansion tracking removed — now handled by VulnRowCompact click → modal flow
@@ -1018,6 +1047,11 @@ projectHeaderState.assessmentRestoreHandler.value = () => {
     showAssessmentRestoreModal.value = true
 }
 
+projectHeaderState.rescoreRuleSyncHandler.value = () => {
+    if (!currentVulnTaskId.value) return
+    showRescoreRuleSyncModal.value = true
+}
+
 const handleBulkResolveUpdates = (updates: Array<{ id: string; data: any }>) => {
     handleBulkUpdates(updates, closeBulkModal)
 }
@@ -1028,6 +1062,11 @@ const handleBulkApproveModalUpdates = (updates: Array<{ id: string; data: any }>
 
 const handleAssessmentRestoreApplied = (_result: AssessmentRestoreApplyResponse) => {
     handleBulkUpdates([])
+}
+
+const handleRescoreRuleSyncApplied = (_result: RescoreRuleSyncApplyResponse) => {
+    handleBulkUpdates([])
+    void refreshRescoreRuleSyncCount()
 }
 
 const exportCurrentProjectArchive = async () => {
@@ -1274,6 +1313,7 @@ const syncProjectHeaderState = () => {
     projectHeaderState.isReviewer.value = currentUserRole.value === 'REVIEWER'
     projectHeaderState.incompleteCount.value = needsApprovalGroups.value.length
     projectHeaderState.assessmentRestoreCount.value = assessmentRestoreCount.value
+    projectHeaderState.rescoreRuleSyncCount.value = rescoreRuleSyncCount.value
 }
 
 const hydrateSelectedRouteGroup = () => {
@@ -1341,6 +1381,12 @@ watch(assessmentRestoreCount, (count) => {
 
 watch(currentUserRole, (role) => {
     projectHeaderState.isReviewer.value = (role || 'ANALYST') === 'REVIEWER'
+    if (role === 'REVIEWER' && currentVulnTaskId.value) {
+        void refreshRescoreRuleSyncCount()
+    } else if (role !== 'REVIEWER') {
+        rescoreRuleSyncCount.value = 0
+        projectHeaderState.rescoreRuleSyncCount.value = 0
+    }
 }, { immediate: true })
 </script>
 
@@ -1854,6 +1900,13 @@ watch(currentUserRole, (role) => {
         :task-id="currentVulnTaskId"
         @close="showAssessmentRestoreModal = false"
         @applied="handleAssessmentRestoreApplied"
+    />
+
+    <BulkRescoreRuleSyncModal
+        :show="showRescoreRuleSyncModal"
+        :task-id="currentVulnTaskId"
+        @close="showRescoreRuleSyncModal = false"
+        @applied="handleRescoreRuleSyncApplied"
     />
 
     <Teleport to="body">

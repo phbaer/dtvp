@@ -757,7 +757,10 @@ const resetToDefault = (ver: string) => {
 
 const normalizeRescoredVector = () => {
     if (!cvssInstance.value) return
-    pendingVector.value = normalizeCvssVectorInstance(cvssInstance.value)
+    pendingVector.value = normalizeCvssVectorInstance(
+        cvssInstance.value,
+        rescoreRules?.value?.metric_rules?.[activeVersion.value],
+    )
 }
 
 const setCvssInstanceFromVector = (vector: string) => {
@@ -1173,6 +1176,7 @@ const applyStateRescore = (targetState: string) => {
     const rules = rescoreRules?.value?.transitions || []
     const result = buildRescoredVectorForState({
         rules,
+        metricRules: rescoreRules?.value?.metric_rules,
         targetState,
         currentVector: pendingVector.value,
         fallbackVersion: activeVersion.value,
@@ -1187,6 +1191,7 @@ const applyStateRescore = (targetState: string) => {
 
 const rescoreRuleSyncPreview = computed(() => buildRescoredVectorForState({
     rules: rescoreRules?.value?.transitions || [],
+    metricRules: rescoreRules?.value?.metric_rules,
     targetState: state.value,
     currentVector: pendingVector.value,
     fallbackVersion: activeVersion.value,

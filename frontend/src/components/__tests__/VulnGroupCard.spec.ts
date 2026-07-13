@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
+import defaultRescoreRules from '../../../../data/rescore_rules.json'
 
 // Mock API
 vi.mock('../../lib/api', () => ({
@@ -764,7 +765,7 @@ describe('VulnGroupCard', () => {
 
         const wrapper = mount(VulnGroupCard, {
             props: { group: groupWithVector },
-            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: ref(defaultRescoreRules) } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -811,7 +812,7 @@ describe('VulnGroupCard', () => {
 
         const wrapper = mount(VulnGroupCard, {
             props: { group: groupWithVector },
-            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: ref(defaultRescoreRules) } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -835,6 +836,7 @@ describe('VulnGroupCard', () => {
 
     it('offers to sync an existing rescored vector that is missing required rule fields', async () => {
         const rescoreRules = ref({
+            metric_rules: defaultRescoreRules.metric_rules,
             transitions: [{
                 trigger: { state: 'NOT_AFFECTED' },
                 actions: {

@@ -12,28 +12,20 @@ const allVersionRules = [{
         '2.0': { CR: 'L', IR: 'L', AR: 'L', CDP: 'N', TD: 'N' },
     },
 }]
+const metricRules = defaultRescoreRules.metric_rules as any
 
 describe('cvssRescore', () => {
     it('ships complete default actions and paired impact requirements for every supported version', () => {
         const versions = ['2.0', '3.0', '3.1', '4.0']
-        const requirementPairs: Record<string, Record<string, string>> = {
-            '3.0': { MC: 'CR', MI: 'IR', MA: 'AR' },
-            '3.1': { MC: 'CR', MI: 'IR', MA: 'AR' },
-            '4.0': { MVC: 'CR', MVI: 'IR', MVA: 'AR' },
-        }
-
         for (const transition of defaultRescoreRules.transitions as Array<Record<string, any>>) {
             expect(Object.keys(transition.actions).sort()).toEqual(versions)
             for (const version of versions) {
                 const actions = transition.actions[version]
+                const relationships = (defaultRescoreRules.metric_rules as Record<string, any>)[version].relationships
                 expect(Object.keys(actions).length).toBeGreaterThan(0)
-                if (version === '2.0') {
-                    expect(actions).toMatchObject({ CR: expect.any(String), IR: expect.any(String), AR: expect.any(String) })
-                    continue
-                }
-                for (const [modifiedMetric, requirementMetric] of Object.entries(requirementPairs[version] || {})) {
-                    if (modifiedMetric in actions) {
-                        expect(actions).toHaveProperty(requirementMetric)
+                for (const relationship of relationships) {
+                    if (relationship.requirement && (!relationship.modified || relationship.modified in actions)) {
+                        expect(actions).toHaveProperty(relationship.requirement)
                     }
                 }
             }
@@ -57,6 +49,7 @@ describe('cvssRescore', () => {
                     '3.1': { MC: 'N', MI: 'N', MA: 'N' },
                 },
             }],
+            metricRules,
             targetState: 'NOT_AFFECTED',
             currentVector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
             fallbackVersion: '3.1',
@@ -92,6 +85,7 @@ describe('cvssRescore', () => {
     ])('applies complete $version rules and requirement fields', ({ version, vector, modifiedMetrics }) => {
         const result = buildRescoredVectorForState({
             rules: allVersionRules,
+            metricRules,
             targetState: 'NOT_AFFECTED',
             currentVector: vector,
             fallbackVersion: version,
@@ -107,6 +101,7 @@ describe('cvssRescore', () => {
     it('repairs missing requirements on an already-rescored vector', () => {
         const result = buildRescoredVectorForState({
             rules: allVersionRules,
+            metricRules,
             targetState: 'NOT_AFFECTED',
             currentVector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N',
             fallbackVersion: '3.1',
@@ -123,6 +118,7 @@ describe('cvssRescore', () => {
                     '3.1': { MC: 'N' },
                 },
             }],
+            metricRules,
             targetState: 'NOT_AFFECTED',
             currentVector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H',
             fallbackVersion: '3.1',
@@ -134,6 +130,7 @@ describe('cvssRescore', () => {
     it('clears stale modified and requirement values when the rule target matches the base metric', () => {
         const result = buildRescoredVectorForState({
             rules: allVersionRules,
+            metricRules,
             targetState: 'NOT_AFFECTED',
             currentVector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H/CR:H/MC:H',
             fallbackVersion: '3.1',
@@ -148,7 +145,7 @@ describe('cvssRescore', () => {
     it('removes modified and requirement metrics when they collapse to base values', () => {
         const instance = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N/IR:H/MI:H')
 
-        const cleanedVector = normalizeCvssVectorInstance(instance)
+        const cleanedVector = normalizeCvssVectorInstance(instance, metricRules['3.1'])
 
         expect(cleanedVector).not.toContain('MI:H')
         expect(cleanedVector).not.toContain('IR:H')
@@ -157,7 +154,7 @@ describe('cvssRescore', () => {
     it('preserves a requirement when its corresponding modified metric is effective', () => {
         const instance = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:H/MC:L')
 
-        const cleanedVector = normalizeCvssVectorInstance(instance)
+        const cleanedVector = normalizeCvssVectorInstance(instance, metricRules['3.1'])
 
         expect(cleanedVector).toContain('MC:L')
         expect(cleanedVector).toContain('CR:H')
@@ -166,7 +163,7 @@ describe('cvssRescore', () => {
     it('preserves CVSS 2.0 requirements because they apply directly to base CIA metrics', () => {
         const instance = new Cvss2('AV:N/AC:L/Au:N/C:C/I:P/A:P/CR:L/IR:M/AR:H')
 
-        const cleanedVector = normalizeCvssVectorInstance(instance)
+        const cleanedVector = normalizeCvssVectorInstance(instance, metricRules['2.0'])
 
         expect(cleanedVector).toContain('CR:L')
         expect(cleanedVector).toContain('IR:M')
