@@ -179,6 +179,115 @@ def test_summary_list_metadata_includes_row_rollups():
     assert "dependency_chains" not in component
 
 
+def test_summary_list_metadata_identifies_multiple_inconsistency_reasons():
+    shared_prefix = "--- [Team: team-a] [State: NOT_AFFECTED] ---\n"
+    summaries = summarize_grouped_vulnerabilities(
+        [
+            {
+                "id": "CVE-2026-INCONSISTENCY-REASONS",
+                "tags": ["team-a"],
+                "affected_versions": [
+                    {
+                        "project_version": "1.0.0",
+                        "components": [
+                            {
+                                "analysis_state": "NOT_AFFECTED",
+                                "analysis_details": shared_prefix + "First assessment",
+                                "is_suppressed": False,
+                            }
+                        ],
+                    },
+                    {
+                        "project_version": "2.0.0",
+                        "components": [
+                            {
+                                "analysis_state": "EXPLOITABLE",
+                                "analysis_details": shared_prefix + "Second assessment",
+                                "is_suppressed": False,
+                            }
+                        ],
+                    },
+                ],
+            }
+        ],
+        {},
+    )
+
+    metadata = summaries[0]["list_metadata"]
+    assert metadata["lifecycle"] == "INCONSISTENT"
+    assert metadata["inconsistency_reasons"] == [
+        "ANALYSIS_STATE_MISMATCH",
+        "TEAM_ASSESSMENT_MISMATCH",
+        "ASSESSMENT_DETAILS_MISMATCH",
+    ]
+
+
+def test_task_group_query_filters_inconsistency_reasons_with_or_semantics():
+    groups = [
+        {
+            "id": "CVE-STATE",
+            "list_metadata": {
+                "lifecycle": "INCONSISTENT",
+                "inconsistency_reasons": ["ANALYSIS_STATE_MISMATCH"],
+            },
+            "affected_versions": [],
+        },
+        {
+            "id": "CVE-DETAILS",
+            "list_metadata": {
+                "lifecycle": "INCONSISTENT",
+                "inconsistency_reasons": [
+                    "TEAM_ASSESSMENT_MISMATCH",
+                    "ASSESSMENT_DETAILS_MISMATCH",
+                ],
+            },
+            "affected_versions": [],
+        },
+        {
+            "id": "CVE-OPEN",
+            "list_metadata": {"lifecycle": "OPEN"},
+            "affected_versions": [],
+        },
+    ]
+
+    response = query_task_groups(
+        build_task_group_query_index(groups),
+        q="",
+        lifecycle=["INCONSISTENT"],
+        inconsistency_reason=[
+            "ANALYSIS_STATE_MISMATCH",
+            "ASSESSMENT_DETAILS_MISMATCH",
+        ],
+        analysis=[],
+        tag="",
+        vuln_id="",
+        component="",
+        assignee="",
+        dependency=[],
+        versions=[],
+        cvss_mismatch=False,
+        attributed_before_days=None,
+        attribution_mode="older",
+        tmrescore=[],
+        tmrescore_proposal_ids=[],
+        sort_by="id",
+        sort_order="asc",
+        offset=0,
+        limit=10,
+    )
+
+    assert [item["id"] for item in response["items"]] == [
+        "CVE-DETAILS",
+        "CVE-STATE",
+    ]
+    assert response["counts"]["all"]["inconsistency_reason"] == {
+        "MISSING_RESCORING_VECTOR": 0,
+        "ANALYSIS_STATE_MISMATCH": 1,
+        "TEAM_ASSESSMENT_MISMATCH": 1,
+        "ASSESSMENT_DETAILS_MISMATCH": 1,
+    }
+
+
 def test_task_group_query_index_reuses_precomputed_fields():
     groups = [
         {

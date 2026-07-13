@@ -98,6 +98,13 @@ The repository includes Agentyzer under `agentyzer/` as the first-party implemen
     - `assessment` — an `Assessment` object with top-level verdict metadata.
     - `steps` — an ordered array of `StepFindings`.
 
+- `POST /benchmark/compare`
+  - Compare a human assessment artifact with a saved automated assessment result.
+  - This endpoint evaluates assessment artifacts only; it must not rerun repository or source analysis.
+  - DTVP sends a prepared `benchmark` object with normalized human/automated fields and deterministic state/CVSS deltas.
+  - Expected response keeps the benchmark shape and includes `comparison_method`, `evaluator`, canonical 1-5 `rating`, `findings`, and `recommendation`.
+  - If the LLM evaluator is unavailable, return a deterministic fallback response with `evaluator.probabilistic=false`.
+
 - `GET /jobs`
   - List jobs known to the analyzer process.
   - Expected response: `{ "jobs": [...], "configuration": {...}, "backend": {...} }`, where each item follows the `JobStatusResponse` shape.

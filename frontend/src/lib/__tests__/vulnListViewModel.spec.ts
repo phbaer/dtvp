@@ -57,6 +57,7 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
     dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'],
     tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
     automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+    inconsistencyReasonFilter: [],
     versionFilterList: [],
     cvssVersionMismatchOnly: false,
     attributionAgeDays: null,
@@ -69,6 +70,55 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
 })
 
 describe('vulnListViewModel', () => {
+    it('counts ambiguous restoration gaps for the restore preview entry point', () => {
+        const items = buildVulnListItems([
+            makeGroup({
+                id: 'CVE-AMBIGUOUS-RESTORE',
+                assessment_restore_count: 1,
+                assessment_restore_recoverable_count: 0,
+                assessment_restore_status: 'ambiguous',
+                list_metadata: {
+                    lifecycle: 'INCONSISTENT',
+                    assessment_restore_count: 1,
+                    assessment_restore_recoverable_count: 0,
+                    assessment_restore_status: 'ambiguous',
+                    inconsistency_reasons: ['MISSING_RESCORING_VECTOR'],
+                },
+            }),
+        ], {}, {})
+
+        const stats = deriveVulnListStaticStats(items)
+        expect(stats.assessmentRestoreCount).toBe(1)
+        expect(stats.assessmentRestoreRecoverableCount).toBe(0)
+    })
+
+    it('filters inconsistent groups by any selected reason', () => {
+        const items = buildVulnListItems([
+            makeGroup({
+                id: 'CVE-STATE',
+                list_metadata: {
+                    lifecycle: 'INCONSISTENT',
+                    inconsistency_reasons: ['ANALYSIS_STATE_MISMATCH'],
+                },
+            }),
+            makeGroup({
+                id: 'CVE-DETAILS',
+                list_metadata: {
+                    lifecycle: 'INCONSISTENT',
+                    inconsistency_reasons: ['ASSESSMENT_DETAILS_MISMATCH'],
+                },
+            }),
+        ], {}, {})
+
+        const view = deriveVulnListViewModel(items, baseFilters({
+            inconsistencyReasonFilter: ['ASSESSMENT_DETAILS_MISMATCH'],
+        }))
+
+        expect(view.matchingItems.map(item => item.id)).toEqual(['CVE-DETAILS'])
+        expect(view.inconsistencyReasonCounts.ANALYSIS_STATE_MISMATCH).toBe(1)
+        expect(view.inconsistencyReasonCounts.ASSESSMENT_DETAILS_MISMATCH).toBe(1)
+    })
+
     it('derives filtered rows, sorted rows, and sidebar counts in one model', () => {
         const openDirect = makeGroup({
             id: 'CVE-2026-0001',

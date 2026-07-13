@@ -106,8 +106,12 @@ DTVP supports:
 - Lifecycle states such as open, assessed, incomplete, inconsistent, and needs approval.
 - Global and team-specific assessments.
 - CVSS rescoring and reviewer workflows.
+- Audit-backed repair of assessed findings whose rescored CVSS vector tag was
+  lost from Dependency-Track details.
 - Optional threat-model rescoring through tmrescore.
 - Optional reachability/exploitability code analysis with automatic scans for newly discovered open vulnerabilities.
+- Per-vulnerability benchmark comparisons between existing assessments and
+  saved Agentyzer assessments, with a 1-5 agreement rating.
 - Versioned project archive export/import for Dependency-Track replacement, restore, and retention workflows.
 - UI editing for team mappings, user roles, rescore rules, and automatic assessment guidance.
 - Local operation with a complete mock Dependency-Track stack.
@@ -147,6 +151,7 @@ Important backend entry points:
 | `dtvp/task_group_query_services.py` | Backend filtering, sorting, facets, pagination, and task-window query support. |
 | `dtvp/logic.py` | Domain logic for grouping, team mapping, assessment parsing, statistics, CVSS, BOM dependency analysis. |
 | `dtvp/assessment_services.py` | Dependency-Track assessment writes, conflict detection, local overlays, result finalization. |
+| `dtvp/assessment_restore_services.py` | Detection and repair helpers for missing rescored CVSS assessment tags recovered from Dependency-Track audit comments. |
 | `dtvp/dt_client.py` | Dependency-Track API client. |
 | `dtvp/dt_cache.py` | Local Dependency-Track cache and pending update storage. |
 | `dtvp/sqlite_migration_services.py` and `dtvp/migrations/` | Lightweight SQLite migration runner and numbered SQL schema files for local stores. |
@@ -294,6 +299,23 @@ Other domain rules:
 - Assessment details are structured text blocks with headers such as
   `[Team: ...]`, `[State: ...]`, `[Assessed By: ...]`, `[Reviewed By: ...]`,
   `[Rescored: ...]`, `[Rescored Vector: ...]`, and `[Assigned: ...]`.
+- Assessed findings that still have rescoring evidence but are missing an
+  explicit `[Rescored Vector: ...]` tag are marked inconsistent. Reviewers can
+  bulk restore the sole historical vector, or the strictly newest historical
+  vector when an assessment was rescored more than once, from Dependency-Track
+  analysis comments while preserving the current state, justification,
+  suppression, and details text. Ambiguous or undated histories remain visible
+  in the restore preview for manual review but are not applied automatically.
+  Restore apply shows an indeterminate in-progress state while Dependency-Track
+  is updating, then keeps a completion report open with restored,
+  queued-for-retry, failed, and per-finding error details. An outer HTTP 405 is
+  identified as a frontend/backend route or proxy method mismatch; downstream
+  Dependency-Track 405 responses remain visible in the queued result details.
+- Inconsistent groups carry one or more indexed reasons: missing rescoring
+  vector metadata, differing analysis states, differing structured team
+  assessments, or differing substantive assessment details. The project view
+  can filter on these reasons; multiple selected reasons use OR semantics and
+  still combine with other filter categories using AND semantics.
 - A non-`NOT_SET` General block takes precedence in aggregate assessment state.
   Otherwise DTVP chooses the worst team state using the priority in
   `dtvp/logic.py`.
@@ -312,12 +334,13 @@ Other domain rules:
 The project view groups vulnerabilities by CVE or vulnerability ID across all
 selected project versions. Reviewers can:
 
-- Search and filter by lifecycle, analysis state, attribution age, assignee,
-  and automatic-assessment status.
+- Search and filter by lifecycle, specific inconsistency reason, analysis state,
+  attribution age, assignee, and automatic-assessment status.
 - Inspect dependency paths and team ownership.
 - Open a vulnerability detail card.
 - Apply synchronized global or team-specific assessments across matching
   Dependency-Track findings.
+- Preview and bulk-apply audit-trail repairs for missing rescored CVSS vectors.
 
 Backend task windows keep large projects responsive:
 
@@ -379,15 +402,34 @@ change, DTVP remaps assessments by component purl/name/version/bom-ref and
 vulnerability ID/name/aliases. Dependency-Track audit history and comments are
 not replayed.
 
-Backend-native bulk preview/apply endpoints remain the main future scale improvement. Today the bulk incomplete modal can use backend-filtered detail windows, but still drains full details into the browser before acting.
+Backend-native bulk preview/apply endpoints remain the main future scale
+improvement for incomplete-assessment synchronization. Today the bulk incomplete
+modal can use backend-filtered detail windows, but still drains full details
+into the browser before acting.
 
 ### Threat-Model Rescoring
 
 Set `DTVP_TMRESCORE_URL` to enable tmrescore entry points.
 
 Users can open a project, choose `Threat Model`, upload a `.tm7` file plus
-optional `items.csv` or config inputs, and cache proposal snapshots for
-reviewer rescoring dialogs.
+optional `items.csv`, analysis config, or MITRE countermeasures inputs, and
+cache proposal snapshots for reviewer rescoring dialogs. The threat-model
+workspace scrolls within the project shell so upload and analysis controls
+remain reachable on short viewports. DTVP uses vscorer's current
+session/inventory REST contract:
+
+- Pipeline progress from `step` / `total_steps` is normalized into the DTVP
+  progress bar while legacy percentage responses remain accepted.
+- Chain analysis, prioritization, what-if, MITRE ATT&CK enrichment, offline
+  mode, and provider-neutral LLM enrichment are available as run options.
+  MITRE enrichment can include an uploaded countermeasures YAML.
+- LLM availability, provider, and configured model come from vscorer's `llm_*`
+  health fields, with the legacy Ollama health flag retained as a compatibility
+  fallback. DTVP shows the vscorer model as read-only context and does not send
+  a model override with analysis requests.
+- The frontend resolves generated downloads from vscorer's
+  output-name-to-URL map. A `skeptic_gate_failed` response is terminal and
+  shown as requiring manual review rather than being polled indefinitely.
 
 SBOM modes:
 
@@ -408,6 +450,15 @@ analysis. Scans run through DTVP's in-process queue and send the analyzer:
 - Optional dependency context.
 - Optional TMRescore/vscorer guidance.
 - Optional LLM metadata hints.
+
+Final analyzer verdicts pass through a deterministic claim audit before DTVP
+maps them to Dependency-Track assessment fields. The audit normalizes the final
+verdict, final reasoning, and structured pipeline evidence into comparable
+claims, records any claim issues on the audit view, challenges unsupported
+downgrades, restores original CVSS scoring when unsupported downgrades are
+removed, keeps the final verdict step aligned with guarded verdicts, and catches
+internally inconsistent final reasoning such as affected-version claims paired
+with an already-satisfied fixed-version floor.
 
 #### Result Store
 
@@ -439,7 +490,35 @@ Result APIs:
 - `GET /api/code-analysis/results/{run_id}`
 - `DELETE /api/code-analysis/results/{run_id}`
 - `POST /api/code-analysis/results/{run_id}/compact`
+- `POST /api/code-analysis/results/{run_id}/benchmark`
 - `GET /api/projects/{project}/vulnerabilities/{vuln_id}/analysis-results`
+
+#### Assessment Benchmarks
+
+Reviewers start one normal `Analyze` run from a vulnerability card. Analysis
+runs are saved in the normal code-analysis result history; there is no separate
+benchmark scan action because it would execute the same Agentyzer source-analysis
+pipeline. Historical/API-created queue items with `source=benchmark` remain
+supported for compatibility.
+
+When a saved run is selected and an existing assessment is available, DTVP
+automatically compares the two, regardless of whether that assessment was
+created by a person or automation. DTVP computes deterministic anchors for
+state, justification, CVSS score/vector, and basic evidence differences, then
+asks Agentyzer `POST /benchmark/compare` to judge the free-text reasoning
+probabilistically. If Agentyzer or its LLM backend is unavailable, DTVP returns
+the deterministic fallback and labels the evaluator as `DTVP fallback`. If the
+existing assessment is `NOT_SET`, analysis still runs but no benchmark is
+requested or displayed.
+
+Benchmark ratings use a canonical numeric score. The optional letter grade in
+API responses is only a display alias derived from that score:
+
+- `5 / A`: strong semantic agreement.
+- `4 / B`: aligned outcome with minor reasoning, evidence, or CVSS differences.
+- `3 / C`: partial agreement or inconclusive baseline/result.
+- `2 / D`: weak match with important disagreement.
+- `1 / F`: direct contradiction, especially affected versus not-affected.
 
 #### Automatic Dedupe
 
@@ -472,16 +551,27 @@ selected results, and prompt drawers survive tab switches.
 
 The Code Analysis tab is organized as:
 
-1. Scan controls with component selection and the `Analyze` action.
+1. Scan controls with component selection and one `Analyze` action.
 2. Active queue items and compact saved run history.
-3. Decision, including follow-up questions.
-4. Always-visible assessment draft diff for state, justification, details,
-   CVSS, and assignees.
-5. Evidence-quality badges for version confirmation, source evidence,
-   SBOM-only attribution, external research, and inconclusive results.
-6. Summary/reasoning, component results, and ticket drafts.
-7. `Analysis Artifacts` drawers for version coverage, raw `LLM Conversation`,
+3. The assessment decision and its evidence-quality badges.
+4. A `Summary` drawer, opened by default, containing the rationale, final
+   reasoning, and follow-up question controls.
+5. A separate artifact-style `Assessment Draft` drawer, opened by default,
+   with the state, justification, details, CVSS, and assignee diff.
+6. A separate `Assessment Benchmark` drawer, opened by default when a saved run
+   is selected and a prior assessment exists. It compares the existing
+   assessment with the analysis result side by side, emphasizing their CVSS
+   scores and vectors. State, justification, CVSS-score, and CVSS-vector
+   agreement are rendered as explicit comparison states with green aligned,
+   red different, or amber review icons; DTVP does not offer or request a
+   benchmark when the existing assessment state is `NOT_SET`.
+7. Per-component result cards for multi-target assessments.
+8. A separate, initially collapsed `Ticket Draft` drawer.
+9. `Analysis Artifacts` drawers for version coverage, raw `LLM Conversation`,
    and pipeline evidence.
+
+Expandable assessment and artifact sections use one bordered card whose body
+extends below the header, rather than separate header and content boxes.
 
 Artifact details:
 
@@ -503,6 +593,8 @@ Card actions:
 - Load a previous run into the result panel.
 - Remove saved runs from history.
 - Use a result as an editable assessment draft.
+- Automatically compare a selected saved run against the current existing
+  assessment when one is available.
 - Submit follow-up questions linked to a parent run.
 - Start additional non-duplicate component scans while other scans for the same
   vulnerability are queued or running.
@@ -611,9 +703,14 @@ assessments.
 
 Prompt behavior:
 
+- All Agentyzer LLM prompts live in dedicated YAML prompt bundles under
+  `agentyzer/config/prompts/`; runtime overrides can provide matching files via
+  `AGENTYZER_CONFIG_DIR/prompts`.
 - Reachability, deep-analysis, transitive-analysis, and final-verdict prompts
   use compact `analysis_protocol` sections instead of bundled few-shot example
   transcripts.
+- Benchmark comparison uses the `benchmark_comparison` prompt bundle and never
+  asks the model to fetch source or rerun repository analysis.
 - The model keeps its analysis private and emits only structured fields with
   evidence anchors.
 - Response contracts list exact output fields, allowed values, evidence labels,
@@ -625,6 +722,10 @@ Verdict behavior:
 
 - Final verdict reasoning remains usable as developer ticket summary material
   with Desc, Surface, Evidence, Fix, and Validate guidance.
+- An affected-range dependency version without confirmed direct reachability,
+  deep exploitability, or a positive transitive path is capped at
+  `Probably Affected` with medium confidence. Version presence alone cannot
+  produce a confirmed `Affected` verdict.
 - Transitive and verdict prompts require a source/search fetch before unresolved
   intermediary or advisory facts can drive `UNCERTAIN` or a `Not Affected`
   downgrade.
@@ -634,7 +735,12 @@ Verdict behavior:
 - If static guidance identifies a framework/platform such as Keycloak, the
   vulnerable dependency is only SBOM-attributed, and every checked version
   remains unknown, final verdicting performs a mandatory upstream-platform
-  search before accepting an inconclusive or downgrade-style result.
+  search before accepting an inconclusive or downgrade-style result. Successful
+  results from that mandatory lookup are treated as upstream-platform evidence,
+  not as local reachability evidence: they can support `Probably Affected` with
+  medium confidence even when local analysis excludes the checked codebase, but
+  cannot by themselves support a confirmed `Affected` verdict. Static guidance
+  without successful research remains non-evidentiary.
 
 The LLM research loop supports native OpenAI-style tool calls plus text
 `FETCH_SEARCH`, `FETCH_URL`, `FETCH_PACKAGE`, and `FETCH_SOURCE`, including
@@ -982,7 +1088,6 @@ Most values can be set in `.env` for Docker Compose or in the shell for local `u
 | `DTVP_TMRESCORE_URL` | External or mock tmrescore base URL | unset |
 | `DTVP_TMRESCORE_TIMEOUT_SECONDS` | tmrescore HTTP timeout before polling fallback | `180` |
 | `DTVP_TMRESCORE_CACHE_PATH` | Cached per-project tmrescore proposals | `data/tmrescore_proposals.json` |
-| `DTVP_TMRESCORE_OLLAMA_MODEL` | Default model for tmrescore LLM enrichment UI | `qwen2.5:7b` |
 | `DTVP_TMRESCORE_TASK_TTL_SECONDS` | Completed/failed tmrescore task retention | `3600` |
 | `DTVP_CODE_ANALYSIS_URL` | External or mock code-analysis base URL | unset; Compose defaults to `http://agentyzer:8000` |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | Code-analysis HTTP timeout | `300` |
@@ -1010,6 +1115,10 @@ Most values can be set in `.env` for Docker Compose or in the shell for local `u
 | `AGENTYZER_OPENWEBUI_MODEL` | OpenWebUI model used by Agentyzer | `mistral` |
 | `AGENTYZER_OPENWEBUI_API_KEY` | Optional OpenWebUI bearer token | unset |
 | `AGENTYZER_OPENWEBUI_TOOL_CALLS` | Native OpenAI-style tool calls for OpenWebUI research loops, `auto` or `off` | `auto` |
+| `AGENTYZER_OPENWEBUI_CONTEXT_WINDOW` | Optional OpenWebUI model context window in tokens; enables preflight prompt compaction when set, for example `131072` | `0` |
+| `AGENTYZER_OPENWEBUI_CONTEXT_SAFETY_MARGIN` | Token margin reserved below the configured or reported OpenWebUI context limit | `256` |
+| `AGENTYZER_OPENWEBUI_CONTEXT_RETRIES` | Context-length retry attempts after OpenWebUI rejects an oversized request | `2` |
+| `AGENTYZER_OPENWEBUI_MIN_COMPLETION_TOKENS` | Minimum completion budget preserved when Agentyzer truncates oversized OpenWebUI prompt context | `256` |
 
 ## SBOM
 

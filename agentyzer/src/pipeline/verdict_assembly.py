@@ -6,6 +6,7 @@ payload live here.  ``graph.py`` calls these after the graph completes.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -264,6 +265,523 @@ def _score_severity_bucket(score: float | None) -> str | None:
     if score < 9.0:
         return "high"
     return "critical"
+
+
+_VERSION_TOKEN_RE = re.compile(r"\bv?\d+(?:\.\d+){1,5}\b", re.IGNORECASE)
+_REMEDIATION_FLOOR_RE = re.compile(
+    r"\b(?:upgrade|update|bump|pin|move)\b[^.:\n]{0,120}?\b(?:to|at least)\s+"
+    r"(?:version\s+)?(v?\d+(?:\.\d+){1,5})\s*"
+    r"(?:\+|or\s+(?:higher|newer|later)|and\s+(?:higher|newer|later))?",
+    re.IGNORECASE,
+)
+_FIXED_VERSION_RE = re.compile(
+    r"\b(?:fixed|patched|resolved)\s+(?:in|by)\s+(?:version\s+)?"
+    r"(v?\d+(?:\.\d+){1,5})\b",
+    re.IGNORECASE,
+)
+
+
+def _version_parts(value: Any) -> tuple[int, ...] | None:
+    text = _clean_text(value)
+    match = _VERSION_TOKEN_RE.search(text)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.group(0).lstrip("vV").split("."))
+
+
+def _compare_versions(left: Any, right: Any) -> int | None:
+    left_parts = _version_parts(left)
+    right_parts = _version_parts(right)
+    if not left_parts or not right_parts:
+        return None
+    length = max(len(left_parts), len(right_parts))
+    padded_left = left_parts + (0,) * (length - len(left_parts))
+    padded_right = right_parts + (0,) * (length - len(right_parts))
+    if padded_left < padded_right:
+        return -1
+    if padded_left > padded_right:
+        return 1
+    return 0
+
+
+def _detected_version_from_reasoning(text: str) -> str | None:
+    patterns = (
+        re.compile(
+            r"\b(?:project\s+uses|uses|detected|resolved)\b[^.:\n]{0,80}?"
+            r"(v?\d+(?:\.\d+){1,5})\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bversion\s+(v?\d+(?:\.\d+){1,5})\b",
+            re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _fixed_version_text_candidates(text: str) -> list[str]:
+    candidates: list[Any] = []
+    candidates.extend(match.group(1) for match in _REMEDIATION_FLOOR_RE.finditer(text))
+    candidates.extend(match.group(1) for match in _FIXED_VERSION_RE.finditer(text))
+    return _unique_nonempty(candidates)
+
+
+def _claims_detected_version_affected(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "within the affected range",
+            "inside the affected range",
+            "in the affected range",
+            "is affected",
+            "is vulnerable",
+        )
+    )
+
+
+def _final_claim_text(
+    result: Dict[str, Any],
+    reasoning: str | None = None,
+) -> str:
+    return " ".join(
+        _clean_text(value)
+        for value in (
+            reasoning,
+            result.get("reasoning"),
+            result.get("summary"),
+        )
+        if value
+    )
+
+
+def _has_successful_upstream_platform_research(
+    final_state: Dict[str, Any] | None,
+    result: Dict[str, Any] | None,
+) -> bool:
+    """Return whether the mandatory upstream-platform lookup produced results.
+
+    ``required=True`` is retained as a compatibility marker for assessments
+    created before research entries gained an explicit ``scope`` field.
+    """
+    state_result = ((final_state or {}).get("result") or {})
+    research_log = (result or {}).get("research_log") or state_result.get(
+        "research_log"
+    )
+    if not isinstance(research_log, list):
+        return False
+
+    failure_markers = (
+        "--- fetch failed:",
+        "--- search failed:",
+        "--- package lookup failed:",
+        "--- source fetch failed:",
+        "--- tool call failed:",
+    )
+    supported_directives = {"search", "url", "package", "source"}
+
+    for entry in research_log:
+        if not isinstance(entry, dict):
+            continue
+        scope = _clean_text(entry.get("scope")).lower()
+        is_upstream_lookup = scope == "upstream_platform" or (
+            not scope and entry.get("required") is True
+        )
+        if not is_upstream_lookup:
+            continue
+        directives = entry.get("directives") or []
+        if not any(
+            isinstance(directive, dict)
+            and _clean_text(directive.get("type")).lower()
+            in supported_directives
+            for directive in directives
+        ):
+            continue
+        summary = _clean_text(entry.get("results_summary"))
+        if summary and not any(marker in summary.lower() for marker in failure_markers):
+            return True
+
+    return False
+
+
+def _build_evidence_claims(
+    version_analysis: Dict[str, Any] | None,
+    final_state: Dict[str, Any] | None,
+    result: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    state = final_state or {}
+    dep_info = state.get("dep_info") or {}
+    llm_analysis = state.get("llm_analysis") or {}
+    deep_analysis = state.get("deep_analysis") or {}
+    transitive_analysis = state.get("transitive_analysis") or {}
+    deep_exploitable = str(deep_analysis.get("exploitable", "")).upper()
+    transitive_reachable = str(transitive_analysis.get("reachable", "")).upper()
+    any_version_affected = bool(version_analysis and version_analysis.get("affected"))
+    current_workspace_affected = (
+        (version_analysis or {}).get("current_workspace_affected")
+        if version_analysis
+        else None
+    )
+    historical_only_affected = bool(
+        any_version_affected and current_workspace_affected is False
+    )
+    version_excludes_all = bool(
+        version_analysis
+        and version_analysis.get("affected") is False
+        and current_workspace_affected is False
+    )
+    direct_reachable = bool(llm_analysis.get("reachable"))
+    deep_conflict = deep_exploitable in {"YES", "LIKELY"}
+    transitive_positive = transitive_reachable in {"YES", "LIKELY"}
+    transitive_unexcluded = transitive_reachable in {"YES", "LIKELY", "UNCERTAIN"}
+    workspace_exclusion_evidence = (
+        llm_analysis.get("reachable") is False
+        and not deep_conflict
+        and not transitive_unexcluded
+    )
+    upstream_platform_research = _has_successful_upstream_platform_research(
+        final_state,
+        result,
+    )
+    upstream_platform_support = bool(
+        dep_info.get("sbom_attributed") and upstream_platform_research
+    )
+    confirmed_affected_path = bool(
+        direct_reachable
+        or (deep_analysis.get("confirmed") and deep_conflict)
+        or transitive_positive
+    )
+
+    return {
+        "detected_version": _clean_text(
+            (version_analysis or {}).get("detected_version")
+            or ((result or {}).get("version_context") or {}).get("detected_version")
+        ),
+        "any_version_affected": any_version_affected,
+        "current_workspace_affected": current_workspace_affected,
+        "historical_only_affected": historical_only_affected,
+        "version_excludes_all": version_excludes_all,
+        "direct_reachable": direct_reachable,
+        "deep_confirmed": bool(deep_analysis.get("confirmed")),
+        "deep_conflict": deep_conflict,
+        "transitive_positive": transitive_positive,
+        "transitive_unexcluded": transitive_unexcluded,
+        "confirmed_affected_path": confirmed_affected_path,
+        "workspace_exclusion_evidence": workspace_exclusion_evidence,
+        "dependency_evidence": bool(
+            dep_info.get("found") or dep_info.get("sbom_attributed")
+        ),
+        "upstream_platform_research": upstream_platform_research,
+        "upstream_platform_support": upstream_platform_support,
+    }
+
+
+def _build_verdict_claims(result: Dict[str, Any]) -> Dict[str, Any]:
+    verdict = _clean_text(result.get("verdict")) or "Inconclusive"
+    return {
+        "verdict": verdict,
+        "affected": bool(result.get("affected")),
+        "claims_affected": verdict in {"Affected", "Probably Affected"}
+        or bool(result.get("affected")),
+        "claims_not_affected": verdict == "Not Affected",
+        "confidence": _clean_text(result.get("confidence")),
+        "exposure": _clean_text(result.get("exposure")),
+    }
+
+
+def _build_text_claims(
+    result: Dict[str, Any],
+    reasoning: str | None = None,
+) -> Dict[str, Any]:
+    text = _final_claim_text(result, reasoning)
+    return {
+        "current_version_affected": _claims_detected_version_affected(text),
+        "detected_version": _clean_text(_detected_version_from_reasoning(text)),
+        "fixed_version_floors": _fixed_version_text_candidates(text),
+    }
+
+
+def _claim_issue(
+    *,
+    kind: str,
+    severity: str,
+    claim: Dict[str, Any],
+    evidence: Dict[str, Any],
+    detail: str,
+) -> Dict[str, Any]:
+    return {
+        "kind": kind,
+        "severity": severity,
+        "claim": claim,
+        "evidence": evidence,
+        "detail": detail,
+    }
+
+
+def _not_affected_guardrail_reasons(evidence: Dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    if evidence["direct_reachable"]:
+        reasons.append("direct reachability was reported")
+    if evidence["deep_conflict"]:
+        reasons.append("deep analysis reported a still-exploitable path")
+    if evidence["current_workspace_affected"] is True:
+        reasons.append("the current detected version is in the affected range")
+    elif evidence["historical_only_affected"]:
+        reasons.append("tracked historical releases shipped an affected version")
+    elif evidence["any_version_affected"]:
+        reasons.append("version analysis still includes affected releases")
+    if evidence["transitive_unexcluded"]:
+        reasons.append("transitive reachability was not fully excluded")
+    return reasons
+
+
+def _validate_final_claims(
+    *,
+    evidence: Dict[str, Any],
+    verdict: Dict[str, Any],
+    text: Dict[str, Any],
+) -> list[Dict[str, Any]]:
+    issues: list[Dict[str, Any]] = []
+
+    if (
+        text["current_version_affected"]
+        and evidence["current_workspace_affected"] is False
+        and not (
+            evidence["upstream_platform_support"]
+            and not text.get("detected_version")
+        )
+    ):
+        issues.append(
+            _claim_issue(
+                kind="text_affected_conflicts_with_version_evidence",
+                severity="fail",
+                claim={
+                    "current_version_affected": True,
+                    "source": "final_reasoning",
+                },
+                evidence={
+                    "current_workspace_affected": False,
+                    "detected_version": evidence.get("detected_version")
+                    or text.get("detected_version"),
+                },
+                detail=(
+                    "final reasoning claims the current version is affected, "
+                    "but structured version evidence says the current workspace "
+                    "is outside the affected range"
+                ),
+            )
+        )
+
+    if text["current_version_affected"] or evidence["current_workspace_affected"] is True:
+        detected_version = _clean_text(
+            evidence.get("detected_version") or text.get("detected_version")
+        )
+        for fixed_version in text["fixed_version_floors"]:
+            comparison = _compare_versions(detected_version, fixed_version)
+            if comparison is not None and comparison >= 0:
+                issues.append(
+                    _claim_issue(
+                        kind="fixed_version_floor_contradiction",
+                        severity="fail",
+                        claim={
+                            "current_version_affected": True,
+                            "fixed_version_floor": fixed_version,
+                        },
+                        evidence={"detected_version": detected_version},
+                        detail=(
+                            f"detected version {detected_version} is already at "
+                            f"or above the stated fixed version floor {fixed_version}"
+                        ),
+                    )
+                )
+
+    if verdict["claims_not_affected"]:
+        reasons = _not_affected_guardrail_reasons(evidence)
+        if evidence["workspace_exclusion_evidence"]:
+            version_reasons = {
+                "the current detected version is in the affected range",
+                "tracked historical releases shipped an affected version",
+                "version analysis still includes affected releases",
+            }
+            reasons = [
+                reason
+                for reason in reasons
+                if reason not in version_reasons
+            ]
+        if reasons:
+            issues.append(
+                _claim_issue(
+                    kind="unsupported_not_affected",
+                    severity="fail",
+                    claim={
+                        "verdict": verdict["verdict"],
+                        "affected": verdict["affected"],
+                    },
+                    evidence={"reasons": reasons},
+                    detail="; ".join(reasons),
+                )
+            )
+
+    if (
+        verdict["claims_affected"]
+        and not evidence["confirmed_affected_path"]
+        and not evidence["upstream_platform_support"]
+        and (
+            evidence["version_excludes_all"]
+            or not evidence["any_version_affected"]
+        )
+    ):
+        if evidence["version_excludes_all"]:
+            detail = (
+                "version evidence excludes the affected range and no "
+                "reachability, deep-analysis, or transitive-path evidence "
+                "supports an affected verdict"
+            )
+        else:
+            detail = (
+                "no affected version, direct reachability, confirmed deep "
+                "exploitability, or positive transitive path supports an "
+                "affected verdict"
+            )
+        issues.append(
+            _claim_issue(
+                kind="unsupported_affected",
+                severity="fail",
+                claim={"verdict": verdict["verdict"], "affected": verdict["affected"]},
+                evidence={
+                    "version_excludes_all": evidence["version_excludes_all"],
+                    "any_version_affected": evidence["any_version_affected"],
+                    "direct_reachable": False,
+                    "deep_conflict": False,
+                    "transitive_unexcluded": evidence["transitive_unexcluded"],
+                },
+                detail=detail,
+            )
+        )
+
+    if (
+        verdict["claims_affected"]
+        and evidence["any_version_affected"]
+        and evidence["dependency_evidence"]
+        and not evidence["confirmed_affected_path"]
+        and (
+            verdict["verdict"] == "Affected"
+            or verdict["confidence"] == "High"
+        )
+    ):
+        issues.append(
+            _claim_issue(
+                kind="affected_without_confirmed_path",
+                severity="fail",
+                claim={
+                    "verdict": verdict["verdict"],
+                    "affected": verdict["affected"],
+                    "confidence": verdict["confidence"],
+                },
+                evidence={
+                    "any_version_affected": True,
+                    "dependency_evidence": True,
+                    "direct_reachable": False,
+                    "deep_confirmed_exploitable": False,
+                    "transitive_positive": False,
+                },
+                detail=(
+                    "an affected-range dependency version is present, but no "
+                    "direct reachability, confirmed deep exploitability, or "
+                    "positive transitive path establishes use of the vulnerable "
+                    "surface"
+                ),
+            )
+        )
+
+    return issues
+
+
+def build_final_claims(
+    *,
+    result: Dict[str, Any],
+    version_analysis: Dict[str, Any] | None,
+    final_state: Dict[str, Any] | None = None,
+    reasoning: str | None = None,
+) -> Dict[str, Any]:
+    """Normalize final verdict, prose, and pipeline evidence into comparable claims."""
+    evidence_claims = _build_evidence_claims(version_analysis, final_state, result)
+    verdict_claims = _build_verdict_claims(result)
+    text_claims = _build_text_claims(result, reasoning)
+    if not evidence_claims.get("detected_version"):
+        evidence_claims["detected_version"] = text_claims.get("detected_version")
+    issues = _validate_final_claims(
+        evidence=evidence_claims,
+        verdict=verdict_claims,
+        text=text_claims,
+    )
+    return {
+        "evidence": evidence_claims,
+        "verdict": verdict_claims,
+        "text": text_claims,
+        "issues": issues,
+    }
+
+
+def _claim_issue_check(issue: Dict[str, Any]) -> str:
+    detail = _clean_text(issue.get("detail"))
+    kind = issue.get("kind")
+    if kind == "fixed_version_floor_contradiction":
+        return "Concern: final claims are inconsistent: " + detail + "."
+    if kind == "text_affected_conflicts_with_version_evidence":
+        return "Concern: final reasoning conflicts with version evidence: " + detail + "."
+    if kind == "unsupported_not_affected":
+        return "Concern: final Not Affected claim is unsupported by evidence: " + detail + "."
+    if kind == "unsupported_affected":
+        return "Concern: final affected claim is unsupported by evidence: " + detail + "."
+    if kind == "affected_without_confirmed_path":
+        return "Concern: final Affected claim overstates version-only evidence: " + detail + "."
+    return "Concern: final claim issue: " + detail + "."
+
+
+def _claim_issue_details(
+    issues: list[Dict[str, Any]],
+    *kinds: str,
+) -> list[str]:
+    wanted = set(kinds)
+    return _unique_nonempty(
+        [
+            issue.get("detail")
+            for issue in issues
+            if not wanted or issue.get("kind") in wanted
+        ]
+    )
+
+
+def _claim_issues_from_audit_view(
+    audit_view: Dict[str, Any] | None,
+) -> list[Dict[str, Any]]:
+    final_claims = (audit_view or {}).get("final_claims") or {}
+    issues = (
+        final_claims.get("issues") or (audit_view or {}).get("claim_issues") or []
+    )
+    return [issue for issue in issues if isinstance(issue, dict)]
+
+
+def _final_claims_from_audit_view(
+    audit_view: Dict[str, Any] | None,
+    *,
+    result: Dict[str, Any],
+    version_analysis: Dict[str, Any] | None,
+    final_state: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    final_claims = (audit_view or {}).get("final_claims")
+    if isinstance(final_claims, dict) and "issues" in final_claims:
+        return final_claims
+    return build_final_claims(
+        result=result,
+        version_analysis=version_analysis,
+        final_state=final_state,
+    )
 
 
 # ----------------------------------------------------------------------- #
@@ -637,6 +1155,17 @@ def build_audit_view(
         and transitive_analysis.get("reachable") not in {"YES", "LIKELY", "UNCERTAIN"}
         and str(deep_analysis.get("exploitable", "")).upper() not in {"YES", "LIKELY"}
     )
+    final_claims = build_final_claims(
+        result={
+            "verdict": verdict_label,
+            "affected": affected,
+            "reasoning": reasoning,
+        },
+        version_analysis=version_analysis,
+        final_state=final_state,
+        reasoning=reasoning,
+    )
+    claim_issues = _claim_issues_from_audit_view({"final_claims": final_claims})
 
     if verdict_label == "Not Affected":
         if not dep_info.get("found", False) and not dep_info.get(
@@ -693,6 +1222,18 @@ def build_audit_view(
             )
             concerns += 1
     else:
+        upstream_platform_support = bool(
+            final_claims.get("evidence", {}).get("upstream_platform_support")
+        )
+        if upstream_platform_support:
+            checks.append(
+                "Supports verdict scope: the vulnerable dependency is SBOM-attributed even though it was not rediscovered in the local codebase."
+            )
+            strengths += 1
+            checks.append(
+                "Supports verdict: mandatory external research returned evidence about the analyst-identified upstream platform/runtime."
+            )
+            strengths += 1
         if version_analysis and version_analysis.get("affected"):
             if version_analysis.get("current_workspace_affected", True):
                 checks.append(
@@ -714,10 +1255,19 @@ def build_audit_view(
             )
             strengths += 1
         if version_analysis and version_analysis.get("affected") is False and affected:
-            checks.append(
-                "Concern: the version analysis says the current codebase is outside range, so the impact verdict may be overstated."
-            )
-            concerns += 1
+            if upstream_platform_support:
+                checks.append(
+                    "Scope note: local version analysis excludes the checked codebase, but it does not exclude the separately researched upstream platform/runtime."
+                )
+            else:
+                checks.append(
+                    "Concern: the version analysis says the current codebase is outside range, so the impact verdict may be overstated."
+                )
+                concerns += 1
+
+    for issue in claim_issues:
+        checks.append(_claim_issue_check(issue))
+        concerns += 1
 
     if strengths >= 2 and concerns == 0:
         consistency = "strong"
@@ -756,6 +1306,8 @@ def build_audit_view(
         "downgrade_target": downgrade_target,
         "downgrade_supported": downgrade_supported,
         "checks": checks,
+        "final_claims": final_claims,
+        "claim_issues": claim_issues,
         "conclusion": conclusion,
     }
 
@@ -787,47 +1339,20 @@ def build_audit_summary_emphasis(
     return f"{lead} {tail}".strip()
 
 
-def apply_audit_guardrail(
+def _prepend_guardrail_reasoning(
     result: Dict[str, Any],
-    audit_view: Dict[str, Any] | None,
-    version_analysis: Dict[str, Any] | None,
-) -> Dict[str, Any]:
-    """Promote unsupported Not Affected downgrades before emitting the response."""
-    if result.get("verdict") != "Not Affected":
-        return result
-    if not audit_view or audit_view.get("status") != "fail":
-        return result
-    if not version_analysis:
-        return result
-
-    historical_only_affected = bool(
-        version_analysis.get("affected")
-        and version_analysis.get("current_workspace_affected") is False
-    )
-    if not historical_only_affected:
-        return result
-
-    guarded = dict(result)
-    original_reasoning = str(guarded.get("reasoning", "")).strip()
-    guardrail_note = (
-        "[AUDIT GUARDRAIL: tracked historical releases shipped an affected "
-        "version and the Not Affected downgrade is not sufficiently supported]"
-    )
-    guarded["verdict"] = "Probably Affected"
-    guarded["affected"] = True
-    guarded["confidence"] = "Medium"
-    guarded["summary"] = (
-        "Tracked historical releases shipped an affected version. The current "
-        "workspace may be patched, but the downgrade to Not Affected is not "
-        "supported without stronger workspace-only exclusion evidence."
-    )
-    guarded["reasoning"] = (
-        f"{guardrail_note} {original_reasoning}".strip()
+    note: str,
+) -> None:
+    original_reasoning = str(result.get("reasoning", "")).strip()
+    result["reasoning"] = (
+        f"{note} {original_reasoning}".strip()
         if original_reasoning
-        else guardrail_note
+        else note
     )
 
-    adjusted_cvss = guarded.get("adjusted_cvss") or {}
+
+def _restore_original_cvss(result: Dict[str, Any], reason: str) -> None:
+    adjusted_cvss = result.get("adjusted_cvss") or {}
     original_score = adjusted_cvss.get("original_score")
     if adjusted_cvss and original_score is not None:
         restored = dict(adjusted_cvss)
@@ -836,16 +1361,180 @@ def apply_audit_guardrail(
         reasons = list(restored.get("reasons") or [])
         reasons.insert(
             0,
-            "audit guardrail removed the unsupported not-affected downgrade",
+            reason,
         )
         restored["reasons"] = reasons
         restored["summary"] = (
             f"{restored.get('original_score')} → {restored.get('adjusted_score')} "
             f"({'; '.join(reasons)})"
         )
-        guarded["adjusted_cvss"] = restored
+        result["adjusted_cvss"] = restored
 
-    return guarded
+
+def apply_audit_guardrail(
+    result: Dict[str, Any],
+    audit_view: Dict[str, Any] | None,
+    version_analysis: Dict[str, Any] | None,
+    final_state: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Run the final contradiction/consistency guard before emitting a verdict."""
+    final_claims = _final_claims_from_audit_view(
+        audit_view,
+        result=result,
+        version_analysis=version_analysis,
+        final_state=final_state,
+    )
+    claim_issues = final_claims.get("issues") or []
+    evidence = final_claims.get("evidence") or {}
+    fixed_version_contradictions = _claim_issue_details(
+        claim_issues,
+        "fixed_version_floor_contradiction",
+        "text_affected_conflicts_with_version_evidence",
+    )
+    if (
+        result.get("verdict") in {"Affected", "Probably Affected"}
+        and fixed_version_contradictions
+    ):
+        guarded = dict(result)
+        guarded["verdict"] = "Inconclusive"
+        guarded["affected"] = False
+        guarded["confidence"] = "Low"
+        guarded["summary"] = (
+            "Final sanity check found a version contradiction in the final "
+            "reasoning: "
+            + "; ".join(fixed_version_contradictions)
+            + "."
+        )
+        _prepend_guardrail_reasoning(
+            guarded,
+            "[AUDIT GUARDRAIL / FINAL SANITY CHECK: "
+            + "; ".join(fixed_version_contradictions)
+            + "]",
+        )
+        return guarded
+
+    upstream_platform_only = bool(
+        evidence.get("upstream_platform_support")
+        and evidence.get("version_excludes_all")
+        and not evidence.get("direct_reachable")
+        and not evidence.get("deep_conflict")
+        and not evidence.get("transitive_positive")
+    )
+    if upstream_platform_only and (
+        result.get("verdict") == "Affected"
+        or (
+            result.get("verdict") == "Probably Affected"
+            and result.get("confidence") == "High"
+        )
+    ):
+        guarded = dict(result)
+        guarded["verdict"] = "Probably Affected"
+        guarded["affected"] = True
+        guarded["confidence"] = "Medium"
+        if guarded.get("exposure") in {None, "", "none"}:
+            guarded["exposure"] = "transitive"
+        guarded["summary"] = (
+            "Mandatory upstream-platform research supports possible transitive "
+            "exposure, while local version and reachability analysis cannot "
+            "confirm the deployed upstream runtime."
+        )
+        _prepend_guardrail_reasoning(
+            guarded,
+            "[AUDIT GUARDRAIL / UPSTREAM PLATFORM SCOPE: external research "
+            "supports a Probably Affected platform verdict, but local evidence "
+            "does not support a confirmed Affected verdict]",
+        )
+        return guarded
+
+    version_only_reasons = _claim_issue_details(
+        claim_issues,
+        "affected_without_confirmed_path",
+    )
+    if version_only_reasons:
+        guarded = dict(result)
+        guarded["verdict"] = "Probably Affected"
+        guarded["affected"] = True
+        guarded["confidence"] = "Medium"
+        guarded["summary"] = (
+            "An affected-range dependency version is present, but confirmed "
+            "use of the vulnerability-specific surface is still missing."
+        )
+        _prepend_guardrail_reasoning(
+            guarded,
+            "[AUDIT GUARDRAIL / VERSION-ONLY EVIDENCE: the affected version "
+            "supports Probably Affected, but Affected requires confirmed "
+            "reachability or exploitability]",
+        )
+        return guarded
+
+    if not audit_view or audit_view.get("status") not in {"fail", "review"}:
+        return result
+
+    verdict = result.get("verdict")
+
+    if verdict == "Not Affected" and audit_view.get("status") == "fail":
+        reasons = _claim_issue_details(claim_issues, "unsupported_not_affected")
+        if not reasons:
+            reasons = _not_affected_guardrail_reasons(evidence)
+        if not reasons:
+            reasons = ["the final audit found the Not Affected downgrade unsupported"]
+
+        guarded = dict(result)
+        target_verdict = (
+            "Affected"
+            if evidence["deep_confirmed"] and evidence["deep_conflict"]
+            else "Probably Affected"
+        )
+        guarded["verdict"] = target_verdict
+        guarded["affected"] = True
+        guarded["confidence"] = "High" if target_verdict == "Affected" else "Medium"
+        if evidence["direct_reachable"]:
+            guarded["exposure"] = "direct"
+        elif evidence["transitive_unexcluded"] or guarded.get("exposure") == "none":
+            guarded["exposure"] = "transitive"
+        guarded["summary"] = (
+            "Final sanity check found contradictions in the Not Affected "
+            "downgrade: "
+            + "; ".join(reasons)
+            + "."
+        )
+        _prepend_guardrail_reasoning(
+            guarded,
+            "[AUDIT GUARDRAIL / FINAL SANITY CHECK: "
+            + "; ".join(reasons)
+            + "]",
+        )
+        _restore_original_cvss(
+            guarded,
+            "final sanity check removed the unsupported not-affected downgrade",
+        )
+        return guarded
+
+    if (
+        verdict in {"Affected", "Probably Affected"}
+        and _claim_issue_details(claim_issues, "unsupported_affected")
+    ):
+        reasons = _claim_issue_details(claim_issues, "unsupported_affected")
+        guarded = dict(result)
+        guarded["verdict"] = "Inconclusive"
+        guarded["affected"] = False
+        guarded["confidence"] = "Low"
+        guarded["summary"] = (
+            "Final sanity check found that the affected verdict was not "
+            "supported by version, reachability, deep-analysis, or transitive "
+            "evidence: "
+            + "; ".join(reasons)
+            + "."
+        )
+        _prepend_guardrail_reasoning(
+            guarded,
+            "[AUDIT GUARDRAIL / FINAL SANITY CHECK: "
+            + "; ".join(reasons)
+            + "]",
+        )
+        return guarded
+
+    return result
 
 
 def _append_audit_details_emphasis(

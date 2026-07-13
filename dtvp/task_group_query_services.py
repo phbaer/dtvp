@@ -3,9 +3,11 @@ import json
 from datetime import datetime
 from typing import Any
 
+from .inconsistency import INCONSISTENCY_REASONS
+
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 4
+TASK_GROUP_QUERY_INDEX_VERSION = 6
 TASK_GROUP_QUERY_CACHE_LIMIT = 64
 TASK_GROUP_CURSOR_VERSION = 1
 ANALYSIS_STATE_ORDER = {
@@ -184,6 +186,22 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
     rescored_score = group.get("rescored_cvss")
     if rescored_score is None:
         rescored_score = base_score
+    assessment_restore_count = int(
+        metadata.get("assessment_restore_count")
+        or group.get("assessment_restore_count")
+        or 0
+    )
+    assessment_restore_recoverable_count = int(
+        metadata.get("assessment_restore_recoverable_count")
+        or group.get("assessment_restore_recoverable_count")
+        or 0
+    )
+    assessment_restore_status = str(
+        metadata.get("assessment_restore_status")
+        or group.get("assessment_restore_status")
+        or ""
+    )
+    inconsistency_reasons = _string_list(metadata.get("inconsistency_reasons"))
 
     searchable_text = " ".join(
         value
@@ -199,6 +217,8 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
             _lower(metadata.get("lifecycle")),
             _lower(metadata.get("technical_state")),
             _lower(_dependency_relationship_for_group(group)),
+            _lower(assessment_restore_status),
+            *[_lower(value) for value in inconsistency_reasons],
         ]
         if value
     )
@@ -223,6 +243,10 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "versions_lower_set": set(versions_lower),
         "searchable_text": searchable_text,
         "lifecycle": str(metadata.get("lifecycle") or "OPEN"),
+        "inconsistency_reasons": inconsistency_reasons,
+        "inconsistency_reason_set": {
+            value.upper() for value in inconsistency_reasons
+        },
         "is_open": bool(metadata.get("is_open")),
         "is_pending": bool(metadata.get("is_pending")),
         "technical_state": str(metadata.get("technical_state") or "NOT_SET"),
@@ -233,6 +257,9 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "rescored_score": _score_value(rescored_score),
         "base_severity_rank": _score_severity_rank(base_score),
         "rescored_severity_rank": _score_severity_rank(rescored_score),
+        "assessment_restore_count": assessment_restore_count,
+        "assessment_restore_recoverable_count": assessment_restore_recoverable_count,
+        "assessment_restore_status": assessment_restore_status,
     }
 
 
@@ -248,6 +275,15 @@ def _matches_lifecycle(fields: dict[str, Any], filters: set[str]) -> bool:
         or ("INCONSISTENT" in filters and lifecycle == "INCONSISTENT")
         or ("NEEDS_APPROVAL" in filters and fields["is_pending"])
     )
+
+
+def _matches_inconsistency_reason(
+    fields: dict[str, Any],
+    filters: set[str],
+) -> bool:
+    if not filters:
+        return True
+    return not fields["inconsistency_reason_set"].isdisjoint(filters)
 
 
 def _matches_attribution_age(
@@ -325,6 +361,7 @@ def _matches_task_group_fields(
     *,
     q_terms: tuple[str, ...],
     lifecycle: set[str],
+    inconsistency_reason: set[str],
     analysis: set[str],
     tag_terms: tuple[str, ...],
     vuln_id_terms: tuple[str, ...],
@@ -344,6 +381,8 @@ def _matches_task_group_fields(
     if q_terms and not all(term in fields["searchable_text"] for term in q_terms):
         return False
     if not _matches_lifecycle(fields, lifecycle):
+        return False
+    if not _matches_inconsistency_reason(fields, inconsistency_reason):
         return False
     if analysis and fields["technical_state"] not in analysis:
         return False
@@ -444,6 +483,19 @@ def _empty_automatic_assessment_counts() -> dict[str, int]:
     }
 
 
+def _empty_assessment_restore_counts() -> dict[str, int]:
+    return {
+        "WITH_RESTORE": 0,
+        "RECOVERABLE": 0,
+        "AMBIGUOUS": 0,
+        "NO_HISTORY": 0,
+    }
+
+
+def _empty_inconsistency_reason_counts() -> dict[str, int]:
+    return {reason: 0 for reason in INCONSISTENCY_REASONS}
+
+
 def _increment(counts: dict[str, int], key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
 
@@ -485,6 +537,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     components: dict[str, int] = {}
     team_tags: dict[str, dict[str, int]] = {}
     cvss_version_mismatch = 0
+    assessment_restore_counts = _empty_assessment_restore_counts()
+    inconsistency_reason_counts = _empty_inconsistency_reason_counts()
 
     for row in rows:
         fields = row["fields"]
@@ -504,6 +558,17 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             dependency_counts[relationship_key] += 1
         if fields["cvss_version_mismatch"]:
             cvss_version_mismatch += 1
+        if fields["assessment_restore_count"] > 0:
+            assessment_restore_counts["WITH_RESTORE"] += 1
+            status = str(fields.get("assessment_restore_status") or "").upper()
+            if status == "RECOVERABLE":
+                assessment_restore_counts["RECOVERABLE"] += 1
+            elif status == "AMBIGUOUS":
+                assessment_restore_counts["AMBIGUOUS"] += 1
+            elif status == "NO_HISTORY":
+                assessment_restore_counts["NO_HISTORY"] += 1
+        for reason in fields["inconsistency_reasons"]:
+            _increment(inconsistency_reason_counts, reason)
 
         seen_ids = set()
         for identifier in [fields["id"], *fields["aliases"]]:
@@ -540,6 +605,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "assignees": assignees,
         "components": components,
         "team_tags": team_tags,
+        "assessment_restore": assessment_restore_counts,
+        "inconsistency_reason": inconsistency_reason_counts,
     }
 
 
@@ -547,6 +614,7 @@ def _copy_counts(counts: dict[str, Any]) -> dict[str, Any]:
     return {
         **counts,
         "lifecycle": dict(counts.get("lifecycle", {})),
+        "inconsistency_reason": dict(counts.get("inconsistency_reason", {})),
         "analysis": dict(counts.get("analysis", {})),
         "dependency_relationship": dict(counts.get("dependency_relationship", {})),
         "ids": dict(counts.get("ids", {})),
@@ -559,6 +627,7 @@ def _copy_counts(counts: dict[str, Any]) -> dict[str, Any]:
             for team, values in (counts.get("team_tags") or {}).items()
             if isinstance(values, dict)
         },
+        "assessment_restore": dict(counts.get("assessment_restore", {})),
     }
 
 
@@ -670,6 +739,7 @@ def _query_cache_key(
     *,
     q: str,
     lifecycle: list[str],
+    inconsistency_reason: list[str],
     analysis: list[str],
     tag: str,
     vuln_id: str,
@@ -696,6 +766,7 @@ def _query_cache_key(
     return (
         _lower(q),
         _normalized_upper_tuple(lifecycle),
+        _normalized_upper_tuple(inconsistency_reason),
         _normalized_upper_tuple(analysis),
         _lower(tag),
         _lower(vuln_id),
@@ -757,6 +828,7 @@ def query_task_groups(
     cursor: str = "",
     automatic_assessment: list[str] | None = None,
     automatic_assessment_ids: list[str] | None = None,
+    inconsistency_reason: list[str] | None = None,
 ) -> dict[str, Any]:
     now_ms = int(datetime.now().timestamp() * 1000)
     effective_offset = decode_task_group_cursor(cursor) if cursor else offset
@@ -771,6 +843,7 @@ def query_task_groups(
     cache_key = _query_cache_key(
         q=q,
         lifecycle=lifecycle,
+        inconsistency_reason=inconsistency_reason or [],
         analysis=analysis,
         tag=tag,
         vuln_id=vuln_id,
@@ -797,6 +870,7 @@ def query_task_groups(
     else:
         q_terms = tuple(_lower(q).split())
         lifecycle_set = _normalized_upper_set(lifecycle)
+        inconsistency_reason_set = _normalized_upper_set(inconsistency_reason or [])
         analysis_set = _normalized_upper_set(analysis)
         tag_terms = tuple(_lower(tag).split())
         vuln_id_terms = tuple(_lower(vuln_id).split())
@@ -817,6 +891,7 @@ def query_task_groups(
                 row["fields"],
                 q_terms=q_terms,
                 lifecycle=lifecycle_set,
+                inconsistency_reason=inconsistency_reason_set,
                 analysis=analysis_set,
                 tag_terms=tag_terms,
                 vuln_id_terms=vuln_id_terms,

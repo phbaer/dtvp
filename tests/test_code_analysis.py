@@ -189,6 +189,32 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     dummy_client.aclose.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_code_analysis_client_compares_benchmark(monkeypatch):
+    monkeypatch.setenv("DTVP_CODE_ANALYSIS_URL", "http://example.com/")
+    monkeypatch.setenv("DTVP_CODE_ANALYSIS_MODEL", "gpt-benchmark")
+
+    dummy_client = MagicMock()
+    dummy_client.post = AsyncMock(
+        return_value=DummyResponse({"comparison_method": "agentyzer_probabilistic"})
+    )
+    dummy_client.aclose = AsyncMock()
+    monkeypatch.setattr(
+        code_analysis.httpx, "AsyncClient", MagicMock(return_value=dummy_client)
+    )
+
+    client = code_analysis.CodeAnalysisClient(settings=code_analysis.CodeAnalysisSettings())
+    result = await client.compare_benchmark({"rating": {"score": 4}})
+
+    assert result == {"comparison_method": "agentyzer_probabilistic"}
+    assert dummy_client.post.await_args.args[0] == "http://example.com/benchmark/compare"
+    assert dummy_client.post.await_args.kwargs["json"] == {
+        "benchmark": {"rating": {"score": 4}},
+        "model": "gpt-benchmark",
+    }
+    await client.close()
+
+
 def test_code_analysis_endpoints_require_configuration(client):
     with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": ""}):
         response = client.get("/api/code-analysis/health")
@@ -643,6 +669,24 @@ def test_analysis_queue_submit_list_get_cancel(client):
     assert all(item["queue_id"] != queue_id for item in list_after_cancel.json())
 
 
+def test_analysis_queue_submit_accepts_benchmark_source(client):
+    response = client.post(
+        "/api/analysis-queue/submit",
+        json={
+            "vuln_id": "CVE-2026-BENCH-SOURCE",
+            "component_name": "owned-api",
+            "project_name": "ExampleApp",
+            "source": "benchmark",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "benchmark"
+    item = main.analysis_queue.get(payload["queue_id"])
+    assert item.source == "benchmark"
+
+
 def test_analysis_queue_submit_appends_component_guidance(client, monkeypatch):
     monkeypatch.setattr(
         main,
@@ -750,6 +794,145 @@ def test_completed_analysis_queue_item_persists_result_history(client):
     assert detail["result"]["llm_conversation"][0]["messages"][1]["content"].endswith("Team note")
     assert detail["compact_context"]["target"]["component_name"] == "owned-api"
     assert detail["user_guidance_redacted"] is False
+
+
+def test_code_analysis_benchmark_result_delegates_to_agentyzer(client):
+    item = main.analysis_queue.submit(
+        vuln_id="CVE-2026-BENCH",
+        component_name="owned-api",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+        source="benchmark",
+    )
+    item.status = "running"
+    item.job_id = "job-benchmark"
+    result = {
+        "assessment": {
+            "affected": False,
+            "verdict": "Not Affected",
+            "confidence": "High",
+            "exposure": "none",
+            "analysis": "NOT_AFFECTED",
+            "justification": "CODE_NOT_PRESENT",
+            "response": "NOT_SET",
+            "summary": "No vulnerable code path was found.",
+            "reasoning": "The vulnerable package is not present in the analyzed source tree.",
+            "details": "No imports found.",
+            "adjusted_cvss": {
+                "original_score": 9.8,
+                "adjusted_score": 0.0,
+                "original_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                "adjusted_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+                "reasons": ["code not present"],
+                "summary": "9.8 -> 0.0",
+            },
+        },
+        "steps": [],
+        "versions_checked": ["1.0.0"],
+    }
+    main.analysis_queue._finish_item(item, status="completed", result=result)
+
+    agentyzer_payload = {
+        "schema_version": "agentyzer.benchmark-comparison/v1",
+        "comparison_method": "agentyzer_probabilistic",
+        "evaluator": {"provider": "agentyzer", "probabilistic": True},
+        "rating": {
+            "score": 4,
+            "max_score": 5,
+            "grade": "B",
+            "label": "Good match",
+            "tone": "cyan",
+            "confidence": 0.8,
+        },
+        "human": {"state": "NOT_AFFECTED"},
+        "automated": {"state": "NOT_AFFECTED"},
+        "deltas": {"state_match": True},
+        "findings": [],
+        "recommendation": "Aligned.",
+    }
+
+    with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": "http://example.com"}):
+        with patch(
+            "dtvp.main.CodeAnalysisClient.compare_benchmark",
+            new=AsyncMock(return_value=agentyzer_payload),
+        ) as compare_mock:
+            response = client.post(
+                f"/api/code-analysis/results/{item.queue_id}/benchmark",
+                json={
+                    "current_state": "NOT_AFFECTED",
+                    "current_justification": "CODE_NOT_PRESENT",
+                    "current_details": "No vulnerable code path was found.",
+                    "current_cvss_score": 0.0,
+                },
+            )
+
+    assert response.status_code == 200
+    assert response.json()["comparison_method"] == "agentyzer_probabilistic"
+    compare_mock.assert_awaited_once()
+    sent_benchmark = compare_mock.await_args.args[0]
+    assert sent_benchmark["comparison_method"] == "deterministic_fallback"
+    assert sent_benchmark["human"]["state"] == "NOT_AFFECTED"
+    assert sent_benchmark["automated"]["state"] == "NOT_AFFECTED"
+
+
+def test_code_analysis_benchmark_result_falls_back_when_agentyzer_unavailable(client):
+    item = main.analysis_queue.submit(
+        vuln_id="CVE-2026-BENCH-FALLBACK",
+        component_name="owned-api",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+        source="benchmark",
+    )
+    item.status = "running"
+    item.job_id = "job-benchmark-fallback"
+    main.analysis_queue._finish_item(
+        item,
+        status="completed",
+        result={
+            "assessment": {
+                "affected": False,
+                "verdict": "Not Affected",
+                "confidence": "High",
+                "exposure": "none",
+                "analysis": "NOT_AFFECTED",
+                "justification": "CODE_NOT_PRESENT",
+                "summary": "No vulnerable code path was found.",
+                "reasoning": "The vulnerable package is not present in the analyzed source tree.",
+                "details": "No imports found.",
+            },
+            "steps": [],
+            "versions_checked": ["1.0.0"],
+        },
+    )
+
+    with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": "http://example.com"}):
+        with patch(
+            "dtvp.main.CodeAnalysisClient.compare_benchmark",
+            new=AsyncMock(side_effect=RuntimeError("offline")),
+        ) as compare_mock:
+            response = client.post(
+                f"/api/code-analysis/results/{item.queue_id}/benchmark",
+                json={
+                    "current_state": "NOT_AFFECTED",
+                    "current_justification": "CODE_NOT_PRESENT",
+                    "current_details": "No vulnerable code path was found.",
+                    "current_cvss_score": 0.0,
+                },
+            )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["comparison_method"] == "deterministic_fallback"
+    assert payload["evaluator"] == {
+        "provider": "dtvp",
+        "probabilistic": False,
+        "available": False,
+        "reason": "Agentyzer benchmark comparison unavailable: offline",
+    }
+    assert payload["rating"]["max_score"] == 5
+    assert payload["human"]["state"] == "NOT_AFFECTED"
+    assert payload["automated"]["state"] == "NOT_AFFECTED"
+    compare_mock.assert_awaited_once()
 
 
 def test_code_analysis_result_can_be_deleted_from_history(client):

@@ -198,4 +198,18 @@ describe('useProjectAssessmentUpdates', () => {
 
         wrapper.unmount()
     })
+
+    it('refreshes an active task window even when bulk updates are empty', () => {
+        const { refreshTaskWindow, updates, wrapper } = mountHarness({
+            taskWindowActive: true,
+        })
+        const onComplete = vi.fn()
+
+        updates.handleBulkUpdates([], onComplete)
+
+        expect(refreshTaskWindow).toHaveBeenCalledTimes(1)
+        expect(onComplete).toHaveBeenCalledTimes(1)
+
+        wrapper.unmount()
+    })
 })

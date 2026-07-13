@@ -1,6 +1,7 @@
-import type { GroupedVuln, TMRescoreProposal } from '../types'
+import type { GroupedVuln, InconsistencyReason, TMRescoreProposal } from '../types'
 import {
     getAssessedTeams,
+    getGroupInconsistencyReasons,
     hasCvssVersionMismatch,
     hasGlobalAssessmentForGroup,
     normalizeTags,
@@ -42,6 +43,10 @@ export interface VulnListItem {
     hasTmrescoreProposal: boolean
     hasAutomaticAssessment: boolean
     cvssVersionMismatch: boolean
+    assessmentRestoreCount: number
+    assessmentRestoreRecoverableCount: number
+    assessmentRestoreStatus: string
+    inconsistencyReasons: InconsistencyReason[]
     lifecycle: string
     isPending: boolean
     isOpen: boolean
@@ -71,6 +76,7 @@ export interface VulnListFilterInput {
     dependencyFilter?: FilterSelection<DependencyRelationship>
     tmrescoreProposalFilter?: FilterSelection<TMRescoreProposalFilter>
     automaticAssessmentFilter?: FilterSelection<AutomaticAssessmentFilter>
+    inconsistencyReasonFilter?: FilterSelection<InconsistencyReason>
     versionFilterList?: readonly string[]
     cvssVersionMismatchOnly?: boolean
     attributionAgeDays?: number | string | null
@@ -89,6 +95,7 @@ export interface CompiledVulnListFilters {
     automaticAssessmentFilterSet: Set<AutomaticAssessmentFilter>
     includesAutomaticAssessment: boolean
     includesNoAutomaticAssessment: boolean
+    inconsistencyReasonFilterSet: Set<InconsistencyReason>
     tagFilterLower: string
     idFilterLower: string
     componentFilterLower: string
@@ -584,6 +591,18 @@ export function buildVulnListItem(
         ?? (attributedOnMsValues.length
         ? Math.min(...attributedOnMsValues)
         : null)
+    const assessmentRestoreCount = metadataNumber(metadata?.assessment_restore_count)
+        ?? group.assessment_restore_count
+        ?? 0
+    const assessmentRestoreRecoverableCount = metadataNumber(metadata?.assessment_restore_recoverable_count)
+        ?? group.assessment_restore_recoverable_count
+        ?? 0
+    const assessmentRestoreStatus = String(
+        metadata?.assessment_restore_status
+        ?? group.assessment_restore_status
+        ?? ''
+    )
+    const inconsistencyReasons = getGroupInconsistencyReasons(group)
     const titleLower = lower(group.title)
     const fallbackClassification = metadata ? null : classifyGroup(group, teamMapping)
     const classification = {
@@ -652,6 +671,10 @@ export function buildVulnListItem(
         cvssVersionMismatch: typeof metadata?.cvss_version_mismatch === 'boolean'
             ? metadata.cvss_version_mismatch
             : hasCvssVersionMismatch(group),
+        assessmentRestoreCount,
+        assessmentRestoreRecoverableCount,
+        assessmentRestoreStatus,
+        inconsistencyReasons,
         lifecycle: classification.lifecycle,
         isPending: classification.isPending,
         isOpen: classification.isOpen,
@@ -730,6 +753,9 @@ export function compileVulnListFilters(
         ? [...DEFAULT_AUTOMATIC_ASSESSMENT_FILTER]
         : normalizeFilterSelection(filters.automaticAssessmentFilter)
     const automaticAssessmentFilterSet = new Set(automaticAssessmentFilter)
+    const inconsistencyReasonFilterSet = new Set(
+        normalizeFilterSelection(filters.inconsistencyReasonFilter),
+    )
 
     return {
         smartSearch: filters.smartSearch,
@@ -743,6 +769,7 @@ export function compileVulnListFilters(
         automaticAssessmentFilterSet,
         includesAutomaticAssessment: automaticAssessmentFilterSet.has('WITH_AUTOMATIC_ASSESSMENT'),
         includesNoAutomaticAssessment: automaticAssessmentFilterSet.has('WITHOUT_AUTOMATIC_ASSESSMENT'),
+        inconsistencyReasonFilterSet,
         tagFilterLower: lower(filters.tagFilter),
         idFilterLower: lower(filters.idFilter),
         componentFilterLower: lower(filters.componentFilter),
@@ -859,6 +886,13 @@ export function matchesCompiledListFilters(
     }
 
     if (!matchesCompiledAutomaticAssessmentSelection(item, filters)) {
+        return false
+    }
+
+    if (
+        filters.inconsistencyReasonFilterSet.size > 0
+        && !item.inconsistencyReasons.some(reason => filters.inconsistencyReasonFilterSet.has(reason))
+    ) {
         return false
     }
 

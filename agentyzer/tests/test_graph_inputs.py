@@ -24,6 +24,9 @@ from src.pipeline.verdict_assembly import (
     build_developer_ticket_text as _build_developer_ticket_text,
 )
 from src.pipeline.verdict_assembly import (
+    build_final_claims as _build_final_claims,
+)
+from src.pipeline.verdict_assembly import (
     build_remediation_view as _build_remediation_view,
 )
 from src.pipeline.verdict_assembly import (
@@ -707,6 +710,94 @@ def test_build_audit_view_allows_historical_only_not_affected_with_exclusion_evi
     )
 
 
+def test_build_final_claims_flags_fixed_version_floor_contradiction():
+    claims = _build_final_claims(
+        result={
+            "verdict": "Affected",
+            "affected": True,
+            "reasoning": (
+                "Evidence: Project uses zlib 1.2.13 which is within the "
+                "affected range. Fix: Upgrade zlib to version 1.2.11 or higher."
+            ),
+        },
+        version_analysis={
+            "detected_version": "1.2.13",
+            "affected": True,
+            "current_workspace_affected": True,
+        },
+        final_state={
+            "dep_info": {"found": True},
+            "llm_analysis": {"reachable": True},
+        },
+    )
+
+    issue = claims["issues"][0]
+    assert issue["kind"] == "fixed_version_floor_contradiction"
+    assert issue["claim"]["fixed_version_floor"] == "1.2.11"
+    assert issue["evidence"]["detected_version"] == "1.2.13"
+
+
+def test_build_final_claims_ignores_advisory_fixed_ranges_without_text_claim():
+    claims = _build_final_claims(
+        result={
+            "verdict": "Not Affected",
+            "affected": False,
+            "reasoning": "The current workspace lock is patched and unreachable.",
+        },
+        version_analysis={
+            "detected_version": "1.2.13",
+            "affected": False,
+            "current_workspace_affected": False,
+            "affected_ranges_summary": ["SEMVER range: introduced=0 fixed=1.2.11"],
+        },
+        final_state={
+            "dep_info": {"found": True},
+            "llm_analysis": {"reachable": False},
+            "deep_analysis": {"exploitable": "NO"},
+            "transitive_analysis": {"reachable": "NO"},
+        },
+    )
+
+    assert not [
+        issue
+        for issue in claims["issues"]
+        if issue["kind"] == "fixed_version_floor_contradiction"
+    ]
+
+
+def test_build_audit_view_includes_structured_claim_issues():
+    audit_view = _build_audit_view(
+        final_state={
+            "dep_info": {"found": True},
+            "llm_analysis": {"reachable": True},
+            "deep_analysis": {},
+            "transitive_analysis": {},
+        },
+        verdict_label="Affected",
+        affected=True,
+        reasoning=(
+            "Evidence: Project uses zlib 1.2.13 which is within the affected "
+            "range. Fix: Upgrade zlib to version 1.2.11 or higher."
+        ),
+        version_analysis={
+            "detected_version": "1.2.13",
+            "affected": True,
+            "current_workspace_affected": True,
+        },
+        adjusted_cvss={"adjusted_score": 9.8},
+    )
+
+    assert audit_view["status"] == "review"
+    assert audit_view["consistency"] == "mixed"
+    assert audit_view["claim_issues"][0]["kind"] == "fixed_version_floor_contradiction"
+    assert any(
+        "final claims are inconsistent" in check
+        and "1.2.13" in check
+        and "1.2.11" in check
+        for check in audit_view["checks"]
+    )
+
+
 def test_build_researcher_view_marks_sbom_attributed_presence_without_repo_match():
     researcher_view = _build_researcher_view(
         final_state={
@@ -1089,6 +1180,271 @@ def test_apply_audit_guardrail_promotes_historical_only_not_affected():
     )
 
 
+def test_apply_audit_guardrail_softens_fixed_version_floor_contradiction():
+    guarded = _apply_audit_guardrail(
+        {
+            "verdict": "Affected",
+            "affected": True,
+            "confidence": "High",
+            "reasoning": (
+                "Evidence: Project uses zlib 1.2.13 which is within the "
+                "affected range. Fix: Upgrade zlib to version 1.2.11 or higher."
+            ),
+            "version_context": {"detected_version": "1.2.13"},
+        },
+        {"status": "pass", "checks": []},
+        {
+            "detected_version": "1.2.13",
+            "affected": True,
+            "current_workspace_affected": True,
+        },
+        {
+            "dep_info": {"found": True},
+            "llm_analysis": {"reachable": True},
+        },
+    )
+
+    assert guarded["verdict"] == "Inconclusive"
+    assert guarded["affected"] is False
+    assert guarded["confidence"] == "Low"
+    assert "FINAL SANITY CHECK" in guarded["reasoning"]
+    assert "1.2.13" in guarded["summary"]
+    assert "1.2.11" in guarded["summary"]
+
+
+def test_audit_guardrail_caps_version_only_affected_verdict():
+    result = {
+        "verdict": "Affected",
+        "affected": True,
+        "confidence": "High",
+        "exposure": "transitive",
+        "reasoning": (
+            "Desc: CVE-2026-5038 leaves orphaned upload files. "
+            "Surface: multipart uploads via diskStorage. "
+            "Evidence: package-lock.json contains multer 2.1.1 in the "
+            "affected range, but local analysis found no direct imports. "
+            "Fix: Upgrade multer to 2.2.0. "
+            "Validate: Confirm whether diskStorage is used."
+        ),
+    }
+    final_state = {
+        "dep_info": {
+            "found": True,
+            "repo_found": True,
+            "transitive": True,
+            "locked_version": "2.1.1",
+            "lock_files": ["package-lock.json"],
+        },
+        "llm_analysis": {"reachable": False},
+        "deep_analysis": {"confirmed": False, "exploitable": "NO"},
+        "transitive_analysis": {"reachable": "NO"},
+        "result": result,
+    }
+    version_analysis = {
+        "detected_version": "2.1.1",
+        "affected": True,
+        "current_workspace_affected": True,
+    }
+    audit = _build_audit_view(
+        final_state=final_state,
+        verdict_label=result["verdict"],
+        affected=result["affected"],
+        reasoning=result["reasoning"],
+        version_analysis=version_analysis,
+    )
+
+    assert any(
+        issue["kind"] == "affected_without_confirmed_path"
+        for issue in audit["final_claims"]["issues"]
+    )
+
+    guarded = _apply_audit_guardrail(
+        result,
+        audit,
+        version_analysis,
+        final_state,
+    )
+    assert guarded["verdict"] == "Probably Affected"
+    assert guarded["affected"] is True
+    assert guarded["confidence"] == "Medium"
+    assert "VERSION-ONLY EVIDENCE" in guarded["reasoning"]
+    assert "diskStorage" in guarded["reasoning"]
+
+
+def test_audit_guardrail_keeps_affected_when_vulnerable_surface_is_reachable():
+    result = {
+        "verdict": "Affected",
+        "affected": True,
+        "confidence": "High",
+        "exposure": "direct",
+        "reasoning": "Production upload handling calls multer diskStorage.",
+    }
+    final_state = {
+        "dep_info": {"found": True, "locked_version": "2.1.1"},
+        "llm_analysis": {"reachable": True},
+        "deep_analysis": {"confirmed": True, "exploitable": "YES"},
+        "transitive_analysis": {"reachable": "NO"},
+        "result": result,
+    }
+    version_analysis = {
+        "detected_version": "2.1.1",
+        "affected": True,
+        "current_workspace_affected": True,
+    }
+    claims = _build_final_claims(
+        result=result,
+        version_analysis=version_analysis,
+        final_state=final_state,
+    )
+
+    assert not any(
+        issue["kind"] == "affected_without_confirmed_path"
+        for issue in claims["issues"]
+    )
+    assert (
+        _apply_audit_guardrail(
+            result,
+            {"status": "pass", "final_claims": claims},
+            version_analysis,
+            final_state,
+        )
+        == result
+    )
+
+
+def test_upstream_platform_research_supports_probably_affected_scope():
+    result = {
+        "verdict": "Affected",
+        "affected": True,
+        "confidence": "High",
+        "exposure": "transitive",
+        "reasoning": (
+            "The local extension does not call Netty, but external research "
+            "confirms that the upstream Keycloak runtime is vulnerable."
+        ),
+        "research_log": [
+            {
+                "round": 0,
+                "required": True,
+                "directives": [
+                    {
+                        "type": "search",
+                        "target": "Keycloak netty CVE-2026-47691 dependency version",
+                    }
+                ],
+                "results_summary": (
+                    "--- Search results for: Keycloak netty CVE-2026-47691 --- "
+                    "Keycloak runtime dependency information and affected versions."
+                ),
+            }
+        ],
+    }
+    final_state = {
+        "dep_info": {
+            "found": True,
+            "repo_found": False,
+            "sbom_attributed": True,
+            "presence_basis": "sbom_attributed",
+        },
+        "llm_analysis": {"reachable": False},
+        "deep_analysis": {"confirmed": False, "exploitable": "NO"},
+        "transitive_analysis": {"reachable": "NO"},
+        "user_guidance": "This project extends Keycloak.",
+        "result": result,
+    }
+    version_analysis = {
+        "affected": False,
+        "current_workspace_affected": False,
+    }
+
+    audit = _build_audit_view(
+        final_state=final_state,
+        verdict_label=result["verdict"],
+        affected=result["affected"],
+        reasoning=result["reasoning"],
+        version_analysis=version_analysis,
+    )
+    guarded = _apply_audit_guardrail(
+        result,
+        audit,
+        version_analysis,
+        final_state,
+    )
+    guarded_audit = _build_audit_view(
+        final_state=final_state,
+        verdict_label=guarded["verdict"],
+        affected=guarded["affected"],
+        reasoning=guarded["reasoning"],
+        version_analysis=version_analysis,
+    )
+
+    assert audit["final_claims"]["evidence"]["upstream_platform_support"] is True
+    assert not any(
+        issue["kind"] == "unsupported_affected"
+        for issue in audit["final_claims"]["issues"]
+    )
+    assert guarded["verdict"] == "Probably Affected"
+    assert guarded["affected"] is True
+    assert guarded["confidence"] == "Medium"
+    assert "UPSTREAM PLATFORM SCOPE" in guarded["reasoning"]
+    assert guarded_audit["status"] == "pass"
+
+
+def test_upstream_guidance_without_successful_research_remains_unsupported():
+    result = {
+        "verdict": "Probably Affected",
+        "affected": True,
+        "confidence": "Medium",
+        "exposure": "transitive",
+        "reasoning": "Analyst guidance says upstream Keycloak is vulnerable.",
+        "research_log": [
+            {
+                "round": 0,
+                "required": True,
+                "scope": "upstream_platform",
+                "directives": [{"type": "search", "target": "Keycloak Netty"}],
+                "results_summary": (
+                    "--- Search failed: Keycloak Netty "
+                    "(provider challenge page) ---"
+                ),
+            }
+        ],
+    }
+    final_state = {
+        "dep_info": {
+            "found": True,
+            "repo_found": False,
+            "sbom_attributed": True,
+        },
+        "llm_analysis": {"reachable": False},
+        "deep_analysis": {"confirmed": False, "exploitable": "NO"},
+        "transitive_analysis": {"reachable": "NO"},
+        "user_guidance": "This project extends Keycloak.",
+        "result": result,
+    }
+    version_analysis = {
+        "affected": False,
+        "current_workspace_affected": False,
+    }
+    claims = _build_final_claims(
+        result=result,
+        version_analysis=version_analysis,
+        final_state=final_state,
+    )
+
+    assert claims["evidence"]["upstream_platform_research"] is False
+    assert any(issue["kind"] == "unsupported_affected" for issue in claims["issues"])
+
+    guarded = _apply_audit_guardrail(
+        result,
+        {"status": "fail", "final_claims": claims},
+        version_analysis,
+        final_state,
+    )
+    assert guarded["verdict"] == "Inconclusive"
+    assert guarded["affected"] is False
+
+
 def test_run_pipeline_promotes_unsupported_historical_only_not_affected(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -1138,7 +1494,22 @@ def test_run_pipeline_promotes_unsupported_historical_only_not_affected(monkeypa
                         "note": "current workspace version is outside the affected range, but one or more tracked releases shipped an affected version",
                     },
                 },
-                "step_reports": {},
+                "step_reports": {
+                    "aggregate_verdict": {
+                        "title": "Final Verdict",
+                        "status": "Not Affected",
+                        "findings": {
+                            "verdict": "Not Affected",
+                            "confidence": "Low",
+                            "affected": False,
+                            "exposure": "transitive",
+                            "reasoning": "Workspace lock is outside the affected range.",
+                        },
+                        "evidence": [
+                            "Final verdict: Not Affected (confidence=Low)"
+                        ],
+                    },
+                },
             }
 
     monkeypatch.setattr(pipeline_graph_module, "graph", _FakeGraph())
@@ -1157,6 +1528,10 @@ def test_run_pipeline_promotes_unsupported_historical_only_not_affected(monkeypa
     assert assessment["analysis"] == "IN_TRIAGE"
     assert assessment["audit_view"]["status"] != "fail"
     assert assessment["cvss_score"] == 6.3
+    final_step = next(step for step in result["steps"] if step["step"] == "aggregate_verdict")
+    assert final_step["status"] == "Probably Affected"
+    assert final_step["findings"]["verdict"] == "Probably Affected"
+    assert final_step["evidence"][0] == "Final verdict: Probably Affected (confidence=Medium)"
 
 
 def test_run_pipeline_keeps_not_affected_when_historical_only_but_unreachable(

@@ -7,6 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from .dt_client import DTClient
+from .assessment_restore_services import refresh_group_restore_metadata
+from .inconsistency import (
+    INCONSISTENCY_REASON_ANALYSIS_STATE_MISMATCH,
+    INCONSISTENCY_REASON_ASSESSMENT_DETAILS_MISMATCH,
+    INCONSISTENCY_REASON_MISSING_RESCORING_VECTOR,
+    INCONSISTENCY_REASON_TEAM_ASSESSMENT_MISMATCH,
+)
 from .grouped_vuln_summary_index_services import (
     build_grouped_vuln_summary_cache_key,
 )
@@ -247,35 +254,33 @@ def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _derive_group_lifecycle(
+def _derive_group_inconsistency_reasons(
     group: Dict[str, Any],
     summary: Dict[str, Any],
-    required_teams: List[str],
-) -> str:
+) -> List[str]:
     instances = summary["instances"]
     component_states = summary["component_states"]
     blocks = summary["blocks"]
     has_any = summary["has_any_assessment"]
-    has_missing = summary["has_missing_component"]
     has_global = summary["has_global_assessment"]
+    reasons: List[str] = []
 
     if not instances:
-        return "OPEN"
+        return reasons
+
+    if int(group.get("assessment_restore_count") or 0) > 0:
+        reasons.append(INCONSISTENCY_REASON_MISSING_RESCORING_VECTOR)
 
     distinct_non_missing = {state for state in component_states if state != "NOT_SET"}
     if len(distinct_non_missing) > 1:
-        return "INCONSISTENT"
+        reasons.append(INCONSISTENCY_REASON_ANALYSIS_STATE_MISMATCH)
 
-    if not blocks and has_any:
-        return "ASSESSED_LEGACY"
-
-    if (
+    is_legacy = (not blocks and has_any) or (
         len(blocks) == 1
         and blocks[0].get("team") == "General"
         and blocks[0].get("state") == "NOT_SET"
         and has_any
-    ):
-        return "ASSESSED_LEGACY"
+    )
 
     if not has_global:
         instance_block_signatures = []
@@ -295,10 +300,14 @@ def _derive_group_lifecycle(
             if len(significant) > 1 and len(distinct_signatures) > 1:
                 has_inconsistent_instance_blocks = True
 
-        if len(set(instance_block_signatures)) > 1:
-            return "INCONSISTENT"
-        if has_inconsistent_instance_blocks and len(instance_block_signatures) <= 1:
-            return "INCONSISTENT"
+        if (
+            len(set(instance_block_signatures)) > 1
+            or (
+                has_inconsistent_instance_blocks
+                and len(instance_block_signatures) <= 1
+            )
+        ):
+            reasons.append(INCONSISTENCY_REASON_TEAM_ASSESSMENT_MISMATCH)
 
     def normalize_details(details: str) -> str:
         cleaned = details
@@ -318,10 +327,51 @@ def _derive_group_lifecycle(
         if _instance_state(instance) != "NOT_SET"
     ]
     assessed_details = [details for details in assessed_details if details]
-    if len(assessed_details) > 1 and any(
+    details_mismatch = len(assessed_details) > 1 and any(
         details != assessed_details[0] for details in assessed_details
+    )
+    # Preserve the existing legacy-assessment classification: differing legacy
+    # plaintext alone did not make a group inconsistent. Once another supported
+    # inconsistency is present, retaining this diagnostic is still useful.
+    if details_mismatch and (not is_legacy or reasons):
+        reasons.append(INCONSISTENCY_REASON_ASSESSMENT_DETAILS_MISMATCH)
+
+    return reasons
+
+
+def _derive_group_lifecycle(
+    group: Dict[str, Any],
+    summary: Dict[str, Any],
+    required_teams: List[str],
+    inconsistency_reasons: Optional[List[str]] = None,
+) -> str:
+    instances = summary["instances"]
+    component_states = summary["component_states"]
+    blocks = summary["blocks"]
+    has_any = summary["has_any_assessment"]
+    has_missing = summary["has_missing_component"]
+    has_global = summary["has_global_assessment"]
+
+    if not instances:
+        return "OPEN"
+
+    if (
+        inconsistency_reasons
+        if inconsistency_reasons is not None
+        else _derive_group_inconsistency_reasons(group, summary)
     ):
         return "INCONSISTENT"
+
+    if not blocks and has_any:
+        return "ASSESSED_LEGACY"
+
+    if (
+        len(blocks) == 1
+        and blocks[0].get("team") == "General"
+        and blocks[0].get("state") == "NOT_SET"
+        and has_any
+    ):
+        return "ASSESSED_LEGACY"
 
     if summary["is_pending_review"]:
         return "NEEDS_APPROVAL"
@@ -389,7 +439,13 @@ def _build_group_list_metadata(
     attributed_on_ms_numbers = [int(value) for value in attributed_on_ms_values]
     normalized_tags = _normalize_group_tags(group.get("tags") or [], team_mapping)
     summary = _build_assessment_summary(group)
-    lifecycle = _derive_group_lifecycle(group, summary, normalized_tags)
+    inconsistency_reasons = _derive_group_inconsistency_reasons(group, summary)
+    lifecycle = _derive_group_lifecycle(
+        group,
+        summary,
+        normalized_tags,
+        inconsistency_reasons,
+    )
     is_open = lifecycle == "OPEN" or (
         summary["is_pending_review"]
         and _has_open_team_assessment(summary, normalized_tags)
@@ -397,6 +453,7 @@ def _build_group_list_metadata(
 
     return {
         "lifecycle": lifecycle,
+        "inconsistency_reasons": inconsistency_reasons,
         "is_pending": summary["is_pending_review"],
         "is_open": is_open,
         "is_assessed": (
@@ -422,6 +479,14 @@ def _build_group_list_metadata(
         "instance_count": len(components),
         "dependency_relationship": _dependency_relationship(components),
         "cvss_version_mismatch": _has_cvss_version_mismatch(group),
+        "assessment_restore_count": int(group.get("assessment_restore_count") or 0),
+        "assessment_restore_recoverable_count": int(
+            group.get("assessment_restore_recoverable_count") or 0
+        ),
+        "assessment_restore_reasons": list(
+            group.get("assessment_restore_reasons") or []
+        ),
+        "assessment_restore_status": group.get("assessment_restore_status"),
     }
 
 
@@ -441,6 +506,7 @@ def _summarize_component(component: Dict[str, Any]) -> Dict[str, Any]:
         "is_suppressed": component.get("is_suppressed", False),
         "is_direct_dependency": component.get("is_direct_dependency"),
         "tags": component.get("tags", []),
+        "assessment_restore": component.get("assessment_restore"),
     }
 
 
@@ -450,6 +516,7 @@ def summarize_grouped_vulnerabilities(
 ) -> List[Dict[str, Any]]:
     summaries: List[Dict[str, Any]] = []
     for group in groups:
+        refresh_group_restore_metadata(group)
         summary = {
             key: group.get(key)
             for key in [
@@ -466,6 +533,10 @@ def summarize_grouped_vulnerabilities(
                 "tags",
                 "assignees",
                 "aliases",
+                "assessment_restore_count",
+                "assessment_restore_recoverable_count",
+                "assessment_restore_reasons",
+                "assessment_restore_status",
             ]
         }
         summary["list_metadata"] = _build_group_list_metadata(group, team_mapping)

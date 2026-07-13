@@ -9,6 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from .assessment_restore_services import (
+    ASSESSMENT_RESTORE_STATUS_RECOVERABLE,
+    refresh_group_restore_metadata,
+    restore_rescoring_tags_in_details,
+    update_component_restore_metadata,
+)
 from .dt_client import DTClient
 from .grouped_vuln_services import (
     build_grouped_vuln_statistics_rollup,
@@ -39,6 +45,11 @@ class AssessmentRequest(BaseModel):
 
 class AssessmentDetailsRequest(BaseModel):
     instances: list[dict]
+
+
+class AssessmentRestoreRequest(BaseModel):
+    task_id: str
+    group_ids: Optional[list[str]] = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +162,7 @@ def _apply_assessment_payload_to_group(
             component["is_suppressed"] = bool(payload.get("suppressed", False))
             if "justification" in payload:
                 component["justification"] = payload.get("justification")
+            update_component_restore_metadata(component)
             changed = True
     return changed
 
@@ -178,6 +190,7 @@ def _refresh_grouped_task_groups(
     for group in groups:
         if str(group.get("id") or "") not in changed_group_ids:
             continue
+        refresh_group_restore_metadata(group)
         summary = summarize_grouped_vulnerabilities([group], team_mapping)
         if summary:
             group["list_metadata"] = summary[0].get("list_metadata") or {}
@@ -386,6 +399,7 @@ def _register_task_routes(
         task_id: str,
         q: str = "",
         lifecycle: list[str] | None = Query(default=None),
+        inconsistency_reason: list[str] | None = Query(default=None),
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
         vuln_id: str = Query("", alias="id"),
@@ -426,6 +440,7 @@ def _register_task_routes(
                     get_or_build_task_group_query_index(task),
                     q=q,
                     lifecycle=split_query_values(lifecycle),
+                    inconsistency_reason=split_query_values(inconsistency_reason),
                     analysis=split_query_values(analysis),
                     tag=tag,
                     vuln_id=vuln_id,
@@ -465,6 +480,7 @@ def _register_task_routes(
         task_id: str,
         q: str = "",
         lifecycle: list[str] | None = Query(default=None),
+        inconsistency_reason: list[str] | None = Query(default=None),
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
         vuln_id: str = Query("", alias="id"),
@@ -500,6 +516,7 @@ def _register_task_routes(
                     get_or_build_task_group_query_index(task),
                     q=q,
                     lifecycle=split_query_values(lifecycle),
+                    inconsistency_reason=split_query_values(inconsistency_reason),
                     analysis=split_query_values(analysis),
                     tag=tag,
                     vuln_id=vuln_id,
@@ -638,6 +655,171 @@ def _register_statistics_route(
         return stats
 
 
+def _completed_task_full_groups(
+    deps: GeneralApiRouteDeps,
+    task_id: str,
+) -> list[dict[str, Any]]:
+    deps.prune_grouped_vuln_tasks()
+    task = deps.tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="Task is not completed")
+
+    full_result = task.get("_full_result")
+    if isinstance(full_result, list):
+        return full_result
+    result = task.get("result")
+    if isinstance(result, list) and task.get("result_mode") != "summary":
+        return result
+    raise HTTPException(status_code=409, detail="Full task result is unavailable")
+
+
+def _selected_restore_groups(
+    groups: list[dict[str, Any]],
+    group_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    if group_ids is None:
+        return groups
+    if not group_ids:
+        return []
+    wanted = {str(group_id) for group_id in group_ids}
+    return [group for group in groups if str(group.get("id") or "") in wanted]
+
+
+def _iter_restore_components(
+    groups: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    items: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for group in groups:
+        refresh_group_restore_metadata(group)
+        for affected_version in group.get("affected_versions") or []:
+            for component in affected_version.get("components") or []:
+                if not isinstance(component, dict):
+                    continue
+                candidate = update_component_restore_metadata(component)
+                if candidate:
+                    items.append((group, component, candidate))
+    return items
+
+
+def _assessment_restore_preview(
+    groups: list[dict[str, Any]],
+    group_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    selected_groups = _selected_restore_groups(groups, group_ids)
+    group_items: dict[str, dict[str, Any]] = {}
+    totals = {
+        "groups": 0,
+        "findings": 0,
+        "recoverable_findings": 0,
+        "ambiguous_findings": 0,
+        "no_history_findings": 0,
+    }
+
+    for group, component, candidate in _iter_restore_components(selected_groups):
+        group_id = str(group.get("id") or "")
+        if not group_id:
+            continue
+
+        item = group_items.setdefault(
+            group_id,
+            {
+                "group_id": group_id,
+                "title": group.get("title"),
+                "severity": group.get("severity"),
+                "status": group.get("assessment_restore_status"),
+                "reason": candidate.get("reason"),
+                "finding_count": 0,
+                "recoverable_finding_count": 0,
+                "findings": [],
+            },
+        )
+
+        status = candidate.get("status")
+        finding = {
+            "finding_uuid": component.get("finding_uuid"),
+            "project_uuid": component.get("project_uuid"),
+            "project_name": component.get("project_name"),
+            "project_version": component.get("project_version"),
+            "component_uuid": component.get("component_uuid"),
+            "component_name": component.get("component_name"),
+            "component_version": component.get("component_version"),
+            "vulnerability_uuid": component.get("vulnerability_uuid"),
+            "status": status,
+            "reason": candidate.get("reason"),
+            "current_score": candidate.get("current_score"),
+            "restored_score": candidate.get("restored_score"),
+            "restored_vector": candidate.get("restored_vector"),
+            "candidate_vectors": candidate.get("candidate_vectors") or [],
+            "source": candidate.get("source"),
+        }
+        item["findings"].append(finding)
+        item["finding_count"] += 1
+        totals["findings"] += 1
+
+        if status == ASSESSMENT_RESTORE_STATUS_RECOVERABLE:
+            item["recoverable_finding_count"] += 1
+            totals["recoverable_findings"] += 1
+        elif status == "ambiguous":
+            totals["ambiguous_findings"] += 1
+        elif status == "no_history":
+            totals["no_history_findings"] += 1
+
+    items = sorted(group_items.values(), key=lambda item: item["group_id"])
+    totals["groups"] = len(items)
+    return {"items": items, "summary": totals}
+
+
+def _build_assessment_restore_payloads(
+    groups: list[dict[str, Any]],
+    group_ids: list[str] | None = None,
+) -> tuple[list[tuple[dict, dict]], dict[str, int]]:
+    selected_groups = _selected_restore_groups(groups, group_ids)
+    payloads: list[tuple[dict, dict]] = []
+    skipped = {"not_recoverable": 0, "unchanged": 0, "missing_identity": 0}
+
+    for _group, component, candidate in _iter_restore_components(selected_groups):
+        if candidate.get("status") != ASSESSMENT_RESTORE_STATUS_RECOVERABLE:
+            skipped["not_recoverable"] += 1
+            continue
+
+        restored_vector = candidate.get("restored_vector")
+        if not restored_vector:
+            skipped["not_recoverable"] += 1
+            continue
+
+        project_uuid = component.get("project_uuid")
+        component_uuid = component.get("component_uuid")
+        vulnerability_uuid = component.get("vulnerability_uuid")
+        if not project_uuid or not component_uuid or not vulnerability_uuid:
+            skipped["missing_identity"] += 1
+            continue
+
+        current_details = component.get("analysis_details") or ""
+        restored_details = restore_rescoring_tags_in_details(
+            current_details,
+            restored_vector=str(restored_vector),
+            restored_score=candidate.get("restored_score"),
+        )
+        if restored_details == current_details:
+            skipped["unchanged"] += 1
+            continue
+
+        payload = {
+            "project_uuid": project_uuid,
+            "component_uuid": component_uuid,
+            "vulnerability_uuid": vulnerability_uuid,
+            "state": component.get("analysis_state") or "NOT_SET",
+            "details": restored_details,
+            "justification": component.get("justification"),
+            "suppressed": bool(component.get("is_suppressed", False)),
+        }
+        payloads.append((component, payload))
+
+    return payloads, skipped
+
+
 def _register_assessment_routes(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
@@ -690,6 +872,73 @@ def _register_assessment_routes(
             results.append(result_item)
 
         return results
+
+    @router.post("/assessments/restore-preview")
+    async def preview_assessment_restore(
+        req: AssessmentRestoreRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+
+        groups = _completed_task_full_groups(deps, req.task_id)
+        preview = _assessment_restore_preview(groups, req.group_ids)
+        return {"task_id": req.task_id, **preview}
+
+    @router.post("/assessments/restore-apply")
+    async def apply_assessment_restore(
+        req: AssessmentRestoreRequest,
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+
+        groups = _completed_task_full_groups(deps, req.task_id)
+        payloads, skipped = _build_assessment_restore_payloads(groups, req.group_ids)
+        for _instance, payload in payloads:
+            deps.cache_manager._save_local_analysis(payload)
+
+        try:
+            refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
+                deps.tasks,
+                payloads,
+                deps.load_team_mapping(),
+            )
+            if refreshed_tasks:
+                deps.logger.info(
+                    "Refreshed %d grouped vulnerability task snapshot(s) "
+                    "after assessment restore",
+                    refreshed_tasks,
+                )
+        except Exception:
+            deps.logger.exception(
+                "Failed to refresh grouped vulnerability task snapshots "
+                "after assessment restore"
+            )
+
+        api_results = await deps.apply_assessment_payloads(client, payloads)
+        finalized = await deps.finalize_assessment_results(api_results)
+        queued = sum(1 for result in finalized if result.get("queued"))
+        succeeded = sum(1 for result in finalized if result.get("status") == "success")
+        failed = sum(
+            1
+            for result in finalized
+            if result.get("status") == "error" and not result.get("queued")
+        )
+        return {
+            "task_id": req.task_id,
+            "summary": {
+                "attempted": len(payloads),
+                "succeeded": succeeded,
+                "queued": queued,
+                "failed": failed,
+                **skipped,
+            },
+            "results": finalized,
+        }
 
     @router.post("/assessment")
     async def update_assessment(

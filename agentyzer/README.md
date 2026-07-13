@@ -281,6 +281,10 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `OPENWEBUI_MODEL` | `mistral` | Model identifier served by OpenWebUI. |
 | `OPENWEBUI_API_KEY` | empty | Bearer token for OpenWebUI when required. |
 | `OPENWEBUI_TOOL_CALLS` | `auto` | Native OpenAI-style research tool calls for OpenWebUI, or `off` to use text `FETCH_*` only. |
+| `OPENWEBUI_CONTEXT_WINDOW` | `0` | Optional model context window in tokens. When set, Agentyzer pre-trims oversized OpenWebUI prompts before sending them. |
+| `OPENWEBUI_CONTEXT_SAFETY_MARGIN` | `256` | Token margin reserved below the configured or reported context limit. |
+| `OPENWEBUI_CONTEXT_RETRIES` | `2` | Number of retries after OpenWebUI rejects a request for exceeding context length. |
+| `OPENWEBUI_MIN_COMPLETION_TOKENS` | `256` | Minimum completion budget to preserve when truncating input context. |
 | `LOG_LEVEL` | `INFO` | Standard Python logging level. |
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
@@ -331,6 +335,7 @@ The API is designed for two integration styles:
 | `GET` | `/configuration` | Sanitized service configuration and backend information for consumers. |
 | `GET` | `/prompts` | Prompt bundle metadata; pass `include_values=true` to include configured prompt text. |
 | `POST` | `/assess` | Submit an assessment request, synchronously or asynchronously. |
+| `POST` | `/benchmark/compare` | Probabilistically compare a human assessment artifact with an automated assessment result. |
 | `GET` | `/jobs` | List all in-memory async jobs known to the current process. |
 | `GET` | `/jobs/{job_id}` | Fetch job status and progress. |
 | `GET` | `/jobs/{job_id}/result` | Retrieve the final assessment for a completed job. |
@@ -352,6 +357,31 @@ The API is designed for two integration styles:
 | `llm_backend` | string | No | Optional caller-supplied backend label for tracking. |
 | `llm_provider` | string | No | Optional caller-supplied provider label for tracking. |
 | `debug` | boolean | No | Include more detailed per-step inputs and traces in the result. |
+
+### Benchmark comparisons
+
+`POST /benchmark/compare` evaluates assessment artifacts only. It does not
+clone repositories, inspect dependency files, or rerun source analysis. DTVP
+uses it after a normal Agentyzer assessment has produced an automated result.
+
+The request body contains a `benchmark` object prepared by DTVP with:
+
+- the current human assessment snapshot
+- the saved automated assessment summary
+- deterministic state, justification, and CVSS deltas
+- a fallback 1-5 rating; any letter grade is a derived display alias
+
+Agentyzer asks the configured LLM to judge the free-text reasoning and evidence
+semantically, using the deterministic deltas as anchors. The response keeps the
+same benchmark shape and adds evaluator metadata, `comparison_method`, findings,
+recommendation, and an optional reasoning summary. If the LLM backend is not
+healthy or returns invalid JSON, Agentyzer returns a deterministic fallback
+instead of rerunning source analysis.
+
+The benchmark judge prompt is loaded from
+`config/prompts/benchmark_comparison.yaml`, or from a matching override under
+`AGENTYZER_CONFIG_DIR/prompts`. The numeric `rating.score` is canonical; a
+`rating.grade` value is retained only as a score-derived display alias.
 
 ### Service configuration and backend information
 
@@ -627,7 +657,14 @@ The pipeline state contract lives in `src/pipeline/state.py` and carries:
 
 The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. With OpenWebUI and `OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`); Agentyzer executes them locally through its existing allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
 
-Prompt bundles use compact `analysis_protocol` sections instead of bundled few-shot example transcripts. The protocol tells the model to keep analysis private, apply security researcher/remediator/auditor/ticket-author lenses internally, and emit only structured evidence fields such as call paths, dependency chains, exclusions, remediation, and validation notes. Response contracts define exact field order, allowed values, evidence labels, and disallow markdown, JSON, preambles, conclusions, or extra fields. Legacy custom prompt bundles that still provide `few_shot` are accepted as a compatibility alias for `analysis_protocol`.
+All LLM prompts are managed as YAML bundles in `config/prompts/`. Prompt bundles use compact `analysis_protocol` sections instead of bundled few-shot example transcripts. The protocol tells the model to keep analysis private, apply security researcher/remediator/auditor/ticket-author lenses internally, and emit only structured evidence fields such as call paths, dependency chains, exclusions, remediation, and validation notes. Response contracts define exact field order, allowed values, evidence labels, and disallow markdown, JSON, preambles, conclusions, or extra fields. Legacy custom prompt bundles that still provide `few_shot` are accepted as a compatibility alias for `analysis_protocol`.
+
+OpenWebUI context limits are handled in two ways. If OpenWebUI rejects a request
+with a context-length error, Agentyzer parses the reported model limit and input
+token count, then retries with a lower completion budget or a compacted prompt.
+For models with a known window, set `OPENWEBUI_CONTEXT_WINDOW` to enable
+preflight prompt compaction before the request is sent. For example, a model
+with a 131072-token context can use `OPENWEBUI_CONTEXT_WINDOW=131072`.
 
 ## Parallel Project Runs And Workspace Reuse
 

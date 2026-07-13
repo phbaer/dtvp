@@ -31,6 +31,8 @@ from src.api.models import (
     Assessment,
     AssessRequest,
     AssessResponse,
+    BenchmarkCompareRequest,
+    BenchmarkCompareResponse,
     BackendInformation,
     CompactContextResponse,
     ErrorResponse,
@@ -47,6 +49,7 @@ from src.api.models import (
     ServiceConfiguration,
     StepFindings,
 )
+from src.benchmark import compare_benchmark_with_llm, deterministic_benchmark_fallback
 from src.llm import OllamaClient, OpenWebUIClient, create_llm_client
 from src.llm.base import LLMClient
 from src.llm.prompt_registry import (
@@ -117,9 +120,9 @@ def _llm_metadata(client: object, *, healthy: bool | None = None) -> Dict[str, A
     return metadata
 
 
-def _client_for_request(req: AssessRequest) -> LLMClient:
+def _client_for_model(model_override: str | None = None) -> LLMClient:
     base = app.state.ollama
-    model = req.model or getattr(base, "model", None)
+    model = model_override or getattr(base, "model", None)
     if isinstance(base, OpenWebUIClient):
         return OpenWebUIClient(
             host=base.host,
@@ -130,6 +133,10 @@ def _client_for_request(req: AssessRequest) -> LLMClient:
     if isinstance(base, OllamaClient):
         return OllamaClient(host=base.host, model=model)
     return base
+
+
+def _client_for_request(req: AssessRequest) -> LLMClient:
+    return _client_for_model(req.model)
 
 
 def load_repos_config(path: str | None = None):
@@ -215,6 +222,10 @@ app = FastAPI(
             "name": "jobs",
             "description": "Track, inspect, and remove asynchronous assessment jobs.",
         },
+        {
+            "name": "benchmark",
+            "description": "Compare human and automated assessment artifacts without rerunning repository analysis.",
+        },
     ],
 )
 
@@ -272,6 +283,7 @@ def _service_configuration() -> ServiceConfiguration:
             "repos_config_hot_reload": True,
             "context_compaction": True,
             "follow_up_assessments": True,
+            "benchmark_comparisons": True,
         },
     )
 
@@ -738,6 +750,32 @@ async def prompts(
         include_values=include_values,
         system_only=system_only,
     )
+
+
+@app.post(
+    "/benchmark/compare",
+    response_model=BenchmarkCompareResponse,
+    tags=["benchmark"],
+    summary="Compare human and automated assessment artifacts",
+    description=(
+        "Probabilistically compare a human vulnerability assessment with an "
+        "automated Agentyzer assessment result. This endpoint evaluates the "
+        "assessment artifacts only; it does not run repository or source-code analysis."
+    ),
+)
+async def benchmark_compare(req: BenchmarkCompareRequest):
+    benchmark = req.benchmark or {}
+    if not isinstance(benchmark, dict):
+        raise HTTPException(status_code=400, detail="benchmark must be an object")
+
+    if not getattr(app.state, "llm_healthy", False):
+        return deterministic_benchmark_fallback(
+            benchmark,
+            reason="LLM backend is not healthy; returned deterministic fallback.",
+        )
+
+    llm_client = _client_for_model(req.model)
+    return await compare_benchmark_with_llm(benchmark, llm_client)
 
 
 @app.post(

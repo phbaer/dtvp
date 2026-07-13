@@ -478,6 +478,53 @@ class FollowUpRequest(BaseModel):
     )
 
 
+class BenchmarkCompareRequest(BaseModel):
+    """Input for comparing human and automated assessment artifacts."""
+
+    benchmark: Dict[str, Any] = Field(
+        description=(
+            "Structured benchmark artifact prepared by DTVP. It includes the "
+            "human assessment snapshot, automated Agentyzer assessment summary, "
+            "deterministic state/CVSS deltas, and fallback rating."
+        )
+    )
+    model: Optional[str] = Field(
+        default=None,
+        description="Optional LLM model override for the probabilistic comparison.",
+    )
+
+
+class BenchmarkCompareResponse(BaseModel):
+    """Probabilistic benchmark comparison result."""
+
+    schema_version: str = Field(description="Benchmark comparison schema version.")
+    comparison_method: str = Field(
+        description="Comparison method, such as agentyzer_probabilistic or deterministic_fallback."
+    )
+    evaluator: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Evaluator metadata including model and whether probabilistic scoring was available.",
+    )
+    rating: Dict[str, Any] = Field(
+        description=(
+            "Canonical 1-5 agreement rating for human and automated assessment "
+            "artifacts. The optional letter grade is a derived display alias."
+        )
+    )
+    human: Dict[str, Any] = Field(description="Normalized human assessment snapshot.")
+    automated: Dict[str, Any] = Field(description="Normalized automated assessment snapshot.")
+    deltas: Dict[str, Any] = Field(description="Deterministic state, CVSS, and reasoning anchors.")
+    findings: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Important agreement or disagreement findings.",
+    )
+    recommendation: str = Field(description="Recommended reviewer action.")
+    reasoning_summary: Optional[str] = Field(
+        default=None,
+        description="Probabilistic evaluator explanation for the rating.",
+    )
+
+
 class VersionContext(BaseModel):
     """Concrete version evidence used during CVSS rescoring."""
 

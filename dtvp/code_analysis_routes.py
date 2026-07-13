@@ -11,6 +11,7 @@ from .auto_analysis_services import (
     build_component_auto_analysis_guidance_block,
     get_component_auto_analysis_guidance,
 )
+from .code_analysis_benchmark_services import build_code_analysis_benchmark
 from .code_analysis_result_services import build_follow_up_guidance
 
 
@@ -53,6 +54,16 @@ class QueueSubmitRequest(BaseModel):
     model: Optional[str] = None
     llm_backend: Optional[str] = None
     llm_provider: Optional[str] = None
+    source: Optional[str] = None
+
+
+class CodeAnalysisBenchmarkRequest(BaseModel):
+    current_team: Optional[str] = None
+    current_state: Optional[str] = None
+    current_justification: Optional[str] = None
+    current_details: Optional[str] = None
+    current_cvss_score: Optional[float | str] = None
+    current_cvss_vector: Optional[str] = None
 
 
 class QueueFollowUpRequest(BaseModel):
@@ -621,6 +632,39 @@ def _register_code_analysis_routes(
             raise HTTPException(status_code=404, detail="Analysis result not found.")
         return compact_context
 
+    @router.post(
+        "/code-analysis/results/{run_id}/benchmark",
+        responses=deps.not_found_response,
+    )
+    async def code_analysis_benchmark_result(
+        run_id: str,
+        req: CodeAnalysisBenchmarkRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        record = deps.result_store.get(run_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Analysis result not found.")
+        benchmark = build_code_analysis_benchmark(record, req.model_dump())
+        settings = deps.code_analysis_settings_cls()
+        if not settings.enabled:
+            return benchmark
+
+        try:
+            async with deps.code_analysis_client_cls(settings) as client:
+                evaluated = await client.compare_benchmark(benchmark)
+            if isinstance(evaluated, dict):
+                return evaluated
+        except Exception as exc:
+            benchmark["evaluator"] = {
+                "provider": "dtvp",
+                "probabilistic": False,
+                "available": False,
+                "reason": f"Agentyzer benchmark comparison unavailable: {_extract_error_message(exc)}",
+            }
+            benchmark["comparison_method"] = "deterministic_fallback"
+        return benchmark
+
     @router.get(
         "/projects/{project_name}/vulnerabilities/{vuln_id}/analysis-results",
     )
@@ -783,6 +827,12 @@ def _register_analysis_queue_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        source = (req.source or "manual").strip().lower()
+        if source not in {"manual", "benchmark"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Queue source must be manual or benchmark.",
+            )
         user_guidance = _append_static_component_guidance(
             load_auto_analysis_guidance=deps.load_auto_analysis_guidance,
             vuln_id=req.vuln_id,
@@ -800,6 +850,7 @@ def _register_analysis_queue_routes(
             model=req.model,
             llm_backend=req.llm_backend,
             llm_provider=req.llm_provider,
+            source=source,
         )
         return item.model_dump(exclude={"result"})
 

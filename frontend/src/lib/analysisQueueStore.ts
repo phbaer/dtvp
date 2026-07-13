@@ -169,6 +169,7 @@ async function submit(
     onComplete?: CompletionCallback,
     onError?: (error: string) => void,
     affectedProductVersions?: string[],
+    source: 'manual' | 'benchmark' | string = 'manual',
 ): Promise<AnalysisQueueItem> {
     const item = await analysisQueueSubmit({
         vuln_id: vulnId,
@@ -177,6 +178,7 @@ async function submit(
         cvss_vector: cvssVector,
         user_guidance: userGuidance,
         affected_product_versions: affectedProductVersions,
+        source,
     })
     if (onComplete) completionCallbacks.set(item.queue_id, onComplete)
     if (onError) failureCallbacks.set(item.queue_id, onError)

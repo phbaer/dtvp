@@ -58,7 +58,9 @@ describe('TMRescore integration via api.ts', () => {
                 llm_enrichment: {
                     available: true,
                     status: 'available',
-                    default_model: 'qwen2.5:7b',
+                    model: 'qwen2.5:7b',
+                    backend: 'openwebui',
+                    provider: 'OpenWebUI',
                     host_configured: true,
                     warning: null,
                 },
@@ -96,7 +98,7 @@ describe('TMRescore integration via api.ts', () => {
                     vex: '/api/tmrescore/sessions/session-1/results/vex',
                 },
                 outputs: {
-                    'enriched-sbom.json': { size: 1234, content_type: 'application/json' },
+                    enriched_sbom: '/api/v1/sessions/session-1/outputs/enriched_sbom.cdx.json',
                 },
             },
         })
@@ -129,9 +131,7 @@ describe('TMRescore integration via api.ts', () => {
             configurable: true,
         })
         await input.trigger('change')
-        const enrichToggle = wrapper.findAll('input[type="checkbox"]')[3]
-        await enrichToggle.setValue(true)
-        await wrapper.get('[data-testid="ollama-model-input"]').setValue('qwen2.5:14b')
+        await wrapper.get('[data-testid="llm-enrichment-input"]').setValue(true)
         await wrapper.get('form').trigger('submit.prevent')
         await flushPromises()
 
@@ -140,9 +140,11 @@ describe('TMRescore integration via api.ts', () => {
         expect(axiosMocks.post.mock.calls[0]?.[1]).toBeInstanceOf(FormData)
         const payload = axiosMocks.post.mock.calls[0]?.[1] as FormData
         expect(payload.get('enrich')).toBe('true')
-        expect(payload.get('ollama_model')).toBe('qwen2.5:14b')
+        expect(payload.has('ollama_model')).toBe(false)
+        expect(payload.get('mitre_enrichment')).toBe('false')
+        expect(payload.get('offline')).toBe('false')
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
-        expect(wrapper.text()).toContain('enriched-sbom.json')
+        expect(wrapper.text()).toContain('Enriched CycloneDX SBOM')
     })
 })

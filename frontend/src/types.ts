@@ -35,6 +35,7 @@ export interface Instance {
     dependency_chains?: string[];
     justification?: string;
     tags?: string[];
+    assessment_restore?: AssessmentRestoreCandidate;
 }
 
 
@@ -46,9 +47,15 @@ export interface AffectedVersion {
 }
 
 export type GroupedVulnDependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN';
+export type InconsistencyReason =
+    | 'MISSING_RESCORING_VECTOR'
+    | 'ANALYSIS_STATE_MISMATCH'
+    | 'TEAM_ASSESSMENT_MISMATCH'
+    | 'ASSESSMENT_DETAILS_MISMATCH';
 
 export interface GroupedVulnListMetadata {
     lifecycle?: string;
+    inconsistency_reasons?: InconsistencyReason[];
     is_pending?: boolean;
     is_open?: boolean;
     is_assessed?: boolean;
@@ -61,6 +68,24 @@ export interface GroupedVulnListMetadata {
     instance_count?: number;
     dependency_relationship?: GroupedVulnDependencyRelationship;
     cvss_version_mismatch?: boolean;
+    assessment_restore_count?: number;
+    assessment_restore_recoverable_count?: number;
+    assessment_restore_reasons?: string[];
+    assessment_restore_status?: string | null;
+}
+
+export interface AssessmentRestoreCandidate {
+    reason: string;
+    status: 'recoverable' | 'ambiguous' | 'no_history' | string;
+    current_score?: number | null;
+    restored_score?: number | null;
+    restored_vector?: string | null;
+    candidate_vectors?: string[];
+    source?: {
+        timestamp?: string | number | null;
+        commenter?: string | null;
+        comment_index?: number | null;
+    } | null;
 }
 
 export interface GroupedVuln {
@@ -77,6 +102,10 @@ export interface GroupedVuln {
     tags?: string[];
     assignees?: string[];
     aliases?: string[];
+    assessment_restore_count?: number;
+    assessment_restore_recoverable_count?: number;
+    assessment_restore_reasons?: string[];
+    assessment_restore_status?: string | null;
     list_metadata?: GroupedVulnListMetadata;
     affected_versions: AffectedVersion[];
 }
@@ -208,7 +237,9 @@ export interface TMRescoreContext {
     llm_enrichment?: {
         available: boolean;
         status: 'available' | 'not_configured' | 'unreachable' | 'integration_disabled';
-        default_model: string;
+        model?: string | null;
+        backend?: string | null;
+        provider?: string | null;
         host_configured: boolean;
         warning?: string | null;
     };
@@ -221,7 +252,7 @@ export interface TMRescoreAnalysisResult {
     rescored_count: number;
     avg_score_reduction: number;
     elapsed_seconds: number;
-    outputs?: Record<string, any>;
+    outputs?: Record<string, string | Record<string, unknown>>;
     error?: string | null;
     session?: Record<string, any>;
     scope: 'latest_only' | 'merged_versions';
@@ -233,6 +264,9 @@ export interface TMRescoreAnalysisResult {
     strategy_note: string;
     llm_enrichment?: {
         enabled: boolean;
+        model?: string | null;
+        backend?: string | null;
+        provider?: string | null;
         ollama_model?: string | null;
     };
     download_urls: {
@@ -245,6 +279,8 @@ export interface TMRescoreAnalysisProgress {
     session_id: string;
     status: string;
     progress: number;
+    step?: number | null;
+    total_steps?: number | null;
     message: string;
     log?: string[];
     error?: string | null;
@@ -258,6 +294,8 @@ export interface TMRescoreProjectState {
     session_id: string;
     status: string;
     progress: number;
+    step?: number | null;
+    total_steps?: number | null;
     message: string;
     log?: string[];
     error?: string | null;
@@ -266,7 +304,17 @@ export interface TMRescoreProjectState {
     analyzed_versions: string[];
     llm_enrichment?: {
         enabled: boolean;
+        model?: string | null;
+        backend?: string | null;
+        provider?: string | null;
         ollama_model?: string | null;
+    };
+    analysis_options?: {
+        chain_analysis: boolean;
+        prioritize: boolean;
+        what_if: boolean;
+        mitre_enrichment: boolean;
+        offline: boolean;
     };
     created_at?: number | null;
     updated_at?: number | null;

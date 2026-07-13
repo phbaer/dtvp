@@ -11,11 +11,13 @@ const mocks = vi.hoisted(() => ({
     getResult: vi.fn(),
     deleteResult: vi.fn(),
     getPrompts: vi.fn(),
+    benchmarkResult: vi.fn(),
 }))
 
 const clipboardWriteText = vi.fn()
 
 vi.mock('../../lib/api', () => ({
+    codeAnalysisBenchmarkResult: mocks.benchmarkResult,
     codeAnalysisDeleteResult: mocks.deleteResult,
     codeAnalysisGetPrompts: mocks.getPrompts,
     codeAnalysisGetResult: mocks.getResult,
@@ -61,6 +63,22 @@ describe('CodeAnalysisPanel', () => {
         mocks.queueItems.value = []
         mocks.listResults.mockResolvedValue([])
         mocks.deleteResult.mockResolvedValue({ status: 'removed', analysis_run_id: 'run-1' })
+        mocks.benchmarkResult.mockResolvedValue({
+            schema_version: 'dtvp.code-analysis-benchmark/v1',
+            analysis_run_id: 'run-1',
+            compared_at: 'now',
+            rating: { score: 5, max_score: 5, grade: 'A', label: 'Strong match', tone: 'green' },
+            human: { state: 'NOT_AFFECTED', state_family: 'not_affected', justification: 'CODE_NOT_PRESENT' },
+            automated: { state: 'NOT_AFFECTED', state_family: 'not_affected', justification: 'CODE_NOT_PRESENT' },
+            deltas: {
+                state_match: true,
+                state_family_match: true,
+                state_distance: 0,
+                justification_match: true,
+            },
+            findings: [],
+            recommendation: 'Automated assessment strongly agrees.',
+        })
         mocks.getPrompts.mockResolvedValue({
             bundles: [
                 {
@@ -115,7 +133,193 @@ describe('CodeAnalysisPanel', () => {
             expect.any(Function),
             expect.any(Function),
             ['1.0.0', '1.1.0'],
+            'manual',
         )
+    })
+
+    it('runs one analysis action and automatically shows the benchmark comparison', async () => {
+        const benchmarkResult = makeAnalysisResult('Analysis result')
+        const benchmarkRecord = {
+            analysis_run_id: 'queue-benchmark',
+            queue_id: 'queue-benchmark',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'owned-service',
+            project_name: 'ExampleApp',
+            source: 'manual',
+            summary: { affected: false, verdict: 'Not Affected' },
+            finished_at: '2026-07-06T12:00:00Z',
+        }
+        const queueItem = {
+            queue_id: 'queue-benchmark',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'owned-service',
+            project_name: 'ExampleApp',
+            submitted_by: 'tester',
+            submitted_at: 'now',
+            status: 'completed',
+            position: 0,
+            source: 'manual',
+        }
+
+        mocks.listResults
+            .mockResolvedValueOnce([])
+            .mockResolvedValue([benchmarkRecord])
+        mocks.submit.mockImplementation(async (...args: any[]) => {
+            const onComplete = args[5]
+            onComplete(benchmarkResult, queueItem)
+            return queueItem
+        })
+        mocks.benchmarkResult.mockResolvedValue({
+            schema_version: 'agentyzer.benchmark-comparison/v1',
+            comparison_method: 'agentyzer_probabilistic',
+            evaluator: { provider: 'agentyzer', probabilistic: true, model: 'judge-model' },
+            analysis_run_id: 'queue-benchmark',
+            compared_at: 'now',
+            rating: { score: 4, max_score: 5, grade: 'B', label: 'Good match', tone: 'cyan', confidence: 0.8 },
+            human: {
+                state: 'NOT_AFFECTED',
+                state_family: 'not_affected',
+                justification: 'CODE_NOT_PRESENT',
+                cvss_score: 0,
+                cvss_vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:N',
+            },
+            automated: {
+                state: 'NOT_AFFECTED',
+                state_family: 'not_affected',
+                justification: 'CODE_NOT_PRESENT',
+                cvss_score: 0,
+                cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N',
+            },
+            deltas: {
+                state_match: true,
+                state_family_match: true,
+                state_distance: 0,
+                justification_match: true,
+                cvss_delta: 0,
+                cvss_vector_match: false,
+                reasoning_overlap: 0.72,
+            },
+            findings: [{ kind: 'state', severity: 'info', title: 'Assessment state matches', detail: 'Both assessments agree.' }],
+            recommendation: 'Aligned.',
+            reasoning_summary: 'The reasoning is semantically aligned.',
+        })
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service'],
+                currentState: 'NOT_AFFECTED',
+                currentJustification: 'CODE_NOT_PRESENT',
+                currentDetails: 'No vulnerable code path was found.',
+                currentCvssScore: 0,
+                currentCvssVector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:N',
+            },
+        })
+
+        await flushPromises()
+        expect(wrapper.findAll('button').some(button => button.text().trim() === 'Benchmark')).toBe(false)
+        await wrapper.findAll('button').find(button => button.text().trim() === 'Analyze')?.trigger('click')
+        await flushPromises()
+        await flushPromises()
+
+        expect(mocks.submit).toHaveBeenCalledWith(
+            'CVE-2026-0001',
+            'owned-service',
+            'ExampleApp',
+            undefined,
+            undefined,
+            expect.any(Function),
+            expect.any(Function),
+            undefined,
+            'manual',
+        )
+        expect(mocks.benchmarkResult).toHaveBeenCalledWith('queue-benchmark', {
+            current_team: 'General',
+            current_state: 'NOT_AFFECTED',
+            current_justification: 'CODE_NOT_PRESENT',
+            current_details: 'No vulnerable code path was found.',
+            current_cvss_score: 0,
+            current_cvss_vector: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:N',
+        })
+        expect(wrapper.text()).toContain('Agreement 4/5')
+        expect(wrapper.text()).toContain('Good match')
+        expect(wrapper.text()).toContain('Agentyzer probabilistic')
+        expect(wrapper.text()).toContain('judge-model')
+        expect(wrapper.text()).toContain('Existing Assessment')
+        expect(wrapper.text()).toContain('Analysis Result')
+        expect(wrapper.text()).toContain('neither side is assumed to be human-authored or ground truth')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:N')
+        expect(wrapper.text()).toContain('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N')
+        expect(wrapper.text()).not.toContain('CVSS Delta')
+        expect(wrapper.text()).not.toContain('Human State')
+        expect(wrapper.text()).not.toContain('Automated State')
+
+        const comparisonStates = wrapper.findAll('[data-testid="benchmark-comparison-state"]')
+        expect(comparisonStates).toHaveLength(4)
+        const stateAgreement = comparisonStates.find(state => state.text().includes('State Agreement'))
+        const vectorAgreement = comparisonStates.find(state => state.text().includes('CVSS Vector Agreement'))
+        expect(stateAgreement?.attributes('data-alignment')).toBe('aligned')
+        expect(stateAgreement?.text()).toContain('Aligned')
+        expect(stateAgreement?.find('svg').exists()).toBe(true)
+        expect(vectorAgreement?.attributes('data-alignment')).toBe('different')
+        expect(vectorAgreement?.text()).toContain('Different')
+        expect(vectorAgreement?.find('svg').exists()).toBe(true)
+        const benchmarkFinding = wrapper.get('[data-testid="benchmark-finding"]')
+        expect(benchmarkFinding.attributes('data-alignment')).toBe('aligned')
+        expect(benchmarkFinding.text()).toContain('Aligned')
+        expect(benchmarkFinding.find('svg').exists()).toBe(true)
+
+        const decision = wrapper.get('[data-testid="assessment-decision"]')
+        const summary = wrapper.get('[data-testid="assessment-summary"]')
+        expect(wrapper.html().indexOf('data-testid="assessment-decision"')).toBeLessThan(
+            wrapper.html().indexOf('data-testid="assessment-summary"'),
+        )
+        expect(decision.text()).toContain('Evidence Quality')
+        expect(decision.text()).not.toContain('Follow-up Question')
+        expect(summary.text()).toContain('Follow-up Question')
+        expect(summary.text()).not.toContain('Evidence Quality')
+        expect(wrapper.get('[data-testid="assessment-summary-body"]').element.parentElement).toBe(summary.element)
+        expect(wrapper.get('[data-testid="assessment-draft-body"]').element.parentElement).toBe(
+            wrapper.get('[data-testid="assessment-draft"]').element,
+        )
+        expect(wrapper.get('[data-testid="assessment-benchmark-body"]').element.parentElement).toBe(
+            wrapper.get('[data-testid="assessment-benchmark"]').element,
+        )
+
+        const disclosureButtons = wrapper.findAll('button[aria-expanded]')
+        const summaryIndex = disclosureButtons.findIndex(button => button.text().includes('Summary'))
+        const draftIndex = disclosureButtons.findIndex(button => button.text().includes('Assessment Draft'))
+        const benchmarkIndex = disclosureButtons.findIndex(button => button.text().includes('Assessment Benchmark'))
+        expect(summaryIndex).toBeGreaterThanOrEqual(0)
+        expect(draftIndex).toBeGreaterThan(summaryIndex)
+        expect(benchmarkIndex).toBeGreaterThan(draftIndex)
+        expect(disclosureButtons[summaryIndex].attributes('aria-expanded')).toBe('true')
+        expect(disclosureButtons[draftIndex].attributes('aria-expanded')).toBe('true')
+        expect(disclosureButtons[benchmarkIndex].attributes('aria-expanded')).toBe('true')
+
+        await disclosureButtons[draftIndex].trigger('click')
+        expect(disclosureButtons[draftIndex].attributes('aria-expanded')).toBe('false')
+        expect(disclosureButtons[summaryIndex].attributes('aria-expanded')).toBe('true')
+        expect(disclosureButtons[benchmarkIndex].attributes('aria-expanded')).toBe('true')
+        expect(wrapper.text()).toContain('Agreement 4/5')
+    })
+
+    it('does not offer a separate benchmark or load a comparison without an existing assessment', async () => {
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service'],
+                currentState: 'NOT_SET',
+            },
+        })
+
+        await flushPromises()
+
+        expect(wrapper.findAll('button').some(button => button.text().trim() === 'Benchmark')).toBe(false)
+        expect(wrapper.find('[data-testid="assessment-benchmark"]').exists()).toBe(false)
+        expect(mocks.benchmarkResult).not.toHaveBeenCalled()
     })
 
     it('allows queue interaction and skips already active components when starting more', async () => {
@@ -602,7 +806,7 @@ describe('CodeAnalysisPanel', () => {
         )
 
         const selectedFollowUpRow = wrapper.findAll('div').find(node =>
-            node.text().includes('follow-up')
+            node.text().includes('Follow-up')
             && node.text().includes('Selected')
             && node.text().includes('owned-service')
         )
@@ -700,6 +904,11 @@ describe('CodeAnalysisPanel', () => {
         await flushPromises()
 
         expect(wrapper.text()).toContain('Ticket Draft')
+        expect(wrapper.find('textarea[aria-label="Generated ticket text"]').exists()).toBe(false)
+        await wrapper.findAll('button').find(button => button.text().includes('Ticket Draft'))?.trigger('click')
+        expect(wrapper.get('[data-testid="ticket-draft-body"]').element.parentElement).toBe(
+            wrapper.get('[data-testid="ticket-draft"]').element,
+        )
         const ticket = wrapper.find('textarea[aria-label="Generated ticket text"]')
         const ticketText = (ticket.element as HTMLTextAreaElement).value
         expect(ticketText).toBe(generatedTicketText)

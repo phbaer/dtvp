@@ -1,1243 +1,2444 @@
 {
-    "openapi": "3.1.0",
-    "info": {
-        "title": "CVSS Re-Scorer Service",
-        "summary": "Context-aware CVSS 3.1 re-scoring driven by threat models",
-        "description": "The CVSS Re-Scorer automatically adjusts CVSS 3.1 base scores by analysing security context extracted from a **Microsoft Threat Model** (.tm7) and a **CycloneDX SBOM**.\n\n### Workflow\n\n1. **Create a session** — identifies the application under analysis.\n2. **Upload files** — threat model, SBOM (with optional embedded vulnerabilities), CVE data, and an analysis configuration.  Alternatively, use the single-shot *inventory* endpoint.\n3. **Run analysis** — the pipeline re-scores each CVE, optionally performs attack-chain analysis, priority ranking, and what-if scenarios.\n4. **Retrieve results** — download HTML/JSON reports, a CycloneDX VEX document, and the enriched SBOM.\n\n### Key concepts\n\n| Concept | Description |\n|---|---|\n| **Session** | An isolated workspace for one analysis run. |\n| **Inventory mode** | Single multipart request that uploads a TM7 + SBOM, extracts CVEs, enriches components, and runs the full pipeline. |\n| **Classic mode** | Upload each file individually, then trigger analysis. |\n| **Rescoring rules** | YAML-driven rules that lower CVSS metrics when the threat model proves mitigating context (e.g. no inbound data path → AV:P). |\n| **VEX** | CycloneDX Vulnerability Exploitability eXchange document carrying the adjusted scores. |\n",
-        "version": "0.1.0"
-    },
-    "paths": {
-        "/api/v1/sessions": {
-            "post": {
-                "tags": [
-                    "Sessions"
-                ],
-                "summary": "Create a new analysis session",
-                "description": "Create an isolated session workspace for one application version.\n\nAll subsequent file uploads, configuration, and analysis runs are\nscoped to this session.  A caller-supplied session ID may be\nprovided for idempotency; otherwise a UUID is generated.",
-                "operationId": "create_session_api_v1_sessions_post",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/SessionCreate"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "201": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SessionInfo"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CVSS Re-Scorer Service",
+    "summary": "Context-aware CVSS re-scoring (v3.0, v3.1, v4.0) driven by threat models",
+    "description": "The CVSS Re-Scorer automatically adjusts CVSS base scores (v3.0, v3.1, v4.0) by analysing security context extracted from a **Microsoft Threat Model** (.tm7) and a **CycloneDX SBOM**.\n\n### Workflow\n\n1. **Create a session** \u2014 identifies the application under analysis.\n2. **Upload files** \u2014 threat model, SBOM (with optional embedded vulnerabilities), CVE data, and an analysis configuration.  Alternatively, use the single-shot *inventory* endpoint.\n3. **Run analysis** \u2014 the pipeline re-scores each CVE, optionally performs attack-chain analysis, priority ranking, and what-if scenarios.\n4. **Retrieve results** \u2014 download the unified HTML action report, JSON evidence, a CycloneDX VEX document, and the enriched SBOM.\n\n### Key concepts\n\n| Concept | Description |\n|---|---|\n| **Session** | An isolated workspace for one analysis run. |\n| **Inventory mode** | Single multipart request that uploads a TM7 + SBOM, extracts CVEs, enriches components, and runs the full pipeline. |\n| **Classic mode** | Upload each file individually, then trigger analysis. |\n| **Rescoring rules** | YAML-driven rules that lower CVSS metrics when the threat model proves mitigating context (e.g. no inbound data path \u2192 AV:P). |\n| **VEX** | CycloneDX Vulnerability Exploitability eXchange document carrying the adjusted scores. |\n",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/wizard/methods": {
+      "get": {
+        "tags": [
+          "Wizard"
+        ],
+        "summary": "List service-hosted wizard methods",
+        "description": "Return the allowlisted wizard methods available to API consumers.",
+        "operationId": "list_wizard_methods_api_v1_wizard_methods_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
             }
-        },
-        "/api/v1/sessions/{session_id}": {
-            "get": {
-                "tags": [
-                    "Sessions"
-                ],
-                "summary": "Get session details",
-                "description": "Return the current state of a session, including which files have\nbeen uploaded and the analysis status.",
-                "operationId": "get_session_api_v1_sessions__session_id__get",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SessionInfo"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "tags": [
-                    "Sessions"
-                ],
-                "summary": "Delete a session",
-                "description": "Remove a session and all its data (uploads, cache, outputs) from\ndisk.  This operation is irreversible.",
-                "operationId": "delete_session_api_v1_sessions__session_id__delete",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "Successful Response"
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/files/threatmodel": {
-            "put": {
-                "tags": [
-                    "File uploads"
-                ],
-                "summary": "Upload threat model",
-                "description": "Upload the Microsoft Threat Model (.tm7) file.\n\nThe threat model provides the security context (elements, data flows,\ntrust boundaries) used to evaluate whether CVSS metrics can be\nlowered.",
-                "operationId": "upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/Body_upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/files/sbom": {
-            "put": {
-                "tags": [
-                    "File uploads"
-                ],
-                "summary": "Upload CycloneDX SBOM",
-                "description": "Upload a CycloneDX SBOM in JSON format.\n\nComponents should carry ``threatModelElementIds`` properties or\nthe pipeline will attempt name-based matching to the threat model.\nIf the SBOM includes a ``vulnerabilities`` section, a separate CVE\nfile upload is optional.",
-                "operationId": "upload_sbom_api_v1_sessions__session_id__files_sbom_put",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/Body_upload_sbom_api_v1_sessions__session_id__files_sbom_put"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/files/cves": {
-            "put": {
-                "tags": [
-                    "File uploads"
-                ],
-                "summary": "Upload CVE data (optional)",
-                "description": "Upload a CVE data file (.json or .csv).\n\nOptional when the CycloneDX SBOM already contains a\n``vulnerabilities`` section.  Accepted formats:\n\n- **JSON** — ``{\"cves\": [{\"cve_id\", \"cvss_vector\", ...}]}``\n\n- **CSV** — exported from a vulnerability work-list.  Expected\n  columns: ``cve_id``, ``cvss_vector``, ``base_score``, ``severity``\n  (additional columns are ignored).",
-                "operationId": "upload_cves_api_v1_sessions__session_id__files_cves_put",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/Body_upload_cves_api_v1_sessions__session_id__files_cves_put"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/files/items": {
-            "put": {
-                "tags": [
-                    "File uploads"
-                ],
-                "summary": "Upload items.csv (optional)",
-                "description": "Upload an items.csv that maps components to threat-model elements.\n\nRequired columns: ``item`` (component name) and\n``threatmodel_id`` (TM element GUID).  Additional columns are\nignored.",
-                "operationId": "upload_items_csv_api_v1_sessions__session_id__files_items_put",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/Body_upload_items_csv_api_v1_sessions__session_id__files_items_put"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/config": {
-            "put": {
-                "tags": [
-                    "Configuration"
-                ],
-                "summary": "Set analysis configuration (JSON)",
-                "description": "Set the analysis configuration as a JSON body.\n\nAccepted top-level keys:\n\n- **cyclonedx_mapping** — how SBOM components map to TM elements.\n\n- **rescoring_rules** — per-metric rules that lower CVSS when\n  context proves mitigation.\n\n- **trust_boundaries** — boundary definitions and default trust\n  level.\n\n- **cwe_mitigations** — CWE-specific mitigation overrides.\n\n- **property_overrides** / **deployment_environment** — optional\n  context hints.",
-                "operationId": "set_analysis_config_api_v1_sessions__session_id__config_put",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "type": "object",
-                                "additionalProperties": true,
-                                "description": "Analysis configuration as a JSON object",
-                                "title": "Config"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/config/upload": {
-            "put": {
-                "tags": [
-                    "Configuration"
-                ],
-                "summary": "Upload analysis configuration (YAML file)",
-                "description": "Upload analysis configuration as a YAML file.\n\nThe file should contain only analysis sections (rescoring_rules,\ntrust_boundaries, etc.) — input/output/cache paths are ignored.",
-                "operationId": "upload_analysis_config_api_v1_sessions__session_id__config_upload_put",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/Body_upload_analysis_config_api_v1_sessions__session_id__config_upload_put"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/analyze": {
-            "post": {
-                "tags": [
-                    "Analysis"
-                ],
-                "summary": "Run analysis (classic mode)",
-                "description": "Trigger the CVSS re-scoring pipeline using previously uploaded files.\n\n**Prerequisites:** threat model, SBOM, and analysis config must\nalready be uploaded.  CVE data is optional — when absent,\nvulnerabilities are extracted from the SBOM's ``vulnerabilities``\nsection.\n\nThe call blocks until the pipeline finishes.  Poll\n``GET /progress`` for real-time step updates while the analysis\nis running.",
-                "operationId": "run_analysis_api_v1_sessions__session_id__analyze_post",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "anyOf": [
-                                    {
-                                        "$ref": "#/components/schemas/AnalysisRequest"
-                                    },
-                                    {
-                                        "type": "null"
-                                    }
-                                ],
-                                "title": "Request"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/AnalysisResult"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/inventory": {
-            "post": {
-                "tags": [
-                    "Analysis"
-                ],
-                "summary": "Upload & analyse in one step (inventory mode)",
-                "description": "One-shot analysis: upload a TM7 threat model and a CycloneDX SBOM\n(with embedded ``vulnerabilities``), and receive the re-scored\nresults.\n\nThe SBOM components are automatically enriched with\n``threatModelElementIds`` properties linking each component to the\nmatching threat-model elements.  The enriched SBOM is available as\nan output file after analysis completes.\n\nIf no analysis configuration is provided, sensible defaults (name-\nbased component-to-element matching, standard rescoring rules) are\nused.",
-                "operationId": "analyze_inventory_api_v1_sessions__session_id__inventory_post",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/Body_analyze_inventory_api_v1_sessions__session_id__inventory_post"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/AnalysisResult"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/results": {
-            "get": {
-                "tags": [
-                    "Results"
-                ],
-                "summary": "Get analysis result summary",
-                "description": "Return the summary of the last completed analysis, including CVE\ncounts, average score reduction, elapsed time, and download links\nfor every output artefact.",
-                "operationId": "get_results_api_v1_sessions__session_id__results_get",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/AnalysisResult"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/results/json": {
-            "get": {
-                "tags": [
-                    "Results"
-                ],
-                "summary": "Download JSON rescoring results",
-                "description": "Download the full rescoring results as a JSON document containing\noriginal and adjusted scores for every CVE.",
-                "operationId": "get_results_json_api_v1_sessions__session_id__results_json_get",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/results/vex": {
-            "get": {
-                "tags": [
-                    "Results"
-                ],
-                "summary": "Download CycloneDX VEX document",
-                "description": "Download the Vulnerability Exploitability eXchange (VEX) document\nin CycloneDX JSON format.  The VEX carries the re-scored CVSS\nvectors and justification annotations.",
-                "operationId": "get_results_vex_api_v1_sessions__session_id__results_vex_get",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/outputs/{filename}": {
-            "get": {
-                "tags": [
-                    "Results"
-                ],
-                "summary": "Download an output file",
-                "description": "Download a specific output artefact by filename.\n\nAvailable files depend on the analysis options selected and may\ninclude: ``rescore_report.html``, ``rescore_results.json``,\n``rescore_vex.cdx.json``, ``priority_report.html``,\n``attack_chain_analysis.html``, ``enriched_sbom.cdx.json``.",
-                "operationId": "get_output_file_api_v1_sessions__session_id__outputs__filename__get",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    },
-                    {
-                        "name": "filename",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Filename"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/health": {
-            "get": {
-                "tags": [
-                    "System"
-                ],
-                "summary": "Health check",
-                "description": "Returns ``{\"status\": \"ok\"}`` and whether Ollama is configured.",
-                "operationId": "health_health_get",
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sessions/{session_id}/progress": {
-            "get": {
-                "tags": [
-                    "Analysis"
-                ],
-                "summary": "Poll analysis progress",
-                "description": "Return the current pipeline step, total steps, and a human-readable\nmessage.  Intended for polling while an analysis is running.",
-                "operationId": "get_progress_api_v1_sessions__session_id__progress_get",
-                "parameters": [
-                    {
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Session Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+          }
         }
+      }
     },
-    "components": {
-        "schemas": {
-            "AnalysisRequest": {
-                "properties": {
-                    "chain_analysis": {
-                        "type": "boolean",
-                        "title": "Chain Analysis",
-                        "description": "Run attack-chain analysis across linked components.",
-                        "default": true
-                    },
-                    "prioritize": {
-                        "type": "boolean",
-                        "title": "Prioritize",
-                        "description": "Generate a priority-ranked vulnerability report.",
-                        "default": true
-                    },
-                    "what_if": {
-                        "type": "boolean",
-                        "title": "What If",
-                        "description": "Run hypothetical what-if scenarios.",
-                        "default": false
-                    },
-                    "clear_cache": {
-                        "type": "boolean",
-                        "title": "Clear Cache",
-                        "description": "Discard cached EPSS/KEV data and re-fetch.",
-                        "default": false
-                    },
-                    "enrich": {
-                        "type": "boolean",
-                        "title": "Enrich",
-                        "description": "Run LLM-based threat-justification enrichment before analysis (requires OLLAMA_HOST to be configured).",
-                        "default": false
-                    },
-                    "ollama_model": {
-                        "type": "string",
-                        "title": "Ollama Model",
-                        "description": "Ollama model to use for enrichment (only relevant when enrich=True).",
-                        "default": "qwen2.5:7b"
-                    }
-                },
-                "type": "object",
-                "title": "AnalysisRequest",
-                "description": "Options for triggering an analysis run."
-            },
-            "AnalysisResult": {
-                "properties": {
-                    "session_id": {
-                        "type": "string",
-                        "title": "Session Id",
-                        "description": "The session that produced this result."
-                    },
-                    "status": {
-                        "type": "string",
-                        "title": "Status",
-                        "description": "Outcome: 'completed' or 'failed'."
-                    },
-                    "total_cves": {
-                        "type": "integer",
-                        "title": "Total Cves",
-                        "description": "Total number of CVEs evaluated.",
-                        "default": 0
-                    },
-                    "rescored_count": {
-                        "type": "integer",
-                        "title": "Rescored Count",
-                        "description": "Number of CVEs whose score was lowered.",
-                        "default": 0
-                    },
-                    "avg_score_reduction": {
-                        "type": "number",
-                        "title": "Avg Score Reduction",
-                        "description": "Mean CVSS score reduction across rescored CVEs.",
-                        "default": 0.0
-                    },
-                    "elapsed_seconds": {
-                        "type": "number",
-                        "title": "Elapsed Seconds",
-                        "description": "Wall-clock time for the pipeline run.",
-                        "default": 0.0
-                    },
-                    "outputs": {
-                        "additionalProperties": true,
-                        "type": "object",
-                        "title": "Outputs",
-                        "description": "Map of output name to download URL path."
-                    },
-                    "error": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Error",
-                        "description": "Error message when status is 'failed'."
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "session_id",
-                    "status"
-                ],
-                "title": "AnalysisResult",
-                "description": "Summary returned after an analysis run completes."
-            },
-            "Body_analyze_inventory_api_v1_sessions__session_id__inventory_post": {
-                "properties": {
-                    "threatmodel": {
-                        "type": "string",
-                        "contentMediaType": "application/octet-stream",
-                        "title": "Threatmodel",
-                        "description": "Microsoft Threat Model (.tm7)"
-                    },
-                    "sbom": {
-                        "type": "string",
-                        "contentMediaType": "application/octet-stream",
-                        "title": "Sbom",
-                        "description": "CycloneDX SBOM with vulnerabilities (.json)"
-                    },
-                    "items_csv": {
-                        "anyOf": [
-                            {
-                                "type": "string",
-                                "contentMediaType": "application/octet-stream"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Items Csv",
-                        "description": "Optional items.csv mapping components to TM elements."
-                    },
-                    "config": {
-                        "anyOf": [
-                            {
-                                "type": "string",
-                                "contentMediaType": "application/octet-stream"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Config",
-                        "description": "Optional analysis config (.yaml). Uses defaults if omitted."
-                    },
-                    "chain_analysis": {
-                        "type": "boolean",
-                        "title": "Chain Analysis",
-                        "description": "Run attack-chain analysis across linked components.",
-                        "default": true
-                    },
-                    "prioritize": {
-                        "type": "boolean",
-                        "title": "Prioritize",
-                        "description": "Generate a priority-ranked vulnerability report.",
-                        "default": true
-                    },
-                    "what_if": {
-                        "type": "boolean",
-                        "title": "What If",
-                        "description": "Run hypothetical what-if scenarios.",
-                        "default": false
-                    },
-                    "enrich": {
-                        "type": "boolean",
-                        "title": "Enrich",
-                        "description": "Run LLM-based threat-justification enrichment before analysis (requires OLLAMA_HOST).",
-                        "default": false
-                    },
-                    "ollama_model": {
-                        "type": "string",
-                        "title": "Ollama Model",
-                        "description": "Ollama model for enrichment (only when enrich=True).",
-                        "default": "qwen2.5:7b"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "threatmodel",
-                    "sbom"
-                ],
-                "title": "Body_analyze_inventory_api_v1_sessions__session_id__inventory_post"
-            },
-            "Body_upload_analysis_config_api_v1_sessions__session_id__config_upload_put": {
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "contentMediaType": "application/octet-stream",
-                        "title": "File",
-                        "description": "Analysis configuration in YAML format (.yaml)"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "file"
-                ],
-                "title": "Body_upload_analysis_config_api_v1_sessions__session_id__config_upload_put"
-            },
-            "Body_upload_cves_api_v1_sessions__session_id__files_cves_put": {
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "contentMediaType": "application/octet-stream",
-                        "title": "File",
-                        "description": "CVE data file (.json or .csv)"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "file"
-                ],
-                "title": "Body_upload_cves_api_v1_sessions__session_id__files_cves_put"
-            },
-            "Body_upload_items_csv_api_v1_sessions__session_id__files_items_put": {
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "contentMediaType": "application/octet-stream",
-                        "title": "File",
-                        "description": "CSV mapping components to threat-model elements (.csv)"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "file"
-                ],
-                "title": "Body_upload_items_csv_api_v1_sessions__session_id__files_items_put"
-            },
-            "Body_upload_sbom_api_v1_sessions__session_id__files_sbom_put": {
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "contentMediaType": "application/octet-stream",
-                        "title": "File",
-                        "description": "CycloneDX SBOM in JSON format (.cdx.json)"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "file"
-                ],
-                "title": "Body_upload_sbom_api_v1_sessions__session_id__files_sbom_put"
-            },
-            "Body_upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put": {
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "contentMediaType": "application/octet-stream",
-                        "title": "File",
-                        "description": "Microsoft Threat Model file (.tm7)"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "file"
-                ],
-                "title": "Body_upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put"
-            },
-            "HTTPValidationError": {
-                "properties": {
-                    "detail": {
-                        "items": {
-                            "$ref": "#/components/schemas/ValidationError"
-                        },
-                        "type": "array",
-                        "title": "Detail"
-                    }
-                },
-                "type": "object",
-                "title": "HTTPValidationError"
-            },
-            "SessionCreate": {
-                "properties": {
-                    "application_name": {
-                        "type": "string",
-                        "maxLength": 256,
-                        "minLength": 1,
-                        "title": "Application Name",
-                        "description": "Name of the application under analysis"
-                    },
-                    "application_version": {
-                        "type": "string",
-                        "maxLength": 128,
-                        "minLength": 1,
-                        "title": "Application Version",
-                        "description": "Version string (e.g. '1.0.0')"
-                    },
-                    "session_id": {
-                        "anyOf": [
-                            {
-                                "type": "string",
-                                "maxLength": 128
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Session Id",
-                        "description": "Caller-supplied session identifier. If omitted a UUID is generated."
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "application_name",
-                    "application_version"
-                ],
-                "title": "SessionCreate",
-                "description": "Payload for creating a new analysis session."
-            },
-            "SessionInfo": {
-                "properties": {
-                    "session_id": {
-                        "type": "string",
-                        "title": "Session Id",
-                        "description": "Unique session identifier."
-                    },
-                    "application_name": {
-                        "type": "string",
-                        "title": "Application Name",
-                        "description": "Name of the application under analysis."
-                    },
-                    "application_version": {
-                        "type": "string",
-                        "title": "Application Version",
-                        "description": "Version string of the application."
-                    },
-                    "project_id": {
-                        "type": "string",
-                        "title": "Project Id",
-                        "description": "Stable hash derived from application name and version."
-                    },
-                    "created_at": {
-                        "type": "string",
-                        "title": "Created At",
-                        "description": "ISO 8601 timestamp of session creation (UTC)."
-                    },
-                    "has_threat_model": {
-                        "type": "boolean",
-                        "title": "Has Threat Model",
-                        "description": "Whether a threat model (.tm7) has been uploaded.",
-                        "default": false
-                    },
-                    "has_sbom": {
-                        "type": "boolean",
-                        "title": "Has Sbom",
-                        "description": "Whether a CycloneDX SBOM has been uploaded.",
-                        "default": false
-                    },
-                    "has_cves": {
-                        "type": "boolean",
-                        "title": "Has Cves",
-                        "description": "Whether a CVE data file has been uploaded.",
-                        "default": false
-                    },
-                    "has_items_csv": {
-                        "type": "boolean",
-                        "title": "Has Items Csv",
-                        "description": "Whether an items.csv mapping file has been uploaded.",
-                        "default": false
-                    },
-                    "has_analysis_config": {
-                        "type": "boolean",
-                        "title": "Has Analysis Config",
-                        "description": "Whether an analysis configuration has been set.",
-                        "default": false
-                    },
-                    "status": {
-                        "type": "string",
-                        "title": "Status",
-                        "description": "Current session status: created, ready, running, completed, or failed.",
-                        "default": "created"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "session_id",
-                    "application_name",
-                    "application_version",
-                    "project_id",
-                    "created_at"
-                ],
-                "title": "SessionInfo",
-                "description": "Read-only view of a session."
-            },
-            "ValidationError": {
-                "properties": {
-                    "loc": {
-                        "items": {
-                            "anyOf": [
-                                {
-                                    "type": "string"
-                                },
-                                {
-                                    "type": "integer"
-                                }
-                            ]
-                        },
-                        "type": "array",
-                        "title": "Location"
-                    },
-                    "msg": {
-                        "type": "string",
-                        "title": "Message"
-                    },
-                    "type": {
-                        "type": "string",
-                        "title": "Error Type"
-                    },
-                    "input": {
-                        "title": "Input"
-                    },
-                    "ctx": {
-                        "type": "object",
-                        "title": "Context"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "loc",
-                    "msg",
-                    "type"
-                ],
-                "title": "ValidationError"
+    "/api/v1/wizard/call/{method_name}": {
+      "post": {
+        "tags": [
+          "Wizard"
+        ],
+        "summary": "Call a service-hosted wizard method",
+        "description": "Call one allowlisted method from the wizard bridge.\n\nThis is the HTTP equivalent of ``window.pywebview.api.<method>(...)`` used\nby the native desktop wizard. Arguments are passed as ``args`` / ``kwargs``\nin the JSON body and the method return value is wrapped under ``result``.",
+        "operationId": "call_wizard_method_api_v1_wizard_call__method_name__post",
+        "parameters": [
+          {
+            "name": "method_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Method Name"
             }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WizardCallRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
         }
+      }
     },
-    "tags": [
-        {
-            "name": "Sessions",
-            "description": "Create, inspect, and delete analysis sessions. A session groups all inputs, configuration, and outputs for a single application version."
-        },
-        {
-            "name": "File uploads",
-            "description": "Upload individual input files (threat model, SBOM, CVE data, items.csv) into an existing session. Used in *classic* mode."
-        },
-        {
-            "name": "Configuration",
-            "description": "Set or upload the analysis configuration (rescoring rules, trust boundaries, CWE mitigations, etc.)."
-        },
-        {
-            "name": "Analysis",
-            "description": "Trigger re-scoring analysis and monitor progress. Supports both classic (POST /analyze) and inventory (POST /inventory) modes."
-        },
-        {
-            "name": "Results",
-            "description": "Retrieve analysis results: summary, JSON details, CycloneDX VEX, HTML reports, and the enriched SBOM."
-        },
-        {
-            "name": "System",
-            "description": "Health check and operational endpoints."
+    "/api/v1/sessions/{session_id}/wizard/context": {
+      "get": {
+        "tags": [
+          "Wizard"
+        ],
+        "summary": "Get session-scoped wizard context",
+        "description": "Return a path-free wizard view of uploaded session inputs.\n\nThis endpoint is intended for browser or integration consumers that stage\nfiles through the normal session upload API and then need the wizard's\nimport-time context without operating on server-side team-directory paths.\nConfig writes and threat-model edits remain on the existing session\nendpoints.",
+        "operationId": "get_session_wizard_context_api_v1_sessions__session_id__wizard_context_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "include_validation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Validation"
+            }
+          },
+          {
+            "name": "include_editor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Editor"
+            }
+          },
+          {
+            "name": "include_threat_model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Include Threat Model"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
         }
-    ]
+      }
+    },
+    "/api/v1/sessions/{session_id}/wizard/catalogs": {
+      "get": {
+        "tags": [
+          "Wizard"
+        ],
+        "summary": "Get session-safe wizard catalogs",
+        "description": "Return wizard metadata that does not require or expose local paths.",
+        "operationId": "get_session_wizard_catalogs_api_v1_sessions__session_id__wizard_catalogs_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create a new analysis session",
+        "description": "Create an isolated session workspace for one application version.\n\nAll subsequent file uploads, configuration, and analysis runs are\nscoped to this session.  A caller-supplied session ID may be\nprovided for idempotency; otherwise a UUID is generated.",
+        "operationId": "create_session_api_v1_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get session details",
+        "description": "Return the current state of a session, including which files have\nbeen uploaded and the analysis status.",
+        "operationId": "get_session_api_v1_sessions__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Delete a session",
+        "description": "Remove a session and all its data (uploads, cache, outputs) from\ndisk.  This operation is irreversible.",
+        "operationId": "delete_session_api_v1_sessions__session_id__delete",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/threatmodel": {
+      "put": {
+        "tags": [
+          "File uploads"
+        ],
+        "summary": "Upload threat model",
+        "description": "Upload the Microsoft Threat Model (.tm7) file.\n\nThe threat model provides the security context (elements, data flows,\ntrust boundaries) used to evaluate whether CVSS metrics can be\nlowered.",
+        "operationId": "upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/sbom": {
+      "put": {
+        "tags": [
+          "File uploads"
+        ],
+        "summary": "Upload CycloneDX SBOM",
+        "description": "Upload a CycloneDX SBOM in JSON format.\n\nComponents should carry ``threatModelElementIds`` properties or\nthe pipeline will attempt name-based matching to the threat model.\nIf the SBOM includes a ``vulnerabilities`` section, a separate CVE\nfile upload is optional.",
+        "operationId": "upload_sbom_api_v1_sessions__session_id__files_sbom_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_sbom_api_v1_sessions__session_id__files_sbom_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/cves": {
+      "put": {
+        "tags": [
+          "File uploads"
+        ],
+        "summary": "Upload CVE data (optional)",
+        "description": "Upload a CVE data file (.json or .csv).\n\nOptional when the CycloneDX SBOM already contains a\n``vulnerabilities`` section.  Accepted formats:\n\n- **JSON** \u2014 ``{\"cves\": [{\"cve_id\", \"cvss_vector\", ...}]}``\n\n- **CSV** \u2014 exported from a vulnerability work-list.  Expected\n  columns: ``cve_id``, ``cvss_vector``, ``base_score``, ``severity``\n  (additional columns are ignored).",
+        "operationId": "upload_cves_api_v1_sessions__session_id__files_cves_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_cves_api_v1_sessions__session_id__files_cves_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/items": {
+      "put": {
+        "tags": [
+          "File uploads"
+        ],
+        "summary": "Upload items.csv (optional)",
+        "description": "Upload an items.csv that maps components to threat-model elements.\n\nRequired columns: ``item`` (component name) and\n``threatmodel_id`` (TM element GUID).  Additional columns are\nignored.",
+        "operationId": "upload_items_csv_api_v1_sessions__session_id__files_items_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_items_csv_api_v1_sessions__session_id__files_items_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/countermeasures": {
+      "put": {
+        "tags": [
+          "MITRE ATT&CK"
+        ],
+        "summary": "Upload MITRE countermeasures (optional)",
+        "description": "Upload a countermeasures YAML used by MITRE ATT&CK analysis.\n\nThe file maps ATT&CK mitigation IDs to coverage levels and\njustifications.  Once uploaded it is used by both the standalone\n``/mitre/analyze`` endpoint and, when ``mitre_enrichment`` is set,\nby the re-scoring pipeline.",
+        "operationId": "upload_countermeasures_api_v1_sessions__session_id__files_countermeasures_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_countermeasures_api_v1_sessions__session_id__files_countermeasures_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/vex-prior": {
+      "put": {
+        "tags": [
+          "File uploads"
+        ],
+        "summary": "Upload a prior VEX document (optional)",
+        "description": "Upload a previously issued VEX document for drift validation.\n\nEach call adds one file to the session's prior-VEX set; the\nre-scoring run compares the new results against every uploaded prior\nVEX statement when ``vex_validation`` is configured. Call repeatedly\nto attach multiple prior VEX documents.",
+        "operationId": "upload_prior_vex_api_v1_sessions__session_id__files_vex_prior_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_prior_vex_api_v1_sessions__session_id__files_vex_prior_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/code-review-verdicts": {
+      "put": {
+        "tags": [
+          "File uploads"
+        ],
+        "summary": "Upload a code-review verdict YAML (optional)",
+        "description": "Upload a source-review verdict consumed by ``code_review.verdicts_dir``.\n\nEach uploaded YAML is stored in a session-local verdict directory. During\nanalysis, the service injects that directory into ``config['code_review']``\nso API users do not need pre-existing server-side paths.",
+        "operationId": "upload_code_review_verdict_api_v1_sessions__session_id__files_code_review_verdicts_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_code_review_verdict_api_v1_sessions__session_id__files_code_review_verdicts_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/files/compliance": {
+      "put": {
+        "tags": [
+          "Compliance"
+        ],
+        "summary": "Upload a compliance declaration YAML (optional)",
+        "description": "Upload a standards compliance declaration for MITRE auto-mapping.\n\nUploaded declarations are stored under the session upload directory and\ninjected as ``compliance_dir`` / ``compliance_product_dir`` for standalone\nMITRE analysis and combined report generation.",
+        "operationId": "upload_compliance_declaration_api_v1_sessions__session_id__files_compliance_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_compliance_declaration_api_v1_sessions__session_id__files_compliance_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/config": {
+      "put": {
+        "tags": [
+          "Configuration"
+        ],
+        "summary": "Set analysis configuration (JSON)",
+        "description": "Set the analysis configuration as a JSON body.\n\nAccepted top-level keys (the canonical analysis surface \u2014 see\n:data:`cvss_rescorer.config_loader.ANALYSIS_KEYS`):\n\nRequired:\n- **cyclonedx_mapping** \u2014 how SBOM components map to TM elements.\n- **rescoring_rules** \u2014 per-metric rules that lower CVSS when\n  context proves mitigation.\n\nContext / environment:\n- **trust_boundaries** \u2014 boundary definitions and default trust\n  level.\n- **cwe_mitigations** \u2014 CWE-specific mitigation overrides.\n- **property_overrides** / **deployment_environment** \u2014 optional\n  context hints.\n- **component_evidence**, **critical_assets**, **critical_patching**,\n  **ssvc**, **cwss**, **iec62443** \u2014 optional evidence and risk-policy\n  context for the generated reports.\n\nEngine knobs:\n- **rescoring_policy** \u2014 e.g. ``missing_cwe: skip|generic_only``.\n- **vex_validation**, **review_skeptic**, **code_review**,\n  **code_review_prompts**, **mitre_countermeasures**,\n  **compliance_dir**, **compliance_product_dir**.\n\nL6 evidentiary controls:\n- **compliance_mode** (``none|audit_ready|qmsr|medical``), **product**,\n  **device**, **audit**, **archives**, **drift**, **pipeline_version**,\n  **traceability**, **sbom_quality**, **kev**, **kev_cves**,\n  **safety_signoff**, **postmarket_lifecycle**, **patch_sla**,\n  **safety_impact**, **safety_impact_by_element**, **safety_matrix**,\n  **safety_review**, **mitigation_evidence**,\n  **evidence_backed_mitigations**, **customer_assumption_accepted**.\n\nUnknown keys are silently dropped.",
+        "operationId": "set_analysis_config_api_v1_sessions__session_id__config_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "Analysis configuration as a JSON object",
+                "title": "Config"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/config/upload": {
+      "put": {
+        "tags": [
+          "Configuration"
+        ],
+        "summary": "Upload analysis configuration (YAML file)",
+        "description": "Upload analysis configuration as a YAML file.\n\nThe file should contain only analysis sections (rescoring_rules,\ntrust_boundaries, etc.) \u2014 input/output/cache paths are ignored.",
+        "operationId": "upload_analysis_config_api_v1_sessions__session_id__config_upload_put",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_analysis_config_api_v1_sessions__session_id__config_upload_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/analyze": {
+      "post": {
+        "tags": [
+          "Analysis"
+        ],
+        "summary": "Run analysis (classic mode)",
+        "description": "Trigger the CVSS re-scoring pipeline using previously uploaded files.\n\n**Prerequisites:** threat model, SBOM, and analysis config must\nalready be uploaded.  CVE data is optional \u2014 when absent,\nvulnerabilities are extracted from the SBOM's ``vulnerabilities``\nsection.\n\nThe call blocks until the pipeline finishes.  Poll\n``GET /progress`` for real-time step updates while the analysis\nis running.",
+        "operationId": "run_analysis_api_v1_sessions__session_id__analyze_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AnalysisRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/inventory": {
+      "post": {
+        "tags": [
+          "Analysis"
+        ],
+        "summary": "Upload & analyse in one step (inventory mode)",
+        "description": "One-shot analysis: upload or reuse a TM7 threat model and CycloneDX SBOM\n(with embedded ``vulnerabilities``), then receive the re-scored results.\n\nThe SBOM components are automatically enriched with\n``threatModelElementIds`` properties linking each component to the\nmatching threat-model elements.  The enriched SBOM is available as\nan output file after analysis completes.\n\nOn the first run, both TM7 and SBOM must be provided. Later calls in the\nsame session may upload only the changed input, allowing a new threat model\nto be analyzed against the stored SBOM. If no analysis configuration is\nprovided, the previous session config is reused; otherwise sensible defaults\n(name-based component-to-element matching, standard rescoring rules) are\nused.",
+        "operationId": "analyze_inventory_api_v1_sessions__session_id__inventory_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_inventory_api_v1_sessions__session_id__inventory_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/results": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get analysis result summary",
+        "description": "Return the summary of the last completed analysis, including CVE\ncounts, average score reduction, elapsed time, and download links\nfor every output artefact.",
+        "operationId": "get_results_api_v1_sessions__session_id__results_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/results/json": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Download JSON rescoring results",
+        "description": "Download the full rescoring results as a JSON document containing\noriginal and adjusted scores for every CVE.",
+        "operationId": "get_results_json_api_v1_sessions__session_id__results_json_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/results/vex": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Download CycloneDX VEX document",
+        "description": "Download the Vulnerability Exploitability eXchange (VEX) document\nin CycloneDX JSON format.  The VEX carries the re-scored CVSS\nvectors and justification annotations.",
+        "operationId": "get_results_vex_api_v1_sessions__session_id__results_vex_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/outputs/{filename}": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Download an output file",
+        "description": "Download a specific output artefact by filename.\n\n``rescore_report.html`` is the primary human report. Available files\ndepend on the analysis options selected and may also include machine\noutputs and text sidecars such as ``rescore_results.json``,\n``rescore_vex.cdx.json``, ``priority_report.txt``,\n``attack_chain_analysis.txt``, and ``enriched_sbom.cdx.json``.",
+        "operationId": "get_output_file_api_v1_sessions__session_id__outputs__filename__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/threatmodel/editor": {
+      "get": {
+        "tags": [
+          "Analysis"
+        ],
+        "summary": "Get editable threat-model repair issues",
+        "description": "Return missing threat-model properties/threat dispositions with context.",
+        "operationId": "get_threat_model_editor_api_v1_sessions__session_id__threatmodel_editor_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Analysis"
+        ],
+        "summary": "Apply threat-model repair editor decisions",
+        "description": "Apply user-selected property/threat fixes to the stored TM7 file.",
+        "operationId": "patch_threat_model_editor_api_v1_sessions__session_id__threatmodel_editor_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThreatModelEditorPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/threatmodel/download": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Download current threat model",
+        "description": "Download the current stored TM7 file, including any editor changes.",
+        "operationId": "download_threat_model_api_v1_sessions__session_id__threatmodel_download_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/validators/threatmodel": {
+      "post": {
+        "tags": [
+          "Validators"
+        ],
+        "summary": "Validate the uploaded threat model",
+        "description": "Grade the uploaded threat model (.tm7) against the vscorer / FDA /\nGEHC input-quality rule catalogue.\n\nReturns an A\u2013F grade, per-family findings, and actionable fix hints.\nRun this before ``/analyze`` to catch missing properties, threats,\nor trust boundaries that would weaken the re-scoring result.",
+        "operationId": "validate_threatmodel_api_v1_sessions__session_id__validators_threatmodel_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/validators/sbom": {
+      "post": {
+        "tags": [
+          "Validators"
+        ],
+        "summary": "Validate the uploaded SBOM",
+        "description": "Grade the uploaded CycloneDX SBOM against CycloneDX / CISA minimum\nand FDA expectations, plus vscorer component-matching quality.",
+        "operationId": "validate_sbom_endpoint_api_v1_sessions__session_id__validators_sbom_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/validators/cves": {
+      "post": {
+        "tags": [
+          "Validators"
+        ],
+        "summary": "Validate the uploaded CVE list",
+        "description": "Grade the uploaded CVE data file for required fields, coverage, and\nvscorer rescoring quality (e.g. presence of CVSS vectors and CWEs).",
+        "operationId": "validate_cves_endpoint_api_v1_sessions__session_id__validators_cves_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/validators/report": {
+      "get": {
+        "tags": [
+          "Validators"
+        ],
+        "summary": "Validate all uploaded inputs",
+        "description": "Run every applicable validator (threat model, SBOM, CVE list) for\nthe files uploaded so far and return a combined report.\n\nAt least one input file must be uploaded.",
+        "operationId": "validators_report_api_v1_sessions__session_id__validators_report_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/validators/todo": {
+      "get": {
+        "tags": [
+          "Validators"
+        ],
+        "summary": "Export validation findings as a Markdown TODO list",
+        "description": "Render the findings from every applicable validator as a Markdown\nTODO checklist that can be pasted into an issue tracker.",
+        "operationId": "validators_todo_api_v1_sessions__session_id__validators_todo_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/mitre/boundaries": {
+      "get": {
+        "tags": [
+          "MITRE ATT&CK"
+        ],
+        "summary": "List trust boundaries in the threat model",
+        "description": "List the trust-boundary names defined in the uploaded threat model.\n\nUse one of these names as ``trust_boundary`` when calling\n``POST /mitre/analyze``.",
+        "operationId": "mitre_boundaries_api_v1_sessions__session_id__mitre_boundaries_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/mitre/analyze": {
+      "post": {
+        "tags": [
+          "MITRE ATT&CK"
+        ],
+        "summary": "Run standalone MITRE ATT&CK boundary analysis",
+        "description": "Run MITRE ATT&CK trust-boundary analysis for a single boundary.\n\nMaps in-scope ATT&CK techniques to threat-model coverage, applies any\nuploaded countermeasures (and compliance-derived auto-mappings), and\ngenerates a heatmap report retrievable via ``GET /mitre/heatmap``.\n\nWhen ``use_rescore_results`` is true and a prior analysis has run in\nthis session, unmitigated CVEs degrade technique coverage.",
+        "operationId": "mitre_analyze_api_v1_sessions__session_id__mitre_analyze_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MitreAnalysisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/mitre/heatmap": {
+      "get": {
+        "tags": [
+          "MITRE ATT&CK"
+        ],
+        "summary": "Download the MITRE ATT&CK heatmap report",
+        "description": "Download the HTML heatmap produced by ``POST /mitre/analyze``.",
+        "operationId": "mitre_heatmap_api_v1_sessions__session_id__mitre_heatmap_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/medical/gates": {
+      "get": {
+        "tags": [
+          "Compliance"
+        ],
+        "summary": "Get medical-mode gate results",
+        "description": "Return the medical-mode / L6 evidentiary gate decisions from the last\nanalysis run.\n\nGates only run when ``compliance_mode`` is set to ``medical`` in the\nanalysis configuration. Each entry reports whether the gate blocked the\nrun, any warnings, details, and the names of artefacts it produced\n(retrievable via ``/outputs/{name}``).",
+        "operationId": "medical_gates_api_v1_sessions__session_id__medical_gates_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/outputs": {
+      "get": {
+        "tags": [
+          "Compliance"
+        ],
+        "summary": "List all generated output artefacts",
+        "description": "List every artefact in the session output directory with its size and\ndownload URL.\n\nCovers all generated files \u2014 HTML report, JSON, VEX, priority and chain\nreports, MITRE heatmap, audit trail, drift report, run archive, SRA\nexport, medical-gate artefacts, and explanation files.",
+        "operationId": "list_outputs_api_v1_sessions__session_id__outputs_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Health check",
+        "description": "Return non-secret operational status for UI and startup checks.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/progress": {
+      "get": {
+        "tags": [
+          "Analysis"
+        ],
+        "summary": "Poll analysis progress",
+        "description": "Return the current pipeline step, total steps, and a human-readable\nmessage.  Intended for polling while an analysis is running.",
+        "operationId": "get_progress_api_v1_sessions__session_id__progress_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalysisRequest": {
+        "properties": {
+          "chain_analysis": {
+            "type": "boolean",
+            "title": "Chain Analysis",
+            "description": "Run attack-chain analysis across linked components.",
+            "default": true
+          },
+          "prioritize": {
+            "type": "boolean",
+            "title": "Prioritize",
+            "description": "Generate a priority-ranked vulnerability report.",
+            "default": true
+          },
+          "what_if": {
+            "type": "boolean",
+            "title": "What If",
+            "description": "Run hypothetical what-if scenarios.",
+            "default": false
+          },
+          "clear_cache": {
+            "type": "boolean",
+            "title": "Clear Cache",
+            "description": "Discard cached EPSS/KEV data and re-fetch.",
+            "default": false
+          },
+          "enrich": {
+            "type": "boolean",
+            "title": "Enrich",
+            "description": "Run LLM-based threat-justification enrichment before analysis (requires a configured LLM backend).",
+            "default": false
+          },
+          "ollama_model": {
+            "type": "string",
+            "title": "Ollama Model",
+            "description": "LLM model to use for enrichment (only relevant when enrich=True).",
+            "default": "qwen2.5:7b"
+          },
+          "mitre_enrichment": {
+            "type": "boolean",
+            "title": "Mitre Enrichment",
+            "description": "Enrich re-scored CVEs with MITRE ATT&CK countermeasure coverage (degrades technique coverage for unmitigated CVEs).",
+            "default": false
+          },
+          "mitre_countermeasures_path": {
+            "type": "string",
+            "title": "Mitre Countermeasures Path",
+            "description": "Optional server-side path to a countermeasures YAML. When omitted, a countermeasures file uploaded to this session (or config['mitre_countermeasures']) is used.",
+            "default": ""
+          },
+          "offline": {
+            "type": "boolean",
+            "title": "Offline",
+            "description": "Cache-only run: skip all NVD/KEV/EPSS network calls and use locally cached threat intel only.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "AnalysisRequest",
+        "description": "Options for triggering an analysis run."
+      },
+      "AnalysisResult": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "The session that produced this result."
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Outcome: 'completed' or 'failed'."
+          },
+          "total_cves": {
+            "type": "integer",
+            "title": "Total Cves",
+            "description": "Total number of CVEs evaluated.",
+            "default": 0
+          },
+          "rescored_count": {
+            "type": "integer",
+            "title": "Rescored Count",
+            "description": "Number of CVEs whose score was lowered.",
+            "default": 0
+          },
+          "avg_score_reduction": {
+            "type": "number",
+            "title": "Avg Score Reduction",
+            "description": "Mean CVSS score reduction across rescored CVEs.",
+            "default": 0.0
+          },
+          "elapsed_seconds": {
+            "type": "number",
+            "title": "Elapsed Seconds",
+            "description": "Wall-clock time for the pipeline run.",
+            "default": 0.0
+          },
+          "outputs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Outputs",
+            "description": "Map of output name to download URL path."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message when status is 'failed'."
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "status"
+        ],
+        "title": "AnalysisResult",
+        "description": "Summary returned after an analysis run completes."
+      },
+      "Body_analyze_inventory_api_v1_sessions__session_id__inventory_post": {
+        "properties": {
+          "threatmodel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threatmodel",
+            "description": "Microsoft Threat Model (.tm7). Optional on rerun when the session already has one."
+          },
+          "sbom": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sbom",
+            "description": "CycloneDX SBOM with vulnerabilities (.json). Optional on rerun when the session already has one."
+          },
+          "items_csv": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items Csv",
+            "description": "Optional items.csv mapping components to TM elements."
+          },
+          "config": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config",
+            "description": "Optional analysis config (.yaml). Uses defaults if omitted."
+          },
+          "chain_analysis": {
+            "type": "boolean",
+            "title": "Chain Analysis",
+            "description": "Run attack-chain analysis across linked components.",
+            "default": true
+          },
+          "prioritize": {
+            "type": "boolean",
+            "title": "Prioritize",
+            "description": "Generate a priority-ranked vulnerability report.",
+            "default": true
+          },
+          "what_if": {
+            "type": "boolean",
+            "title": "What If",
+            "description": "Run hypothetical what-if scenarios.",
+            "default": false
+          },
+          "enrich": {
+            "type": "boolean",
+            "title": "Enrich",
+            "description": "Run LLM-based threat-justification enrichment before analysis (requires a configured LLM backend).",
+            "default": false
+          },
+          "ollama_model": {
+            "type": "string",
+            "title": "Ollama Model",
+            "description": "LLM model for enrichment (only when enrich=True).",
+            "default": "qwen2.5:7b"
+          },
+          "mitre_enrichment": {
+            "type": "boolean",
+            "title": "Mitre Enrichment",
+            "description": "Enrich re-scored CVEs with MITRE ATT&CK countermeasure coverage (uses a countermeasures file uploaded to this session).",
+            "default": false
+          },
+          "offline": {
+            "type": "boolean",
+            "title": "Offline",
+            "description": "Cache-only run: skip all NVD/KEV/EPSS network calls.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "Body_analyze_inventory_api_v1_sessions__session_id__inventory_post"
+      },
+      "Body_upload_analysis_config_api_v1_sessions__session_id__config_upload_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Analysis configuration in YAML format (.yaml)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_analysis_config_api_v1_sessions__session_id__config_upload_put"
+      },
+      "Body_upload_code_review_verdict_api_v1_sessions__session_id__files_code_review_verdicts_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Code-review verdict YAML (.yaml/.yml)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_code_review_verdict_api_v1_sessions__session_id__files_code_review_verdicts_put"
+      },
+      "Body_upload_compliance_declaration_api_v1_sessions__session_id__files_compliance_put": {
+        "properties": {
+          "product_overlay": {
+            "type": "boolean",
+            "title": "Product Overlay",
+            "description": "Store as a product-specific overlay instead of a baseline declaration.",
+            "default": false
+          },
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Compliance declaration YAML (.yaml/.yml)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_compliance_declaration_api_v1_sessions__session_id__files_compliance_put"
+      },
+      "Body_upload_countermeasures_api_v1_sessions__session_id__files_countermeasures_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "MITRE ATT&CK countermeasures YAML (.yaml)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_countermeasures_api_v1_sessions__session_id__files_countermeasures_put"
+      },
+      "Body_upload_cves_api_v1_sessions__session_id__files_cves_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "CVE data file (.json or .csv)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_cves_api_v1_sessions__session_id__files_cves_put"
+      },
+      "Body_upload_items_csv_api_v1_sessions__session_id__files_items_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "CSV mapping components to threat-model elements (.csv)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_items_csv_api_v1_sessions__session_id__files_items_put"
+      },
+      "Body_upload_prior_vex_api_v1_sessions__session_id__files_vex_prior_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Prior CycloneDX VEX document (.cdx.json)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_prior_vex_api_v1_sessions__session_id__files_vex_prior_put"
+      },
+      "Body_upload_sbom_api_v1_sessions__session_id__files_sbom_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "CycloneDX SBOM in JSON format (.cdx.json)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_sbom_api_v1_sessions__session_id__files_sbom_put"
+      },
+      "Body_upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Microsoft Threat Model file (.tm7)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_threat_model_api_v1_sessions__session_id__files_threatmodel_put"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MitreAnalysisRequest": {
+        "properties": {
+          "trust_boundary": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Trust Boundary",
+            "description": "Name of the trust boundary (from the threat model) to analyse."
+          },
+          "countermeasures_path": {
+            "type": "string",
+            "title": "Countermeasures Path",
+            "description": "Optional server-side path to a countermeasures YAML. When omitted, a countermeasures file uploaded to this session (or config['mitre_countermeasures']) is used.",
+            "default": ""
+          },
+          "use_rescore_results": {
+            "type": "boolean",
+            "title": "Use Rescore Results",
+            "description": "Feed the last analysis's re-scored CVEs into the boundary analysis for CVE-driven exposure degradation (if available).",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "trust_boundary"
+        ],
+        "title": "MitreAnalysisRequest",
+        "description": "Options for a standalone MITRE ATT&CK trust-boundary analysis."
+      },
+      "SessionCreate": {
+        "properties": {
+          "application_name": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Application Name",
+            "description": "Name of the application under analysis"
+          },
+          "application_version": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Application Version",
+            "description": "Version string (e.g. '1.0.0')"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Caller-supplied session identifier. If omitted a UUID is generated."
+          }
+        },
+        "type": "object",
+        "required": [
+          "application_name",
+          "application_version"
+        ],
+        "title": "SessionCreate",
+        "description": "Payload for creating a new analysis session."
+      },
+      "SessionInfo": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Unique session identifier."
+          },
+          "application_name": {
+            "type": "string",
+            "title": "Application Name",
+            "description": "Name of the application under analysis."
+          },
+          "application_version": {
+            "type": "string",
+            "title": "Application Version",
+            "description": "Version string of the application."
+          },
+          "project_id": {
+            "type": "string",
+            "title": "Project Id",
+            "description": "Stable hash derived from application name and version."
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "description": "ISO 8601 timestamp of session creation (UTC)."
+          },
+          "has_threat_model": {
+            "type": "boolean",
+            "title": "Has Threat Model",
+            "description": "Whether a threat model (.tm7) has been uploaded.",
+            "default": false
+          },
+          "has_sbom": {
+            "type": "boolean",
+            "title": "Has Sbom",
+            "description": "Whether a CycloneDX SBOM has been uploaded.",
+            "default": false
+          },
+          "has_cves": {
+            "type": "boolean",
+            "title": "Has Cves",
+            "description": "Whether a CVE data file has been uploaded.",
+            "default": false
+          },
+          "has_items_csv": {
+            "type": "boolean",
+            "title": "Has Items Csv",
+            "description": "Whether an items.csv mapping file has been uploaded.",
+            "default": false
+          },
+          "has_countermeasures": {
+            "type": "boolean",
+            "title": "Has Countermeasures",
+            "description": "Whether MITRE countermeasures have been uploaded.",
+            "default": false
+          },
+          "prior_vex_count": {
+            "type": "integer",
+            "title": "Prior Vex Count",
+            "description": "Number of prior VEX documents uploaded for this session.",
+            "default": 0
+          },
+          "code_review_verdict_count": {
+            "type": "integer",
+            "title": "Code Review Verdict Count",
+            "description": "Number of code-review verdict YAML files uploaded.",
+            "default": 0
+          },
+          "compliance_declaration_count": {
+            "type": "integer",
+            "title": "Compliance Declaration Count",
+            "description": "Number of compliance declaration YAML files uploaded.",
+            "default": 0
+          },
+          "has_analysis_config": {
+            "type": "boolean",
+            "title": "Has Analysis Config",
+            "description": "Whether an analysis configuration has been set.",
+            "default": false
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Current session status: created, ready, running, completed, or failed.",
+            "default": "created"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "application_name",
+          "application_version",
+          "project_id",
+          "created_at"
+        ],
+        "title": "SessionInfo",
+        "description": "Read-only view of a session."
+      },
+      "ThreatModelEditorPatch": {
+        "properties": {
+          "issue_id": {
+            "type": "string",
+            "title": "Issue Id",
+            "description": "Issue identifier from the editor state."
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "'set' to apply values or 'keep' to leave missing.",
+            "default": "set"
+          },
+          "target_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Type",
+            "description": "element, flow, or threat."
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id",
+            "description": "TM7 object GUID or threat ID."
+          },
+          "values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Values",
+            "description": "Field/property values to write."
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "Optional reason when keeping a missing value.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "issue_id"
+        ],
+        "title": "ThreatModelEditorPatch",
+        "description": "Single user decision from the threat-model repair editor."
+      },
+      "ThreatModelEditorPatchRequest": {
+        "properties": {
+          "patches": {
+            "items": {
+              "$ref": "#/components/schemas/ThreatModelEditorPatch"
+            },
+            "type": "array",
+            "title": "Patches"
+          }
+        },
+        "type": "object",
+        "title": "ThreatModelEditorPatchRequest",
+        "description": "Batch of threat-model editor decisions."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WizardCallRequest": {
+        "properties": {
+          "args": {
+            "items": {},
+            "type": "array",
+            "title": "Args",
+            "description": "Positional arguments passed to the allowlisted wizard method."
+          },
+          "kwargs": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Kwargs",
+            "description": "Keyword arguments passed to the allowlisted wizard method."
+          }
+        },
+        "type": "object",
+        "title": "WizardCallRequest",
+        "description": "Generic call payload for the service-hosted configuration wizard API."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Sessions",
+      "description": "Create, inspect, and delete analysis sessions. A session groups all inputs, configuration, and outputs for a single application version."
+    },
+    {
+      "name": "File uploads",
+      "description": "Upload individual input files (threat model, SBOM, CVE data, items.csv) into an existing session. Used in *classic* mode."
+    },
+    {
+      "name": "Configuration",
+      "description": "Set or upload the analysis configuration (rescoring rules, trust boundaries, CWE mitigations, etc.)."
+    },
+    {
+      "name": "Analysis",
+      "description": "Trigger re-scoring analysis and monitor progress. Supports both classic (POST /analyze) and inventory (POST /inventory) modes."
+    },
+    {
+      "name": "Results",
+      "description": "Retrieve analysis results: summary, JSON details, CycloneDX VEX, the unified HTML action report, and the enriched SBOM."
+    },
+    {
+      "name": "Validators",
+      "description": "Pre-flight input-quality validation. Grade an uploaded threat model, SBOM, or CVE list against vscorer / FDA / CISA guidance and export a Markdown TODO list of fixes."
+    },
+    {
+      "name": "MITRE ATT&CK",
+      "description": "Standalone MITRE ATT&CK trust-boundary analysis, countermeasure uploads, and heatmap retrieval."
+    },
+    {
+      "name": "Compliance",
+      "description": "Medical-mode / L6 evidentiary gate results and the full list of generated output artefacts."
+    },
+    {
+      "name": "Wizard",
+      "description": "Service-hosted configuration-wizard operations. These endpoints expose the same YAML authoring and validation bridge used by the native wizard for API consumers."
+    },
+    {
+      "name": "System",
+      "description": "Health check and operational endpoints."
+    }
+  ]
 }

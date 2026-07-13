@@ -3,6 +3,8 @@ import { computed, toRefs } from 'vue'
 import { Bot, CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
 import { parseAttributionTimestamp } from '../lib/vulnListIndex'
+import { getGroupInconsistencyReasons } from '../lib/assessment-helpers'
+import { inconsistencyReasonLabel } from '../lib/inconsistency'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -126,7 +128,12 @@ const lifecycleTooltip = computed(() => {
     case 'OPEN':
     case 'NOT_SET': return 'Lifecycle: Open — no assessment has been started'
     case 'INCOMPLETE': return 'Lifecycle: Incomplete — some teams have assessed, others have not'
-    case 'INCONSISTENT': return 'Lifecycle: Inconsistent — teams disagree on the analysis state'
+    case 'INCONSISTENT': {
+      const labels = getGroupInconsistencyReasons(group.value).map(inconsistencyReasonLabel)
+      return labels.length > 0
+        ? `Lifecycle: Inconsistent — ${labels.join('; ')}`
+        : 'Lifecycle: Inconsistent — assessments disagree across findings'
+    }
     case 'ASSESSED': return 'Lifecycle: Assessed — all required teams have completed their assessment'
     case 'ASSESSED_LEGACY': return 'Lifecycle: Assessed (Legacy) — assessed before the multi-team workflow was introduced'
     case 'NEEDS_APPROVAL': return 'Lifecycle: Needs Approval — analyst assessment awaiting reviewer sign-off'

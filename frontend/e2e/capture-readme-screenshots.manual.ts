@@ -547,6 +547,18 @@ async function mockCommonShell(page: Page) {
         })
     })
 
+    await page.route('**/api/settings/auto-analysis-guidance', async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                components: {
+                    'keycloak-extension': 'Also consider the surrounding Keycloak runtime when evaluating reachability.',
+                },
+            }),
+        })
+    })
+
     await page.route('**/api/project-archives/snapshots', async (route) => {
         await route.fulfill({
             status: 200,
@@ -609,7 +621,9 @@ async function mockCommonShell(page: Page) {
                 llm_enrichment: {
                     available: true,
                     status: 'available',
-                    default_model: 'qwen2.5:7b',
+                    model: 'qwen2.5:7b',
+                    backend: 'ollama',
+                    provider: 'Ollama',
                     host_configured: true,
                     warning: null,
                 },
@@ -1470,9 +1484,12 @@ test.describe('Capture README screenshots', () => {
         const sidebar = page.getByTestId('stats-sidebar')
         await expect(sidebar.getByText('Automatic Assessment')).toBeVisible({ timeout: 10000 })
 
-        const missingButton = sidebar.getByRole('button', { name: /missing/i }).first()
+        const automaticAssessmentFilters = sidebar
+            .getByText('Automatic Assessment', { exact: true })
+            .locator('..')
+        const missingButton = automaticAssessmentFilters.getByRole('button', { name: /^missing\b/i })
         await missingButton.click()
-        await expect(page.locator('span.truncate').filter({ hasText: /^Auto: available$/ }).first()).toBeVisible({ timeout: 10000 })
+        await expect(page.getByText('Auto: available', { exact: true })).toBeVisible({ timeout: 10000 })
         await expect(autoCard).toBeVisible({ timeout: 10000 })
         await page.waitForTimeout(500)
 

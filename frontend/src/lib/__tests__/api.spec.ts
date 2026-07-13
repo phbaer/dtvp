@@ -805,7 +805,6 @@ describe('api.ts', () => {
             threatmodel: new File(['tm7'], 'model.tm7', { type: 'application/octet-stream' }),
             whatIf: true,
             enrich: true,
-            ollamaModel: 'llama3.1:8b',
         })
 
         expect(mocks.post).toHaveBeenCalledTimes(1)
@@ -813,7 +812,7 @@ describe('api.ts', () => {
         const formData = mocks.post.mock.calls[0]?.[1] as FormData
         expect(formData).toBeInstanceOf(FormData)
         expect(formData.get('enrich')).toBe('true')
-        expect(formData.get('ollama_model')).toBe('llama3.1:8b')
+        expect(formData.has('ollama_model')).toBe(false)
         expect(result.session_id).toBe('session-1')
         expect(result.status).toBe('completed')
     })
@@ -864,10 +863,10 @@ describe('api.ts', () => {
         expect(result.progress).toBe(64)
     })
 
-    it('resumeTMRescoreAnalysis fetches final results for a completed cached state', async () => {
+    it('resumeTMRescoreAnalysis treats a skeptic gate failure as a terminal result', async () => {
         mocks.get.mockResolvedValue({ data: {
             session_id: 'session-1',
-            status: 'completed',
+            status: 'skeptic_gate_failed',
             total_cves: 2,
             rescored_count: 1,
             avg_score_reduction: 0.5,
@@ -888,7 +887,7 @@ describe('api.ts', () => {
         const onAnalysisProgress = vi.fn()
         const result = await resumeTMRescoreAnalysis('session-1', {
             session_id: 'session-1',
-            status: 'completed',
+            status: 'skeptic_gate_failed',
             progress: 100,
             message: 'TMRescore analysis completed.',
             log: ['TMRescore analysis completed.'],
@@ -901,7 +900,7 @@ describe('api.ts', () => {
 
         expect(onAnalysisProgress).toHaveBeenCalledTimes(1)
         expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/results')
-        expect(result.status).toBe('completed')
+        expect(result.status).toBe('skeptic_gate_failed')
     })
 
     it('runTMRescoreAnalysis polls the tmrescore progress endpoint until completion', async () => {
@@ -946,6 +945,9 @@ describe('api.ts', () => {
         const promise = runTMRescoreAnalysis('Example App', {
             scope: 'merged_versions',
             threatmodel: new File(['tm7'], 'model.tm7', { type: 'application/octet-stream' }),
+            countermeasures: new File(['mitigations: []'], 'countermeasures.yaml', { type: 'application/x-yaml' }),
+            mitreEnrichment: true,
+            offline: false,
         }, {
             onAnalysisProgress,
             pollIntervalMs: 1000,
@@ -956,6 +958,10 @@ describe('api.ts', () => {
 
         expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/progress')
         expect(mocks.get).toHaveBeenCalledWith('/tmrescore/sessions/session-1/results')
+        const submittedForm = mocks.post.mock.calls[0][1] as FormData
+        expect(submittedForm.get('mitre_enrichment')).toBe('true')
+        expect(submittedForm.get('offline')).toBe('false')
+        expect((submittedForm.get('countermeasures') as File).name).toBe('countermeasures.yaml')
         expect(onAnalysisProgress).toHaveBeenCalledTimes(2)
         expect(result.session_id).toBe('session-1')
         expect(result.status).toBe('completed')

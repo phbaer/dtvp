@@ -149,6 +149,7 @@ The archive tab exports, imports, previews, applies, and downloads project archi
 ![TMRescore](screenshots/tmrescore.png)
 
 The threat-model rescoring screen prepares a synthetic analysis SBOM, selects latest-only or merged multi-version scope, and submits tmrescore inputs with optional LLM enrichment.
+The configured model is reported by vscorer and shown read-only in DTVP.
 
 ## Code Analysis
 

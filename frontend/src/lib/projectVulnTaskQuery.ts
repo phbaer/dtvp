@@ -1,5 +1,5 @@
 import type { TaskVulnGroupListQuery } from './api'
-import type { TMRescoreProposal } from '../types'
+import type { InconsistencyReason, TMRescoreProposal } from '../types'
 import {
     isMeaningfulTMRescoreProposalCandidate,
     type AutomaticAssessmentFilter,
@@ -14,6 +14,7 @@ export interface BuildTaskVulnGroupListQueryInput {
     parsedSearch: ParsedVulnSearchQuery
     filtersReady: boolean
     lifecycleFilters: readonly string[]
+    inconsistencyReasonFilters?: readonly InconsistencyReason[]
     defaultLifecycleFilters: readonly string[]
     analysisFilters: readonly string[]
     defaultAnalysisFilters: readonly string[]
@@ -91,6 +92,7 @@ export function buildTaskVulnGroupListQuery({
     parsedSearch,
     filtersReady,
     lifecycleFilters,
+    inconsistencyReasonFilters = [],
     defaultLifecycleFilters,
     analysisFilters,
     defaultAnalysisFilters,
@@ -129,6 +131,7 @@ export function buildTaskVulnGroupListQuery({
     return {
         q: parsedSearch.textTerms.join(' '),
         lifecycle,
+        inconsistency_reason: [...inconsistencyReasonFilters],
         analysis,
         tag: joinSearchTerms([tagFilter, ...parsedSearch.teamTerms]),
         id: joinSearchTerms([idFilter, ...parsedSearch.idTerms]),

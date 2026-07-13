@@ -2,6 +2,7 @@
 
 Implements the same API surface as the real Code Analysis service:
   POST /assess           – submit an async or sync assessment
+  POST /benchmark/compare – compare human/automated assessment artifacts
   GET  /jobs             – list all jobs
   GET  /jobs/{id}        – poll job status
   GET  /jobs/{id}/result – fetch completed result
@@ -63,6 +64,11 @@ class AssessRequest(BaseModel):
     dependency_paths: Optional[List[List[str]]] = None
     user_guidance: Optional[str] = None
     debug: bool = False
+
+
+class BenchmarkCompareRequest(BaseModel):
+    benchmark: Dict[str, Any]
+    model: Optional[str] = None
 
 
 # ── Mock data helpers ────────────────────────────────────────────────────────
@@ -697,6 +703,44 @@ async def assess(req: AssessRequest, sync: bool = Query(default=False)):
             job_snapshot=job_snapshot,
         ),
     }
+
+
+@app.post("/benchmark/compare")
+async def benchmark_compare(req: BenchmarkCompareRequest):
+    benchmark = dict(req.benchmark or {})
+    fallback_rating = (
+        benchmark.get("rating") if isinstance(benchmark.get("rating"), dict) else {}
+    )
+    score = int(fallback_rating.get("score") or 3)
+    benchmark["schema_version"] = "agentyzer.benchmark-comparison/v1"
+    benchmark["comparison_method"] = "agentyzer_probabilistic_mock"
+    benchmark["evaluator"] = {
+        "provider": "mock",
+        "probabilistic": True,
+        "available": True,
+        "model": req.model or _DEFAULT_MODEL,
+    }
+    benchmark["rating"] = {
+        **fallback_rating,
+        "score": score,
+        "max_score": 5,
+        "grade": {5: "A", 4: "B", 3: "C", 2: "D", 1: "F"}.get(score, "C"),
+        "label": fallback_rating.get("label") or "Mock benchmark comparison",
+        "tone": fallback_rating.get("tone")
+        or {5: "green", 4: "cyan", 3: "amber", 2: "orange", 1: "red"}.get(
+            score, "amber"
+        ),
+        "confidence": 0.8,
+    }
+    benchmark.setdefault("findings", [])
+    benchmark.setdefault(
+        "recommendation",
+        "Mock probabilistic benchmark comparison completed.",
+    )
+    benchmark["reasoning_summary"] = (
+        "Mock evaluator reused deterministic anchors without running source analysis."
+    )
+    return benchmark
 
 
 @app.get("/jobs")

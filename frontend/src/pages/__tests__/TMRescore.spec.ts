@@ -67,7 +67,9 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:14b',
+                model: 'qwen2.5:14b',
+                backend: 'openwebui',
+                provider: 'OpenWebUI',
                 host_configured: true,
                 warning: null,
             },
@@ -83,14 +85,28 @@ describe('TMRescore.vue', () => {
         expect(wrapper.text()).toContain('Recommended')
         expect(wrapper.text()).toContain('1.10.0')
         expect(wrapper.text()).toContain('LLM enrichment')
+        expect(wrapper.text()).not.toContain('LLM enrichment via')
         expect(wrapper.get('[data-testid="llm-enrichment-status"]').text()).toBe('Available')
-        expect((wrapper.get('[data-testid="ollama-model-input"]').element as HTMLInputElement).value).toBe('qwen2.5:14b')
+        expect(wrapper.get('[data-testid="llm-configured-model"]').text()).toContain('qwen2.5:14b')
+        expect(wrapper.find('[data-testid="llm-model-input"]').exists()).toBe(false)
         expect(getTMRescoreSyntheticSbomDownloadUrl).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
         expect(getTMRescoreSyntheticSbomSummary).toHaveBeenCalledWith('ExampleApp', 'merged_versions')
         expect(wrapper.get('[data-testid="download-analysis-sbom"]').attributes('href')).toBe('/api/projects/ExampleApp/tmrescore/sbom?scope=merged_versions')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-components"]').text()).toBe('6')
         expect(wrapper.get('[data-testid="analysis-sbom-summary-vulnerabilities"]').text()).toBe('4')
         expect(wrapper.get('a[href="/project/ExampleApp"]').text()).toContain('Back to Project View')
+        expect(wrapper.get('[data-testid="tmrescore-scroll-region"]').classes()).toEqual(expect.arrayContaining([
+            'h-full',
+            'min-h-0',
+            'overflow-y-auto',
+            'overscroll-contain',
+        ]))
+
+        const llmToggle = wrapper.get('[data-testid="llm-enrichment-input"]')
+        await llmToggle.setValue(true)
+        await wrapper.get('[data-testid="offline-input"]').setValue(true)
+        expect((llmToggle.element as HTMLInputElement).checked).toBe(false)
+        expect((llmToggle.element as HTMLInputElement).disabled).toBe(true)
     })
 
     it('refreshes the synthetic SBOM summary when the scope changes', async () => {
@@ -108,7 +124,7 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: true,
                 warning: null,
             },
@@ -145,7 +161,7 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: true,
                 warning: null,
             },
@@ -186,7 +202,11 @@ describe('TMRescore.vue', () => {
                 json: '/api/tmrescore/sessions/session-1/results/json',
                 vex: '/api/tmrescore/sessions/session-1/results/vex',
             },
-            outputs: {},
+            outputs: {
+                html_report: '/api/v1/sessions/session-1/outputs/rescore_report.html',
+                json_output: '/api/v1/sessions/session-1/outputs/rescore_results.json',
+                enriched_sbom: '/api/v1/sessions/session-1/outputs/enriched_sbom.cdx.json',
+            },
         } as any)
 
         const { wrapper } = await mountWithRouter(TMRescore, {
@@ -209,6 +229,9 @@ describe('TMRescore.vue', () => {
         expect(wrapper.get('[data-testid="cached-analysis-state-meta"]').text()).toContain('5 minutes ago')
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
+        expect(wrapper.get('a[href="/api/tmrescore/sessions/session-1/outputs/rescore_report.html"]').text()).toContain('Unified Action Report')
+        expect(wrapper.get('a[href="/api/tmrescore/sessions/session-1/outputs/enriched_sbom.cdx.json"]').text()).toContain('Enriched CycloneDX SBOM')
+        expect(wrapper.find('a[href="/api/tmrescore/sessions/session-1/outputs/rescore_results.json"]').exists()).toBe(false)
 
         vi.mocked(getTMRescoreProjectState).mockResolvedValueOnce({
             session_id: 'session-1',
@@ -281,7 +304,7 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: true,
                 warning: null,
             },
@@ -319,7 +342,7 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: true,
                 warning: null,
             },
@@ -343,14 +366,15 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: true,
                 warning: null,
             },
         } as any)
         vi.mocked(runTMRescoreAnalysis).mockResolvedValue({
             session_id: 'session-1',
-            status: 'completed',
+            status: 'skeptic_gate_failed',
+            error: 'Missing reviewer sign-off for a high-risk reduction.',
             total_cves: 2,
             rescored_count: 1,
             avg_score_reduction: 0.4,
@@ -381,9 +405,15 @@ describe('TMRescore.vue', () => {
             configurable: true,
         })
         await input.trigger('change')
-        const enrichToggle = wrapper.findAll('input[type="checkbox"]')[3]
-        await enrichToggle.setValue(true)
-        await wrapper.get('[data-testid="ollama-model-input"]').setValue('llama3.1:8b')
+        const countermeasuresInput = wrapper.get('[data-testid="countermeasures-input"]')
+        const countermeasuresFile = new File(['mitigations: []'], 'countermeasures.yaml', { type: 'application/x-yaml' })
+        Object.defineProperty(countermeasuresInput.element, 'files', {
+            value: [countermeasuresFile],
+            configurable: true,
+        })
+        await countermeasuresInput.trigger('change')
+        await wrapper.get('[data-testid="mitre-enrichment-input"]').setValue(true)
+        await wrapper.get('[data-testid="llm-enrichment-input"]').setValue(true)
         await wrapper.get('form').trigger('submit.prevent')
         await flushPromises()
 
@@ -392,12 +422,16 @@ describe('TMRescore.vue', () => {
             scope: 'merged_versions',
             threatmodel: file,
             enrich: true,
-            ollamaModel: 'llama3.1:8b',
+            countermeasures: countermeasuresFile,
+            mitreEnrichment: true,
+            offline: false,
         }), expect.objectContaining({
             onUploadProgress: expect.any(Function),
         }))
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
+        expect(wrapper.get('[data-testid="tmrescore-skeptic-gate-warning"]').text()).toContain('Missing reviewer sign-off')
+        expect(wrapper.text()).toContain('Review Required')
         expect(window.sessionStorage.getItem('dtvp:tmrescore-refresh:ExampleApp')).toBeTruthy()
         expect(wrapper.getComponent({ name: 'RouterLink' }).props('to')).toBe('/project/ExampleApp')
     })
@@ -416,7 +450,7 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: true,
                 warning: null,
             },
@@ -484,7 +518,7 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: true,
                 status: 'available',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: true,
                 warning: null,
             },
@@ -552,7 +586,7 @@ describe('TMRescore.vue', () => {
             llm_enrichment: {
                 available: false,
                 status: 'unreachable',
-                default_model: 'qwen2.5:7b',
+                model: 'qwen2.5:7b',
                 host_configured: false,
                 warning: 'Could not verify LLM enrichment availability from the tmrescore backend.',
             },
@@ -565,6 +599,7 @@ describe('TMRescore.vue', () => {
 
         expect(wrapper.get('[data-testid="llm-enrichment-status"]').text()).toBe('Unavailable')
         expect(wrapper.text()).toContain('Could not verify LLM enrichment availability from the tmrescore backend.')
-        expect((wrapper.get('[data-testid="ollama-model-input"]').element as HTMLInputElement).disabled).toBe(true)
+        expect(wrapper.find('[data-testid="llm-model-input"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="llm-configured-model"]').text()).toContain('qwen2.5:7b')
     })
 })

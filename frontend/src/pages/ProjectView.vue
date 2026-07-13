@@ -13,7 +13,7 @@ import {
     startProjectArchiveExport,
     waitForProjectArchiveTask,
 } from '../lib/api'
-import type { CodeAnalysisResultRecord, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
+import type { AssessmentRestoreApplyResponse, CodeAnalysisResultRecord, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import type { GroupedVuln, ProjectArchiveTask, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
@@ -55,10 +55,12 @@ import {
     sortVulnListItems,
 } from '../lib/vulnListViewModel'
 import { deriveVulnListFacetsFromTaskCounts } from '../lib/vulnListFacets'
+import { INCONSISTENCY_REASON_OPTIONS } from '../lib/inconsistency'
 
 import VulnRowCompact from '../components/VulnRowCompact.vue'
 import VulnDetailInspector from '../components/VulnDetailInspector.vue'
 import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal.vue'
+import BulkRestoreAssessmentModal from '../components/BulkRestoreAssessmentModal.vue'
 import BulkApproveModal from '../components/BulkApproveModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
@@ -154,6 +156,7 @@ const listItemCache = createVulnListItemCache()
 provide('tmrescoreProposals', tmrescoreProposals)
 
 const showBulkApproveModal = ref(false)
+const showAssessmentRestoreModal = ref(false)
 
 const appendLoadingLog = (message: string) => {
     if (!message) return
@@ -507,6 +510,7 @@ const {
     attributionAgeDays,
     attributionAgeMode,
     lifecycleFilters,
+    inconsistencyReasonFilters,
     analysisFilters,
     filtersReady,
     sortBy,
@@ -569,7 +573,7 @@ const LIFECYCLE_OPTIONS = [
     { value: 'ASSESSED', label: 'Assessed', color: 'bg-green-600', description: 'Approved assessments with a global assessment' },
     { value: 'ASSESSED_LEGACY', label: 'Assessed (Legacy)', color: 'bg-sky-600', description: 'Legacy assessments without structured DTvP format' },
     { value: 'INCOMPLETE', label: 'Incomplete', color: 'bg-amber-500', description: 'Some assessment for some version is missing, the others are identical' },
-    { value: 'INCONSISTENT', label: 'Inconsistent', color: 'bg-indigo-500', description: 'Different assessments for at least two versions; empty assessments don\'t count' },
+    { value: 'INCONSISTENT', label: 'Inconsistent', color: 'bg-indigo-500', description: 'Assessment states, team blocks, details, or rescoring metadata disagree' },
     { value: 'NEEDS_APPROVAL', label: 'Needs Approval', color: 'bg-purple-500', description: 'When there\'s a need for an approval (flag)' }
 ]
 
@@ -592,6 +596,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     parsedSearch: parsedSmartSearch.value,
     filtersReady: filtersReady.value,
     lifecycleFilters: lifecycleFilters.value,
+    inconsistencyReasonFilters: inconsistencyReasonFilters.value,
     defaultLifecycleFilters: defaultLifecycleFilters.value,
     analysisFilters: analysisFilters.value,
     defaultAnalysisFilters,
@@ -697,6 +702,7 @@ const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
     dependencyFilter: selectedDependencyFilters.value,
     tmrescoreProposalFilter: selectedTMRescoreProposalFilters.value,
     automaticAssessmentFilter: selectedAutomaticAssessmentFilters.value,
+    inconsistencyReasonFilter: inconsistencyReasonFilters.value,
     versionFilterList: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     attributionAgeDays: attributionAgeDays.value,
@@ -916,9 +922,26 @@ const analysisCounts = computed(() =>
         : listView.value.analysisCounts
 )
 
+const inconsistencyReasonCounts = computed(() => {
+    const taskCounts = taskListCounts.value?.all.inconsistency_reason
+    const counts = { ...listStaticStats.value.inconsistencyReasonCounts }
+    if (currentVulnTaskId.value && taskCounts) {
+        for (const option of INCONSISTENCY_REASON_OPTIONS) {
+            counts[option.value] = taskCounts[option.value] || 0
+        }
+    }
+    return counts
+})
+
 const needsApprovalGroups = computed(() => listStaticStats.value.needsApprovalGroups)
 
 const incompleteGroups = computed(() => listStaticStats.value.incompleteGroups)
+
+const assessmentRestoreCount = computed(() =>
+    currentVulnTaskId.value && taskListCounts.value?.all.assessment_restore
+        ? taskListCounts.value.all.assessment_restore.WITH_RESTORE || 0
+        : listStaticStats.value.assessmentRestoreCount
+)
 
 const selectedListGroup = computed(() => {
     if (!selectedGroupId.value) return null
@@ -936,12 +959,20 @@ const {
     cacheGroup: cacheFullGroup,
     ensureFullGroup,
     hydrateGroup: hydrateVisibleGroup,
+    refreshGroup: refreshTaskGroupDetail,
 } = useTaskGroupDetails({
     currentTaskId: currentVulnTaskId,
     selectedGroupId,
     selectedListGroup,
     findListGroup,
 })
+
+const refreshActiveTaskWindowAndDetails = async () => {
+    await loadTaskGroupWindow({ reset: true })
+    if (selectedGroupId.value) {
+        await refreshTaskGroupDetail(selectedGroupId.value, { showLoading: false })
+    }
+}
 
 const selectedGroupHasAutomaticAssessment = computed(() =>
     selectedGroup.value
@@ -962,7 +993,7 @@ const {
     viewMode,
     fetchStats,
     isTaskWindowActive: isTaskWindowListActive,
-    refreshTaskWindow: () => loadTaskGroupWindow({ reset: true }),
+    refreshTaskWindow: refreshActiveTaskWindowAndDetails,
 })
 
 const {
@@ -982,12 +1013,21 @@ projectHeaderState.bulkSyncHandler.value = () => {
     void openBulkResolveModal()
 }
 
+projectHeaderState.assessmentRestoreHandler.value = () => {
+    if (!currentVulnTaskId.value) return
+    showAssessmentRestoreModal.value = true
+}
+
 const handleBulkResolveUpdates = (updates: Array<{ id: string; data: any }>) => {
     handleBulkUpdates(updates, closeBulkModal)
 }
 
 const handleBulkApproveModalUpdates = (updates: Array<{ id: string; data: any }>) => {
     handleBulkUpdates(updates, () => { showBulkApproveModal.value = false })
+}
+
+const handleAssessmentRestoreApplied = (_result: AssessmentRestoreApplyResponse) => {
+    handleBulkUpdates([])
 }
 
 const exportCurrentProjectArchive = async () => {
@@ -1104,6 +1144,8 @@ defineExpose({ filteredGroups })
 const activeFilterChips = computed(() => buildActiveFilterChips({
     lifecycleFilters: lifecycleFilters.value,
     lifecycleOptions: LIFECYCLE_OPTIONS,
+    inconsistencyReasonFilters: inconsistencyReasonFilters.value,
+    inconsistencyReasonOptions: INCONSISTENCY_REASON_OPTIONS,
     analysisFilters: analysisFilters.value,
     analysisOptions: ANALYSIS_OPTIONS,
     dependencyFilters: selectedDependencyFilters.value,
@@ -1126,6 +1168,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
     switch (key) {
         case 'lifecycle':
             lifecycleFilters.value = allLifecycleFilterValues.value
+            break
+        case 'inconsistencyReason':
+            inconsistencyReasonFilters.value = []
             break
         case 'analysis':
             analysisFilters.value = allAnalysisFilterValues.value
@@ -1176,6 +1221,7 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
     lifecycleFilters: lifecycleFilters.value,
+    inconsistencyReasonFilters: inconsistencyReasonFilters.value,
     defaultLifecycleFilters: defaultLifecycleFilters.value,
     analysisFilters: analysisFilters.value,
     defaultAnalysisFilters,
@@ -1192,6 +1238,8 @@ const filterSidebarProps = computed(() => ({
     filterCounts: filterCounts.value,
     availableVersions: availableVersions.value,
     lifecycleOptions: LIFECYCLE_OPTIONS,
+    inconsistencyReasonOptions: INCONSISTENCY_REASON_OPTIONS,
+    inconsistencyReasonCounts: inconsistencyReasonCounts.value,
     analysisOptions: ANALYSIS_OPTIONS,
     copiedUrl: copiedUrl.value,
     filteredCount: filteredGroupCount.value,
@@ -1225,6 +1273,7 @@ const syncProjectHeaderState = () => {
     }
     projectHeaderState.isReviewer.value = currentUserRole.value === 'REVIEWER'
     projectHeaderState.incompleteCount.value = needsApprovalGroups.value.length
+    projectHeaderState.assessmentRestoreCount.value = assessmentRestoreCount.value
 }
 
 const hydrateSelectedRouteGroup = () => {
@@ -1284,6 +1333,10 @@ watch(() => route.query.vuln, (vulnId) => {
 
 watch(() => needsApprovalGroups.value.length, (length) => {
     projectHeaderState.incompleteCount.value = length
+}, { immediate: true })
+
+watch(assessmentRestoreCount, (count) => {
+    projectHeaderState.assessmentRestoreCount.value = count
 }, { immediate: true })
 
 watch(currentUserRole, (role) => {
@@ -1794,6 +1847,13 @@ watch(currentUserRole, (role) => {
         :incomplete-groups="displayedBulkIncompleteGroups"
         @close="closeBulkModal"
         @updated="handleBulkResolveUpdates"
+    />
+
+    <BulkRestoreAssessmentModal
+        :show="showAssessmentRestoreModal"
+        :task-id="currentVulnTaskId"
+        @close="showAssessmentRestoreModal = false"
+        @applied="handleAssessmentRestoreApplied"
     />
 
     <Teleport to="body">

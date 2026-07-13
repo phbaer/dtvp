@@ -44,6 +44,7 @@ def test_verdict_prompt_pins_uncertain_transitive_cases_to_probable_affected():
     assert "dependency evidence is only SBOM/input attribution and the version is unknown" in prompt
     assert "guidance names an upstream platform/framework/runtime" in prompt
     assert "Validate: fetch/check/confirm" in prompt
+    assert "Dependency/version presence alone is not enough for Affected" in prompt
 
 
 def test_upstream_guidance_extracts_platform_names():
@@ -169,6 +170,7 @@ def test_llm_verdict_prefetches_upstream_research_for_keycloak_guidance(
         ollama.prompts[0]
     )
     assert result["research_log"][0]["required"] is True
+    assert result["research_log"][0]["scope"] == "upstream_platform"
     assert result["research_log"][0]["directives"][0]["type"] == "search"
 
 
@@ -335,3 +337,54 @@ def test_fix_contradictions_rejects_sbom_only_unknown_version_not_affected():
     assert result["exposure"] == "transitive"
     assert "SBOM-attributed but not rediscovered locally" in result["reasoning"]
     assert "no Netty dependency is present" not in result["reasoning"]
+
+
+def test_fix_contradictions_caps_version_only_affected_verdict():
+    result = verdict._fix_contradictions(
+        {
+            "verdict": "Affected",
+            "affected": True,
+            "confidence": "High",
+            "exposure": "transitive",
+            "reasoning": (
+                "multer 2.1.1 is in the affected range, but diskStorage use "
+                "was not confirmed."
+            ),
+        },
+        llm_reachable=False,
+        deep_confirmed=False,
+        deep_exploitable="NO",
+        dep_found=True,
+        dep_direct=False,
+        transitive_reachable="NO",
+        worst_affected=True,
+        current_workspace_affected=True,
+    )
+
+    assert result["verdict"] == "Probably Affected"
+    assert result["affected"] is True
+    assert result["confidence"] == "Medium"
+    assert "affected-range dependency version" in result["reasoning"]
+
+
+def test_fix_contradictions_keeps_affected_with_direct_reachability():
+    result = verdict._fix_contradictions(
+        {
+            "verdict": "Affected",
+            "affected": True,
+            "confidence": "High",
+            "reasoning": "Production upload handling calls multer diskStorage.",
+        },
+        llm_reachable=True,
+        deep_confirmed=False,
+        deep_exploitable="NO",
+        dep_found=True,
+        dep_direct=True,
+        transitive_reachable="NO",
+        worst_affected=True,
+        current_workspace_affected=True,
+    )
+
+    assert result["verdict"] == "Affected"
+    assert result["affected"] is True
+    assert result["confidence"] == "High"

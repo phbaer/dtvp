@@ -51,6 +51,7 @@ describe('useProjectVulnFilters', () => {
             query: {
                 q: 'spring team:platform',
                 lifecycle: ['OPEN', 'INCOMPLETE'],
+                inconsistency_reason: ['analysis_state_mismatch', 'assessment_details_mismatch'],
                 analysis: 'NOT_SET',
                 id: 'CVE-1',
                 component: 'spring-core',
@@ -73,7 +74,11 @@ describe('useProjectVulnFilters', () => {
         expect(filters.smartSearchInput.value).toBe('spring team:platform')
         expect(filters.parsedSmartSearch.value.textTerms).toEqual(['spring'])
         expect(filters.parsedSmartSearch.value.teamTerms).toEqual(['platform'])
-        expect(filters.lifecycleFilters.value).toEqual(['OPEN', 'INCOMPLETE'])
+        expect(filters.lifecycleFilters.value).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT'])
+        expect(filters.inconsistencyReasonFilters.value).toEqual([
+            'ANALYSIS_STATE_MISMATCH',
+            'ASSESSMENT_DETAILS_MISMATCH',
+        ])
         expect(filters.analysisFilters.value).toEqual(['NOT_SET'])
         expect(filters.idFilter.value).toBe('CVE-1')
         expect(filters.componentFilter.value).toBe('spring-core')

@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from dtvp import main
+from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
 
 
 @pytest.fixture(autouse=True)
@@ -108,6 +109,108 @@ def test_cache_status_endpoint(client):
         assert data["cached_boms"] == 2
         assert data["cached_analyses"] == 10
         assert data["pending_updates"] == 1
+
+
+def _restore_group():
+    vector = (
+        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:H/RL:O/RC:C/AR:L/MAC:H/MA:N"
+    )
+    group = {
+        "id": "CVE-RESTORE",
+        "title": "Recover CVSS metadata",
+        "severity": "HIGH",
+        "cvss_score": 7.5,
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+        "rescored_cvss": None,
+        "rescored_vector": None,
+        "tags": [],
+        "assignees": [],
+        "aliases": [],
+        "affected_versions": [
+            {
+                "project_uuid": "project-1",
+                "project_name": "Project",
+                "project_version": "1.0.0",
+                "components": [
+                    {
+                        "project_uuid": "project-1",
+                        "project_name": "Project",
+                        "project_version": "1.0.0",
+                        "component_uuid": "component-1",
+                        "component_name": "sqlite",
+                        "component_version": "3.0",
+                        "vulnerability_uuid": "vuln-1",
+                        "finding_uuid": "finding-1",
+                        "analysis_state": "NOT_AFFECTED",
+                        "justification": "CODE_NOT_REACHABLE",
+                        "analysis_details": (
+                            "--- [Team: General] [State: NOT_AFFECTED] "
+                            "[Assessed By: 100045117] "
+                            "[Justification: CODE_NOT_REACHABLE] ---\n\n"
+                            "sqlite not used in the product"
+                        ),
+                        "analysis_comments": [
+                            {
+                                "timestamp": 1710000000000,
+                                "commenter": "100045117",
+                                "comment": (
+                                    "Details: [Rescored: 0] "
+                                    f"[Rescored Vector: {vector}]"
+                                ),
+                            }
+                        ],
+                        "is_suppressed": False,
+                        "is_direct_dependency": True,
+                    }
+                ],
+            }
+        ],
+    }
+    summarize_grouped_vulnerabilities([group], {})
+    return group, vector
+
+
+def test_assessment_restore_preview_and_apply(client, mock_dt_client):
+    group, vector = _restore_group()
+    task_id = "restore-task"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "result": summarize_grouped_vulnerabilities([group], {}),
+    }
+
+    try:
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            preview_response = client.post(
+                "/api/assessments/restore-preview",
+                json={"task_id": task_id},
+            )
+            assert preview_response.status_code == 200
+            preview = preview_response.json()
+            assert preview["summary"]["recoverable_findings"] == 1
+            assert preview["items"][0]["group_id"] == "CVE-RESTORE"
+            assert preview["items"][0]["findings"][0]["restored_vector"] == vector
+
+            apply_response = client.post(
+                "/api/assessments/restore-apply",
+                json={"task_id": task_id},
+            )
+            assert apply_response.status_code == 200
+            assert apply_response.json()["summary"]["attempted"] == 1
+
+        mock_dt_client.update_analysis.assert_called_once()
+        _, kwargs = mock_dt_client.update_analysis.call_args
+        assert kwargs["project_uuid"] == "project-1"
+        assert kwargs["component_uuid"] == "component-1"
+        assert kwargs["vulnerability_uuid"] == "vuln-1"
+        assert "[Rescored: 0]" in kwargs["details"]
+        assert f"[Rescored Vector: {vector}]" in kwargs["details"]
+        assert "sqlite not used in the product" in kwargs["details"]
+        assert group["assessment_restore_count"] == 0
+    finally:
+        main.tasks.pop(task_id, None)
 
 
 def test_get_task_statistics_reuses_completed_grouped_result(client):
@@ -283,6 +386,50 @@ def test_get_task_groups_filters_sorts_and_windows(client):
         "WITHOUT_PROPOSAL": 1,
     }
     assert data["counts"]["filtered"]["attribution_age"] == 2
+
+
+def test_get_task_groups_filters_by_inconsistency_reason(client):
+    task_id = "task-inconsistency-reason"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-STATE",
+                "list_metadata": {
+                    "lifecycle": "INCONSISTENT",
+                    "inconsistency_reasons": ["ANALYSIS_STATE_MISMATCH"],
+                },
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-CVSS",
+                "list_metadata": {
+                    "lifecycle": "INCONSISTENT",
+                    "inconsistency_reasons": ["MISSING_RESCORING_VECTOR"],
+                },
+                "affected_versions": [],
+            },
+        ],
+    }
+
+    try:
+        response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "lifecycle": "INCONSISTENT",
+                "inconsistency_reason": "MISSING_RESCORING_VECTOR",
+                "sort": "id",
+                "order": "asc",
+            },
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filtered"] == 1
+    assert [item["id"] for item in data["items"]] == ["CVE-CVSS"]
 
 def test_get_task_groups_accepts_cursor(client):
     task_id = "task-list-query-cursor"

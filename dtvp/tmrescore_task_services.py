@@ -3,6 +3,40 @@ from datetime import datetime
 from typing import Any, Callable, Optional
 
 
+TMRESCORE_TERMINAL_STATUSES = {"completed", "failed", "skeptic_gate_failed"}
+
+
+def calculate_tmrescore_progress(
+    payload: dict[str, Any],
+    fallback: int = 0,
+) -> int:
+    """Normalize legacy percentages and vscorer step-based progress."""
+    status = str(payload.get("status") or "running").lower()
+    if status in TMRESCORE_TERMINAL_STATUSES:
+        return 100
+
+    raw_progress = payload.get("progress")
+    if raw_progress is not None:
+        try:
+            return max(0, min(int(raw_progress), 99))
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        step = int(payload.get("step") or 0)
+        total_steps = int(payload.get("total_steps") or 0)
+    except (TypeError, ValueError):
+        return max(0, min(int(fallback), 99))
+
+    if total_steps > 0:
+        return max(0, min(round((step / total_steps) * 100), 99))
+    return max(0, min(int(fallback), 99))
+
+
+def is_tmrescore_terminal_status(status: str) -> bool:
+    return str(status or "").lower() in TMRESCORE_TERMINAL_STATUSES
+
+
 @dataclass(frozen=True)
 class TMRescoreTaskServiceDeps:
     tmrescore_analysis_tasks: dict[str, dict[str, Any]]
@@ -31,7 +65,7 @@ def prune_tmrescore_analysis_tasks(
     expired_session_ids = []
     for session_id, task in deps.tmrescore_analysis_tasks.items():
         status = str(task.get("status") or "").lower()
-        if status not in {"completed", "failed"}:
+        if not is_tmrescore_terminal_status(status):
             continue
         completed_at = (
             task.get("completed_at") or task.get("updated_at") or task.get("created_at")
@@ -106,6 +140,8 @@ def build_tmrescore_cached_state(
         "session_id": task["session_id"],
         "status": status,
         "progress": int(task.get("progress") or 0),
+        "step": task.get("step"),
+        "total_steps": task.get("total_steps"),
         "message": task.get("message")
         or describe_tmrescore_progress(status, int(task.get("progress") or 0)),
         "log": task.get("log") or [],
@@ -114,7 +150,15 @@ def build_tmrescore_cached_state(
         "latest_version": task.get("latest_version"),
         "analyzed_versions": task.get("analyzed_versions") or [],
         "llm_enrichment": task.get("llm_enrichment")
-        or {"enabled": False, "ollama_model": None},
+        or {"enabled": False, "model": None, "backend": None, "provider": None},
+        "analysis_options": task.get("analysis_options")
+        or {
+            "chain_analysis": True,
+            "prioritize": True,
+            "what_if": False,
+            "mitre_enrichment": False,
+            "offline": False,
+        },
         "created_at": task.get("created_at"),
         "updated_at": task.get("updated_at"),
         "completed_at": task.get("completed_at"),

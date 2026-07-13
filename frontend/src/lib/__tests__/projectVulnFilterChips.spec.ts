@@ -24,6 +24,11 @@ const analysisOptions = DEFAULT_ANALYSIS_FILTERS.map(value => ({
     label: value.replace(/_/g, ' '),
 }))
 
+const inconsistencyReasonOptions = [
+    { value: 'ANALYSIS_STATE_MISMATCH', label: 'Analysis states differ' },
+    { value: 'ASSESSMENT_DETAILS_MISMATCH', label: 'Assessment details differ' },
+]
+
 const dependencyOptions = [
     { value: 'DIRECT', label: 'Direct' },
     { value: 'TRANSITIVE', label: 'Transitive' },
@@ -45,6 +50,8 @@ describe('projectVulnFilterChips', () => {
         const chips = buildActiveFilterChips({
             lifecycleFilters: ['OPEN'],
             lifecycleOptions,
+            inconsistencyReasonFilters: ['ANALYSIS_STATE_MISMATCH'],
+            inconsistencyReasonOptions,
             analysisFilters: DEFAULT_ANALYSIS_FILTERS,
             analysisOptions,
             dependencyFilters: ['DIRECT', 'UNKNOWN'],
@@ -65,6 +72,7 @@ describe('projectVulnFilterChips', () => {
 
         expect(chips).toEqual([
             { key: 'lifecycle', label: 'Lifecycle: Open' },
+            { key: 'inconsistencyReason', label: 'Inconsistency: Analysis states differ' },
             { key: 'dependency', label: 'Dependency: Direct, Unknown' },
             { key: 'id', label: 'ID: CVE-2026-0001' },
             { key: 'tag', label: 'Team: platform' },
@@ -90,6 +98,7 @@ describe('projectVulnFilterChips', () => {
             sortBy: 'rescored-severity',
             sortOrder: 'desc' as const,
             lifecycleFilters: DEFAULT_REVIEWER_LIFECYCLE_FILTERS,
+            inconsistencyReasonFilters: [],
             defaultLifecycleFilters: DEFAULT_REVIEWER_LIFECYCLE_FILTERS,
             analysisFilters: DEFAULT_ANALYSIS_FILTERS,
             defaultAnalysisFilters: DEFAULT_ANALYSIS_FILTERS,
@@ -109,6 +118,10 @@ describe('projectVulnFilterChips', () => {
         expect(hasCustomProjectVulnFilterState({
             ...defaultInput,
             lifecycleFilters: ['OPEN'],
+        })).toBe(true)
+        expect(hasCustomProjectVulnFilterState({
+            ...defaultInput,
+            inconsistencyReasonFilters: ['ASSESSMENT_DETAILS_MISMATCH'],
         })).toBe(true)
         expect(hasCustomProjectVulnFilterState({
             ...defaultInput,

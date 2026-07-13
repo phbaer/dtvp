@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Awaitable, Callable, Coroutine
@@ -15,6 +14,7 @@ from .tmrescore_integration import (
     normalize_tmrescore_snapshot,
     sort_projects_by_version,
 )
+from .tmrescore_task_services import calculate_tmrescore_progress
 
 
 def _merge_responses(
@@ -82,21 +82,33 @@ def _register_tmrescore_context_route(
         llm_enrichment_available = False
         llm_enrichment_status = "integration_disabled"
         llm_enrichment_warning = None
+        llm_backend = None
+        llm_provider = None
+        llm_model = None
 
         if settings.enabled:
             try:
                 async with TMRescoreClient(settings) as tmrescore_client:
                     health = await tmrescore_client.get_health()
-                llm_enrichment_available = bool(health.get("ollama_configured"))
+                llm_enrichment_available = bool(
+                    health.get("llm_configured", health.get("ollama_configured", False))
+                )
+                llm_backend = health.get("llm_backend") or (
+                    "ollama" if health.get("ollama_configured") else None
+                )
+                llm_provider = health.get("llm_provider") or (
+                    "Ollama" if llm_backend == "ollama" else None
+                )
+                llm_model = health.get("llm_model")
                 llm_enrichment_status = (
                     "available" if llm_enrichment_available else "not_configured"
                 )
                 if not llm_enrichment_available:
-                    llm_enrichment_warning = "LLM enrichment requires OLLAMA_HOST to be configured on the tmrescore backend."
+                    llm_enrichment_warning = "LLM enrichment requires a configured LLM backend in vscorer."
             except Exception as exc:
                 llm_enrichment_status = "unreachable"
                 deps.logger.warning(
-                    "Unable to determine tmrescore Ollama configuration for %s: %s",
+                    "Unable to determine vscorer LLM configuration for %s: %s",
                     project_name,
                     exc,
                 )
@@ -147,7 +159,9 @@ def _register_tmrescore_context_route(
             "llm_enrichment": {
                 "available": llm_enrichment_available,
                 "status": llm_enrichment_status,
-                "default_model": os.getenv("DTVP_TMRESCORE_OLLAMA_MODEL", "qwen2.5:7b"),
+                "model": llm_model,
+                "backend": llm_backend,
+                "provider": llm_provider,
                 "host_configured": llm_enrichment_available,
                 "warning": llm_enrichment_warning,
             },
@@ -242,12 +256,14 @@ def _register_tmrescore_analysis_route(
         threatmodel: Annotated[UploadFile, File(...)],
         items_csv: Annotated[UploadFile | None, File()] = None,
         config: Annotated[UploadFile | None, File()] = None,
+        countermeasures: Annotated[UploadFile | None, File()] = None,
         scope: Annotated[str, Form()] = "merged_versions",
         chain_analysis: Annotated[bool, Form()] = True,
         prioritize: Annotated[bool, Form()] = True,
         what_if: Annotated[bool, Form()] = False,
         enrich: Annotated[bool, Form()] = False,
-        ollama_model: Annotated[str, Form()] = "qwen2.5:7b",
+        mitre_enrichment: Annotated[bool, Form()] = False,
+        offline: Annotated[bool, Form()] = False,
         *,
         client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
@@ -255,6 +271,11 @@ def _register_tmrescore_analysis_route(
         settings = TMRescoreSettings()
         if not settings.enabled:
             raise HTTPException(status_code=503, detail=deps.tmrescore_disabled_detail)
+        if enrich and offline:
+            raise HTTPException(
+                status_code=422,
+                detail="LLM enrichment cannot run when offline mode is enabled.",
+            )
 
         inventory = await deps.prepare_tmrescore_inventory_or_raise(
             project_name,
@@ -273,13 +294,34 @@ def _register_tmrescore_analysis_route(
         threatmodel_bytes = await threatmodel.read()
         items_csv_bytes = await items_csv.read() if items_csv else None
         config_bytes = await config.read() if config else None
+        countermeasures_bytes = await countermeasures.read() if countermeasures else None
         deps.prune_tmrescore_analysis_tasks()
 
         async with TMRescoreClient(settings) as tmrescore_client:
+            llm_runtime = {}
+            if enrich:
+                try:
+                    health = await tmrescore_client.get_health()
+                    llm_runtime = {
+                        "model": health.get("llm_model"),
+                        "backend": health.get("llm_backend"),
+                        "provider": health.get("llm_provider"),
+                    }
+                except Exception as exc:
+                    deps.logger.warning(
+                        "Unable to record the vscorer LLM model for %s: %s",
+                        project_name,
+                        exc,
+                    )
             session = await tmrescore_client.create_session(
                 project_name, session_version_label
             )
             session_id = session.get("session_id") or ""
+            if session_id and countermeasures_bytes is not None:
+                await tmrescore_client.upload_countermeasures(
+                    session_id,
+                    countermeasures_bytes,
+                )
 
         if not session_id:
             raise HTTPException(
@@ -300,7 +342,14 @@ def _register_tmrescore_analysis_route(
             "strategy_note": inventory["strategy_note"],
             "llm_enrichment": {
                 "enabled": enrich,
-                "ollama_model": ollama_model if enrich else None,
+                **llm_runtime,
+            },
+            "analysis_options": {
+                "chain_analysis": chain_analysis,
+                "prioritize": prioritize,
+                "what_if": what_if,
+                "mitre_enrichment": mitre_enrichment,
+                "offline": offline,
             },
             "status": "running",
             "progress": 10,
@@ -328,7 +377,8 @@ def _register_tmrescore_analysis_route(
                 prioritize,
                 what_if,
                 enrich,
-                ollama_model,
+                mitre_enrichment,
+                offline,
             )
         )
 
@@ -412,7 +462,7 @@ def _register_tmrescore_progress_route(
             payload = await tmrescore_client.get_progress(session_id)
 
         status = str(payload.get("status") or "running")
-        progress = int(payload.get("progress") or 0)
+        progress = calculate_tmrescore_progress(payload)
         message = payload.get("message") or deps.describe_tmrescore_progress(
             status,
             progress,
@@ -421,6 +471,8 @@ def _register_tmrescore_progress_route(
             "session_id": session_id,
             "status": status,
             "progress": progress,
+            "step": payload.get("step"),
+            "total_steps": payload.get("total_steps"),
             "message": message,
             "log": [message],
             "error": None,

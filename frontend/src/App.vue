@@ -362,6 +362,14 @@ const acknowledgeChangelog = () => {
                         >
                             Bulk Sync ({{ projectHeaderState.incompleteCount.value }})
                         </button>
+                        <button
+                            v-if="projectHeaderState.isReviewer.value && projectHeaderState.assessmentRestoreCount.value > 0"
+                            type="button"
+                            @click="projectHeaderState.assessmentRestoreHandler.value?.()"
+                            :class="[headerButtonBase, headerButtonWarning]"
+                        >
+                            Restore CVSS ({{ projectHeaderState.assessmentRestoreCount.value }})
+                        </button>
                     </template>
                 </div>
                 <div class="text-sm text-gray-400 hidden sm:flex items-center gap-6">

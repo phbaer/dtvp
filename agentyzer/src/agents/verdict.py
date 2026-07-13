@@ -747,6 +747,7 @@ async def _llm_verdict(
             {
                 "round": 0,
                 "required": True,
+                "scope": "upstream_platform",
                 "directives": directives,
                 "results_summary": fetched_text[:500],
             }
@@ -1019,22 +1020,36 @@ def _fix_contradictions(
             )
             verdict["reasoning"] = f"{note} {existing}" if existing else note
 
-    # Rule 7: verdict is Affected but no evidence supports it
+    # Rule 7: Affected requires positive path/exploitability evidence. An
+    # affected-range dependency version without that evidence supports only
+    # Probably Affected.
     if verdict.get("verdict") == "Affected" and not overrides:
-        has_evidence = (
+        has_confirmed_path = (
             llm_reachable
-            or deep_confirmed
-            or transitive_reachable in ("YES", "LIKELY")
-            or dep_found
-        )
-        if not has_evidence:
-            verdict["verdict"] = "Inconclusive"
-            verdict["affected"] = False
-            verdict["confidence"] = "Low"
-            overrides.append(
-                "LLM said 'Affected' but no supporting evidence found — "
-                "downgraded to Inconclusive"
+            or (
+                deep_confirmed
+                and deep_exploitable in ("YES", "LIKELY")
             )
+            or transitive_reachable in ("YES", "LIKELY")
+        )
+        if not has_confirmed_path:
+            if dep_found and worst_affected:
+                verdict["verdict"] = "Probably Affected"
+                verdict["affected"] = True
+                verdict["confidence"] = "Medium"
+                overrides.append(
+                    "an affected-range dependency version is present, but no "
+                    "vulnerable path or exploitability was confirmed — "
+                    "downgraded Affected to Probably Affected"
+                )
+            else:
+                verdict["verdict"] = "Inconclusive"
+                verdict["affected"] = False
+                verdict["confidence"] = "Low"
+                overrides.append(
+                    "LLM said 'Affected' but no supporting evidence found — "
+                    "downgraded to Inconclusive"
+                )
 
     if overrides:
         original_reasoning = _sanitize_overridden_reasoning(
