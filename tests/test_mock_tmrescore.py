@@ -23,6 +23,8 @@ def test_mock_tmrescore_health_and_ui():
     assert health.status_code == 200
     assert health.json()["service"] == "mock-tmrescore"
     assert health.json()["ollama_configured"] is True
+    assert health.json()["llm_configured"] is True
+    assert health.json()["llm_provider"] == "Ollama"
 
     ui = client.get("/ui")
     assert ui.status_code == 200
@@ -41,6 +43,18 @@ def test_mock_tmrescore_inventory_flow_returns_downloadable_results():
     )
     assert create.status_code == 201
     session_id = create.json()["session_id"]
+
+    countermeasures = client.put(
+        f"/api/v1/sessions/{session_id}/files/countermeasures",
+        files={
+            "file": (
+                "countermeasures.yaml",
+                b"mitigations: []",
+                "application/x-yaml",
+            )
+        },
+    )
+    assert countermeasures.status_code == 200
 
     sbom = {
         "bomFormat": "CycloneDX",
@@ -78,6 +92,8 @@ def test_mock_tmrescore_inventory_flow_returns_downloadable_results():
             "what_if": "false",
             "enrich": "true",
             "ollama_model": "qwen2.5:14b",
+            "mitre_enrichment": "true",
+            "offline": "false",
         },
         files={
             "threatmodel": ("model.tm7", b"tm7", "application/octet-stream"),
@@ -88,7 +104,8 @@ def test_mock_tmrescore_inventory_flow_returns_downloadable_results():
     payload = analyze.json()
     assert payload["status"] == "completed"
     assert payload["total_cves"] == 1
-    assert "rescored-report.json" in payload["outputs"]
+    assert payload["outputs"]["html_report"].endswith("/rescore_report.html")
+    assert payload["outputs"]["enriched_sbom"].endswith("/enriched_sbom.cdx.json")
     assert payload["llm_enrichment"] == {"enabled": True, "ollama_model": "qwen2.5:14b"}
 
     raw_results = client.get(f"/api/v1/sessions/{session_id}/results/json")
@@ -96,6 +113,8 @@ def test_mock_tmrescore_inventory_flow_returns_downloadable_results():
     assert raw_results.json()["summary"]["vulnerability_count"] == 1
     assert raw_results.json()["summary"]["enrich"] is True
     assert raw_results.json()["summary"]["ollama_model"] == "qwen2.5:14b"
+    assert raw_results.json()["summary"]["mitre_enrichment"] is True
+    assert raw_results.json()["summary"]["offline"] is False
     vulnerability = raw_results.json()["vulnerabilities"][0]
     assert vulnerability["original_score"] == 8.8
     assert vulnerability["original_vector"].startswith("CVSS:3.1/")
@@ -106,10 +125,27 @@ def test_mock_tmrescore_inventory_flow_returns_downloadable_results():
     assert vulnerability["rescored_vector"] != vulnerability["original_vector"]
     assert vulnerability["rescored_vector"].startswith("CVSS:3.")
 
-    output_file = client.get(f"/api/v1/sessions/{session_id}/outputs/enriched-sbom.json")
+    output_file = client.get(
+        f"/api/v1/sessions/{session_id}/outputs/enriched_sbom.cdx.json"
+    )
     assert output_file.status_code == 200
     assert output_file.headers["content-type"].startswith("application/json")
     assert "vp:threatModelElementIds" in output_file.text
+
+    progress = client.get(f"/api/v1/sessions/{session_id}/progress")
+    assert progress.json() == {
+        "status": "completed",
+        "step": 4,
+        "total_steps": 4,
+        "message": "Analysis completed.",
+    }
+
+    outputs = client.get(f"/api/v1/sessions/{session_id}/outputs")
+    assert outputs.status_code == 200
+    assert any(
+        item["filename"] == "rescore_report.html"
+        for item in outputs.json()["outputs"]
+    )
 
 
 def test_mock_tmrescore_vex_results_include_detail_messages():

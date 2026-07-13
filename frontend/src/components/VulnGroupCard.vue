@@ -2063,6 +2063,7 @@ const teamBlockStateColor = (state?: string): string => {
                 :currentState="state"
                 :currentJustification="justification"
                 :currentDetails="details"
+                :currentTeam="selectedTeam || 'General'"
                 :currentCvssScore="pendingScore"
                 :currentCvssVector="pendingVector"
                 :currentAssigned="currentAssigned"

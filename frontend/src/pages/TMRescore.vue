@@ -36,11 +36,13 @@ const selectedScope = ref<'latest_only' | 'merged_versions'>('merged_versions')
 const threatModelFile = ref<File | null>(null)
 const itemsCsvFile = ref<File | null>(null)
 const configFile = ref<File | null>(null)
+const countermeasuresFile = ref<File | null>(null)
 const chainAnalysis = ref(true)
 const prioritize = ref(true)
 const whatIf = ref(false)
+const mitreEnrichment = ref(false)
+const offline = ref(false)
 const enrich = ref(false)
-const ollamaModel = ref('qwen2.5:7b')
 const submitting = ref(false)
 const result = ref<TMRescoreAnalysisResult | null>(null)
 const submitError = ref('')
@@ -58,7 +60,31 @@ const refreshSignalKey = computed(() => `dtvp:tmrescore-refresh:${projectName.va
 const projectReturnUrl = computed(() => `/project/${projectName.value}`)
 const syntheticSbomDownloadUrl = computed(() => getTMRescoreSyntheticSbomDownloadUrl(projectName.value, selectedScope.value))
 
-const outputFiles = computed(() => Object.keys(result.value?.outputs || {}))
+const outputLabels: Record<string, string> = {
+  html_report: 'Unified Action Report',
+  json_output: 'JSON Evidence',
+  vex_output: 'CycloneDX VEX',
+  enriched_sbom: 'Enriched CycloneDX SBOM',
+}
+
+const outputDownloads = computed(() => Object.entries(result.value?.outputs || {})
+  .map(([name, value]) => {
+    const rawPath = typeof value === 'string' ? value : name
+    const pathWithoutQuery = rawPath.split('?')[0]
+    const encodedFilename = pathWithoutQuery.split('/').filter(Boolean).pop() || name
+    let filename = encodedFilename
+    try {
+      filename = decodeURIComponent(encodedFilename)
+    } catch {
+      filename = encodedFilename
+    }
+    return {
+      name,
+      filename,
+      label: outputLabels[name] || filename,
+    }
+  })
+  .filter(({ filename }) => !['rescore_results.json', 'rescore_vex.cdx.json'].includes(filename)))
 
 const progressTimer = ref<number | null>(null)
 const stagedProgressTimers: number[] = []
@@ -113,13 +139,16 @@ const updateCachedProjectState = (state: Partial<TMRescoreProjectState | TMResco
     session_id: state.session_id,
     status: state.status || previous?.status || 'running',
     progress: state.progress ?? previous?.progress ?? 0,
+    step: state.step ?? previous?.step ?? null,
+    total_steps: state.total_steps ?? previous?.total_steps ?? null,
     message: state.message || previous?.message || '',
     log: state.log || previous?.log || [],
     error: state.error ?? previous?.error ?? null,
     scope: (state as Partial<TMRescoreProjectState>).scope || previous?.scope || selectedScope.value,
     latest_version: (state as Partial<TMRescoreProjectState>).latest_version || previous?.latest_version || context.value?.latest_version || '',
     analyzed_versions: (state as Partial<TMRescoreProjectState>).analyzed_versions || previous?.analyzed_versions || [],
-    llm_enrichment: (state as Partial<TMRescoreProjectState>).llm_enrichment || previous?.llm_enrichment || { enabled: false, ollama_model: null },
+    llm_enrichment: (state as Partial<TMRescoreProjectState>).llm_enrichment || previous?.llm_enrichment || { enabled: false, model: null, backend: null, provider: null },
+    analysis_options: (state as Partial<TMRescoreProjectState>).analysis_options || previous?.analysis_options,
     created_at: state.created_at ?? previous?.created_at ?? null,
     updated_at: state.updated_at ?? previous?.updated_at ?? null,
     completed_at: state.completed_at ?? previous?.completed_at ?? null,
@@ -251,13 +280,31 @@ const getOutputUrl = (filename: string) => {
     return `${apiPrefix}/tmrescore/sessions/${encodeURIComponent(result.value.session_id)}/outputs/${encodeURIComponent(filename)}`
 }
 
-const handleFileChange = (event: Event, target: 'threatmodel' | 'items' | 'config') => {
+const handleFileChange = (event: Event, target: 'threatmodel' | 'items' | 'config' | 'countermeasures') => {
     const input = event.target as HTMLInputElement
     const file = input.files?.[0] || null
     if (target === 'threatmodel') threatModelFile.value = file
     if (target === 'items') itemsCsvFile.value = file
     if (target === 'config') configFile.value = file
+    if (target === 'countermeasures') countermeasuresFile.value = file
 }
+
+const resultStatusLabel = computed(() => (
+  result.value?.status === 'skeptic_gate_failed'
+    ? 'Review Required'
+    : result.value?.status || 'completed'
+))
+const resultStatusClass = computed(() => (
+  result.value?.status === 'skeptic_gate_failed'
+    ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+    : 'border-green-500/30 bg-green-500/10 text-green-200'
+))
+
+const getAnalysisCompletionMessage = (analysisResult: TMRescoreAnalysisResult) => (
+  analysisResult.status === 'skeptic_gate_failed'
+    ? 'Analysis finished, but the review-skeptic gate requires manual attention.'
+    : `Analysis completed. ${analysisResult.rescored_count} of ${analysisResult.total_cves} CVEs were rescored.`
+)
 
 const applyAnalysisProgress = (progress: TMRescoreAnalysisProgress) => {
   stopProgressTimer()
@@ -276,8 +323,12 @@ const restoreCachedAnalysisState = async (state: TMRescoreProjectState) => {
   cachedProjectState.value = state
   selectedScope.value = state.scope
   enrich.value = Boolean(state.llm_enrichment?.enabled)
-  if (state.llm_enrichment?.ollama_model) {
-    ollamaModel.value = state.llm_enrichment.ollama_model
+  if (state.analysis_options) {
+    chainAnalysis.value = state.analysis_options.chain_analysis
+    prioritize.value = state.analysis_options.prioritize
+    whatIf.value = state.analysis_options.what_if
+    mitreEnrichment.value = state.analysis_options.mitre_enrichment
+    offline.value = state.analysis_options.offline
   }
 
   submitError.value = ''
@@ -306,7 +357,7 @@ const restoreCachedAnalysisState = async (state: TMRescoreProjectState) => {
         applyAnalysisProgress(progress)
       },
     })
-    setProgressState(`Analysis completed. ${result.value.rescored_count} of ${result.value.total_cves} CVEs were rescored.`, 100)
+    setProgressState(getAnalysisCompletionMessage(result.value), 100)
     if (typeof window !== 'undefined' && window.sessionStorage) {
       window.sessionStorage.setItem(refreshSignalKey.value, String(Date.now()))
     }
@@ -362,7 +413,6 @@ const loadContext = async () => {
         )
       }
     }
-    ollamaModel.value = context.value.llm_enrichment?.default_model || 'qwen2.5:7b'
     if (!cachedState) {
       setProgressState(`Loaded ${context.value.versions.length} project version${context.value.versions.length === 1 ? '' : 's'}. Preparing the ${getScopeLabel(selectedScope.value)} analysis preview...`, 52)
     }
@@ -403,7 +453,14 @@ const submit = async () => {
     resetProgressState('Preparing threat-model analysis request...')
     setProgressState(`Queued ${selectedScope.value === 'merged_versions' ? 'merged multi-version' : 'latest-only'} analysis scope.`, 10)
     if (enrich.value) {
-      appendProgressLog(`LLM enrichment enabled with model ${ollamaModel.value}.`)
+      const model = context.value?.llm_enrichment?.model
+      appendProgressLog(`LLM enrichment enabled${model ? ` with vscorer model ${model}` : ' using the vscorer-managed model'}.`)
+    }
+    if (mitreEnrichment.value) {
+      appendProgressLog('MITRE ATT&CK enrichment enabled.')
+    }
+    if (offline.value) {
+      appendProgressLog('Offline mode enabled; vscorer will use cached or embedded threat intelligence only.')
     }
     setProgressState('Uploading threat model and analysis inputs...', 18)
     driftProgressTo(58)
@@ -417,11 +474,13 @@ const submit = async () => {
             threatmodel: threatModelFile.value,
             itemsCsv: itemsCsvFile.value,
             config: configFile.value,
+            countermeasures: countermeasuresFile.value,
             chainAnalysis: chainAnalysis.value,
             prioritize: prioritize.value,
             whatIf: whatIf.value,
             enrich: enrich.value,
-            ollamaModel: ollamaModel.value,
+            mitreEnrichment: mitreEnrichment.value,
+            offline: offline.value,
           }, {
             onUploadProgress: (event) => {
               const total = event.total || 0
@@ -440,7 +499,7 @@ const submit = async () => {
         })
           stopProgressTimer()
           clearStagedProgressTimers()
-          setProgressState(`Analysis completed. ${result.value.rescored_count} of ${result.value.total_cves} CVEs were rescored.`, 100)
+          setProgressState(getAnalysisCompletionMessage(result.value), 100)
           if (typeof window !== 'undefined' && window.sessionStorage) {
             window.sessionStorage.setItem(refreshSignalKey.value, String(Date.now()))
           }
@@ -462,6 +521,14 @@ watch(selectedScope, () => {
   if (!context.value?.enabled) return
   void loadSyntheticSbomSummary()
 })
+
+watch(offline, (enabled) => {
+  if (enabled) enrich.value = false
+})
+
+watch(enrich, (enabled) => {
+  if (enabled) offline.value = false
+})
       onBeforeUnmount(() => {
         stopProgressTimer()
         clearStagedProgressTimers()
@@ -469,7 +536,10 @@ watch(selectedScope, () => {
 </script>
 
 <template>
-  <div class="w-full space-y-6">
+  <div
+    class="h-full min-h-0 w-full space-y-6 overflow-y-auto overscroll-contain pr-1"
+    data-testid="tmrescore-scroll-region"
+  >
     <div class="flex flex-col gap-3">
       <router-link :to="projectReturnUrl" class="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1.5 font-medium transition-colors">
         <ChevronLeft :size="16" />
@@ -560,7 +630,7 @@ watch(selectedScope, () => {
               </div>
             </div>
 
-            <div class="grid gap-4 md:grid-cols-3">
+            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <label class="block rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
                 <span class="block text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-2">Threat Model</span>
                 <input type="file" accept=".tm7" @change="handleFileChange($event, 'threatmodel')" data-testid="threatmodel-input" class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-white" />
@@ -578,9 +648,21 @@ watch(selectedScope, () => {
                 <input type="file" accept=".yaml,.yml" @change="handleFileChange($event, 'config')" class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-white" />
                 <span class="mt-2 block text-xs text-gray-500">Optional rescoring config for trust boundaries and overrides.</span>
               </label>
+
+              <label class="block rounded-2xl border border-gray-800 bg-gray-950/60 p-4">
+                <span class="block text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-2">MITRE Countermeasures</span>
+                <input
+                  type="file"
+                  accept=".yaml,.yml"
+                  class="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-700 file:px-3 file:py-2 file:text-white"
+                  data-testid="countermeasures-input"
+                  @change="handleFileChange($event, 'countermeasures')"
+                />
+                <span class="mt-2 block text-xs text-gray-500">Optional ATT&amp;CK countermeasure coverage for MITRE enrichment.</span>
+              </label>
             </div>
 
-            <div class="grid gap-3 md:grid-cols-3">
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
               <label class="flex items-center gap-3 rounded-xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
                 <input v-model="chainAnalysis" type="checkbox" class="h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-500" />
                 Chain analysis
@@ -593,6 +675,14 @@ watch(selectedScope, () => {
                 <input v-model="whatIf" type="checkbox" class="h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-500" />
                 What-if mode
               </label>
+              <label class="flex items-center gap-3 rounded-xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
+                <input v-model="mitreEnrichment" type="checkbox" class="h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-500" data-testid="mitre-enrichment-input" />
+                MITRE enrichment
+              </label>
+              <label class="flex items-center gap-3 rounded-xl border border-gray-800 bg-gray-950/60 px-4 py-3 text-sm text-gray-300">
+                <input v-model="offline" type="checkbox" class="h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-500" data-testid="offline-input" />
+                Offline mode
+              </label>
             </div>
 
             <div class="rounded-2xl border border-gray-800 bg-gray-950/60 p-4 space-y-3">
@@ -602,7 +692,8 @@ watch(selectedScope, () => {
                     v-model="enrich"
                     type="checkbox"
                     class="h-4 w-4 rounded border-gray-600 bg-gray-900 text-blue-500"
-                    :disabled="!context.llm_enrichment?.available"
+                    :disabled="!context.llm_enrichment?.available || offline"
+                    data-testid="llm-enrichment-input"
                   />
                   LLM enrichment
                 </label>
@@ -615,20 +706,15 @@ watch(selectedScope, () => {
                 </span>
               </div>
 
-              <div class="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                <label class="block">
-                  <span class="block text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-2">Ollama Model</span>
-                  <input
-                    v-model="ollamaModel"
-                    type="text"
-                    placeholder="qwen2.5:7b"
-                    class="block w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200"
-                    :disabled="!context.llm_enrichment?.available || !enrich"
-                    data-testid="ollama-model-input"
-                  />
-                </label>
+              <div class="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+                <div class="rounded-lg border border-gray-800 bg-black/20 px-3 py-2" data-testid="llm-configured-model">
+                  <div class="text-[11px] font-bold uppercase tracking-widest text-gray-500">Vscorer Model</div>
+                  <div class="mt-1 text-sm font-medium text-gray-200">
+                    {{ context.llm_enrichment?.model || 'Managed by vscorer' }}
+                  </div>
+                </div>
                 <div class="text-xs text-gray-500 md:max-w-xs">
-                  Adds LLM-based threat justification enrichment before analysis when the tmrescore backend has Ollama configured.
+                  The model is selected by vscorer and cannot be overridden in DTVP. LLM enrichment and offline mode are mutually exclusive.
                 </div>
               </div>
 
@@ -806,9 +892,20 @@ watch(selectedScope, () => {
             <h3 class="text-2xl font-bold text-white">Analysis Result</h3>
             <p class="text-sm text-gray-400">{{ result.strategy_note }}</p>
           </div>
-          <span class="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-green-200">
-            {{ result.status }}
+          <span
+            class="rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider"
+            :class="resultStatusClass"
+          >
+            {{ resultStatusLabel }}
           </span>
+        </div>
+
+        <div
+          v-if="result.status === 'skeptic_gate_failed'"
+          class="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+          data-testid="tmrescore-skeptic-gate-warning"
+        >
+          The analysis produced reviewable outputs, but vscorer's review-skeptic gate requires manual attention<span v-if="result.error">: {{ result.error }}</span>.
         </div>
 
         <div class="mt-6 grid gap-4 md:grid-cols-4">
@@ -856,7 +953,15 @@ watch(selectedScope, () => {
               </div>
               <div class="flex items-center justify-between gap-4">
                 <dt>LLM Enrichment</dt>
-                <dd>{{ result.llm_enrichment?.enabled ? `Enabled (${result.llm_enrichment?.ollama_model || 'default'})` : 'Disabled' }}</dd>
+                <dd>{{ result.llm_enrichment?.enabled ? `Enabled (${result.llm_enrichment?.model || context?.llm_enrichment?.model || 'vscorer managed'})` : 'Disabled' }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <dt>MITRE Enrichment</dt>
+                <dd>{{ mitreEnrichment ? 'Enabled' : 'Disabled' }}</dd>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <dt>Threat Intelligence</dt>
+                <dd>{{ offline ? 'Offline / cached only' : 'Online' }}</dd>
               </div>
             </dl>
           </div>
@@ -871,14 +976,14 @@ watch(selectedScope, () => {
                 Download CycloneDX VEX
               </a>
               <a
-                v-for="filename in outputFiles"
-                :key="filename"
-                :href="getOutputUrl(filename)"
+                v-for="download in outputDownloads"
+                :key="download.name"
+                :href="getOutputUrl(download.filename)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-gray-200 transition-colors hover:border-gray-600"
               >
-                Download {{ filename }}
+                Download {{ download.label }}
               </a>
             </div>
           </div>

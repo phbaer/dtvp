@@ -20,7 +20,10 @@ from dtvp.tmrescore_integration import (
     is_meaningful_tmrescore_proposal,
     normalize_tmrescore_snapshot,
 )
-from dtvp.tmrescore_task_services import prune_tmrescore_analysis_tasks
+from dtvp.tmrescore_task_services import (
+    calculate_tmrescore_progress,
+    prune_tmrescore_analysis_tasks,
+)
 from test_setup import mock_tmrescore
 
 
@@ -48,6 +51,21 @@ def wait_for_tmrescore_progress(
     pytest.fail(
         f"Timed out waiting for tmrescore session {session_id} to reach {expected_status}: {last_payload}"
     )
+
+
+@pytest.mark.parametrize(
+    ("payload", "fallback", "expected"),
+    [
+        ({"status": "running", "step": 3, "total_steps": 4}, 25, 75),
+        ({"status": "running", "progress": 64}, 25, 64),
+        ({"status": "running", "step": 0, "total_steps": 0}, 25, 25),
+        ({"status": "skeptic_gate_failed", "step": 4, "total_steps": 4}, 25, 100),
+    ],
+)
+def test_calculate_tmrescore_progress_supports_current_and_legacy_contracts(
+    payload, fallback, expected
+):
+    assert calculate_tmrescore_progress(payload, fallback) == expected
 
 
 def test_prune_tmrescore_analysis_tasks_removes_expired_terminal_entries():
@@ -434,7 +452,7 @@ def test_tmrescore_context_endpoint_uses_remote_health_for_ollama_availability(
     assert payload["llm_enrichment"]["status"] == "not_configured"
     assert (
         payload["llm_enrichment"]["warning"]
-        == "LLM enrichment requires OLLAMA_HOST to be configured on the tmrescore backend."
+        == "LLM enrichment requires a configured LLM backend in vscorer."
     )
 
 
@@ -451,7 +469,16 @@ def test_tmrescore_context_endpoint_reports_remote_ollama_when_available(
     ):
         with patch(
             "dtvp.main.TMRescoreClient.get_health",
-            new=AsyncMock(return_value={"status": "ok", "ollama_configured": True}),
+            new=AsyncMock(
+                return_value={
+                    "status": "ok",
+                    "ollama_configured": True,
+                    "llm_configured": True,
+                    "llm_backend": "openwebui",
+                    "llm_provider": "OpenWebUI",
+                    "llm_model": "mistral",
+                }
+            ),
         ):
             response = client.get("/api/projects/ExampleApp/tmrescore/context")
 
@@ -460,6 +487,9 @@ def test_tmrescore_context_endpoint_reports_remote_ollama_when_available(
     assert payload["llm_enrichment"]["available"] is True
     assert payload["llm_enrichment"]["host_configured"] is True
     assert payload["llm_enrichment"]["status"] == "available"
+    assert payload["llm_enrichment"]["backend"] == "openwebui"
+    assert payload["llm_enrichment"]["provider"] == "OpenWebUI"
+    assert payload["llm_enrichment"]["model"] == "mistral"
     assert payload["llm_enrichment"]["warning"] is None
 
 
@@ -488,6 +518,30 @@ def test_tmrescore_context_endpoint_reports_unreachable_when_health_check_fails(
     assert (
         payload["llm_enrichment"]["warning"]
         == "Could not verify LLM enrichment availability from the tmrescore backend."
+    )
+
+
+def test_tmrescore_analyze_rejects_llm_enrichment_in_offline_mode(client):
+    with patch.dict(
+        os.environ,
+        {"DTVP_TMRESCORE_URL": "http://tmrescore.local"},
+        clear=False,
+    ):
+        response = client.post(
+            "/api/projects/ExampleApp/tmrescore/analyze",
+            data={"enrich": "true", "offline": "true"},
+            files={
+                "threatmodel": (
+                    "model.tm7",
+                    b"tm7-data",
+                    "application/octet-stream",
+                )
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "LLM enrichment cannot run when offline mode is enabled."
     )
 
 
@@ -890,12 +944,13 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
     analyze_mock = AsyncMock(
         return_value={
             "session_id": "session-1",
-            "status": "completed",
+            "status": "skeptic_gate_failed",
             "total_cves": 2,
             "rescored_count": 2,
             "avg_score_reduction": 1.25,
             "elapsed_seconds": 4.2,
             "outputs": {"rescored-report.json": True},
+            "error": "Manual review is required.",
         }
     )
 
@@ -909,6 +964,17 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
         with patch(
             "dtvp.main.TMRescoreClient.create_session",
             new=AsyncMock(return_value={"session_id": "session-1"}),
+        ), patch(
+            "dtvp.main.TMRescoreClient.get_health",
+            new=AsyncMock(
+                return_value={
+                    "status": "ok",
+                    "llm_configured": True,
+                    "llm_backend": "openwebui",
+                    "llm_provider": "OpenWebUI",
+                    "llm_model": "mistral",
+                }
+            ),
         ):
             with patch("dtvp.main.TMRescoreClient.analyze_inventory", new=analyze_mock):
                 with patch(
@@ -925,7 +991,8 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
                         data={
                             "scope": "merged_versions",
                             "enrich": "true",
-                            "ollama_model": "llama3.1:8b",
+                            "mitre_enrichment": "true",
+                            "offline": "false",
                         },
                         files={
                             "threatmodel": (
@@ -948,6 +1015,7 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
                     )
                     assert results_response.status_code == 200
                     final_result = results_response.json()
+                    assert final_result["status"] == "skeptic_gate_failed"
                     assert final_result["scope"] == "merged_versions"
                     assert final_result["analyzed_versions"] == ["1.0.0", "1.1.0"]
                     assert final_result["sbom_component_count"] >= 3
@@ -957,11 +1025,15 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
                     )
                     assert final_result["llm_enrichment"] == {
                         "enabled": True,
-                        "ollama_model": "llama3.1:8b",
+                        "model": "mistral",
+                        "backend": "openwebui",
+                        "provider": "OpenWebUI",
                     }
 
     assert analyze_mock.await_args.kwargs["enrich"] is True
-    assert analyze_mock.await_args.kwargs["ollama_model"] == "llama3.1:8b"
+    assert "ollama_model" not in analyze_mock.await_args.kwargs
+    assert analyze_mock.await_args.kwargs["mitre_enrichment"] is True
+    assert analyze_mock.await_args.kwargs["offline"] is False
 
 
 def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(
@@ -1009,14 +1081,16 @@ def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(
                     new=AsyncMock(
                         side_effect=[
                             {
-                                "session_id": "session-1",
                                 "status": "running",
-                                "progress": 80,
+                                "step": 4,
+                                "total_steps": 5,
+                                "message": "Generating reports...",
                             },
                             {
-                                "session_id": "session-1",
                                 "status": "completed",
-                                "progress": 100,
+                                "step": 5,
+                                "total_steps": 5,
+                                "message": "Analysis completed.",
                             },
                         ]
                     ),
@@ -1184,18 +1258,24 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
         ):
             response = client.post(
                 "/api/projects/ExampleApp/tmrescore/analyze",
-                data={
-                    "scope": "merged_versions",
-                    "chain_analysis": "true",
-                    "prioritize": "true",
-                },
-                files={
-                    "threatmodel": (
-                        "model.tm7",
-                        b"tm7-data",
-                        "application/octet-stream",
-                    )
-                },
+                    data={
+                        "scope": "merged_versions",
+                        "chain_analysis": "true",
+                        "prioritize": "true",
+                        "mitre_enrichment": "true",
+                    },
+                    files={
+                        "threatmodel": (
+                            "model.tm7",
+                            b"tm7-data",
+                            "application/octet-stream",
+                        ),
+                        "countermeasures": (
+                            "countermeasures.yaml",
+                            b"mitigations: []",
+                            "application/x-yaml",
+                        ),
+                    },
             )
 
             assert response.status_code == 200
@@ -1220,6 +1300,11 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
             assert results_json.status_code == 200
             results_payload = results_json.json()
             assert results_payload["summary"]["vulnerability_count"] == 2
+            assert results_payload["summary"]["mitre_enrichment"] is True
+            assert (
+                mock_tmrescore.sessions[session_id]["files"]["countermeasures"]
+                == b"mitigations: []"
+            )
 
             cached_proposals = client.get(
                 "/api/projects/ExampleApp/tmrescore/proposals"
@@ -1247,7 +1332,7 @@ def test_tmrescore_backend_api_end_to_end_against_mock_service(client, mock_dt_c
             assert len(vex.json()["vulnerabilities"]) == 2
 
             enriched_sbom = client.get(
-                f"/api/tmrescore/sessions/{session_id}/outputs/enriched-sbom.json"
+                f"/api/tmrescore/sessions/{session_id}/outputs/enriched_sbom.cdx.json"
             )
             assert enriched_sbom.status_code == 200
             assert "vp:threatModelElementIds" in enriched_sbom.text

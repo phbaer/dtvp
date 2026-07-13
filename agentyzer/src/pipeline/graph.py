@@ -455,6 +455,46 @@ def build_graph() -> Any:
 graph = build_graph()
 
 
+def _sync_aggregate_verdict_step(
+    step_reports: Dict[str, Any],
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Keep the visible final-verdict step aligned with guardrail changes."""
+    report = step_reports.get("aggregate_verdict")
+    if not isinstance(report, dict):
+        return step_reports
+
+    synced_reports = dict(step_reports)
+    synced_report = dict(report)
+    verdict = result.get("verdict", "Inconclusive")
+    confidence = result.get("confidence", "Low")
+    synced_report["status"] = verdict
+
+    findings = dict(synced_report.get("findings") or {})
+    findings.update(
+        {
+            "verdict": verdict,
+            "confidence": confidence,
+            "affected": result.get("affected", False),
+            "exposure": result.get("exposure", "none"),
+            "reasoning": result.get("reasoning", ""),
+        }
+    )
+    synced_report["findings"] = findings
+
+    evidence = list(synced_report.get("evidence") or [])
+    verdict_line = f"Final verdict: {verdict} (confidence={confidence})"
+    if evidence and str(evidence[0]).startswith("Final verdict:"):
+        evidence[0] = verdict_line
+    else:
+        evidence.insert(0, verdict_line)
+    if "FINAL SANITY CHECK" in str(result.get("reasoning", "")):
+        evidence.append("Final sanity check adjusted the emitted verdict.")
+    synced_report["evidence"] = evidence
+    synced_reports["aggregate_verdict"] = synced_report
+    return synced_reports
+
+
 # ----------------------------------------------------------------------- #
 # Public entry point
 # ----------------------------------------------------------------------- #
@@ -525,13 +565,6 @@ async def run_pipeline(
     advisory_relevance = build_advisory_relevance_summary(step_reports)
     version_analysis = build_version_analysis_summary(result)
 
-    # Ordered step keys matching the graph topology
-    steps = [
-        {"step": key, **step_reports[key]}
-        for key in PIPELINE_STEP_ORDER
-        if key in step_reports
-    ]
-
     verdict_label = result.get("verdict", "Inconclusive")
     affected = result.get("affected", False)
     reasoning = result.get("reasoning", "")
@@ -545,7 +578,20 @@ async def run_pipeline(
         adjusted_cvss=adj_cvss,
     )
 
-    result = apply_audit_guardrail(result, audit_view, version_analysis)
+    result = apply_audit_guardrail(
+        result,
+        audit_view,
+        version_analysis,
+        final_state,
+    )
+    step_reports = _sync_aggregate_verdict_step(step_reports, result)
+
+    # Ordered step keys matching the graph topology
+    steps = [
+        {"step": key, **step_reports[key]}
+        for key in PIPELINE_STEP_ORDER
+        if key in step_reports
+    ]
 
     # ---- Map verdict to Dependency-Track fields ----
     verdict_label = result.get("verdict", "Inconclusive")

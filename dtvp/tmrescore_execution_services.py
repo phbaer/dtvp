@@ -4,6 +4,11 @@ from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
+from .tmrescore_task_services import (
+    calculate_tmrescore_progress,
+    is_tmrescore_terminal_status,
+)
+
 
 @dataclass(frozen=True)
 class TMRescoreExecutionServiceDeps:
@@ -31,7 +36,8 @@ class TMRescoreInventoryRequest:
     prioritize: bool
     what_if: bool
     enrich: bool
-    ollama_model: str
+    mitre_enrichment: bool
+    offline: bool
     max_wait_seconds: float
 
 
@@ -47,7 +53,8 @@ class TMRescoreExecutionRequest:
     prioritize: bool
     what_if: bool
     enrich: bool
-    ollama_model: str
+    mitre_enrichment: bool
+    offline: bool
 
 
 async def wait_for_tmrescore_completion(
@@ -62,7 +69,10 @@ async def wait_for_tmrescore_completion(
     while True:
         progress_payload = await tmrescore_client.get_progress(session_id)
         status = str(progress_payload.get("status") or task.get("status") or "running")
-        progress = int(progress_payload.get("progress") or task.get("progress") or 0)
+        progress = calculate_tmrescore_progress(
+            progress_payload,
+            int(task.get("progress") or 0),
+        )
         message = progress_payload.get("message") or deps.describe_tmrescore_progress(
             status, progress
         )
@@ -70,14 +80,16 @@ async def wait_for_tmrescore_completion(
 
         task["status"] = status
         task["progress"] = max(int(task.get("progress") or 0), min(progress, 100))
+        task["step"] = progress_payload.get("step")
+        task["total_steps"] = progress_payload.get("total_steps")
         task["message"] = message
         deps.touch_tmrescore_analysis_task(
             task,
-            mark_terminal=normalized_status in {"completed", "failed"},
+            mark_terminal=is_tmrescore_terminal_status(normalized_status),
         )
         deps.append_tmrescore_analysis_log(task, message)
 
-        if normalized_status == "completed":
+        if normalized_status in {"completed", "skeptic_gate_failed"}:
             return
         if normalized_status == "failed":
             raise RuntimeError(
@@ -109,7 +121,8 @@ async def submit_tmrescore_inventory(
             prioritize=request.prioritize,
             what_if=request.what_if,
             enrich=request.enrich,
-            ollama_model=request.ollama_model if request.enrich else None,
+            mitre_enrichment=request.mitre_enrichment,
+            offline=request.offline,
         )
     except httpx.ReadTimeout, httpx.TimeoutException:
         task["message"] = "TMRescore is still processing remotely. Polling progress..."
@@ -151,7 +164,7 @@ async def resolve_tmrescore_service_result(
             raise RuntimeError(
                 service_result.get("error") or "TMRescore analysis failed"
             )
-        if normalized_status != "completed":
+        if not is_tmrescore_terminal_status(normalized_status):
             task["status"] = returned_status
             task["progress"] = max(
                 int(task.get("progress") or 0),
@@ -206,7 +219,8 @@ async def run_tmrescore_analysis_task(
                     prioritize=request.prioritize,
                     what_if=request.what_if,
                     enrich=request.enrich,
-                    ollama_model=request.ollama_model,
+                    mitre_enrichment=request.mitre_enrichment,
+                    offline=request.offline,
                     max_wait_seconds=max_wait_seconds,
                 ),
             )
@@ -232,9 +246,14 @@ async def run_tmrescore_analysis_task(
             final_result = deps.build_tmrescore_analysis_response(
                 final_service_result, task
             )
+            result_status = str(final_service_result.get("status") or "completed").lower()
             task["status"] = "completed"
             task["progress"] = 100
-            task["message"] = "TMRescore analysis completed."
+            task["message"] = (
+                "TMRescore analysis completed with a review-skeptic gate failure."
+                if result_status == "skeptic_gate_failed"
+                else "TMRescore analysis completed."
+            )
             task["result"] = final_result
             task["error"] = None
             deps.touch_tmrescore_analysis_task(task, mark_terminal=True)

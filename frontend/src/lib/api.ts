@@ -251,6 +251,7 @@ export interface GroupedVulnRequestOptions {
 export interface TaskVulnGroupListQuery {
     q?: string;
     lifecycle?: string[];
+    inconsistency_reason?: string[];
     analysis?: string[];
     tag?: string;
     id?: string;
@@ -275,6 +276,7 @@ export interface TaskVulnGroupListQuery {
 export interface TaskVulnGroupListCounts {
     total: number;
     lifecycle: Record<string, number>;
+    inconsistency_reason?: Record<string, number>;
     analysis: Record<string, number>;
     dependency_relationship: {
         direct: number;
@@ -295,6 +297,12 @@ export interface TaskVulnGroupListCounts {
     automatic_assessment?: {
         WITH_AUTOMATIC_ASSESSMENT: number;
         WITHOUT_AUTOMATIC_ASSESSMENT: number;
+    };
+    assessment_restore?: {
+        WITH_RESTORE: number;
+        RECOVERABLE: number;
+        AMBIGUOUS: number;
+        NO_HISTORY: number;
     };
     attribution_age?: number;
 }
@@ -525,6 +533,88 @@ export const drainTaskVulnGroupDetails = async (
     return groups;
 };
 
+export interface AssessmentRestorePreviewFinding {
+    finding_uuid?: string;
+    project_uuid?: string;
+    project_name?: string;
+    project_version?: string;
+    component_uuid?: string;
+    component_name?: string;
+    component_version?: string;
+    vulnerability_uuid?: string;
+    status: string;
+    reason: string;
+    current_score?: number | null;
+    restored_score?: number | null;
+    restored_vector?: string | null;
+    candidate_vectors: string[];
+    source?: {
+        timestamp?: string | number | null;
+        commenter?: string | null;
+        comment_index?: number | null;
+    } | null;
+}
+
+export interface AssessmentRestorePreviewGroup {
+    group_id: string;
+    title?: string | null;
+    severity?: string | null;
+    status?: string | null;
+    reason?: string | null;
+    finding_count: number;
+    recoverable_finding_count: number;
+    findings: AssessmentRestorePreviewFinding[];
+}
+
+export interface AssessmentRestoreSummary {
+    groups?: number;
+    findings?: number;
+    recoverable_findings?: number;
+    ambiguous_findings?: number;
+    no_history_findings?: number;
+    attempted?: number;
+    succeeded?: number;
+    queued?: number;
+    failed?: number;
+    not_recoverable?: number;
+    unchanged?: number;
+    missing_identity?: number;
+}
+
+export interface AssessmentRestorePreviewResponse {
+    task_id: string;
+    items: AssessmentRestorePreviewGroup[];
+    summary: AssessmentRestoreSummary;
+}
+
+export interface AssessmentRestoreApplyResponse {
+    task_id: string;
+    summary: AssessmentRestoreSummary;
+    results: Array<Record<string, any>>;
+}
+
+export const previewAssessmentRestore = async (
+    taskId: string,
+    groupIds?: string[],
+): Promise<AssessmentRestorePreviewResponse> => {
+    const res = await api.post('/assessments/restore-preview', {
+        task_id: taskId,
+        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+    });
+    return res.data;
+};
+
+export const applyAssessmentRestore = async (
+    taskId: string,
+    groupIds?: string[],
+): Promise<AssessmentRestoreApplyResponse> => {
+    const res = await api.post('/assessments/restore-apply', {
+        task_id: taskId,
+        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+    });
+    return res.data;
+};
+
 // Start a task and poll until completion
 export const getGroupedVulns = async (
     name: string,
@@ -746,11 +836,13 @@ export interface TMRescoreAnalysisOptions {
     threatmodel: File;
     itemsCsv?: File | null;
     config?: File | null;
+    countermeasures?: File | null;
     chainAnalysis?: boolean;
     prioritize?: boolean;
     whatIf?: boolean;
     enrich?: boolean;
-    ollamaModel?: string;
+    mitreEnrichment?: boolean;
+    offline?: boolean;
 }
 
 export interface TMRescoreAnalysisProgressHandlers {
@@ -810,7 +902,7 @@ const waitForTMRescoreAnalysisCompletion = async (
 
     let progressState = initialProgressState;
     const pollIntervalMs = handlers?.pollIntervalMs ?? 1000;
-    while (progressState.status !== 'completed') {
+    while (!['completed', 'skeptic_gate_failed'].includes(progressState.status)) {
         await delay(pollIntervalMs);
         progressState = await getTMRescoreAnalysisProgress(sessionId);
         if (handlers?.onAnalysisProgress) {
@@ -833,7 +925,7 @@ export const resumeTMRescoreAnalysis = async (
         handlers.onAnalysisProgress(state);
     }
 
-    if (state.status === 'completed') {
+    if (['completed', 'skeptic_gate_failed'].includes(state.status)) {
         return getTMRescoreAnalysisResult(sessionId);
     }
 
@@ -852,12 +944,16 @@ export const runTMRescoreAnalysis = async (
     formData.append('prioritize', String(options.prioritize ?? true));
     formData.append('what_if', String(options.whatIf ?? false));
     formData.append('enrich', String(options.enrich ?? false));
-    formData.append('ollama_model', options.ollamaModel ?? 'qwen2.5:7b');
+    formData.append('mitre_enrichment', String(options.mitreEnrichment ?? false));
+    formData.append('offline', String(options.offline ?? false));
     if (options.itemsCsv) {
         formData.append('items_csv', options.itemsCsv);
     }
     if (options.config) {
         formData.append('config', options.config);
+    }
+    if (options.countermeasures) {
+        formData.append('countermeasures', options.countermeasures);
     }
 
     const res = await api.post(`/projects/${encodeURIComponent(projectName)}/tmrescore/analyze`, formData, {
@@ -1225,6 +1321,87 @@ export interface CodeAnalysisResultRecord {
     recorded_at?: string | null;
 }
 
+export interface CodeAnalysisBenchmarkRequest {
+    current_team?: string | null;
+    current_state?: string | null;
+    current_justification?: string | null;
+    current_details?: string | null;
+    current_cvss_score?: number | string | null;
+    current_cvss_vector?: string | null;
+}
+
+export interface CodeAnalysisBenchmarkFinding {
+    kind: string;
+    severity: 'info' | 'warning' | 'high' | string;
+    title: string;
+    detail: string;
+}
+
+export interface CodeAnalysisBenchmarkComparison {
+    schema_version: string;
+    comparison_method?: string;
+    evaluator?: {
+        provider?: string;
+        probabilistic?: boolean;
+        available?: boolean;
+        reason?: string;
+        backend?: string | null;
+        host?: string | null;
+        model?: string | null;
+        [key: string]: any;
+    };
+    analysis_run_id?: string | null;
+    queue_id?: string | null;
+    project_name?: string | null;
+    vuln_id?: string | null;
+    component_name?: string | null;
+    compared_at: string;
+    rating: {
+        score: number;
+        max_score: number;
+        grade: string;
+        label: string;
+        tone: 'green' | 'cyan' | 'amber' | 'orange' | 'red' | string;
+    };
+    human: {
+        team?: string | null;
+        state: string;
+        state_family: string;
+        justification: string;
+        cvss_score?: number | null;
+        cvss_vector?: string | null;
+        details_excerpt?: string;
+        has_details?: boolean;
+    };
+    automated: {
+        state: string;
+        state_family: string;
+        justification: string;
+        cvss_score?: number | null;
+        cvss_vector?: string | null;
+        verdict?: string;
+        confidence?: string;
+        exposure?: string;
+        summary_excerpt?: string;
+        reasoning_excerpt?: string;
+        versions_checked?: string[];
+        step_count?: number;
+        source?: string;
+    };
+    deltas: {
+        state_match: boolean;
+        state_family_match: boolean;
+        state_distance: number;
+        justification_match: boolean;
+        cvss_delta?: number | null;
+        cvss_vector_match?: boolean | null;
+        reasoning_overlap?: number | null;
+    };
+    findings: CodeAnalysisBenchmarkFinding[];
+    recommendation: string;
+    reasoning_summary?: string | null;
+}
+
 export const codeAnalysisStartAssessment = async (req: CodeAnalysisAssessRequest): Promise<CodeAnalysisJobSubmitted> => {
     const res = await api.post('/code-analysis/assess', req);
     return res.data;
@@ -1301,6 +1478,14 @@ export const codeAnalysisCompactResult = async (
     runId: string,
 ): Promise<Record<string, any>> => {
     const res = await api.post(`/code-analysis/results/${encodeURIComponent(runId)}/compact`);
+    return res.data;
+};
+
+export const codeAnalysisBenchmarkResult = async (
+    runId: string,
+    req: CodeAnalysisBenchmarkRequest,
+): Promise<CodeAnalysisBenchmarkComparison> => {
+    const res = await api.post(`/code-analysis/results/${encodeURIComponent(runId)}/benchmark`, req);
     return res.data;
 };
 
@@ -1388,6 +1573,7 @@ export const analysisQueueSubmit = async (req: {
     model?: string;
     llm_backend?: string;
     llm_provider?: string;
+    source?: 'manual' | 'benchmark' | string;
 }): Promise<AnalysisQueueItem> => {
     const res = await api.post('/analysis-queue/submit', req);
     return res.data;

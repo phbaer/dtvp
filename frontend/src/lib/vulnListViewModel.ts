@@ -1,4 +1,5 @@
 import type { FilterCounts, TeamCounts } from './group-classifier'
+import type { InconsistencyReason } from '../types'
 import type { VulnListFacets } from './vulnListFacets'
 import {
     addVulnListFacetItem,
@@ -33,6 +34,7 @@ export interface VulnListViewFilters {
     dependencyFilter: DependencyRelationship[]
     tmrescoreProposalFilter: TMRescoreProposalFilter[]
     automaticAssessmentFilter: AutomaticAssessmentFilter[]
+    inconsistencyReasonFilter?: InconsistencyReason[]
     versionFilterList: readonly string[]
     cvssVersionMismatchOnly: boolean
     attributionAgeDays: number | null
@@ -48,9 +50,13 @@ export type VulnListFilterModelFilters = Omit<VulnListViewFilters, 'sortBy' | 's
 export interface VulnListStaticStats {
     filterCounts: FilterCounts
     cvssVersionMismatchCount: number
+    assessmentRestoreCount: number
+    assessmentRestoreRecoverableCount: number
+    inconsistencyReasonCounts: Record<InconsistencyReason, number>
     teamTagCounts: Record<string, TeamCounts>
     needsApprovalGroups: VulnListItem['group'][]
     incompleteGroups: VulnListItem['group'][]
+    assessmentRestoreGroups: VulnListItem['group'][]
 }
 
 export interface VulnListFilterModel extends VulnListStaticStats {
@@ -133,6 +139,13 @@ const createTMRescoreCounts = (): Record<TMRescoreProposalFilter, number> => ({
 const createAutomaticAssessmentCounts = (): Record<AutomaticAssessmentFilter, number> => ({
     WITH_AUTOMATIC_ASSESSMENT: 0,
     WITHOUT_AUTOMATIC_ASSESSMENT: 0,
+})
+
+const createInconsistencyReasonCounts = (): Record<InconsistencyReason, number> => ({
+    MISSING_RESCORING_VECTOR: 0,
+    ANALYSIS_STATE_MISMATCH: 0,
+    TEAM_ASSESSMENT_MISMATCH: 0,
+    ASSESSMENT_DETAILS_MISMATCH: 0,
 })
 
 const incrementRelationship = (counts: RelationshipCounts, relationship: DependencyRelationship) => {
@@ -239,9 +252,13 @@ export const deriveVulnListBaseIndex = (
     const teamTagCounts: Record<string, TeamCounts> = {}
     const needsApprovalGroups: VulnListItem['group'][] = []
     const incompleteGroups: VulnListItem['group'][] = []
+    const assessmentRestoreGroups: VulnListItem['group'][] = []
     const groups: VulnListItem['group'][] = []
     const groupById = new Map<string, VulnListItem['group']>()
     let cvssVersionMismatchCount = 0
+    let assessmentRestoreCount = 0
+    let assessmentRestoreRecoverableCount = 0
+    const inconsistencyReasonCounts = createInconsistencyReasonCounts()
 
     for (const item of items) {
         addVulnListFacetItem(facetAccumulator, item)
@@ -250,6 +267,14 @@ export const deriveVulnListBaseIndex = (
         groups.push(item.group)
         groupById.set(item.id, item.group)
         if (item.cvssVersionMismatch) cvssVersionMismatchCount++
+        if (item.assessmentRestoreCount > 0) {
+            assessmentRestoreCount++
+            assessmentRestoreGroups.push(item.group)
+        }
+        if (item.assessmentRestoreRecoverableCount > 0) {
+            assessmentRestoreRecoverableCount++
+        }
+        for (const reason of item.inconsistencyReasons) inconsistencyReasonCounts[reason]++
         if (item.lifecycle === 'NEEDS_APPROVAL') needsApprovalGroups.push(item.group)
         if (item.lifecycle === 'INCOMPLETE') incompleteGroups.push(item.group)
     }
@@ -259,9 +284,13 @@ export const deriveVulnListBaseIndex = (
         staticStats: {
             filterCounts,
             cvssVersionMismatchCount,
+            assessmentRestoreCount,
+            assessmentRestoreRecoverableCount,
+            inconsistencyReasonCounts,
             teamTagCounts,
             needsApprovalGroups,
             incompleteGroups,
+            assessmentRestoreGroups,
         },
         groupLookup: { groups, groupById },
     }
@@ -279,12 +308,24 @@ export const deriveVulnListStaticStats = (
     const teamTagCounts: Record<string, TeamCounts> = {}
     const needsApprovalGroups: VulnListItem['group'][] = []
     const incompleteGroups: VulnListItem['group'][] = []
+    const assessmentRestoreGroups: VulnListItem['group'][] = []
     let cvssVersionMismatchCount = 0
+    let assessmentRestoreCount = 0
+    let assessmentRestoreRecoverableCount = 0
+    const inconsistencyReasonCounts = createInconsistencyReasonCounts()
 
     for (const item of items) {
         updateStaticFilterCounts(filterCounts, item)
         updateTeamCounts(teamTagCounts, item)
         if (item.cvssVersionMismatch) cvssVersionMismatchCount++
+        if (item.assessmentRestoreCount > 0) {
+            assessmentRestoreCount++
+            assessmentRestoreGroups.push(item.group)
+        }
+        if (item.assessmentRestoreRecoverableCount > 0) {
+            assessmentRestoreRecoverableCount++
+        }
+        for (const reason of item.inconsistencyReasons) inconsistencyReasonCounts[reason]++
         if (item.lifecycle === 'NEEDS_APPROVAL') needsApprovalGroups.push(item.group)
         if (item.lifecycle === 'INCOMPLETE') incompleteGroups.push(item.group)
     }
@@ -292,9 +333,13 @@ export const deriveVulnListStaticStats = (
     return {
         filterCounts,
         cvssVersionMismatchCount,
+        assessmentRestoreCount,
+        assessmentRestoreRecoverableCount,
+        inconsistencyReasonCounts,
         teamTagCounts,
         needsApprovalGroups,
         incompleteGroups,
+        assessmentRestoreGroups,
     }
 }
 
@@ -322,6 +367,7 @@ export const deriveVulnListFilterModel = (
         dependencyFilter: filters.dependencyFilter,
         tmrescoreProposalFilter: filters.tmrescoreProposalFilter,
         automaticAssessmentFilter: filters.automaticAssessmentFilter,
+        inconsistencyReasonFilter: filters.inconsistencyReasonFilter,
         versionFilterList: filters.versionFilterList,
         cvssVersionMismatchOnly: filters.cvssVersionMismatchOnly,
         attributionAgeDays: filters.attributionAgeDays,
@@ -389,6 +435,10 @@ export const deriveVulnListFilterModel = (
         analysisCounts,
         needsApprovalGroups: staticStats.needsApprovalGroups,
         incompleteGroups: staticStats.incompleteGroups,
+        assessmentRestoreRecoverableCount: staticStats.assessmentRestoreRecoverableCount,
+        assessmentRestoreCount: staticStats.assessmentRestoreCount,
+        inconsistencyReasonCounts: staticStats.inconsistencyReasonCounts,
+        assessmentRestoreGroups: staticStats.assessmentRestoreGroups,
     }
 }
 

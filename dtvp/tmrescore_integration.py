@@ -169,7 +169,8 @@ class TMRescoreClient:
         prioritize: bool = True,
         what_if: bool = False,
         enrich: bool = False,
-        ollama_model: Optional[str] = None,
+        mitre_enrichment: bool = False,
+        offline: bool = False,
     ) -> Dict[str, Any]:
         files = {
             "threatmodel": ("threatmodel.tm7", threatmodel_bytes, "application/octet-stream"),
@@ -188,7 +189,26 @@ class TMRescoreClient:
                 "prioritize": str(prioritize).lower(),
                 "what_if": str(what_if).lower(),
                 "enrich": str(enrich).lower(),
-                **({"ollama_model": ollama_model} if ollama_model else {}),
+                "mitre_enrichment": str(mitre_enrichment).lower(),
+                "offline": str(offline).lower(),
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def upload_countermeasures(
+        self,
+        session_id: str,
+        countermeasures_bytes: bytes,
+    ) -> Dict[str, Any]:
+        response = await self.client.put(
+            f"{self.settings.base_url}/api/v1/sessions/{session_id}/files/countermeasures",
+            files={
+                "file": (
+                    "countermeasures.yaml",
+                    countermeasures_bytes,
+                    "application/x-yaml",
+                )
             },
         )
         response.raise_for_status()

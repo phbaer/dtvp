@@ -1,6 +1,7 @@
 import type { AffectedVersion, GroupedVuln, Instance } from '../types'
 import {
     getAssessedTeams,
+    getGroupInconsistencyReasons,
     hasGlobalAssessmentForGroup,
     normalizeTags,
 } from './assessment-helpers'
@@ -30,6 +31,7 @@ const summarizeComponent = (component: Instance): Instance => ({
     is_suppressed: component.is_suppressed,
     is_direct_dependency: component.is_direct_dependency,
     tags: component.tags ? [...component.tags] : undefined,
+    assessment_restore: component.assessment_restore ? { ...component.assessment_restore } : undefined,
 })
 
 const summarizeAffectedVersion = (version: AffectedVersion): AffectedVersion => ({
@@ -48,6 +50,7 @@ export const summarizeGroupForList = (
         hasGlobalAssessmentForGroup(group) &&
         !classification.isPending
     ) || classification.lifecycle === 'ASSESSED_LEGACY'
+    const inconsistencyReasons = getGroupInconsistencyReasons(group)
 
     return {
         id: group.id,
@@ -63,13 +66,22 @@ export const summarizeGroupForList = (
         tags: group.tags ? [...group.tags] : undefined,
         assignees: group.assignees ? [...group.assignees] : undefined,
         aliases: group.aliases ? [...group.aliases] : undefined,
+        assessment_restore_count: group.assessment_restore_count ?? 0,
+        assessment_restore_recoverable_count: group.assessment_restore_recoverable_count ?? 0,
+        assessment_restore_reasons: group.assessment_restore_reasons ? [...group.assessment_restore_reasons] : [],
+        assessment_restore_status: group.assessment_restore_status ?? null,
         list_metadata: {
             lifecycle: classification.lifecycle,
+            inconsistency_reasons: inconsistencyReasons,
             is_pending: classification.isPending,
             is_open: classification.isOpen,
             is_assessed: isAssessed,
             technical_state: classification.technicalState,
             assessed_teams: normalizeAssessedTeams(getAssessedTeams(group), teamMapping),
+            assessment_restore_count: group.assessment_restore_count ?? 0,
+            assessment_restore_recoverable_count: group.assessment_restore_recoverable_count ?? 0,
+            assessment_restore_reasons: group.assessment_restore_reasons ? [...group.assessment_restore_reasons] : [],
+            assessment_restore_status: group.assessment_restore_status ?? null,
         },
         affected_versions: (group.affected_versions || []).map(summarizeAffectedVersion),
     }

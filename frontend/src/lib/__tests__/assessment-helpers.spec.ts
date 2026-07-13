@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getConsensusAssessment, getAssessedTeams, hasOpenTeamAssessment, normalizeTags } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getConsensusAssessment, getAssessedTeams, hasOpenTeamAssessment, normalizeTags } from '../assessment-helpers';
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -78,6 +78,7 @@ describe('Assessment Helpers', () => {
             };
 
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
+            expect(getGroupInconsistencyReasons(group)).toContain('ANALYSIS_STATE_MISMATCH');
         });
 
         it('should return INCONSISTENT when same state but different analysis details across instances', () => {
@@ -95,6 +96,10 @@ describe('Assessment Helpers', () => {
             };
 
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
+            expect(getGroupInconsistencyReasons(group)).toEqual(expect.arrayContaining([
+                'TEAM_ASSESSMENT_MISMATCH',
+                'ASSESSMENT_DETAILS_MISMATCH',
+            ]));
         });
 
         it('should return INCONSISTENT when same state but different analysis details across versions', () => {

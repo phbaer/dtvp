@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from test_setup import mock_dt
 from unittest.mock import patch
 from dtvp.logic import group_vulnerabilities, BOMAnalysisCache, sanitize_rescored_vector
+from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
 
 
 def test_group_vulnerabilities_basic():
@@ -236,6 +237,64 @@ def test_group_vulnerabilities_rescored_equal_to_base():
     assert len(grouped) == 1
     g = grouped[0]
     assert g["rescored_cvss"] == 9.8
+
+
+def test_group_vulnerabilities_marks_missing_rescoring_vector_recoverable():
+    historical_vector = (
+        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H/E:H/RL:O/RC:C/AR:L/MAC:H/MA:N"
+    )
+    v1_data = {
+        "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},
+        "vulnerabilities": [
+            {
+                "vulnerability": {
+                    "vulnId": "CVE-RESTORE",
+                    "uuid": "vuuid1",
+                    "severity": "HIGH",
+                    "cvssV3BaseScore": 7.5,
+                    "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                },
+                "component": {"name": "sqlite", "version": "3.0", "uuid": "comp1"},
+                "analysis": {
+                    "analysisState": "NOT_AFFECTED",
+                    "analysisDetails": (
+                        "--- [Team: General] [State: NOT_AFFECTED] "
+                        "[Assessed By: 100045117] "
+                        "[Justification: CODE_NOT_REACHABLE] ---\n\n"
+                        "sqlite not used in the product"
+                    ),
+                    "analysisComments": [
+                        {
+                            "timestamp": 1710000000000,
+                            "commenter": "100045117",
+                            "comment": (
+                                "Details: [Rescored: 0] "
+                                f"[Rescored Vector: {historical_vector}]"
+                            ),
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+
+    grouped = group_vulnerabilities([v1_data])
+
+    group = grouped[0]
+    component = group["affected_versions"][0]["components"][0]
+    candidate = component["assessment_restore"]
+    assert group["assessment_restore_count"] == 1
+    assert group["assessment_restore_recoverable_count"] == 1
+    assert candidate["status"] == "recoverable"
+    assert candidate["restored_score"] == 0
+    assert candidate["restored_vector"] == historical_vector
+
+    summary = summarize_grouped_vulnerabilities(grouped, {})[0]
+    assert summary["list_metadata"]["lifecycle"] == "INCONSISTENT"
+    assert summary["list_metadata"]["inconsistency_reasons"] == [
+        "MISSING_RESCORING_VECTOR"
+    ]
+    assert summary["list_metadata"]["assessment_restore_recoverable_count"] == 1
 
 
 def test_group_vulnerabilities_missing_data():

@@ -185,6 +185,22 @@ class CodeAnalysisClient:
         response.raise_for_status()
         return response.json()
 
+    async def compare_benchmark(
+        self,
+        benchmark: Dict[str, Any],
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"benchmark": benchmark}
+        selected_model = model or self.settings.DTVP_CODE_ANALYSIS_MODEL
+        if selected_model:
+            payload["model"] = selected_model
+        response = await self.client.post(
+            f"{self.settings.base_url}/benchmark/compare",
+            json=payload,
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def start_assessment_sync(
         self,
         vuln_id: str,

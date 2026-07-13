@@ -2,12 +2,13 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, History, Send, Ban, FileText, Copy, Trash2 } from 'lucide-vue-next'
 import {
+    codeAnalysisBenchmarkResult,
     codeAnalysisDeleteResult,
     codeAnalysisGetPrompts,
     codeAnalysisGetResult,
     codeAnalysisListVulnerabilityResults,
 } from '../lib/api'
-import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
+import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisBenchmarkComparison, CodeAnalysisBenchmarkFinding, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
 
@@ -23,6 +24,7 @@ const props = defineProps<{
     currentState?: string
     currentJustification?: string
     currentDetails?: string
+    currentTeam?: string
     currentCvssScore?: number | string | null
     currentCvssVector?: string
     currentAssigned?: string[]
@@ -38,6 +40,10 @@ const error = ref<string | null>(null)
 const result = ref<CodeAnalysisAssessResponse | null>(null)
 const stepsExpanded = ref(false)
 const coverageOpen = ref(false)
+const assessmentSummaryOpen = ref(true)
+const assessmentDraftOpen = ref(true)
+const assessmentBenchmarkOpen = ref(true)
+const ticketDraftOpen = ref(false)
 const selectedComponents = ref<Set<string>>(new Set())
 const componentDropdownOpen = ref(false)
 const submitting = ref(false)
@@ -56,8 +62,12 @@ const systemPromptLoading = ref(false)
 const systemPromptError = ref<string | null>(null)
 const systemPromptPayload = ref<Record<string, any> | null>(null)
 const ticketCopyState = ref<'idle' | 'copied' | 'error'>('idle')
+const benchmarkComparison = ref<CodeAnalysisBenchmarkComparison | null>(null)
+const benchmarkLoading = ref(false)
+const benchmarkError = ref<string | null>(null)
 const HISTORY_RESULT_REFRESH_ATTEMPTS = 4
 const HISTORY_RESULT_REFRESH_DELAY_MS = 500
+let benchmarkLoadCounter = 0
 
 // Track queue IDs for items submitted from this panel
 const pendingQueueIds = ref<string[]>([])
@@ -99,6 +109,10 @@ const allSelected = computed(() =>
 
 const noneSelected = computed(() => selectedComponents.value.size === 0)
 const hasOwnedTargets = computed(() => uniqueComponents.value.length > 0)
+const hasExistingAssessment = computed(() => {
+    const state = String(props.currentState || '').trim().toUpperCase()
+    return Boolean(state && state !== 'NOT_SET')
+})
 
 const visiblePersistedResults = computed(() => persistedResults.value.slice(0, 4))
 const latestPersistedResult = computed(() => persistedResults.value[0] || null)
@@ -616,12 +630,14 @@ const handleComponentError = (_batchId: string, component: string, err: string) 
     error.value = `[${component}] ${err}`
 }
 
-const startScan = async () => {
+const startAnalysis = async () => {
     submitting.value = true
     componentDropdownOpen.value = false
     error.value = null
     result.value = null
     selectedFullRecord.value = null
+    benchmarkComparison.value = null
+    benchmarkError.value = null
     collectedResults.value = []
     pendingQueueIds.value = []
 
@@ -646,6 +662,7 @@ const startScan = async () => {
                 (res, item) => handleComponentComplete(batchId, comp, res, item),
                 (err) => handleComponentError(batchId, comp, err),
                 props.affectedProductVersions,
+                'manual',
             )
             pendingQueueIds.value.push(item.queue_id)
             batch.queueIds.push(item.queue_id)
@@ -656,6 +673,8 @@ const startScan = async () => {
         submitting.value = false
     }
 }
+
+const startScan = async () => startAnalysis()
 
 const loadPersistedResults = async (options: LoadPersistedResultsOptions = {}) => {
     const expectedRunId = options.expectedRunId || null
@@ -1104,13 +1123,180 @@ const copyTicketText = async () => {
 }
 
 const sourceClass = (source?: string | null) => {
+    if (source === 'benchmark') return 'text-amber-200 border-amber-700/40 bg-amber-950/25'
     if (source === 'automatic') return 'text-cyan-300 border-cyan-700/40 bg-cyan-900/20'
     if (source === 'follow-up') return 'text-blue-300 border-blue-700/40 bg-blue-900/20'
     return 'text-gray-300 border-gray-700 bg-gray-950'
 }
 
+const sourceLabel = (source?: string | null) => {
+    if (source === 'automatic') return 'Auto'
+    if (source === 'benchmark') return 'Benchmark'
+    if (source === 'follow-up') return 'Follow-up'
+    return 'Manual'
+}
+
+const benchmarkEvaluatorLabel = (comparison: CodeAnalysisBenchmarkComparison) => {
+    if (comparison.evaluator?.probabilistic) {
+        const model = comparison.evaluator.model ? ` · ${comparison.evaluator.model}` : ''
+        return `Agentyzer probabilistic${model}`
+    }
+    return 'DTVP fallback'
+}
+
 const verdictClass = (record: CodeAnalysisResultRecord) =>
     record.summary?.affected ? 'text-red-300' : 'text-green-400'
+
+const benchmarkRatingClass = (tone?: string) => {
+    switch (tone) {
+        case 'green': return 'border-green-700/40 bg-green-950/30 text-green-200'
+        case 'cyan': return 'border-cyan-700/40 bg-cyan-950/30 text-cyan-200'
+        case 'amber': return 'border-amber-700/40 bg-amber-950/30 text-amber-200'
+        case 'orange': return 'border-orange-700/40 bg-orange-950/30 text-orange-200'
+        case 'red': return 'border-red-700/40 bg-red-950/30 text-red-200'
+        default: return 'border-gray-700/50 bg-gray-950/40 text-gray-300'
+    }
+}
+
+const benchmarkFindingClass = (severity?: string) => {
+    switch (severity) {
+        case 'high': return 'border-red-700/40 bg-red-950/20 text-red-200'
+        case 'warning': return 'border-amber-700/40 bg-amber-950/20 text-amber-200'
+        default: return 'border-gray-800 bg-gray-950/35 text-gray-300'
+    }
+}
+
+type BenchmarkAlignment = 'aligned' | 'different' | 'review'
+
+type BenchmarkComparisonState = {
+    key: 'state' | 'justification' | 'cvss' | 'cvss_vector'
+    label: string
+    alignment: BenchmarkAlignment
+    detail: string
+}
+
+const benchmarkComparisonStates = computed<BenchmarkComparisonState[]>(() => {
+    const comparison = benchmarkComparison.value
+    if (!comparison) return []
+
+    const existingScore = comparison.human.cvss_score
+    const analysisScore = comparison.automated.cvss_score
+    const scoreComparable = existingScore != null && analysisScore != null
+    const vectorMatch = comparison.deltas.cvss_vector_match
+
+    return [
+        {
+            key: 'state',
+            label: 'State Agreement',
+            alignment: comparison.deltas.state_match || comparison.deltas.state_family_match
+                ? 'aligned'
+                : 'different',
+            detail: `${formatBenchmarkState(comparison.human.state)} ↔ ${formatBenchmarkState(comparison.automated.state)}`,
+        },
+        {
+            key: 'justification',
+            label: 'Justification Agreement',
+            alignment: comparison.deltas.justification_match ? 'aligned' : 'different',
+            detail: `${formatBenchmarkState(comparison.human.justification)} ↔ ${formatBenchmarkState(comparison.automated.justification)}`,
+        },
+        {
+            key: 'cvss',
+            label: 'CVSS Score Agreement',
+            alignment: !scoreComparable
+                ? 'review'
+                : comparison.deltas.cvss_delta === 0
+                    ? 'aligned'
+                    : 'different',
+            detail: `${formatBenchmarkCvss(existingScore)} ↔ ${formatBenchmarkCvss(analysisScore)}`,
+        },
+        {
+            key: 'cvss_vector',
+            label: 'CVSS Vector Agreement',
+            alignment: vectorMatch == null ? 'review' : vectorMatch ? 'aligned' : 'different',
+            detail: vectorMatch == null
+                ? 'One or both vectors are not set'
+                : vectorMatch
+                    ? 'Vectors match'
+                    : 'Vectors differ',
+        },
+    ]
+})
+
+const benchmarkAlignmentIcon = (alignment: BenchmarkAlignment) => {
+    if (alignment === 'aligned') return CheckCircle
+    if (alignment === 'different') return XCircle
+    return AlertTriangle
+}
+
+const benchmarkAlignmentLabel = (alignment: BenchmarkAlignment) => {
+    if (alignment === 'aligned') return 'Aligned'
+    if (alignment === 'different') return 'Different'
+    return 'Review'
+}
+
+const benchmarkAlignmentClass = (alignment: BenchmarkAlignment) => {
+    if (alignment === 'aligned') return 'border-green-800/50 bg-green-950/20 text-green-200'
+    if (alignment === 'different') return 'border-red-800/50 bg-red-950/20 text-red-200'
+    return 'border-amber-800/50 bg-amber-950/20 text-amber-200'
+}
+
+const benchmarkAlignmentTextClass = (alignment: BenchmarkAlignment) => {
+    if (alignment === 'aligned') return 'text-green-300'
+    if (alignment === 'different') return 'text-red-300'
+    return 'text-amber-300'
+}
+
+const benchmarkFindingAlignment = (finding: CodeAnalysisBenchmarkFinding): BenchmarkAlignment => {
+    const structured = benchmarkComparisonStates.value.find(state => state.key === finding.kind)
+    if (structured) return structured.alignment
+    if (finding.severity === 'high') return 'different'
+    if (finding.severity === 'warning') return 'review'
+    return 'aligned'
+}
+
+const formatBenchmarkState = (value?: string | null) =>
+    String(value || 'NOT_SET').replace(/_/g, ' ')
+
+const formatBenchmarkCvss = (value?: number | null) =>
+    value == null ? 'Not set' : Number(value).toFixed(1).replace(/\.0$/, '.0')
+
+const buildBenchmarkRequest = () => ({
+    current_team: props.currentTeam || 'General',
+    current_state: props.currentState || 'NOT_SET',
+    current_justification: props.currentJustification || 'NOT_SET',
+    current_details: props.currentDetails || '',
+    current_cvss_score: props.currentCvssScore ?? null,
+    current_cvss_vector: props.currentCvssVector || '',
+})
+
+const loadBenchmarkComparison = async () => {
+    const record = selectedPersistedResult.value
+    if (!hasExistingAssessment.value || !record?.analysis_run_id || !result.value) {
+        benchmarkComparison.value = null
+        benchmarkError.value = null
+        benchmarkLoading.value = false
+        return
+    }
+
+    const loadId = ++benchmarkLoadCounter
+    benchmarkLoading.value = true
+    benchmarkError.value = null
+    try {
+        const comparison = await codeAnalysisBenchmarkResult(record.analysis_run_id, buildBenchmarkRequest())
+        if (loadId === benchmarkLoadCounter) {
+            benchmarkComparison.value = comparison
+        }
+    } catch (err: any) {
+        if (loadId === benchmarkLoadCounter) {
+            benchmarkComparison.value = null
+            benchmarkError.value = err?.response?.data?.detail || err?.message || 'Unable to compare this analysis result.'
+        }
+    } finally {
+        if (loadId === benchmarkLoadCounter) {
+            benchmarkLoading.value = false
+        }
+    }
+}
 
 const loadSystemPrompts = async () => {
     if (systemPromptOpen.value) {
@@ -1796,7 +1982,24 @@ watch(result, (current) => {
     coverageOpen.value = false
     stepsExpanded.value = false
     systemPromptOpen.value = false
+    assessmentSummaryOpen.value = true
+    assessmentDraftOpen.value = true
+    assessmentBenchmarkOpen.value = true
+    ticketDraftOpen.value = false
     emit('result-change', current, analyzedComponents.value)
+})
+
+watch([
+    selectedPersistedResult,
+    result,
+    () => props.currentTeam,
+    () => props.currentState,
+    () => props.currentJustification,
+    () => props.currentDetails,
+    () => props.currentCvssScore,
+    () => props.currentCvssVector,
+], () => {
+    void loadBenchmarkComparison()
 })
 
 watch(analyzedComponents, (components) => {
@@ -1837,7 +2040,7 @@ watch(analyzedComponents, (components) => {
                     {{ selectedComponents.size }} selected
                 </span>
             </div>
-            <div class="grid gap-3 items-end md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <div class="grid gap-3 items-end md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
                 <div class="relative">
                     <label for="code-analysis-components" class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Components</label>
                     <button
@@ -1898,6 +2101,7 @@ watch(analyzedComponents, (components) => {
                     <Zap v-else :size="14" />
                     {{ submitting ? 'Submitting...' : activeQueueItems.length > 0 ? 'Analyze More' : 'Analyze' }}
                 </button>
+
             </div>
         </section>
 
@@ -1920,7 +2124,9 @@ watch(analyzedComponents, (components) => {
                     <Loader2 v-if="qi.status === 'running'" :size="12" class="animate-spin text-blue-400" />
                     <Clock v-else :size="12" class="text-yellow-400" />
                     <span class="min-w-0 truncate font-mono text-gray-200">{{ qi.component_name }}</span>
-                    <span v-if="qi.source === 'automatic'" class="text-[10px] text-cyan-300 uppercase font-semibold">Auto</span>
+                    <span v-if="qi.source && qi.source !== 'manual'" class="rounded border px-1.5 py-0.5 text-[10px] uppercase font-semibold" :class="sourceClass(qi.source)">
+                        {{ sourceLabel(qi.source) }}
+                    </span>
                     <span v-if="qi.status === 'queued' && qi.position > 0" class="text-yellow-400 font-bold">#{{ qi.position }}</span>
                     <span class="uppercase font-semibold" :class="qi.status === 'running' ? 'text-blue-400' : 'text-yellow-400'">{{ qi.status }}</span>
                 </div>
@@ -1949,7 +2155,9 @@ watch(analyzedComponents, (components) => {
                 <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <CheckCircle :size="12" class="text-green-400" />
                     <span class="min-w-0 truncate font-mono text-gray-200">{{ qi.component_name }}</span>
-                    <span v-if="qi.source === 'automatic'" class="text-[10px] text-cyan-300 uppercase font-semibold">Auto</span>
+                    <span v-if="qi.source && qi.source !== 'manual'" class="rounded border px-1.5 py-0.5 text-[10px] uppercase font-semibold" :class="sourceClass(qi.source)">
+                        {{ sourceLabel(qi.source) }}
+                    </span>
                     <span class="uppercase font-semibold text-green-400">completed</span>
                 </div>
                 <span class="text-[10px] text-cyan-400 font-semibold uppercase">View Result</span>
@@ -1967,7 +2175,7 @@ watch(analyzedComponents, (components) => {
                         <History :size="12" class="shrink-0 text-cyan-400" />
                         <span class="min-w-0 truncate font-mono text-gray-200">{{ record.component_name }}</span>
                         <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase font-semibold" :class="sourceClass(record.source)">
-                            {{ record.source || 'manual' }}
+                            {{ sourceLabel(record.source) }}
                         </span>
                         <span class="shrink-0 uppercase font-semibold" :class="verdictClass(record)">
                             {{ record.summary?.verdict || 'saved' }}
@@ -2050,8 +2258,8 @@ watch(analyzedComponents, (components) => {
         </div>
 
         <div v-if="result" class="space-y-4 border-t border-gray-800/80 pt-3">
-            <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Decision</h6>
-            <section class="rounded border p-3" :class="{
+            <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Assessment Decision</h6>
+            <section data-testid="assessment-decision" class="rounded border p-3" :class="{
                 'bg-red-900/20 border-red-700/40': result.assessment.affected,
                 'bg-green-900/20 border-green-700/40': !result.assessment.affected,
             }">
@@ -2077,9 +2285,88 @@ watch(analyzedComponents, (components) => {
                         Use as Assessment Draft
                     </button>
                 </div>
-                <div v-if="assessmentDraftPreview" class="mt-3 border-t border-white/10 pt-3">
-                    <div class="mb-2 flex w-full flex-wrap items-center justify-between gap-2 text-[11px]">
-                        <span class="font-bold uppercase tracking-wider text-gray-400">
+                <div class="mt-3 border-t border-white/10 pt-3">
+                    <h6 class="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">Evidence Quality</h6>
+                    <div class="flex flex-wrap gap-2">
+                        <span
+                            v-for="badge in evidenceQualityBadges"
+                            :key="badge.label"
+                            class="inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                            :class="evidenceQualityClass(badge.tone)"
+                            :title="badge.detail"
+                        >
+                            {{ badge.label }}
+                        </span>
+                    </div>
+                </div>
+            </section>
+
+            <section data-testid="assessment-summary" class="overflow-hidden rounded border border-cyan-900/50 bg-cyan-950/10">
+                <button
+                    type="button"
+                    @click="assessmentSummaryOpen = !assessmentSummaryOpen"
+                    class="flex w-full flex-wrap items-center justify-between gap-2 bg-cyan-950/20 px-3 py-2 text-left transition-colors hover:bg-cyan-950/30"
+                    :aria-expanded="assessmentSummaryOpen"
+                >
+                    <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-cyan-200">
+                        <component :is="assessmentSummaryOpen ? ChevronUp : ChevronDown" :size="12" />
+                        Summary
+                    </span>
+                    <span class="text-[10px] font-semibold text-gray-500">Rationale, final reasoning, and follow-up</span>
+                </button>
+                <div v-if="assessmentSummaryOpen" data-testid="assessment-summary-body" class="space-y-3 border-t border-cyan-900/40 p-3">
+                    <p class="text-sm leading-relaxed text-gray-200">{{ result.assessment.summary }}</p>
+                    <div v-if="result.assessment.reasoning" class="border-t border-cyan-900/30 pt-3">
+                        <h6 class="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">Reasoning</h6>
+                        <p class="text-xs leading-relaxed text-gray-400">{{ result.assessment.reasoning }}</p>
+                    </div>
+                    <div
+                        v-if="followUpParentRunId"
+                        class="grid items-end gap-3 border-t border-cyan-900/30 pt-3 md:grid-cols-[minmax(0,1fr)_minmax(8rem,14rem)_auto]"
+                    >
+                        <div>
+                            <label for="code-analysis-follow-up" class="mb-1 block text-[11px] font-semibold uppercase text-gray-500">Follow-up Question</label>
+                            <input
+                                id="code-analysis-follow-up"
+                                v-model="followUpQuestion"
+                                :disabled="controlsBusy"
+                                placeholder="e.g. Is the platform package affected?"
+                                class="w-full rounded border border-gray-700 bg-gray-950 p-2 text-xs focus:border-cyan-500 disabled:opacity-50"
+                                @keyup.enter="startFollowUp"
+                            />
+                        </div>
+                        <div>
+                            <label for="code-analysis-follow-up-target" class="mb-1 block text-[11px] font-semibold uppercase text-gray-500">Target</label>
+                            <input
+                                id="code-analysis-follow-up-target"
+                                v-model="followUpComponent"
+                                :disabled="controlsBusy"
+                                class="w-full rounded border border-gray-700 bg-gray-950 p-2 font-mono text-xs focus:border-cyan-500 disabled:opacity-50"
+                                @keyup.enter="startFollowUp"
+                            />
+                        </div>
+                        <button
+                            @click="startFollowUp"
+                            :disabled="controlsBusy || !followUpParentRunId || !followUpQuestion.trim()"
+                            class="flex items-center justify-center gap-2 whitespace-nowrap rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            <Loader2 v-if="followUpSubmitting" :size="14" class="animate-spin" />
+                            <Send v-else :size="14" />
+                            Follow-up
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <section v-if="assessmentDraftPreview" data-testid="assessment-draft" class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
+                    <button
+                        type="button"
+                        @click="assessmentDraftOpen = !assessmentDraftOpen"
+                        class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
+                        :aria-expanded="assessmentDraftOpen"
+                    >
+                        <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                            <component :is="assessmentDraftOpen ? ChevronUp : ChevronDown" :size="12" />
                             Assessment Draft
                         </span>
                         <span class="flex flex-wrap items-center gap-2">
@@ -2088,8 +2375,8 @@ watch(analyzedComponents, (components) => {
                                 Target {{ assessmentDraftPreview.targetTeam }}
                             </span>
                         </span>
-                    </div>
-                    <div class="overflow-x-auto rounded border border-gray-800">
+                    </button>
+                    <div v-if="assessmentDraftOpen" data-testid="assessment-draft-body" class="overflow-x-auto border-t border-gray-800 p-3">
                         <table class="min-w-full text-left text-[11px]">
                             <thead class="bg-gray-950/70 text-[10px] uppercase tracking-wider text-gray-500">
                                 <tr>
@@ -2120,67 +2407,152 @@ watch(analyzedComponents, (components) => {
                             </tbody>
                         </table>
                     </div>
-                </div>
-                <div class="mt-3 border-t border-white/10 pt-3">
-                    <h6 class="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">Evidence Quality</h6>
-                    <div class="flex flex-wrap gap-2">
-                        <span
-                            v-for="badge in evidenceQualityBadges"
-                            :key="badge.label"
-                            class="inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide"
-                            :class="evidenceQualityClass(badge.tone)"
-                            :title="badge.detail"
-                        >
-                            {{ badge.label }}
-                        </span>
-                    </div>
-                </div>
-                <div
-                    v-if="followUpParentRunId"
-                    class="mt-3 grid gap-3 border-t border-white/10 pt-3 items-end md:grid-cols-[minmax(0,1fr)_minmax(8rem,14rem)_auto]"
-                >
-                    <div>
-                        <label for="code-analysis-follow-up" class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Follow-up Question</label>
-                        <input
-                            id="code-analysis-follow-up"
-                            v-model="followUpQuestion"
-                            :disabled="controlsBusy"
-                            placeholder="e.g. Is the platform package affected?"
-                            class="w-full p-2 rounded bg-gray-950 border border-gray-700 focus:border-cyan-500 text-xs disabled:opacity-50"
-                            @keyup.enter="startFollowUp"
-                        />
-                    </div>
-                    <div>
-                        <label for="code-analysis-follow-up-target" class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Target</label>
-                        <input
-                            id="code-analysis-follow-up-target"
-                            v-model="followUpComponent"
-                            :disabled="controlsBusy"
-                            class="w-full p-2 rounded bg-gray-950 border border-gray-700 focus:border-cyan-500 text-xs font-mono disabled:opacity-50"
-                            @keyup.enter="startFollowUp"
-                        />
-                    </div>
-                    <button
-                        @click="startFollowUp"
-                        :disabled="controlsBusy || !followUpParentRunId || !followUpQuestion.trim()"
-                        class="flex items-center justify-center gap-2 px-4 py-2 rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                        <Loader2 v-if="followUpSubmitting" :size="14" class="animate-spin" />
-                        <Send v-else :size="14" />
-                        Follow-up
-                    </button>
-                </div>
             </section>
 
-            <section class="space-y-3 border-t border-gray-800/80 pt-3">
-                <div>
-                    <h6 class="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-500">Summary</h6>
-                    <p class="text-sm leading-relaxed text-gray-200">{{ result.assessment.summary }}</p>
-                </div>
-                <div v-if="result.assessment.reasoning">
-                    <h6 class="mb-1 text-[11px] font-bold uppercase tracking-wider text-gray-500">Reasoning</h6>
-                    <p class="text-xs leading-relaxed text-gray-400">{{ result.assessment.reasoning }}</p>
-                </div>
+            <section v-if="hasExistingAssessment && selectedPersistedResult" data-testid="assessment-benchmark" class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
+                    <button
+                        type="button"
+                        @click="assessmentBenchmarkOpen = !assessmentBenchmarkOpen"
+                        class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
+                        :aria-expanded="assessmentBenchmarkOpen"
+                    >
+                        <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                            <component :is="assessmentBenchmarkOpen ? ChevronUp : ChevronDown" :size="12" />
+                            Assessment Benchmark
+                        </span>
+                        <span
+                            v-if="benchmarkComparison"
+                            class="inline-flex items-center gap-2 rounded border px-2 py-1 font-bold uppercase"
+                            :class="benchmarkRatingClass(benchmarkComparison.rating.tone)"
+                        >
+                            Agreement <span class="font-mono">{{ benchmarkComparison.rating.score }}/{{ benchmarkComparison.rating.max_score }}</span>
+                            <span>{{ benchmarkComparison.rating.grade }}</span>
+                            <span>{{ benchmarkComparison.rating.label }}</span>
+                        </span>
+                    </button>
+                    <div v-if="assessmentBenchmarkOpen" data-testid="assessment-benchmark-body" class="space-y-2 border-t border-gray-800 p-3">
+                    <div v-if="benchmarkComparison" class="mb-2 flex flex-wrap items-center gap-2 text-[10px] text-gray-500">
+                        <span class="rounded border border-gray-800 bg-gray-950/45 px-2 py-0.5 font-semibold uppercase">
+                            {{ benchmarkEvaluatorLabel(benchmarkComparison) }}
+                        </span>
+                        <span v-if="benchmarkComparison.evaluator?.reason" class="text-amber-300">
+                            {{ benchmarkComparison.evaluator.reason }}
+                        </span>
+                    </div>
+                    <p v-if="benchmarkComparison" class="text-[10px] leading-relaxed text-gray-500">
+                        The existing assessment is the current saved state. The analysis result is the selected run; neither side is assumed to be human-authored or ground truth.
+                    </p>
+                    <div v-if="benchmarkLoading" class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/35 px-3 py-2 text-xs text-gray-500">
+                        <Loader2 :size="12" class="animate-spin" />
+                        Comparing selected run with current assessment
+                    </div>
+                    <div v-else-if="benchmarkError" class="rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+                        {{ benchmarkError }}
+                    </div>
+                    <div v-else-if="benchmarkComparison" class="space-y-2">
+                        <div class="grid gap-3 md:grid-cols-2">
+                            <div class="rounded border border-gray-700/60 bg-gray-950/45 p-3">
+                                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-2">
+                                    <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Existing Assessment</div>
+                                    <div class="text-xs font-semibold text-gray-200">{{ formatBenchmarkState(benchmarkComparison.human.state) }}</div>
+                                </div>
+                                <div class="mt-3 grid gap-3">
+                                    <div>
+                                        <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Score</div>
+                                        <div class="mt-1 font-mono text-lg font-semibold text-gray-100">{{ formatBenchmarkCvss(benchmarkComparison.human.cvss_score) }}</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Vector</div>
+                                        <div class="mt-1 break-all rounded bg-gray-950/80 p-2 font-mono text-[10px] leading-relaxed text-gray-300">{{ benchmarkComparison.human.cvss_vector || 'Not set' }}</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">Justification</div>
+                                        <div class="mt-1 text-xs text-gray-300">{{ formatBenchmarkState(benchmarkComparison.human.justification) }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="rounded border border-cyan-900/50 bg-cyan-950/10 p-3">
+                                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-cyan-900/30 pb-2">
+                                    <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">Analysis Result</div>
+                                    <div class="text-xs font-semibold text-gray-200">{{ formatBenchmarkState(benchmarkComparison.automated.state) }}</div>
+                                </div>
+                                <div class="mt-3 grid gap-3">
+                                    <div>
+                                        <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Score</div>
+                                        <div class="mt-1 font-mono text-lg font-semibold text-gray-100">{{ formatBenchmarkCvss(benchmarkComparison.automated.cvss_score) }}</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Vector</div>
+                                        <div class="mt-1 break-all rounded bg-gray-950/80 p-2 font-mono text-[10px] leading-relaxed text-gray-300">{{ benchmarkComparison.automated.cvss_vector || 'Not set' }}</div>
+                                    </div>
+                                    <div>
+                                        <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">Justification</div>
+                                        <div class="mt-1 text-xs text-gray-300">{{ formatBenchmarkState(benchmarkComparison.automated.justification) }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rounded border border-gray-800 bg-gray-950/25 p-3">
+                            <div class="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">Comparison States</div>
+                            <div class="grid gap-2 md:grid-cols-2">
+                                <div
+                                    v-for="state in benchmarkComparisonStates"
+                                    :key="state.key"
+                                    data-testid="benchmark-comparison-state"
+                                    :data-alignment="state.alignment"
+                                    class="flex items-start gap-2 rounded border p-2"
+                                    :class="benchmarkAlignmentClass(state.alignment)"
+                                >
+                                    <component :is="benchmarkAlignmentIcon(state.alignment)" :size="15" class="mt-0.5 shrink-0" />
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex flex-wrap items-center justify-between gap-2">
+                                            <span class="text-[10px] font-bold uppercase tracking-wider">{{ state.label }}</span>
+                                            <span class="rounded border border-current/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                                                {{ benchmarkAlignmentLabel(state.alignment) }}
+                                            </span>
+                                        </div>
+                                        <div class="mt-1 break-words text-[10px] opacity-80">{{ state.detail }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rounded border border-gray-800 bg-gray-950/35 p-2 text-xs leading-relaxed text-gray-300">
+                            {{ benchmarkComparison.recommendation }}
+                        </div>
+                        <div v-if="benchmarkComparison.reasoning_summary" class="rounded border border-cyan-900/40 bg-cyan-950/15 p-2 text-xs leading-relaxed text-cyan-100">
+                            {{ benchmarkComparison.reasoning_summary }}
+                        </div>
+                        <div class="grid gap-2 md:grid-cols-2">
+                            <div
+                                v-for="finding in benchmarkComparison.findings"
+                                :key="`${finding.kind}-${finding.title}`"
+                                data-testid="benchmark-finding"
+                                :data-alignment="benchmarkFindingAlignment(finding)"
+                                class="flex items-start gap-2 rounded border p-2 text-xs"
+                                :class="benchmarkFindingClass(finding.severity)"
+                            >
+                                <component
+                                    :is="benchmarkAlignmentIcon(benchmarkFindingAlignment(finding))"
+                                    :size="14"
+                                    class="mt-0.5 shrink-0"
+                                    :class="benchmarkAlignmentTextClass(benchmarkFindingAlignment(finding))"
+                                />
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <span class="text-[10px] font-bold uppercase tracking-wider">{{ finding.title }}</span>
+                                        <span
+                                            class="text-[9px] font-bold uppercase tracking-wider"
+                                            :class="benchmarkAlignmentTextClass(benchmarkFindingAlignment(finding))"
+                                        >
+                                            {{ benchmarkAlignmentLabel(benchmarkFindingAlignment(finding)) }}
+                                        </span>
+                                    </div>
+                                    <div class="mt-1 leading-relaxed opacity-90">{{ finding.detail }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    </div>
             </section>
 
             <section v-if="result.component_results?.length" class="space-y-2 border-t border-gray-800/80 pt-3">
@@ -2203,29 +2575,40 @@ watch(analyzedComponents, (components) => {
                 </div>
             </section>
 
-            <section v-if="ticketText" class="rounded border border-red-800/40 bg-red-950/20 p-3 space-y-2">
-                <div class="flex items-center justify-between gap-3">
-                    <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-red-200">
-                        <FileText :size="14" />
-                        Ticket Draft
-                    </div>
+            <section v-if="ticketText" data-testid="ticket-draft" class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
+                <div class="flex items-center gap-2 px-3 py-2 transition-colors hover:bg-gray-950/60">
+                    <button
+                        type="button"
+                        @click="ticketDraftOpen = !ticketDraftOpen"
+                        class="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
+                        :aria-expanded="ticketDraftOpen"
+                    >
+                        <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-red-200">
+                            <component :is="ticketDraftOpen ? ChevronUp : ChevronDown" :size="12" />
+                            <FileText :size="13" />
+                            Ticket Draft
+                        </span>
+                        <span class="text-[10px] font-semibold text-gray-500">Developer-ready remediation ticket</span>
+                    </button>
                     <button
                         type="button"
                         @click="copyTicketText"
-                        class="inline-flex items-center gap-1.5 rounded bg-red-700 px-2.5 py-1 text-[10px] font-bold uppercase text-white hover:bg-red-600"
+                        class="inline-flex shrink-0 items-center gap-1.5 rounded bg-red-700 px-2.5 py-1 text-[10px] font-bold uppercase text-white hover:bg-red-600"
                     >
                         <CheckCircle v-if="ticketCopyState === 'copied'" :size="12" />
                         <Copy v-else :size="12" />
                         {{ ticketCopyState === 'copied' ? 'Copied' : 'Copy' }}
                     </button>
                 </div>
-                <textarea
-                    aria-label="Generated ticket text"
-                    readonly
-                    :value="ticketText"
-                    class="min-h-64 w-full resize-y rounded border border-gray-700 bg-gray-950 p-2 font-mono text-xs leading-relaxed text-gray-300"
-                />
-                <div v-if="ticketCopyState === 'error'" class="text-[10px] text-amber-300">
+                <div v-if="ticketDraftOpen" data-testid="ticket-draft-body" class="border-t border-red-800/40 bg-red-950/20 p-3">
+                    <textarea
+                        aria-label="Generated ticket text"
+                        readonly
+                        :value="ticketText"
+                        class="min-h-64 w-full resize-y rounded border border-gray-700 bg-gray-950 p-2 font-mono text-xs leading-relaxed text-gray-300"
+                    />
+                </div>
+                <div v-if="ticketCopyState === 'error'" class="border-t border-gray-800 px-3 py-2 text-[10px] text-amber-300">
                     Clipboard copy failed
                 </div>
             </section>
@@ -2233,11 +2616,11 @@ watch(analyzedComponents, (components) => {
             <section class="space-y-2 border-t border-gray-800/80 pt-3">
                 <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Analysis Artifacts</h6>
 
-                <div class="space-y-2">
+                <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
                     <button
                         type="button"
                         @click="coverageOpen = !coverageOpen"
-                        class="flex w-full flex-wrap items-center justify-between gap-2 rounded border border-gray-800 bg-gray-950/40 px-3 py-2 text-left transition-colors hover:border-gray-700 hover:bg-gray-950/60"
+                        class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
                     >
                         <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <component :is="coverageOpen ? ChevronUp : ChevronDown" :size="12" />
@@ -2245,7 +2628,7 @@ watch(analyzedComponents, (components) => {
                         </span>
                         <span class="text-[10px] font-semibold text-gray-500">{{ checkedVersionCoverageSummary }}</span>
                     </button>
-                    <div v-if="coverageOpen" class="space-y-2 rounded border border-gray-800 bg-gray-950/40 p-3">
+                    <div v-if="coverageOpen" class="space-y-2 border-t border-gray-800 p-3">
                         <p class="text-[10px] leading-relaxed text-gray-500">
                             Product Version is populated for DTVP affected-version tag or branch checks. Workspace and lock-file rows describe the current analyzed checkout.
                         </p>
@@ -2286,11 +2669,11 @@ watch(analyzedComponents, (components) => {
                     </div>
                 </div>
 
-                <div class="space-y-2">
+                <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
                     <button
                         type="button"
                         @click="loadSystemPrompts"
-                        class="flex w-full flex-wrap items-center justify-between gap-2 rounded border border-gray-800 bg-gray-950/40 px-3 py-2 text-left transition-colors hover:border-gray-700 hover:bg-gray-950/60"
+                        class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
                     >
                         <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <Loader2 v-if="systemPromptLoading" :size="12" class="animate-spin" />
@@ -2299,7 +2682,7 @@ watch(analyzedComponents, (components) => {
                         </span>
                         <span class="text-[10px] font-semibold text-gray-500">{{ llmConversationSummary }}</span>
                     </button>
-                    <div v-if="systemPromptOpen" class="rounded border border-gray-700/50 bg-gray-950/60 p-2">
+                    <div v-if="systemPromptOpen" class="border-t border-gray-700/50 bg-gray-950/60 p-2">
                         <div v-if="systemPromptLoading" class="flex items-center gap-2 text-xs text-gray-500">
                             <Loader2 :size="12" class="animate-spin" />
                             Loading conversation
@@ -2407,11 +2790,11 @@ watch(analyzedComponents, (components) => {
                     </div>
                 </div>
 
-                <div class="space-y-2">
+                <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
                     <button
                         type="button"
                         @click="stepsExpanded = !stepsExpanded"
-                        class="flex w-full flex-wrap items-center justify-between gap-2 rounded border border-gray-800 bg-gray-950/40 px-3 py-2 text-left transition-colors hover:border-gray-700 hover:bg-gray-950/60"
+                        class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
                     >
                         <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <component :is="stepsExpanded ? ChevronUp : ChevronDown" :size="12" />
@@ -2419,7 +2802,7 @@ watch(analyzedComponents, (components) => {
                         </span>
                         <span class="text-[10px] font-semibold text-gray-500">{{ pipelineEvidenceSummary }}</span>
                     </button>
-                    <div v-if="stepsExpanded" class="rounded border border-gray-800 bg-gray-950/40 p-3">
+                    <div v-if="stepsExpanded" class="border-t border-gray-800 p-3">
                         <div v-if="!result.steps.length" class="text-xs text-gray-500">No pipeline evidence reported.</div>
                         <div v-else class="grid gap-2 md:grid-cols-2">
                             <div v-for="(step, i) in result.steps" :key="i" class="p-3 rounded bg-gray-950/40 border border-gray-800">

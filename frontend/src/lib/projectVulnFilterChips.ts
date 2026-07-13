@@ -1,8 +1,10 @@
 import type { AutomaticAssessmentFilter, DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
+import type { InconsistencyReason } from '../types'
 
 export type ActiveFilterChipKey =
     | 'lifecycle'
     | 'analysis'
+    | 'inconsistencyReason'
     | 'dependency'
     | 'id'
     | 'tag'
@@ -27,6 +29,8 @@ export interface ProjectVulnFilterOption {
 export interface BuildActiveFilterChipsInput {
     lifecycleFilters: readonly string[]
     lifecycleOptions: readonly ProjectVulnFilterOption[]
+    inconsistencyReasonFilters?: readonly InconsistencyReason[]
+    inconsistencyReasonOptions?: readonly ProjectVulnFilterOption[]
     analysisFilters: readonly string[]
     analysisOptions: readonly ProjectVulnFilterOption[]
     dependencyFilters: readonly DependencyRelationship[]
@@ -57,6 +61,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     sortBy: string
     sortOrder: 'asc' | 'desc'
     lifecycleFilters: readonly string[]
+    inconsistencyReasonFilters?: readonly InconsistencyReason[]
     defaultLifecycleFilters: readonly string[]
     analysisFilters: readonly string[]
     defaultAnalysisFilters: readonly string[]
@@ -101,6 +106,8 @@ const hasAllOptionsSelected = (
 export function buildActiveFilterChips({
     lifecycleFilters,
     lifecycleOptions,
+    inconsistencyReasonFilters = [],
+    inconsistencyReasonOptions = [],
     analysisFilters,
     analysisOptions,
     dependencyFilters,
@@ -122,6 +129,12 @@ export function buildActiveFilterChips({
 
     if (!hasAllOptionsSelected(lifecycleFilters, lifecycleOptions)) {
         chips.push({ key: 'lifecycle', label: `Lifecycle: ${summarizedSelection(lifecycleFilters, lifecycleOptions, 'All lifecycle')}` })
+    }
+    if (inconsistencyReasonFilters.length > 0) {
+        chips.push({
+            key: 'inconsistencyReason',
+            label: `Inconsistency: ${summarizedSelection(inconsistencyReasonFilters, inconsistencyReasonOptions, 'All reasons')}`,
+        })
     }
     if (!hasAllOptionsSelected(analysisFilters, analysisOptions)) {
         chips.push({ key: 'analysis', label: `State: ${summarizedSelection(analysisFilters, analysisOptions, 'All states')}` })
@@ -162,6 +175,7 @@ export function hasCustomProjectVulnFilterState({
     sortBy,
     sortOrder,
     lifecycleFilters,
+    inconsistencyReasonFilters = [],
     defaultLifecycleFilters,
     analysisFilters,
     defaultAnalysisFilters,
@@ -183,6 +197,7 @@ export function hasCustomProjectVulnFilterState({
         || sortBy !== 'rescored-severity'
         || sortOrder !== 'desc'
         || !sameStringSet(lifecycleFilters, defaultLifecycleFilters)
+        || inconsistencyReasonFilters.length > 0
         || !sameStringSet(analysisFilters, defaultAnalysisFilters)
         || !sameStringSet(dependencyFilters, defaultDependencyFilters)
         || !sameStringSet(tmrescoreFilters, defaultTMRescoreFilters)

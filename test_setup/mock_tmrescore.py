@@ -93,6 +93,10 @@ def _build_session_info(session: Dict[str, Any]) -> Dict[str, Any]:
         "has_sbom": session["files"]["sbom"] is not None,
         "has_cves": session["files"]["cves"] is not None,
         "has_items_csv": session["files"]["items_csv"] is not None,
+        "has_countermeasures": session["files"]["countermeasures"] is not None,
+        "prior_vex_count": 0,
+        "code_review_verdict_count": 0,
+        "compliance_declaration_count": 0,
         "has_analysis_config": session["files"]["config"] is not None,
         "status": session["status"],
     }
@@ -206,6 +210,8 @@ def _perform_analysis(
     what_if: bool,
     enrich: bool,
     ollama_model: Optional[str],
+    mitre_enrichment: bool = False,
+    offline: bool = False,
 ) -> Dict[str, Any]:
     sbom = _parse_sbom_bytes(session["files"]["sbom"])
     enriched_sbom = _enrich_sbom(sbom)
@@ -265,6 +271,8 @@ def _perform_analysis(
             "what_if": what_if,
             "enrich": enrich,
             "ollama_model": ollama_model if enrich else None,
+            "mitre_enrichment": mitre_enrichment,
+            "offline": offline,
         },
         "vulnerabilities": rescored_vulnerabilities,
     }
@@ -318,8 +326,10 @@ def _perform_analysis(
     }
 
     output_files = {
-        "rescored-report.json": json.dumps(raw_result, indent=2).encode("utf-8"),
-        "enriched-sbom.json": json.dumps(enriched_sbom, indent=2).encode("utf-8"),
+        "rescore_report.html": b"<html><body><h1>Mock unified action report</h1></body></html>",
+        "rescore_results.json": json.dumps(raw_result, indent=2).encode("utf-8"),
+        "rescore_vex.cdx.json": json.dumps(vex_result, indent=2).encode("utf-8"),
+        "enriched_sbom.cdx.json": json.dumps(enriched_sbom, indent=2).encode("utf-8"),
         "summary.txt": (
             f"Mock TMRescore session {session['session_id']}\n"
             f"Application: {session['application_name']} {session['application_version']}\n"
@@ -342,17 +352,18 @@ def _perform_analysis(
             "ollama_model": ollama_model if enrich else None,
         },
         "outputs": {
-            filename: {
-                "size": len(content),
-                "content_type": "application/json" if filename.endswith(".json") else "text/plain",
-            }
-            for filename, content in output_files.items()
+            "html_report": f"/api/v1/sessions/{session['session_id']}/outputs/rescore_report.html",
+            "json_output": f"/api/v1/sessions/{session['session_id']}/outputs/rescore_results.json",
+            "vex_output": f"/api/v1/sessions/{session['session_id']}/outputs/rescore_vex.cdx.json",
+            "enriched_sbom": f"/api/v1/sessions/{session['session_id']}/outputs/enriched_sbom.cdx.json",
         },
         "error": None,
     }
 
     session["status"] = "completed"
-    session["progress"] = 100
+    session["progress_step"] = 4
+    session["progress_total"] = 4
+    session["progress_message"] = "Analysis completed."
     session["results"] = result
     session["results_json"] = raw_result
     session["results_vex"] = vex_result
@@ -370,13 +381,16 @@ def _new_session(payload: SessionCreate) -> Dict[str, Any]:
         "project_id": project_id,
         "created_at": _now_iso(),
         "status": "created",
-        "progress": 0,
+        "progress_step": 0,
+        "progress_total": 0,
+        "progress_message": "",
         "files": {
             "threatmodel": None,
             "sbom": None,
             "cves": None,
             "items_csv": None,
             "config": None,
+            "countermeasures": None,
         },
         "config_json": None,
         "results": None,
@@ -434,6 +448,14 @@ async def upload_items(session_id: str, file: UploadFile = File(...)):
     return {"status": "ok"}
 
 
+@app.put("/api/v1/sessions/{session_id}/files/countermeasures")
+async def upload_countermeasures(session_id: str, file: UploadFile = File(...)):
+    session = _get_session(session_id)
+    content = await file.read()
+    session["files"]["countermeasures"] = content
+    return {"filename": file.filename, "size": len(content)}
+
+
 @app.put("/api/v1/sessions/{session_id}/config")
 async def update_config(session_id: str, config: Dict[str, Any]):
     session = _get_session(session_id)
@@ -457,11 +479,22 @@ async def run_analysis(
     what_if: bool = False,
     enrich: bool = False,
     ollama_model: str = "qwen2.5:7b",
+    mitre_enrichment: bool = False,
+    offline: bool = False,
 ):
     session = _get_session(session_id)
     if not session["files"]["threatmodel"] or not session["files"]["sbom"]:
         raise HTTPException(status_code=400, detail="Threat model and SBOM are required")
-    return _perform_analysis(session, chain_analysis, prioritize, what_if, enrich, ollama_model)
+    return _perform_analysis(
+        session,
+        chain_analysis,
+        prioritize,
+        what_if,
+        enrich,
+        ollama_model,
+        mitre_enrichment,
+        offline,
+    )
 
 
 @app.post("/api/v1/sessions/{session_id}/inventory")
@@ -476,6 +509,8 @@ async def analyze_inventory(
     what_if: bool = Form(False),
     enrich: bool = Form(False),
     ollama_model: str = Form("qwen2.5:7b"),
+    mitre_enrichment: bool = Form(False),
+    offline: bool = Form(False),
 ):
     session = _get_session(session_id)
     session["files"]["threatmodel"] = await threatmodel.read()
@@ -483,8 +518,19 @@ async def analyze_inventory(
     session["files"]["items_csv"] = await items_csv.read() if items_csv else None
     session["files"]["config"] = await config.read() if config else None
     session["status"] = "running"
-    session["progress"] = 75
-    return _perform_analysis(session, chain_analysis, prioritize, what_if, enrich, ollama_model)
+    session["progress_step"] = 3
+    session["progress_total"] = 4
+    session["progress_message"] = "Generating outputs..."
+    return _perform_analysis(
+        session,
+        chain_analysis,
+        prioritize,
+        what_if,
+        enrich,
+        ollama_model,
+        mitre_enrichment,
+        offline,
+    )
 
 
 @app.get("/api/v1/sessions/{session_id}/results")
@@ -517,7 +563,12 @@ async def get_output_file(session_id: str, filename: str):
     content = session["output_files"].get(filename)
     if content is None:
         raise HTTPException(status_code=404, detail="Output file not found")
-    media_type = "application/json" if filename.endswith(".json") else "text/plain"
+    if filename.endswith(".json"):
+        media_type = "application/json"
+    elif filename.endswith(".html"):
+        media_type = "text/html"
+    else:
+        media_type = "text/plain"
     return Response(
         content=content,
         media_type=media_type,
@@ -525,19 +576,44 @@ async def get_output_file(session_id: str, filename: str):
     )
 
 
+@app.get("/api/v1/sessions/{session_id}/outputs")
+async def list_output_files(session_id: str):
+    session = _get_session(session_id)
+    return {
+        "outputs": [
+            {
+                "filename": filename,
+                "size": len(content),
+                "url": f"/api/v1/sessions/{session_id}/outputs/{filename}",
+            }
+            for filename, content in sorted(session["output_files"].items())
+        ]
+    }
+
+
 @app.get("/api/v1/sessions/{session_id}/progress")
 async def get_progress(session_id: str):
     session = _get_session(session_id)
     return {
-        "session_id": session_id,
         "status": session["status"],
-        "progress": session["progress"],
+        "step": session["progress_step"],
+        "total_steps": session["progress_total"],
+        "message": session["progress_message"],
     }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "mock-tmrescore", "ollama_configured": True}
+    return {
+        "status": "ok",
+        "service": "mock-tmrescore",
+        "ollama_configured": True,
+        "llm_configured": True,
+        "llm_backend": "ollama",
+        "llm_provider": "Ollama",
+        "llm_model": "qwen2.5:7b",
+        "nvd": {"session_cache": "automatic"},
+    }
 
 
 @app.get("/ui")

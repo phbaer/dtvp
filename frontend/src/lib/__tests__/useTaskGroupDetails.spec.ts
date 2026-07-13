@@ -81,6 +81,24 @@ describe('useTaskGroupDetails', () => {
         expect(details.selectedGroupLoading.value).toBe(false)
     })
 
+    it('force-refreshes a cached full group from the task detail endpoint', async () => {
+        const api = await import('../api')
+        const cachedGroup = group('CVE-1')
+        const refreshedGroup = { ...group('CVE-1'), title: 'fresh' }
+        vi.mocked(api.getTaskVulnGroup).mockResolvedValue(refreshedGroup)
+
+        const { details } = createHarness({ 'CVE-1': group('CVE-1', true) })
+        details.cacheGroup(cachedGroup)
+
+        await expect(details.ensureFullGroup('CVE-1')).resolves.toEqual(cachedGroup)
+        await expect(details.refreshGroup('CVE-1', { showLoading: false })).resolves.toEqual(refreshedGroup)
+
+        expect(api.getTaskVulnGroup).toHaveBeenCalledTimes(1)
+        expect(api.getTaskVulnGroup).toHaveBeenCalledWith('task-1', 'CVE-1')
+        expect(details.fullGroupCache.value['CVE-1']).toEqual(refreshedGroup)
+        expect(details.selectedGroup.value).toEqual(refreshedGroup)
+    })
+
     it('ignores a stale detail response after reset', async () => {
         const api = await import('../api')
         let resolveDetails: (value: GroupedVuln) => void = () => {}

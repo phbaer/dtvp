@@ -1,4 +1,5 @@
-import type { GroupedVuln, Tags, TagValue } from '../types';
+import type { GroupedVuln, InconsistencyReason, Tags, TagValue } from '../types';
+import { normalizeInconsistencyReasons } from './inconsistency';
 
 export interface AssessmentBlock {
     team: string; // 'General' or specific team name
@@ -690,6 +691,90 @@ export function hasOpenTeamAssessment(group: GroupedVuln, requiredTeamsOrTags?: 
     return hasOpenTeamAssessmentFromSummary(getGroupAssessmentSummary(group), requiredTeamsOrTags, teamMapping);
 }
 
+const getGroupInconsistencyReasonsFromSummary = (
+    group: GroupedVuln,
+    summary: GroupAssessmentSummary,
+): InconsistencyReason[] => {
+    const { allInstances, componentStates, blocks, hasAnyAssessment, hasGlobalAssessment } = summary;
+    const reasons: InconsistencyReason[] = [];
+    if (allInstances.length === 0) return reasons;
+
+    if ((group.assessment_restore_count || group.list_metadata?.assessment_restore_count || 0) > 0) {
+        reasons.push('MISSING_RESCORING_VECTOR');
+    }
+
+    const distinctNonMissingStates = new Set(componentStates.filter(state => state !== 'NOT_SET'));
+    if (distinctNonMissingStates.size > 1) {
+        reasons.push('ANALYSIS_STATE_MISMATCH');
+    }
+
+    const isLegacy = (blocks.length === 0 && hasAnyAssessment) || (
+        blocks.length === 1
+        && blocks[0].team === 'General'
+        && blocks[0].state === 'NOT_SET'
+        && hasAnyAssessment
+    );
+
+    if (!hasGlobalAssessment) {
+        const normalizeBlockSignature = (block: AssessmentBlock) => JSON.stringify({
+            team: block.team,
+            state: block.state,
+            justification: block.justification,
+            details: block.details.replace(/\s+/g, ' ').trim(),
+        });
+        const instanceBlockSignatures = allInstances
+            .map(instance => {
+                const significantBlocks = parseAssessmentBlocks(getInstanceAssessmentDetails(instance))
+                    .filter(block => block.state !== 'NOT_SET' && block.team !== 'General');
+                if (significantBlocks.length === 0) return '';
+                return Array.from(new Set(significantBlocks.map(normalizeBlockSignature)))
+                    .sort((left, right) => left.localeCompare(right))
+                    .join('||');
+            })
+            .filter(Boolean);
+        const hasInconsistentInstanceBlocks = allInstances.some(instance => {
+            const significantBlocks = parseAssessmentBlocks(getInstanceAssessmentDetails(instance))
+                .filter(block => block.state !== 'NOT_SET' && block.team !== 'General');
+            return significantBlocks.length > 1
+                && new Set(significantBlocks.map(normalizeBlockSignature)).size > 1;
+        });
+
+        if (
+            new Set(instanceBlockSignatures).size > 1
+            || (hasInconsistentInstanceBlocks && instanceBlockSignatures.length <= 1)
+        ) {
+            reasons.push('TEAM_ASSESSMENT_MISMATCH');
+        }
+    }
+
+    const normalizeDetails = (details: string) => details
+        .replace(/\[Date:\s*[^\]]*\]/g, '')
+        .replace(/\[Assessed By:\s*[^\]]*\]/g, '')
+        .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
+        .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
+        .replace(/\[Status: Pending Review\]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const assessedDetails = allInstances
+        .filter(instance => getInstanceAssessmentState(instance) !== 'NOT_SET')
+        .map(instance => normalizeDetails(getInstanceAssessmentDetails(instance)))
+        .filter(Boolean);
+    const detailsMismatch = assessedDetails.length > 1
+        && assessedDetails.some(details => details !== assessedDetails[0]);
+    if (detailsMismatch && (!isLegacy || reasons.length > 0)) {
+        reasons.push('ASSESSMENT_DETAILS_MISMATCH');
+    }
+
+    return reasons;
+};
+
+export function getGroupInconsistencyReasons(group: GroupedVuln): InconsistencyReason[] {
+    if (group.list_metadata && Array.isArray(group.list_metadata.inconsistency_reasons)) {
+        return normalizeInconsistencyReasons(group.list_metadata.inconsistency_reasons);
+    }
+    return getGroupInconsistencyReasonsFromSummary(group, getGroupAssessmentSummary(group));
+}
+
 const getGroupLifecycleFromSummary = (
     group: GroupedVuln,
     summary: GroupAssessmentSummary,
@@ -699,13 +784,10 @@ const getGroupLifecycleFromSummary = (
     const requiredTeams = teamMapping
         ? normalizeTags(requiredTeamsOrTags, teamMapping)
         : (requiredTeamsOrTags || []).map(tagToString).filter(Boolean);
-    const { allInstances, componentStates: allCompStates, hasAnyAssessment, hasMissingComponent, blocks, hasGlobalAssessment: hasGlobal, isPendingReview } = summary;
+    const { allInstances, hasAnyAssessment, hasMissingComponent, blocks, hasGlobalAssessment: hasGlobal, isPendingReview } = summary;
     if (allInstances.length === 0) return 'OPEN';
 
-    // If multiple distinct technical states exist across components and there is
-    // no structured block information, treat as INCONSISTENT.
-    const distinctNonMissingStates = Array.from(new Set(allCompStates.filter(s => s !== 'NOT_SET')));
-    if (distinctNonMissingStates.length > 1) {
+    if (getGroupInconsistencyReasonsFromSummary(group, summary).length > 0) {
         return 'INCONSISTENT';
     }
 
@@ -726,82 +808,6 @@ const getGroupLifecycleFromSummary = (
         hasAnyAssessment
     ) {
         return 'ASSESSED_LEGACY';
-    }
-
-    // Detect conflicts from structured assessment blocks directly.
-    // This prevents lifecycle flips when raw component analysis_state values are
-    // refreshed to a single summary state (e.g. IN_TRIAGE) while team/global
-    // blocks still contain conflicting states.
-    // However, when a global assessment exists, it is authoritative — different
-    // team opinions should NOT cause INCONSISTENT.
-    if (!hasGlobal) {
-        const normalizeBlockSignature = (block: AssessmentBlock) => JSON.stringify({
-            team: block.team,
-            state: block.state,
-            justification: block.justification,
-            details: block.details.replace(/\s+/g, ' ').trim()
-        });
-
-        const instanceBlockSignatures = allInstances
-            .map(inst => {
-                const details = getInstanceAssessmentDetails(inst);
-                const instanceBlocks = parseAssessmentBlocks(details);
-                const significantBlocks = instanceBlocks
-                    .filter(b => b.state !== 'NOT_SET' && b.team !== 'General');
-                if (significantBlocks.length === 0) return '';
-
-                const distinctSignatures = Array.from(new Set(significantBlocks.map(normalizeBlockSignature)))
-                    .sort((left, right) => left.localeCompare(right));
-                return distinctSignatures.join('||');
-            })
-            .filter(Boolean);
-
-        const hasInconsistentInstanceBlocks = allInstances.some(inst => {
-            const details = getInstanceAssessmentDetails(inst);
-            const instanceBlocks = parseAssessmentBlocks(details);
-            const significantBlocks = instanceBlocks
-                .filter(b => b.state !== 'NOT_SET' && b.team !== 'General');
-            if (significantBlocks.length <= 1) return false;
-            const distinctSignatures = Array.from(new Set(significantBlocks.map(normalizeBlockSignature)));
-            return distinctSignatures.length > 1;
-        });
-
-        if (new Set(instanceBlockSignatures).size > 1) {
-            return 'INCONSISTENT';
-        }
-
-        if (hasInconsistentInstanceBlocks && instanceBlockSignatures.length <= 1) {
-            return 'INCONSISTENT';
-        }
-    }
-
-    // Check if analysis_details content differs across versions/components.
-    // This must happen BEFORE lifecycle checks (pending review, missing teams)
-    // because differing details is a fundamental inconsistency that takes priority.
-    // Normalize by stripping timestamps, assessor names, rescored tags, and
-    // whitespace so that only the substantive assessment text is compared.
-    // Only compare instances that have a non-NOT_SET analysis_state — unassessed
-    // instances naturally have different (empty) details and should not trigger
-    // INCONSISTENT (that's an INCOMPLETE scenario instead).
-    const normalizeDetails = (d: string) =>
-        d.replace(/\[Date:\s*[^\]]*\]/g, '')
-         .replace(/\[Assessed By:\s*[^\]]*\]/g, '')
-         .replace(/\[Rescored:\s*[\d\.]+\]/g, '')
-         .replace(/\[Rescored Vector:\s*[^\]]+\]/g, '')
-         .replace(/\[Status: Pending Review\]/g, '')
-         .replace(/\s+/g, ' ')
-         .trim();
-
-    const assessedDetails = allInstances
-        .filter(i => getInstanceAssessmentState(i) !== 'NOT_SET')
-        .map(i => normalizeDetails(getInstanceAssessmentDetails(i)))
-        .filter(d => d.length > 0);
-
-    if (assessedDetails.length > 1) {
-        const first = assessedDetails[0];
-        if (assessedDetails.some(d => d !== first)) {
-            return 'INCONSISTENT';
-        }
     }
 
     if (isPendingReview) return 'NEEDS_APPROVAL';

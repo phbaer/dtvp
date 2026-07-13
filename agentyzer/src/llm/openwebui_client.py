@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +30,36 @@ logger = logging.getLogger(__name__)
 _MAX_LOG_CHARS = 800
 _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 _TOOL_CALL_MODES = {"auto", "off"}
+_TOKEN_ESTIMATE_CHARS = 3
+_CONTEXT_SAFETY_MARGIN = 256
+_CONTEXT_RETRIES = 2
+_MIN_COMPLETION_TOKENS = 256
+_TRUNCATION_MARKER = (
+    "\n\n...[truncated by Agentyzer to fit OpenWebUI context budget]...\n\n"
+)
+_CONTEXT_ERROR_RE = re.compile(
+    r"maximum context length is\s+(?P<max>\d+)\s+tokens.*?"
+    r"requested\s+(?P<requested>\d+)\s+output tokens.*?"
+    r"prompt contains at least\s+(?P<input>\d+)\s+input tokens",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+class OpenWebUIContextLengthError(RuntimeError):
+    """OpenWebUI rejected a request because prompt + output exceeded context."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        max_context_tokens: int | None = None,
+        requested_output_tokens: int | None = None,
+        input_tokens: int | None = None,
+    ):
+        super().__init__(message)
+        self.max_context_tokens = max_context_tokens
+        self.requested_output_tokens = requested_output_tokens
+        self.input_tokens = input_tokens
 
 
 def _truncate_for_log(value: str, limit: int = _MAX_LOG_CHARS) -> str:
@@ -51,6 +83,230 @@ def _normalize_tool_call_mode(value: str | None) -> str:
         "Unknown OPENWEBUI_TOOL_CALLS=%r; falling back to auto", value
     )
     return "auto"
+
+
+def _positive_int(value: Any, *, default: int | None = None) -> int | None:
+    if value in (None, ""):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _nonnegative_int(value: Any, *, default: int | None = None) -> int | None:
+    if value in (None, ""):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _int_env(name: str, *, default: int | None = None) -> int | None:
+    return _positive_int(os.environ.get(name), default=default)
+
+
+def _nonnegative_int_env(name: str, *, default: int | None = None) -> int | None:
+    return _nonnegative_int(os.environ.get(name), default=default)
+
+
+def _estimate_text_tokens(value: Any) -> int:
+    text = "" if value is None else str(value)
+    if not text:
+        return 0
+    return max(1, (len(text) + _TOKEN_ESTIMATE_CHARS - 1) // _TOKEN_ESTIMATE_CHARS)
+
+
+def _estimate_payload_input_tokens(payload: dict) -> int:
+    tokens = 8
+    for message in payload.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        tokens += 4
+        tokens += _estimate_text_tokens(message.get("role", ""))
+        tokens += _estimate_text_tokens(message.get("content", ""))
+        tool_calls = message.get("tool_calls")
+        if tool_calls:
+            tokens += _estimate_text_tokens(json.dumps(tool_calls, ensure_ascii=True))
+    tools = payload.get("tools")
+    if tools:
+        tokens += _estimate_text_tokens(json.dumps(tools, ensure_ascii=True))
+    return tokens
+
+
+def _truncate_middle(text: str, target_chars: int) -> str:
+    if len(text) <= target_chars:
+        return text
+    if target_chars <= len(_TRUNCATION_MARKER) + 80:
+        return text[: max(0, target_chars - len(_TRUNCATION_MARKER))].rstrip() + _TRUNCATION_MARKER
+
+    available = target_chars - len(_TRUNCATION_MARKER)
+    head_chars = max(40, int(available * 0.6))
+    tail_chars = max(40, available - head_chars)
+    return (
+        text[:head_chars].rstrip()
+        + _TRUNCATION_MARKER
+        + text[-tail_chars:].lstrip()
+    )
+
+
+def _select_truncation_candidate(messages: list[dict[str, Any]]) -> int | None:
+    priority = {"user": 0, "tool": 0, "assistant": 1, "system": 2}
+    candidates: list[tuple[int, int, int]] = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, str) or len(content) <= len(_TRUNCATION_MARKER) + 200:
+            continue
+        role = str(message.get("role") or "")
+        candidates.append((priority.get(role, 1), -len(content), index))
+    if not candidates:
+        return None
+    return sorted(candidates)[0][2]
+
+
+def _fit_payload_messages_to_input_budget(
+    payload: dict,
+    max_input_tokens: int,
+    *,
+    exact_input_tokens: int | None = None,
+) -> list[str]:
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or max_input_tokens <= 0:
+        return []
+
+    notes: list[str] = []
+    current_tokens = exact_input_tokens or _estimate_payload_input_tokens(payload)
+    for _ in range(8):
+        if current_tokens <= max_input_tokens:
+            break
+
+        index = _select_truncation_candidate(messages)
+        if index is None:
+            notes.append("context budget exceeded but no truncatable message was found")
+            break
+
+        message = dict(messages[index])
+        content = str(message.get("content") or "")
+        overage_tokens = max(1, current_tokens - max_input_tokens)
+        remove_chars = max(
+            overage_tokens * _TOKEN_ESTIMATE_CHARS + 2048,
+            len(content) // 10,
+        )
+        target_chars = max(400, len(content) - remove_chars)
+        truncated = _truncate_middle(content, target_chars)
+        if len(truncated) >= len(content):
+            notes.append(
+                f"context budget exceeded but message {index} could not be shortened"
+            )
+            break
+
+        message["content"] = truncated
+        messages[index] = message
+        notes.append(
+            "truncated "
+            f"{message.get('role', 'message')} message {index} "
+            f"from {len(content)} to {len(truncated)} chars"
+        )
+        current_tokens = _estimate_payload_input_tokens(payload)
+
+    return notes
+
+
+def _apply_preflight_context_budget(
+    payload: dict,
+    *,
+    context_window_tokens: int | None,
+    min_completion_tokens: int,
+    safety_margin_tokens: int,
+) -> list[str]:
+    if not context_window_tokens:
+        return []
+
+    notes: list[str] = []
+    desired_completion = int(payload.get("max_tokens") or min_completion_tokens)
+    target_input_tokens = (
+        context_window_tokens
+        - max(min_completion_tokens, 1)
+        - max(safety_margin_tokens, 0)
+    )
+    notes.extend(
+        _fit_payload_messages_to_input_budget(payload, target_input_tokens)
+    )
+
+    estimated_input = _estimate_payload_input_tokens(payload)
+    allowed_completion = (
+        context_window_tokens
+        - estimated_input
+        - max(safety_margin_tokens, 0)
+    )
+    if allowed_completion < desired_completion:
+        new_completion = max(1, allowed_completion)
+        payload["max_tokens"] = new_completion
+        notes.append(
+            f"reduced max_tokens from {desired_completion} to {new_completion} "
+            "for configured context window"
+        )
+    return notes
+
+
+def _parse_context_length_error(reason: str) -> dict[str, int] | None:
+    match = _CONTEXT_ERROR_RE.search(reason or "")
+    if not match:
+        return None
+    try:
+        return {
+            "max_context_tokens": int(match.group("max")),
+            "requested_output_tokens": int(match.group("requested")),
+            "input_tokens": int(match.group("input")),
+        }
+    except (TypeError, ValueError):
+        return None
+
+
+def _adapt_payload_after_context_error(
+    payload: dict,
+    error: OpenWebUIContextLengthError,
+    *,
+    min_completion_tokens: int,
+    safety_margin_tokens: int,
+) -> list[str]:
+    max_context = error.max_context_tokens
+    input_tokens = error.input_tokens
+    if not max_context or not input_tokens:
+        return []
+
+    current_completion = int(payload.get("max_tokens") or min_completion_tokens)
+    safety = max(0, safety_margin_tokens)
+    min_completion = max(1, min_completion_tokens)
+    allowed_completion = max_context - input_tokens - safety
+    if allowed_completion >= min_completion:
+        new_completion = min(current_completion, allowed_completion)
+        if new_completion < current_completion:
+            payload["max_tokens"] = new_completion
+            return [
+                f"reduced max_tokens from {current_completion} to {new_completion} "
+                "after OpenWebUI context-length rejection"
+            ]
+
+    target_input_tokens = max_context - min_completion - safety
+    notes = _fit_payload_messages_to_input_budget(
+        payload,
+        target_input_tokens,
+        exact_input_tokens=input_tokens,
+    )
+    if notes:
+        new_completion = min(current_completion, min_completion)
+        payload["max_tokens"] = new_completion
+        notes.append(
+            f"reduced max_tokens from {current_completion} to {new_completion} "
+            "after truncating prompt context"
+        )
+    return notes
 
 
 def _format_http_error(error: httpx.HTTPError) -> str:
@@ -181,12 +437,16 @@ async def _raise_openwebui_error(
         f" hint={hint}" if hint else "",
         json.dumps(request_debug, ensure_ascii=True),
     )
-    raise RuntimeError(
+    message = (
         "OpenWebUI request failed: "
         f"HTTP {resp.status_code}; "
         f"reason={error_reason or '<empty response body>'}"
         + (f"; hint={hint}" if hint else "")
     )
+    context_error = _parse_context_length_error(error_reason)
+    if context_error:
+        raise OpenWebUIContextLengthError(message, **context_error)
+    raise RuntimeError(message)
 
 
 def _extract_usage(usage_payload: object) -> dict[str, int] | None:
@@ -330,11 +590,52 @@ class OpenWebUIClient(LLMClient):
         model: str = "mistral",
         api_key: str = "",
         tool_call_mode: str = "auto",
+        context_window_tokens: int | None = None,
+        context_safety_margin: int | None = None,
+        context_retries: int | None = None,
+        min_completion_tokens: int | None = None,
     ):
         self.host = host.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.tool_call_mode = _normalize_tool_call_mode(tool_call_mode)
+        self.context_window_tokens = (
+            _positive_int(context_window_tokens)
+            or _int_env("OPENWEBUI_CONTEXT_WINDOW")
+        )
+        parsed_context_safety_margin = (
+            _nonnegative_int(context_safety_margin)
+            if context_safety_margin is not None
+            else _nonnegative_int_env(
+                "OPENWEBUI_CONTEXT_SAFETY_MARGIN",
+                default=_CONTEXT_SAFETY_MARGIN,
+            )
+        )
+        self.context_safety_margin = (
+            parsed_context_safety_margin
+            if parsed_context_safety_margin is not None
+            else _CONTEXT_SAFETY_MARGIN
+        )
+        parsed_context_retries = (
+            _nonnegative_int(context_retries)
+            if context_retries is not None
+            else _nonnegative_int_env(
+                "OPENWEBUI_CONTEXT_RETRIES", default=_CONTEXT_RETRIES
+            )
+        )
+        self.context_retries = (
+            parsed_context_retries
+            if parsed_context_retries is not None
+            else _CONTEXT_RETRIES
+        )
+        self.min_completion_tokens = (
+            _positive_int(min_completion_tokens)
+            or _int_env(
+                "OPENWEBUI_MIN_COMPLETION_TOKENS",
+                default=_MIN_COMPLETION_TOKENS,
+            )
+            or _MIN_COMPLETION_TOKENS
+        )
         self.last_error = ""
         self.last_usage: dict[str, int] | None = None
         self.conversation_trace: list[dict] = []
@@ -396,6 +697,13 @@ class OpenWebUIClient(LLMClient):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
+        context_adaptations = _apply_preflight_context_budget(
+            payload,
+            context_window_tokens=self.context_window_tokens,
+            min_completion_tokens=self.min_completion_tokens,
+            safety_margin_tokens=self.context_safety_margin,
+        )
+
         self.last_error = ""
         self.last_usage = None
         trace_entry: dict = {
@@ -408,14 +716,18 @@ class OpenWebUIClient(LLMClient):
             "request": {
                 "url": url,
                 "temperature": temperature,
-                "max_tokens": num_predict,
+                "max_tokens": payload["max_tokens"],
                 "stream": True,
+                "context_window_tokens": self.context_window_tokens,
+                "estimated_input_tokens": _estimate_payload_input_tokens(payload),
             },
-            "messages": request_messages,
+            "messages": payload["messages"],
             "response": None,
             "usage": None,
             "status": "running",
         }
+        if context_adaptations:
+            trace_entry["request"]["context_adaptations"] = context_adaptations
         if tools:
             trace_entry["request"]["tool_choice"] = payload["tool_choice"]
             trace_entry["request"]["tools"] = [
@@ -442,9 +754,11 @@ class OpenWebUIClient(LLMClient):
             pool=10.0,
         )
         max_attempts = 2
+        max_context_retries = max(0, self.context_retries)
         attempts = 0
+        context_retry_count = 0
         try:
-            for attempt in range(1, max_attempts + 1):
+            for attempt in range(1, max_attempts + max_context_retries + 1):
                 attempts = attempt
                 parts: list[str] = []
                 tool_calls: list[dict[str, Any]] = []
@@ -467,6 +781,40 @@ class OpenWebUIClient(LLMClient):
                             self.last_usage = usage
                             self.last_error = ""
                             break
+                    except OpenWebUIContextLengthError as e:
+                        self.last_error = str(e)
+                        if context_retry_count < max_context_retries:
+                            adaptations = _adapt_payload_after_context_error(
+                                payload,
+                                e,
+                                min_completion_tokens=self.min_completion_tokens,
+                                safety_margin_tokens=self.context_safety_margin,
+                            )
+                            if adaptations:
+                                context_retry_count += 1
+                                context_adaptations.extend(adaptations)
+                                trace_entry["messages"] = payload["messages"]
+                                trace_entry["request"]["max_tokens"] = payload[
+                                    "max_tokens"
+                                ]
+                                trace_entry["request"][
+                                    "estimated_input_tokens"
+                                ] = _estimate_payload_input_tokens(payload)
+                                trace_entry["request"][
+                                    "context_adaptations"
+                                ] = context_adaptations
+                                request_debug = _build_request_debug_context(
+                                    url,
+                                    payload,
+                                    has_api_key=bool(self.api_key),
+                                )
+                                logger.warning(
+                                    "OpenWebUI context limit reached; retrying "
+                                    "with compacted request: %s",
+                                    json.dumps(request_debug, ensure_ascii=True),
+                                )
+                                continue
+                        raise
                     except httpx.RemoteProtocolError as e:
                         self.last_error = _format_http_error(e)
                         if attempt < max_attempts:

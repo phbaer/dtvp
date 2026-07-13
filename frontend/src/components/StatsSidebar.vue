@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { LayoutList, Copy } from 'lucide-vue-next'
 import CustomSelect from './CustomSelect.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
-import type { CacheStatus } from '../types'
+import type { CacheStatus, InconsistencyReason } from '../types'
 
 export interface TeamEntry {
     team: string
@@ -35,6 +35,7 @@ export interface FilterState {
     componentFilter: string
     versionFilterInput: string
     lifecycleFilters: string[]
+    inconsistencyReasonFilters?: InconsistencyReason[]
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
     assigneeFilter: string
@@ -47,6 +48,8 @@ const props = defineProps<{
     filterCounts: Record<string, number>
     availableVersions: string[]
     lifecycleOptions: FilterOption[]
+    inconsistencyReasonOptions: ReadonlyArray<Omit<FilterOption, 'color'>>
+    inconsistencyReasonCounts: Record<InconsistencyReason, number>
     analysisOptions: FilterOption[]
     copiedUrl: boolean
     filteredCount: number
@@ -110,7 +113,30 @@ const toggleLifecycleFilter = (val: string) => {
     const idx = current.indexOf(val)
     if (idx >= 0) current.splice(idx, 1)
     else current.push(val)
+    if (val === 'INCONSISTENT' && idx >= 0) {
+        emit('update:filters', {
+            ...props.filters,
+            lifecycleFilters: current,
+            inconsistencyReasonFilters: [],
+        })
+        return
+    }
     updateFilter('lifecycleFilters', current)
+}
+
+const toggleInconsistencyReasonFilter = (value: InconsistencyReason) => {
+    const current = [...(props.filters.inconsistencyReasonFilters || [])]
+    const idx = current.indexOf(value)
+    if (idx >= 0) current.splice(idx, 1)
+    else current.push(value)
+    const lifecycleFilters = current.length > 0
+        ? Array.from(new Set([...props.filters.lifecycleFilters, 'INCONSISTENT']))
+        : props.filters.lifecycleFilters
+    emit('update:filters', {
+        ...props.filters,
+        lifecycleFilters,
+        inconsistencyReasonFilters: current,
+    })
 }
 
 const toggleAnalysisFilter = (val: string) => {
@@ -272,6 +298,29 @@ const handleCopy = () => {
                                                 :class="props.filters.lifecycleFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
                                             >
                                                 {{ props.filterCounts[opt.value] || 0 }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Inconsistency Reason</label>
+                                    <div class="flex flex-wrap gap-1.5 items-center">
+                                        <button
+                                            v-for="opt in props.inconsistencyReasonOptions"
+                                            :key="opt.value"
+                                            @click="toggleInconsistencyReasonFilter(opt.value as InconsistencyReason)"
+                                            :title="opt.description"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                (props.filters.inconsistencyReasonFilters || []).includes(opt.value as InconsistencyReason)
+                                                    ? 'bg-indigo-500/20 text-indigo-200 border-indigo-400/30'
+                                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
+                                            ]"
+                                        >
+                                            {{ opt.label }}
+                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">
+                                                {{ props.inconsistencyReasonCounts[opt.value as InconsistencyReason] || 0 }}
                                             </span>
                                         </button>
                                     </div>

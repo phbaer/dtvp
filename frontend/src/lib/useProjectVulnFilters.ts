@@ -8,6 +8,8 @@ import {
 } from './vulnListIndex'
 import type { DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
 import type { AutomaticAssessmentFilter } from './vulnListIndex'
+import type { InconsistencyReason } from '../types'
+import { normalizeInconsistencyReasons } from './inconsistency'
 import { useDebouncedValue } from './useDebouncedValue'
 
 export const DEFAULT_REVIEWER_LIFECYCLE_FILTERS = [
@@ -61,6 +63,7 @@ const FILTER_QUERY_KEYS = new Set([
     'q',
     'lifecycle',
     'analysis',
+    'inconsistency_reason',
     'tag',
     'id',
     'cve',
@@ -106,6 +109,7 @@ export function useProjectVulnFilters({
     const attributionAgeDays = ref<number | null>(null)
     const attributionAgeMode = ref<'older' | 'younger'>('older')
     const lifecycleFilters = ref<string[]>([])
+    const inconsistencyReasonFilters = ref<InconsistencyReason[]>([])
     const analysisFilters = ref<string[]>([])
     const filtersReady = ref(false)
     const sortBy = ref('rescored-severity')
@@ -138,6 +142,7 @@ export function useProjectVulnFilters({
         lifecycleFilters.value = currentUserRole.value === 'REVIEWER'
             ? [...DEFAULT_REVIEWER_LIFECYCLE_FILTERS]
             : [...DEFAULT_ANALYST_LIFECYCLE_FILTERS]
+        inconsistencyReasonFilters.value = []
         idFilter.value = ''
         tagFilter.value = ''
         smartSearchInput.value = ''
@@ -184,6 +189,18 @@ export function useProjectVulnFilters({
             analysisFilters.value = queryStringList(q.analysis)
         } else {
             analysisFilters.value = [...DEFAULT_ANALYSIS_FILTERS]
+        }
+
+        if (q.inconsistency_reason) {
+            inconsistencyReasonFilters.value = normalizeInconsistencyReasons(
+                queryStringList(q.inconsistency_reason),
+            )
+            if (
+                inconsistencyReasonFilters.value.length > 0
+                && !lifecycleFilters.value.includes('INCONSISTENT')
+            ) {
+                lifecycleFilters.value.push('INCONSISTENT')
+            }
         }
 
         if (q.tag) tagFilter.value = queryString(q.tag)
@@ -238,6 +255,9 @@ export function useProjectVulnFilters({
         if (selectedAutomaticAssessmentFilters.value.length > 0) query.automatic_assessment = selectedAutomaticAssessmentFilters.value
         else delete query.automatic_assessment
         delete query.auto_assessment
+
+        if (inconsistencyReasonFilters.value.length > 0) query.inconsistency_reason = inconsistencyReasonFilters.value
+        else delete query.inconsistency_reason
 
         if (attributionAgeDays.value == null) {
             delete query.attributed_before_days
@@ -300,6 +320,9 @@ export function useProjectVulnFilters({
         if (analysisFilters.value.length > 0) query.analysis = analysisFilters.value
         else delete query.analysis
 
+        if (inconsistencyReasonFilters.value.length > 0) query.inconsistency_reason = inconsistencyReasonFilters.value
+        else delete query.inconsistency_reason
+
         if (tagFilter.value) query.tag = tagFilter.value
         else delete query.tag
 
@@ -359,6 +382,7 @@ export function useProjectVulnFilters({
         assigneeFilter: assigneeFilter.value,
         versionFilterInput: versionFilterInput.value,
         lifecycleFilters: lifecycleFilters.value,
+        inconsistencyReasonFilters: inconsistencyReasonFilters.value,
         analysisFilters: analysisFilters.value,
         cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
         attributionAgeDays: attributionAgeDays.value,
@@ -376,7 +400,10 @@ export function useProjectVulnFilters({
         componentFilter.value = newFilters.componentFilter
         assigneeFilter.value = newFilters.assigneeFilter
         versionFilterInput.value = newFilters.versionFilterInput
-        lifecycleFilters.value = newFilters.lifecycleFilters
+        inconsistencyReasonFilters.value = newFilters.inconsistencyReasonFilters || []
+        lifecycleFilters.value = inconsistencyReasonFilters.value.length > 0
+            ? Array.from(new Set([...newFilters.lifecycleFilters, 'INCONSISTENT']))
+            : newFilters.lifecycleFilters
         analysisFilters.value = newFilters.analysisFilters
         cvssVersionMismatchOnly.value = newFilters.cvssVersionMismatchOnly
         attributionAgeDays.value = normalizeAttributionAgeDays(newFilters.attributionAgeDays)
@@ -387,6 +414,7 @@ export function useProjectVulnFilters({
         if (!newRole || newRole === oldRole) return
 
         analysisFilters.value = [...DEFAULT_ANALYSIS_FILTERS]
+        inconsistencyReasonFilters.value = []
         lifecycleFilters.value = newRole === 'REVIEWER'
             ? [...DEFAULT_REVIEWER_LIFECYCLE_FILTERS]
             : [...DEFAULT_ANALYST_LIFECYCLE_FILTERS]
@@ -395,6 +423,7 @@ export function useProjectVulnFilters({
     watch([
         smartSearchInput,
         lifecycleFilters,
+        inconsistencyReasonFilters,
         analysisFilters,
         tagFilter,
         idFilter,
@@ -443,6 +472,7 @@ export function useProjectVulnFilters({
         attributionAgeDays,
         attributionAgeMode,
         lifecycleFilters,
+        inconsistencyReasonFilters,
         analysisFilters,
         filtersReady,
         sortBy,

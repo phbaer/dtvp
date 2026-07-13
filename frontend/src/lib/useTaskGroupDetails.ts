@@ -46,9 +46,10 @@ export function useTaskGroupDetails({
 
     const ensureFullGroup = async (
         groupId: string,
-        options: { showLoading?: boolean } = {},
+        options: { showLoading?: boolean; force?: boolean } = {},
     ): Promise<GroupedVuln | null> => {
-        if (fullGroupCache.value[groupId]) return fullGroupCache.value[groupId]
+        const force = options.force === true
+        if (!force && fullGroupCache.value[groupId]) return fullGroupCache.value[groupId]
 
         const listGroup = findListGroup(groupId)
         const taskId = currentTaskId.value
@@ -59,7 +60,7 @@ export function useTaskGroupDetails({
 
         if (!taskId) return listGroup || null
 
-        if (listGroup && !isSummaryGroupedVuln(listGroup)) {
+        if (!force && listGroup && !isSummaryGroupedVuln(listGroup)) {
             return listGroup
         }
 
@@ -108,6 +109,13 @@ export function useTaskGroupDetails({
         return ensureFullGroup(groupId)
     }
 
+    const refreshGroup = async (
+        groupId: string,
+        options: { showLoading?: boolean } = {},
+    ): Promise<GroupedVuln | null> => {
+        return ensureFullGroup(groupId, { ...options, force: true })
+    }
+
     return {
         fullGroupCache,
         selectedGroup,
@@ -116,5 +124,6 @@ export function useTaskGroupDetails({
         cacheGroup,
         ensureFullGroup,
         hydrateGroup,
+        refreshGroup,
     }
 }

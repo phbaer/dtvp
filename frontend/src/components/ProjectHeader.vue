@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { BarChart3, Layers, LayoutList, ChevronRight } from 'lucide-vue-next'
+import { BarChart3, Calculator, Layers, LayoutList, ChevronRight } from 'lucide-vue-next'
 
-const { projectName, viewMode, isAllProjects, userRole, incompleteCount } = defineProps<{
+const { projectName, viewMode, isAllProjects, userRole, incompleteCount, assessmentRestoreCount } = defineProps<{
     projectName: string
     viewMode: 'analysis' | 'statistics'
     isAllProjects: boolean
     userRole: string
     incompleteCount: number
+    assessmentRestoreCount?: number
 }>()
 
 const emit = defineEmits<{
     'toggle-view-mode': []
     'show-bulk-modal': []
+    'show-assessment-restore-modal': []
 }>()
 
 const router = useRouter()
@@ -89,6 +91,16 @@ const goToThreatModel = () => {
             >
                 <Layers :size="14" />
                 Bulk Sync ({{ incompleteCount }})
+            </button>
+
+            <button
+                v-if="!isAllProjects && userRole === 'REVIEWER' && (assessmentRestoreCount || 0) > 0"
+                type="button"
+                @click="emit('show-assessment-restore-modal')"
+                class="inline-flex h-9 min-h-9 items-center justify-center leading-none gap-2 px-4 rounded-full text-[11px] font-semibold uppercase tracking-widest transition-all border border-white/10 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
+            >
+                <Calculator :size="14" />
+                Restore CVSS ({{ assessmentRestoreCount }})
             </button>
         </div>
     </div>

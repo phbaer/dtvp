@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import CustomSelect from './CustomSelect.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
 import { Copy } from 'lucide-vue-next'
+import type { InconsistencyReason } from '../types'
 
 export interface FilterState {
     sortBy: string
@@ -16,6 +17,7 @@ export interface FilterState {
     assigneeFilter: string
     versionFilterInput: string
     lifecycleFilters: string[]
+    inconsistencyReasonFilters?: InconsistencyReason[]
     analysisFilters: string[]
     cvssVersionMismatchOnly: boolean
     attributionAgeDays: number | null

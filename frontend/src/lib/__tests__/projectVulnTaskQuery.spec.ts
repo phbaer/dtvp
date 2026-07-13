@@ -16,6 +16,7 @@ const baseInput = (overrides: Partial<BuildTaskVulnGroupListQueryInput> = {}): B
     parsedSearch: parseVulnSearchQuery(''),
     filtersReady: true,
     lifecycleFilters: DEFAULT_REVIEWER_LIFECYCLE_FILTERS,
+    inconsistencyReasonFilters: [],
     defaultLifecycleFilters: DEFAULT_REVIEWER_LIFECYCLE_FILTERS,
     analysisFilters: DEFAULT_ANALYSIS_FILTERS,
     defaultAnalysisFilters: DEFAULT_ANALYSIS_FILTERS,
@@ -58,6 +59,7 @@ describe('projectVulnTaskQuery', () => {
         const query = buildTaskVulnGroupListQuery(baseInput({
             parsedSearch: parseVulnSearchQuery('urgent lifecycle:open analysis:resolved team:platform id:CVE-2026-9999 component:spring assignee:alice version:2.0.0 dependency:direct tm:with has:cvss_mismatch'),
             lifecycleFilters: ['OPEN', 'INCOMPLETE'],
+            inconsistencyReasonFilters: ['ANALYSIS_STATE_MISMATCH'],
             analysisFilters: DEFAULT_ANALYSIS_FILTERS,
             tagFilter: 'backend',
             idFilter: 'GHSA-1234',
@@ -73,6 +75,7 @@ describe('projectVulnTaskQuery', () => {
         expect(query).toMatchObject({
             q: 'urgent',
             lifecycle: ['OPEN'],
+            inconsistency_reason: ['ANALYSIS_STATE_MISMATCH'],
             analysis: ['RESOLVED'],
             tag: 'backend platform',
             id: 'GHSA-1234 cve-2026-9999',

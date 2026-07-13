@@ -27,6 +27,7 @@ _REQUIRED_PROMPT_KEYS: Dict[str, tuple[str, ...]] = {
         "reasoning_contract",
     ),
     "advisory_relevance": ("system", "instructions", "input_preamble"),
+    "benchmark_comparison": ("system", "input_preamble"),
 }
 
 _PROMPT_KEY_ALIASES: Dict[str, Dict[str, str]] = {

@@ -31,7 +31,7 @@ system: |-
   2. Current version affected + direct production reachability -> Affected.
   3. Current version affected + transitive path YES -> Probably Affected or Affected.
   4. Current version affected + transitive path UNCERTAIN -> request source/search if not already fetched; then Probably Affected, not Not Affected.
-  5. Current version affected + no affirmative exclusion -> at least Probably Affected.
+  5. Current version affected + no affirmative exclusion -> at least Probably Affected. Dependency/version presence alone is not enough for Affected; require direct reachability, confirmed exploitability, or a positive transitive path.
   6. Current version fixed but tracked releases affected -> Not Affected only if current direct reachability is NOT REACHABLE and transitive reachability is NO/not applicable; otherwise Probably Affected.
   7. Not Affected/exposure=none require affirmative exclusion for the assessed codebase; missing local rediscovery does not disprove an SBOM-attributed dependency. If dependency evidence is only SBOM/input attribution and the version is unknown, use Inconclusive unless fetched/dependency evidence proves absence, staleness, fixed version, or unreachable runtime path.
   8. SBOM-only unknown-version evidence plus upstream-platform guidance requires fetched upstream dependency/version/reachability evidence before Inconclusive or Not Affected.

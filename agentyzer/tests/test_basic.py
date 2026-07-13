@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 
 import httpx
@@ -466,15 +467,18 @@ class _FakeOpenWebUIResponse:
 
 class _FakeOpenWebUIClient:
     def __init__(self, response, capture):
-        self._response = response
+        self._responses = response if isinstance(response, list) else [response]
         self._capture = capture
 
     def stream(self, method, url, *, json, headers):
+        self._capture.setdefault("requests", []).append(copy.deepcopy(json))
         self._capture["method"] = method
         self._capture["url"] = url
         self._capture["json"] = json
         self._capture["headers"] = headers
-        return self._response
+        if len(self._responses) > 1:
+            return self._responses.pop(0)
+        return self._responses[0]
 
     async def __aenter__(self):
         return self
@@ -551,6 +555,69 @@ def test_openwebui_client_sends_openai_compatible_payload(monkeypatch):
         "content": "ok",
     }
     assert client.conversation_trace[0]["status"] == "completed"
+
+
+def test_openwebui_client_retries_with_smaller_output_on_context_error(monkeypatch):
+    capture = {}
+    context_error = (
+        "This model's maximum context length is 131072 tokens. However, you "
+        "requested 4096 output tokens and your prompt contains at least 126977 "
+        "input tokens, for a total of at least 131073 tokens. Please reduce the "
+        "length of the input prompt or the number of requested output tokens."
+    )
+    responses = [
+        _FakeOpenWebUIResponse(status_code=400, json_data={"detail": context_error}),
+        _FakeOpenWebUIResponse(status_code=200),
+    ]
+
+    def fake_async_client(**kwargs):
+        return _FakeOpenWebUIClient(responses, capture)
+
+    monkeypatch.setattr("src.llm.openwebui_client.async_client", fake_async_client)
+
+    client = OpenWebUIClient(
+        host="https://webui.vp.apps.ge-healthcare.net",
+        model="mistral",
+        api_key="secret",
+    )
+
+    result = asyncio.run(client.generate("hello", num_predict=4096))
+
+    assert result == "ok"
+    assert len(capture["requests"]) == 2
+    assert capture["requests"][0]["max_tokens"] == 4096
+    assert capture["requests"][1]["max_tokens"] == 3839
+    request_trace = client.conversation_trace[0]["request"]
+    assert request_trace["max_tokens"] == 3839
+    assert "context_adaptations" in request_trace
+
+
+def test_openwebui_client_truncates_prompt_for_configured_context_window(monkeypatch):
+    capture = {}
+    response = _FakeOpenWebUIResponse(status_code=200)
+
+    def fake_async_client(**kwargs):
+        return _FakeOpenWebUIClient(response, capture)
+
+    monkeypatch.setattr("src.llm.openwebui_client.async_client", fake_async_client)
+
+    client = OpenWebUIClient(
+        host="https://webui.vp.apps.ge-healthcare.net",
+        model="mistral",
+        api_key="secret",
+        context_window_tokens=1000,
+        context_safety_margin=0,
+        min_completion_tokens=100,
+    )
+    prompt = "source-line\n" * 2000
+
+    asyncio.run(client.generate(prompt, num_predict=500))
+
+    sent_prompt = capture["json"]["messages"][0]["content"]
+    assert len(sent_prompt) < len(prompt)
+    assert "truncated by Agentyzer" in sent_prompt
+    assert capture["json"]["max_tokens"] <= 500
+    assert "context_adaptations" in client.conversation_trace[0]["request"]
 
 
 def test_openwebui_client_sends_and_captures_native_tool_calls(monkeypatch):

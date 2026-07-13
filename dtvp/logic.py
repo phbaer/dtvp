@@ -4,6 +4,10 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .assessment_restore_services import (
+    build_missing_rescoring_vector_restore_candidate,
+    refresh_group_restore_metadata,
+)
 from .team_mapping import compile_team_mapping, get_team_mapping_tags
 
 logger = logging.getLogger(__name__)
@@ -830,6 +834,10 @@ def group_vulnerabilities(
                     "tags": [],
                     "assignees": [],
                     "aliases": set(groups_by_root.get(root, [])) - {canonical_id},
+                    "assessment_restore_count": 0,
+                    "assessment_restore_recoverable_count": 0,
+                    "assessment_restore_reasons": [],
+                    "assessment_restore_status": None,
                 }
             else:
                 # Update base CVSS to maximum
@@ -958,6 +966,15 @@ def group_vulnerabilities(
                 "is_direct_dependency": None,
                 "tags": tags,
             }
+            restore_candidate = build_missing_rescoring_vector_restore_candidate(
+                {
+                    "analysisState": component_info.get("analysis_state"),
+                    "analysisDetails": details,
+                    "analysisComments": component_info.get("analysis_comments", []),
+                }
+            )
+            if restore_candidate:
+                component_info["assessment_restore"] = restore_candidate
 
             if include_dependency_paths and proj_uuid in bom_processors and comp_uuid:
                 try:
@@ -1022,6 +1039,7 @@ def group_vulnerabilities(
             reverse=True,
         )
         g["aliases"] = sorted(list(g.get("aliases", [])))
+        refresh_group_restore_metadata(g)
         result.append(g)
 
     # Sort final result: Severity (asc rank), then Score (desc), then ID (asc)
