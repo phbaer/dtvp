@@ -710,9 +710,11 @@ watch([showCalculatorModal, pendingVector], () => {
             if (v.startsWith('CVSS:4.0')) {
                 activeVersion.value = '4.0'
                 cvssInstance.value = new Cvss4P0(v)
+            } else if (v.startsWith('CVSS:3.0')) {
+                activeVersion.value = '3.0'
+                cvssInstance.value = new Cvss3P0(v)
             } else if (v.startsWith('CVSS:3.')) {
                 activeVersion.value = '3.1'
-                if (v.startsWith('CVSS:3.0')) v = v.replace('CVSS:3.0', 'CVSS:3.1')
                 cvssInstance.value = new Cvss3P1(v)
             } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
                 activeVersion.value = '2.0'
@@ -766,8 +768,7 @@ const setCvssInstanceFromVector = (vector: string) => {
         if (v.startsWith('CVSS:4.0')) {
             cvssInstance.value = new Cvss4P0(v)
         } else if (v.startsWith('CVSS:3.0')) {
-            v = v.replace('CVSS:3.0', 'CVSS:3.1')
-            cvssInstance.value = new Cvss3P1(v)
+            cvssInstance.value = new Cvss3P0(v)
         } else if (v.startsWith('CVSS:3.1')) {
             cvssInstance.value = new Cvss3P1(v)
         } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
@@ -1182,6 +1183,23 @@ const applyStateRescore = (targetState: string) => {
     activeVersion.value = result.version
     pendingVector.value = result.vector
     setCvssInstanceFromVector(result.vector)
+}
+
+const rescoreRuleSyncPreview = computed(() => buildRescoredVectorForState({
+    rules: rescoreRules?.value?.transitions || [],
+    targetState: state.value,
+    currentVector: pendingVector.value,
+    fallbackVersion: activeVersion.value,
+}))
+
+const rescoreRulesOutOfSync = computed(() => Boolean(
+    rescoreRuleSyncPreview.value &&
+    rescoreRuleSyncPreview.value.vector !== pendingVector.value.trim(),
+))
+
+const syncRescoreRules = () => {
+    applyStateRescore(state.value)
+    formTouched.value = true
 }
 
 watch(state, (newState, oldState) => {
@@ -1910,6 +1928,15 @@ const teamBlockStateColor = (state?: string): string => {
                                 title="Reset to Original"
                             >
                                 <RotateCcw :size="10" />
+                            </button>
+                            <button
+                                v-if="rescoreRulesOutOfSync"
+                                data-testid="sync-rescore-rules"
+                                @click="syncRescoreRules"
+                                class="text-amber-300 hover:text-amber-200 flex items-center gap-1 cursor-pointer"
+                                title="Apply the configured rules for the current assessment state; use Apply to save"
+                            >
+                                <RefreshCw :size="10" /> Sync rules
                             </button>
                             <button
                                 @click="cleanRescoredVector"

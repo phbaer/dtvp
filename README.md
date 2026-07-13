@@ -320,7 +320,22 @@ Other domain rules:
   Otherwise DTVP chooses the worst team state using the priority in
   `dtvp/logic.py`.
 - Rescored CVSS vectors preserve original base metrics so
-  threat/environment changes do not silently mutate base metrics.
+  threat/environment changes do not silently mutate base metrics. Sanitizing
+  those vectors uses the correct base-metric set for CVSS 2.0, 3.0/3.1, and
+  4.0, and preserves the original exact version instead of rewriting 3.0 as
+  3.1. Cross-version vectors stay visible for manual review.
+- CVSS rescore rules are loaded from `RESCORE_RULES_PATH`, defaulting to
+  `data/rescore_rules.json`. The shipped `NOT_AFFECTED` and `FALSE_POSITIVE`
+  transitions define actions for CVSS 2.0, 3.0, 3.1, and 4.0.
+- Rule application processes modified metrics before their requirement fields.
+  In CVSS 3.x/4.0, `CR`, `IR`, and `AR` are retained when the corresponding
+  modified impact metric is effective; CVSS 2.0 requirements apply directly to
+  its defined base CIA metrics. Redundant modified values and orphaned
+  requirements are removed by calculator cleanup.
+- Existing rescored vectors that do not match the configured actions show a
+  `Sync rules` control in the CVSS calculator. It stages the corrected vector;
+  the reviewer then uses the normal `Apply` action to persist it across the
+  finding instances.
 - Dependency relationships and paths come from CycloneDX BOM dependency graphs.
 - Dependency-Track attribution timestamps are preserved as `attributed_on` and
   can be filtered by age in the project view.
