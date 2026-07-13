@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { calculateScoreFromVector } from '../cvss'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance } from '../cvssRescore'
 import { Cvss2, Cvss3P1 } from 'ae-cvss-calculator'
 import defaultRescoreRules from '../../../../data/rescore_rules.json'
@@ -6,7 +7,11 @@ import defaultRescoreRules from '../../../../data/rescore_rules.json'
 const allVersionRules = [{
     trigger: { state: 'NOT_AFFECTED' },
     actions: {
-        '4.0': { CR: 'L', IR: 'L', AR: 'L', MVC: 'N', MVI: 'N', MVA: 'N' },
+        '4.0': {
+            CR: 'L', IR: 'L', AR: 'L',
+            MVC: 'N', MVI: 'N', MVA: 'N',
+            MSC: 'N', MSI: 'N', MSA: 'N',
+        },
         '3.1': { CR: 'L', IR: 'L', AR: 'L', MC: 'N', MI: 'N', MA: 'N' },
         '3.0': { CR: 'L', IR: 'L', AR: 'L', MC: 'N', MI: 'N', MA: 'N' },
         '2.0': { CR: 'L', IR: 'L', AR: 'L', CDP: 'N', TD: 'N' },
@@ -65,7 +70,7 @@ describe('cvssRescore', () => {
         {
             version: '4.0' as const,
             vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H',
-            modifiedMetrics: ['MVC:N', 'MVI:N', 'MVA:N'],
+            modifiedMetrics: ['MVC:N', 'MVI:N', 'MVA:N', 'MSC:N', 'MSI:N', 'MSA:N'],
         },
         {
             version: '3.1' as const,
@@ -95,6 +100,38 @@ describe('cvssRescore', () => {
         if (version !== '2.0') expect(result?.vector.startsWith(`CVSS:${version}/`)).toBe(true)
         for (const metric of [...modifiedMetrics, 'CR:L', 'IR:L', 'AR:L']) {
             expect(result?.vector).toContain(metric)
+        }
+    })
+
+    it.each([
+        {
+            version: '4.0' as const,
+            vector: 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H',
+        },
+        {
+            version: '3.1' as const,
+            vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
+        },
+        {
+            version: '3.0' as const,
+            vector: 'CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H',
+        },
+        {
+            version: '2.0' as const,
+            vector: 'AV:N/AC:L/Au:N/C:C/I:C/A:C',
+        },
+    ])('calculates $version NOT_AFFECTED and FALSE_POSITIVE transitions as 0.0', ({ version, vector }) => {
+        for (const targetState of ['NOT_AFFECTED', 'FALSE_POSITIVE']) {
+            const result = buildRescoredVectorForState({
+                rules: defaultRescoreRules.transitions,
+                metricRules,
+                targetState,
+                currentVector: vector,
+                fallbackVersion: version,
+            })
+
+            expect(result).not.toBeNull()
+            expect(calculateScoreFromVector(result!.vector)).toBe(0.0)
         }
     })
 

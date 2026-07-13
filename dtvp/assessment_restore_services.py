@@ -231,7 +231,7 @@ def restore_rescoring_tags_in_details(
 
     tags = [vector_tag]
     if restored_score is not None:
-        tags.insert(0, f"[Rescored: {restored_score:g}]")
+        tags.insert(0, f"[Rescored: {restored_score:.1f}]")
     return f"{' '.join(tags)}\n\n{details}".strip()
 
 

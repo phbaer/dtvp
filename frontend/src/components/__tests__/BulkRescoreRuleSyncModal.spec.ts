@@ -28,7 +28,7 @@ const previewResponse = {
                     status: 'ready',
                     reasons: ['Missing requirements: AR, CR, IR'],
                     current_score: 9.8,
-                    proposed_score: 3.1,
+                    proposed_score: 0,
                     current_vector: 'CVSS:3.1/AV:N/MC:N',
                     proposed_vector: 'CVSS:3.1/AV:N/CR:L/IR:L/AR:L/MC:N',
                 },
@@ -66,7 +66,7 @@ describe('BulkRescoreRuleSyncModal', () => {
 
         expect(mocks.previewRescoreRuleSync).toHaveBeenCalledWith('task-1')
         expect(wrapper.text()).toContain('Missing requirements: AR, CR, IR')
-        expect(wrapper.text()).toContain('9.8 → 3.1')
+        expect(wrapper.text()).toContain('9.8 → 0.0')
 
         await wrapper.findAll('button').find(button => button.text().includes('Apply Rule Sync'))?.trigger('click')
         await flushPromises()

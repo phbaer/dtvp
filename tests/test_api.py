@@ -205,7 +205,7 @@ def test_assessment_restore_preview_and_apply(client, mock_dt_client):
         assert kwargs["project_uuid"] == "project-1"
         assert kwargs["component_uuid"] == "component-1"
         assert kwargs["vulnerability_uuid"] == "vuln-1"
-        assert "[Rescored: 0]" in kwargs["details"]
+        assert "[Rescored: 0.0]" in kwargs["details"]
         assert f"[Rescored Vector: {vector}]" in kwargs["details"]
         assert "sqlite not used in the product" in kwargs["details"]
         assert group["assessment_restore_count"] == 0

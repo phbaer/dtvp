@@ -285,7 +285,7 @@ def replace_rescoring_tags(
     details: str, *, vector: str, score: float
 ) -> str:
     """Replace the first score/vector tags in place and remove duplicates."""
-    score_tag = f"[Rescored: {score:g}]"
+    score_tag = f"[Rescored: {score:.1f}]"
     vector_tag = f"[Rescored Vector: {vector}]"
 
     def replace_once(pattern: re.Pattern[str], source: str, replacement: str) -> tuple[str, bool]:

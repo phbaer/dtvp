@@ -24,8 +24,18 @@ def rules():
     [
         (
             "4.0",
-            "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
-            ("MVC:N", "MVI:N", "MVA:N", "CR:L", "IR:L", "AR:L"),
+            "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+            (
+                "MVC:N",
+                "MVI:N",
+                "MVA:N",
+                "MSC:N",
+                "MSI:N",
+                "MSA:N",
+                "CR:L",
+                "IR:L",
+                "AR:L",
+            ),
         ),
         (
             "3.1",
@@ -59,20 +69,20 @@ def test_build_rescored_vector_uses_configured_relationships(
     assert detected_version == version
     for metric in expected_metrics:
         assert metric in rescored_vector
-    assert calculate_cvss_score(rescored_vector, version) >= 0
+    assert calculate_cvss_score(rescored_vector, version) == 0.0
 
 
 @pytest.mark.parametrize(
     "vector",
     [
-        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
-        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
         "AV:N/AC:L/Au:N/C:C/I:C/A:C",
     ],
 )
 @pytest.mark.parametrize("state", ["NOT_AFFECTED", "FALSE_POSITIVE"])
-def test_every_shipped_transition_produces_a_valid_score(rules, vector, state):
+def test_every_shipped_transition_produces_zero_score(rules, vector, state):
     result = build_rescored_vector_for_state(
         rules,
         state=state,
@@ -81,7 +91,7 @@ def test_every_shipped_transition_produces_a_valid_score(rules, vector, state):
 
     assert result is not None
     rescored_vector, version = result
-    assert calculate_cvss_score(rescored_vector, version) >= 0
+    assert calculate_cvss_score(rescored_vector, version) == 0.0
 
 
 def test_requirement_relationships_are_not_inferred_from_metric_names(rules):
@@ -154,6 +164,48 @@ def test_sync_preview_detects_missing_requirements_and_builds_payload(rules):
     assert payload["suppressed"] is True
 
 
+@pytest.mark.parametrize(
+    "vector",
+    [
+        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:H/SI:H/SA:H",
+        "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "AV:N/AC:L/Au:N/C:C/I:C/A:C",
+    ],
+)
+@pytest.mark.parametrize("state", ["NOT_AFFECTED", "FALSE_POSITIVE"])
+def test_bulk_sync_writes_zero_score_for_every_shipped_transition(
+    rules, vector, state
+):
+    group = {
+        "id": "CVE-2026-ZERO",
+        "cvss_vector": vector,
+        "affected_versions": [
+            {
+                "components": [
+                    {
+                        "finding_uuid": "finding-1",
+                        "project_uuid": "project-1",
+                        "component_uuid": "component-1",
+                        "vulnerability_uuid": "vulnerability-1",
+                        "analysis_state": state,
+                        "analysis_details": "Keep this text.",
+                    }
+                ]
+            }
+        ],
+    }
+
+    preview = build_rescore_rule_sync_preview([group], rules)
+    finding = preview["items"][0]["findings"][0]
+    assert finding["status"] == "ready"
+    assert finding["proposed_score"] == 0.0
+
+    payloads, skipped = build_rescore_rule_sync_payloads([group], rules)
+    assert skipped == {"review_required": 0, "unchanged": 0}
+    assert "[Rescored: 0.0]" in payloads[0][1]["details"]
+
+
 def test_sync_preview_marks_cross_version_vectors_for_review(rules):
     group = {
         "id": "CVE-2026-0002",
@@ -212,3 +264,6 @@ def test_replace_rescoring_tags_updates_in_place_without_losing_details():
     assert updated.count("[Rescored:") == 1
     assert updated.count("[Rescored Vector:") == 1
     assert "Before [Rescored: 2.4] [Rescored Vector: new] after" in updated
+
+    zero_score = replace_rescoring_tags("Details", vector="new", score=0.0)
+    assert "[Rescored: 0.0]" in zero_score

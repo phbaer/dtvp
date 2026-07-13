@@ -330,7 +330,10 @@ Other domain rules:
   transitions define actions for CVSS 2.0, 3.0, 3.1, and 4.0. Each version's
   `metric_rules` entry defines its base metrics, serialization order, undefined
   values, and base/modified/requirement relationships. The settings API rejects
-  rule files that omit or contradict this schema.
+  rule files that omit or contradict this schema. Both shipped transitions
+  produce an exact rescored score of `0.0` for every supported CVSS version;
+  CVSS 4.0 therefore clears all vulnerable-system and subsequent-system impact
+  metrics.
 - Rule application processes configured modified relationships before their
   requirement relationships. A relationship with a modified metric retains
   its requirement only while that override is effective; a relationship

@@ -108,6 +108,8 @@ const applySelected = async () => {
 const firstReadyFinding = (group: RescoreRuleSyncPreviewGroup) =>
     group.findings.find(finding => finding.status === 'ready') || group.findings[0]
 
+const formatScore = (score: number | null | undefined) => score == null ? '—' : score.toFixed(1)
+
 const groupReasons = (group: RescoreRuleSyncPreviewGroup) =>
     Array.from(new Set(group.findings.flatMap(finding => finding.reasons))).join(' · ')
 
@@ -243,7 +245,7 @@ watch(() => props.show, show => {
                             <div class="pt-1 text-center">
                                 <div class="text-[10px] font-black uppercase text-slate-500">CVSS {{ firstReadyFinding(group)?.cvss_version }}</div>
                                 <div class="mt-1 font-mono text-sm font-bold text-white">
-                                    {{ firstReadyFinding(group)?.current_score ?? '—' }} → {{ firstReadyFinding(group)?.proposed_score ?? '—' }}
+                                    {{ formatScore(firstReadyFinding(group)?.current_score) }} → {{ formatScore(firstReadyFinding(group)?.proposed_score) }}
                                 </div>
                             </div>
                             <div class="min-w-0">

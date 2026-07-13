@@ -747,10 +747,10 @@ describe('VulnGroupCard', () => {
         await confirmBtn?.trigger('click')
         await flushPromises()
 
-        // Verify updateAssessment was called with the Rescored 0 vector in the payload.
-        // It should inject [Rescored: 0] and the default CVSS 3.1 0-score vector.
+        // Verify updateAssessment was called with the Rescored 0.0 vector in the payload.
+        // It should inject [Rescored: 0.0] and the default CVSS 3.1 0-score vector.
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
-            details: expect.stringContaining('[Rescored:')
+            details: expect.stringContaining('[Rescored: 0.0]')
         }))
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             details: expect.stringContaining('[Rescored Vector: CVSS:3.1')
