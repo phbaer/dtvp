@@ -103,6 +103,7 @@ describe('ProjectView.vue', () => {
         projectHeaderState.viewMode.value = 'analysis'
         projectHeaderState.lastProjectName.value = null
         projectHeaderState.lastProjectPath.value = null
+        projectHeaderState.incompleteCount.value = 0
         projectHeaderState.bulkSyncHandler.value = null
         projectHeaderState.rescoreRuleSyncCount.value = 0
         projectHeaderState.rescoreRuleSyncHandler.value = null
@@ -788,6 +789,24 @@ describe('ProjectView.vue', () => {
     })
 
     it('prepares bulk sync from backend incomplete full-detail windows', async () => {
+        const taskCounts = (total: number, incomplete: number, needsApproval: number) => ({
+            total,
+            lifecycle: {
+                OPEN: 0,
+                ASSESSED: 0,
+                ASSESSED_LEGACY: 0,
+                INCOMPLETE: incomplete,
+                INCONSISTENT: 0,
+                NEEDS_APPROVAL: needsApproval,
+            },
+            analysis: { NOT_SET: total },
+            dependency_relationship: { direct: 0, transitive: 0, unknown: total },
+            cvss_version_mismatch: 0,
+            versions: {},
+            tags: {},
+            assignees: {},
+            components: {},
+        })
         vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
             options?.onTaskId?.('task-1')
             return [
@@ -806,8 +825,12 @@ describe('ProjectView.vue', () => {
                     affected_versions: [],
                 },
             ],
-            total: 1,
+            total: 6,
             filtered: 1,
+            counts: {
+                all: taskCounts(6, 4, 3),
+                filtered: taskCounts(1, 1, 0),
+            },
             offset: 0,
             limit: 250,
             sort: 'rescored-severity',
@@ -838,6 +861,7 @@ describe('ProjectView.vue', () => {
         await flushPromises()
         await wrapper.vm.$nextTick()
 
+        expect(projectHeaderState.incompleteCount.value).toBe(1)
         expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith(
             'task-1',
             expect.objectContaining({

@@ -1,6 +1,7 @@
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import { drainTaskVulnGroupDetails } from './api'
 import type { TaskVulnGroupListQuery } from './api'
+import { NO_MATCH_FILTER } from './projectVulnTaskQuery'
 import type { GroupedVuln } from '../types'
 
 interface UseProjectBulkResolveOptions {
@@ -40,9 +41,12 @@ export function useProjectBulkResolve({
             bulkIncompleteGroups.value = null
             const taskId = currentTaskId.value
             if (taskId) {
+                const activeLifecycle = taskGroupListQuery.value.lifecycle || []
+                const includesIncomplete = activeLifecycle.length === 0
+                    || activeLifecycle.some(value => value.toUpperCase() === 'INCOMPLETE')
                 bulkIncompleteGroups.value = await drainTaskVulnGroupDetails(taskId, {
                     ...taskGroupListQuery.value,
-                    lifecycle: ['INCOMPLETE'],
+                    lifecycle: includesIncomplete ? ['INCOMPLETE'] : [NO_MATCH_FILTER],
                     sort: 'id',
                     order: 'asc',
                 }, { limit: 1000 })

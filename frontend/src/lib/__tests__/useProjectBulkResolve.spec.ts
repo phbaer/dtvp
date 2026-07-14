@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { TaskVulnGroupListQuery } from '../api'
 import type { GroupedVuln } from '../../types'
 import { drainTaskVulnGroupDetails } from '../api'
+import { NO_MATCH_FILTER } from '../projectVulnTaskQuery'
 import { useProjectBulkResolve } from '../useProjectBulkResolve'
 
 vi.mock('../api', () => ({
@@ -99,6 +100,29 @@ describe('useProjectBulkResolve', () => {
             'CVE-1-full',
             'CVE-2-full',
         ])
+
+        wrapper.unmount()
+    })
+
+    it('does not reintroduce incomplete groups excluded by the active lifecycle filter', async () => {
+        vi.mocked(drainTaskVulnGroupDetails).mockResolvedValue([])
+        const { bulk, wrapper } = mountHarness({
+            taskId: 'task-1',
+            query: {
+                lifecycle: ['ASSESSED'],
+                component: 'library-a',
+            },
+        })
+
+        await bulk.openBulkResolveModal()
+
+        expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith('task-1', {
+            lifecycle: [NO_MATCH_FILTER],
+            component: 'library-a',
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        expect(bulk.displayedBulkIncompleteGroups.value).toEqual([])
 
         wrapper.unmount()
     })
