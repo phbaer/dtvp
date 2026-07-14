@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, inject, watch } from 'vue'
 import { CheckCircle, X, Info, AlertTriangle, Loader2 } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
 import { parseAssessmentBlocks, getConsensusAssessment, buildBulkSyncDetails, STATE_PRIORITY } from '../lib/assessment-helpers'
+import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { updateAssessment } from '../lib/api'
 
 const props = defineProps<{
@@ -11,6 +12,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits(['close', 'updated'])
+const teamMapping = inject<any>('teamMapping', ref({}))
 
 const selectedIds = ref<Set<string>>(new Set())
 const processing = ref(false)
@@ -84,6 +86,10 @@ const previewChanges = computed(() => {
             id: group.id,
             title: group.title,
             severity: group.severity,
+            syncIssues: getGroupAssessmentSyncIssues(group, {
+                lifecycle: group.list_metadata?.lifecycle || 'INCOMPLETE',
+                teamMapping: teamMapping.value || {},
+            }),
             targetState: aggregatedState || consensus.state,
             targetDetails: builtText,
             targetJustification: consensus.justification,
@@ -268,7 +274,7 @@ const getStateClass = (state: string) => {
                         <!-- Table Header: Perfectly Aligned Boxes -->
                         <div class="grid grid-cols-[60px_1fr_120px_140px_100px] gap-4 px-6 py-4 bg-white/2 border-b border-white/5 items-center">
                             <div class="flex justify-center uppercase text-[10px] font-black text-gray-600 tracking-widest leading-none">SEL</div>
-                            <div class="uppercase text-[10px] font-black text-gray-600 tracking-widest leading-none">Vulnerability Details</div>
+                            <div class="uppercase text-[10px] font-black text-gray-600 tracking-widest leading-none">Vulnerability / Reason</div>
                             <div class="uppercase text-[10px] font-black text-gray-600 tracking-widest leading-none text-center">Severity</div>
                             <div class="uppercase text-[10px] font-black text-gray-600 tracking-widest leading-none text-center">Consensus Target</div>
                             <div class="uppercase text-[10px] font-black text-gray-600 tracking-widest leading-none text-right">Blocks</div>
@@ -302,6 +308,25 @@ const getStateClass = (state: string) => {
                                         <span class="text-[11px] font-medium text-gray-500 truncate italic" v-if="change.title">
                                             {{ change.title }}
                                         </span>
+                                    </div>
+                                    <div
+                                        :data-testid="`sync-reasons-${change.id}`"
+                                        class="mt-2 space-y-1.5"
+                                    >
+                                        <div
+                                            v-for="issue in change.syncIssues"
+                                            :key="issue.code"
+                                            class="rounded-lg border px-2.5 py-2 text-[10px] leading-relaxed"
+                                            :class="issue.kind === 'inconsistent'
+                                                ? 'border-indigo-500/20 bg-indigo-500/10 text-indigo-100/80'
+                                                : 'border-amber-500/15 bg-amber-500/5 text-amber-100/80'"
+                                        >
+                                            <span
+                                                class="font-black uppercase tracking-wide"
+                                                :class="issue.kind === 'inconsistent' ? 'text-indigo-300' : 'text-amber-300'"
+                                            >{{ issue.label }}:</span>
+                                            {{ issue.detail }}
+                                        </div>
                                     </div>
                                 </div>
 
