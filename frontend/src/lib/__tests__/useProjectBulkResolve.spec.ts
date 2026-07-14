@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
+import type { TaskVulnGroupListQuery } from '../api'
 import type { GroupedVuln } from '../../types'
 import { drainTaskVulnGroupDetails } from '../api'
 import { useProjectBulkResolve } from '../useProjectBulkResolve'
@@ -18,10 +19,12 @@ const group = (id: string): GroupedVuln => ({
 
 const mountHarness = (options: {
     taskId?: string | null
+    query?: TaskVulnGroupListQuery
     incompleteGroups?: GroupedVuln[]
     ensureFullGroup?: (groupId: string, options?: { showLoading?: boolean }) => Promise<GroupedVuln | null>
 } = {}) => {
     const currentTaskId = ref<string | null>(options.taskId ?? null)
+    const taskGroupListQuery = ref<TaskVulnGroupListQuery>(options.query || {})
     const incompleteGroups = ref(options.incompleteGroups || [])
     const ensureFullGroup = vi.fn(options.ensureFullGroup || (async (id: string) => group(`${id}-full`)))
     let bulk!: ProjectBulkResolve
@@ -30,6 +33,7 @@ const mountHarness = (options: {
         setup() {
             bulk = useProjectBulkResolve({
                 currentTaskId,
+                taskGroupListQuery,
                 incompleteGroups,
                 ensureFullGroup,
             })
@@ -42,6 +46,7 @@ const mountHarness = (options: {
     return {
         wrapper,
         currentTaskId,
+        taskGroupListQuery,
         incompleteGroups,
         ensureFullGroup,
         bulk,
@@ -51,12 +56,25 @@ const mountHarness = (options: {
 describe('useProjectBulkResolve', () => {
     it('loads full incomplete groups from the task detail window', async () => {
         vi.mocked(drainTaskVulnGroupDetails).mockResolvedValue([group('CVE-1')])
-        const { bulk, ensureFullGroup, wrapper } = mountHarness({ taskId: 'task-1' })
+        const { bulk, ensureFullGroup, wrapper } = mountHarness({
+            taskId: 'task-1',
+            query: {
+                q: 'urgent',
+                lifecycle: ['OPEN', 'INCOMPLETE'],
+                tag: 'platform',
+                versions: ['2.0.0'],
+                sort: 'severity',
+                order: 'desc',
+            },
+        })
 
         await bulk.openBulkResolveModal()
 
         expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith('task-1', {
+            q: 'urgent',
             lifecycle: ['INCOMPLETE'],
+            tag: 'platform',
+            versions: ['2.0.0'],
             sort: 'id',
             order: 'asc',
         }, { limit: 1000 })

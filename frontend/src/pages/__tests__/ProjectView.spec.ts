@@ -831,16 +831,23 @@ describe('ProjectView.vue', () => {
         }] as any)
 
         const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        ;(wrapper.vm as any).componentFilter = 'library-a'
+        await flushPromises()
 
         projectHeaderState.bulkSyncHandler.value?.()
         await flushPromises()
         await wrapper.vm.$nextTick()
 
-        expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith('task-1', {
-            lifecycle: ['INCOMPLETE'],
-            sort: 'id',
-            order: 'asc',
-        }, { limit: 1000 })
+        expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith(
+            'task-1',
+            expect.objectContaining({
+                component: 'library-a',
+                lifecycle: ['INCOMPLETE'],
+                sort: 'id',
+                order: 'asc',
+            }),
+            { limit: 1000 },
+        )
         expect(getTaskVulnGroup).not.toHaveBeenCalledWith('task-1', 'CVE-INCOMPLETE')
         expect(wrapper.get('[data-testid="bulk-resolve-modal"]').text()).toContain('CVE-INCOMPLETE')
     })

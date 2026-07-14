@@ -374,6 +374,7 @@ selected project versions. Reviewers can:
 - Open a vulnerability detail card.
 - Apply synchronized global or team-specific assessments across matching
   Dependency-Track findings.
+- Limit Bulk Sync candidates with the active vulnerability-list filters.
 - Preview and bulk-apply audit-trail repairs for missing rescored CVSS vectors.
 - Preview and bulk-apply configured CVSS rule synchronization across all
   findings in the completed project task.

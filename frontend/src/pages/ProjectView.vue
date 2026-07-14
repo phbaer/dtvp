@@ -964,7 +964,11 @@ const inconsistencyReasonCounts = computed(() => {
 
 const needsApprovalGroups = computed(() => listStaticStats.value.needsApprovalGroups)
 
-const incompleteGroups = computed(() => listStaticStats.value.incompleteGroups)
+const incompleteGroups = computed(() =>
+    listView.value.matchingItems
+        .filter(item => item.lifecycle === 'INCOMPLETE')
+        .map(item => item.group)
+)
 
 const assessmentRestoreCount = computed(() =>
     currentVulnTaskId.value && taskListCounts.value?.all.assessment_restore
@@ -1034,6 +1038,7 @@ const {
     resetBulkResolveModal,
 } = useProjectBulkResolve({
     currentTaskId: currentVulnTaskId,
+    taskGroupListQuery,
     incompleteGroups,
     ensureFullGroup,
 })
