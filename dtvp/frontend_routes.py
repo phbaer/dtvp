@@ -17,7 +17,20 @@ class FrontendRouteDeps:
     get_dev_disable_auth: Callable[[], bool]
     get_default_project_filter: Callable[[], str]
     get_attribution_age_filter_days: Callable[[], str]
+    get_jira_create_url: Callable[[], str]
     read_text: Callable[[str], str]
+
+
+def _inline_script_json(value: str) -> str:
+    """Return a JSON string that cannot terminate the surrounding script tag."""
+    return (
+        json.dumps(value)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 def _render_index_html(index_path: str, deps: FrontendRouteDeps) -> HTMLResponse:
@@ -40,6 +53,10 @@ def _render_index_html(index_path: str, deps: FrontendRouteDeps) -> HTMLResponse
         content = content.replace(
             "${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}",
             deps.get_attribution_age_filter_days(),
+        )
+        content = content.replace(
+            "'${DTVP_JIRA_CREATE_URL}'",
+            _inline_script_json(deps.get_jira_create_url()),
         )
 
         if current_context_path:
