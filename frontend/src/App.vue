@@ -370,6 +370,14 @@ const acknowledgeChangelog = () => {
                         >
                             Restore CVSS ({{ projectHeaderState.assessmentRestoreCount.value }})
                         </button>
+                        <button
+                            v-if="projectHeaderState.isReviewer.value && projectHeaderState.rescoreRuleSyncCount.value > 0"
+                            type="button"
+                            @click="projectHeaderState.rescoreRuleSyncHandler.value?.()"
+                            :class="[headerButtonBase, headerButtonWarning]"
+                        >
+                            Sync CVSS Rules ({{ projectHeaderState.rescoreRuleSyncCount.value }})
+                        </button>
                     </template>
                 </div>
                 <div class="text-sm text-gray-400 hidden sm:flex items-center gap-6">

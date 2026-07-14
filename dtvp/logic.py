@@ -19,14 +19,38 @@ RE_ANY_VECTOR = re.compile(r"\b(CVSS:\d\.\d/\S+|AV:[NLA]/\S+)")
 
 DEFAULT_DEPENDENCY_CHAIN_LIMIT = 100
 
-# CVSS 3.x base metric keys – everything else (temporal, environmental,
-# modified-base) is considered a rescoring addition.
-_CVSS3_BASE_METRIC_KEYS = frozenset({"AV", "AC", "PR", "UI", "S", "C", "I", "A"})
+# Base metric keys by CVSS major version. Everything else (temporal,
+# environmental, supplemental, and modified-base metrics) is considered a
+# rescoring addition.
+_CVSS_BASE_METRIC_KEYS = {
+    "2": frozenset({"AV", "AC", "Au", "C", "I", "A"}),
+    "3": frozenset({"AV", "AC", "PR", "UI", "S", "C", "I", "A"}),
+    "4": frozenset(
+        {"AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA"}
+    ),
+}
 
 
 def _metric_key(token: str) -> str:
     """Extract the metric key from a CVSS token like ``AV:N`` → ``AV``."""
     return token.split(":")[0]
+
+
+def _cvss_vector_major_version(vector: str) -> Optional[str]:
+    normalized = vector.strip().lstrip("(")
+    if normalized.startswith("CVSS:4."):
+        return "4"
+    if normalized.startswith("CVSS:3."):
+        return "3"
+    if normalized.startswith("CVSS:2.") or normalized.startswith("AV:"):
+        return "2"
+    return None
+
+
+def _cvss_vector_parts(vector: str) -> tuple[list[str], int]:
+    parts = vector.strip().replace("(", "").replace(")", "").split("/")
+    metric_start = 1 if parts and parts[0].startswith("CVSS:") else 0
+    return parts, metric_start
 
 
 def sanitize_rescored_vector(
@@ -40,49 +64,59 @@ def sanitize_rescored_vector(
     Otherwise the base components are taken from ``original_vector`` and only
     the non-base tokens from ``rescored_vector`` are appended.
 
-    Returns ``None`` when either input is falsy or when both vectors are
-    identical (meaning no rescoring occurred).
+    The original vector's CVSS version and version-specific base metrics are
+    retained. Cross-version vectors are returned unchanged so the caller can
+    expose them for manual review. Returns ``None`` when correction removes all
+    meaningful rescoring additions.
     """
     if not original_vector or not rescored_vector:
         return rescored_vector or None
 
-    # CVSS 3.0 and 3.1 are equivalent; DT uses 3.0, we always rescore in 3.1.
-    # Normalize both to 3.1 for comparison; output always uses 3.1.
-    norm_original = original_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
-    norm_rescored = rescored_vector.replace("CVSS:3.0/", "CVSS:3.1/", 1)
+    original_version = _cvss_vector_major_version(original_vector)
+    rescored_version = _cvss_vector_major_version(rescored_vector)
+    if (
+        original_version is None
+        or rescored_version is None
+        or original_version != rescored_version
+    ):
+        # Cross-version vectors cannot safely share base components. Keep the
+        # submitted vector intact so the existing mismatch indicator can route
+        # it to manual review.
+        return rescored_vector
 
-    orig_parts = norm_original.split("/")
-    rescored_parts = norm_rescored.split("/")
-
-    # Determine where metric tokens start (skip the CVSS version prefix)
-    orig_start = 1 if orig_parts[0].startswith("CVSS:") else 0
-    rescored_start = 1 if rescored_parts[0].startswith("CVSS:") else 0
+    base_metric_keys = _CVSS_BASE_METRIC_KEYS[original_version]
+    orig_parts, orig_start = _cvss_vector_parts(original_vector)
+    rescored_parts, rescored_start = _cvss_vector_parts(rescored_vector)
 
     orig_base = {
-        p for p in orig_parts[orig_start:] if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS
+        p for p in orig_parts[orig_start:] if _metric_key(p) in base_metric_keys
     }
     rescored_base = {
         p
         for p in rescored_parts[rescored_start:]
-        if _metric_key(p) in _CVSS3_BASE_METRIC_KEYS
+        if _metric_key(p) in base_metric_keys
     }
 
-    if orig_base == rescored_base:
-        # Base metrics already match – vector is valid as-is (always in 3.1)
-        return norm_rescored
+    original_prefix = orig_parts[:orig_start]
+    rescored_prefix = rescored_parts[:rescored_start]
+    if orig_base == rescored_base and original_prefix == rescored_prefix:
+        # Base metrics and the precise CVSS version already match.
+        return rescored_vector
 
-    # Reconstruct: original base (in 3.1) + only the non-base tokens from the rescored vector
+    # Reconstruct using the original vector version and base metrics plus only
+    # the non-base tokens from the rescored vector.
+    original_base = [
+        p for p in orig_parts[orig_start:] if _metric_key(p) in base_metric_keys
+    ]
     non_base = [
         p
         for p in rescored_parts[rescored_start:]
-        if _metric_key(p) not in _CVSS3_BASE_METRIC_KEYS
+        if _metric_key(p) not in base_metric_keys
     ]
-    if non_base:
-        corrected = "/".join(orig_parts + non_base)
-    else:
-        corrected = norm_original
+    corrected = "/".join(original_prefix + original_base + non_base)
+    normalized_original = "/".join(original_prefix + original_base)
 
-    if corrected == norm_original:
+    if corrected == normalized_original:
         return None  # No meaningful change after correction
 
     logger.debug(

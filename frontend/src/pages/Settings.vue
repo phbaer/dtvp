@@ -787,7 +787,9 @@ watch(() => activeTab.value, (newTab) => {
              <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Editor</h4>
              <p class="text-gray-400 mb-2 text-xs">
                 Edit the JSON below directly or upload a file. This controls automated vector changes when analysis states trigger.
-            </p>
+                Define each version's base, modified, and requirement relationships in <code>metric_rules</code>;
+                transition actions are evaluated through those relationships by both individual and bulk rule sync.
+             </p>
              <div class="relative">
                 <textarea 
                     v-model="rescoreJson"

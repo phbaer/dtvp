@@ -615,6 +615,84 @@ export const applyAssessmentRestore = async (
     return res.data;
 };
 
+export interface RescoreRuleSyncPreviewFinding {
+    finding_uuid?: string;
+    project_uuid?: string;
+    project_name?: string;
+    project_version?: string;
+    component_uuid?: string;
+    component_name?: string;
+    component_version?: string;
+    vulnerability_uuid?: string;
+    state: string;
+    cvss_version: string;
+    status: 'ready' | 'review';
+    reasons: string[];
+    current_vector?: string | null;
+    current_score?: number | null;
+    proposed_vector?: string | null;
+    proposed_score?: number | null;
+}
+
+export interface RescoreRuleSyncPreviewGroup {
+    group_id: string;
+    title?: string | null;
+    severity?: string | null;
+    finding_count: number;
+    syncable_finding_count: number;
+    review_finding_count: number;
+    findings: RescoreRuleSyncPreviewFinding[];
+}
+
+export interface RescoreRuleSyncSummary {
+    groups?: number;
+    findings?: number;
+    syncable_groups?: number;
+    syncable_findings?: number;
+    review_findings?: number;
+    compliant_findings?: number;
+    attempted?: number;
+    succeeded?: number;
+    queued?: number;
+    failed?: number;
+    review_required?: number;
+    unchanged?: number;
+}
+
+export interface RescoreRuleSyncPreviewResponse {
+    task_id: string;
+    items: RescoreRuleSyncPreviewGroup[];
+    summary: RescoreRuleSyncSummary;
+}
+
+export interface RescoreRuleSyncApplyResponse {
+    task_id: string;
+    summary: RescoreRuleSyncSummary;
+    results: Array<Record<string, any>>;
+}
+
+export const previewRescoreRuleSync = async (
+    taskId: string,
+    groupIds?: string[],
+): Promise<RescoreRuleSyncPreviewResponse> => {
+    const res = await api.post('/assessments/rescore-rule-preview', {
+        task_id: taskId,
+        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+    });
+    return res.data;
+};
+
+export const applyRescoreRuleSync = async (
+    taskId: string,
+    groupIds?: string[],
+): Promise<RescoreRuleSyncApplyResponse> => {
+    const res = await api.post('/assessments/rescore-rule-apply', {
+        task_id: taskId,
+        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+    });
+    return res.data;
+};
+
 // Start a task and poll until completion
 export const getGroupedVulns = async (
     name: string,
