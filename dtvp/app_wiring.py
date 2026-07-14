@@ -228,6 +228,7 @@ def build_general_api_route_deps(
     dt_settings_cls: Callable[[], Any],
     get_dt_client_cls: Callable[[], type],
     get_user_role: Callable[[str], str],
+    load_rescore_rules: Callable[[], dict[str, Any] | None],
     get_bom_analysis_cache_cls: Callable[[], type],
     default_dependency_chain_limit: int,
     service_unavailable_response: dict[int | str, dict[str, Any]],
@@ -257,6 +258,7 @@ def build_general_api_route_deps(
         ),
         sort_projects_by_version=sort_projects_by_version,
         load_team_mapping=lambda: load_team_mapping(),
+        load_rescore_rules=load_rescore_rules,
         collect_version_snapshots=lambda versions, client, cve, team_mapping, progress_callback=None: (
             collect_grouped_vuln_version_snapshots(
                 grouped_vuln_service_deps,

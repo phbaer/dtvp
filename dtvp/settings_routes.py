@@ -6,6 +6,8 @@ from typing import Annotated, Any, Callable
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from .rescore_rule_services import validate_rescore_rule_config
+
 
 @dataclass(frozen=True)
 class SettingsRouteDeps:
@@ -117,9 +119,15 @@ def _register_role_routes(
         try:
             content = await file.read()
             try:
-                json.loads(content)
+                parsed = json.loads(content)
             except json.JSONDecodeError:
                 return {"status": "error", "message": "Invalid JSON"}
+            validation_errors = validate_rescore_rule_config(parsed)
+            if validation_errors:
+                return {
+                    "status": "error",
+                    "message": "; ".join(validation_errors),
+                }
 
             await asyncio.to_thread(deps.write_bytes, target_path, content)
             return {
@@ -282,6 +290,12 @@ def _register_rescore_rule_routes(
         _ensure_parent_dir(target_path)
 
         try:
+            validation_errors = validate_rescore_rule_config(rules)
+            if validation_errors:
+                return {
+                    "status": "error",
+                    "message": "; ".join(validation_errors),
+                }
             await asyncio.to_thread(deps.write_json, target_path, rules)
             return {
                 "status": "success",

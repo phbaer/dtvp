@@ -155,6 +155,50 @@ def test_sanitize_rescored_vector_cvss2():
     assert sanitize_rescored_vector(orig, rescored) == rescored
 
 
+def test_sanitize_rescored_vector_cvss2_preserves_all_v2_base_metrics():
+    orig = "AV:N/AC:L/Au:N/C:P/I:P/A:P"
+    bad = "AV:L/AC:H/Au:S/C:C/I:C/A:C/CDP:N/TD:N/CR:L/IR:L/AR:L"
+
+    assert sanitize_rescored_vector(orig, bad) == (
+        "AV:N/AC:L/Au:N/C:P/I:P/A:P/CDP:N/TD:N/CR:L/IR:L/AR:L"
+    )
+
+
+def test_sanitize_rescored_vector_cvss30_preserves_exact_version():
+    orig = "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    rescored = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/MC:N"
+
+    assert sanitize_rescored_vector(orig, rescored) == (
+        "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/MC:N"
+    )
+
+
+def test_sanitize_rescored_vector_cvss4_preserves_all_v4_base_metrics():
+    orig = (
+        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/"
+        "VC:H/VI:H/VA:H/SC:L/SI:L/SA:L"
+    )
+    bad = (
+        "CVSS:4.0/AV:P/AC:H/AT:P/PR:H/UI:A/"
+        "VC:N/VI:N/VA:N/SC:N/SI:N/SA:N/CR:L/MVC:N"
+    )
+
+    assert sanitize_rescored_vector(orig, bad) == (
+        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/"
+        "VC:H/VI:H/VA:H/SC:L/SI:L/SA:L/CR:L/MVC:N"
+    )
+
+
+def test_sanitize_rescored_vector_leaves_cross_version_vector_for_manual_review():
+    orig = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    rescored = (
+        "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/"
+        "VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+    )
+
+    assert sanitize_rescored_vector(orig, rescored) == rescored
+
+
 def test_group_vulnerabilities_rescored():
     v1_data = {
         "version": {"name": "TestProj", "version": "1.0", "uuid": "uuid1"},

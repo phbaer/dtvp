@@ -152,6 +152,7 @@ Important backend entry points:
 | `dtvp/logic.py` | Domain logic for grouping, team mapping, assessment parsing, statistics, CVSS, BOM dependency analysis. |
 | `dtvp/assessment_services.py` | Dependency-Track assessment writes, conflict detection, local overlays, result finalization. |
 | `dtvp/assessment_restore_services.py` | Detection and repair helpers for missing rescored CVSS assessment tags recovered from Dependency-Track audit comments. |
+| `dtvp/rescore_rule_services.py` | Data-driven CVSS rule validation, cross-version vector/score synchronization, and bulk preview/apply payload construction. |
 | `dtvp/dt_client.py` | Dependency-Track API client. |
 | `dtvp/dt_cache.py` | Local Dependency-Track cache and pending update storage. |
 | `dtvp/sqlite_migration_services.py` and `dtvp/migrations/` | Lightweight SQLite migration runner and numbered SQL schema files for local stores. |
@@ -320,7 +321,40 @@ Other domain rules:
   Otherwise DTVP chooses the worst team state using the priority in
   `dtvp/logic.py`.
 - Rescored CVSS vectors preserve original base metrics so
-  threat/environment changes do not silently mutate base metrics.
+  threat/environment changes do not silently mutate base metrics. Sanitizing
+  those vectors uses the correct base-metric set for CVSS 2.0, 3.0/3.1, and
+  4.0, and preserves the original exact version instead of rewriting 3.0 as
+  3.1. Cross-version vectors stay visible for manual review.
+- CVSS rescore rules are loaded from `RESCORE_RULES_PATH`, defaulting to
+  `data/rescore_rules.json`. The shipped `NOT_AFFECTED` and `FALSE_POSITIVE`
+  transitions define actions for CVSS 2.0, 3.0, 3.1, and 4.0. Each version's
+  `metric_rules` entry defines its base metrics, serialization order, undefined
+  values, and base/modified/requirement relationships. The settings API rejects
+  rule files that omit or contradict this schema. Both shipped transitions
+  produce an exact rescored score of `0.0` for every supported CVSS version;
+  CVSS 4.0 therefore clears all vulnerable-system and subsequent-system impact
+  metrics.
+- Rule application processes configured modified relationships before their
+  requirement relationships. A relationship with a modified metric retains
+  its requirement only while that override is effective; a relationship
+  without one (CVSS 2.0 in the shipped rules) applies directly to its base
+  metric. Redundant modified values and orphaned requirements are removed by
+  both calculator cleanup and bulk synchronization without inferring metric
+  pairings from their names.
+- Existing rescored vectors that do not match the configured actions show a
+  `Sync rules` control in the CVSS calculator. It stages the corrected vector;
+  the reviewer then uses the normal `Apply` action to persist it across the
+  finding instances.
+- Reviewers also get a project-header `Sync CVSS Rules` action when a completed
+  project task contains non-compliant findings. Its server-side preview shows
+  current and proposed vectors/scores per group, auto-selects safe repairs, and
+  leaves malformed, cross-version, or incomplete-identity findings for manual
+  review. Apply recomputes the preview, preserves assessment state,
+  justification, suppression, and explanatory text, refreshes active task
+  snapshots, and reports successful, queued, and failed Dependency-Track
+  updates. The endpoints are
+  `POST /api/assessments/rescore-rule-preview` and
+  `POST /api/assessments/rescore-rule-apply`.
 - Dependency relationships and paths come from CycloneDX BOM dependency graphs.
 - Dependency-Track attribution timestamps are preserved as `attributed_on` and
   can be filtered by age in the project view.
@@ -341,6 +375,8 @@ selected project versions. Reviewers can:
 - Apply synchronized global or team-specific assessments across matching
   Dependency-Track findings.
 - Preview and bulk-apply audit-trail repairs for missing rescored CVSS vectors.
+- Preview and bulk-apply configured CVSS rule synchronization across all
+  findings in the completed project task.
 
 Backend task windows keep large projects responsive:
 
@@ -908,6 +944,8 @@ Compose runtime notes:
 - `./data` is mounted into `/app/data`, so mapping files, role files, cache
   data, tmrescore proposals, and project archives persist across container
   restarts.
+- The frontend image build copies the canonical `data/rescore_rules.json` into
+  its build stage because `vue-tsc` also type-checks the rule-engine tests.
 - The bundled `agentyzer` service is started by default.
 - Cloned analysis workspaces persist in the `agentyzer-repos` Docker volume.
 - DTVP points at `http://agentyzer:8000` unless `DTVP_CODE_ANALYSIS_URL` is

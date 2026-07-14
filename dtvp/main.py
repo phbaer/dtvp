@@ -520,6 +520,7 @@ api_router.include_router(
             dt_settings_cls=DTSettings,
             get_dt_client_cls=lambda: DTClient,
             get_user_role=lambda user: get_user_role(user),
+            load_rescore_rules=lambda: load_rescore_rules(),
             get_bom_analysis_cache_cls=lambda: BOMAnalysisCache,
             default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
             service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,

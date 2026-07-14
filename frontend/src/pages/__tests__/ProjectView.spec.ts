@@ -47,6 +47,7 @@ vi.mock('../../lib/api', () => ({
     codeAnalysisListResults: vi.fn(() => Promise.resolve([])),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
+    previewRescoreRuleSync: vi.fn(() => Promise.resolve({ task_id: 'task-1', items: [], summary: { groups: 0 } })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} }))
 }))
 
@@ -103,6 +104,8 @@ describe('ProjectView.vue', () => {
         projectHeaderState.lastProjectName.value = null
         projectHeaderState.lastProjectPath.value = null
         projectHeaderState.bulkSyncHandler.value = null
+        projectHeaderState.rescoreRuleSyncCount.value = 0
+        projectHeaderState.rescoreRuleSyncHandler.value = null
         Object.defineProperty(navigator, 'clipboard', {
             value: { writeText: writeTextSpy },
             writable: true,

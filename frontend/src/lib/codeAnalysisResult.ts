@@ -144,9 +144,9 @@ export const buildCodeAnalysisDetails = (
         ...(cvss
             ? [
                 '',
-                `[Rescored: ${cvss.adjusted_score}]`,
+                `[Rescored: ${cvss.adjusted_score.toFixed(1)}]`,
                 ...(cvss.adjusted_vector ? [`[Rescored Vector: ${cvss.adjusted_vector}]`] : []),
-                `CVSS: ${cvss.original_score} → ${cvss.adjusted_score}`,
+                `CVSS: ${cvss.original_score.toFixed(1)} → ${cvss.adjusted_score.toFixed(1)}`,
                 ...(cvss.adjusted_vector ? [`Adjusted Vector: ${cvss.adjusted_vector}`] : []),
                 ...(cvss.summary ? [`CVSS Summary: ${cvss.summary}`] : []),
                 ...(cvss.reasons.length ? [`CVSS Reasons: ${cvss.reasons.join('; ')}`] : []),

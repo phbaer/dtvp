@@ -182,7 +182,7 @@ const buildRescoredTags = ({
 
     const tags: string[] = []
     if (pendingScore !== null && pendingScore !== undefined) {
-        tags.push(`[Rescored: ${pendingScore}]`)
+        tags.push(`[Rescored: ${pendingScore.toFixed(1)}]`)
     }
     if (pendingVector) {
         tags.push(`[Rescored Vector: ${pendingVector}]`)

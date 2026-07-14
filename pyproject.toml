@@ -12,7 +12,8 @@ dependencies = [
     "httpx",
     "python-jose[cryptography]",
     "pydantic-settings",
-    "python-multipart"
+    "python-multipart",
+    "cvss>=3.6"
 ]
 
 [dependency-groups]

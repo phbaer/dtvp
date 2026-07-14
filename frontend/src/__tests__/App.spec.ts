@@ -98,6 +98,10 @@ describe('App bootstrap state', () => {
         projectHeaderState.lastProjectPath.value = null
         projectHeaderState.isAllProjects.value = true
         projectHeaderState.viewMode.value = 'analysis'
+        projectHeaderState.incompleteCount.value = 0
+        projectHeaderState.assessmentRestoreCount.value = 0
+        projectHeaderState.rescoreRuleSyncCount.value = 0
+        projectHeaderState.rescoreRuleSyncHandler.value = null
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }))
         vi.stubGlobal('localStorage', createLocalStorageMock())
     })
@@ -176,5 +180,26 @@ describe('App bootstrap state', () => {
         await button?.trigger('click')
 
         expect(projectHeaderState.viewMode.value).toBe('analysis')
+    })
+
+    it('opens bulk CVSS rule sync from the project header', async () => {
+        mocks.getVersion.mockResolvedValue({ version: '1.2.3', build: 'abc123' })
+        mocks.route.path = '/project/ExampleApp'
+        mocks.route.fullPath = '/project/ExampleApp'
+        const handler = vi.fn()
+        projectHeaderState.currentProjectName.value = 'ExampleApp'
+        projectHeaderState.isAllProjects.value = false
+        projectHeaderState.isReviewer.value = true
+        projectHeaderState.rescoreRuleSyncCount.value = 3
+        projectHeaderState.rescoreRuleSyncHandler.value = handler
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        const button = wrapper.findAll('button')
+            .find(candidate => candidate.text().includes('Sync CVSS Rules (3)'))
+        expect(button).toBeTruthy()
+        await button?.trigger('click')
+        expect(handler).toHaveBeenCalledOnce()
     })
 })

@@ -1,6 +1,21 @@
-import { Cvss2, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
+import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 
 export type CvssVersion = '4.0' | '3.1' | '3.0' | '2.0'
+
+export interface CvssMetricRelationship {
+    base: string
+    modified?: string
+    requirement?: string
+}
+
+export interface CvssMetricRule {
+    undefined_values: string[]
+    base_metrics: string[]
+    metric_order: string[]
+    relationships: CvssMetricRelationship[]
+}
+
+export type CvssMetricRules = Partial<Record<CvssVersion, CvssMetricRule>>
 
 interface CvssComponentLike {
     shortName: string
@@ -31,39 +46,28 @@ const detectCvssVersion = (vector: string, fallbackVersion: CvssVersion): CvssVe
 
 const createCvssInstance = (vector: string, fallbackVersion: CvssVersion) => {
     const version = detectCvssVersion(vector, fallbackVersion)
-    let normalizedVector = vector.trim()
+    const normalizedVector = vector.trim()
+    const hasRecognizedVector = normalizedVector.startsWith('CVSS:4.0') ||
+        normalizedVector.startsWith('CVSS:3.') ||
+        normalizedVector.startsWith('CVSS:2.0') ||
+        (normalizedVector.includes('/') && !normalizedVector.startsWith('CVSS:'))
 
-    try {
-        if (normalizedVector.startsWith('CVSS:4.0')) {
-            return { version, instance: new Cvss4P0(normalizedVector) }
+    if (hasRecognizedVector) {
+        try {
+            if (version === '4.0') return { version, instance: new Cvss4P0(normalizedVector) }
+            if (version === '3.1') return { version, instance: new Cvss3P1(normalizedVector) }
+            if (version === '3.0') return { version, instance: new Cvss3P0(normalizedVector) }
+            if (version === '2.0') return { version, instance: new Cvss2(normalizedVector) }
+        } catch {
+            // fall through to default vector
         }
-        if (normalizedVector.startsWith('CVSS:3.')) {
-            if (normalizedVector.startsWith('CVSS:3.0')) {
-                normalizedVector = normalizedVector.replace('CVSS:3.0', 'CVSS:3.1')
-            }
-            return { version, instance: new Cvss3P1(normalizedVector) }
-        }
-        if (normalizedVector.startsWith('CVSS:2.0') || (normalizedVector.includes('/') && !normalizedVector.startsWith('CVSS:'))) {
-            return { version, instance: new Cvss2(normalizedVector) }
-        }
-    } catch {
-        // fall through to default vector
     }
 
-    const defaultVersion = version === '3.0' ? '3.1' : version
-    const defaultVector = DEFAULT_VECTOR_BY_VERSION[defaultVersion]
-    if (defaultVersion === '4.0') {
-        return { version: defaultVersion, instance: new Cvss4P0(defaultVector) }
-    }
-    if (defaultVersion === '2.0') {
-        return { version: defaultVersion, instance: new Cvss2(defaultVector) }
-    }
-    return { version: defaultVersion, instance: new Cvss3P1(defaultVector) }
-}
-
-const getMetricValue = (vectorParts: string[], key: string) => {
-    const part = vectorParts.find(vectorPart => vectorPart.startsWith(`${key}:`))
-    return part ? part.split(':')[1] : null
+    const defaultVector = DEFAULT_VECTOR_BY_VERSION[version]
+    if (version === '4.0') return { version, instance: new Cvss4P0(defaultVector) }
+    if (version === '3.1') return { version, instance: new Cvss3P1(defaultVector) }
+    if (version === '3.0') return { version, instance: new Cvss3P0(defaultVector) }
+    return { version, instance: new Cvss2(defaultVector) }
 }
 
 const getComponentSafe = (instance: CvssInstanceLike, name: string) => {
@@ -77,39 +81,79 @@ const getComponentSafe = (instance: CvssInstanceLike, name: string) => {
     }
 }
 
-const shouldApplyAction = (
-    key: string,
+const undefinedValues = (metricRule?: CvssMetricRule) =>
+    new Set(metricRule?.undefined_values?.length ? metricRule.undefined_values : ['X', 'ND'])
+
+const isDefinedMetricValue = (value?: string | null, metricRule?: CvssMetricRule) =>
+    Boolean(value && !undefinedValues(metricRule).has(value))
+
+const getComponentValue = (instance: CvssInstanceLike, key: string) =>
+    getComponentSafe(instance, key)?.shortName ?? null
+
+const applyComponent = (instance: CvssInstanceLike, key: string, value: string) => {
+    try {
+        instance.applyComponentString(key, value)
+    } catch (error) {
+        console.error('Failed to apply component string:', key, value, error)
+    }
+}
+
+const applyModifiedAction = (
+    instance: CvssInstanceLike,
+    relationship: CvssMetricRelationship,
     value: string,
-    currentVector: string,
-    actions: Record<string, string>,
+    metricRule?: CvssMetricRule,
 ) => {
-    const vectorParts = currentVector.split('/')
-    const isV4 = currentVector.startsWith('CVSS:4.0')
-    const isModifiedMetric = key.startsWith('M') && key.length > 1
-    const isRequirementMetric = key === 'CR' || key === 'IR' || key === 'AR'
+    if (!relationship.modified) return
+    const baseValue = getComponentValue(instance, relationship.base)
+    if (!isDefinedMetricValue(baseValue, metricRule)) return
 
-    let baseKey = key
-    if (isModifiedMetric) {
-        baseKey = key.slice(1)
-    } else if (isRequirementMetric) {
-        baseKey = isV4 ? `V${key.charAt(0)}` : key.charAt(0)
-    }
+    // A modified value equal to its base value is redundant. Clearing an old
+    // override here also lets the same rule repair already-rescored vectors.
+    applyComponent(
+        instance,
+        relationship.modified,
+        baseValue === value ? (metricRule?.undefined_values?.[0] || 'X') : value,
+    )
+}
 
-    const baseValue = getMetricValue(vectorParts, baseKey)
-    const isDefined = Boolean(baseValue && baseValue !== 'X')
+const applyRequirementAction = (
+    instance: CvssInstanceLike,
+    relationship: CvssMetricRelationship,
+    value: string,
+    metricRule?: CvssMetricRule,
+) => {
+    if (!relationship.requirement) return
+    const baseValue = getComponentValue(instance, relationship.base)
 
-    if (isModifiedMetric) {
-        return isDefined && baseValue !== value
-    }
+    // A relationship without a modified metric (CVSS v2 in the default
+    // configuration) applies its requirement to the base metric. Otherwise,
+    // a requirement is retained only while the configured modified metric is
+    // an effective override.
+    const hasApplicableMetric = !relationship.modified
+        ? isDefinedMetricValue(baseValue, metricRule)
+        : Boolean(
+            isDefinedMetricValue(baseValue, metricRule) &&
+            isDefinedMetricValue(getComponentValue(instance, relationship.modified), metricRule) &&
+            getComponentValue(instance, relationship.modified) !== baseValue,
+        )
 
-    if (isRequirementMetric) {
-        const modKey = `M${baseKey}`
-        const currentModValue = actions[modKey] ?? getMetricValue(vectorParts, modKey)
-        const finalModValue = currentModValue && currentModValue !== 'X' ? currentModValue : baseValue
-        return isDefined && baseValue !== finalModValue
-    }
+    applyComponent(
+        instance,
+        relationship.requirement,
+        hasApplicableMetric ? value : (metricRule?.undefined_values?.[0] || 'X'),
+    )
+}
 
-    return true
+const toDefinedVector = (instance: CvssInstanceLike, metricRule?: CvssMetricRule) => {
+    const unresolved = undefinedValues(metricRule)
+    return instance.toString()
+    .split('/')
+    .filter((part: string) => {
+        const value = part.includes(':') ? part.slice(part.lastIndexOf(':') + 1) : ''
+        return !unresolved.has(value)
+    })
+    .join('/')
 }
 
 const getTransitionActions = (
@@ -131,11 +175,13 @@ const getTransitionActions = (
 
 export const buildRescoredVectorForState = ({
     rules,
+    metricRules,
     targetState,
     currentVector,
     fallbackVersion,
 }: {
     rules: Array<Record<string, any>>
+    metricRules?: CvssMetricRules
     targetState: string
     currentVector: string
     fallbackVersion: CvssVersion
@@ -148,60 +194,82 @@ export const buildRescoredVectorForState = ({
     }
 
     const { instance, version } = createCvssInstance(currentVector, fallbackVersion)
+    const metricRule = metricRules?.[version]
+    const relationships = metricRule?.relationships || []
+    const requirementRelationships = new Map(
+        relationships
+            .filter(relationship => relationship.requirement)
+            .map(relationship => [relationship.requirement as string, relationship]),
+    )
+    const modifiedRelationships = new Map(
+        relationships
+            .filter(relationship => relationship.modified)
+            .map(relationship => [relationship.modified as string, relationship]),
+    )
 
+    const requirementActions: Array<[string, string]> = []
     for (const [key, value] of Object.entries(actions)) {
-        if (!shouldApplyAction(key, value, currentVector.trim(), actions)) {
-            continue
-        }
-
-        try {
-            instance.applyComponentString(key, value)
-        } catch (error) {
-            console.error('Failed to apply component string:', key, value, error)
+        if (requirementRelationships.has(key)) {
+            requirementActions.push([key, value])
+        } else if (modifiedRelationships.has(key)) {
+            applyModifiedAction(instance, modifiedRelationships.get(key)!, value, metricRule)
+        } else {
+            applyComponent(instance, key, value)
         }
     }
+    for (const [key, value] of requirementActions) {
+        applyRequirementAction(instance, requirementRelationships.get(key)!, value, metricRule)
+    }
 
-    const vector = instance.toString().split('/').filter((part: string) => !part.endsWith(':X')).join('/')
+    const vector = toDefinedVector(instance, metricRule)
     return { vector, version }
 }
 
-export const normalizeCvssVectorInstance = (instance: CvssInstanceLike) => {
-    const modifiedPairs: Array<[string, string]> = [
-        ['MAV', 'AV'], ['MAC', 'AC'], ['MAT', 'AT'], ['MPR', 'PR'], ['MUI', 'UI'],
-        ['MVC', 'VC'], ['MVI', 'VI'], ['MVA', 'VA'], ['MSC', 'SC'], ['MSI', 'SI'], ['MSA', 'SA'],
-        ['MC', 'C'], ['MI', 'I'], ['MA', 'A'],
-    ]
-
-    for (const [modifiedKey, baseKey] of modifiedPairs) {
+export const normalizeCvssVectorInstance = (
+    instance: CvssInstanceLike,
+    metricRule?: CvssMetricRule,
+) => {
+    const relationships = metricRule?.relationships || []
+    for (const relationship of relationships) {
+        const modifiedKey = relationship.modified
+        if (!modifiedKey) continue
+        const baseKey = relationship.base
         const modifiedComponent = getComponentSafe(instance, modifiedKey)
         const baseComponent = getComponentSafe(instance, baseKey)
         if (!modifiedComponent || !baseComponent) continue
 
         const modifiedValue = modifiedComponent.shortName
         const baseValue = baseComponent.shortName
-        if (modifiedValue === 'X' || baseValue === 'X') continue
+        if (!isDefinedMetricValue(modifiedValue, metricRule) || !isDefinedMetricValue(baseValue, metricRule)) continue
         if (modifiedValue === baseValue) {
-            instance.applyComponentString(modifiedKey, 'X')
+            instance.applyComponentString(modifiedKey, metricRule?.undefined_values?.[0] || 'X')
         }
     }
 
-    const requirementMap: Record<string, string[]> = {
-        CR: ['C', 'VC'],
-        IR: ['I', 'VI'],
-        AR: ['A', 'VA'],
-    }
-
-    for (const [requirementKey, baseKeys] of Object.entries(requirementMap)) {
+    for (const relationship of relationships) {
+        const requirementKey = relationship.requirement
+        if (!requirementKey) continue
         const requirementComponent = getComponentSafe(instance, requirementKey)
-        if (!requirementComponent || requirementComponent.shortName === 'X') continue
+        if (!requirementComponent || !isDefinedMetricValue(requirementComponent.shortName, metricRule)) continue
 
-        const baseComponent = baseKeys.map(baseKey => getComponentSafe(instance, baseKey)).find(Boolean)
-        if (!baseComponent || baseComponent.shortName === 'X') continue
+        const baseComponent = getComponentSafe(instance, relationship.base)
+        if (!baseComponent) continue
 
-        if (requirementComponent.shortName === baseComponent.shortName) {
-            instance.applyComponentString(requirementKey, 'X')
+        const modifiedComponent = relationship.modified
+            ? getComponentSafe(instance, relationship.modified)
+            : null
+
+        if (modifiedComponent) {
+            const hasEffectiveModifiedMetric = isDefinedMetricValue(baseComponent.shortName, metricRule) &&
+                isDefinedMetricValue(modifiedComponent.shortName, metricRule) &&
+                modifiedComponent.shortName !== baseComponent.shortName
+            if (!hasEffectiveModifiedMetric) {
+                instance.applyComponentString(requirementKey, metricRule?.undefined_values?.[0] || 'X')
+            }
+        } else if (!isDefinedMetricValue(baseComponent.shortName, metricRule)) {
+            instance.applyComponentString(requirementKey, metricRule?.undefined_values?.[0] || 'X')
         }
     }
 
-    return instance.toString().split('/').filter((part: string) => !part.endsWith(':X')).join('/')
+    return toDefinedVector(instance, metricRule)
 }

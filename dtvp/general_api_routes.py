@@ -20,7 +20,18 @@ from .grouped_vuln_services import (
     build_grouped_vuln_statistics_rollup,
     summarize_grouped_vulnerabilities,
 )
-from .logic import populate_group_dependency_chains
+from .logic import (
+    RE_SCORE,
+    RE_VECTOR,
+    populate_group_dependency_chains,
+    sanitize_rescored_vector,
+    score_to_severity,
+)
+from .rescore_rule_services import (
+    RescoreRuleError,
+    build_rescore_rule_sync_payloads,
+    build_rescore_rule_sync_preview,
+)
 from .task_group_query_services import (
     build_task_group_query_index,
     get_or_build_task_group_query_index,
@@ -65,6 +76,7 @@ class GeneralApiRouteDeps:
     ]
     sort_projects_by_version: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
     load_team_mapping: Callable[[], dict[str, Any]]
+    load_rescore_rules: Callable[[], dict[str, Any] | None]
     collect_version_snapshots: Callable[
         ...,
         Awaitable[
@@ -164,7 +176,47 @@ def _apply_assessment_payload_to_group(
                 component["justification"] = payload.get("justification")
             update_component_restore_metadata(component)
             changed = True
+    if changed:
+        _refresh_group_rescoring_metadata(group)
     return changed
+
+
+def _refresh_group_rescoring_metadata(group: dict[str, Any]) -> None:
+    """Rebuild aggregate rescoring fields after component detail updates."""
+    best_score: float | None = None
+    best_vector: str | None = None
+    fallback_vector: str | None = None
+    vector_adjusted = False
+    base_vector = group.get("cvss_vector")
+
+    for affected_version in group.get("affected_versions") or []:
+        for component in affected_version.get("components") or []:
+            details = component.get("analysis_details") or ""
+            score_match = RE_SCORE.search(details)
+            vector_match = RE_VECTOR.search(details)
+            score: float | None = None
+            if score_match:
+                try:
+                    score = float(score_match.group(1))
+                except ValueError:
+                    score = None
+            vector = vector_match.group(1).strip() if vector_match else None
+            if vector and base_vector:
+                sanitized = sanitize_rescored_vector(base_vector, vector)
+                vector_adjusted = vector_adjusted or sanitized != vector
+                vector = sanitized
+            if vector and fallback_vector is None:
+                fallback_vector = vector
+            if score is not None and (best_score is None or score > best_score):
+                best_score = score
+                best_vector = vector
+
+    group["rescored_cvss"] = best_score
+    group["rescored_vector"] = best_vector or fallback_vector
+    group["rescored_vector_adjusted"] = vector_adjusted
+    effective_score = best_score if best_score is not None else group.get("cvss_score")
+    if effective_score is not None:
+        group["severity"] = score_to_severity(float(effective_score))
 
 
 def _refresh_grouped_task_groups(
@@ -826,6 +878,12 @@ def _register_assessment_routes(
     current_user_dependency: Callable[..., Any],
     client_dependency: Callable[..., Any],
 ) -> None:
+    def load_rescore_rules_or_raise() -> dict[str, Any]:
+        rules = deps.load_rescore_rules()
+        if not rules:
+            raise HTTPException(status_code=409, detail="Rescore rules are not configured")
+        return rules
+
     @router.post("/assessments/details")
     async def get_assessment_details(
         req: AssessmentDetailsRequest,
@@ -885,6 +943,88 @@ def _register_assessment_routes(
         groups = _completed_task_full_groups(deps, req.task_id)
         preview = _assessment_restore_preview(groups, req.group_ids)
         return {"task_id": req.task_id, **preview}
+
+    @router.post("/assessments/rescore-rule-preview")
+    async def preview_rescore_rule_sync(
+        req: AssessmentRestoreRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+
+        groups = _completed_task_full_groups(deps, req.task_id)
+        try:
+            preview = build_rescore_rule_sync_preview(
+                groups,
+                load_rescore_rules_or_raise(),
+                req.group_ids,
+            )
+        except RescoreRuleError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"task_id": req.task_id, **preview}
+
+    @router.post("/assessments/rescore-rule-apply")
+    async def apply_rescore_rule_sync(
+        req: AssessmentRestoreRequest,
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+
+        groups = _completed_task_full_groups(deps, req.task_id)
+        try:
+            payloads, skipped = build_rescore_rule_sync_payloads(
+                groups,
+                load_rescore_rules_or_raise(),
+                req.group_ids,
+            )
+        except RescoreRuleError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        for _instance, payload in payloads:
+            deps.cache_manager._save_local_analysis(payload)
+
+        try:
+            refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
+                deps.tasks,
+                payloads,
+                deps.load_team_mapping(),
+            )
+            if refreshed_tasks:
+                deps.logger.info(
+                    "Refreshed %d grouped vulnerability task snapshot(s) "
+                    "after CVSS rule sync",
+                    refreshed_tasks,
+                )
+        except Exception:
+            deps.logger.exception(
+                "Failed to refresh grouped vulnerability task snapshots "
+                "after CVSS rule sync"
+            )
+
+        api_results = await deps.apply_assessment_payloads(client, payloads)
+        finalized = await deps.finalize_assessment_results(api_results)
+        queued = sum(1 for result in finalized if result.get("queued"))
+        succeeded = sum(1 for result in finalized if result.get("status") == "success")
+        failed = sum(
+            1
+            for result in finalized
+            if result.get("status") == "error" and not result.get("queued")
+        )
+        return {
+            "task_id": req.task_id,
+            "summary": {
+                "attempted": len(payloads),
+                "succeeded": succeeded,
+                "queued": queued,
+                "failed": failed,
+                **skipped,
+            },
+            "results": finalized,
+        }
 
     @router.post("/assessments/restore-apply")
     async def apply_assessment_restore(

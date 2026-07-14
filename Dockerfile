@@ -15,6 +15,9 @@ RUN npm ci --include=optional
 # Copy frontend source code
 COPY frontend/ ./
 
+# vue-tsc type-checks frontend test sources, which import the canonical rules.
+COPY data/rescore_rules.json /app/data/rescore_rules.json
+
 # Build the frontend for production
 RUN npm run build
 

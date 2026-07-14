@@ -58,6 +58,16 @@ describe('codeAnalysisResult', () => {
         expect(details).not.toContain('Reachability analysis')
     })
 
+    it('formats zero adjusted scores with one decimal place', () => {
+        const response = createResponse()
+        response.assessment.adjusted_cvss!.adjusted_score = 0
+
+        const details = buildCodeAnalysisDetails(response, 'CODE_NOT_PRESENT')
+
+        expect(details).toContain('[Rescored: 0.0]')
+        expect(details).toContain('CVSS: 8.1 → 0.0')
+    })
+
     it('formats merged results with compact per-component sections', () => {
         const response = createResponse()
         response.assessment.summary = 'Combined analysis for 2 components. lib-a: not affected; lib-b: affected'

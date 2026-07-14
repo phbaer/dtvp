@@ -58,6 +58,7 @@ def test_build_general_api_route_deps_preserves_provider_contracts():
         dt_settings_cls=DTSettings,
         get_dt_client_cls=lambda: DTClient,
         get_user_role=lambda _user: "ANALYST",
+        load_rescore_rules=lambda: {"metric_rules": {}, "transitions": []},
         get_bom_analysis_cache_cls=lambda: BOMAnalysisCache,
         default_dependency_chain_limit=100,
         service_unavailable_response={},

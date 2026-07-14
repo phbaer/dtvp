@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
+import defaultRescoreRules from '../../../../data/rescore_rules.json'
 
 // Mock API
 vi.mock('../../lib/api', () => ({
@@ -746,10 +747,10 @@ describe('VulnGroupCard', () => {
         await confirmBtn?.trigger('click')
         await flushPromises()
 
-        // Verify updateAssessment was called with the Rescored 0 vector in the payload.
-        // It should inject [Rescored: 0] and the default CVSS 3.1 0-score vector.
+        // Verify updateAssessment was called with the Rescored 0.0 vector in the payload.
+        // It should inject [Rescored: 0.0] and the default CVSS 3.1 0-score vector.
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
-            details: expect.stringContaining('[Rescored:')
+            details: expect.stringContaining('[Rescored: 0.0]')
         }))
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             details: expect.stringContaining('[Rescored Vector: CVSS:3.1')
@@ -764,7 +765,7 @@ describe('VulnGroupCard', () => {
 
         const wrapper = mount(VulnGroupCard, {
             props: { group: groupWithVector },
-            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: ref(defaultRescoreRules) } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -811,7 +812,7 @@ describe('VulnGroupCard', () => {
 
         const wrapper = mount(VulnGroupCard, {
             props: { group: groupWithVector },
-            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } } } }
+            global: { provide: { user: { value: { role: 'REVIEWER', username: 'tester' } }, rescoreRules: ref(defaultRescoreRules) } }
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
@@ -830,7 +831,47 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         expect((vectorInput.element as HTMLInputElement).value).not.toContain('MI:')
-        expect((vectorInput.element as HTMLInputElement).value).toContain('IR:M')
+        expect((vectorInput.element as HTMLInputElement).value).not.toContain('IR:')
+    })
+
+    it('offers to sync an existing rescored vector that is missing required rule fields', async () => {
+        const rescoreRules = ref({
+            metric_rules: defaultRescoreRules.metric_rules,
+            transitions: [{
+                trigger: { state: 'NOT_AFFECTED' },
+                actions: {
+                    '3.1': { CR: 'L', IR: 'L', AR: 'L', MC: 'N', MI: 'N', MA: 'N' },
+                },
+            }],
+        })
+        const groupWithIncompleteRescore = {
+            ...mockGroup,
+            rescored_cvss: 0,
+            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/MC:N/MI:N/MA:N',
+            affected_versions: [{
+                ...mockGroup.affected_versions[0],
+                components: mockComponents.map(component => ({
+                    ...component,
+                    analysis_state: 'NOT_AFFECTED',
+                    analysis_details: '--- [Team: General] [State: NOT_AFFECTED] [Assessed By: tester] ---\nNot reachable',
+                })),
+            }],
+        }
+
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: groupWithIncompleteRescore },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'tester' }), rescoreRules } },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="sync-rescore-rules"]').text()).toContain('Sync rules')
+        await wrapper.get('[data-testid="sync-rescore-rules"]').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect((wrapper.vm as any).pendingVector).toContain('CR:L/IR:L/AR:L')
+        expect(wrapper.find('[data-testid="sync-rescore-rules"]').exists()).toBe(false)
     })
 
     it('preserves cvss when state changes away from NOT_AFFECTED (requirement: user context remains)', async () => {

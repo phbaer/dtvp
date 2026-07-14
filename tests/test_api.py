@@ -205,10 +205,95 @@ def test_assessment_restore_preview_and_apply(client, mock_dt_client):
         assert kwargs["project_uuid"] == "project-1"
         assert kwargs["component_uuid"] == "component-1"
         assert kwargs["vulnerability_uuid"] == "vuln-1"
-        assert "[Rescored: 0]" in kwargs["details"]
+        assert "[Rescored: 0.0]" in kwargs["details"]
         assert f"[Rescored Vector: {vector}]" in kwargs["details"]
         assert "sqlite not used in the product" in kwargs["details"]
         assert group["assessment_restore_count"] == 0
+    finally:
+        main.tasks.pop(task_id, None)
+
+
+def test_rescore_rule_sync_preview_and_apply(client, mock_dt_client):
+    base_vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    stale_vector = f"{base_vector}/MAV:P/MAC:H/MPR:H/MUI:R/MC:N/MI:N/MA:N"
+    component = {
+        "project_uuid": "project-rule",
+        "project_name": "Project",
+        "project_version": "1.0.0",
+        "component_uuid": "component-rule",
+        "component_name": "example",
+        "component_version": "1.0.0",
+        "vulnerability_uuid": "vuln-rule",
+        "finding_uuid": "finding-rule",
+        "analysis_state": "NOT_AFFECTED",
+        "justification": "CODE_NOT_REACHABLE",
+        "analysis_details": (
+            f"[Rescored: 9.8] [Rescored Vector: {stale_vector}]\n\n"
+            "Preserve the assessment explanation."
+        ),
+        "is_suppressed": True,
+    }
+    group = {
+        "id": "CVE-RULE-SYNC",
+        "title": "Sync CVSS rules",
+        "severity": "CRITICAL",
+        "cvss_score": 9.8,
+        "cvss_vector": base_vector,
+        "rescored_cvss": 9.8,
+        "rescored_vector": stale_vector,
+        "tags": [],
+        "assignees": [],
+        "aliases": [],
+        "affected_versions": [
+            {
+                "project_uuid": "project-rule",
+                "project_name": "Project",
+                "project_version": "1.0.0",
+                "components": [component],
+            }
+        ],
+    }
+    summarize_grouped_vulnerabilities([group], {})
+    task_id = "rescore-rule-sync-task"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "result": summarize_grouped_vulnerabilities([group], {}),
+    }
+
+    try:
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            preview_response = client.post(
+                "/api/assessments/rescore-rule-preview",
+                json={"task_id": task_id},
+            )
+            assert preview_response.status_code == 200
+            preview = preview_response.json()
+            assert preview["summary"]["syncable_groups"] == 1
+            finding = preview["items"][0]["findings"][0]
+            assert finding["status"] == "ready"
+            assert "Missing requirements: AR, CR, IR" in finding["reasons"]
+
+            apply_response = client.post(
+                "/api/assessments/rescore-rule-apply",
+                json={"task_id": task_id, "group_ids": [group["id"]]},
+            )
+            assert apply_response.status_code == 200
+            assert apply_response.json()["summary"]["attempted"] == 1
+
+        mock_dt_client.update_analysis.assert_called_once()
+        _, kwargs = mock_dt_client.update_analysis.call_args
+        assert "CR:L/IR:L/AR:L" in kwargs["details"]
+        assert "Preserve the assessment explanation." in kwargs["details"]
+        assert kwargs["justification"] == "CODE_NOT_REACHABLE"
+        assert kwargs["suppressed"] is True
+
+        refreshed_component = group["affected_versions"][0]["components"][0]
+        assert "CR:L/IR:L/AR:L" in refreshed_component["analysis_details"]
+        assert group["rescored_vector"] == finding["proposed_vector"]
+        assert group["rescored_cvss"] == finding["proposed_score"]
     finally:
         main.tasks.pop(task_id, None)
 
