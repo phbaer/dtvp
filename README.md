@@ -649,6 +649,16 @@ chain, remediation, and validation steps. The fallback ticket renderer for
 older results avoids analyzer runtime details and targets the vulnerable
 dependency or direct parent dependency.
 
+Set `DTVP_JIRA_CREATE_URL` to show a `Create Jira issue` action beside the
+ticket draft. The action copies the complete draft and opens the configured
+Jira create screen in a new tab. Jira uses its existing browser/SSO session;
+DTVP does not read or forward Jira cookies. The URL may be absolute, such as
+`https://jira.example/secure/CreateIssue!default.jspa`, or root-relative when
+Jira and DTVP share a gateway. The generated vulnerability text stays out of
+the URL and must be pasted into the Jira description. When running the Vite
+development frontend directly, use the equivalent
+`VITE_DTVP_JIRA_CREATE_URL` variable.
+
 Submitted scans and follow-ups are reconciled by queue ID after submission and
 polling refreshes. A run that finishes before the first poll still updates and
 selects the matching history row without a page reload.
@@ -1133,6 +1143,7 @@ Most values can be set in `.env` for Docker Compose or in the shell for local `u
 | `DTVP_CODE_ANALYSIS_MODEL` | Model hint sent to the analyzer and shown on the dashboard when available | unset |
 | `DTVP_CODE_ANALYSIS_LLM_BACKEND` | LLM backend hint shown on the dashboard and sent with analysis requests | unset |
 | `DTVP_CODE_ANALYSIS_LLM_PROVIDER` | LLM provider hint shown on the dashboard and sent with analysis requests | unset |
+| `DTVP_JIRA_CREATE_URL` | Jira create-screen URL used by the ticket-draft action; the browser's existing Jira session handles authentication | unset |
 | `DTVP_ANALYSIS_QUEUE_CAPACITY` | Maximum number of code-analysis queue items DTVP runs at the same time | `1` |
 | `DTVP_ANALYSIS_QUEUE_TTL_SECONDS` | Completed/failed code-analysis queue item retention | `3600` |
 | `DTVP_CODE_ANALYSIS_RESULTS_PATH` | SQLite store for completed code-analysis results and compact follow-up context. Legacy `.json` paths import into a sibling `.sqlite` file. | `data/code_analysis_results.sqlite` |

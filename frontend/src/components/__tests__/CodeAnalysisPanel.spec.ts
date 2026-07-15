@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 const clipboardWriteText = vi.fn()
+const windowOpen = vi.fn()
 
 vi.mock('../../lib/api', () => ({
     codeAnalysisBenchmarkResult: mocks.benchmarkResult,
@@ -60,6 +61,11 @@ describe('CodeAnalysisPanel', () => {
             configurable: true,
             value: { writeText: clipboardWriteText },
         })
+        Object.defineProperty(window, 'open', {
+            configurable: true,
+            value: windowOpen,
+        })
+        ;(window as any).__env__ = { DTVP_JIRA_CREATE_URL: '' }
         mocks.queueItems.value = []
         mocks.listResults.mockResolvedValue([])
         mocks.deleteResult.mockResolvedValue({ status: 'removed', analysis_run_id: 'run-1' })
@@ -815,6 +821,9 @@ describe('CodeAnalysisPanel', () => {
     })
 
     it('uses and copies analyzer-generated ticket text for affected analysis results', async () => {
+        ;(window as any).__env__ = {
+            DTVP_JIRA_CREATE_URL: 'https://jira.example/secure/CreateIssue!default.jspa',
+        }
         const generatedTicketText = [
             'Title: Remediate CVE-2026-0002 in owned-service via vulnerable-parser',
             '',
@@ -915,6 +924,15 @@ describe('CodeAnalysisPanel', () => {
         expect(ticketText).not.toContain('Repository Clone')
         expect(ticketText).not.toContain('/tmp/agentyzer/worktree')
         expect(ticketText).not.toContain('Update owned-service')
+
+        await wrapper.findAll('button').find(button => button.text().includes('Create Jira issue'))?.trigger('click')
+        await flushPromises()
+        expect(windowOpen).toHaveBeenCalledWith(
+            'https://jira.example/secure/CreateIssue!default.jspa',
+            '_blank',
+            'noopener,noreferrer',
+        )
+        expect(clipboardWriteText).toHaveBeenCalledWith(ticketText)
 
         await wrapper.findAll('button').find(button => button.text().includes('Copy'))?.trigger('click')
         expect(clipboardWriteText).toHaveBeenCalledWith(ticketText)
