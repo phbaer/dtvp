@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
-import { codeAnalysisListResults, drainTaskVulnGroupDetails, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroup, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
+import { codeAnalysisListResults, drainTaskVulnGroupDetails, drainTaskVulnGroups, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroup, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
 import { projectHeaderState } from '../../lib/projectHeaderStore'
 import { useRoute } from 'vue-router'
 import { defaultAnalysisFilters, defaultLifecycleFilters, defaultStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
 
 vi.mock('../../lib/api', () => ({
     drainTaskVulnGroupDetails: vi.fn(),
-    drainTaskVulnGroups: vi.fn(),
+    drainTaskVulnGroups: vi.fn(() => Promise.resolve([])),
     getGroupedVulns: vi.fn(),
     getTaskVulnGroup: vi.fn(),
     getTaskVulnGroups: vi.fn(() => Promise.resolve({
@@ -857,6 +857,7 @@ describe('ProjectView.vue', () => {
         ;(wrapper.vm as any).componentFilter = 'library-a'
         await flushPromises()
 
+        ;(wrapper.vm as any).smartSearchInput = 'only-this-vulnerability'
         projectHeaderState.bulkSyncHandler.value?.()
         await flushPromises()
         await wrapper.vm.$nextTick()
@@ -866,10 +867,16 @@ describe('ProjectView.vue', () => {
             'task-1',
             expect.objectContaining({
                 component: 'library-a',
+                q: 'only-this-vulnerability',
                 lifecycle: ['INCOMPLETE'],
                 sort: 'id',
                 order: 'asc',
             }),
+            { limit: 1000 },
+        )
+        expect(drainTaskVulnGroups).toHaveBeenCalledWith(
+            'task-1',
+            expect.objectContaining({ q: 'only-this-vulnerability' }),
             { limit: 1000 },
         )
         expect(getTaskVulnGroup).not.toHaveBeenCalledWith('task-1', 'CVE-INCOMPLETE')

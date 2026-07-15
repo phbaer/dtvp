@@ -677,13 +677,38 @@ describe('VulnGroupCard', () => {
         const leavePromise = (wrapper.vm as any).confirmApplyDraftBeforeLeave()
         await flushPromises()
 
-        expect(wrapper.text()).toContain('Apply this assessment draft before switching cards?')
+        expect(wrapper.text()).toContain('Apply this assessment draft before leaving?')
         expect(wrapper.findAll('button').some(button => button.text() === 'Apply')).toBe(true)
+        expect(wrapper.findAll('button').some(button => button.text() === 'Discard')).toBe(true)
 
         const stayButton = wrapper.findAll('button').find(button => button.text() === 'Stay')
         expect(stayButton).toBeDefined()
         await stayButton?.trigger('click')
         await expect(leavePromise).resolves.toBe(false)
+    })
+
+    it('discards an unsaved draft and closes without applying it', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup, inModal: true },
+            global: { stubs: { teleport: true } }
+        })
+
+        ;(wrapper.vm as any).details = 'Unsaved local explanation'
+        ;(wrapper.vm as any).formTouched = true
+        await wrapper.vm.$nextTick()
+
+        await wrapper.get('button[title="Close details"]').trigger('click')
+        await flushPromises()
+
+        const discardButton = wrapper.findAll('button').find(button => button.text() === 'Discard')
+        expect(discardButton).toBeDefined()
+        await discardButton?.trigger('click')
+        await flushPromises()
+
+        expect(wrapper.emitted('close')).toHaveLength(1)
+        expect((wrapper.vm as any).hasUnsavedDraft).toBe(false)
+        expect((wrapper.vm as any).details).not.toBe('Unsaved local explanation')
+        expect(updateAssessment).not.toHaveBeenCalled()
     })
 
 

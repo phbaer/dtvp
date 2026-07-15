@@ -81,6 +81,10 @@ pm2 delete mock-dt mock-tmrescore mock-code-analysis dtvp-backend dtvp-frontend
 | Tail local stack logs | `pm2 logs` |
 | Start Docker deployment | `cp .env.dist .env && docker compose up -d` |
 
+The CI end-to-end job uses the version-matched Playwright container image from
+`.github/workflows/build-publish.yml`. When upgrading `@playwright/test`, update
+that image tag in the same change so its bundled browser matches the test runner.
+
 ## Repository Map
 
 | Path | Purpose |
@@ -372,14 +376,15 @@ selected project versions. Reviewers can:
   attribution age, assignee, and automatic-assessment status.
 - Inspect dependency paths and team ownership.
 - Open a vulnerability detail card.
+- Apply, discard, or keep editing local assessment drafts when closing or
+  switching vulnerability cards.
 - Apply synchronized global or team-specific assessments across matching
   Dependency-Track findings.
-- Limit Bulk Sync candidates and its header count with the active
-  vulnerability-list filters, including lifecycle selection, and review
-  explicit missing-coverage or inconsistency reasons before applying.
-- Preview and bulk-apply audit-trail repairs for missing rescored CVSS vectors.
-- Preview and bulk-apply configured CVSS rule synchronization across all
-  findings in the completed project task.
+- Limit Bulk Sync, audit-trail CVSS restore, and configured CVSS rule-sync
+  candidates and header counts with the active vulnerability-list filters,
+  including the free-text search and lifecycle selection.
+- Review explicit missing-coverage or inconsistency reasons before applying
+  bulk changes.
 
 Backend task windows keep large projects responsive:
 

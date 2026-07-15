@@ -293,6 +293,7 @@ const genericModal = ref({
     confirmOnly: false,
     confirmLabel: '',
     cancelLabel: '',
+    discardLabel: '',
     resolve: (_: boolean) => {}
 })
 
@@ -300,7 +301,7 @@ const promptConfirm = (
     title: string,
     message: string,
     confirmOnly = false,
-    labels: { confirmLabel?: string; cancelLabel?: string } = {},
+    labels: { confirmLabel?: string; cancelLabel?: string; discardLabel?: string } = {},
 ) => {
     genericModal.value = {
         show: true,
@@ -309,6 +310,7 @@ const promptConfirm = (
         confirmOnly,
         confirmLabel: labels.confirmLabel || '',
         cancelLabel: labels.cancelLabel || '',
+        discardLabel: labels.discardLabel || '',
         resolve: () => {}
     }
     return new Promise<boolean>((resolve) => {
@@ -351,11 +353,13 @@ const confirmApplyDraftBeforeLeave = async (): Promise<boolean> => {
 
     const shouldApply = await promptConfirm(
         'Unsaved draft',
-        'Apply this assessment draft before switching cards? Staying here lets you keep reviewing or discard the local edits.',
+        'Apply this assessment draft before leaving? Discard closes without saving, while Stay keeps the local edits open.',
         false,
-        { confirmLabel: 'Apply', cancelLabel: 'Stay' },
+        { confirmLabel: 'Apply', cancelLabel: 'Stay', discardLabel: 'Discard' },
     )
     if (!shouldApply) return false
+
+    if (!hasUnsavedDraft.value) return true
 
     await handleUpdate(false)
     return !hasUnsavedDraft.value
@@ -371,8 +375,26 @@ defineExpose({
     confirmApplyDraftBeforeLeave,
 })
 
-const handleModalResponse = (value: boolean) => {
+const discardUnsavedDraft = () => {
+    teamDrafts.value.clear()
+    formTouched.value = false
+    rawDetailsTouched.value = false
+    codeAnalysisDraftApplied.value = false
+    isManualBaseMode.value = false
+    assigneeInput.value = ''
+    assigneeSuggestionsVisible.value = false
+    showConflictModal.value = false
+    updateFormFromGroup(true)
+    rawDetails.value = mergedAssessmentData.value.fullText
+}
+
+const handleModalResponse = (value: boolean | 'discard') => {
     genericModal.value.show = false
+    if (value === 'discard') {
+        discardUnsavedDraft()
+        genericModal.value.resolve(true)
+        return
+    }
     genericModal.value.resolve(value)
 }
 
@@ -2454,6 +2476,7 @@ const teamBlockStateColor = (state?: string): string => {
       :confirmOnly="genericModal.confirmOnly"
       :confirmLabel="genericModal.confirmLabel"
       :cancelLabel="genericModal.cancelLabel"
+      :discardLabel="genericModal.discardLabel"
       @response="handleModalResponse"
     />
 

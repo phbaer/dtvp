@@ -2,6 +2,7 @@
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+    drainTaskVulnGroups,
     getGroupedVulns,
     getProjectArchiveTaskDownloadUrl,
     getRescoreRules,
@@ -171,7 +172,15 @@ const refreshRescoreRuleSyncCount = async (taskId = currentVulnTaskId.value) => 
         return
     }
     try {
-        const result = await previewRescoreRuleSync(taskId)
+        const matchingGroups = await drainTaskVulnGroups(taskId, {
+            ...taskGroupListQuery.value,
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        const result = await previewRescoreRuleSync(
+            taskId,
+            matchingGroups.map(group => group.id),
+        )
         if (requestId !== rescoreRulePreviewRequestId || taskId !== currentVulnTaskId.value) return
         rescoreRuleSyncCount.value = result.summary.groups || 0
         projectHeaderState.rescoreRuleSyncCount.value = rescoreRuleSyncCount.value
@@ -977,8 +986,8 @@ const bulkSyncCount = computed(() =>
 )
 
 const assessmentRestoreCount = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value?.all.assessment_restore
-        ? taskListCounts.value.all.assessment_restore.WITH_RESTORE || 0
+    currentVulnTaskId.value && taskListCounts.value?.filtered.assessment_restore
+        ? taskListCounts.value.filtered.assessment_restore.WITH_RESTORE || 0
         : listStaticStats.value.assessmentRestoreCount
 )
 
@@ -1050,16 +1059,19 @@ const {
 })
 
 projectHeaderState.bulkSyncHandler.value = () => {
+    flushSmartSearchFilter()
     void openBulkResolveModal()
 }
 
 projectHeaderState.assessmentRestoreHandler.value = () => {
     if (!currentVulnTaskId.value) return
+    flushSmartSearchFilter()
     showAssessmentRestoreModal.value = true
 }
 
 projectHeaderState.rescoreRuleSyncHandler.value = () => {
     if (!currentVulnTaskId.value) return
+    flushSmartSearchFilter()
     showRescoreRuleSyncModal.value = true
 }
 
@@ -1178,6 +1190,9 @@ watch(sortedItems, (items, previousItems) => {
 watch(taskGroupListQueryKey, () => {
     if (!currentVulnTaskId.value || loading.value) return
     void loadTaskGroupWindow({ reset: true })
+    if (currentUserRole.value === 'REVIEWER') {
+        void refreshRescoreRuleSyncCount()
+    }
 })
 
 watch([visibleEndIndex, loadedGroupCount, hasMoreTaskListGroups], () => {
@@ -1909,6 +1924,7 @@ watch(currentUserRole, (role) => {
     <BulkRestoreAssessmentModal
         :show="showAssessmentRestoreModal"
         :task-id="currentVulnTaskId"
+        :query="taskGroupListQuery"
         @close="showAssessmentRestoreModal = false"
         @applied="handleAssessmentRestoreApplied"
     />
@@ -1916,6 +1932,7 @@ watch(currentUserRole, (role) => {
     <BulkRescoreRuleSyncModal
         :show="showRescoreRuleSyncModal"
         :task-id="currentVulnTaskId"
+        :query="taskGroupListQuery"
         @close="showRescoreRuleSyncModal = false"
         @applied="handleRescoreRuleSyncApplied"
     />

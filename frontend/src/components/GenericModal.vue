@@ -18,6 +18,13 @@
             {{ cancelLabel || 'Cancel' }}
           </button>
           <button
+            v-if="!confirmOnly && discardLabel"
+            @click="$emit('response', 'discard')"
+            class="px-4 py-2 rounded border border-red-500/40 bg-red-950/40 hover:bg-red-900/60 text-red-100 text-sm font-bold transition-colors"
+          >
+            {{ discardLabel }}
+          </button>
+          <button
             @click="$emit('response', true)"
             class="px-6 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold shadow-lg shadow-blue-900/20 transition-all active:scale-95"
           >
@@ -38,9 +45,10 @@ const props = defineProps<{
   confirmOnly: boolean
   confirmLabel?: string
   cancelLabel?: string
+  discardLabel?: string
 }>()
 
 const emit = defineEmits<{
-  (e: 'response', value: boolean): void
+  (e: 'response', value: boolean | 'discard'): void
 }>()
 </script>

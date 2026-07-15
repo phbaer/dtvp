@@ -3,11 +3,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import BulkRestoreAssessmentModal from '../BulkRestoreAssessmentModal.vue'
 
 const mocks = vi.hoisted(() => ({
+    drainTaskVulnGroups: vi.fn(),
     previewAssessmentRestore: vi.fn(),
     applyAssessmentRestore: vi.fn(),
 }))
 
 vi.mock('../../lib/api', () => ({
+    drainTaskVulnGroups: mocks.drainTaskVulnGroups,
     previewAssessmentRestore: mocks.previewAssessmentRestore,
     applyAssessmentRestore: mocks.applyAssessmentRestore,
 }))
@@ -45,6 +47,7 @@ const previewResponse = {
 describe('BulkRestoreAssessmentModal', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.drainTaskVulnGroups.mockResolvedValue([{ id: 'CVE-2026-RESTORE' }])
         mocks.previewAssessmentRestore.mockResolvedValue(previewResponse)
     })
 
@@ -54,11 +57,20 @@ describe('BulkRestoreAssessmentModal', () => {
             resolveApply = resolve
         }))
         const wrapper = mount(BulkRestoreAssessmentModal, {
-            props: { show: false, taskId: 'task-1' },
+            props: { show: false, taskId: 'task-1', query: { q: 'openssl' } },
         })
 
         await wrapper.setProps({ show: true })
         await flushPromises()
+        expect(mocks.drainTaskVulnGroups).toHaveBeenCalledWith('task-1', {
+            q: 'openssl',
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        expect(mocks.previewAssessmentRestore).toHaveBeenCalledWith(
+            'task-1',
+            ['CVE-2026-RESTORE'],
+        )
         await wrapper.findAll('button').find(button => button.text().includes('Apply Restore'))?.trigger('click')
 
         expect(wrapper.get('[data-testid="restore-progress"]').text()).toContain('Restoring CVSS rescoring')

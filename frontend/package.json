@@ -20,28 +20,28 @@
     "test:ui:real-stack": "DTVP_E2E_REAL_STACK=true playwright test --config=playwright.manual.config.ts e2e/tmrescore-real-stack.manual.ts e2e/code-analysis-real-stack.manual.ts"
   },
   "dependencies": {
-    "@tailwindcss/postcss": "^4.2.4",
-    "ae-cvss-calculator": "^1.0.12",
-    "autoprefixer": "^10.5.0",
-    "axios": "^1.16.0",
+    "@tailwindcss/postcss": "^4.3.2",
+    "ae-cvss-calculator": "^1.0.13",
+    "autoprefixer": "^10.5.2",
+    "axios": "^1.18.1",
     "lucide-vue-next": "^1.0.0",
-    "marked": "^18.0.3",
-    "postcss": "^8.5.13",
-    "vue": "^3.5.33",
-    "vue-router": "^5.0.6"
+    "marked": "^18.0.6",
+    "postcss": "^8.5.18",
+    "vue": "^3.5.39",
+    "vue-router": "^5.1.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
-    "@types/node": "^25.6.0",
-    "@vitejs/plugin-vue": "^6.0.6",
-    "@vitest/coverage-v8": "^4.1.5",
-    "@vue/test-utils": "^2.4.10",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^26.1.1",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "flush-promises": "^1.0.2",
     "jsdom": "^29.1.1",
-    "typescript": "~6.0.3",
-    "vite": "^8.0.10",
-    "vitest": "^4.1.5",
-    "vue-tsc": "^3.2.7"
+    "typescript": "^6.0.3",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.7"
   }
 }

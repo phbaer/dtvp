@@ -21,10 +21,14 @@ import {
     getTMRescoreSyntheticSbomDownloadUrl,
     getTMRescoreSyntheticSbomSummary,
     applyProjectArchiveImport,
+    applyAssessmentRestore,
+    applyRescoreRuleSync,
     getProjectArchiveSnapshotDownloadUrl,
     getProjectArchiveTask,
     getProjectArchiveTaskDownloadUrl,
     listProjectArchiveSnapshots,
+    previewAssessmentRestore,
+    previewRescoreRuleSync,
     resumeTMRescoreAnalysis,
     runTMRescoreAnalysis,
     startProjectArchiveExport,
@@ -61,6 +65,22 @@ describe('api.ts', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.useRealTimers()
+    })
+
+    it.each([
+        ['restore preview', previewAssessmentRestore, '/assessments/restore-preview'],
+        ['restore apply', applyAssessmentRestore, '/assessments/restore-apply'],
+        ['rule-sync preview', previewRescoreRuleSync, '/assessments/rescore-rule-preview'],
+        ['rule-sync apply', applyRescoreRuleSync, '/assessments/rescore-rule-apply'],
+    ] as const)('preserves an empty bulk selection for %s', async (_label, request, endpoint) => {
+        mocks.post.mockResolvedValue({ data: {} })
+
+        await request('task-1', [])
+
+        expect(mocks.post).toHaveBeenCalledWith(endpoint, {
+            task_id: 'task-1',
+            group_ids: [],
+        })
     })
 
     it('serializes array query params as repeated keys for FastAPI list filters', () => {
