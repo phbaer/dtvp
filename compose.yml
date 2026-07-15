@@ -55,6 +55,7 @@ services:
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
       DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}
       DTVP_ATTRIBUTION_AGE_FILTER_DAYS: ${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
+      DTVP_JIRA_CREATE_URL: ${DTVP_JIRA_CREATE_URL:-}
       # If using OIDC via D-T, these might not be needed if we rely on headers,
       # but we need SESSION_SECRET for the fallback cookie if used.
       DTVP_SESSION_SECRET_KEY: ${DTVP_SESSION_SECRET_KEY:-change_me}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, History, Send, Ban, FileText, Copy, Trash2 } from 'lucide-vue-next'
+import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, History, Send, Ban, FileText, Copy, ExternalLink, Trash2 } from 'lucide-vue-next'
 import {
     codeAnalysisBenchmarkResult,
     codeAnalysisDeleteResult,
@@ -11,6 +11,7 @@ import {
 import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisBenchmarkComparison, CodeAnalysisBenchmarkFinding, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
+import { getRuntimeConfig } from '../lib/env'
 
 const props = defineProps<{
     vulnId: string
@@ -62,6 +63,7 @@ const systemPromptLoading = ref(false)
 const systemPromptError = ref<string | null>(null)
 const systemPromptPayload = ref<Record<string, any> | null>(null)
 const ticketCopyState = ref<'idle' | 'copied' | 'error'>('idle')
+const jiraCreateUrl = getRuntimeConfig('DTVP_JIRA_CREATE_URL', '').trim()
 const benchmarkComparison = ref<CodeAnalysisBenchmarkComparison | null>(null)
 const benchmarkLoading = ref(false)
 const benchmarkError = ref<string | null>(null)
@@ -1120,6 +1122,29 @@ const copyTicketText = async () => {
         ticketCopyState.value = 'error'
         error.value = err?.message || 'Unable to copy ticket text.'
     }
+}
+
+const createJiraIssue = async () => {
+    if (!ticketText.value || !jiraCreateUrl) return
+
+    let target: URL
+    try {
+        const baseUrl = window.location.origin === 'null'
+            ? 'http://localhost/'
+            : `${window.location.origin}/`
+        target = new URL(jiraCreateUrl, baseUrl)
+        if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+            throw new Error('Unsupported Jira URL protocol.')
+        }
+    } catch {
+        error.value = 'The configured Jira create URL is invalid.'
+        return
+    }
+
+    // Open synchronously from the click so popup blockers recognize the user action.
+    // Jira receives its own browser cookies during this top-level navigation.
+    window.open(target.toString(), '_blank', 'noopener,noreferrer')
+    await copyTicketText()
 }
 
 const sourceClass = (source?: string | null) => {
@@ -2589,6 +2614,16 @@ watch(analyzedComponents, (components) => {
                             Ticket Draft
                         </span>
                         <span class="text-[10px] font-semibold text-gray-500">Developer-ready remediation ticket</span>
+                    </button>
+                    <button
+                        v-if="jiraCreateUrl"
+                        type="button"
+                        @click="createJiraIssue"
+                        title="Copy the ticket draft and open the Jira create screen"
+                        class="inline-flex shrink-0 items-center gap-1.5 rounded border border-blue-700/70 bg-blue-950/60 px-2.5 py-1 text-[10px] font-bold uppercase text-blue-100 hover:bg-blue-900/70"
+                    >
+                        <ExternalLink :size="12" />
+                        Create Jira issue
                     </button>
                     <button
                         type="button"

@@ -926,6 +926,7 @@ register_frontend_routes(
             "DTVP_ATTRIBUTION_AGE_FILTER_DAYS",
             "7d,14d,28d",
         ),
+        get_jira_create_url=lambda: os.getenv("DTVP_JIRA_CREATE_URL", ""),
         read_text=read_text_impl,
     ),
 )
