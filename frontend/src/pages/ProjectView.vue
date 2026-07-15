@@ -964,7 +964,17 @@ const inconsistencyReasonCounts = computed(() => {
 
 const needsApprovalGroups = computed(() => listStaticStats.value.needsApprovalGroups)
 
-const incompleteGroups = computed(() => listStaticStats.value.incompleteGroups)
+const incompleteGroups = computed(() =>
+    listView.value.matchingItems
+        .filter(item => item.lifecycle === 'INCOMPLETE')
+        .map(item => item.group)
+)
+
+const bulkSyncCount = computed(() =>
+    currentVulnTaskId.value
+        ? taskListCounts.value?.filtered.lifecycle.INCOMPLETE || 0
+        : incompleteGroups.value.length
+)
 
 const assessmentRestoreCount = computed(() =>
     currentVulnTaskId.value && taskListCounts.value?.all.assessment_restore
@@ -1034,6 +1044,7 @@ const {
     resetBulkResolveModal,
 } = useProjectBulkResolve({
     currentTaskId: currentVulnTaskId,
+    taskGroupListQuery,
     incompleteGroups,
     ensureFullGroup,
 })
@@ -1311,7 +1322,7 @@ const syncProjectHeaderState = () => {
         projectHeaderState.lastProjectPath.value = route.fullPath || `/project/${name}`
     }
     projectHeaderState.isReviewer.value = currentUserRole.value === 'REVIEWER'
-    projectHeaderState.incompleteCount.value = needsApprovalGroups.value.length
+    projectHeaderState.incompleteCount.value = bulkSyncCount.value
     projectHeaderState.assessmentRestoreCount.value = assessmentRestoreCount.value
     projectHeaderState.rescoreRuleSyncCount.value = rescoreRuleSyncCount.value
 }
@@ -1371,8 +1382,8 @@ watch(() => route.query.vuln, (vulnId) => {
     hydrateSelectedRouteGroup()
 })
 
-watch(() => needsApprovalGroups.value.length, (length) => {
-    projectHeaderState.incompleteCount.value = length
+watch(bulkSyncCount, (count) => {
+    projectHeaderState.incompleteCount.value = count
 }, { immediate: true })
 
 watch(assessmentRestoreCount, (count) => {

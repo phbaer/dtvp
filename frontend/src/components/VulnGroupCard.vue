@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, E
 
 import { parseAssessmentBlocks, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
+import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
@@ -405,6 +406,12 @@ const totalTargeted = computed(() => {
 const displayState = computed(() => {
     return getGroupLifecycle(props.group, effectiveTags.value, teamMapping?.value)
 })
+
+const assessmentSyncIssues = computed(() => getGroupAssessmentSyncIssues(props.group, {
+    lifecycle: displayState.value,
+    requiredTeamsOrTags: effectiveTags.value,
+    teamMapping: teamMapping?.value || {},
+}))
 
 const technicalState = computed(() => {
     return getGroupTechnicalState(props.group)
@@ -2341,6 +2348,33 @@ const teamBlockStateColor = (state?: string): string => {
                     </div>
 
                     <div v-if="isReviewer && !selectedTeam && mergedAssessmentData.blocks.length > 0" class="pt-2 border-t border-gray-700 mt-2">
+                        <div
+                            v-if="assessmentSyncIssues.length > 0"
+                            data-testid="assessment-sync-reasons"
+                            class="mb-2 rounded border p-2.5"
+                            :class="displayState === 'INCONSISTENT'
+                                ? 'border-indigo-500/30 bg-indigo-950/20'
+                                : 'border-amber-600/30 bg-amber-950/20'"
+                        >
+                            <div
+                                class="mb-1.5 text-[10px] font-black uppercase tracking-widest"
+                                :class="displayState === 'INCONSISTENT' ? 'text-indigo-300' : 'text-amber-400'"
+                            >
+                                Why synchronization is needed
+                            </div>
+                            <div
+                                v-for="issue in assessmentSyncIssues"
+                                :key="issue.code"
+                                class="text-[11px] leading-relaxed"
+                                :class="issue.kind === 'inconsistent' ? 'text-indigo-100/80' : 'text-amber-100/80'"
+                            >
+                                <span
+                                    class="font-bold"
+                                    :class="issue.kind === 'inconsistent' ? 'text-indigo-300' : 'text-amber-300'"
+                                >{{ issue.label }}:</span>
+                                {{ issue.detail }}
+                            </div>
+                        </div>
                         <button
                             @click="applyConsensusAssessment"
                             class="w-full mb-2 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-500 border border-yellow-600/50 font-bold py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
