@@ -149,6 +149,10 @@ describe('VulnGroupCard Branch Coverage', () => {
         
         expect((wrapper.vm as any).displayState).toBe('INCOMPLETE')
         expect((wrapper.vm as any).consensusButtonLabel).toBe('Sync all')
+        ;(wrapper.vm as any).expanded = true
+        await wrapper.vm.$nextTick()
+        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Unassessed findings')
+        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Missing global assessment')
         
         // Trigger consensus
         await (wrapper.vm as any).applyConsensusAssessment()
@@ -440,6 +444,10 @@ describe('VulnGroupCard Branch Coverage', () => {
         
         expect((wrapper.vm as any).displayState).toBe('INCONSISTENT')
         expect((wrapper.vm as any).consensusButtonLabel).toBe('Apply worst assessment')
+        ;(wrapper.vm as any).expanded = true
+        await wrapper.vm.$nextTick()
+        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Analysis states differ')
+        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Exploitable, Not Affected')
         
         // Trigger consensus
         await (wrapper.vm as any).applyConsensusAssessment()

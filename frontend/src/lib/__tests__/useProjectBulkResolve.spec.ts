@@ -1,8 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
+import type { TaskVulnGroupListQuery } from '../api'
 import type { GroupedVuln } from '../../types'
 import { drainTaskVulnGroupDetails } from '../api'
+import { NO_MATCH_FILTER } from '../projectVulnTaskQuery'
 import { useProjectBulkResolve } from '../useProjectBulkResolve'
 
 vi.mock('../api', () => ({
@@ -18,10 +20,12 @@ const group = (id: string): GroupedVuln => ({
 
 const mountHarness = (options: {
     taskId?: string | null
+    query?: TaskVulnGroupListQuery
     incompleteGroups?: GroupedVuln[]
     ensureFullGroup?: (groupId: string, options?: { showLoading?: boolean }) => Promise<GroupedVuln | null>
 } = {}) => {
     const currentTaskId = ref<string | null>(options.taskId ?? null)
+    const taskGroupListQuery = ref<TaskVulnGroupListQuery>(options.query || {})
     const incompleteGroups = ref(options.incompleteGroups || [])
     const ensureFullGroup = vi.fn(options.ensureFullGroup || (async (id: string) => group(`${id}-full`)))
     let bulk!: ProjectBulkResolve
@@ -30,6 +34,7 @@ const mountHarness = (options: {
         setup() {
             bulk = useProjectBulkResolve({
                 currentTaskId,
+                taskGroupListQuery,
                 incompleteGroups,
                 ensureFullGroup,
             })
@@ -42,6 +47,7 @@ const mountHarness = (options: {
     return {
         wrapper,
         currentTaskId,
+        taskGroupListQuery,
         incompleteGroups,
         ensureFullGroup,
         bulk,
@@ -51,12 +57,25 @@ const mountHarness = (options: {
 describe('useProjectBulkResolve', () => {
     it('loads full incomplete groups from the task detail window', async () => {
         vi.mocked(drainTaskVulnGroupDetails).mockResolvedValue([group('CVE-1')])
-        const { bulk, ensureFullGroup, wrapper } = mountHarness({ taskId: 'task-1' })
+        const { bulk, ensureFullGroup, wrapper } = mountHarness({
+            taskId: 'task-1',
+            query: {
+                q: 'urgent',
+                lifecycle: ['OPEN', 'INCOMPLETE'],
+                tag: 'platform',
+                versions: ['2.0.0'],
+                sort: 'severity',
+                order: 'desc',
+            },
+        })
 
         await bulk.openBulkResolveModal()
 
         expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith('task-1', {
+            q: 'urgent',
             lifecycle: ['INCOMPLETE'],
+            tag: 'platform',
+            versions: ['2.0.0'],
             sort: 'id',
             order: 'asc',
         }, { limit: 1000 })
@@ -81,6 +100,29 @@ describe('useProjectBulkResolve', () => {
             'CVE-1-full',
             'CVE-2-full',
         ])
+
+        wrapper.unmount()
+    })
+
+    it('does not reintroduce incomplete groups excluded by the active lifecycle filter', async () => {
+        vi.mocked(drainTaskVulnGroupDetails).mockResolvedValue([])
+        const { bulk, wrapper } = mountHarness({
+            taskId: 'task-1',
+            query: {
+                lifecycle: ['ASSESSED'],
+                component: 'library-a',
+            },
+        })
+
+        await bulk.openBulkResolveModal()
+
+        expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith('task-1', {
+            lifecycle: [NO_MATCH_FILTER],
+            component: 'library-a',
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        expect(bulk.displayedBulkIncompleteGroups.value).toEqual([])
 
         wrapper.unmount()
     })
