@@ -3,11 +3,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import BulkRescoreRuleSyncModal from '../BulkRescoreRuleSyncModal.vue'
 
 const mocks = vi.hoisted(() => ({
+    drainTaskVulnGroups: vi.fn(),
     previewRescoreRuleSync: vi.fn(),
     applyRescoreRuleSync: vi.fn(),
 }))
 
 vi.mock('../../lib/api', () => ({
+    drainTaskVulnGroups: mocks.drainTaskVulnGroups,
     previewRescoreRuleSync: mocks.previewRescoreRuleSync,
     applyRescoreRuleSync: mocks.applyRescoreRuleSync,
 }))
@@ -48,6 +50,7 @@ const previewResponse = {
 describe('BulkRescoreRuleSyncModal', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.drainTaskVulnGroups.mockResolvedValue([{ id: 'CVE-2026-RULE' }])
         mocks.previewRescoreRuleSync.mockResolvedValue(previewResponse)
         mocks.applyRescoreRuleSync.mockResolvedValue({
             task_id: 'task-1',
@@ -58,13 +61,18 @@ describe('BulkRescoreRuleSyncModal', () => {
 
     it('previews configured changes, selects syncable groups, and applies them', async () => {
         const wrapper = mount(BulkRescoreRuleSyncModal, {
-            props: { show: false, taskId: 'task-1' },
+            props: { show: false, taskId: 'task-1', query: { q: 'runtime' } },
         })
 
         await wrapper.setProps({ show: true })
         await flushPromises()
 
-        expect(mocks.previewRescoreRuleSync).toHaveBeenCalledWith('task-1')
+        expect(mocks.drainTaskVulnGroups).toHaveBeenCalledWith('task-1', {
+            q: 'runtime',
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        expect(mocks.previewRescoreRuleSync).toHaveBeenCalledWith('task-1', ['CVE-2026-RULE'])
         expect(wrapper.text()).toContain('Missing requirements: AR, CR, IR')
         expect(wrapper.text()).toContain('9.8 → 0.0')
 

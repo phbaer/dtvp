@@ -599,7 +599,7 @@ export const previewAssessmentRestore = async (
 ): Promise<AssessmentRestorePreviewResponse> => {
     const res = await api.post('/assessments/restore-preview', {
         task_id: taskId,
-        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+        group_ids: groupIds,
     });
     return res.data;
 };
@@ -610,7 +610,7 @@ export const applyAssessmentRestore = async (
 ): Promise<AssessmentRestoreApplyResponse> => {
     const res = await api.post('/assessments/restore-apply', {
         task_id: taskId,
-        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+        group_ids: groupIds,
     });
     return res.data;
 };
@@ -677,7 +677,7 @@ export const previewRescoreRuleSync = async (
 ): Promise<RescoreRuleSyncPreviewResponse> => {
     const res = await api.post('/assessments/rescore-rule-preview', {
         task_id: taskId,
-        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+        group_ids: groupIds,
     });
     return res.data;
 };
@@ -688,7 +688,7 @@ export const applyRescoreRuleSync = async (
 ): Promise<RescoreRuleSyncApplyResponse> => {
     const res = await api.post('/assessments/rescore-rule-apply', {
         task_id: taskId,
-        group_ids: groupIds && groupIds.length > 0 ? groupIds : undefined,
+        group_ids: groupIds,
     });
     return res.data;
 };

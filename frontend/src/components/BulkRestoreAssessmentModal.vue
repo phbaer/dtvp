@@ -3,16 +3,21 @@ import { computed, ref, watch } from 'vue'
 import { AlertTriangle, Calculator, CheckCircle, Loader2, X } from 'lucide-vue-next'
 import {
     applyAssessmentRestore,
+    drainTaskVulnGroups,
     previewAssessmentRestore,
     type AssessmentRestoreApplyResponse,
     type AssessmentRestorePreviewGroup,
     type AssessmentRestorePreviewResponse,
+    type TaskVulnGroupListQuery,
 } from '../lib/api'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     show: boolean
     taskId: string | null
-}>()
+    query?: TaskVulnGroupListQuery
+}>(), {
+    query: () => ({}),
+})
 
 const emit = defineEmits<{
     close: []
@@ -55,7 +60,15 @@ const loadPreview = async () => {
     selectedIds.value = new Set()
     appliedResult.value = null
     try {
-        const result = await previewAssessmentRestore(props.taskId)
+        const matchingGroups = await drainTaskVulnGroups(props.taskId, {
+            ...props.query,
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        const result = await previewAssessmentRestore(
+            props.taskId,
+            matchingGroups.map(group => group.id),
+        )
         preview.value = result
         selectedIds.value = new Set(
             result.items

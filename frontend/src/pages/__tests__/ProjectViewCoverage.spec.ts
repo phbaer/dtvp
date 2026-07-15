@@ -6,7 +6,7 @@ import { extendedAnalysisFilters, extendedLifecycleFilters, mountProjectView, up
 
 vi.mock('../../lib/api', () => ({
     drainTaskVulnGroupDetails: vi.fn(),
-    drainTaskVulnGroups: vi.fn(),
+    drainTaskVulnGroups: vi.fn(() => Promise.resolve([])),
     getGroupedVulns: vi.fn(),
     getTaskVulnGroup: vi.fn(),
     getTaskVulnGroups: vi.fn(),

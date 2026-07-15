@@ -3,16 +3,21 @@ import { computed, ref, watch } from 'vue'
 import { AlertTriangle, CheckCircle, Loader2, RefreshCw, X } from 'lucide-vue-next'
 import {
     applyRescoreRuleSync,
+    drainTaskVulnGroups,
     previewRescoreRuleSync,
     type RescoreRuleSyncApplyResponse,
     type RescoreRuleSyncPreviewGroup,
     type RescoreRuleSyncPreviewResponse,
+    type TaskVulnGroupListQuery,
 } from '../lib/api'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     show: boolean
     taskId: string | null
-}>()
+    query?: TaskVulnGroupListQuery
+}>(), {
+    query: () => ({}),
+})
 
 const emit = defineEmits<{
     close: []
@@ -58,7 +63,15 @@ const loadPreview = async () => {
     selectedIds.value = new Set()
     appliedResult.value = null
     try {
-        const result = await previewRescoreRuleSync(props.taskId)
+        const matchingGroups = await drainTaskVulnGroups(props.taskId, {
+            ...props.query,
+            sort: 'id',
+            order: 'asc',
+        }, { limit: 1000 })
+        const result = await previewRescoreRuleSync(
+            props.taskId,
+            matchingGroups.map(group => group.id),
+        )
         preview.value = result
         selectedIds.value = new Set(
             result.items
