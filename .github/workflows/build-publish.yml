@@ -14,7 +14,7 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: node
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Install dependencies
@@ -43,7 +43,7 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: node
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install dependencies
         uses: nick-fields/retry@v4
         with:
@@ -65,7 +65,7 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: node
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Install dependencies
@@ -84,7 +84,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.61.1-noble
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install dependencies
         uses: nick-fields/retry@v4
         with:
@@ -111,7 +111,7 @@ jobs:
       tag: ${{ steps.get_version.outputs.TAG }}
       tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install uv
@@ -140,7 +140,7 @@ jobs:
     runs-on: node
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
@@ -160,7 +160,7 @@ jobs:
     runs-on: node
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
@@ -261,7 +261,7 @@ jobs:
     runs-on: node
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
