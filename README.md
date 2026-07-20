@@ -276,6 +276,10 @@ Every candidate set is the intersection of all active project-list filters and
 the selected workflow's applicability rules. The dialog loads plug-in metadata
 first and prepares only the chosen preview. Preview tokens prevent applying a
 stale candidate set; prepared previews are reused while the dialog is open.
+Filtering uses compact task summaries, then carries their canonical lifecycle
+metadata onto the hydrated full groups used by workflows. This keeps lifecycle-
+specific workflows such as `Sync Incomplete Assessments` aligned with the
+visible filtered list.
 
 The UI starts preview, apply, and document work as background operations and
 polls their short status endpoint. The operation survives the initiating HTTP
