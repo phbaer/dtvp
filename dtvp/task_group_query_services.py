@@ -268,7 +268,7 @@ def _matches_lifecycle(fields: dict[str, Any], filters: set[str]) -> bool:
         return True
     lifecycle = fields["lifecycle"]
     return (
-        ("OPEN" in filters and fields["is_open"])
+        ("OPEN" in filters and lifecycle == "OPEN")
         or ("ASSESSED" in filters and lifecycle == "ASSESSED")
         or ("ASSESSED_LEGACY" in filters and lifecycle == "ASSESSED_LEGACY")
         or ("INCOMPLETE" in filters and lifecycle == "INCOMPLETE")
@@ -542,7 +542,7 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     for row in rows:
         fields = row["fields"]
-        if fields["is_open"]:
+        if fields["lifecycle"] == "OPEN":
             lifecycle_counts["OPEN"] += 1
         if fields["lifecycle"] in lifecycle_counts and fields["lifecycle"] not in {
             "OPEN",

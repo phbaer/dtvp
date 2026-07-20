@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
-import { codeAnalysisListResults, drainTaskVulnGroupDetails, drainTaskVulnGroups, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroup, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
+import { drainTaskVulnGroupDetails, getAssessmentDetails, getGroupedVulns, getStatistics, getTaskStatistics, getTaskVulnGroups, getTMRescoreProposals } from '../../lib/api'
 import { projectHeaderState } from '../../lib/projectHeaderStore'
 import { useRoute } from 'vue-router'
 import { defaultAnalysisFilters, defaultLifecycleFilters, defaultStatusFilters, mountProjectView, updateProjectViewState } from './projectViewTestUtils'
@@ -9,6 +9,7 @@ vi.mock('../../lib/api', () => ({
     drainTaskVulnGroupDetails: vi.fn(),
     drainTaskVulnGroups: vi.fn(() => Promise.resolve([])),
     getGroupedVulns: vi.fn(),
+    getAssessmentDetails: vi.fn(),
     getTaskVulnGroup: vi.fn(),
     getTaskVulnGroups: vi.fn(() => Promise.resolve({
         items: [],
@@ -44,7 +45,6 @@ vi.mock('../../lib/api', () => ({
         major_version_details: {},
     })),
     getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
-    codeAnalysisListResults: vi.fn(() => Promise.resolve([])),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     previewRescoreRuleSync: vi.fn(() => Promise.resolve({ task_id: 'task-1', items: [], summary: { groups: 0 } })),
@@ -65,10 +65,11 @@ vi.mock('../../components/VulnRowCompact.vue', () => ({
         template: `
             <div class="vuln-group-card vuln-card" data-testid="group-card" @click="$emit('select', item.group)">
                 <button data-testid="emit-update" @click="$emit('update', item.group)">emit update</button>
+                <button data-testid="emit-reload" @click.stop="$emit('reload', item.group)">reload</button>
             </div>
         `,
-        props: ['item'],
-        emits: ['select', 'update', 'update:assessment']
+        props: ['item', 'reloading', 'reloadError'],
+        emits: ['select', 'update', 'update:assessment', 'reload']
     }
 }))
 
@@ -86,12 +87,12 @@ vi.mock('../../components/VulnDetailInspector.vue', () => ({
     }
 }))
 
-vi.mock('../../components/BulkResolveIncompleteModal.vue', () => ({
+vi.mock('../../components/BulkWorkflowModal.vue', () => ({
     default: {
-        name: 'BulkResolveIncompleteModal',
-        template: '<div v-if="show" data-testid="bulk-resolve-modal">{{ incompleteGroups.map(group => group.id).join(",") }}</div>',
-        props: ['show', 'incompleteGroups'],
-        emits: ['close', 'updated']
+        name: 'BulkWorkflowModal',
+        template: '<div v-if="show" data-testid="bulk-workflow-modal">{{ taskId }}|{{ query.q }}|{{ query.component }}</div>',
+        props: ['show', 'taskId', 'query'],
+        emits: ['close', 'applied']
     }
 }))
 
@@ -103,10 +104,7 @@ describe('ProjectView.vue', () => {
         projectHeaderState.viewMode.value = 'analysis'
         projectHeaderState.lastProjectName.value = null
         projectHeaderState.lastProjectPath.value = null
-        projectHeaderState.incompleteCount.value = 0
-        projectHeaderState.bulkSyncHandler.value = null
-        projectHeaderState.rescoreRuleSyncCount.value = 0
-        projectHeaderState.rescoreRuleSyncHandler.value = null
+        projectHeaderState.bulkWorkflowHandler.value = null
         Object.defineProperty(navigator, 'clipboard', {
             value: { writeText: writeTextSpy },
             writable: true,
@@ -157,19 +155,25 @@ describe('ProjectView.vue', () => {
         expect(wrapper.text()).toContain('No vulnerabilities found')
     })
 
-    it('marks and filters vulnerabilities with automatic assessment results', async () => {
-        vi.mocked(codeAnalysisListResults).mockResolvedValue([
-            {
-                analysis_run_id: 'run-auto-1',
-                vuln_id: 'GHSA-AUTO',
-                component_name: 'CompA',
-                source: 'automatic',
-            } as any,
-        ])
+    it('does not load code-analysis history while the vulnerability search completes', async () => {
+        let resolveSearch: ((groups: any[]) => void) | undefined
+        vi.mocked(getGroupedVulns).mockImplementation(() => new Promise((resolve) => {
+            resolveSearch = resolve
+        }))
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+
+        resolveSearch?.([])
+        await flushPromises()
+        expect(wrapper.findAll('.vuln-group-card')).toHaveLength(0)
+    })
+
+    it('marks and filters vulnerabilities with persisted assessment metadata', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue([
             {
                 id: 'CVE-AUTO',
                 aliases: ['GHSA-AUTO'],
+                code_assessment_status: 'auto',
                 affected_versions: [{ components: [{ component_name: 'CompA', analysis_state: 'NOT_SET' }] }],
             },
             {
@@ -184,6 +188,7 @@ describe('ProjectView.vue', () => {
 
         const autoItem = (wrapper.vm as any).listItems.find((item: any) => item.id === 'CVE-AUTO')
         expect(autoItem.hasAutomaticAssessment).toBe(true)
+        expect(autoItem.automaticAssessmentStatus).toBe('auto')
 
         ;(wrapper.vm as any).automaticAssessmentFilter = ['WITH_AUTOMATIC_ASSESSMENT']
         await wrapper.vm.$nextTick()
@@ -321,6 +326,57 @@ describe('ProjectView.vue', () => {
         expect(replaceSpy).toHaveBeenCalledWith(expect.objectContaining({
             query: expect.objectContaining({ vuln: 'CVE-2' }),
         }))
+    })
+
+    it('reloads a vulnerability card assessment without selecting the card', async () => {
+        const mockGroup = {
+            id: 'CVE-RELOAD',
+            title: 'Reload me',
+            affected_versions: [
+                {
+                    project_name: 'Project',
+                    project_version: '1.0.0',
+                    project_uuid: 'project-uuid',
+                    components: [
+                        {
+                            project_uuid: 'project-uuid',
+                            component_uuid: 'component-uuid',
+                            vulnerability_uuid: 'vulnerability-uuid',
+                            finding_uuid: 'finding-uuid',
+                            component_name: 'library-a',
+                            analysis_state: 'NOT_SET',
+                            is_suppressed: false,
+                        },
+                    ],
+                },
+            ],
+        }
+        vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
+        vi.mocked(getAssessmentDetails).mockResolvedValue([
+            {
+                project_uuid: 'project-uuid',
+                component_uuid: 'component-uuid',
+                vulnerability_uuid: 'vulnerability-uuid',
+                finding_uuid: 'finding-uuid',
+                analysis: {
+                    analysisState: 'EXPLOITABLE',
+                    analysisDetails: 'Reloaded details',
+                    isSuppressed: false,
+                },
+                error: null,
+            },
+        ])
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await wrapper.get('[data-testid="emit-reload"]').trigger('click')
+        await flushPromises()
+
+        expect(getAssessmentDetails).toHaveBeenCalledWith([
+            expect.objectContaining({ finding_uuid: 'finding-uuid' }),
+        ])
+        expect(wrapper.findAllComponents({ name: 'VulnDetailInspector' })).toHaveLength(0)
+        const updatedGroup = (wrapper.findComponent({ name: 'VulnRowCompact' }).props('item') as any).group
+        expect(updatedGroup.affected_versions[0].components[0].analysis_state).toBe('EXPLOITABLE')
     })
 
     it('closes the selected inspector and removes the vulnerability query param', async () => {
@@ -749,15 +805,7 @@ describe('ProjectView.vue', () => {
         expect(drainTaskVulnGroupDetails).not.toHaveBeenCalled()
     })
 
-    it('passes automatic assessment result ids to backend task windows', async () => {
-        vi.mocked(codeAnalysisListResults).mockResolvedValue([
-            {
-                analysis_run_id: 'run-auto-1',
-                vuln_id: 'CVE-AUTO',
-                component_name: 'CompA',
-                source: 'automatic',
-            } as any,
-        ])
+    it('uses the server assessment property for backend task windows', async () => {
         vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
             options?.onTaskId?.('task-auto-window')
             return [] as any
@@ -784,11 +832,11 @@ describe('ProjectView.vue', () => {
         expect(lastCall?.[0]).toBe('task-auto-window')
         expect(lastCall?.[1]).toEqual(expect.objectContaining({
             automatic_assessment: ['WITH_AUTOMATIC_ASSESSMENT'],
-            automatic_assessment_ids: ['cve-auto'],
+            automatic_assessment_ids: [],
         }))
     })
 
-    it('prepares bulk sync from backend incomplete full-detail windows', async () => {
+    it('opens the bulk workflow selector with the active task filters', async () => {
         const taskCounts = (total: number, incomplete: number, needsApproval: number) => ({
             total,
             lifecycle: {
@@ -836,51 +884,18 @@ describe('ProjectView.vue', () => {
             sort: 'rescored-severity',
             order: 'desc',
         } as any)
-        vi.mocked(drainTaskVulnGroupDetails).mockResolvedValue([{
-            id: 'CVE-INCOMPLETE',
-            title: 'Needs sync',
-            affected_versions: [
-                {
-                    project_version: '1.0.0',
-                    components: [
-                        {
-                            component_name: 'library-a',
-                            analysis_state: 'NOT_SET',
-                            analysis_details: '--- [Team: Team A] [State: EXPLOITABLE] ---',
-                        },
-                    ],
-                },
-            ],
-        }] as any)
-
         const wrapper = await mountProjectView({ routeName: 'TestProject' })
         ;(wrapper.vm as any).componentFilter = 'library-a'
         await flushPromises()
 
         ;(wrapper.vm as any).smartSearchInput = 'only-this-vulnerability'
-        projectHeaderState.bulkSyncHandler.value?.()
+        projectHeaderState.bulkWorkflowHandler.value?.()
         await flushPromises()
         await wrapper.vm.$nextTick()
 
-        expect(projectHeaderState.incompleteCount.value).toBe(1)
-        expect(drainTaskVulnGroupDetails).toHaveBeenCalledWith(
-            'task-1',
-            expect.objectContaining({
-                component: 'library-a',
-                q: 'only-this-vulnerability',
-                lifecycle: ['INCOMPLETE'],
-                sort: 'id',
-                order: 'asc',
-            }),
-            { limit: 1000 },
-        )
-        expect(drainTaskVulnGroups).toHaveBeenCalledWith(
-            'task-1',
-            expect.objectContaining({ q: 'only-this-vulnerability' }),
-            { limit: 1000 },
-        )
-        expect(getTaskVulnGroup).not.toHaveBeenCalledWith('task-1', 'CVE-INCOMPLETE')
-        expect(wrapper.get('[data-testid="bulk-resolve-modal"]').text()).toContain('CVE-INCOMPLETE')
+        expect(wrapper.get('[data-testid="bulk-workflow-modal"]').text()).toContain('task-1')
+        expect(wrapper.get('[data-testid="bulk-workflow-modal"]').text()).toContain('only-this-vulnerability')
+        expect(wrapper.get('[data-testid="bulk-workflow-modal"]').text()).toContain('library-a')
     })
 
     it('does not fetch if route param name is undefined', async () => {

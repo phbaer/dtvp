@@ -1,4 +1,4 @@
-import { constructAssessmentDetails, mergeTeamAssessment, parseAssessmentBlocks, sanitizeAssessmentDetails, type AssessmentBlock } from './assessment-helpers'
+import { assessmentTeamKey, constructAssessmentDetails, mergeTeamAssessment, parseAssessmentBlocks, sanitizeAssessmentDetails, type AssessmentBlock } from './assessment-helpers'
 import { cleanStructuredAssessmentDetails } from './assessmentFormState'
 import type { AssessmentPayload, Instance } from '../types'
 
@@ -82,9 +82,10 @@ const upsertLatestBlock = (
     teamToIndex: Map<string, number>,
     block: AssessmentBlock,
 ) => {
-    const existingIndex = teamToIndex.get(block.team)
+    const teamKey = assessmentTeamKey(block.team)
+    const existingIndex = teamToIndex.get(teamKey)
     if (existingIndex === undefined) {
-        teamToIndex.set(block.team, allBlocks.length)
+        teamToIndex.set(teamKey, allBlocks.length)
         allBlocks.push(block)
         return
     }
@@ -193,8 +194,20 @@ const buildRescoredTags = ({
 export const prepareAssessmentSubmission = (
     input: PrepareAssessmentSubmissionInput,
 ): PreparedAssessmentSubmission => {
-    const targetTeam = input.selectedTeam || 'General'
-    const nextDrafts = new Map(input.teamDrafts)
+    const requestedTargetTeam = input.selectedTeam || 'General'
+    const targetTeam = assessmentTeamKey(requestedTargetTeam) === 'general'
+        ? 'General'
+        : requestedTargetTeam.trim()
+    const nextDrafts = new Map<string, AssessmentDraft>()
+    for (const [teamName, draft] of input.teamDrafts.entries()) {
+        const duplicateKey = [...nextDrafts.keys()]
+            .find(existingTeam => assessmentTeamKey(existingTeam) === assessmentTeamKey(teamName))
+        if (duplicateKey) nextDrafts.delete(duplicateKey)
+        nextDrafts.set(assessmentTeamKey(teamName) === 'general' ? 'General' : teamName.trim(), draft)
+    }
+    const duplicateTargetKey = [...nextDrafts.keys()]
+        .find(existingTeam => assessmentTeamKey(existingTeam) === assessmentTeamKey(targetTeam))
+    if (duplicateTargetKey) nextDrafts.delete(duplicateTargetKey)
     nextDrafts.set(targetTeam, {
         state: input.state,
         details: input.details,

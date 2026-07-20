@@ -28,11 +28,13 @@ import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
 import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
 import type { CodeAnalysisAssessResponse, CodeAnalysisCvssAdjustment } from '../lib/api'
+import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 
 const props = defineProps<{
     group: GroupedVuln
     inModal?: boolean
     hasAutomaticAssessment?: boolean
+    automaticAssessmentStatus?: AutomaticAssessmentStatus | null
 }>()
 
 const DESCRIPTION_FALLBACK = 'No description available.'
@@ -173,6 +175,7 @@ const teamDrafts = ref<Map<string, AssessmentDraftState>>(new Map())
 const refreshCounter = ref(0)
 const formTouched = ref(false)
 const codeAnalysisDraftApplied = ref(false)
+const codeAnalysisRunIds = ref<string[]>([])
 const latestCodeAnalysisCvssAdjustment = ref<CodeAnalysisCvssAdjustment | null>(null)
 const latestCodeAnalysisCvssComponents = ref<string[]>([])
 
@@ -380,6 +383,7 @@ const discardUnsavedDraft = () => {
     formTouched.value = false
     rawDetailsTouched.value = false
     codeAnalysisDraftApplied.value = false
+    codeAnalysisRunIds.value = []
     isManualBaseMode.value = false
     assigneeInput.value = ''
     assigneeSuggestionsVisible.value = false
@@ -657,7 +661,11 @@ const applyProposal = async () => {
     await handleUpdate(false)
 }
 
-const handleCodeAnalysisResult = async (result: CodeAnalysisAssessResponse, components: string[]) => {
+const handleCodeAnalysisResult = async (
+    result: CodeAnalysisAssessResponse,
+    components: string[],
+    analysisRunIds: string[] = [],
+) => {
     const prepared = prepareCodeAnalysisResult(
         result,
         components,
@@ -692,6 +700,7 @@ const handleCodeAnalysisResult = async (result: CodeAnalysisAssessResponse, comp
 
     formTouched.value = true
     codeAnalysisDraftApplied.value = true
+    codeAnalysisRunIds.value = [...analysisRunIds]
     setDetailTab('review')
 }
 
@@ -1390,6 +1399,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             ...preparedSubmission.payload,
             details: finalText,
             state: finalState,
+            analysis_run_ids: [...codeAnalysisRunIds.value],
         }
 
         const results = await updateAssessment(payload)
@@ -1659,6 +1669,7 @@ const applySuccessfulAssessmentUpdate = (success: any, finalState: string, final
     formTouched.value = false
     rawDetailsTouched.value = false
     codeAnalysisDraftApplied.value = false
+    codeAnalysisRunIds.value = []
 }
 
 const handleAssessmentUpdateResults = async (results: any[], finalState: string, finalText: string) => {
@@ -1793,6 +1804,8 @@ const teamBlockStateColor = (state?: string): string => {
             :assignees="group.assignees || []"
             :showExpandToggle="!inModal"
             :hasAutomaticAssessment="props.hasAutomaticAssessment"
+            :automaticAssessmentStatus="props.automaticAssessmentStatus"
+            :hasTmrescoreAnalysis="!!matchedProposal"
             :scoreTitle="assessmentScoreTitle"
             :hasUnsavedDraft="hasUnsavedDraft"
             @approve-assessment="approveAssessment"
@@ -2128,6 +2141,7 @@ const teamBlockStateColor = (state?: string): string => {
                 :currentCvssScore="pendingScore"
                 :currentCvssVector="pendingVector"
                 :currentAssigned="currentAssigned"
+                :assessmentStatus="props.automaticAssessmentStatus"
                 @apply-result="handleCodeAnalysisResult"
                 @result-change="handleCodeAnalysisResultChange"
             />

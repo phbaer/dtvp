@@ -11,6 +11,10 @@ from .auto_analysis_services import (
     build_component_auto_analysis_guidance_block,
     get_component_auto_analysis_guidance,
 )
+from .code_analysis_assessment_services import (
+    build_assessment_index,
+    discover_assessment_metadata,
+)
 from .code_analysis_benchmark_services import build_code_analysis_benchmark
 from .code_analysis_result_services import build_follow_up_guidance
 
@@ -523,13 +527,21 @@ async def build_code_analysis_dashboard_status(
     else:
         overall_state = "idle"
 
+    result_cache = (
+        await asyncio.to_thread(deps.result_store.status)
+        if hasattr(deps.result_store, "status")
+        else None
+    )
+    recent_results = await asyncio.to_thread(
+        deps.result_store.list_result_metadata,
+        limit=10,
+    )
+
     return {
         "overall_state": overall_state,
         "updated_at": _utc_now_iso(),
         "configured": bool(settings.enabled),
-        "result_cache": deps.result_store.status()
-        if hasattr(deps.result_store, "status")
-        else None,
+        "result_cache": result_cache,
         "queue": {
             "capacity": capacity,
             "running_count": len(running_items),
@@ -546,7 +558,7 @@ async def build_code_analysis_dashboard_status(
             "active_items": [_dump_queue_item(item) for item in running_items],
             "items": [_dump_queue_item(item) for item in items],
         },
-        "recent_results": deps.result_store.list(limit=10, include_result=False),
+        "recent_results": recent_results,
         "auto_sweep": sweep_status,
         "external": external,
         "active_agents": queue_progress_agents or external_agents,
@@ -582,14 +594,45 @@ def _register_code_analysis_routes(
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         include_result: Annotated[bool, Query()] = False,
     ):
-        return deps.result_store.list(
+        if include_result:
+            return await asyncio.to_thread(
+                deps.result_store.list,
+                project_name=project_name,
+                vuln_id=vuln_id,
+                component_name=component_name,
+                source=source,
+                limit=_coerce_limit(limit),
+                include_result=True,
+            )
+        return await asyncio.to_thread(
+            deps.result_store.list_result_metadata,
             project_name=project_name,
             vuln_id=vuln_id,
             component_name=component_name,
             source=source,
             limit=_coerce_limit(limit),
-            include_result=include_result,
         )
+
+    @router.get("/code-analysis/assessment-index")
+    async def code_analysis_assessment_index(
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+        project_name: Annotated[Optional[str], Query()] = None,
+    ):
+        diagnostics: dict[str, int] = {}
+        records = await asyncio.to_thread(
+            discover_assessment_metadata,
+            deps.result_store,
+            diagnostics,
+            project_name=project_name,
+        )
+        return {
+            "records": build_assessment_index(records),
+            "summary": {
+                **diagnostics,
+                "indexed_assessment_results": len(records),
+            },
+        }
 
     @router.get(
         "/code-analysis/results/{run_id}",
@@ -600,7 +643,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        record = deps.result_store.get(run_id)
+        record = await asyncio.to_thread(deps.result_store.get, run_id)
         if not record:
             raise HTTPException(status_code=404, detail="Analysis result not found.")
         return record
@@ -614,7 +657,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        if not deps.result_store.delete(run_id):
+        if not await asyncio.to_thread(deps.result_store.delete, run_id):
             raise HTTPException(status_code=404, detail="Analysis result not found.")
         return {"status": "removed", "analysis_run_id": run_id}
 
@@ -627,7 +670,10 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        compact_context = deps.result_store.compact_context(run_id)
+        compact_context = await asyncio.to_thread(
+            deps.result_store.compact_context,
+            run_id,
+        )
         if not compact_context:
             raise HTTPException(status_code=404, detail="Analysis result not found.")
         return compact_context
@@ -642,7 +688,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        record = deps.result_store.get(run_id)
+        record = await asyncio.to_thread(deps.result_store.get, run_id)
         if not record:
             raise HTTPException(status_code=404, detail="Analysis result not found.")
         benchmark = build_code_analysis_benchmark(record, req.model_dump())
@@ -677,12 +723,21 @@ def _register_code_analysis_routes(
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         include_result: Annotated[bool, Query()] = False,
     ):
-        return deps.result_store.list(
+        if include_result:
+            return await asyncio.to_thread(
+                deps.result_store.list,
+                project_name=project_name,
+                vuln_id=vuln_id,
+                component_name=component_name,
+                limit=_coerce_limit(limit),
+                include_result=True,
+            )
+        return await asyncio.to_thread(
+            deps.result_store.list_result_metadata,
             project_name=project_name,
             vuln_id=vuln_id,
             component_name=component_name,
             limit=_coerce_limit(limit),
-            include_result=include_result,
         )
 
     @router.post(
@@ -863,7 +918,7 @@ def _register_analysis_queue_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        parent = deps.result_store.get(req.parent_run_id)
+        parent = await asyncio.to_thread(deps.result_store.get, req.parent_run_id)
         if not parent:
             raise HTTPException(
                 status_code=404,

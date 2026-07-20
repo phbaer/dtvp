@@ -13,6 +13,7 @@ from .sqlite_migration_services import run_sqlite_migrations
 
 CODE_ANALYSIS_RESULT_SCHEMA_VERSION = "dtvp.code-analysis-result/v1"
 CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE = "code_analysis_results"
+CODE_ANALYSIS_ASSESSMENT_METADATA_VERSION = 1
 FOLLOW_UP_CONTEXT_PROMPT_LIMIT = 12_000
 
 
@@ -195,6 +196,37 @@ def _decode_record_payload(payload: str, logger: Any = None) -> Optional[dict[st
             logger.warning("Failed to decode code-analysis result payload: %s", exc)
         return None
     return value if isinstance(value, dict) else None
+
+
+def _decode_json_dict(value: Any) -> dict[str, Any]:
+    try:
+        decoded = json.loads(str(value or "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _decode_json_strings(value: Any) -> list[str]:
+    try:
+        decoded = json.loads(str(value or "[]"))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(decoded, list):
+        return []
+    return list(
+        dict.fromkeys(
+            normalized
+            for item in decoded
+            if (normalized := _lower(item))
+        )
+    )
+
+
+def _build_record_assessment_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    # Imported lazily to keep result serialization independent during module load.
+    from .code_analysis_assessment_services import build_record_assessment_metadata
+
+    return build_record_assessment_metadata(record)
 
 
 def summarize_code_analysis_result(result: Any) -> dict[str, Any]:
@@ -501,6 +533,7 @@ class CodeAnalysisResultStore:
         with closing(self._connect()) as connection:
             with connection:
                 self._import_legacy_json_locked(connection)
+                self._backfill_assessment_metadata_locked(connection)
                 self._prune_locked(connection)
         self._loaded_path = path
 
@@ -551,6 +584,8 @@ class CodeAnalysisResultStore:
         if not run_id:
             return
         record["analysis_run_id"] = run_id
+        assessment_metadata = _build_record_assessment_metadata(record)
+        project_names = assessment_metadata.get("project_names") or []
         connection.execute(
             """
             INSERT OR REPLACE INTO code_analysis_results (
@@ -570,9 +605,12 @@ class CodeAnalysisResultStore:
             """,
             (
                 run_id,
-                _lower(record.get("project_name")),
-                _lower(record.get("vuln_id")),
-                _lower(record.get("component_name")),
+                _lower(record.get("project_name"))
+                or (project_names[0] if project_names else ""),
+                _lower(record.get("vuln_id"))
+                or _lower(assessment_metadata.get("vuln_id")),
+                _lower(record.get("component_name"))
+                or _lower(assessment_metadata.get("scan_target")),
                 _lower(record.get("source")),
                 _normalize_text(record.get("context_fingerprint")),
                 _normalize_text(record.get("finished_at")),
@@ -582,6 +620,99 @@ class CodeAnalysisResultStore:
                 _record_payload_json(record),
             ),
         )
+        self._upsert_assessment_metadata_locked(
+            connection,
+            run_id,
+            assessment_metadata,
+        )
+
+    def _upsert_assessment_metadata_locked(
+        self,
+        connection: sqlite3.Connection,
+        run_id: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO code_analysis_assessment_metadata (
+                analysis_run_id,
+                metadata_version,
+                has_assessment,
+                vuln_id_lower,
+                project_names_json,
+                component_names_json,
+                scan_target_lower,
+                source_kind,
+                assessment_data_json,
+                record_data_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                int(
+                    metadata.get("metadata_version")
+                    or CODE_ANALYSIS_ASSESSMENT_METADATA_VERSION
+                ),
+                1 if metadata.get("has_assessment") else 0,
+                _lower(metadata.get("vuln_id")),
+                json.dumps(
+                    metadata.get("project_names") or [],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                json.dumps(
+                    metadata.get("component_names") or [],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                _lower(metadata.get("scan_target")),
+                _lower(metadata.get("source_kind")) or "unknown",
+                json.dumps(
+                    metadata.get("assessment") or {},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                json.dumps(
+                    metadata.get("record") or {},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+
+    def _backfill_assessment_metadata_locked(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        cursor = connection.execute(
+            """
+            SELECT results.analysis_run_id, results.payload_json
+            FROM code_analysis_results AS results
+            LEFT JOIN code_analysis_assessment_metadata AS metadata
+              ON metadata.analysis_run_id = results.analysis_run_id
+            WHERE metadata.analysis_run_id IS NULL
+               OR metadata.metadata_version < ?
+            ORDER BY results.analysis_run_id
+            """,
+            (CODE_ANALYSIS_ASSESSMENT_METADATA_VERSION,),
+        )
+        updated = 0
+        while rows := cursor.fetchmany(25):
+            for run_id, payload_json in rows:
+                record = _decode_record_payload(payload_json, self.logger)
+                if record is None:
+                    continue
+                self._upsert_assessment_metadata_locked(
+                    connection,
+                    str(run_id),
+                    _build_record_assessment_metadata(record),
+                )
+                updated += 1
+        if updated and self.logger:
+            self.logger.info(
+                "Backfilled code-analysis assessment metadata for %d result records",
+                updated,
+            )
 
     def _prune_locked(self, connection: sqlite3.Connection) -> None:
         retention_days = get_code_analysis_results_retention_days()
@@ -607,6 +738,22 @@ class CodeAnalysisResultStore:
             )
             """,
             (max_records,),
+        )
+        connection.execute(
+            """
+            DELETE FROM code_analysis_result_applications
+            WHERE analysis_run_id NOT IN (
+                SELECT analysis_run_id FROM code_analysis_results
+            )
+            """
+        )
+        connection.execute(
+            """
+            DELETE FROM code_analysis_assessment_metadata
+            WHERE analysis_run_id NOT IN (
+                SELECT analysis_run_id FROM code_analysis_results
+            )
+            """
         )
 
     def record_queue_item_result(self, item: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -639,6 +786,36 @@ class CodeAnalysisResultStore:
                 ).fetchone()
         return _decode_record_payload(row[0], self.logger) if row else None
 
+    def get_many(self, run_ids: list[str]) -> list[dict[str, Any]]:
+        normalized_ids = list(
+            dict.fromkeys(
+                normalized
+                for value in run_ids
+                if (normalized := _normalize_text(value))
+            )
+        )
+        if not normalized_ids:
+            return []
+        records: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            self._ensure_loaded()
+            with closing(self._connect()) as connection:
+                for start in range(0, len(normalized_ids), 500):
+                    batch = normalized_ids[start : start + 500]
+                    rows = connection.execute(
+                        f"""
+                        SELECT analysis_run_id, payload_json
+                        FROM code_analysis_results
+                        WHERE analysis_run_id IN ({','.join('?' for _ in batch)})
+                        """,
+                        batch,
+                    ).fetchall()
+                    for run_id, payload_json in rows:
+                        record = _decode_record_payload(payload_json, self.logger)
+                        if record is not None:
+                            records[str(run_id)] = record
+        return [records[run_id] for run_id in normalized_ids if run_id in records]
+
     def delete(self, run_id: str) -> bool:
         normalized = _normalize_text(run_id)
         if not normalized:
@@ -647,6 +824,13 @@ class CodeAnalysisResultStore:
             self._ensure_loaded()
             with closing(self._connect()) as connection:
                 with connection:
+                    connection.execute(
+                        """
+                        DELETE FROM code_analysis_result_applications
+                        WHERE analysis_run_id = ?
+                        """,
+                        (normalized,),
+                    )
                     cursor = connection.execute(
                         """
                         DELETE FROM code_analysis_results
@@ -656,6 +840,131 @@ class CodeAnalysisResultStore:
                     )
                     self._prune_locked(connection)
                     return cursor.rowcount > 0
+
+    def record_application(
+        self,
+        *,
+        analysis_run_id: str,
+        finding_uuid: str,
+        group_id: str,
+        status: str,
+        applied_by: str,
+        workflow_id: str,
+        payload_fingerprint: str = "",
+    ) -> dict[str, Any]:
+        run_id = _normalize_text(analysis_run_id)
+        finding = _normalize_text(finding_uuid)
+        normalized_status = _lower(status)
+        if not run_id or not finding:
+            raise ValueError("Analysis run id and finding uuid are required")
+        if normalized_status not in {"applied", "queued", "failed"}:
+            raise ValueError(f"Unsupported application status: {status}")
+        application = {
+            "analysis_run_id": run_id,
+            "finding_uuid": finding,
+            "group_id": _lower(group_id),
+            "workflow_id": _normalize_text(workflow_id),
+            "status": normalized_status,
+            "applied_by": _normalize_text(applied_by),
+            "applied_at": _utc_now_iso(),
+            "payload_fingerprint": _normalize_text(payload_fingerprint),
+        }
+        with self._lock:
+            self._ensure_loaded()
+            with closing(self._connect()) as connection:
+                with connection:
+                    connection.execute(
+                        """
+                        INSERT INTO code_analysis_result_applications (
+                            analysis_run_id,
+                            finding_uuid,
+                            group_id_lower,
+                            workflow_id,
+                            status,
+                            applied_by,
+                            applied_at,
+                            payload_fingerprint
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (analysis_run_id, finding_uuid) DO UPDATE SET
+                            group_id_lower = excluded.group_id_lower,
+                            workflow_id = excluded.workflow_id,
+                            status = CASE
+                                WHEN code_analysis_result_applications.status = 'applied'
+                                    THEN 'applied'
+                                WHEN code_analysis_result_applications.status = 'queued'
+                                     AND excluded.status = 'failed'
+                                    THEN 'queued'
+                                ELSE excluded.status
+                            END,
+                            applied_by = excluded.applied_by,
+                            applied_at = excluded.applied_at,
+                            payload_fingerprint = excluded.payload_fingerprint
+                        """,
+                        (
+                            run_id,
+                            finding,
+                            _lower(group_id),
+                            application["workflow_id"],
+                            normalized_status,
+                            application["applied_by"],
+                            application["applied_at"],
+                            application["payload_fingerprint"],
+                        ),
+                    )
+        return application
+
+    def list_applications(
+        self,
+        *,
+        analysis_run_ids: Optional[list[str]] = None,
+        group_id: Optional[str] = None,
+        statuses: Optional[list[str]] = None,
+    ) -> list[dict[str, Any]]:
+        run_ids = list(dict.fromkeys(filter(None, map(_normalize_text, analysis_run_ids or []))))
+        normalized_statuses = list(dict.fromkeys(filter(None, map(_lower, statuses or []))))
+        where: list[str] = []
+        params: list[Any] = []
+        if analysis_run_ids is not None:
+            if not run_ids:
+                return []
+            where.append(f"analysis_run_id IN ({','.join('?' for _ in run_ids)})")
+            params.extend(run_ids)
+        if group_id:
+            where.append("group_id_lower = ?")
+            params.append(_lower(group_id))
+        if statuses is not None:
+            if not normalized_statuses:
+                return []
+            where.append(f"status IN ({','.join('?' for _ in normalized_statuses)})")
+            params.extend(normalized_statuses)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        with self._lock:
+            self._ensure_loaded()
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT analysis_run_id, finding_uuid, group_id_lower,
+                           workflow_id, status, applied_by, applied_at,
+                           payload_fingerprint
+                    FROM code_analysis_result_applications
+                    {where_sql}
+                    ORDER BY applied_at DESC, analysis_run_id, finding_uuid
+                    """,
+                    params,
+                ).fetchall()
+        return [
+            {
+                "analysis_run_id": row[0],
+                "finding_uuid": row[1],
+                "group_id": row[2],
+                "workflow_id": row[3],
+                "status": row[4],
+                "applied_by": row[5],
+                "applied_at": row[6],
+                "payload_fingerprint": row[7],
+            }
+            for row in rows
+        ]
 
     def list(
         self,
@@ -671,7 +980,10 @@ class CodeAnalysisResultStore:
         vuln_filter = _lower(vuln_id)
         component_filter = _lower(component_name)
         source_filter = _lower(source)
-        max_results = max(1, min(int(limit or 100), 500))
+        max_results = max(
+            1,
+            min(int(limit or 100), get_code_analysis_results_max_records()),
+        )
 
         with self._lock:
             self._ensure_loaded()
@@ -692,7 +1004,7 @@ class CodeAnalysisResultStore:
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
             params.append(max_results)
             with closing(self._connect()) as connection:
-                rows = connection.execute(
+                cursor = connection.execute(
                     f"""
                     SELECT payload_json
                     FROM code_analysis_results
@@ -701,19 +1013,197 @@ class CodeAnalysisResultStore:
                     LIMIT ?
                     """,
                     params,
+                )
+                filtered: list[dict[str, Any]] = []
+                while rows := cursor.fetchmany(100):
+                    for row in rows:
+                        payload = _decode_record_payload(row[0], self.logger)
+                        if payload is None:
+                            continue
+                        if not include_result:
+                            result = _as_dict(payload.get("result"))
+                            if not _as_dict(payload.get("summary")) and result:
+                                payload["summary"] = summarize_code_analysis_result(result)
+                            payload.pop("result", None)
+                            payload.pop("user_guidance", None)
+                            payload.pop("follow_up_user_guidance", None)
+                        filtered.append(payload)
+        return filtered
+
+    def list_result_metadata(
+        self,
+        *,
+        project_name: Optional[str] = None,
+        vuln_id: Optional[str] = None,
+        component_name: Optional[str] = None,
+        source: Optional[str] = None,
+        limit: int = 100,
+        assessments_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        project_filter = _lower(project_name)
+        vuln_filter = _lower(vuln_id)
+        component_filter = _lower(component_name)
+        source_filter = _lower(source)
+        max_results = max(
+            1,
+            min(int(limit or 100), get_code_analysis_results_max_records()),
+        )
+        with self._lock:
+            self._ensure_loaded()
+            where: list[str] = []
+            params: list[Any] = []
+            if vuln_filter:
+                where.append(
+                    """
+                    (
+                        metadata.vuln_id_lower = ?
+                        OR (
+                            metadata.vuln_id_lower = ''
+                            AND results.vuln_id_lower = ?
+                        )
+                    )
+                    """
+                )
+                params.extend([vuln_filter, vuln_filter])
+            if assessments_only:
+                where.append("metadata.has_assessment = 1")
+            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            with closing(self._connect()) as connection:
+                rows = connection.execute(
+                    f"""
+                    SELECT
+                        results.analysis_run_id,
+                        results.project_name_lower,
+                        results.vuln_id_lower,
+                        results.component_name_lower,
+                        results.source_lower,
+                        results.context_fingerprint,
+                        results.finished_at,
+                        results.submitted_at,
+                        results.recorded_at,
+                        metadata.has_assessment,
+                        metadata.vuln_id_lower,
+                        metadata.project_names_json,
+                        metadata.component_names_json,
+                        metadata.scan_target_lower,
+                        metadata.source_kind,
+                        metadata.assessment_data_json,
+                        metadata.record_data_json
+                    FROM code_analysis_results AS results
+                    JOIN code_analysis_assessment_metadata AS metadata
+                      ON metadata.analysis_run_id = results.analysis_run_id
+                    {where_sql}
+                    ORDER BY results.finished_at DESC,
+                             results.submitted_at DESC,
+                             results.analysis_run_id DESC
+                    """,
+                    params,
                 ).fetchall()
 
-        filtered: list[dict[str, Any]] = []
+        records: list[dict[str, Any]] = []
         for row in rows:
-            payload = _decode_record_payload(row[0], self.logger)
-            if payload is None:
+            project_names = _decode_json_strings(row[11])
+            component_names = _decode_json_strings(row[12])
+            has_assessment = bool(row[9])
+            normalized_vuln = _lower(row[10]) or _lower(row[2])
+            scan_target = _lower(row[13]) or _lower(row[3])
+            source_kind = _lower(row[14]) or "unknown"
+            raw_source = _lower(row[4])
+            if assessments_only and not has_assessment:
                 continue
-            if not include_result:
-                payload.pop("result", None)
-                payload.pop("user_guidance", None)
-                payload.pop("follow_up_user_guidance", None)
-            filtered.append(payload)
-        return filtered
+            if (
+                project_filter
+                and project_filter != "_all_"
+                and project_filter not in project_names
+                and project_filter != _lower(row[1])
+            ):
+                continue
+            if vuln_filter and vuln_filter != normalized_vuln:
+                continue
+            if (
+                component_filter
+                and component_filter != scan_target
+                and component_filter not in component_names
+            ):
+                continue
+            if source_filter:
+                source_aliases = {raw_source, source_kind}
+                if source_kind == "auto":
+                    source_aliases.add("automatic")
+                if source_filter not in source_aliases:
+                    continue
+            assessment = _decode_json_dict(row[15])
+            record_data = _decode_json_dict(row[16])
+            records.append(
+                {
+                    **record_data,
+                    "analysis_run_id": str(row[0]),
+                    "project_name": (
+                        _normalize_text(record_data.get("project_name"))
+                        or (project_names[0] if project_names else "")
+                        or _lower(row[1])
+                    ),
+                    "project_names": project_names,
+                    "vuln_id": normalized_vuln,
+                    "component_name": (
+                        _normalize_text(record_data.get("component_name"))
+                        or scan_target
+                        or (component_names[0] if component_names else "")
+                    ),
+                    "component_names": component_names,
+                    "scan_target": scan_target,
+                    "source": (
+                        _normalize_text(record_data.get("source"))
+                        or raw_source
+                        or source_kind
+                    ),
+                    "source_kind": source_kind,
+                    "context_fingerprint": str(row[5] or ""),
+                    "finished_at": str(row[6] or ""),
+                    "submitted_at": str(row[7] or ""),
+                    "recorded_at": str(row[8] or ""),
+                    "status": "completed",
+                    "has_assessment": has_assessment,
+                    "assessment": assessment,
+                    "summary": assessment,
+                }
+            )
+            if len(records) >= max_results:
+                break
+        return records
+
+    def list_assessment_metadata(
+        self,
+        *,
+        project_name: Optional[str] = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_loaded()
+            with closing(self._connect()) as connection:
+                stored_count = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM code_analysis_results"
+                    ).fetchone()[0]
+                )
+                usable_count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM code_analysis_assessment_metadata
+                        WHERE has_assessment = 1
+                        """
+                    ).fetchone()[0]
+                )
+        records = self.list_result_metadata(
+            project_name=project_name,
+            limit=get_code_analysis_results_max_records(),
+            assessments_only=True,
+        )
+        return {
+            "records": records,
+            "stored_analysis_results": stored_count,
+            "usable_assessment_results": usable_count,
+        }
 
     def find_latest(
         self,

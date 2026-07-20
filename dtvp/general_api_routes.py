@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass
@@ -6,14 +7,30 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from .assessment_restore_services import (
-    ASSESSMENT_RESTORE_STATUS_RECOVERABLE,
     refresh_group_restore_metadata,
-    restore_rescoring_tags_in_details,
     update_component_restore_metadata,
+)
+from .bulk_workflows.assessment_restore import (
+    build_assessment_restore_payloads as workflow_assessment_restore_payloads,
+    build_assessment_restore_preview as workflow_assessment_restore_preview,
+    create_assessment_restore_workflow,
+)
+from .bulk_workflows.automatic_assessments import create_automatic_assessment_workflow
+from .bulk_workflows.base import (
+    BulkWorkflowContext,
+    BulkWorkflowRegistry,
+    build_preview_token,
+)
+from .bulk_workflows.incomplete_sync import create_incomplete_sync_workflow
+from .bulk_workflows.rescore_rule_sync import create_rescore_rule_sync_workflow
+from .code_analysis_assessment_services import (
+    assessment_status_for_group,
+    discover_assessment_metadata,
+    record_vulnerability_id,
 )
 from .dt_client import DTClient
 from .grouped_vuln_services import (
@@ -52,6 +69,7 @@ class AssessmentRequest(BaseModel):
     original_analysis: Optional[dict[str, dict[str, Any]]] = None
     force: bool = False
     comparison_mode: Optional[str] = "MERGE"
+    analysis_run_ids: list[str] = Field(default_factory=list)
 
 
 class AssessmentDetailsRequest(BaseModel):
@@ -61,6 +79,36 @@ class AssessmentDetailsRequest(BaseModel):
 class AssessmentRestoreRequest(BaseModel):
     task_id: str
     group_ids: Optional[list[str]] = None
+
+
+class BulkWorkflowFilters(BaseModel):
+    q: str = ""
+    lifecycle: list[str] = Field(default_factory=list)
+    inconsistency_reason: list[str] = Field(default_factory=list)
+    analysis: list[str] = Field(default_factory=list)
+    tag: str = ""
+    id: str = ""
+    component: str = ""
+    assignee: str = ""
+    dependency: list[str] = Field(default_factory=list)
+    versions: list[str] = Field(default_factory=list)
+    cvss_mismatch: bool = False
+    attributed_before_days: Optional[int] = None
+    attribution_mode: str = "older"
+    tmrescore: list[str] = Field(default_factory=list)
+    tmrescore_proposal_ids: list[str] = Field(default_factory=list)
+    automatic_assessment: list[str] = Field(default_factory=list)
+    automatic_assessment_ids: list[str] = Field(default_factory=list)
+
+
+class BulkWorkflowRequest(BaseModel):
+    task_id: str
+    filters: BulkWorkflowFilters = Field(default_factory=BulkWorkflowFilters)
+
+
+class BulkWorkflowApplyRequest(BulkWorkflowRequest):
+    group_ids: list[str] = Field(default_factory=list)
+    preview_token: str
 
 
 @dataclass(frozen=True)
@@ -106,6 +154,7 @@ class GeneralApiRouteDeps:
     default_dependency_chain_limit: int
     service_unavailable_response: dict[int | str, dict[str, Any]]
     not_found_response: dict[int | str, dict[str, Any]]
+    code_analysis_result_store: Any = None
 
 
 ASSESSMENT_INSTANCE_KEY_FIELDS = (
@@ -151,6 +200,26 @@ def _assessment_payload_for_component(
     if identity is None:
         return None
     return by_identity.get(identity)
+
+
+def _assessment_payload_from_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
+    suppressed = (
+        analysis.get("isSuppressed")
+        if "isSuppressed" in analysis
+        else analysis.get("is_suppressed", False)
+    )
+    return {
+        "state": analysis.get("analysisState")
+        or analysis.get("analysis_state")
+        or "NOT_SET",
+        "details": analysis.get("analysisDetails")
+        or analysis.get("analysis_details")
+        or "",
+        "suppressed": bool(suppressed),
+        "justification": analysis.get("analysisJustification")
+        or analysis.get("justification")
+        or "NOT_SET",
+    }
 
 
 def _apply_assessment_payload_to_group(
@@ -486,6 +555,14 @@ def _register_task_routes(
         if task.get("status") != "completed" and not is_partial_summary:
             raise HTTPException(status_code=409, detail="Task is not completed")
 
+        assessment_records = await asyncio.to_thread(
+            discover_assessment_metadata,
+            deps.code_analysis_result_store,
+        )
+        effective_assessment_ids = _assessment_filter_ids(
+            assessment_records,
+            split_query_values(automatic_assessment_ids),
+        )
         try:
             response = await asyncio.to_thread(
                 lambda: query_task_groups(
@@ -506,7 +583,7 @@ def _register_task_routes(
                     tmrescore=split_query_values(tmrescore),
                     tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
                     automatic_assessment=split_query_values(automatic_assessment),
-                    automatic_assessment_ids=split_query_values(automatic_assessment_ids),
+                    automatic_assessment_ids=effective_assessment_ids,
                     sort_by=sort,
                     sort_order=order,
                     offset=offset,
@@ -525,6 +602,7 @@ def _register_task_routes(
         )
         response["versions_completed"] = task.get("versions_completed")
         response["versions_total"] = task.get("versions_total")
+        _annotate_code_assessment_status(response["items"], assessment_records)
         return response
 
     @router.get("/tasks/{task_id}/group-details")
@@ -562,6 +640,14 @@ def _register_task_routes(
         if task.get("status") != "completed":
             raise HTTPException(status_code=409, detail="Task is not completed")
 
+        assessment_records = await asyncio.to_thread(
+            discover_assessment_metadata,
+            deps.code_analysis_result_store,
+        )
+        effective_assessment_ids = _assessment_filter_ids(
+            assessment_records,
+            split_query_values(automatic_assessment_ids),
+        )
         try:
             response = await asyncio.to_thread(
                 lambda: query_task_groups(
@@ -582,7 +668,7 @@ def _register_task_routes(
                     tmrescore=split_query_values(tmrescore),
                     tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
                     automatic_assessment=split_query_values(automatic_assessment),
-                    automatic_assessment_ids=split_query_values(automatic_assessment_ids),
+                    automatic_assessment_ids=effective_assessment_ids,
                     sort_by=sort,
                     sort_order=order,
                     offset=offset,
@@ -597,6 +683,7 @@ def _register_task_routes(
             full_by_id.get(item.get("id"), item) if isinstance(item, dict) else item
             for item in response["items"]
         ]
+        _annotate_code_assessment_status(response["items"], assessment_records)
         response["result_mode"] = "full"
         response["source_result_mode"] = task.get("result_mode")
         return response
@@ -618,6 +705,11 @@ def _register_task_routes(
         if group is None:
             raise HTTPException(status_code=404, detail="Vulnerability group not found")
         populate_group_dependency_chains(group, task.get("_bom_cache_map") or {})
+        assessment_records = await asyncio.to_thread(
+            discover_assessment_metadata,
+            deps.code_analysis_result_store,
+        )
+        _annotate_code_assessment_status([group], assessment_records)
         return group
 
     @router.get("/tasks/{task_id}/statistics")
@@ -727,149 +819,723 @@ def _completed_task_full_groups(
     raise HTTPException(status_code=409, detail="Full task result is unavailable")
 
 
-def _selected_restore_groups(
-    groups: list[dict[str, Any]],
-    group_ids: list[str] | None,
-) -> list[dict[str, Any]]:
-    if group_ids is None:
-        return groups
-    if not group_ids:
-        return []
-    wanted = {str(group_id) for group_id in group_ids}
-    return [group for group in groups if str(group.get("id") or "") in wanted]
+def _assessment_filter_ids(
+    records: list[dict[str, Any]],
+    requested_ids: list[str] | None = None,
+) -> list[str]:
+    """Return metadata-backed IDs while retaining older API clients' hints."""
+    return sorted(
+        {
+            normalized
+            for value in [
+                *(requested_ids or []),
+                *(record_vulnerability_id(record) for record in records),
+            ]
+            if (normalized := str(value or "").strip().lower())
+        }
+    )
 
 
-def _iter_restore_components(
+def _annotate_code_assessment_status(
     groups: list[dict[str, Any]],
-) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
-    items: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    records: list[dict[str, Any]],
+) -> None:
     for group in groups:
-        refresh_group_restore_metadata(group)
-        for affected_version in group.get("affected_versions") or []:
-            for component in affected_version.get("components") or []:
-                if not isinstance(component, dict):
-                    continue
-                candidate = update_component_restore_metadata(component)
-                if candidate:
-                    items.append((group, component, candidate))
-    return items
-
-
-def _assessment_restore_preview(
-    groups: list[dict[str, Any]],
-    group_ids: list[str] | None = None,
-) -> dict[str, Any]:
-    selected_groups = _selected_restore_groups(groups, group_ids)
-    group_items: dict[str, dict[str, Any]] = {}
-    totals = {
-        "groups": 0,
-        "findings": 0,
-        "recoverable_findings": 0,
-        "ambiguous_findings": 0,
-        "no_history_findings": 0,
-    }
-
-    for group, component, candidate in _iter_restore_components(selected_groups):
-        group_id = str(group.get("id") or "")
-        if not group_id:
+        if not isinstance(group, dict):
             continue
+        group["code_assessment_status"] = assessment_status_for_group(group, records)
 
-        item = group_items.setdefault(
-            group_id,
+
+def _filter_bulk_workflow_groups(
+    groups: list[dict[str, Any]] | dict[str, Any],
+    filters: BulkWorkflowFilters,
+) -> list[dict[str, Any]]:
+    result = query_task_groups(
+        groups,
+        q=filters.q,
+        lifecycle=filters.lifecycle,
+        inconsistency_reason=filters.inconsistency_reason,
+        analysis=filters.analysis,
+        tag=filters.tag,
+        vuln_id=filters.id,
+        component=filters.component,
+        assignee=filters.assignee,
+        dependency=filters.dependency,
+        versions=filters.versions,
+        cvss_mismatch=filters.cvss_mismatch,
+        attributed_before_days=filters.attributed_before_days,
+        attribution_mode=filters.attribution_mode,
+        tmrescore=filters.tmrescore,
+        tmrescore_proposal_ids=filters.tmrescore_proposal_ids,
+        automatic_assessment=filters.automatic_assessment,
+        automatic_assessment_ids=filters.automatic_assessment_ids,
+        sort_by="id",
+        sort_order="asc",
+        offset=0,
+        limit=max(
+            1,
+            int(groups.get("total") or 0)
+            if isinstance(groups, dict)
+            else len(groups),
+        ),
+    )
+    return result["items"]
+
+
+def _filter_bulk_workflow_task_groups(
+    deps: GeneralApiRouteDeps,
+    task_id: str,
+    filters: BulkWorkflowFilters,
+    assessment_records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    full_groups = _completed_task_full_groups(deps, task_id)
+    task = deps.tasks[task_id]
+    summary_index = get_or_build_task_group_query_index(task)
+    assessment_filter = {
+        str(value or "").strip().upper()
+        for value in filters.automatic_assessment
+        if str(value or "").strip()
+    }
+    base_filters = filters.model_copy(
+        update={
+            "automatic_assessment": [],
+            "automatic_assessment_ids": [],
+        }
+    )
+    filtered_summaries = _filter_bulk_workflow_groups(summary_index, base_filters)
+    full_group_lookup = task.get("_full_result_by_id")
+    if not isinstance(full_group_lookup, dict):
+        full_group_lookup = {
+            str(group.get("id") or ""): group
+            for group in full_groups
+            if str(group.get("id") or "")
+        }
+    filtered_groups = [
+        full_group
+        for summary in filtered_summaries
+        if (full_group := full_group_lookup.get(str(summary.get("id") or "")))
+        is not None
+    ]
+    if not assessment_filter or assessment_filter == {
+        "WITH_AUTOMATIC_ASSESSMENT",
+        "WITHOUT_AUTOMATIC_ASSESSMENT",
+    }:
+        return filtered_groups
+    if assessment_filter == {"WITH_AUTOMATIC_ASSESSMENT"}:
+        return [
+            group
+            for group in filtered_groups
+            if assessment_status_for_group(group, assessment_records or []) is not None
+        ]
+    if assessment_filter == {"WITHOUT_AUTOMATIC_ASSESSMENT"}:
+        return [
+            group
+            for group in filtered_groups
+            if assessment_status_for_group(group, assessment_records or []) is None
+        ]
+    return []
+
+
+def _bulk_workflow_registry(
+    load_rescore_rules_or_raise: Callable[[], dict[str, Any]],
+) -> BulkWorkflowRegistry:
+    return BulkWorkflowRegistry(
+        [
+            create_automatic_assessment_workflow(),
+            create_incomplete_sync_workflow(),
+            create_assessment_restore_workflow(),
+            create_rescore_rule_sync_workflow(load_rescore_rules_or_raise),
+        ]
+    )
+
+
+def _bulk_workflow_context(
+    deps: GeneralApiRouteDeps,
+    req: BulkWorkflowRequest,
+    user: str,
+    workflow_id: str,
+) -> BulkWorkflowContext:
+    needs_assessment_records = (
+        workflow_id == "automatic-assessments"
+        or bool(req.filters.automatic_assessment)
+    )
+    assessment_diagnostics: dict[str, int] = {}
+    assessment_records = (
+        discover_assessment_metadata(
+            deps.code_analysis_result_store,
+            assessment_diagnostics,
+        )
+        if needs_assessment_records
+        else None
+    )
+    return BulkWorkflowContext(
+        task_id=req.task_id,
+        groups=_filter_bulk_workflow_task_groups(
+            deps,
+            req.task_id,
+            req.filters,
+            assessment_records,
+        ),
+        user=user,
+        team_mapping=deps.load_team_mapping(),
+        result_store=deps.code_analysis_result_store,
+        assessment_records=assessment_records,
+        assessment_diagnostics=assessment_diagnostics,
+    )
+
+
+def _record_code_analysis_applications(
+    deps: GeneralApiRouteDeps,
+    *,
+    payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+    finalized: list[dict[str, Any]],
+    user: str,
+    workflow_id: str,
+    fallback_run_ids: list[str] | None = None,
+) -> None:
+    store = deps.code_analysis_result_store
+    if store is None:
+        return
+    results_by_uuid = {
+        str(result.get("uuid") or ""): result
+        for result in finalized
+        if result.get("uuid")
+    }
+    try:
+        for instance, payload in payloads:
+            finding_uuid = str(instance.get("finding_uuid") or "").strip()
+            if not finding_uuid:
+                continue
+            run_ids = list(
+                dict.fromkeys(
+                    str(run_id).strip()
+                    for run_id in (
+                        instance.get("analysis_run_ids") or fallback_run_ids or []
+                    )
+                    if str(run_id).strip()
+                )
+            )
+            if not run_ids:
+                continue
+            result = results_by_uuid.get(finding_uuid) or {}
+            status = (
+                "applied"
+                if result.get("status") == "success"
+                else "queued"
+                if result.get("queued")
+                else "failed"
+            )
+            fingerprint = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()
+            group_id = str(
+                instance.get("bulk_workflow_group_id")
+                or instance.get("vuln_id")
+                or instance.get("vulnerability_id")
+                or ""
+            )
+            for run_id in run_ids:
+                store.record_application(
+                    analysis_run_id=run_id,
+                    finding_uuid=finding_uuid,
+                    group_id=group_id,
+                    status=status,
+                    applied_by=user,
+                    workflow_id=workflow_id,
+                    payload_fingerprint=fingerprint,
+                )
+    except Exception:
+        deps.logger.exception("Failed to persist code-analysis application provenance")
+
+
+async def _apply_bulk_workflow_payloads(
+    deps: GeneralApiRouteDeps,
+    client: DTClient,
+    payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    for _instance, payload in payloads:
+        deps.cache_manager._save_local_analysis(payload)
+
+    try:
+        _refresh_grouped_vuln_task_snapshots(
+            deps.tasks,
+            payloads,
+            deps.load_team_mapping(),
+        )
+    except Exception:
+        deps.logger.exception("Failed to refresh grouped task snapshots after bulk workflow")
+
+    api_results = await deps.apply_assessment_payloads(client, payloads)
+    finalized = await deps.finalize_assessment_results(api_results)
+    outcome = {
+        "succeeded": sum(1 for result in finalized if result.get("status") == "success"),
+        "queued": sum(1 for result in finalized if result.get("queued")),
+        "failed": sum(
+            1
+            for result in finalized
+            if result.get("status") == "error" and not result.get("queued")
+        ),
+    }
+    return finalized, outcome
+
+
+def _create_bulk_workflow_task(
+    deps: GeneralApiRouteDeps,
+    *,
+    kind: str,
+    source_task_id: str,
+    workflow_id: str,
+    user: str,
+) -> dict[str, Any]:
+    task_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    message = f"Queued bulk workflow {kind}."
+    task = {
+        "id": task_id,
+        "kind": f"bulk_workflow_{kind}",
+        "source_task_id": source_task_id,
+        "workflow_id": workflow_id,
+        "created_by": user,
+        "status": "pending",
+        "message": message,
+        "progress": 0,
+        "created_at": now,
+        "updated_at": now,
+        "result": None,
+        "log": [message],
+    }
+    deps.tasks[task_id] = task
+    return task
+
+
+def _update_bulk_workflow_task(
+    task: dict[str, Any],
+    *,
+    status: str | None = None,
+    message: str | None = None,
+    progress: int | None = None,
+    result: Any = None,
+    error: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    if status is not None:
+        task["status"] = status
+    if message is not None:
+        task["message"] = message
+        task.setdefault("log", []).append(message)
+    if progress is not None:
+        task["progress"] = progress
+    if result is not None:
+        task["result"] = result
+    if error is not None:
+        task["error"] = error
+    task["updated_at"] = now
+    if status in {"completed", "failed"}:
+        task["completed_at"] = now
+
+
+def _bulk_workflow_task_error(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    return str(exc) or exc.__class__.__name__
+
+
+def _register_bulk_workflow_routes(
+    router: APIRouter,
+    deps: GeneralApiRouteDeps,
+    current_user_dependency: Callable[..., Any],
+    client_dependency: Callable[..., Any],
+) -> None:
+    def require_reviewer(user: str) -> None:
+        if deps.get_user_role(user).upper() != "REVIEWER":
+            raise HTTPException(status_code=403, detail="Reviewer role required")
+
+    def load_rescore_rules_or_raise() -> dict[str, Any]:
+        rules = deps.load_rescore_rules()
+        if not rules:
+            raise HTTPException(status_code=409, detail="Rescore rules are not configured")
+        return rules
+
+    registry = _bulk_workflow_registry(load_rescore_rules_or_raise)
+
+    async def prepare_preview_response(
+        plugin: Any,
+        req: BulkWorkflowRequest,
+        user: str,
+    ) -> dict[str, Any]:
+        context = await asyncio.to_thread(
+            _bulk_workflow_context,
+            deps,
+            req,
+            user,
+            plugin.id,
+        )
+        preview = await asyncio.to_thread(plugin.preview, context)
+        return {
+            "task_id": req.task_id,
+            "workflow": plugin.metadata(),
+            "preview_token": build_preview_token(
+                plugin,
+                task_id=req.task_id,
+                filter_payload=req.filters.model_dump(),
+                preview=preview,
+            ),
+            "selectable_group_ids": plugin.selectable_ids(preview),
+            **preview,
+        }
+
+    async def prepare_apply_response(
+        plugin: Any,
+        req: BulkWorkflowApplyRequest,
+        user: str,
+        client: DTClient,
+    ) -> dict[str, Any]:
+        context = await asyncio.to_thread(
+            _bulk_workflow_context,
+            deps,
+            req,
+            user,
+            plugin.id,
+        )
+        preview = await asyncio.to_thread(plugin.preview, context)
+        expected_token = build_preview_token(
+            plugin,
+            task_id=req.task_id,
+            filter_payload=req.filters.model_dump(),
+            preview=preview,
+        )
+        if req.preview_token != expected_token:
+            raise HTTPException(
+                status_code=409,
+                detail="Bulk workflow preview is stale; reload it before applying.",
+            )
+        selectable = set(plugin.selectable_ids(preview))
+        selected = list(dict.fromkeys(req.group_ids))
+        if not set(selected).issubset(selectable):
+            raise HTTPException(
+                status_code=409,
+                detail="One or more selected groups no longer match this workflow.",
+            )
+        payloads, skipped = await asyncio.to_thread(
+            plugin.build_payloads,
+            context,
+            selected,
+        )
+        finalized, outcome = await _apply_bulk_workflow_payloads(
+            deps, client, payloads
+        )
+        await asyncio.to_thread(
+            _record_code_analysis_applications,
+            deps,
+            payloads=payloads,
+            finalized=finalized,
+            user=user,
+            workflow_id=plugin.id,
+        )
+        return {
+            "task_id": req.task_id,
+            "workflow": plugin.metadata(),
+            "summary": {
+                "selected_groups": len(selected),
+                "attempted": len(payloads),
+                **outcome,
+                **skipped,
+            },
+            "results": finalized,
+        }
+
+    async def prepare_document(
+        plugin: Any,
+        req: BulkWorkflowApplyRequest,
+        user: str,
+    ) -> str:
+        if plugin.document_builder is None:
+            raise HTTPException(
+                status_code=409, detail="This bulk workflow does not provide a document"
+            )
+        context = await asyncio.to_thread(
+            _bulk_workflow_context,
+            deps,
+            req,
+            user,
+            plugin.id,
+        )
+        preview = await asyncio.to_thread(plugin.preview, context)
+        expected_token = build_preview_token(
+            plugin,
+            task_id=req.task_id,
+            filter_payload=req.filters.model_dump(),
+            preview=preview,
+        )
+        if req.preview_token != expected_token:
+            raise HTTPException(
+                status_code=409,
+                detail="Bulk workflow preview is stale; reload it before exporting.",
+            )
+        selectable = set(plugin.selectable_ids(preview))
+        selected = list(dict.fromkeys(req.group_ids))
+        if not set(selected).issubset(selectable):
+            raise HTTPException(
+                status_code=409,
+                detail="One or more selected groups no longer match this workflow.",
+            )
+        return await asyncio.to_thread(
+            plugin.build_document,
+            context,
+            selected,
+        )
+
+    @router.post("/bulk-workflows/summary")
+    async def bulk_workflow_summary(
+        req: BulkWorkflowRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        _completed_task_full_groups(deps, req.task_id)
+        workflows = [
             {
-                "group_id": group_id,
-                "title": group.get("title"),
-                "severity": group.get("severity"),
-                "status": group.get("assessment_restore_status"),
-                "reason": candidate.get("reason"),
-                "finding_count": 0,
-                "recoverable_finding_count": 0,
-                "findings": [],
+                **plugin.metadata(),
+                "candidate_count": None,
+                "summary": {},
+            }
+            for plugin in registry.all()
+        ]
+        return {"task_id": req.task_id, "workflows": workflows}
+
+    @router.post("/bulk-workflows/{workflow_id}/preview")
+    async def preview_bulk_workflow(
+        workflow_id: str,
+        req: BulkWorkflowRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        plugin = registry.get(workflow_id)
+        if plugin is None:
+            raise HTTPException(status_code=404, detail="Bulk workflow not found")
+        return await prepare_preview_response(plugin, req, user)
+
+    @router.post("/bulk-workflows/{workflow_id}/apply")
+    async def apply_bulk_workflow(
+        workflow_id: str,
+        req: BulkWorkflowApplyRequest,
+        *,
+        client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        plugin = registry.get(workflow_id)
+        if plugin is None:
+            raise HTTPException(status_code=404, detail="Bulk workflow not found")
+        return await prepare_apply_response(plugin, req, user, client)
+
+    @router.post("/bulk-workflows/{workflow_id}/document")
+    async def build_bulk_workflow_document(
+        workflow_id: str,
+        req: BulkWorkflowApplyRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        plugin = registry.get(workflow_id)
+        if plugin is None:
+            raise HTTPException(status_code=404, detail="Bulk workflow not found")
+        document = await prepare_document(plugin, req, user)
+        return PlainTextResponse(
+            document,
+            media_type="text/markdown",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{plugin.id}-tickets.md"'
+                )
             },
         )
 
-        status = candidate.get("status")
-        finding = {
-            "finding_uuid": component.get("finding_uuid"),
-            "project_uuid": component.get("project_uuid"),
-            "project_name": component.get("project_name"),
-            "project_version": component.get("project_version"),
-            "component_uuid": component.get("component_uuid"),
-            "component_name": component.get("component_name"),
-            "component_version": component.get("component_version"),
-            "vulnerability_uuid": component.get("vulnerability_uuid"),
-            "status": status,
-            "reason": candidate.get("reason"),
-            "current_score": candidate.get("current_score"),
-            "restored_score": candidate.get("restored_score"),
-            "restored_vector": candidate.get("restored_vector"),
-            "candidate_vectors": candidate.get("candidate_vectors") or [],
-            "source": candidate.get("source"),
+    @router.get("/bulk-workflows/tasks/{operation_id}")
+    async def get_bulk_workflow_task(
+        operation_id: str,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        deps.prune_grouped_vuln_tasks()
+        operation = deps.tasks.get(operation_id)
+        if not operation or not str(operation.get("kind", "")).startswith(
+            "bulk_workflow_"
+        ):
+            raise HTTPException(status_code=404, detail="Bulk workflow task not found")
+        return {
+            key: value
+            for key, value in operation.items()
+            if not str(key).startswith("_")
         }
-        item["findings"].append(finding)
-        item["finding_count"] += 1
-        totals["findings"] += 1
 
-        if status == ASSESSMENT_RESTORE_STATUS_RECOVERABLE:
-            item["recoverable_finding_count"] += 1
-            totals["recoverable_findings"] += 1
-        elif status == "ambiguous":
-            totals["ambiguous_findings"] += 1
-        elif status == "no_history":
-            totals["no_history_findings"] += 1
-
-    items = sorted(group_items.values(), key=lambda item: item["group_id"])
-    totals["groups"] = len(items)
-    return {"items": items, "summary": totals}
-
-
-def _build_assessment_restore_payloads(
-    groups: list[dict[str, Any]],
-    group_ids: list[str] | None = None,
-) -> tuple[list[tuple[dict, dict]], dict[str, int]]:
-    selected_groups = _selected_restore_groups(groups, group_ids)
-    payloads: list[tuple[dict, dict]] = []
-    skipped = {"not_recoverable": 0, "unchanged": 0, "missing_identity": 0}
-
-    for _group, component, candidate in _iter_restore_components(selected_groups):
-        if candidate.get("status") != ASSESSMENT_RESTORE_STATUS_RECOVERABLE:
-            skipped["not_recoverable"] += 1
-            continue
-
-        restored_vector = candidate.get("restored_vector")
-        if not restored_vector:
-            skipped["not_recoverable"] += 1
-            continue
-
-        project_uuid = component.get("project_uuid")
-        component_uuid = component.get("component_uuid")
-        vulnerability_uuid = component.get("vulnerability_uuid")
-        if not project_uuid or not component_uuid or not vulnerability_uuid:
-            skipped["missing_identity"] += 1
-            continue
-
-        current_details = component.get("analysis_details") or ""
-        restored_details = restore_rescoring_tags_in_details(
-            current_details,
-            restored_vector=str(restored_vector),
-            restored_score=candidate.get("restored_score"),
+    @router.post("/bulk-workflows/{workflow_id}/preview-task")
+    async def start_bulk_workflow_preview(
+        workflow_id: str,
+        req: BulkWorkflowRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        plugin = registry.get(workflow_id)
+        if plugin is None:
+            raise HTTPException(status_code=404, detail="Bulk workflow not found")
+        _completed_task_full_groups(deps, req.task_id)
+        operation = _create_bulk_workflow_task(
+            deps,
+            kind="preview",
+            source_task_id=req.task_id,
+            workflow_id=workflow_id,
+            user=user,
         )
-        if restored_details == current_details:
-            skipped["unchanged"] += 1
-            continue
 
-        payload = {
-            "project_uuid": project_uuid,
-            "component_uuid": component_uuid,
-            "vulnerability_uuid": vulnerability_uuid,
-            "state": component.get("analysis_state") or "NOT_SET",
-            "details": restored_details,
-            "justification": component.get("justification"),
-            "suppressed": bool(component.get("is_suppressed", False)),
-        }
-        payloads.append((component, payload))
+        async def run_preview() -> None:
+            _update_bulk_workflow_task(
+                operation,
+                status="running",
+                message="Preparing bulk workflow preview...",
+                progress=10,
+            )
+            try:
+                result = await prepare_preview_response(plugin, req, user)
+                _update_bulk_workflow_task(
+                    operation,
+                    status="completed",
+                    message="Bulk workflow preview is ready.",
+                    progress=100,
+                    result=result,
+                )
+            except Exception as exc:
+                deps.logger.exception("Bulk workflow preview failed")
+                _update_bulk_workflow_task(
+                    operation,
+                    status="failed",
+                    message="Bulk workflow preview failed.",
+                    progress=100,
+                    error=_bulk_workflow_task_error(exc),
+                )
 
-    return payloads, skipped
+        deps.create_tracked_task(run_preview())
+        return {"task_id": operation["id"]}
+
+    @router.post("/bulk-workflows/{workflow_id}/apply-task")
+    async def start_bulk_workflow_apply(
+        workflow_id: str,
+        req: BulkWorkflowApplyRequest,
+        request: Request,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        plugin = registry.get(workflow_id)
+        if plugin is None:
+            raise HTTPException(status_code=404, detail="Bulk workflow not found")
+        _completed_task_full_groups(deps, req.task_id)
+        settings = deps.dt_settings_cls()
+        token = None
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        cookies = dict(request.cookies)
+        operation = _create_bulk_workflow_task(
+            deps,
+            kind="apply",
+            source_task_id=req.task_id,
+            workflow_id=workflow_id,
+            user=user,
+        )
+
+        async def run_apply() -> None:
+            _update_bulk_workflow_task(
+                operation,
+                status="running",
+                message="Applying selected bulk workflow changes...",
+                progress=10,
+            )
+            try:
+                client_cls = deps.get_dt_client_cls()
+                async with client_cls(
+                    settings.api_url,
+                    api_key=settings.api_key,
+                    token=token or "",
+                    cookies=cookies,
+                ) as client:
+                    result = await prepare_apply_response(plugin, req, user, client)
+                _update_bulk_workflow_task(
+                    operation,
+                    status="completed",
+                    message="Bulk workflow changes were applied.",
+                    progress=100,
+                    result=result,
+                )
+            except Exception as exc:
+                deps.logger.exception("Bulk workflow apply failed")
+                _update_bulk_workflow_task(
+                    operation,
+                    status="failed",
+                    message="Bulk workflow apply failed.",
+                    progress=100,
+                    error=_bulk_workflow_task_error(exc),
+                )
+
+        deps.create_tracked_task(run_apply())
+        return {"task_id": operation["id"]}
+
+    @router.post("/bulk-workflows/{workflow_id}/document-task")
+    async def start_bulk_workflow_document(
+        workflow_id: str,
+        req: BulkWorkflowApplyRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        require_reviewer(user)
+        plugin = registry.get(workflow_id)
+        if plugin is None:
+            raise HTTPException(status_code=404, detail="Bulk workflow not found")
+        if plugin.document_builder is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This bulk workflow does not provide a document",
+            )
+        _completed_task_full_groups(deps, req.task_id)
+        operation = _create_bulk_workflow_task(
+            deps,
+            kind="document",
+            source_task_id=req.task_id,
+            workflow_id=workflow_id,
+            user=user,
+        )
+
+        async def run_document() -> None:
+            _update_bulk_workflow_task(
+                operation,
+                status="running",
+                message="Building the ticket document...",
+                progress=10,
+            )
+            try:
+                result = await prepare_document(plugin, req, user)
+                _update_bulk_workflow_task(
+                    operation,
+                    status="completed",
+                    message="Ticket document is ready.",
+                    progress=100,
+                    result=result,
+                )
+            except Exception as exc:
+                deps.logger.exception("Bulk workflow document export failed")
+                _update_bulk_workflow_task(
+                    operation,
+                    status="failed",
+                    message="Ticket document export failed.",
+                    progress=100,
+                    error=_bulk_workflow_task_error(exc),
+                )
+
+        deps.create_tracked_task(run_document())
+        return {"task_id": operation["id"]}
 
 
 def _register_assessment_routes(
@@ -909,6 +1575,7 @@ def _register_assessment_routes(
         gathered_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
 
         results = []
+        refreshed_payloads: list[tuple[dict, dict]] = []
         for instance, result in zip(req.instances, gathered_results):
             result_item = {
                 "finding_uuid": instance.get("finding_uuid"),
@@ -927,7 +1594,30 @@ def _register_assessment_routes(
                 result_item["error"] = str(result)
             else:
                 result_item["analysis"] = result
+                if isinstance(result, dict):
+                    refreshed_payloads.append(
+                        (instance, _assessment_payload_from_analysis(result))
+                    )
             results.append(result_item)
+
+        if refreshed_payloads:
+            try:
+                refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
+                    deps.tasks,
+                    refreshed_payloads,
+                    deps.load_team_mapping(),
+                )
+                if refreshed_tasks:
+                    deps.logger.info(
+                        "Refreshed %d grouped vulnerability task snapshot(s) "
+                        "after assessment detail reload",
+                        refreshed_tasks,
+                    )
+            except Exception:
+                deps.logger.exception(
+                    "Failed to refresh grouped vulnerability task snapshots "
+                    "after assessment detail reload"
+                )
 
         return results
 
@@ -941,7 +1631,7 @@ def _register_assessment_routes(
             raise HTTPException(status_code=403, detail="Reviewer role required")
 
         groups = _completed_task_full_groups(deps, req.task_id)
-        preview = _assessment_restore_preview(groups, req.group_ids)
+        preview = workflow_assessment_restore_preview(groups, req.group_ids)
         return {"task_id": req.task_id, **preview}
 
     @router.post("/assessments/rescore-rule-preview")
@@ -1037,7 +1727,7 @@ def _register_assessment_routes(
             raise HTTPException(status_code=403, detail="Reviewer role required")
 
         groups = _completed_task_full_groups(deps, req.task_id)
-        payloads, skipped = _build_assessment_restore_payloads(groups, req.group_ids)
+        payloads, skipped = workflow_assessment_restore_payloads(groups, req.group_ids)
         for _instance, payload in payloads:
             deps.cache_manager._save_local_analysis(payload)
 
@@ -1132,7 +1822,16 @@ def _register_assessment_routes(
             )
 
         api_results = await deps.apply_assessment_payloads(client, payloads)
-        return await deps.finalize_assessment_results(api_results)
+        finalized = await deps.finalize_assessment_results(api_results)
+        _record_code_analysis_applications(
+            deps,
+            payloads=payloads,
+            finalized=finalized,
+            user=user,
+            workflow_id="individual-assessment",
+            fallback_run_ids=req.analysis_run_ids,
+        )
+        return finalized
 
 
 def _register_dependency_route(
@@ -1173,6 +1872,9 @@ def create_general_api_router(
     _register_task_routes(router, deps, current_user_dependency)
     _register_statistics_route(router, deps, current_user_dependency, client_dependency)
     _register_assessment_routes(
+        router, deps, current_user_dependency, client_dependency
+    )
+    _register_bulk_workflow_routes(
         router, deps, current_user_dependency, client_dependency
     )
     _register_dependency_route(router, deps, client_dependency)

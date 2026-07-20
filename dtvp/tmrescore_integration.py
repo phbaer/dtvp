@@ -171,6 +171,7 @@ class TMRescoreClient:
         enrich: bool = False,
         mitre_enrichment: bool = False,
         offline: bool = False,
+        background: bool = False,
     ) -> Dict[str, Any]:
         files = {
             "threatmodel": ("threatmodel.tm7", threatmodel_bytes, "application/octet-stream"),
@@ -183,6 +184,7 @@ class TMRescoreClient:
 
         response = await self.client.post(
             f"{self.settings.base_url}/api/v1/sessions/{session_id}/inventory",
+            params={"background": "true"} if background else None,
             files=files,
             data={
                 "chain_analysis": str(chain_analysis).lower(),

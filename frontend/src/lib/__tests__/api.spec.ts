@@ -21,13 +21,18 @@ import {
     getTMRescoreSyntheticSbomDownloadUrl,
     getTMRescoreSyntheticSbomSummary,
     applyProjectArchiveImport,
+    applyBulkWorkflow,
+    buildBulkWorkflowDocument,
+    bulkWorkflowFilters,
     applyAssessmentRestore,
     applyRescoreRuleSync,
     getProjectArchiveSnapshotDownloadUrl,
+    getBulkWorkflowSummary,
     getProjectArchiveTask,
     getProjectArchiveTaskDownloadUrl,
     listProjectArchiveSnapshots,
     previewAssessmentRestore,
+    previewBulkWorkflow,
     previewRescoreRuleSync,
     resumeTMRescoreAnalysis,
     runTMRescoreAnalysis,
@@ -87,6 +92,70 @@ describe('api.ts', () => {
         expect(mocks.createConfig).toEqual(expect.objectContaining({
             paramsSerializer: { indexes: null },
         }))
+    })
+
+    it('removes list-window controls from bulk workflow filters', () => {
+        expect(bulkWorkflowFilters({
+            q: 'openssl',
+            lifecycle: ['INCOMPLETE'],
+            sort: 'id',
+            order: 'asc',
+            offset: 10,
+            cursor: 'next',
+            limit: 25,
+        })).toEqual({ q: 'openssl', lifecycle: ['INCOMPLETE'] })
+    })
+
+    it('starts and polls long-running bulk workflow operations', async () => {
+        mocks.post
+            .mockResolvedValueOnce({ data: {} })
+            .mockResolvedValueOnce({ data: { task_id: 'operation-preview' } })
+            .mockResolvedValueOnce({ data: { task_id: 'operation-apply' } })
+            .mockResolvedValueOnce({ data: { task_id: 'operation-document' } })
+        mocks.get.mockImplementation(async (url: string) => {
+            const results: Record<string, unknown> = {
+                '/bulk-workflows/tasks/operation-preview': { preview_token: 'preview-result' },
+                '/bulk-workflows/tasks/operation-apply': { summary: { succeeded: 1 } },
+                '/bulk-workflows/tasks/operation-document': '# Ticket drafts\n',
+            }
+            return {
+                data: {
+                    id: url.split('/').at(-1),
+                    status: 'completed',
+                    message: 'Done',
+                    progress: 100,
+                    result: results[url],
+                },
+            }
+        })
+        const filters = { q: 'openssl', component: 'runtime' }
+
+        await getBulkWorkflowSummary('task-1', filters)
+        await previewBulkWorkflow('incomplete-sync', 'task-1', filters)
+        await applyBulkWorkflow('incomplete-sync', 'task-1', filters, ['CVE-1'], 'token-1')
+        await buildBulkWorkflowDocument('automatic-assessments', 'task-1', filters, ['CVE-1'], 'token-2')
+
+        expect(mocks.post).toHaveBeenNthCalledWith(1, '/bulk-workflows/summary', {
+            task_id: 'task-1', filters,
+        })
+        expect(mocks.post).toHaveBeenNthCalledWith(2, '/bulk-workflows/incomplete-sync/preview-task', {
+            task_id: 'task-1', filters,
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(1, '/bulk-workflows/tasks/operation-preview')
+        expect(mocks.post).toHaveBeenNthCalledWith(3, '/bulk-workflows/incomplete-sync/apply-task', {
+            task_id: 'task-1',
+            filters,
+            group_ids: ['CVE-1'],
+            preview_token: 'token-1',
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(2, '/bulk-workflows/tasks/operation-apply')
+        expect(mocks.post).toHaveBeenNthCalledWith(4, '/bulk-workflows/automatic-assessments/document-task', {
+            task_id: 'task-1',
+            filters,
+            group_ids: ['CVE-1'],
+            preview_token: 'token-2',
+        })
+        expect(mocks.get).toHaveBeenNthCalledWith(3, '/bulk-workflows/tasks/operation-document')
     })
 
     it('getProjects calls /projects', async () => {

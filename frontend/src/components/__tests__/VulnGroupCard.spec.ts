@@ -333,6 +333,34 @@ describe('VulnGroupCard', () => {
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
     })
 
+    it('keeps analysis run provenance with a code-analysis assessment draft', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: { provide: { user: { value: { username: 'tester' } } } },
+        })
+        const analysisResult = {
+            assessment: {
+                affected: false,
+                verdict: 'Not Affected',
+                confidence: 'High',
+                exposure: 'none',
+                summary: 'No vulnerable code path was found.',
+                reasoning: 'The vulnerable package is absent.',
+            },
+            steps: [],
+            versions_checked: ['1.0'],
+        }
+
+        await (wrapper.vm as any).handleCodeAnalysisResult(
+            analysisResult,
+            ['lib'],
+            ['automatic-run-1'],
+        )
+
+        expect((wrapper.vm as any).codeAnalysisRunIds).toEqual(['automatic-run-1'])
+        expect((wrapper.vm as any).codeAnalysisDraftApplied).toBe(true)
+    })
+
     it('preserves existing global analysis when applying a selected team update', async () => {
         const groupWithGlobal = {
             ...mockGroup,
@@ -414,6 +442,36 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Threat Model Proposal')
         expect(wrapper.text()).toContain('Apply Proposal')
         expect(wrapper.text()).toContain('Threat model reduces exposure for the reviewed deployment.')
+    })
+
+    it('shows whether a tmrescore/vscorer analysis is available in the header', () => {
+        const withoutAnalysis = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+        })
+
+        const unavailableBadge = withoutAnalysis.get('[data-testid="tmrescore-analysis-badge"]')
+        expect(unavailableBadge.text()).toContain('TMRescore unavailable')
+        expect(unavailableBadge.attributes('title')).toBe('No TMRescore/vscorer analysis is available')
+
+        const withAnalysis = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    tmrescoreProposals: ref({
+                        'CVE-2023-1234': {
+                            original_score: 9.8,
+                            rescored_score: 4.2,
+                            original_vector: mockGroup.cvss_vector,
+                            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:L/I:L/A:N',
+                        },
+                    }),
+                },
+            },
+        })
+
+        const availableBadge = withAnalysis.get('[data-testid="tmrescore-analysis-badge"]')
+        expect(availableBadge.text()).toContain('TMRescore available')
+        expect(availableBadge.attributes('title')).toBe('TMRescore/vscorer analysis is available')
     })
 
     const openReviewTab = async (wrapper: ReturnType<typeof mount>) => {

@@ -1,4 +1,5 @@
 import type { GroupedVuln, InconsistencyReason, TMRescoreProposal } from '../types'
+import type { CodeAnalysisAssessmentIndexRecord } from './api'
 import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
@@ -13,6 +14,14 @@ import type { FilterCounts, TeamCounts } from './group-classifier'
 export type DependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
 export type TMRescoreProposalFilter = 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'
 export type AutomaticAssessmentFilter = 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'
+export type AutomaticAssessmentStatus = 'auto' | 'manual' | 'mixed' | 'partial'
+export type AutomaticAssessmentLookup =
+    | ReadonlySet<string>
+    | ReadonlyMap<string, readonly CodeAnalysisAssessmentIndexRecord[]>
+const isAutomaticAssessmentMap = (
+    value: AutomaticAssessmentLookup,
+): value is ReadonlyMap<string, readonly CodeAnalysisAssessmentIndexRecord[]> =>
+    typeof (value as ReadonlyMap<string, readonly CodeAnalysisAssessmentIndexRecord[]>).get === 'function'
 export const DEFAULT_ATTRIBUTION_AGE_DAYS = 28
 const DEFAULT_AUTOMATIC_ASSESSMENT_FILTER: AutomaticAssessmentFilter[] = [
     'WITH_AUTOMATIC_ASSESSMENT',
@@ -42,6 +51,7 @@ export interface VulnListItem {
     dependencyRelationship: DependencyRelationship
     hasTmrescoreProposal: boolean
     hasAutomaticAssessment: boolean
+    automaticAssessmentStatus: AutomaticAssessmentStatus | null
     cvssVersionMismatch: boolean
     assessmentRestoreCount: number
     assessmentRestoreRecoverableCount: number
@@ -540,21 +550,87 @@ export function normalizeVulnIdentifier(value: unknown): string {
 
 export function hasAutomaticAssessmentForGroup(
     group: GroupedVuln,
-    automaticAssessmentIds: ReadonlySet<string> = new Set(),
+    automaticAssessments: AutomaticAssessmentLookup = new Set(),
 ): boolean {
-    if (automaticAssessmentIds.size === 0) return false
+    if (group.code_assessment_status) return true
+    if (automaticAssessments.size === 0) return false
     const candidateIds = [group.id, ...(group.aliases || [])]
     return candidateIds.some(candidateId => {
         const normalized = normalizeVulnIdentifier(candidateId)
-        return normalized.length > 0 && automaticAssessmentIds.has(normalized)
+        return normalized.length > 0 && automaticAssessments.has(normalized)
     })
+}
+
+const automaticAssessmentRecordsForGroup = (
+    group: GroupedVuln,
+    automaticAssessments: AutomaticAssessmentLookup,
+): CodeAnalysisAssessmentIndexRecord[] => {
+    if (!isAutomaticAssessmentMap(automaticAssessments)) return []
+    const projectNames = new Set(
+        (group.affected_versions || [])
+            .flatMap(version => version.components || [])
+            .map(component => String(component.project_name || '').trim().toLowerCase())
+            .filter(Boolean),
+    )
+    const records = new Map<string, CodeAnalysisAssessmentIndexRecord>()
+    for (const candidateId of [group.id, ...(group.aliases || [])]) {
+        const normalized = normalizeVulnIdentifier(candidateId)
+        if (!normalized) continue
+        for (const record of automaticAssessments.get(normalized) || []) {
+            const recordProjects = new Set(
+                (record.project_names || []).map(value => value.toLowerCase()),
+            )
+            if (
+                projectNames.size > 0
+                && recordProjects.size > 0
+                && [...projectNames].every(project => !recordProjects.has(project))
+            ) {
+                continue
+            }
+            records.set(record.analysis_run_id, record)
+        }
+    }
+    return [...records.values()]
+}
+
+export function automaticAssessmentStatusForGroup(
+    group: GroupedVuln,
+    automaticAssessments: AutomaticAssessmentLookup = new Set(),
+): AutomaticAssessmentStatus | null {
+    if (group.code_assessment_status) return group.code_assessment_status
+    if (!isAutomaticAssessmentMap(automaticAssessments)) {
+        return hasAutomaticAssessmentForGroup(group, automaticAssessments) ? 'auto' : null
+    }
+    const records = automaticAssessmentRecordsForGroup(group, automaticAssessments)
+    if (records.length === 0) return null
+    const expectedComponents = new Set(
+        (group.affected_versions || [])
+            .flatMap(version => version.components || [])
+            .map(component => String(component.component_name || '').trim().toLowerCase())
+            .filter(Boolean),
+    )
+    const coveredComponents = new Set(
+        records.flatMap(record => record.component_names || []).map(value => value.toLowerCase()),
+    )
+    const sourceKinds = new Set(records.map(record => record.source_kind))
+    if (
+        expectedComponents.size > 0
+        && [...expectedComponents].some(component => !coveredComponents.has(component))
+    ) {
+        return 'partial'
+    }
+    const hasAuto = sourceKinds.has('auto')
+    const hasManual = sourceKinds.has('manual') || sourceKinds.has('unknown')
+    if (hasAuto && hasManual) return 'mixed'
+    if (hasAuto) return 'auto'
+    return 'manual'
 }
 
 export function buildVulnListItem(
     group: GroupedVuln,
     teamMapping: Record<string, any>,
     proposals: Record<string, TMRescoreProposal> = {},
-    automaticAssessmentIds: ReadonlySet<string> = new Set(),
+    automaticAssessments: AutomaticAssessmentLookup = new Set(),
 ): VulnListItem {
     const metadata = group.list_metadata
     const rawTags = (group.tags || []).map(tagToString).filter(Boolean)
@@ -667,7 +743,8 @@ export function buildVulnListItem(
         dependencyRelationship: metadataDependencyRelationship(metadata?.dependency_relationship)
             ?? getGroupDependencyRelationship(group),
         hasTmrescoreProposal: hasTMRescoreProposalForGroup(group, proposals),
-        hasAutomaticAssessment: hasAutomaticAssessmentForGroup(group, automaticAssessmentIds),
+        hasAutomaticAssessment: hasAutomaticAssessmentForGroup(group, automaticAssessments),
+        automaticAssessmentStatus: automaticAssessmentStatusForGroup(group, automaticAssessments),
         cvssVersionMismatch: typeof metadata?.cvss_version_mismatch === 'boolean'
             ? metadata.cvss_version_mismatch
             : hasCvssVersionMismatch(group),
@@ -948,7 +1025,7 @@ export function matchesLifecycleFilter(item: VulnListItem, lifecycleFilters: Fil
     }
 
     return (
-        (filters.includes('OPEN') && item.isOpen) ||
+        (filters.includes('OPEN') && item.lifecycle === 'OPEN') ||
         (filters.includes('ASSESSED') && item.lifecycle === 'ASSESSED') ||
         (filters.includes('ASSESSED_LEGACY') && item.lifecycle === 'ASSESSED_LEGACY') ||
         (filters.includes('INCOMPLETE') && item.lifecycle === 'INCOMPLETE') ||
@@ -975,7 +1052,7 @@ export function matchesCompiledLifecycleFilter(
     }
 
     return (
-        (filters.lifecycleFilterSet.has('OPEN') && item.isOpen) ||
+        (filters.lifecycleFilterSet.has('OPEN') && item.lifecycle === 'OPEN') ||
         (filters.lifecycleFilterSet.has('ASSESSED') && item.lifecycle === 'ASSESSED') ||
         (filters.lifecycleFilterSet.has('ASSESSED_LEGACY') && item.lifecycle === 'ASSESSED_LEGACY') ||
         (filters.lifecycleFilterSet.has('INCOMPLETE') && item.lifecycle === 'INCOMPLETE') ||
@@ -1024,7 +1101,7 @@ export function computeListFilterCounts(
     const lifecycleFilters = normalizeFilterSelection(activeLifecycleFilters)
 
     for (const item of items) {
-        if (item.isOpen) counts.OPEN++
+        if (item.lifecycle === 'OPEN') counts.OPEN++
         if (item.lifecycle === 'ASSESSED') counts.ASSESSED++
         if (item.lifecycle === 'ASSESSED_LEGACY') counts.ASSESSED_LEGACY++
         if (item.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++

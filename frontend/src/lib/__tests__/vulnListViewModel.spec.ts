@@ -200,7 +200,7 @@ describe('vulnListViewModel', () => {
             'CVE-2026-0004',
             'CVE-2026-0001',
         ])
-        expect(view.filterCounts.OPEN).toBe(2)
+        expect(view.filterCounts.OPEN).toBe(1)
         expect(view.filterCounts.ASSESSED).toBe(1)
         expect(view.filterCounts.INCOMPLETE).toBe(1)
         expect(view.filterCounts.NEEDS_APPROVAL).toBe(1)

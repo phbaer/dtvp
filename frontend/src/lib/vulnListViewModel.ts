@@ -156,7 +156,7 @@ const updateStaticFilterCounts = (
     counts: FilterCounts,
     item: VulnListItem,
 ) => {
-    if (item.isOpen) counts.OPEN++
+    if (item.lifecycle === 'OPEN') counts.OPEN++
     if (item.lifecycle === 'ASSESSED') counts.ASSESSED++
     if (item.lifecycle === 'ASSESSED_LEGACY') counts.ASSESSED_LEGACY++
     if (item.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++

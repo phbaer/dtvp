@@ -2,25 +2,22 @@
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-    drainTaskVulnGroups,
     getGroupedVulns,
+    getAssessmentDetails,
     getProjectArchiveTaskDownloadUrl,
     getRescoreRules,
-    previewRescoreRuleSync,
     getStatistics,
     getTaskStatistics,
     getTeamMapping,
     getTMRescoreProposals,
-    codeAnalysisListResults,
     startProjectArchiveExport,
     waitForProjectArchiveTask,
 } from '../lib/api'
-import type { AssessmentRestoreApplyResponse, CodeAnalysisResultRecord, RescoreRuleSyncApplyResponse, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
+import type { BulkWorkflowApplyResponse, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import type { GroupedVuln, ProjectArchiveTask, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
 import { projectHeaderState } from '../lib/projectHeaderStore'
-import { useProjectBulkResolve } from '../lib/useProjectBulkResolve'
 import { useProjectVulnFilters } from '../lib/useProjectVulnFilters'
 import {
     SEARCH_TOKEN_SHORTCUTS,
@@ -34,7 +31,7 @@ import { useTaskGroupWindows } from '../lib/useTaskGroupWindows'
 import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
 import {
     hasAutomaticAssessmentForGroup,
-    normalizeVulnIdentifier,
+    automaticAssessmentStatusForGroup,
     type AutomaticAssessmentFilter,
     type DependencyRelationship,
     type TMRescoreProposalFilter,
@@ -61,10 +58,7 @@ import { INCONSISTENCY_REASON_OPTIONS } from '../lib/inconsistency'
 
 import VulnRowCompact from '../components/VulnRowCompact.vue'
 import VulnDetailInspector from '../components/VulnDetailInspector.vue'
-import BulkResolveIncompleteModal from '../components/BulkResolveIncompleteModal.vue'
-import BulkRestoreAssessmentModal from '../components/BulkRestoreAssessmentModal.vue'
-import BulkRescoreRuleSyncModal from '../components/BulkRescoreRuleSyncModal.vue'
-import BulkApproveModal from '../components/BulkApproveModal.vue'
+import BulkWorkflowModal from '../components/BulkWorkflowModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
 import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from 'lucide-vue-next'
@@ -154,43 +148,10 @@ provide('rescoreRules', rescoreRules)
 const tmrescoreProposalSnapshot = ref<TMRescoreProposalSnapshot | null>(null)
 const emptyTMRescoreProposals: Record<string, TMRescoreProposal> = {}
 const tmrescoreProposals = computed(() => tmrescoreProposalSnapshot.value?.proposals || emptyTMRescoreProposals)
-const automaticAssessmentResults = ref<CodeAnalysisResultRecord[]>([])
 const listItemCache = createVulnListItemCache()
 provide('tmrescoreProposals', tmrescoreProposals)
 
-const showBulkApproveModal = ref(false)
-const showAssessmentRestoreModal = ref(false)
-const showRescoreRuleSyncModal = ref(false)
-const rescoreRuleSyncCount = ref(0)
-let rescoreRulePreviewRequestId = 0
-
-const refreshRescoreRuleSyncCount = async (taskId = currentVulnTaskId.value) => {
-    const requestId = ++rescoreRulePreviewRequestId
-    if (!taskId || currentUserRole.value !== 'REVIEWER') {
-        rescoreRuleSyncCount.value = 0
-        projectHeaderState.rescoreRuleSyncCount.value = 0
-        return
-    }
-    try {
-        const matchingGroups = await drainTaskVulnGroups(taskId, {
-            ...taskGroupListQuery.value,
-            sort: 'id',
-            order: 'asc',
-        }, { limit: 1000 })
-        const result = await previewRescoreRuleSync(
-            taskId,
-            matchingGroups.map(group => group.id),
-        )
-        if (requestId !== rescoreRulePreviewRequestId || taskId !== currentVulnTaskId.value) return
-        rescoreRuleSyncCount.value = result.summary.groups || 0
-        projectHeaderState.rescoreRuleSyncCount.value = rescoreRuleSyncCount.value
-    } catch (err) {
-        if (requestId !== rescoreRulePreviewRequestId) return
-        rescoreRuleSyncCount.value = 0
-        projectHeaderState.rescoreRuleSyncCount.value = 0
-        console.error('Failed to preview CVSS rule synchronization:', err)
-    }
-}
+const showBulkWorkflowModal = ref(false)
 
 const appendLoadingLog = (message: string) => {
     if (!message) return
@@ -285,26 +246,6 @@ const fetchTMRescoreProposals = async () => {
     }
 }
 
-const fetchAutomaticAssessmentResults = async () => {
-    const name = routeProjectName()
-    if (!name) {
-        automaticAssessmentResults.value = []
-        return
-    }
-
-    try {
-        automaticAssessmentResults.value = await codeAnalysisListResults({
-            project_name: name === '_all_' ? undefined : name,
-            source: 'automatic',
-            limit: 500,
-            include_result: false,
-        })
-    } catch (err) {
-        console.error('Failed to fetch automatic code-analysis results:', err)
-        automaticAssessmentResults.value = []
-    }
-}
-
 onMounted(() => {
     fetchTeamMapping()
     fetchRescoreRules()
@@ -312,7 +253,6 @@ onMounted(() => {
 
 onActivated(() => {
     void refreshThreatModelProposalsIfNeeded()
-    void fetchAutomaticAssessmentResults()
 })
 
 const processFetchedGroups = async (data: GroupedVuln[]): Promise<GroupedVuln[]> => {
@@ -371,7 +311,7 @@ const fetchVulns = async () => {
     loadingLog.value = []
     resetTaskGroupWindowState()
     resetTaskGroupDetails()
-    resetBulkResolveModal()
+    showBulkWorkflowModal.value = false
     let releasedPartialList = false
     let reloadedCompletedList = false
     let lastPartialWindowVersionCount: number | null = null
@@ -456,7 +396,6 @@ const fetchVulns = async () => {
                 updateTaskGroupWindowStatus(status)
                 queuedPartialWindow = null
                 await reloadCompletedTaskWindow(taskId)
-                void refreshRescoreRuleSyncCount(taskId)
             },
         })
 
@@ -511,9 +450,7 @@ watch(() => viewMode.value, (newMode) => {
 
 onUnmounted(() => {
     listItemCache.clear()
-    rescoreRulePreviewRequestId++
-    projectHeaderState.rescoreRuleSyncCount.value = 0
-    projectHeaderState.rescoreRuleSyncHandler.value = null
+    projectHeaderState.bulkWorkflowHandler.value = null
 })
 
 // Expansion tracking removed — now handled by VulnRowCompact click → modal flow
@@ -576,23 +513,11 @@ const meaningfulTMRescoreProposalIds = computed(() =>
     buildMeaningfulTMRescoreProposalIds(tmrescoreProposals.value)
 )
 
-const automaticAssessmentIdSet = computed(() => {
-    const ids = new Set<string>()
-    for (const record of automaticAssessmentResults.value) {
-        const normalized = normalizeVulnIdentifier(record.vuln_id)
-        if (normalized) ids.add(normalized)
-    }
-    return ids
-})
-
-const automaticAssessmentIds = computed(() => Array.from(automaticAssessmentIdSet.value))
-
 const listItems = computed(() => {
     return listItemCache.build(
         groups.value,
         teamMapping.value,
         tmrescoreProposals.value,
-        automaticAssessmentIdSet.value,
     )
 })
 
@@ -652,7 +577,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     meaningfulTMRescoreProposalIds: meaningfulTMRescoreProposalIds.value,
     automaticAssessmentFilters: selectedAutomaticAssessmentFilters.value,
     allAutomaticAssessmentFilterValues: allAutomaticAssessmentFilterValues.value,
-    automaticAssessmentIds: automaticAssessmentIds.value,
+    automaticAssessmentIds: [],
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
 }))
@@ -971,26 +896,6 @@ const inconsistencyReasonCounts = computed(() => {
     return counts
 })
 
-const needsApprovalGroups = computed(() => listStaticStats.value.needsApprovalGroups)
-
-const incompleteGroups = computed(() =>
-    listView.value.matchingItems
-        .filter(item => item.lifecycle === 'INCOMPLETE')
-        .map(item => item.group)
-)
-
-const bulkSyncCount = computed(() =>
-    currentVulnTaskId.value
-        ? taskListCounts.value?.filtered.lifecycle.INCOMPLETE || 0
-        : incompleteGroups.value.length
-)
-
-const assessmentRestoreCount = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value?.filtered.assessment_restore
-        ? taskListCounts.value.filtered.assessment_restore.WITH_RESTORE || 0
-        : listStaticStats.value.assessmentRestoreCount
-)
-
 const selectedListGroup = computed(() => {
     if (!selectedGroupId.value) return null
     return sortedGroupLookup.value.groupById.get(selectedGroupId.value) || null
@@ -1005,7 +910,6 @@ const {
     selectedGroupLoading,
     reset: resetTaskGroupDetails,
     cacheGroup: cacheFullGroup,
-    ensureFullGroup,
     hydrateGroup: hydrateVisibleGroup,
     refreshGroup: refreshTaskGroupDetail,
 } = useTaskGroupDetails({
@@ -1024,14 +928,20 @@ const refreshActiveTaskWindowAndDetails = async () => {
 
 const selectedGroupHasAutomaticAssessment = computed(() =>
     selectedGroup.value
-        ? hasAutomaticAssessmentForGroup(selectedGroup.value, automaticAssessmentIdSet.value)
+        ? hasAutomaticAssessmentForGroup(selectedGroup.value)
         : false
+)
+const selectedGroupAutomaticAssessmentStatus = computed(() =>
+    selectedGroup.value
+        ? automaticAssessmentStatusForGroup(selectedGroup.value)
+        : null
 )
 
 const {
     handleLocalAssessmentUpdate,
     handleBulkUpdates,
     handleTeamMappingUpdated,
+    replaceGroup,
 } = useProjectAssessmentUpdates({
     groups,
     fullGroupCache,
@@ -1044,52 +954,115 @@ const {
     refreshTaskWindow: refreshActiveTaskWindowAndDetails,
 })
 
-const {
-    showBulkModal,
-    bulkModalLoading,
-    displayedBulkIncompleteGroups,
-    openBulkResolveModal,
-    closeBulkModal,
-    resetBulkResolveModal,
-} = useProjectBulkResolve({
-    currentTaskId: currentVulnTaskId,
-    taskGroupListQuery,
-    incompleteGroups,
-    ensureFullGroup,
-})
+const reloadingGroupIds = ref<Set<string>>(new Set())
+const groupReloadErrors = ref<Record<string, string>>({})
 
-projectHeaderState.bulkSyncHandler.value = () => {
-    flushSmartSearchFilter()
-    void openBulkResolveModal()
+const setGroupReloading = (groupId: string, reloading: boolean) => {
+    const next = new Set(reloadingGroupIds.value)
+    if (reloading) next.add(groupId)
+    else next.delete(groupId)
+    reloadingGroupIds.value = next
 }
 
-projectHeaderState.assessmentRestoreHandler.value = () => {
+const assessmentIdentity = (value: any) => [
+    value?.project_uuid,
+    value?.component_uuid,
+    value?.vulnerability_uuid,
+].map(part => String(part || '')).join('\u0000')
+
+const applyReloadedAssessmentDetails = (group: GroupedVuln, results: any[]): GroupedVuln => {
+    const byFindingId = new Map<string, any>()
+    const byIdentity = new Map<string, any>()
+    for (const result of results) {
+        if (!result?.analysis || result.error) continue
+        if (result.finding_uuid) byFindingId.set(String(result.finding_uuid), result.analysis)
+        const identity = assessmentIdentity(result)
+        if (identity !== '\u0000\u0000') byIdentity.set(identity, result.analysis)
+    }
+
+    return {
+        ...group,
+        affected_versions: (group.affected_versions || []).map(version => ({
+            ...version,
+            components: (version.components || []).map(component => {
+                const analysis = (component.finding_uuid
+                    ? byFindingId.get(String(component.finding_uuid))
+                    : undefined) || byIdentity.get(assessmentIdentity(component))
+                if (!analysis) return component
+                return {
+                    ...component,
+                    analysis_state: analysis.analysisState ?? analysis.analysis_state ?? component.analysis_state,
+                    analysis_details: analysis.analysisDetails ?? analysis.analysis_details ?? component.analysis_details,
+                    is_suppressed: analysis.isSuppressed ?? analysis.is_suppressed ?? component.is_suppressed,
+                    justification: analysis.analysisJustification ?? analysis.justification ?? component.justification,
+                }
+            }),
+        })),
+    }
+}
+
+const handleReloadGroup = async (group: GroupedVuln) => {
+    if (reloadingGroupIds.value.has(group.id)) return
+    setGroupReloading(group.id, true)
+    const nextErrors = { ...groupReloadErrors.value }
+    delete nextErrors[group.id]
+    groupReloadErrors.value = nextErrors
+
+    try {
+        let sourceGroup = fullGroupCache.value[group.id] || group
+        let instances = (sourceGroup.affected_versions || [])
+            .flatMap(version => version.components || [])
+            .filter(component => component.project_uuid && component.component_uuid && component.vulnerability_uuid)
+        if (instances.length === 0 && currentVulnTaskId.value) {
+            sourceGroup = await refreshTaskGroupDetail(group.id, { showLoading: false }) || sourceGroup
+            instances = (sourceGroup.affected_versions || [])
+                .flatMap(version => version.components || [])
+                .filter(component => component.project_uuid && component.component_uuid && component.vulnerability_uuid)
+        }
+        if (instances.length === 0) {
+            throw new Error('No vulnerability instances are available to reload')
+        }
+
+        const results = await getAssessmentDetails(instances)
+        if (!Array.isArray(results)) {
+            throw new Error('The reload response was invalid')
+        }
+
+        replaceGroup(applyReloadedAssessmentDetails(sourceGroup, results))
+        statsDirty.value = true
+        if (currentVulnTaskId.value) {
+            await loadTaskGroupWindow({ reset: true })
+            if (selectedGroupId.value === group.id) {
+                await refreshTaskGroupDetail(group.id, { showLoading: false })
+            }
+        }
+
+        const failures = results.filter(result => result?.error)
+        if (failures.length > 0) {
+            groupReloadErrors.value = {
+                ...groupReloadErrors.value,
+                [group.id]: `Reloaded with ${failures.length} failed component${failures.length === 1 ? '' : 's'}`,
+            }
+        }
+    } catch (err: any) {
+        console.error(`Failed to reload vulnerability ${group.id}:`, err)
+        groupReloadErrors.value = {
+            ...groupReloadErrors.value,
+            [group.id]: err?.message || 'Failed to reload vulnerability',
+        }
+    } finally {
+        setGroupReloading(group.id, false)
+    }
+}
+
+projectHeaderState.bulkWorkflowHandler.value = () => {
     if (!currentVulnTaskId.value) return
     flushSmartSearchFilter()
-    showAssessmentRestoreModal.value = true
+    void nextTick(() => { showBulkWorkflowModal.value = true })
 }
 
-projectHeaderState.rescoreRuleSyncHandler.value = () => {
-    if (!currentVulnTaskId.value) return
-    flushSmartSearchFilter()
-    showRescoreRuleSyncModal.value = true
-}
-
-const handleBulkResolveUpdates = (updates: Array<{ id: string; data: any }>) => {
-    handleBulkUpdates(updates, closeBulkModal)
-}
-
-const handleBulkApproveModalUpdates = (updates: Array<{ id: string; data: any }>) => {
-    handleBulkUpdates(updates, () => { showBulkApproveModal.value = false })
-}
-
-const handleAssessmentRestoreApplied = (_result: AssessmentRestoreApplyResponse) => {
+const handleBulkWorkflowApplied = (_result: BulkWorkflowApplyResponse) => {
     handleBulkUpdates([])
-}
-
-const handleRescoreRuleSyncApplied = (_result: RescoreRuleSyncApplyResponse) => {
-    handleBulkUpdates([])
-    void refreshRescoreRuleSyncCount()
 }
 
 const exportCurrentProjectArchive = async () => {
@@ -1190,9 +1163,6 @@ watch(sortedItems, (items, previousItems) => {
 watch(taskGroupListQueryKey, () => {
     if (!currentVulnTaskId.value || loading.value) return
     void loadTaskGroupWindow({ reset: true })
-    if (currentUserRole.value === 'REVIEWER') {
-        void refreshRescoreRuleSyncCount()
-    }
 })
 
 watch([visibleEndIndex, loadedGroupCount, hasMoreTaskListGroups], () => {
@@ -1337,9 +1307,6 @@ const syncProjectHeaderState = () => {
         projectHeaderState.lastProjectPath.value = route.fullPath || `/project/${name}`
     }
     projectHeaderState.isReviewer.value = currentUserRole.value === 'REVIEWER'
-    projectHeaderState.incompleteCount.value = bulkSyncCount.value
-    projectHeaderState.assessmentRestoreCount.value = assessmentRestoreCount.value
-    projectHeaderState.rescoreRuleSyncCount.value = rescoreRuleSyncCount.value
 }
 
 const hydrateSelectedRouteGroup = () => {
@@ -1379,7 +1346,6 @@ const loadProjectRouteState = () => {
 
     void fetchVulns()
     void fetchTMRescoreProposals()
-    void fetchAutomaticAssessmentResults()
     syncStatsForProjectRoute()
 }
 
@@ -1397,22 +1363,8 @@ watch(() => route.query.vuln, (vulnId) => {
     hydrateSelectedRouteGroup()
 })
 
-watch(bulkSyncCount, (count) => {
-    projectHeaderState.incompleteCount.value = count
-}, { immediate: true })
-
-watch(assessmentRestoreCount, (count) => {
-    projectHeaderState.assessmentRestoreCount.value = count
-}, { immediate: true })
-
 watch(currentUserRole, (role) => {
     projectHeaderState.isReviewer.value = (role || 'ANALYST') === 'REVIEWER'
-    if (role === 'REVIEWER' && currentVulnTaskId.value) {
-        void refreshRescoreRuleSyncCount()
-    } else if (role !== 'REVIEWER') {
-        rescoreRuleSyncCount.value = 0
-        projectHeaderState.rescoreRuleSyncCount.value = 0
-    }
 }, { immediate: true })
 </script>
 
@@ -1743,8 +1695,11 @@ watch(currentUserRole, (role) => {
                                     :key="item.id"
                                     :item="item"
                                     :selected="selectedGroupId === item.id"
+                                    :reloading="reloadingGroupIds.has(item.id)"
+                                    :reload-error="groupReloadErrors[item.id]"
                                     :data-group-id="item.id"
                                     @select="selectGroupWithDraftGuard"
+                                    @reload="handleReloadGroup"
                                     @update="handleTeamMappingUpdated"
                                     @update:assessment="(data) => handleLocalAssessmentUpdate(item.group, data)"
                                 />
@@ -1848,6 +1803,7 @@ watch(currentUserRole, (role) => {
                 ref="detailInspectorRef"
                 :group="selectedGroup"
                 :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
+                :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
                 class="h-full"
                 @close="closeSelectedGroupWithDraftGuard"
                 @update="handleTeamMappingUpdated"
@@ -1872,6 +1828,7 @@ watch(currentUserRole, (role) => {
                 ref="detailInspectorRef"
                 :group="selectedGroup"
                 :hasAutomaticAssessment="selectedGroupHasAutomaticAssessment"
+                :automaticAssessmentStatus="selectedGroupAutomaticAssessmentStatus"
                 @close="closeSelectedGroupWithDraftGuard"
                 @update="handleTeamMappingUpdated"
                 @update:assessment="(data) => selectedGroup && handleLocalAssessmentUpdate(selectedGroup, data)"
@@ -1914,46 +1871,12 @@ watch(currentUserRole, (role) => {
         </div>
     </Teleport>
 
-    <BulkResolveIncompleteModal
-        :show="showBulkModal"
-        :incomplete-groups="displayedBulkIncompleteGroups"
-        @close="closeBulkModal"
-        @updated="handleBulkResolveUpdates"
-    />
-
-    <BulkRestoreAssessmentModal
-        :show="showAssessmentRestoreModal"
+    <BulkWorkflowModal
+        :show="showBulkWorkflowModal"
         :task-id="currentVulnTaskId"
         :query="taskGroupListQuery"
-        @close="showAssessmentRestoreModal = false"
-        @applied="handleAssessmentRestoreApplied"
-    />
-
-    <BulkRescoreRuleSyncModal
-        :show="showRescoreRuleSyncModal"
-        :task-id="currentVulnTaskId"
-        :query="taskGroupListQuery"
-        @close="showRescoreRuleSyncModal = false"
-        @applied="handleRescoreRuleSyncApplied"
-    />
-
-    <Teleport to="body">
-        <div
-            v-if="bulkModalLoading"
-            class="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-950/70 backdrop-blur-sm"
-        >
-            <div class="flex items-center gap-3 rounded border border-white/10 bg-gray-950 px-4 py-3 text-sm font-semibold text-gray-100 shadow-2xl">
-                <Loader2 class="animate-spin text-amber-300" :size="18" />
-                Preparing bulk sync...
-            </div>
-        </div>
-    </Teleport>
-
-    <BulkApproveModal
-        :show="showBulkApproveModal"
-        :needs-approval-groups="needsApprovalGroups"
-        @close="showBulkApproveModal = false"
-        @updated="handleBulkApproveModalUpdates"
+        @close="showBulkWorkflowModal = false"
+        @applied="handleBulkWorkflowApplied"
     />
   </div>
 </template>

@@ -15,7 +15,7 @@ vi.mock('../../lib/api', () => ({
     getTaskStatistics: vi.fn(() => Promise.resolve({ severity_counts: {}, state_counts: {}, total_unique: 0, total_findings: 0, affected_projects_count: 0, version_counts: {} })),
     updateAssessment: vi.fn(),
     getCacheStatus: vi.fn(() => Promise.resolve({ fully_cached: false, last_refreshed_at: null, projects: 0, active_projects: 0, cached_findings: 0, cached_boms: 0, cached_analyses: 0, pending_updates: 0 })),
-    codeAnalysisListResults: vi.fn(() => Promise.resolve([])),
+    codeAnalysisGetAssessmentIndex: vi.fn(() => Promise.resolve({ records: [], summary: {} })),
     getTeamMapping: vi.fn(() => Promise.resolve({})),
     getRescoreRules: vi.fn(() => Promise.resolve({ transitions: [] })),
     getTMRescoreProposals: vi.fn(() => Promise.resolve({ proposals: {} })),
@@ -483,7 +483,7 @@ describe('ProjectView Filters', () => {
         expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V4')
     })
 
-    it('includes pending review items with open team assessment in OPEN filter', async () => {
+    it('excludes pending review items with open team work from the OPEN lifecycle filter', async () => {
         (getGroupedVulns as any).mockResolvedValue(mockDataWithPending)
         const wrapper = await mountProjectViewRoute()
 
@@ -493,7 +493,8 @@ describe('ProjectView Filters', () => {
 
         const openCards = wrapper.findAll('.vuln-card')
         expect(openCards.length).toBeGreaterThanOrEqual(1)
-        expect(openCards.map((card: any) => card.text())).toContain('V4')
+        expect(openCards.map((card: any) => card.text())).toContain('V1')
+        expect(openCards.map((card: any) => card.text())).not.toContain('V4')
     })
 
     it('should treat plaintext assessments as valid data for filters', async () => {

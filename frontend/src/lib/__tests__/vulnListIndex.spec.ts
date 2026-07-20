@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GroupedVuln, TMRescoreProposal } from '../../types'
 import {
+    automaticAssessmentStatusForGroup,
     buildVulnListItem,
     buildVulnListItems,
     compileVulnListFilters,
@@ -72,6 +73,47 @@ const makeProposal = (overrides: Partial<TMRescoreProposal>): TMRescoreProposal 
 })
 
 describe('vulnListIndex', () => {
+    it('classifies complete and partial code-assessment coverage', () => {
+        const group = makeGroup({
+            aliases: ['GHSA-ASSESSMENT'],
+            affected_versions: [{
+                project_name: 'Project',
+                project_uuid: 'project-uuid',
+                project_version: '1.0.0',
+                components: [
+                    { project_name: 'Project', component_name: 'library-a' },
+                    { project_name: 'Project', component_name: 'library-b' },
+                ],
+            } as any],
+        })
+        const record = (run: string, source: 'auto' | 'manual' | 'unknown', components: string[]) => ({
+            analysis_run_id: run,
+            vuln_id: 'ghsa-assessment',
+            project_names: ['project'],
+            component_names: components,
+            source_kind: source,
+        })
+
+        expect(automaticAssessmentStatusForGroup(group, new Map([
+            ['ghsa-assessment', [record('auto', 'auto', ['library-a', 'library-b'])]],
+        ]))).toBe('auto')
+        expect(automaticAssessmentStatusForGroup(group, new Map([
+            ['ghsa-assessment', [record('manual', 'manual', ['library-a', 'library-b'])]],
+        ]))).toBe('manual')
+        expect(automaticAssessmentStatusForGroup(group, new Map([
+            ['ghsa-assessment', [
+                record('auto', 'auto', ['library-a']),
+                record('manual', 'manual', ['library-b']),
+            ]],
+        ]))).toBe('mixed')
+        expect(automaticAssessmentStatusForGroup(group, new Map([
+            ['ghsa-assessment', [record('partial', 'manual', ['library-a'])]],
+        ]))).toBe('partial')
+        expect(automaticAssessmentStatusForGroup(group, new Map([
+            ['ghsa-assessment', [record('legacy', 'unknown', ['library-a', 'library-b'])]],
+        ]))).toBe('manual')
+    })
+
     it('normalizes scalar and array filter selections', () => {
         expect(normalizeFilterSelection('DIRECT')).toEqual(['DIRECT'])
         expect(normalizeFilterSelection(['DIRECT', 'UNKNOWN'])).toEqual(['DIRECT', 'UNKNOWN'])
@@ -555,7 +597,7 @@ describe('vulnListIndex', () => {
         const item = buildVulnListItem(pending, {}, {})
 
         expect(matchesLifecycleFilter(item, ['NEEDS_APPROVAL'])).toBe(true)
-        expect(matchesLifecycleFilter(item, ['OPEN'])).toBe(true)
+        expect(matchesLifecycleFilter(item, ['OPEN'])).toBe(false)
         expect(matchesStateFilters(item, {
             lifecycleFilters: ['NEEDS_APPROVAL'],
             analysisFilters: ['NOT_SET'],

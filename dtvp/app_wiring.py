@@ -234,6 +234,7 @@ def build_general_api_route_deps(
     service_unavailable_response: dict[int | str, dict[str, Any]],
     not_found_response: dict[int | str, dict[str, Any]],
     get_grouped_vuln_task_ttl_seconds: Callable[[], int] | None = None,
+    code_analysis_result_store: Any = None,
 ) -> GeneralApiRouteDeps:
     return GeneralApiRouteDeps(
         cache_manager=cache_manager,
@@ -303,6 +304,7 @@ def build_general_api_route_deps(
         default_dependency_chain_limit=default_dependency_chain_limit,
         service_unavailable_response=service_unavailable_response,
         not_found_response=not_found_response,
+        code_analysis_result_store=code_analysis_result_store,
     )
 
 
