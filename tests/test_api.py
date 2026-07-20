@@ -258,6 +258,72 @@ def test_bulk_workflow_preview_runs_as_polled_background_task(client):
             main.tasks.pop(operation_id, None)
 
 
+def test_incomplete_bulk_workflow_preview_hydrates_summary_lifecycle(client):
+    group = {
+        "id": "CVE-INCOMPLETE-PREVIEW",
+        "title": "Incomplete assessment",
+        "severity": "HIGH",
+        "tags": [],
+        "assignees": [],
+        "aliases": [],
+        "affected_versions": [
+            {
+                "project_name": "ExampleApp",
+                "project_version": "1.0.0",
+                "project_uuid": "project-1",
+                "components": [
+                    {
+                        "finding_uuid": "finding-1",
+                        "project_uuid": "project-1",
+                        "component_uuid": "component-1",
+                        "vulnerability_uuid": "vulnerability-1",
+                        "analysis_state": "NOT_AFFECTED",
+                        "analysis_details": (
+                            "--- [Team: API] [State: NOT_AFFECTED] "
+                            "[Assessed By: alice] ---\nNo reachable path."
+                        ),
+                    },
+                    {
+                        "finding_uuid": "finding-2",
+                        "project_uuid": "project-1",
+                        "component_uuid": "component-2",
+                        "vulnerability_uuid": "vulnerability-2",
+                        "analysis_state": "NOT_SET",
+                        "analysis_details": "",
+                    },
+                ],
+            }
+        ],
+    }
+    task_id = "incomplete-bulk-preview-source"
+    summaries = summarize_grouped_vulnerabilities([group], {})
+    assert summaries[0]["list_metadata"]["lifecycle"] == "INCOMPLETE"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "result": summaries,
+    }
+
+    try:
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            response = client.post(
+                "/api/bulk-workflows/incomplete-sync/preview",
+                json={
+                    "task_id": task_id,
+                    "filters": {"lifecycle": ["INCOMPLETE"]},
+                },
+            )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    preview = response.json()
+    assert preview["selectable_group_ids"] == [group["id"]]
+    assert preview["summary"] == {"groups": 1, "findings": 2}
+
+
 def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_client):
     group, _vector = _restore_group()
     task_id = "background-bulk-apply-source"

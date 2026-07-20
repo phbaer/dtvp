@@ -159,8 +159,71 @@ def test_bulk_workflow_task_filter_reuses_the_visible_summary_index():
         ),
     )
 
-    assert filtered == [selected_full]
+    assert len(filtered) == 1
+    assert filtered[0]["id"] == selected_full["id"]
+    assert filtered[0]["title"] == selected_full["title"]
+    assert filtered[0]["list_metadata"] == selected_summary["list_metadata"]
+    assert "list_metadata" not in selected_full
     assert task.get("_group_query_index") is not None
+
+
+def test_incomplete_bulk_preview_keeps_lifecycle_when_hydrating_full_groups():
+    summary = _group("CVE-INCOMPLETE", "INCOMPLETE", "NOT_AFFECTED")
+    full = {
+        "id": "CVE-INCOMPLETE",
+        "title": "Incomplete full group",
+        "affected_versions": [
+            {
+                "components": [
+                    {
+                        "finding_uuid": "finding-1",
+                        "project_uuid": "project-1",
+                        "component_uuid": "component-1",
+                        "vulnerability_uuid": "vulnerability-1",
+                        "analysis_state": "NOT_AFFECTED",
+                        "analysis_details": (
+                            "--- [Team: API] [State: NOT_AFFECTED] "
+                            "[Assessed By: alice] ---\nNo reachable path."
+                        ),
+                    },
+                    {
+                        "finding_uuid": "finding-2",
+                        "project_uuid": "project-2",
+                        "component_uuid": "component-2",
+                        "vulnerability_uuid": "vulnerability-2",
+                        "analysis_state": "NOT_SET",
+                        "analysis_details": "",
+                    },
+                ]
+            }
+        ],
+    }
+    task = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [summary],
+        "_full_result": [full],
+        "_full_result_by_id": {full["id"]: full},
+    }
+    deps = type(
+        "Deps",
+        (),
+        {
+            "tasks": {"task-1": task},
+            "prune_grouped_vuln_tasks": staticmethod(lambda: []),
+        },
+    )()
+
+    filtered = _filter_bulk_workflow_task_groups(
+        deps,
+        "task-1",
+        BulkWorkflowFilters(lifecycle=["INCOMPLETE"]),
+    )
+    preview = build_incomplete_sync_preview(filtered)
+
+    assert preview["summary"] == {"groups": 1, "findings": 2}
+    assert preview["items"][0]["group_id"] == "CVE-INCOMPLETE"
+    assert filtered[0]["list_metadata"]["lifecycle"] == "INCOMPLETE"
 
 
 def test_visible_filtered_cvss_rule_candidate_is_included_in_preview():

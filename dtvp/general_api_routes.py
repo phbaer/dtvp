@@ -910,12 +910,22 @@ def _filter_bulk_workflow_task_groups(
             for group in full_groups
             if str(group.get("id") or "")
         }
-    filtered_groups = [
-        full_group
-        for summary in filtered_summaries
-        if (full_group := full_group_lookup.get(str(summary.get("id") or "")))
-        is not None
-    ]
+    filtered_groups = []
+    for summary in filtered_summaries:
+        full_group = full_group_lookup.get(str(summary.get("id") or ""))
+        if full_group is None:
+            continue
+        list_metadata = summary.get("list_metadata")
+        filtered_groups.append(
+            {
+                **full_group,
+                **(
+                    {"list_metadata": dict(list_metadata)}
+                    if isinstance(list_metadata, dict)
+                    else {}
+                ),
+            }
+        )
     if not assessment_filter or assessment_filter == {
         "WITH_AUTOMATIC_ASSESSMENT",
         "WITHOUT_AUTOMATIC_ASSESSMENT",
