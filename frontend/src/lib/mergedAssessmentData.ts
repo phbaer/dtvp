@@ -1,4 +1,4 @@
-import { constructAssessmentDetails, parseAssessmentBlocks, type AssessmentBlock } from './assessment-helpers'
+import { assessmentTeamKey, constructAssessmentDetails, parseAssessmentBlocks, type AssessmentBlock } from './assessment-helpers'
 import type { Instance } from '../types'
 
 const RESCORED_TAG_REGEX = /\[Rescored:\s*[\d.]+\]/
@@ -14,9 +14,10 @@ const upsertLatestBlock = (
     teamToIndex: Map<string, number>,
     block: AssessmentBlock,
 ) => {
-    const existingIndex = teamToIndex.get(block.team)
+    const teamKey = assessmentTeamKey(block.team)
+    const existingIndex = teamToIndex.get(teamKey)
     if (existingIndex === undefined) {
-        teamToIndex.set(block.team, allBlocks.length)
+        teamToIndex.set(teamKey, allBlocks.length)
         allBlocks.push(block)
         return
     }

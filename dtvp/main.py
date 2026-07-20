@@ -517,6 +517,7 @@ api_router.include_router(
             background_tasks=background_tasks,
             grouped_vuln_service_deps=grouped_vuln_service_deps,
             assessment_service_deps=assessment_service_deps,
+            code_analysis_result_store=code_analysis_result_store,
             dt_settings_cls=DTSettings,
             get_dt_client_cls=lambda: DTClient,
             get_user_role=lambda user: get_user_role(user),

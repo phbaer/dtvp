@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { GroupedVuln } from '../types'
+import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 import VulnGroupCard from './VulnGroupCard.vue'
 
 defineProps<{
     group: GroupedVuln
     hasAutomaticAssessment?: boolean
+    automaticAssessmentStatus?: AutomaticAssessmentStatus | null
 }>()
 
 const emit = defineEmits<{
@@ -35,6 +37,7 @@ defineExpose({
                 :group="group"
                 :inModal="true"
                 :hasAutomaticAssessment="hasAutomaticAssessment"
+                :automaticAssessmentStatus="automaticAssessmentStatus"
                 @close="emit('close')"
                 @update="(updatedGroup) => emit('update', updatedGroup)"
                 @update:assessment="(data) => emit('update:assessment', data)"

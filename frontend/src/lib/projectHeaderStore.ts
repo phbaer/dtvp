@@ -8,13 +8,8 @@ export const projectHeaderState = {
   lastProjectPath: ref<string | null>(null),
   isAllProjects: ref(true),
   viewMode: ref<ProjectHeaderViewMode>('analysis'),
-  incompleteCount: ref(0),
-  assessmentRestoreCount: ref(0),
-  rescoreRuleSyncCount: ref(0),
   isReviewer: ref(false),
-  bulkSyncHandler: ref<(() => void) | null>(null),
-  assessmentRestoreHandler: ref<(() => void) | null>(null),
-  rescoreRuleSyncHandler: ref<(() => void) | null>(null),
+  bulkWorkflowHandler: ref<(() => void) | null>(null),
 }
 
 export const showProjectHeaderButtons = computed(

@@ -92,8 +92,14 @@ async def wait_for_tmrescore_completion(
         if normalized_status in {"completed", "skeptic_gate_failed"}:
             return
         if normalized_status == "failed":
+            failure_result: dict[str, Any] = {}
+            try:
+                failure_result = await tmrescore_client.get_results(session_id)
+            except (httpx.HTTPError, RuntimeError):
+                pass
             raise RuntimeError(
-                progress_payload.get("error")
+                failure_result.get("error")
+                or progress_payload.get("error")
                 or progress_payload.get("detail")
                 or message
             )
@@ -123,6 +129,7 @@ async def submit_tmrescore_inventory(
             enrich=request.enrich,
             mitre_enrichment=request.mitre_enrichment,
             offline=request.offline,
+            background=True,
         )
     except httpx.ReadTimeout, httpx.TimeoutException:
         task["message"] = "TMRescore is still processing remotely. Polling progress..."
@@ -157,6 +164,7 @@ async def resolve_tmrescore_service_result(
     service_result: Optional[dict[str, Any]],
     max_wait_seconds: float,
 ) -> dict[str, Any]:
+    fetch_terminal_result = service_result is None
     if service_result is not None:
         returned_status = str(service_result.get("status") or "completed")
         normalized_status = returned_status.lower()
@@ -184,8 +192,11 @@ async def resolve_tmrescore_service_result(
                 tmrescore_client,
                 max_wait_seconds,
             )
+            fetch_terminal_result = True
 
-    return service_result or await tmrescore_client.get_results(task["session_id"])
+    if fetch_terminal_result:
+        return await tmrescore_client.get_results(task["session_id"])
+    return service_result
 
 
 async def run_tmrescore_analysis_task(

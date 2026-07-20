@@ -330,6 +330,23 @@ Checked direct usage and release branches.`;
             expect(text).toContain('[Ticket: SEC-42 ignored]');
             expect(text).toContain('Reviewed.');
         });
+
+        it('should emit only one block per team regardless of casing', () => {
+            const blocks = [
+                { team: 'General', state: 'NOT_SET', user: 'old', details: 'Old', justification: 'NOT_SET' },
+                { team: 'general', state: 'NOT_AFFECTED', user: 'new', details: 'Newer details', justification: 'CODE_NOT_PRESENT' },
+                { team: 'API', state: 'IN_TRIAGE', user: 'one', details: 'First', justification: 'NOT_SET' },
+                { team: 'api', state: 'NOT_AFFECTED', user: 'two', details: 'Second and longer', justification: 'CODE_NOT_PRESENT' },
+            ];
+
+            const { text, aggregatedState } = constructAssessmentDetails(blocks, [], false);
+
+            expect(text.match(/\[Team: General\]/g)).toHaveLength(1);
+            expect(text.toLocaleLowerCase().match(/\[team: api\]/g)).toHaveLength(1);
+            expect(text).toContain('Newer details');
+            expect(text).toContain('Second and longer');
+            expect(aggregatedState).toBe('NOT_AFFECTED');
+        });
     });
 
     describe('mergeTeamAssessment', () => {
@@ -392,21 +409,16 @@ Old details.`;
     });
 
     describe('buildBulkSyncDetails', () => {
-        it('should create a General block with team state summary when none exists', () => {
+        it('should preserve team assessments without creating a duplicate General assessment', () => {
             const blocks = [
                 { team: 'TeamA', state: 'IN_TRIAGE', user: 'UserA', details: 'Investigating now', justification: 'NOT_SET' },
                 { team: 'TeamB', state: 'FALSE_POSITIVE', user: 'UserB', details: 'Not relevant', justification: 'NOT_SET' },
             ]
             const { text, aggregatedState } = buildBulkSyncDetails(blocks)
 
-            // General block should exist
             const parsed = parseAssessmentBlocks(text)
             const general = parsed.find(b => b.team === 'General')
-            expect(general).toBeDefined()
-
-            // Summary of team states should be in General block
-            expect(general!.details).toContain('[TeamA] IN_TRIAGE')
-            expect(general!.details).toContain('[TeamB] FALSE_POSITIVE')
+            expect(general).toBeUndefined()
 
             // Team blocks should still be present
             expect(parsed.find(b => b.team === 'TeamA')).toBeDefined()
@@ -429,12 +441,12 @@ My Policy Comment: track this carefully`
             expect(general).toBeDefined()
             // User comment must be preserved
             expect(general!.details).toContain('My Policy Comment: track this carefully')
-            // Team summary should also be appended
-            expect(general!.details).toContain('[TeamA] NOT_AFFECTED')
+            expect(general!.details).not.toContain('[TeamA] NOT_AFFECTED')
         })
 
-        it('should NOT duplicate raw team details inside the General block', () => {
+        it('should not copy raw team details into an existing General block', () => {
             const blocks = [
+                { team: 'General', state: 'NOT_SET', user: 'Reviewer', details: 'Global policy.', justification: 'NOT_SET' },
                 { team: 'TeamA', state: 'EXPLOITABLE', user: 'UserA', details: 'Active attack vector confirmed', justification: 'NOT_SET' },
             ]
             const { text } = buildBulkSyncDetails(blocks)
@@ -460,18 +472,16 @@ My Policy Comment: track this carefully`
             expect(general.state).toBe('NOT_AFFECTED')
         })
 
-        it('should skip NOT_SET teams from the summary', () => {
+        it('should strip a legacy generated team summary from General details', () => {
             const blocks = [
-                { team: 'TeamA', state: 'NOT_SET', user: 'UserA', details: '', justification: 'NOT_SET' },
+                { team: 'General', state: 'NOT_SET', user: 'Reviewer', details: 'Policy note.\n\nTeam assessments:\n[TeamB] RESOLVED', justification: 'NOT_SET' },
                 { team: 'TeamB', state: 'RESOLVED', user: 'UserB', details: 'Fixed', justification: 'NOT_SET' },
             ]
             const { text } = buildBulkSyncDetails(blocks)
 
             const parsed = parseAssessmentBlocks(text)
             const general = parsed.find(b => b.team === 'General')!
-            // TeamA (NOT_SET) should not appear in summary
-            expect(general.details).not.toContain('[TeamA]')
-            expect(general.details).toContain('[TeamB] RESOLVED')
+            expect(general.details).toBe('Policy note.')
         })
 
         it('should not be marked as pending (bulk sync is a reviewer action)', () => {

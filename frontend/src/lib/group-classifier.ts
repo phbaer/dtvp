@@ -21,7 +21,7 @@ export interface GroupClassification {
     lifecycle: string
     /** Whether the group is pending review */
     isPending: boolean
-    /** Whether this group qualifies as OPEN for filter/stats purposes.
+    /** Whether this group has open team work.
      *  True when lifecycle is OPEN, or when it's a pending group with open team assessments. */
     isOpen: boolean
     /** The technical analysis state (EXPLOITABLE, IN_TRIAGE, NOT_SET, etc.) */
@@ -93,7 +93,7 @@ export function computeFilterCounts(
         const c = classifyGroup(g, teamMapping)
 
         // Lifecycle counts
-        if (c.isOpen) counts.OPEN++
+        if (c.lifecycle === 'OPEN') counts.OPEN++
         if (c.lifecycle === 'ASSESSED') counts.ASSESSED++
         if (c.lifecycle === 'ASSESSED_LEGACY') counts.ASSESSED_LEGACY++
         if (c.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++
@@ -104,7 +104,6 @@ export function computeFilterCounts(
         const lifecycleActiveMatch =
             activeLifecycleFilters.length === 0 ||
             activeLifecycleFilters.includes(c.lifecycle) ||
-            (activeLifecycleFilters.includes('OPEN') && c.isOpen) ||
             (activeLifecycleFilters.includes('NEEDS_APPROVAL') && c.isPending)
 
         if (lifecycleActiveMatch) {
@@ -122,7 +121,8 @@ export interface TeamCounts {
 
 /**
  * Compute per-team open/assessed counts from the full (unfiltered) group list.
- * Uses the same isOpen classification as the lifecycle OPEN filter.
+ * Pending review can still contain open team work, independently of its
+ * displayed lifecycle category.
  */
 export function computeTeamCounts(
     groups: GroupedVuln[],

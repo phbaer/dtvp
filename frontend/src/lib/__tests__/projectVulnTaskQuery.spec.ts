@@ -106,6 +106,16 @@ describe('projectVulnTaskQuery', () => {
         expect(query.analysis).toEqual(DEFAULT_ANALYSIS_FILTERS)
     })
 
+    it('keeps the open lifecycle restriction when searching by vulnerability ID', () => {
+        const query = buildTaskVulnGroupListQuery(baseInput({
+            lifecycleFilters: ['OPEN'],
+            idFilter: 'CVE-2026-CLOSED',
+        }))
+
+        expect(query.lifecycle).toEqual(['OPEN'])
+        expect(query.id).toBe('CVE-2026-CLOSED')
+    })
+
     it('returns a no-match sentinel when token restrictions exclude every selected value', () => {
         const query = buildTaskVulnGroupListQuery(baseInput({
             parsedSearch: parseVulnSearchQuery('lifecycle:open dependency:direct'),

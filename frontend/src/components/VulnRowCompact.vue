@@ -3,17 +3,20 @@ import { computed } from 'vue'
 import type { GroupedVuln } from '../types'
 import type { VulnListItem } from '../lib/vulnListIndex'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
-import { CheckCircle } from 'lucide-vue-next'
+import { CheckCircle, RefreshCw } from 'lucide-vue-next'
 
 const props = defineProps<{
     item: VulnListItem
     selected?: boolean
+    reloading?: boolean
+    reloadError?: string
 }>()
 
 const emit = defineEmits<{
     (e: 'update', group?: GroupedVuln): void
     (e: 'update:assessment', data: any): void
     (e: 'select', group: GroupedVuln): void
+    (e: 'reload', group: GroupedVuln): void
 }>()
 
 const listItem = computed(() => props.item)
@@ -64,6 +67,7 @@ const rescoredSeverityHex = computed(() => {
 })
 
 const handleClick = () => emit('select', group.value)
+const handleReload = () => emit('reload', group.value)
 </script>
 
 <template>
@@ -116,31 +120,50 @@ const handleClick = () => emit('select', group.value)
         </div>
 
         <!-- Header row -->
-        <div class="pl-[62px] pr-3 py-2 flex items-start relative overflow-hidden">
-            <VulnGroupCardHeader
-                :group="group"
-                :displayState="displayState"
-                :technicalState="technicalState"
-                :isRescoredOrModified="isRescoredOrModified || hasStableRescore"
-                :currentDisplayScore="currentDisplayScore"
-                :pendingScore="null"
-                :stableRescoredScore="stableRescoredScore"
-                :hasStableRescore="hasStableRescore"
-                :normalizedTags="normalizedTags"
-                :assessedTeams="assessedTeams"
-                :expanded="false"
-                :canApprove="false"
-                :isPendingReview="isPendingReview"
-                :dependencyRelationship="dependencyRelationship"
-                :assignees="group.assignees || []"
-                :baseScoreDisplayOverride="listItem.baseScoreDisplay"
-                :rescoredScoreDisplayOverride="listItem.rescoredScoreDisplay"
-                :instanceCountOverride="listItem.instanceCount"
-                :oldestAttributedOnMsOverride="listItem.oldestAttributedOnMs"
-                :componentSummaryOverride="listItem.componentSummary"
-                :hasAutomaticAssessment="listItem.hasAutomaticAssessment"
-                compact
-            />
+        <div class="pl-[62px] pr-3 py-2 flex items-center gap-2 relative overflow-hidden">
+            <div class="min-w-0 flex-1">
+                <VulnGroupCardHeader
+                    :group="group"
+                    :displayState="displayState"
+                    :technicalState="technicalState"
+                    :isRescoredOrModified="isRescoredOrModified || hasStableRescore"
+                    :currentDisplayScore="currentDisplayScore"
+                    :pendingScore="null"
+                    :stableRescoredScore="stableRescoredScore"
+                    :hasStableRescore="hasStableRescore"
+                    :normalizedTags="normalizedTags"
+                    :assessedTeams="assessedTeams"
+                    :expanded="false"
+                    :canApprove="false"
+                    :isPendingReview="isPendingReview"
+                    :dependencyRelationship="dependencyRelationship"
+                    :assignees="group.assignees || []"
+                    :baseScoreDisplayOverride="listItem.baseScoreDisplay"
+                    :rescoredScoreDisplayOverride="listItem.rescoredScoreDisplay"
+                    :instanceCountOverride="listItem.instanceCount"
+                    :oldestAttributedOnMsOverride="listItem.oldestAttributedOnMs"
+                    :componentSummaryOverride="listItem.componentSummary"
+                    :hasAutomaticAssessment="listItem.hasAutomaticAssessment"
+                    :automaticAssessmentStatus="listItem.automaticAssessmentStatus"
+                    :hasTmrescoreAnalysis="listItem.hasTmrescoreProposal"
+                    compact
+                />
+            </div>
+            <button
+                type="button"
+                data-testid="reload-vulnerability"
+                class="relative z-30 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-gray-950/50 transition-colors disabled:cursor-wait disabled:opacity-70"
+                :class="reloadError
+                    ? 'border-red-500/50 text-red-300 hover:bg-red-950/40'
+                    : 'border-gray-600/70 text-gray-400 hover:border-blue-400/50 hover:bg-blue-950/40 hover:text-blue-200'"
+                :disabled="reloading"
+                :title="reloadError || 'Reload vulnerability assessments from Dependency-Track'"
+                :aria-label="reloading ? `Reloading ${group.id}` : `Reload ${group.id}`"
+                @click.stop="handleReload"
+            >
+                <RefreshCw :size="14" :class="{ 'animate-spin': reloading }" />
+            </button>
+            <span v-if="reloadError" class="sr-only" role="status">{{ reloadError }}</span>
         </div>
     </div>
 </template>

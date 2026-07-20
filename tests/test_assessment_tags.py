@@ -142,6 +142,32 @@ class TestAssessmentTags(unittest.TestCase):
         self.assertIn("Found exploit!", result)
         self.assertNotIn("Initial report.", result)
 
+    def test_assessment_details_deduplicates_team_names_case_insensitively(self):
+        existing = (
+            "--- [Team: General] [State: NOT_SET] [Assessed By: old] ---\n"
+            "Older global text.\n\n"
+            "--- [Team: general] [State: NOT_AFFECTED] [Assessed By: reviewer] ---\n"
+            "Current global text.\n\n"
+            "--- [Team: API] [State: IN_TRIAGE] [Assessed By: analyst] ---\n"
+            "API assessment."
+        )
+
+        result, state = process_assessment_details(
+            "Updated API assessment.",
+            "reviewer",
+            "REVIEWER",
+            team="api",
+            state="NOT_AFFECTED",
+            existing_details=existing,
+        )
+
+        self.assertEqual(result.count("[Team: General]"), 1)
+        self.assertEqual(result.lower().count("[team: api]"), 1)
+        self.assertNotIn("Older global text.", result)
+        self.assertIn("Current global text.", result)
+        self.assertIn("Updated API assessment.", result)
+        self.assertEqual(state, "NOT_AFFECTED")
+
     def test_assessment_details_metadata_leakage_prevention(self):
         # Existing block has some leaked metadata in the details string.
         existing = (

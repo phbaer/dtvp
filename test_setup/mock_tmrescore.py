@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import uuid
@@ -25,6 +26,7 @@ class SessionCreate(BaseModel):
 
 
 sessions: Dict[str, Dict[str, Any]] = {}
+analysis_tasks: set[asyncio.Task[Any]] = set()
 
 MOCK_VECTOR_PAIRS = [
     {
@@ -415,7 +417,12 @@ async def get_session(session_id: str):
 
 @app.delete("/api/v1/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str):
-    _get_session(session_id)
+    session = _get_session(session_id)
+    if session["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a session while analysis is running",
+        )
     sessions.pop(session_id, None)
     return Response(status_code=204)
 
@@ -511,6 +518,7 @@ async def analyze_inventory(
     ollama_model: str = Form("qwen2.5:7b"),
     mitre_enrichment: bool = Form(False),
     offline: bool = Form(False),
+    background: bool = False,
 ):
     session = _get_session(session_id)
     session["files"]["threatmodel"] = await threatmodel.read()
@@ -521,15 +529,48 @@ async def analyze_inventory(
     session["progress_step"] = 3
     session["progress_total"] = 4
     session["progress_message"] = "Generating outputs..."
-    return _perform_analysis(
-        session,
-        chain_analysis,
-        prioritize,
-        what_if,
-        enrich,
-        ollama_model,
-        mitre_enrichment,
-        offline,
+
+    def perform_analysis() -> Dict[str, Any]:
+        return _perform_analysis(
+            session,
+            chain_analysis,
+            prioritize,
+            what_if,
+            enrich,
+            ollama_model,
+            mitre_enrichment,
+            offline,
+        )
+
+    if not background:
+        return perform_analysis()
+
+    async def run_in_background() -> None:
+        await asyncio.sleep(0)
+        try:
+            perform_analysis()
+        except Exception as exc:
+            session["status"] = "failed"
+            session["progress_step"] = 4
+            session["progress_total"] = 4
+            session["progress_message"] = f"Analysis failed: {exc}"
+            session["results"] = {
+                "session_id": session_id,
+                "status": "failed",
+                "error": str(exc),
+            }
+
+    task = asyncio.create_task(run_in_background())
+    analysis_tasks.add(task)
+    task.add_done_callback(analysis_tasks.discard)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "session_id": session_id,
+            "status": "running",
+            "progress_url": f"/api/v1/sessions/{session_id}/progress",
+            "results_url": f"/api/v1/sessions/{session_id}/results",
+        },
     )
 
 

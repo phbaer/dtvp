@@ -90,6 +90,7 @@ export interface AssessmentRestoreCandidate {
 
 export interface GroupedVuln {
     id: string; // CVE/VulnID
+    code_assessment_status?: 'auto' | 'manual' | 'mixed' | 'partial' | null;
     title?: string;
     description?: string;
     severity?: string;
@@ -121,6 +122,7 @@ export interface AssessmentPayload {
     original_analysis?: Record<string, any>;
     force?: boolean;
     comparison_mode?: 'MERGE' | 'REPLACE';
+    analysis_run_ids?: string[];
 }
 
 export interface Statistics {

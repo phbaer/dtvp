@@ -2,7 +2,7 @@
 import { computed, toRefs } from 'vue'
 import { Bot, CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
-import { parseAttributionTimestamp } from '../lib/vulnListIndex'
+import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 import { getGroupInconsistencyReasons } from '../lib/assessment-helpers'
 import { inconsistencyReasonLabel } from '../lib/inconsistency'
 
@@ -32,7 +32,25 @@ const props = defineProps<{
   oldestAttributedOnMsOverride?: number | null
   componentSummaryOverride?: string
   hasAutomaticAssessment?: boolean
+  automaticAssessmentStatus?: AutomaticAssessmentStatus | null
+  hasTmrescoreAnalysis?: boolean
 }>()
+
+const codeAssessmentStatus = computed<AutomaticAssessmentStatus | null>(() =>
+  props.automaticAssessmentStatus || (props.hasAutomaticAssessment ? 'auto' : null)
+)
+const codeAssessmentTitle = computed(() => ({
+  auto: 'Automatic code-analysis assessment is available',
+  manual: 'Reviewer-started code-analysis assessment is available',
+  mixed: 'Automatic and reviewer-started code-analysis assessments are available',
+  partial: 'A code-analysis assessment is available with partial coverage or metadata',
+}[codeAssessmentStatus.value || 'auto']))
+const codeAssessmentClass = computed(() => ({
+  auto: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-300',
+  manual: 'border-blue-500/25 bg-blue-500/10 text-blue-300',
+  mixed: 'border-purple-500/25 bg-purple-500/10 text-purple-300',
+  partial: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
+}[codeAssessmentStatus.value || 'auto']))
 
 const {
   group,
@@ -311,19 +329,35 @@ const componentSummary = computed(() => {
           Age {{ attributionAgeLabel }}
         </span>
 
+        <span
+          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide shrink-0"
+          :class="props.hasTmrescoreAnalysis
+            ? 'border-teal-500/25 bg-teal-500/10 text-teal-300'
+            : 'border-gray-600/40 bg-gray-950/30 text-gray-500'"
+          data-testid="tmrescore-analysis-badge"
+          :title="props.hasTmrescoreAnalysis
+            ? 'TMRescore/vscorer analysis is available'
+            : 'No TMRescore/vscorer analysis is available'"
+        >
+          <ShieldCheck v-if="props.hasTmrescoreAnalysis" :size="9" />
+          <ShieldOff v-else :size="9" />
+          TMRescore {{ props.hasTmrescoreAnalysis ? 'available' : 'unavailable' }}
+        </span>
+
         <span v-if="isPendingReview && !canApprove" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
           <Eye :size="9" />
           Review
         </span>
 
         <span
-          v-if="props.hasAutomaticAssessment"
-          class="inline-flex items-center gap-1 rounded border border-cyan-500/25 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-cyan-300 shrink-0"
+          v-if="codeAssessmentStatus"
+          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide shrink-0"
+          :class="codeAssessmentClass"
           data-testid="automatic-assessment-badge"
-          title="Automatic code-analysis assessment is available"
+          :title="codeAssessmentTitle"
         >
           <Bot :size="9" />
-          Auto
+          {{ codeAssessmentStatus }}
         </span>
 
         <span

@@ -462,6 +462,57 @@ def test_task_group_query_counts_needs_approval_once_per_group():
     ]
 
 
+def test_task_group_query_combines_exact_open_lifecycle_and_vulnerability_id():
+    groups = [
+        {
+            "id": "CVE-2026-OPEN",
+            "list_metadata": {
+                "lifecycle": "OPEN",
+                "is_open": True,
+                "is_pending": False,
+            },
+            "affected_versions": [],
+        },
+        {
+            "id": "CVE-2026-PENDING",
+            "list_metadata": {
+                "lifecycle": "NEEDS_APPROVAL",
+                # Pending review may still contain open team work, but its
+                # lifecycle category is not OPEN.
+                "is_open": True,
+                "is_pending": True,
+            },
+            "affected_versions": [],
+        },
+    ]
+
+    response = query_task_groups(
+        build_task_group_query_index(groups),
+        q="",
+        lifecycle=["OPEN"],
+        analysis=[],
+        tag="",
+        vuln_id="CVE-2026-PENDING",
+        component="",
+        assignee="",
+        dependency=[],
+        versions=[],
+        cvss_mismatch=False,
+        attributed_before_days=None,
+        attribution_mode="older",
+        tmrescore=[],
+        tmrescore_proposal_ids=[],
+        sort_by="id",
+        sort_order="asc",
+        offset=0,
+        limit=10,
+    )
+
+    assert response["filtered"] == 0
+    assert response["items"] == []
+    assert response["counts"]["all"]["lifecycle"]["OPEN"] == 1
+
+
 def test_task_group_query_cache_reuses_filtered_rows_across_windows():
     groups = [
         {

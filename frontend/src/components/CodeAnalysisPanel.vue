@@ -12,6 +12,7 @@ import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessm
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
 import { getRuntimeConfig } from '../lib/env'
+import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 
 const props = defineProps<{
     vulnId: string
@@ -29,10 +30,11 @@ const props = defineProps<{
     currentCvssScore?: number | string | null
     currentCvssVector?: string
     currentAssigned?: string[]
+    assessmentStatus?: AutomaticAssessmentStatus | null
 }>()
 
 const emit = defineEmits<{
-    (e: 'apply-result', result: CodeAnalysisAssessResponse, components: string[]): void
+    (e: 'apply-result', result: CodeAnalysisAssessResponse, components: string[], analysisRunIds: string[]): void
     (e: 'result-change', result: CodeAnalysisAssessResponse | null, components: string[]): void
 }>()
 
@@ -50,6 +52,7 @@ const componentDropdownOpen = ref(false)
 const submitting = ref(false)
 const persistedResults = ref<CodeAnalysisResultRecord[]>([])
 const historyLoading = ref(false)
+const historyLoaded = ref(false)
 const historyError = ref<string | null>(null)
 const selectedRunId = ref<string | null>(null)
 const selectedFullRecord = ref<CodeAnalysisResultRecord | null>(null)
@@ -74,6 +77,7 @@ let benchmarkLoadCounter = 0
 // Track queue IDs for items submitted from this panel
 const pendingQueueIds = ref<string[]>([])
 const analyzedComponents = ref<string[]>([])
+const activeResultRunIds = ref<string[]>([])
 
 type AnalysisBatch = {
     expectedTargets: string[]
@@ -118,6 +122,18 @@ const hasExistingAssessment = computed(() => {
 
 const visiblePersistedResults = computed(() => persistedResults.value.slice(0, 4))
 const latestPersistedResult = computed(() => persistedResults.value[0] || null)
+const assessmentStatusLabel = computed(() => ({
+    auto: 'Automatic assessment available',
+    manual: 'Manual assessment available',
+    mixed: 'Automatic and manual assessments available',
+    partial: 'Assessment coverage is partial',
+}[props.assessmentStatus || 'auto']))
+const assessmentStatusClass = computed(() => ({
+    auto: 'border-cyan-700/40 bg-cyan-950/30 text-cyan-300',
+    manual: 'border-blue-700/40 bg-blue-950/30 text-blue-300',
+    mixed: 'border-purple-700/40 bg-purple-950/30 text-purple-300',
+    partial: 'border-amber-700/40 bg-amber-950/30 text-amber-300',
+}[props.assessmentStatus || 'auto']))
 const followUpParentRunId = computed(() => selectedRunId.value || latestPersistedResult.value?.analysis_run_id || null)
 const selectedPersistedResult = computed(() => {
     const runId = selectedRunId.value
@@ -145,6 +161,11 @@ const selectionLabel = computed(() => {
     if (count === 1) return [...selectedComponents.value][0]
     return `${count} of ${total} components`
 })
+
+function visibleComponentName(component: string) {
+    const normalized = String(component || '').trim().toLowerCase()
+    return uniqueComponents.value.find(candidate => candidate.toLowerCase() === normalized)
+}
 
 function toggleComponent(comp: string) {
     const next = new Set(selectedComponents.value)
@@ -397,11 +418,21 @@ const evidenceQualityClass = (tone: EvidenceQualityTone) => {
     }
 }
 
-// Auto-select all when component list is first populated
-watch(uniqueComponents, (comps) => {
-    if (selectedComponents.value.size === 0 && comps.length > 0) {
-        selectedComponents.value = new Set(comps)
+// Keep selection canonical when a reused card receives a different component list.
+watch(uniqueComponents, (comps, previousComps) => {
+    if (selectedComponents.value.size === 0) {
+        if (previousComps === undefined && comps.length > 0) {
+            selectedComponents.value = new Set(comps)
+        }
+        return
     }
+    const selectedLower = new Set(
+        [...selectedComponents.value].map(component => component.toLowerCase()),
+    )
+    const retained = comps.filter(component => selectedLower.has(component.toLowerCase()))
+    selectedComponents.value = new Set(
+        retained.length > 0 || comps.length === 0 ? retained : comps,
+    )
 }, { immediate: true })
 
 // Find active queue items for this vulnerability
@@ -613,6 +644,7 @@ const handleComponentComplete = (
             result.value = mergeResults(batch.collected)
         }
         analyzedComponents.value = batch.expectedTargets
+        activeResultRunIds.value = [...batch.queueIds]
         const completedRunId = batch.expectedTargets.length === 1
             ? queueItem?.queue_id || batch.queueIds[0] || null
             : null
@@ -642,6 +674,7 @@ const startAnalysis = async () => {
     benchmarkError.value = null
     collectedResults.value = []
     pendingQueueIds.value = []
+    activeResultRunIds.value = []
 
     const targets = startableSelectedComponents.value
     if (targets.length === 0) {
@@ -711,13 +744,14 @@ const loadPersistedResults = async (options: LoadPersistedResultsOptions = {}) =
     } catch (err: any) {
         historyError.value = err?.response?.data?.detail || err?.message || 'Unable to load analysis history.'
     } finally {
+        historyLoaded.value = true
         historyLoading.value = false
     }
 }
 
 const applyResult = () => {
     if (result.value) {
-        emit('apply-result', result.value, analyzedComponents.value)
+        emit('apply-result', result.value, analyzedComponents.value, activeResultRunIds.value)
     }
 }
 
@@ -747,43 +781,6 @@ const assessedComponentNames = computed(() => {
     return result
 })
 
-// Load the most recent completed result for the current component selection
-const loadCompletedResult = async () => {
-    if (activeQueueItems.value.length > 0) return // Don't overwrite active state
-
-    const targets = [...selectedComponents.value]
-
-    const completedForTargets = targets
-        .map(comp => completedQueueItems.value.find(i => i.component_name === comp))
-        .filter((i): i is NonNullable<typeof i> => !!i)
-
-    if (completedForTargets.length === 0) return
-
-    const results: { component: string; response: CodeAnalysisAssessResponse }[] = []
-
-    for (const item of completedForTargets) {
-        const res = await analysisQueueStore.fetchResult(item.queue_id)
-        if (res) {
-            results.push({ component: item.component_name, response: res })
-        }
-    }
-
-    if (results.length === 0) return
-
-    if (results.length === 1) {
-        result.value = results[0].response
-        selectedRunId.value = completedForTargets[0]?.queue_id || null
-        selectedFullRecord.value = null
-        followUpComponent.value = results[0].component
-    } else {
-        result.value = mergeResults(results)
-        selectedRunId.value = null
-        selectedFullRecord.value = null
-        followUpComponent.value = results[0].component
-    }
-    analyzedComponents.value = results.map(r => r.component)
-}
-
 const viewCompletedResult = async (item: AnalysisQueueItem) => {
     const res = await analysisQueueStore.fetchResult(item.queue_id)
     if (!res) return
@@ -791,10 +788,12 @@ const viewCompletedResult = async (item: AnalysisQueueItem) => {
     result.value = res
     analyzedComponents.value = [item.component_name]
     selectedRunId.value = item.queue_id
+    activeResultRunIds.value = [item.queue_id]
     selectedFullRecord.value = null
     followUpComponent.value = item.component_name
-    if (!selectedComponents.value.has(item.component_name)) {
-        selectedComponents.value = new Set([item.component_name])
+    const visibleComponent = visibleComponentName(item.component_name)
+    if (visibleComponent && !selectedComponents.value.has(visibleComponent)) {
+        selectedComponents.value = new Set([visibleComponent])
     }
 }
 
@@ -805,24 +804,15 @@ const viewPersistedResult = async (record: CodeAnalysisResultRecord) => {
         result.value = full.result
         analyzedComponents.value = [full.component_name]
         selectedRunId.value = full.analysis_run_id
+        activeResultRunIds.value = [full.analysis_run_id]
         selectedFullRecord.value = full
         followUpComponent.value = full.component_name
-        if (!selectedComponents.value.has(full.component_name)) {
-            selectedComponents.value = new Set([full.component_name])
+        const visibleComponent = visibleComponentName(full.component_name)
+        if (visibleComponent && !selectedComponents.value.has(visibleComponent)) {
+            selectedComponents.value = new Set([visibleComponent])
         }
     } catch (err: any) {
         error.value = err?.response?.data?.detail || err?.message || 'Failed to load analysis result.'
-    }
-}
-
-const loadLatestPersistedResult = async () => {
-    if (activeQueueItems.value.length > 0 || result.value) return
-    const targets = new Set([...selectedComponents.value].map(component => component.toLowerCase()))
-    const record = persistedResults.value.find(candidate =>
-        targets.size === 0 || targets.has(candidate.component_name.toLowerCase())
-    ) || latestPersistedResult.value
-    if (record) {
-        await viewPersistedResult(record)
     }
 }
 
@@ -851,6 +841,7 @@ const startFollowUp = async () => {
     error.value = null
     collectedResults.value = []
     pendingQueueIds.value = []
+    activeResultRunIds.value = []
     analyzedComponents.value = []
     const [batchId, batch] = beginAnalysisBatch([target])
 
@@ -918,6 +909,7 @@ const removePersistedResult = async (record: CodeAnalysisResultRecord) => {
                 selectedRunId.value = null
                 selectedFullRecord.value = null
                 result.value = null
+                activeResultRunIds.value = []
                 analyzedComponents.value = []
             }
         }
@@ -1969,13 +1961,8 @@ const conversationPartLabelClass = (kind: ConversationPartKind) => {
     }
 }
 
-// On mount, check if there are completed results to display
 onMounted(() => {
-    void (async () => {
-        await loadPersistedResults()
-        await loadCompletedResult()
-        await loadLatestPersistedResult()
-    })()
+    void loadPersistedResults()
     document.addEventListener('click', handleClickOutside)
 })
 
@@ -1990,16 +1977,12 @@ function handleClickOutside(e: MouseEvent) {
     }
 }
 
-// When the component selection changes, try loading completed results
 watch(selectedComponents, () => {
     if (!controlsBusy.value && activeQueueItems.value.length === 0) {
         result.value = null
         selectedRunId.value = null
         selectedFullRecord.value = null
-        void (async () => {
-            await loadCompletedResult()
-            await loadLatestPersistedResult()
-        })()
+        activeResultRunIds.value = []
     }
 })
 
@@ -2130,10 +2113,31 @@ watch(analyzedComponents, (components) => {
             </div>
         </section>
 
-        <section v-if="activeQueueItems.length > 0 || completedQueueItems.length > 0 || visiblePersistedResults.length > 0 || historyLoading" class="space-y-1.5 border-t border-gray-800/80 pt-3">
+        <section class="space-y-1.5 border-t border-gray-800/80 pt-3">
             <div class="flex items-center justify-between gap-3">
-                <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Runs &amp; History</h6>
-                <span v-if="visiblePersistedResults.length > 0" class="text-[10px] text-gray-600">{{ visiblePersistedResults.length }} shown</span>
+                <div class="flex min-w-0 flex-wrap items-center gap-2">
+                    <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Runs &amp; History</h6>
+                    <span
+                        v-if="assessmentStatus"
+                        class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
+                        :class="assessmentStatusClass"
+                    >
+                        {{ assessmentStatusLabel }}
+                    </span>
+                </div>
+                <div class="flex shrink-0 items-center gap-2">
+                    <span v-if="visiblePersistedResults.length > 0" class="text-[10px] text-gray-600">{{ visiblePersistedResults.length }} shown</span>
+                    <button
+                        type="button"
+                        :disabled="historyLoading"
+                        class="inline-flex items-center gap-1 rounded border border-gray-700 px-2 py-1 text-[10px] font-bold uppercase text-gray-400 transition-colors hover:border-cyan-700/60 hover:text-cyan-300 disabled:cursor-wait disabled:opacity-50"
+                        @click="loadPersistedResults()"
+                    >
+                        <Loader2 v-if="historyLoading" :size="10" class="animate-spin" />
+                        <History v-else :size="10" />
+                        {{ historyLoaded ? 'Refresh' : 'Load history' }}
+                    </button>
+                </div>
             </div>
 
             <div
@@ -2191,6 +2195,8 @@ watch(analyzedComponents, (components) => {
             <div
                 v-for="record in visiblePersistedResults"
                 :key="record.analysis_run_id"
+                data-testid="analysis-history-row"
+                :data-run-id="record.analysis_run_id"
                 class="grid gap-2 rounded border px-2.5 py-1.5 text-[11px] cursor-pointer hover:bg-cyan-900/15 md:grid-cols-[minmax(0,1fr)_auto]"
                 :class="selectedRunId === record.analysis_run_id ? 'bg-cyan-900/20 border-cyan-700/40' : 'bg-gray-950/35 border-gray-700/40'"
                 @click="viewPersistedResult(record)"

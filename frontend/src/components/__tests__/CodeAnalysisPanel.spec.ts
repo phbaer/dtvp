@@ -53,6 +53,16 @@ const makeAnalysisResult = (summary: string) => ({
     versions_checked: ['1.0.0'],
 })
 
+const loadHistory = async (_wrapper: ReturnType<typeof mount>) => {
+    await flushPromises()
+}
+
+const viewHistoryRun = async (wrapper: ReturnType<typeof mount>, runId: string) => {
+    await loadHistory(wrapper)
+    await wrapper.get(`[data-testid="analysis-history-row"][data-run-id="${runId}"]`).trigger('click')
+    await flushPromises()
+}
+
 describe('CodeAnalysisPanel', () => {
     beforeEach(() => {
         vi.clearAllMocks()
@@ -106,6 +116,46 @@ describe('CodeAnalysisPanel', () => {
         expect(wrapper.text()).toContain('No team-assigned component target is available')
         const analyzeButton = wrapper.findAll('button').find(button => button.text().includes('Analyze'))
         expect(analyzeButton?.attributes('disabled')).toBeDefined()
+    })
+
+    it('automatically loads only the current vulnerability history without full results', async () => {
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service'],
+                assessmentStatus: 'mixed',
+            },
+        })
+
+        await flushPromises()
+
+        expect(mocks.listResults).toHaveBeenCalledWith(
+            'ExampleApp',
+            'CVE-2026-0001',
+            { limit: 20 },
+        )
+        expect(mocks.getResult).not.toHaveBeenCalled()
+        expect(wrapper.text()).toContain('Automatic and manual assessments available')
+    })
+
+    it('reconciles selected components when the vulnerability target list changes', async () => {
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                componentNames: ['owned-api', 'owned-worker'],
+            },
+        })
+
+        expect(wrapper.text()).toContain('All Components (2)')
+        expect(wrapper.text()).toContain('2 selected')
+
+        await wrapper.setProps({ componentNames: ['owned-api'] })
+        await flushPromises()
+
+        expect(wrapper.text()).toContain('All Components (1)')
+        expect(wrapper.text()).toContain('1 selected')
+        expect(wrapper.text()).not.toContain('2 of 1 components')
     })
 
     it('submits only provided team-assigned components', async () => {
@@ -167,9 +217,7 @@ describe('CodeAnalysisPanel', () => {
             source: 'manual',
         }
 
-        mocks.listResults
-            .mockResolvedValueOnce([])
-            .mockResolvedValue([benchmarkRecord])
+        mocks.listResults.mockResolvedValue([benchmarkRecord])
         mocks.submit.mockImplementation(async (...args: any[]) => {
             const onComplete = args[5]
             onComplete(benchmarkResult, queueItem)
@@ -573,19 +621,18 @@ describe('CodeAnalysisPanel', () => {
                 },
             ],
         }
-        mocks.listResults.mockResolvedValue([
-            {
-                analysis_run_id: 'run-with-trace',
-                queue_id: 'run-with-trace',
-                vuln_id: 'CVE-2026-0001',
-                component_name: 'owned-service',
-                project_name: 'ExampleApp',
-                source: 'manual',
-                summary: { affected: false, verdict: 'Not Affected' },
-                result: analysisResult,
-                finished_at: '2026-07-06T12:00:00Z',
-            },
-        ])
+        const traceRecord = {
+            analysis_run_id: 'run-with-trace',
+            queue_id: 'run-with-trace',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'owned-service',
+            project_name: 'ExampleApp',
+            source: 'manual',
+            summary: { affected: false, verdict: 'Not Affected' },
+            finished_at: '2026-07-06T12:00:00Z',
+        }
+        mocks.listResults.mockResolvedValue([traceRecord])
+        mocks.getResult.mockResolvedValue({ ...traceRecord, result: analysisResult })
 
         const wrapper = mount(CodeAnalysisPanel, {
             props: {
@@ -595,7 +642,7 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
-        await flushPromises()
+        await viewHistoryRun(wrapper, 'run-with-trace')
         await wrapper.findAll('button').find(button => button.text().includes('LLM Conversation'))?.trigger('click')
         await wrapper.findAll('button').find(button => button.text().includes('Version Coverage'))?.trigger('click')
         await flushPromises()
@@ -670,7 +717,7 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
-        await flushPromises()
+        await viewHistoryRun(wrapper, 'run-with-guidance')
         await wrapper.findAll('button').find(button => button.text().includes('LLM Conversation'))?.trigger('click')
         await flushPromises()
 
@@ -682,6 +729,37 @@ describe('CodeAnalysisPanel', () => {
         expect(wrapper.text()).toContain('Additional request guidance')
         expect(wrapper.text()).toContain('Component-specific auto-assessment guidance configured in DTVP.')
         expect(wrapper.text()).toContain('Check owned-service runtime exposure.')
+    })
+
+    it('emits the persisted analysis run id with an individual assessment draft', async () => {
+        const record = {
+            analysis_run_id: 'run-provenance',
+            queue_id: 'run-provenance',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'owned-service',
+            project_name: 'ExampleApp',
+            source: 'automatic',
+            summary: { affected: false, verdict: 'Not Affected' },
+            finished_at: '2026-07-06T12:00:00Z',
+        }
+        mocks.listResults.mockResolvedValue([record])
+        mocks.getResult.mockResolvedValue({
+            ...record,
+            result: makeAnalysisResult('Stored automatic assessment'),
+        })
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service'],
+            },
+        })
+        await viewHistoryRun(wrapper, 'run-provenance')
+
+        await wrapper.findAll('button').find(button => button.text().includes('Use as Assessment Draft'))?.trigger('click')
+
+        expect(wrapper.emitted('apply-result')?.[0]?.[2]).toEqual(['run-provenance'])
     })
 
     it('removes a saved analysis run from the card history', async () => {
@@ -719,9 +797,8 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
-        await flushPromises()
+        await loadHistory(wrapper)
         expect(wrapper.text()).toContain('owned-service')
-        expect(wrapper.text()).toContain('First stored assessment')
 
         const removeButtons = wrapper.findAll('button[aria-label="Remove analysis run"]')
         await removeButtons[0].trigger('click')
@@ -732,9 +809,7 @@ describe('CodeAnalysisPanel', () => {
         )
         expect(mocks.deleteResult).toHaveBeenCalledWith('run-delete')
         expect(wrapper.text()).not.toContain('owned-service')
-        expect(wrapper.text()).not.toContain('First stored assessment')
         expect(wrapper.text()).toContain('owned-worker')
-        expect(wrapper.text()).toContain('Second stored assessment')
 
         confirmSpy.mockRestore()
     })
@@ -795,7 +870,7 @@ describe('CodeAnalysisPanel', () => {
             },
         })
 
-        await flushPromises()
+        await viewHistoryRun(wrapper, 'parent-run')
         await wrapper.find('#code-analysis-follow-up').setValue('Is Keycloak itself vulnerable?')
         await wrapper.findAll('button').find(button => button.text().includes('Follow-up'))?.trigger('click')
         await flushPromises()

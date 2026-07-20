@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -211,6 +213,347 @@ def test_assessment_restore_preview_and_apply(client, mock_dt_client):
         assert group["assessment_restore_count"] == 0
     finally:
         main.tasks.pop(task_id, None)
+
+
+def test_bulk_workflow_preview_runs_as_polled_background_task(client):
+    group, _vector = _restore_group()
+    task_id = "background-bulk-preview-source"
+    operation_id = None
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "result": summarize_grouped_vulnerabilities([group], {}),
+    }
+
+    try:
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            response = client.post(
+                "/api/bulk-workflows/assessment-restore/preview-task",
+                json={"task_id": task_id, "filters": {}},
+            )
+            assert response.status_code == 200
+            operation_id = response.json()["task_id"]
+            assert operation_id != task_id
+
+            for _attempt in range(20):
+                status_response = client.get(
+                    f"/api/bulk-workflows/tasks/{operation_id}"
+                )
+                assert status_response.status_code == 200
+                status = status_response.json()
+                if status["status"] in {"completed", "failed"}:
+                    break
+
+        assert status["status"] == "completed"
+        assert status["kind"] == "bulk_workflow_preview"
+        assert status["source_task_id"] == task_id
+        assert status["progress"] == 100
+        assert status["result"]["task_id"] == task_id
+        assert status["result"]["selectable_group_ids"] == [group["id"]]
+    finally:
+        main.tasks.pop(task_id, None)
+        if operation_id:
+            main.tasks.pop(operation_id, None)
+
+
+def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_client):
+    group, _vector = _restore_group()
+    task_id = "background-bulk-apply-source"
+    operation_id = None
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "result": summarize_grouped_vulnerabilities([group], {}),
+    }
+
+    class BackgroundDTClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return mock_dt_client
+
+        async def __aexit__(self, *_args):
+            return None
+
+    try:
+        with (
+            patch("dtvp.main.get_user_role", return_value="REVIEWER"),
+            patch("dtvp.main.DTClient", BackgroundDTClient),
+        ):
+            preview_response = client.post(
+                "/api/bulk-workflows/assessment-restore/preview",
+                json={"task_id": task_id, "filters": {}},
+            )
+            assert preview_response.status_code == 200
+            preview = preview_response.json()
+
+            response = client.post(
+                "/api/bulk-workflows/assessment-restore/apply-task",
+                json={
+                    "task_id": task_id,
+                    "filters": {},
+                    "group_ids": [group["id"]],
+                    "preview_token": preview["preview_token"],
+                },
+            )
+            assert response.status_code == 200
+            operation_id = response.json()["task_id"]
+
+            for _attempt in range(20):
+                status_response = client.get(
+                    f"/api/bulk-workflows/tasks/{operation_id}"
+                )
+                assert status_response.status_code == 200
+                status = status_response.json()
+                if status["status"] in {"completed", "failed"}:
+                    break
+
+        assert status["status"] == "completed"
+        assert status["kind"] == "bulk_workflow_apply"
+        assert status["result"]["summary"]["attempted"] == 1
+        mock_dt_client.update_analysis.assert_called_once()
+    finally:
+        main.tasks.pop(task_id, None)
+        if operation_id:
+            main.tasks.pop(operation_id, None)
+
+
+def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(client):
+    group = {
+        "id": "CVE-2026-MANUAL-RUN",
+        "title": "Reviewer-started analyzer result",
+        "severity": "HIGH",
+        "tags": [],
+        "assignees": [],
+        "aliases": [],
+        "affected_versions": [
+            {
+                "project_uuid": "project-manual-run",
+                "project_name": "ExampleApp",
+                "project_version": "1.0.0",
+                "components": [
+                    {
+                        "project_uuid": "project-manual-run",
+                        "project_name": "ExampleApp",
+                        "project_version": "1.0.0",
+                        "component_uuid": "component-vulnerable",
+                        "component_name": "vulnerable-library",
+                        "component_version": "1.2.3",
+                        "vulnerability_uuid": "vuln-manual-run",
+                        "finding_uuid": "finding-manual-run",
+                        "analysis_state": "NOT_SET",
+                        "analysis_details": "",
+                        "is_suppressed": False,
+                    }
+                ],
+            }
+        ],
+    }
+    task_id = "automatic-assessment-manual-run-task"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "result": summarize_grouped_vulnerabilities([group], {}),
+    }
+    main.code_analysis_result_store.record_queue_item_result(
+        SimpleNamespace(
+            queue_id="reviewer-started-run",
+            project_name="ExampleApp",
+            vuln_id=group["id"],
+            component_name="owning-service",
+            source="manual",
+            status="completed",
+            context_summary={
+                "project_name": "ExampleApp",
+                "target_component": "owning-service",
+                "components": [
+                    {
+                        "project_name": "ExampleApp",
+                        "component_name": "vulnerable-library",
+                    }
+                ],
+            },
+        ),
+        {
+            "assessment": {
+                "affected": True,
+                "verdict": "Probably Affected",
+                "confidence": "High",
+                "exposure": "reachable",
+                "summary": "The vulnerable path may be reachable.",
+                "reasoning": "Reviewer-started analysis found a possible path.",
+            },
+            "versions_checked": ["1.0.0"],
+            "steps": [],
+        },
+    )
+
+    try:
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            index_response = client.get(
+                "/api/code-analysis/assessment-index",
+                params={"project_name": "ExampleApp"},
+            )
+            response = client.post(
+                "/api/bulk-workflows/automatic-assessments/preview",
+                json={
+                    "task_id": task_id,
+                    "filters": {
+                        "automatic_assessment": ["WITH_AUTOMATIC_ASSESSMENT"],
+                        "automatic_assessment_ids": ["incorrect-client-id"],
+                    },
+                },
+            )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert index_response.status_code == 200
+    index = index_response.json()
+    assert index["records"] == [
+        {
+            "analysis_run_id": "reviewer-started-run",
+            "vuln_id": group["id"].lower(),
+            "project_names": ["exampleapp"],
+            "component_names": ["owning-service", "vulnerable-library"],
+            "source_kind": "manual",
+        }
+    ]
+    assert index["summary"]["indexed_assessment_results"] == 1
+    assert response.status_code == 200
+    preview = response.json()
+    assert preview["selectable_group_ids"] == [group["id"]]
+    assert preview["items"][0]["run_ids"] == ["reviewer-started-run"]
+    assert preview["items"][0]["verdict_bucket"] == "PROBABLY_AFFECTED"
+    assert preview["items"][0]["target_state"] == "IN_TRIAGE"
+
+
+def test_bulk_automatic_assessment_preview_imports_source_less_legacy_result(client):
+    group = {
+        "id": "CVE-2026-LEGACY-RUN",
+        "title": "Unclassified legacy analyzer result",
+        "severity": "HIGH",
+        "tags": [],
+        "assignees": [],
+        "aliases": [],
+        "affected_versions": [
+            {
+                "project_uuid": "project-legacy-run",
+                "project_name": "ExampleApp",
+                "project_version": "1.0.0",
+                "components": [
+                    {
+                        "project_uuid": "project-legacy-run",
+                        "project_name": "ExampleApp",
+                        "project_version": "1.0.0",
+                        "component_uuid": "component-legacy-run",
+                        "component_name": "vulnerable-library",
+                        "component_version": "1.2.3",
+                        "vulnerability_uuid": "vuln-legacy-run",
+                        "finding_uuid": "finding-legacy-run",
+                        "analysis_state": "NOT_SET",
+                        "analysis_details": "",
+                        "is_suppressed": False,
+                    }
+                ],
+            }
+        ],
+    }
+    task_id = "automatic-assessment-source-less-run-task"
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "result": summarize_grouped_vulnerabilities([group], {}),
+    }
+    legacy_path = Path(os.environ["DTVP_CODE_ANALYSIS_RESULTS_PATH"])
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "analysis_run_id": "source-less-legacy-run",
+                        "compact_context": {
+                            "target": {
+                                "project_name": "ExampleApp",
+                                "vuln_id": group["id"],
+                                "component_name": "owning-service",
+                            },
+                            "request_context": {
+                                "context_summary": {
+                                    "project_name": "ExampleApp",
+                                    "target_component": "owning-service",
+                                    "components": [
+                                        {
+                                            "project_name": "ExampleApp",
+                                            "component_name": "vulnerable-library",
+                                        }
+                                    ],
+                                }
+                            },
+                        },
+                        "summary": {
+                            "affected": False,
+                            "verdict": "Not Affected",
+                            "confidence": "High",
+                            "exposure": "none",
+                            "summary": "The vulnerable code is not present.",
+                            "reasoning": "Source inspection ruled out the path.",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    main.code_analysis_result_store.reset()
+
+    try:
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            index_response = client.get(
+                "/api/code-analysis/assessment-index",
+                params={"project_name": "ExampleApp"},
+            )
+            response = client.post(
+                "/api/bulk-workflows/automatic-assessments/preview",
+                json={
+                    "task_id": task_id,
+                    "filters": {
+                        "automatic_assessment": ["WITH_AUTOMATIC_ASSESSMENT"],
+                        "automatic_assessment_ids": ["incorrect-client-id"],
+                    },
+                },
+            )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert index_response.status_code == 200
+    index = index_response.json()
+    assert index["records"] == [
+        {
+            "analysis_run_id": "source-less-legacy-run",
+            "vuln_id": group["id"].lower(),
+            "project_names": ["exampleapp"],
+            "component_names": ["owning-service", "vulnerable-library"],
+            "source_kind": "unknown",
+        }
+    ]
+    assert index["summary"]["indexed_assessment_results"] == 1
+    assert response.status_code == 200
+    preview = response.json()
+    assert preview["selectable_group_ids"] == [group["id"]]
+    assert preview["items"][0]["run_ids"] == ["source-less-legacy-run"]
+    assert preview["items"][0]["verdict_bucket"] == "NOT_AFFECTED"
+    assert preview["summary"]["stored_analysis_results"] == 1
+    assert preview["summary"]["usable_assessment_results"] == 1
+    assert preview["summary"]["matched_analysis_results"] == 1
 
 
 def test_rescore_rule_sync_preview_and_apply(client, mock_dt_client):
@@ -967,6 +1310,82 @@ def test_get_task_groups_filters_by_automatic_assessment_ids_and_aliases(client)
     assert [item["id"] for item in without_response.json()["items"]] == [
         "CVE-2026-MANUAL",
     ]
+
+
+def test_get_task_groups_filters_and_annotates_from_persisted_assessment_metadata(client):
+    task_id = "task-list-query-persisted-assessment"
+    run_id = "run-task-list-persisted-assessment"
+    assessed_group = {
+        "id": "CVE-2026-PERSISTED-ASSESSMENT",
+        "aliases": [],
+        "list_metadata": {
+            "lifecycle": "OPEN",
+            "is_open": True,
+            "is_pending": False,
+            "technical_state": "NOT_SET",
+        },
+        "affected_versions": [
+            {
+                "project_name": "ExampleApp",
+                "components": [
+                    {
+                        "project_name": "ExampleApp",
+                        "component_name": "owned-api",
+                    }
+                ],
+            }
+        ],
+    }
+    unassessed_group = {
+        **assessed_group,
+        "id": "CVE-2026-NO-PERSISTED-ASSESSMENT",
+    }
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [assessed_group, unassessed_group],
+    }
+    main.code_analysis_result_store.record_queue_item_result(
+        SimpleNamespace(
+            queue_id=run_id,
+            project_name="ExampleApp",
+            vuln_id=assessed_group["id"],
+            component_name="owned-api",
+            source="automatic",
+            status="completed",
+            submitted_at="2026-07-15T10:00:00+00:00",
+            finished_at="2026-07-15T10:01:00+00:00",
+        ),
+        {
+            "assessment": {
+                "affected": False,
+                "verdict": "Not Affected",
+                "analysis": "No reachable path",
+            }
+        },
+    )
+
+    try:
+        response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={
+                "automatic_assessment": "WITH_AUTOMATIC_ASSESSMENT",
+                "sort": "id",
+                "order": "asc",
+            },
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+        main.code_analysis_result_store.delete(run_id)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [item["id"] for item in data["items"]] == [assessed_group["id"]]
+    assert data["items"][0]["code_assessment_status"] == "auto"
+    assert data["counts"]["all"]["automatic_assessment"] == {
+        "WITH_AUTOMATIC_ASSESSMENT": 1,
+        "WITHOUT_AUTOMATIC_ASSESSMENT": 1,
+    }
 
 
 def test_get_task_groups_rejects_incomplete_task(client):

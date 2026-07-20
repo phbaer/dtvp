@@ -828,7 +828,7 @@
           "Analysis"
         ],
         "summary": "Run analysis (classic mode)",
-        "description": "Trigger the CVSS re-scoring pipeline using previously uploaded files.\n\n**Prerequisites:** threat model, SBOM, and analysis config must\nalready be uploaded.  CVE data is optional \u2014 when absent,\nvulnerabilities are extracted from the SBOM's ``vulnerabilities``\nsection.\n\nThe call blocks until the pipeline finishes.  Poll\n``GET /progress`` for real-time step updates while the analysis\nis running.",
+        "description": "Trigger the CVSS re-scoring pipeline using previously uploaded files.\n\n**Prerequisites:** threat model, SBOM, and analysis config must\nalready be uploaded.  CVE data is optional \u2014 when absent,\nvulnerabilities are extracted from the SBOM's ``vulnerabilities``\nsection.\n\nThe call blocks until the pipeline finishes for backward compatibility.\nThe analysis task itself is shielded from caller disconnects, so results\ncan still be retrieved later. For long online NVD runs, prefer\n``POST /analyze/start`` to return immediately and poll ``GET /progress``.",
         "operationId": "run_analysis_api_v1_sessions__session_id__analyze_post",
         "parameters": [
           {
@@ -882,13 +882,73 @@
         }
       }
     },
+    "/api/v1/sessions/{session_id}/analyze/start": {
+      "post": {
+        "tags": [
+          "Analysis"
+        ],
+        "summary": "Start analysis in the background (classic mode)",
+        "description": "Start analysis without holding the HTTP response open.\n\nUse this endpoint for large online NVD enrichments. Poll the returned\n``progress_url`` until the status is terminal, then retrieve\n``results_url``. Only the request connection is decoupled; the same shared\npipeline, cache, offline behavior, and scoring semantics are used.",
+        "operationId": "start_analysis_api_v1_sessions__session_id__analyze_start_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AnalysisRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{session_id}/inventory": {
       "post": {
         "tags": [
           "Analysis"
         ],
         "summary": "Upload & analyse in one step (inventory mode)",
-        "description": "One-shot analysis: upload or reuse a TM7 threat model and CycloneDX SBOM\n(with embedded ``vulnerabilities``), then receive the re-scored results.\n\nThe SBOM components are automatically enriched with\n``threatModelElementIds`` properties linking each component to the\nmatching threat-model elements.  The enriched SBOM is available as\nan output file after analysis completes.\n\nOn the first run, both TM7 and SBOM must be provided. Later calls in the\nsame session may upload only the changed input, allowing a new threat model\nto be analyzed against the stored SBOM. If no analysis configuration is\nprovided, the previous session config is reused; otherwise sensible defaults\n(name-based component-to-element matching, standard rescoring rules) are\nused.",
+        "description": "One-shot analysis: upload or reuse a TM7 threat model and CycloneDX SBOM\n(with embedded ``vulnerabilities``), then receive the re-scored results.\n\nThe SBOM components are automatically enriched with\n``threatModelElementIds`` properties linking each component to the\nmatching threat-model elements.  The enriched SBOM is available as\nan output file after analysis completes.\n\nOn the first run, both TM7 and SBOM must be provided. Later calls in the\nsame session may upload only the changed input, allowing a new threat model\nto be analyzed against the stored SBOM. If no analysis configuration is\nprovided, the previous session config is reused; otherwise sensible defaults\n(name-based component-to-element matching, standard rescoring rules) are\nused. Set the ``background=true`` query parameter for large online NVD\nruns; uploads and input preparation finish before an immediate ``202`` is\nreturned, then callers poll the normal progress and results endpoints.",
         "operationId": "analyze_inventory_api_v1_sessions__session_id__inventory_post",
         "parameters": [
           {
@@ -898,6 +958,16 @@
             "schema": {
               "type": "string",
               "title": "Session Id"
+            }
+          },
+          {
+            "name": "background",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Background"
             }
           }
         ],
@@ -916,7 +986,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AnalysisResult"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AnalysisResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AnalysisAccepted"
+                    }
+                  ],
+                  "title": "Response Analyze Inventory Api V1 Sessions  Session Id  Inventory Post"
                 }
               }
             }
@@ -1724,6 +1802,39 @@
   },
   "components": {
     "schemas": {
+      "AnalysisAccepted": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "The session running the analysis."
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Current analysis status.",
+            "default": "running"
+          },
+          "progress_url": {
+            "type": "string",
+            "title": "Progress Url",
+            "description": "URL to poll for live progress."
+          },
+          "results_url": {
+            "type": "string",
+            "title": "Results Url",
+            "description": "URL to retrieve after completion."
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "progress_url",
+          "results_url"
+        ],
+        "title": "AnalysisAccepted",
+        "description": "Immediate response for a background analysis start."
+      },
       "AnalysisRequest": {
         "properties": {
           "chain_analysis": {

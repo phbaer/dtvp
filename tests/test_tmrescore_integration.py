@@ -12,6 +12,11 @@ from dtvp.tmrescore_cache_services import (
     load_tmrescore_project_cache,
     persist_tmrescore_project_snapshot,
 )
+from dtvp.tmrescore_execution_services import (
+    TMRescoreInventoryRequest,
+    submit_tmrescore_inventory,
+    wait_for_tmrescore_completion,
+)
 from dtvp.tmrescore_integration import (
     build_analysis_sbom,
     build_dtvp_vulnerability_proposals,
@@ -66,6 +71,73 @@ def test_calculate_tmrescore_progress_supports_current_and_legacy_contracts(
     payload, fallback, expected
 ):
     assert calculate_tmrescore_progress(payload, fallback) == expected
+
+
+@pytest.mark.asyncio
+async def test_submit_tmrescore_inventory_uses_background_vscorer_contract():
+    client = AsyncMock()
+    client.analyze_inventory.return_value = {
+        "session_id": "session-background",
+        "status": "running",
+        "progress_url": "/api/v1/sessions/session-background/progress",
+        "results_url": "/api/v1/sessions/session-background/results",
+    }
+    task = {"session_id": "session-background", "log": []}
+
+    result = await submit_tmrescore_inventory(
+        main_module.tmrescore_execution_service_deps,
+        task,
+        client,
+        TMRescoreInventoryRequest(
+            session_id="session-background",
+            threatmodel_bytes=b"tm7",
+            synthetic_sbom={"bomFormat": "CycloneDX"},
+            items_csv_bytes=None,
+            config_bytes=None,
+            chain_analysis=True,
+            prioritize=True,
+            what_if=False,
+            enrich=False,
+            mitre_enrichment=False,
+            offline=False,
+            max_wait_seconds=900,
+        ),
+    )
+
+    assert result["status"] == "running"
+    assert client.analyze_inventory.await_args.kwargs["background"] is True
+
+
+@pytest.mark.asyncio
+async def test_wait_for_tmrescore_completion_uses_persisted_failure_result():
+    client = AsyncMock()
+    client.get_progress.return_value = {
+        "status": "failed",
+        "step": 2,
+        "total_steps": 2,
+        "message": "Analysis failed.",
+    }
+    client.get_results.return_value = {
+        "session_id": "session-failed",
+        "status": "failed",
+        "error": "NVD enrichment failed after all retries",
+    }
+    task = {
+        "session_id": "session-failed",
+        "status": "running",
+        "progress": 25,
+        "log": [],
+    }
+
+    with pytest.raises(RuntimeError, match="NVD enrichment failed after all retries"):
+        await wait_for_tmrescore_completion(
+            main_module.tmrescore_execution_service_deps,
+            task,
+            client,
+            max_wait_seconds=900,
+        )
+
+    client.get_results.assert_awaited_once_with("session-failed")
 
 
 def test_prune_tmrescore_analysis_tasks_removes_expired_terminal_entries():
@@ -1034,6 +1106,7 @@ def test_tmrescore_analyze_endpoint_builds_synthetic_sbom(client, mock_dt_client
     assert "ollama_model" not in analyze_mock.await_args.kwargs
     assert analyze_mock.await_args.kwargs["mitre_enrichment"] is True
     assert analyze_mock.await_args.kwargs["offline"] is False
+    assert analyze_mock.await_args.kwargs["background"] is True
 
 
 def test_tmrescore_analyze_endpoint_polls_progress_after_gateway_timeout(

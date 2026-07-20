@@ -355,28 +355,12 @@ const acknowledgeChangelog = () => {
                             {{ projectHeaderState.viewMode.value === 'analysis' ? 'Project Statistics' : 'Vuln List' }}
                         </button>
                         <button
-                            v-if="projectHeaderState.isReviewer.value && projectHeaderState.incompleteCount.value > 0"
+                            v-if="projectHeaderState.isReviewer.value"
                             type="button"
-                            @click="projectHeaderState.bulkSyncHandler.value?.()"
+                            @click="projectHeaderState.bulkWorkflowHandler.value?.()"
                             :class="[headerButtonBase, headerButtonWarning]"
                         >
-                            Bulk Sync ({{ projectHeaderState.incompleteCount.value }})
-                        </button>
-                        <button
-                            v-if="projectHeaderState.isReviewer.value && projectHeaderState.assessmentRestoreCount.value > 0"
-                            type="button"
-                            @click="projectHeaderState.assessmentRestoreHandler.value?.()"
-                            :class="[headerButtonBase, headerButtonWarning]"
-                        >
-                            Restore CVSS ({{ projectHeaderState.assessmentRestoreCount.value }})
-                        </button>
-                        <button
-                            v-if="projectHeaderState.isReviewer.value && projectHeaderState.rescoreRuleSyncCount.value > 0"
-                            type="button"
-                            @click="projectHeaderState.rescoreRuleSyncHandler.value?.()"
-                            :class="[headerButtonBase, headerButtonWarning]"
-                        >
-                            Sync CVSS Rules ({{ projectHeaderState.rescoreRuleSyncCount.value }})
+                            Bulk Changes
                         </button>
                     </template>
                 </div>

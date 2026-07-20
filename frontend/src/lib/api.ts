@@ -273,6 +273,69 @@ export interface TaskVulnGroupListQuery {
     limit?: number;
 }
 
+export type BulkWorkflowFilters = Omit<
+    TaskVulnGroupListQuery,
+    'sort' | 'order' | 'offset' | 'cursor' | 'limit'
+>;
+
+export interface BulkWorkflowMetadata {
+    id: string;
+    label: string;
+    description: string;
+    supports_apply: boolean;
+    supports_document: boolean;
+    version: number;
+}
+
+export interface BulkWorkflowSummaryItem extends BulkWorkflowMetadata {
+    candidate_count: number | null;
+    summary: Record<string, number>;
+    unavailable_reason?: string;
+}
+
+export interface BulkWorkflowSummaryResponse {
+    task_id: string;
+    workflows: BulkWorkflowSummaryItem[];
+}
+
+export interface BulkWorkflowPreviewItem extends Record<string, any> {
+    group_id: string;
+    title?: string | null;
+    severity?: string | null;
+}
+
+export interface BulkWorkflowPreviewResponse {
+    task_id: string;
+    workflow: BulkWorkflowMetadata;
+    preview_token: string;
+    selectable_group_ids: string[];
+    items: BulkWorkflowPreviewItem[];
+    summary: Record<string, number>;
+}
+
+export interface BulkWorkflowApplyResponse {
+    task_id: string;
+    workflow: BulkWorkflowMetadata;
+    summary: Record<string, number>;
+    results: Array<Record<string, any>>;
+}
+
+export interface BulkWorkflowTaskStatus<T = unknown> {
+    id: string;
+    kind: string;
+    source_task_id: string;
+    workflow_id: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    message: string;
+    progress: number;
+    result?: T | null;
+    error?: string;
+}
+
+export type BulkWorkflowProgressHandler = (
+    status: BulkWorkflowTaskStatus,
+) => void | Promise<void>;
+
 export interface TaskVulnGroupListCounts {
     total: number;
     lifecycle: Record<string, number>;
@@ -422,6 +485,119 @@ export const getTaskVulnGroups = async (
     const params = taskGroupListParams(query);
     const res = await api.get(`/tasks/${encodeURIComponent(taskId)}/groups`, { params });
     return res.data;
+};
+
+export const bulkWorkflowFilters = (
+    query: TaskVulnGroupListQuery = {},
+): BulkWorkflowFilters => {
+    const {
+        sort: _sort,
+        order: _order,
+        offset: _offset,
+        cursor: _cursor,
+        limit: _limit,
+        ...filters
+    } = query;
+    return filters;
+};
+
+export const getBulkWorkflowSummary = async (
+    taskId: string,
+    filters: BulkWorkflowFilters = {},
+): Promise<BulkWorkflowSummaryResponse> => {
+    const res = await api.post('/bulk-workflows/summary', {
+        task_id: taskId,
+        filters,
+    });
+    return res.data;
+};
+
+export const getBulkWorkflowTask = async <T = unknown>(
+    operationId: string,
+): Promise<BulkWorkflowTaskStatus<T>> => {
+    const res = await api.get(`/bulk-workflows/tasks/${encodeURIComponent(operationId)}`);
+    return res.data;
+};
+
+export const waitForBulkWorkflowTask = async <T>(
+    operationId: string,
+    onProgress?: BulkWorkflowProgressHandler,
+    pollIntervalMs = 1000,
+): Promise<T> => {
+    const interval = Math.max(250, pollIntervalMs);
+    while (true) {
+        const status = await getBulkWorkflowTask<T>(operationId);
+        await onProgress?.(status);
+        if (status.status === 'failed') {
+            throw new Error(status.error || status.message || 'Bulk workflow task failed.');
+        }
+        if (status.status === 'completed') {
+            if (status.result == null) {
+                throw new Error('Bulk workflow task completed without a result.');
+            }
+            return status.result;
+        }
+        await new Promise(resolve => window.setTimeout(resolve, interval));
+    }
+};
+
+const startBulkWorkflowTask = async (
+    workflowId: string,
+    operation: 'preview' | 'apply' | 'document',
+    payload: Record<string, unknown>,
+): Promise<string> => {
+    const res = await api.post(
+        `/bulk-workflows/${encodeURIComponent(workflowId)}/${operation}-task`,
+        payload,
+    );
+    return res.data.task_id;
+};
+
+export const previewBulkWorkflow = async (
+    workflowId: string,
+    taskId: string,
+    filters: BulkWorkflowFilters = {},
+    onProgress?: BulkWorkflowProgressHandler,
+): Promise<BulkWorkflowPreviewResponse> => {
+    const operationId = await startBulkWorkflowTask(workflowId, 'preview', {
+        task_id: taskId,
+        filters,
+    });
+    return waitForBulkWorkflowTask<BulkWorkflowPreviewResponse>(operationId, onProgress);
+};
+
+export const applyBulkWorkflow = async (
+    workflowId: string,
+    taskId: string,
+    filters: BulkWorkflowFilters,
+    groupIds: string[],
+    previewToken: string,
+    onProgress?: BulkWorkflowProgressHandler,
+): Promise<BulkWorkflowApplyResponse> => {
+    const operationId = await startBulkWorkflowTask(workflowId, 'apply', {
+        task_id: taskId,
+        filters,
+        group_ids: groupIds,
+        preview_token: previewToken,
+    });
+    return waitForBulkWorkflowTask<BulkWorkflowApplyResponse>(operationId, onProgress);
+};
+
+export const buildBulkWorkflowDocument = async (
+    workflowId: string,
+    taskId: string,
+    filters: BulkWorkflowFilters,
+    groupIds: string[],
+    previewToken: string,
+    onProgress?: BulkWorkflowProgressHandler,
+): Promise<string> => {
+    const operationId = await startBulkWorkflowTask(workflowId, 'document', {
+        task_id: taskId,
+        filters,
+        group_ids: groupIds,
+        preview_token: previewToken,
+    });
+    return waitForBulkWorkflowTask<string>(operationId, onProgress);
 };
 
 export const getTaskVulnGroupDetailsWindow = async (
@@ -1282,6 +1458,10 @@ export interface CodeAnalysisAssessment {
     verdict: string;
     confidence: string;
     exposure: string;
+    analysis?: string | null;
+    justification?: string | null;
+    response?: string | null;
+    details?: string | null;
     dependency_presence?: Record<string, any> | null;
     advisory_relevance?: Record<string, any> | null;
     version_analysis?: CodeAnalysisVersionAnalysis | null;
@@ -1397,6 +1577,25 @@ export interface CodeAnalysisResultRecord {
     compact_context?: Record<string, any>;
     result?: CodeAnalysisAssessResponse;
     recorded_at?: string | null;
+}
+
+export type CodeAnalysisAssessmentSourceKind = 'auto' | 'manual' | 'unknown';
+
+export interface CodeAnalysisAssessmentIndexRecord {
+    analysis_run_id: string;
+    vuln_id: string;
+    project_names: string[];
+    component_names: string[];
+    source_kind: CodeAnalysisAssessmentSourceKind;
+}
+
+export interface CodeAnalysisAssessmentIndexResponse {
+    records: CodeAnalysisAssessmentIndexRecord[];
+    summary: {
+        stored_analysis_results: number;
+        usable_assessment_results: number;
+        indexed_assessment_results: number;
+    };
 }
 
 export interface CodeAnalysisBenchmarkRequest {
@@ -1535,6 +1734,15 @@ export const codeAnalysisListResults = async (
     params: CodeAnalysisResultListParams = {},
 ): Promise<CodeAnalysisResultRecord[]> => {
     const res = await api.get('/code-analysis/results', { params });
+    return res.data;
+};
+
+export const codeAnalysisGetAssessmentIndex = async (
+    projectName?: string,
+): Promise<CodeAnalysisAssessmentIndexResponse> => {
+    const res = await api.get('/code-analysis/assessment-index', {
+        params: projectName ? { project_name: projectName } : undefined,
+    });
     return res.data;
 };
 

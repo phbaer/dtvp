@@ -43,6 +43,42 @@ const cloneAssessmentBlocks = (blocks: readonly AssessmentBlock[]): AssessmentBl
     return blocks.map(cloneAssessmentBlock);
 };
 
+export const assessmentTeamKey = (team: string | undefined | null): string =>
+    String(team || '').trim().toLocaleLowerCase();
+
+export const deduplicateAssessmentBlocks = (
+    blocks: readonly AssessmentBlock[],
+): AssessmentBlock[] => {
+    const unique = new Map<string, { index: number, block: AssessmentBlock }>();
+    blocks.forEach((rawBlock, index) => {
+        const key = assessmentTeamKey(rawBlock.team);
+        if (!key) return;
+        const block = cloneAssessmentBlock({
+            ...rawBlock,
+            team: key === 'general' ? 'General' : rawBlock.team.trim(),
+        });
+        const existing = unique.get(key);
+        if (!existing) {
+            unique.set(key, { index, block });
+            return;
+        }
+        const existingTimestamp = existing.block.timestamp || 0;
+        const candidateTimestamp = block.timestamp || 0;
+        if (
+            candidateTimestamp > existingTimestamp
+            || (
+                candidateTimestamp === existingTimestamp
+                && (block.details?.length || 0) >= (existing.block.details?.length || 0)
+            )
+        ) {
+            unique.set(key, { index: existing.index, block });
+        }
+    });
+    return [...unique.values()]
+        .sort((left, right) => left.index - right.index)
+        .map(entry => entry.block);
+};
+
 const setBoundedCacheEntry = <T>(cache: Map<string, T>, key: string, value: T, maxEntries: number) => {
     if (cache.has(key)) {
         cache.delete(key);
@@ -298,6 +334,7 @@ export function constructAssessmentDetails(
     sharedTags: string[] = [],
     isPending: boolean = true
 ): { text: string, aggregatedState: string } {
+    const uniqueBlocks = deduplicateAssessmentBlocks(blocks);
     const parts: string[] = [];
 
     // Add shared tags first (e.g. [Rescored: ...])
@@ -306,7 +343,7 @@ export function constructAssessmentDetails(
     }
 
     // Preserve the order in the array for generation
-    for (const b of blocks) {
+    for (const b of uniqueBlocks) {
         const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
         const assignedStr = b.assigned && b.assigned.length > 0 ? ` [Assigned: ${b.assigned.join(', ')}]` : '';
         const evidenceStr = b.evidenceReviewed ? ' [Evidence Reviewed: yes]' : '';
@@ -318,7 +355,7 @@ export function constructAssessmentDetails(
     }
 
     // Calculate Aggregated State
-    const generalBlock = blocks.find(b => b.team === 'General');
+    const generalBlock = uniqueBlocks.find(b => assessmentTeamKey(b.team) === 'general');
     let aggState = 'NOT_SET';
 
     if (generalBlock && generalBlock.state !== 'NOT_SET') {
@@ -326,7 +363,7 @@ export function constructAssessmentDetails(
         aggState = generalBlock.state;
     } else {
         // Fallback: Worst of all team states
-        const allStates = blocks.map(b => b.state).filter(s => s !== 'NOT_SET');
+        const allStates = uniqueBlocks.map(b => b.state).filter(s => s !== 'NOT_SET');
         if (allStates.length > 0) {
             allStates.sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10));
             aggState = allStates[0] || 'NOT_SET';
@@ -365,28 +402,10 @@ export function sanitizeAssessmentDetails(
         return { text: fullText.trim(), aggregatedState: 'NOT_SET', blocks: [] };
     }
 
-    // Deduplicate: keep only the latest block per team
-    const teamMap = new Map<string, AssessmentBlock>();
-    for (const block of blocks) {
-        const key = block.team;
-        const existing = teamMap.get(key);
-        if (!existing) {
-            teamMap.set(key, block);
-        } else {
-            const existingTs = existing.timestamp || 0;
-            const newTs = block.timestamp || 0;
-            if (newTs > existingTs) {
-                teamMap.set(key, block);
-            } else if (newTs === existingTs && (block.details?.length || 0) > (existing.details?.length || 0)) {
-                teamMap.set(key, block);
-            }
-        }
-    }
-
     // Sort: General first, then alphabetical
-    const dedupedBlocks = Array.from(teamMap.values()).sort((a, b) => {
-        if (a.team === 'General') return -1;
-        if (b.team === 'General') return 1;
+    const dedupedBlocks = deduplicateAssessmentBlocks(blocks).sort((a, b) => {
+        if (assessmentTeamKey(a.team) === 'general') return -1;
+        if (assessmentTeamKey(b.team) === 'general') return 1;
         return a.team.localeCompare(b.team);
     });
 
@@ -481,13 +500,16 @@ export function getConsensusAssessment(
     // In INCOMPLETE mode ("Sync all"), the General block is a legitimate
     // first-party assessment and should be included.
     const combinedParts: string[] = []
-    for (const b of blocks) {
-        if (displayState === 'INCONSISTENT' && b.team === 'General') continue
+    const seenDetails = new Set<string>()
+    for (const b of deduplicateAssessmentBlocks(blocks)) {
+        if (displayState === 'INCONSISTENT' && assessmentTeamKey(b.team) === 'general') continue
         const cleaned = (b.details || '')
             .replace(/\n\n\[Status: Pending Review\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .trim()
-        if (cleaned) {
+        const signature = cleaned.replace(/\s+/g, ' ').trim().toLocaleLowerCase()
+        if (cleaned && !seenDetails.has(signature)) {
+            seenDetails.add(signature)
             combinedParts.push(`[${b.team}] ${cleaned}`)
         }
     }
@@ -516,10 +538,11 @@ export function mergeTeamAssessment(
     reviewMetadata?: AssessmentReviewMetadata
 ): { text: string, aggregatedState: string } {
     // 1. Parse existing
-    const blocks = parseAssessmentBlocks(currentFullText);
+    const blocks = deduplicateAssessmentBlocks(parseAssessmentBlocks(currentFullText));
 
     // 2. Update, Create, or Remove block for this team
-    const targetIndex = blocks.findIndex(b => b.team === team);
+    const targetKey = assessmentTeamKey(team);
+    const targetIndex = blocks.findIndex(b => assessmentTeamKey(b.team) === targetKey);
     const existingBlock = targetIndex >= 0 ? blocks[targetIndex] : undefined;
     const hasAssignees = newAssigned !== undefined ? newAssigned.length > 0 : ((existingBlock?.assigned?.length ?? 0) > 0);
     const finalEvidenceReviewed = reviewMetadata?.evidenceReviewed ?? existingBlock?.evidenceReviewed ?? false;
@@ -579,12 +602,11 @@ export function mergeTeamAssessment(
  * Builds the full assessment text for a bulk sync operation.
  *
  * Strategy:
- * - Preserves all existing team-specific blocks verbatim (state + details).
- * - Creates or updates the "General" (global policy) block:
- *     - Keeps any existing user-added comment in the General block.
- *     - Appends a compact team-state summary (e.g. "[TeamA] IN_TRIAGE") so
- *       the reader has context without duplicating raw team details.
- *     - Does NOT introduce duplicate team entries.
+ * - Preserves one block per team, case-insensitively.
+ * - Preserves an existing General block but never synthesizes one from team
+ *   assessments or copies team state/details into it.
+ * - Removes team summaries generated by older releases because the team blocks
+ *   already contain that information.
  * - Aggregated state: uses General block state if explicitly set, otherwise
  *   worst state across all team blocks.
  *
@@ -599,9 +621,14 @@ export function buildBulkSyncDetails(
     existingGeneralText: string = '',
     overrideGeneralState: string = 'NOT_SET'
 ): { text: string, aggregatedState: string } {
+    const uniqueBlocks = deduplicateAssessmentBlocks(allBlocks);
     // 1. Separate out the General block from team-specific blocks.
-    const teamBlocks = allBlocks.filter(b => b.team !== 'General');
-    const existingGeneral = allBlocks.find(b => b.team === 'General');
+    const teamBlocks = uniqueBlocks.filter(b => assessmentTeamKey(b.team) !== 'general');
+    let existingGeneral = uniqueBlocks.find(b => assessmentTeamKey(b.team) === 'general');
+    if (!existingGeneral && existingGeneralText) {
+        existingGeneral = deduplicateAssessmentBlocks(parseAssessmentBlocks(existingGeneralText))
+            .find(block => assessmentTeamKey(block.team) === 'general');
+    }
 
     // 2. Recover any user-added comment from the existing General block.
     //    Priority: block already in allBlocks → parse from existingGeneralText.
@@ -612,19 +639,13 @@ export function buildBulkSyncDetails(
         userComment = (generalBlock?.details || '').trim();
     }
 
-    // 3. Build a compact team-state summary (skip teams with NOT_SET state).
-    const summaryLines = teamBlocks
-        .filter(b => b.state && b.state !== 'NOT_SET')
-        .map(b => `[${b.team}] ${b.state}`);
-    const summaryText = summaryLines.length > 0
-        ? `Team assessments:\n${summaryLines.join('\n')}`
-        : '';
-
-    // 4. Compose General block details: keep user comment, append summary.
-    const generalDetailsParts: string[] = [];
-    if (userComment) generalDetailsParts.push(userComment);
-    if (summaryText) generalDetailsParts.push(summaryText);
-    const generalDetails = generalDetailsParts.join('\n\n');
+    // Remove summaries produced by older releases; the team blocks already carry
+    // this information and remain the source of truth.
+    userComment = userComment
+        .split(/\n\s*\n/)
+        .filter(paragraph => !paragraph.trim().toLocaleLowerCase().startsWith('team assessments:\n'))
+        .join('\n\n')
+        .trim();
 
     // 5. Determine the General block state.
     //    If it was explicitly set (not NOT_SET), keep it; otherwise NOT_SET so
@@ -634,19 +655,18 @@ export function buildBulkSyncDetails(
         : (existingGeneral?.state && existingGeneral.state !== 'NOT_SET')
             ? existingGeneral.state
             : 'NOT_SET';
-    const generalUser = existingGeneral?.user || 'General';
-    const generalJustification = existingGeneral?.justification || 'NOT_SET';
-
-    // 6. Assemble the final block list: General first, then team blocks.
-    const generalBlock: AssessmentBlock = {
-        team: 'General',
-        state: generalState,
-        user: generalUser,
-        details: generalDetails,
-        justification: generalJustification,
-    };
-
-    const finalBlocks: AssessmentBlock[] = [generalBlock, ...teamBlocks];
+    const finalBlocks: AssessmentBlock[] = [];
+    if (existingGeneral || generalState !== 'NOT_SET') {
+        finalBlocks.push({
+            ...existingGeneral,
+            team: 'General',
+            state: generalState,
+            user: existingGeneral?.user || 'General',
+            details: userComment,
+            justification: existingGeneral?.justification || 'NOT_SET',
+        });
+    }
+    finalBlocks.push(...teamBlocks);
 
     // 7. Construct the final text — NOT pending (this is a reviewer-level bulk action).
     return constructAssessmentDetails(finalBlocks, [], false);

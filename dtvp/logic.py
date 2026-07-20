@@ -1256,10 +1256,16 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                 if assigned_raw
                 else []
             )
+            timestamp = None
+            try:
+                if parsed_tags.get("Date"):
+                    timestamp = float(parsed_tags["Date"])
+            except ValueError:
+                pass
 
             blocks.append(
                 {
-                    "team": t_name,
+                    "team": "General" if t_name.casefold() == "general" else t_name,
                     "state": parsed_tags.get("State", "NOT_SET"),
                     "user": parsed_tags.get("Assessed By", "unknown"),
                     "reviewer": parsed_tags.get("Reviewed By"),
@@ -1267,11 +1273,43 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                     "rescored": rescored_val,
                     "vector": parsed_tags.get("Rescored Vector"),
                     "assigned": assigned_list,
+                    "timestamp": timestamp,
                     "details": content,
                 }
             )
 
     return shared_text, blocks
+
+
+def _assessment_team_key(value: Any) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _deduplicate_assessment_blocks(
+    blocks: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    unique: dict[str, tuple[int, Dict[str, Any]]] = {}
+    for index, block in enumerate(blocks):
+        key = _assessment_team_key(block.get("team"))
+        if not key:
+            continue
+        candidate = dict(block)
+        if key == "general":
+            candidate["team"] = "General"
+        existing = unique.get(key)
+        if existing is None:
+            unique[key] = (index, candidate)
+            continue
+        existing_index, existing_block = existing
+        existing_timestamp = float(existing_block.get("timestamp") or 0)
+        candidate_timestamp = float(candidate.get("timestamp") or 0)
+        if candidate_timestamp > existing_timestamp or (
+            candidate_timestamp == existing_timestamp
+            and len(str(candidate.get("details") or ""))
+            >= len(str(existing_block.get("details") or ""))
+        ):
+            unique[key] = (existing_index, candidate)
+    return [block for _index, block in sorted(unique.values(), key=lambda item: item[0])]
 
 
 def process_assessment_details(
@@ -1290,7 +1328,8 @@ def process_assessment_details(
     target_team = team if team else "General"
 
     # 1. Parse Existing Blocks
-    shared_text, blocks_list = _parse_assessment_blocks(existing_details)
+    shared_text, parsed_blocks = _parse_assessment_blocks(existing_details)
+    blocks_list = _deduplicate_assessment_blocks(parsed_blocks)
 
     # 2. Extract Metadata from New Content (if Reviewer)
     new_rescored_val = None
@@ -1323,7 +1362,9 @@ def process_assessment_details(
     content = content.strip()
 
     # 4. Handle Legacy text: If shared_text exists but no General block, move it
-    if shared_text and not any(b["team"] == "General" for b in blocks_list):
+    if shared_text and not any(
+        _assessment_team_key(b["team"]) == "general" for b in blocks_list
+    ):
         blocks_list.insert(
             0,
             {
@@ -1338,7 +1379,15 @@ def process_assessment_details(
         shared_text = ""
 
     # 5. Update Target Team Block
-    target_block = next((b for b in blocks_list if b["team"] == target_team), None)
+    target_key = _assessment_team_key(target_team)
+    target_block = next(
+        (
+            block
+            for block in blocks_list
+            if _assessment_team_key(block["team"]) == target_key
+        ),
+        None,
+    )
 
     # Logic for Reviewer vs Analyst
     final_user = user
@@ -1396,6 +1445,7 @@ def process_assessment_details(
                 "details": content,
             }
         )
+    blocks_list = _deduplicate_assessment_blocks(blocks_list)
 
     # 6. Reconstruct Final String
     final_parts = []
@@ -1405,7 +1455,7 @@ def process_assessment_details(
     for b in blocks_list:
         # Skip empty blocks if they aren't the target and aren't set
         if (
-            b["team"] != target_team
+            _assessment_team_key(b["team"]) != target_key
             and b["state"] == "NOT_SET"
             and not b.get("details")
         ):
@@ -1444,7 +1494,8 @@ def calculate_aggregated_state(details: str) -> str:
     """
     Parses and calculates aggregated state. General block has precedence if set.
     """
-    _, blocks_list = _parse_assessment_blocks(details)
+    _, parsed_blocks = _parse_assessment_blocks(details)
+    blocks_list = _deduplicate_assessment_blocks(parsed_blocks)
 
     if not blocks_list:
         return "NOT_SET"
@@ -1453,7 +1504,14 @@ def calculate_aggregated_state(details: str) -> str:
     # 1. Any block named 'General' (if set)
     # 2. Worst state of all teams
 
-    general_block = next((b for b in blocks_list if b["team"] == "General"), None)
+    general_block = next(
+        (
+            block
+            for block in blocks_list
+            if _assessment_team_key(block["team"]) == "general"
+        ),
+        None,
+    )
     if general_block and general_block.get("state") != "NOT_SET":
         return general_block["state"]
 

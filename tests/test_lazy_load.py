@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 from dtvp import main
 from dtvp.dt_client import DTClient
+from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
+from dtvp.task_group_query_services import build_task_group_query_index
 
 
 @pytest.fixture
@@ -94,6 +96,79 @@ def test_get_assessment_details_partial_failure(api_client, mock_client):
 
     assert results[1]["analysis"] is None
     assert results[1]["error"] == "DB Error"
+
+
+def test_get_assessment_details_refreshes_grouped_task_snapshot(api_client, mock_client):
+    task_id = "task-card-reload"
+    group = {
+        "id": "CVE-2026-RELOAD",
+        "title": "Reload assessment",
+        "tags": [],
+        "affected_versions": [
+            {
+                "project_name": "ReloadProject",
+                "project_version": "1.0.0",
+                "project_uuid": "reload-project",
+                "components": [
+                    {
+                        "project_name": "ReloadProject",
+                        "project_version": "1.0.0",
+                        "project_uuid": "reload-project",
+                        "component_name": "reload-component",
+                        "component_version": "1.0.0",
+                        "component_uuid": "reload-component-uuid",
+                        "vulnerability_uuid": "reload-vulnerability-uuid",
+                        "finding_uuid": "reload-finding-uuid",
+                        "analysis_state": "NOT_SET",
+                        "analysis_details": "",
+                        "is_suppressed": False,
+                    }
+                ],
+            }
+        ],
+    }
+    summaries = summarize_grouped_vulnerabilities([group], {})
+    main.tasks[task_id] = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": summaries,
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "_group_query_index": build_task_group_query_index(summaries),
+    }
+    mock_client.get_analysis.return_value = {
+        "analysisState": "EXPLOITABLE",
+        "analysisDetails": "Reloaded directly from Dependency-Track",
+        "analysisJustification": "REQUIRES_CONFIGURATION",
+        "isSuppressed": True,
+    }
+
+    try:
+        response = api_client.post(
+            "/api/assessments/details",
+            json={
+                "instances": [
+                    {
+                        "project_uuid": "reload-project",
+                        "component_uuid": "reload-component-uuid",
+                        "vulnerability_uuid": "reload-vulnerability-uuid",
+                        "finding_uuid": "reload-finding-uuid",
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        component = group["affected_versions"][0]["components"][0]
+        assert component["analysis_state"] == "EXPLOITABLE"
+        assert component["analysis_details"] == "Reloaded directly from Dependency-Track"
+        assert component["justification"] == "REQUIRES_CONFIGURATION"
+        assert component["is_suppressed"] is True
+        assert main.tasks[task_id]["result"][0]["list_metadata"][
+            "technical_state"
+        ] == "EXPLOITABLE"
+    finally:
+        main.tasks.pop(task_id, None)
 
 
 def test_update_assessment_conflict(api_client, mock_client):
