@@ -15,6 +15,12 @@ from .tmrescore_integration import (
     normalize_tmrescore_snapshot,
     sort_projects_by_version,
 )
+from .upload_security import (
+    DEFAULT_TMRESCORE_UPLOAD_MAX_BYTES,
+    read_upload_limited,
+)
+
+
 def _merge_responses(
     *responses: dict[int | str, dict[str, Any]],
 ) -> dict[int | str, dict[str, Any]]:
@@ -22,6 +28,20 @@ def _merge_responses(
     for response in responses:
         merged.update(response)
     return merged
+
+
+async def _read_tmrescore_upload(
+    file: UploadFile | None,
+    label: str,
+) -> bytes | None:
+    if file is None:
+        return None
+    return await read_upload_limited(
+        file,
+        setting="DTVP_TMRESCORE_UPLOAD_MAX_BYTES",
+        default=DEFAULT_TMRESCORE_UPLOAD_MAX_BYTES,
+        label=label,
+    )
 
 
 @dataclass(frozen=True)
@@ -298,6 +318,18 @@ def _register_tmrescore_analysis_route(
                 detail="LLM enrichment cannot run when offline mode is enabled.",
             )
 
+        threatmodel_bytes = await _read_tmrescore_upload(
+            threatmodel,
+            "Threat model",
+        )
+        assert threatmodel_bytes is not None
+        items_csv_bytes = await _read_tmrescore_upload(items_csv, "Items CSV")
+        config_bytes = await _read_tmrescore_upload(config, "Configuration")
+        countermeasures_bytes = await _read_tmrescore_upload(
+            countermeasures,
+            "Countermeasures",
+        )
+
         inventory = await deps.prepare_tmrescore_inventory_or_raise(
             project_name,
             scope,
@@ -312,10 +344,6 @@ def _register_tmrescore_analysis_route(
             else f"multi-version:{latest_version}"
         )
 
-        threatmodel_bytes = await threatmodel.read()
-        items_csv_bytes = await items_csv.read() if items_csv else None
-        config_bytes = await config.read() if config else None
-        countermeasures_bytes = await countermeasures.read() if countermeasures else None
         deps.prune_tmrescore_analysis_tasks()
 
         async with TMRescoreClient(settings) as tmrescore_client:

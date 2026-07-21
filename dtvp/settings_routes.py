@@ -8,6 +8,10 @@ from fastapi import APIRouter, Depends, File, UploadFile
 
 from .authorization import require_reviewer, validate_user_roles_config
 from .rescore_rule_services import validate_rescore_rule_config
+from .upload_security import (
+    DEFAULT_SETTINGS_UPLOAD_MAX_BYTES,
+    read_upload_limited,
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,15 @@ def _ensure_parent_dir(path: str) -> None:
         os.makedirs(dir_path, exist_ok=True)
 
 
+async def _read_settings_upload(file: UploadFile) -> bytes:
+    return await read_upload_limited(
+        file,
+        setting="DTVP_SETTINGS_UPLOAD_MAX_BYTES",
+        default=DEFAULT_SETTINGS_UPLOAD_MAX_BYTES,
+        label="Settings file",
+    )
+
+
 def _register_mapping_routes(
     router: APIRouter,
     deps: SettingsRouteDeps,
@@ -59,8 +72,8 @@ def _register_mapping_routes(
         target_path = deps.get_team_mapping_path()
         _ensure_parent_dir(target_path)
 
+        content = await _read_settings_upload(file)
         try:
-            content = await file.read()
             await asyncio.to_thread(
                 deps.write_and_validate_json_bytes,
                 target_path,
@@ -116,8 +129,8 @@ def _register_role_routes(
         target_path = deps.get_user_roles_path()
         _ensure_parent_dir(target_path)
 
+        content = await _read_settings_upload(file)
         try:
-            content = await file.read()
             try:
                 parsed = json.loads(content)
             except json.JSONDecodeError:
@@ -194,8 +207,8 @@ def _register_auto_analysis_guidance_routes(
         target_path = deps.get_auto_analysis_guidance_path()
         _ensure_parent_dir(target_path)
 
+        content = await _read_settings_upload(file)
         try:
-            content = await file.read()
             try:
                 payload = json.loads(content)
             except json.JSONDecodeError:
@@ -263,8 +276,8 @@ def _register_rescore_rule_routes(
         target_path = deps.get_rescore_rules_path()
         _ensure_parent_dir(target_path)
 
+        content = await _read_settings_upload(file)
         try:
-            content = await file.read()
             try:
                 json.loads(content)
             except json.JSONDecodeError:

@@ -26,6 +26,10 @@ from .project_archive_services import (
     resolve_archive_download_path,
     store_uploaded_archive,
 )
+from .upload_security import (
+    DEFAULT_PROJECT_ARCHIVE_UPLOAD_MAX_BYTES,
+    read_upload_limited,
+)
 
 
 class ProjectArchiveExportRequest(BaseModel):
@@ -295,13 +299,18 @@ def _register_import_routes(
         user: CurrentUser,
     ):
         _require_reviewer(deps, user)
+        content = await read_upload_limited(
+            file,
+            setting="DTVP_PROJECT_ARCHIVE_UPLOAD_MAX_BYTES",
+            default=DEFAULT_PROJECT_ARCHIVE_UPLOAD_MAX_BYTES,
+            label="Project archive",
+        )
         task = _create_task(
             deps,
             kind="import_preview",
             message="Queued project archive import preview.",
             user=user,
         )
-        content = await file.read()
         try:
             archive_path = await asyncio.to_thread(
                 store_uploaded_archive,
@@ -311,6 +320,7 @@ def _register_import_routes(
                 content,
             )
         except ProjectArchiveError as exc:
+            deps.archive_tasks.pop(task["id"], None)
             raise _archive_http_error(exc) from exc
 
         task["_archive_path"] = archive_path

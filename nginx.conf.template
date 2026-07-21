@@ -1,6 +1,7 @@
 server {
     listen 80;
     server_name localhost;
+    client_max_body_size 105m;
 
     # Proxy DTVP backend and SPA under the configured context path.
     location = ${DTVP_CONTEXT_PATH} {

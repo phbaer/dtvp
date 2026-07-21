@@ -444,6 +444,11 @@ Restore matches project name/version first, then remaps changed UUIDs by
 component PURL/name/version/BOM ref and vulnerability ID/name/aliases. Audit
 history and comments are not replayed. ZIPs default to `data/project_archives`;
 optional Git-friendly expanded trees default to `data/project_archives_git`.
+Imports reject oversized uploads, encrypted or unsupported ZIP members,
+duplicate or unsafe paths, excessive member counts or expanded sizes, and
+high-ratio compressed members before writing the upload to disk. The nginx
+gateway accepts enough multipart overhead for the 100 MiB archive limit;
+route-specific limits still protect direct backend deployments.
 
 ### Threat-Model Rescoring
 
@@ -666,6 +671,10 @@ Deployment rules:
   API documentation and the OpenAPI route are disabled in production.
 - Markdown from changelogs and vulnerability advisories is parsed through a
   shared DOMPurify allowlist before Vue renders it as HTML.
+- nginx rejects request bodies larger than 105 MiB. Backend routes apply
+  narrower limits to settings uploads, each tmrescore input, and project
+  archives, so the same controls remain active when port `8000` is exposed
+  directly.
 
 Archive imports require read, BOM upload, and vulnerability-analysis update
 permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
@@ -697,6 +706,7 @@ means the integration or override is disabled.
 | `TEAM_MAPPING_PATH` | Component ownership mapping | `data/team_mapping.json` |
 | `USER_ROLES_PATH` | User-to-role mapping | `data/user_roles.json` |
 | `RESCORE_RULES_PATH` | CVSS transition rules | `data/rescore_rules.json` |
+| `DTVP_SETTINGS_UPLOAD_MAX_BYTES` | Maximum reviewer settings-file upload size | `1048576` (1 MiB) |
 
 ### Authentication, Runtime, And Frontend
 
@@ -736,6 +746,11 @@ means the integration or override is disabled.
 | `DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS` | Snapshot interval; minimum 60 | `86400` |
 | `DTVP_PROJECT_ARCHIVE_RETENTION_COUNT` | Recent ZIPs retained per project | `30` |
 | `DTVP_PROJECT_ARCHIVE_INCLUDE` | Comma-separated scheduled project names | empty |
+| `DTVP_PROJECT_ARCHIVE_UPLOAD_MAX_BYTES` | Maximum uploaded archive size | `104857600` (100 MiB) |
+| `DTVP_PROJECT_ARCHIVE_MAX_FILES` | Maximum ZIP member count | `10000` |
+| `DTVP_PROJECT_ARCHIVE_MAX_MEMBER_BYTES` | Maximum expanded size of one ZIP member | `104857600` (100 MiB) |
+| `DTVP_PROJECT_ARCHIVE_MAX_UNCOMPRESSED_BYTES` | Maximum total expanded ZIP size | `524288000` (500 MiB) |
+| `DTVP_PROJECT_ARCHIVE_MAX_COMPRESSION_RATIO` | Maximum permitted ratio for members larger than 1 MiB | `200` |
 | `DTVP_ARCHIVE_GIT_REMOTE` | Optional archive Git remote | empty |
 | `DTVP_ARCHIVE_GIT_BRANCH` | Archive Git branch | `main` |
 | `DTVP_ARCHIVE_GIT_AUTHOR_NAME` | Commit author name | `DTVP Archive Bot` |
@@ -751,6 +766,7 @@ means the integration or override is disabled.
 | `DTVP_TMRESCORE_TIMEOUT_SECONDS` | HTTP timeout before polling fallback | `180` |
 | `DTVP_TMRESCORE_CACHE_PATH` | Cached proposal snapshots | `data/tmrescore_proposals.json` |
 | `DTVP_TMRESCORE_TASK_TTL_SECONDS` | Completed/failed task retention | `3600` |
+| `DTVP_TMRESCORE_UPLOAD_MAX_BYTES` | Maximum size of each tmrescore multipart file | `20971520` (20 MiB) |
 | `DTVP_CODE_ANALYSIS_URL` | Analyzer base URL | unset; Compose: `http://agentyzer:8000` |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | Analyzer HTTP timeout | `300` |
 | `DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS` | Dashboard health/jobs timeout | `5` |

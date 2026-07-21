@@ -18,6 +18,11 @@ from .dt_client import DTClient
 
 ARCHIVE_SCHEMA_VERSION = "dtvp.project-archive/v1"
 ARCHIVE_FILE_SUFFIX = ".dtvp-project-archive.zip"
+DEFAULT_ARCHIVE_MAX_FILES = 10_000
+DEFAULT_ARCHIVE_MAX_MEMBER_BYTES = 100 * 1024 * 1024
+DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
+DEFAULT_ARCHIVE_MAX_COMPRESSION_RATIO = 200
+_ALLOWED_ZIP_COMPRESSION = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
 
 
 class ProjectArchiveError(Exception):
@@ -93,6 +98,13 @@ def get_project_archive_retention_count() -> int:
 def get_project_archive_include_names() -> list[str]:
     raw = os.getenv("DTVP_PROJECT_ARCHIVE_INCLUDE", "")
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _archive_limit(setting: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(setting, str(default))))
+    except (TypeError, ValueError):
+        return default
 
 
 def _utc_now_iso(now_provider: Callable[[], datetime]) -> str:
@@ -198,6 +210,8 @@ def _write_expanded_archive_tree(
 
 
 def _assert_safe_zip_name(name: str) -> None:
+    if len(name) > 500:
+        raise ProjectArchiveValidationError("Archive member path is too long")
     if not name or name.startswith("/") or name.startswith("\\"):
         raise ProjectArchiveValidationError(f"Unsafe archive path: {name!r}")
     normalized = posixpath.normpath(name)
@@ -205,6 +219,62 @@ def _assert_safe_zip_name(name: str) -> None:
         raise ProjectArchiveValidationError(f"Unsafe archive path: {name!r}")
     if any(part in {"", ".", ".."} for part in name.split("/")):
         raise ProjectArchiveValidationError(f"Unsafe archive path: {name!r}")
+
+
+def _validate_zip_limits(zip_file: zipfile.ZipFile) -> None:
+    members = zip_file.infolist()
+    max_files = _archive_limit(
+        "DTVP_PROJECT_ARCHIVE_MAX_FILES",
+        DEFAULT_ARCHIVE_MAX_FILES,
+    )
+    if len(members) > max_files:
+        raise ProjectArchiveValidationError(
+            f"Archive contains more than {max_files} members"
+        )
+
+    names: set[str] = set()
+    total_size = 0
+    max_member_size = _archive_limit(
+        "DTVP_PROJECT_ARCHIVE_MAX_MEMBER_BYTES",
+        DEFAULT_ARCHIVE_MAX_MEMBER_BYTES,
+    )
+    max_total_size = _archive_limit(
+        "DTVP_PROJECT_ARCHIVE_MAX_UNCOMPRESSED_BYTES",
+        DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES,
+    )
+    max_ratio = _archive_limit(
+        "DTVP_PROJECT_ARCHIVE_MAX_COMPRESSION_RATIO",
+        DEFAULT_ARCHIVE_MAX_COMPRESSION_RATIO,
+    )
+
+    for member in members:
+        _assert_safe_zip_name(member.filename.rstrip("/"))
+        if member.filename in names:
+            raise ProjectArchiveValidationError(
+                f"Archive contains duplicate member: {member.filename}"
+            )
+        names.add(member.filename)
+        if member.flag_bits & 0x1:
+            raise ProjectArchiveValidationError("Encrypted archives are not supported")
+        if member.compress_type not in _ALLOWED_ZIP_COMPRESSION:
+            raise ProjectArchiveValidationError(
+                f"Unsupported ZIP compression for {member.filename}"
+            )
+        if member.file_size > max_member_size:
+            raise ProjectArchiveValidationError(
+                f"Archive member exceeds {max_member_size} bytes: {member.filename}"
+            )
+        total_size += member.file_size
+        if total_size > max_total_size:
+            raise ProjectArchiveValidationError(
+                f"Archive expands beyond {max_total_size} bytes"
+            )
+        if member.file_size > 1024 * 1024:
+            ratio = member.file_size / max(1, member.compress_size)
+            if ratio > max_ratio:
+                raise ProjectArchiveValidationError(
+                    f"Archive member compression ratio is unsafe: {member.filename}"
+                )
 
 
 def _read_json_member(
@@ -584,9 +654,13 @@ async def export_project_archive(
 
 
 def load_project_archive(path: str) -> dict[str, Any]:
-    with zipfile.ZipFile(path, "r") as zip_file:
-        for member in zip_file.namelist():
-            _assert_safe_zip_name(member)
+    try:
+        zip_file_context = zipfile.ZipFile(path, "r")
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ProjectArchiveValidationError("Uploaded file is not a valid ZIP archive") from exc
+
+    with zip_file_context as zip_file:
+        _validate_zip_limits(zip_file)
 
         manifest = _read_json_member(zip_file, "manifest.json")
         schema_version = manifest.get("schema_version")
@@ -933,6 +1007,13 @@ def store_uploaded_archive(
 ) -> str:
     if not content:
         raise ProjectArchiveValidationError("Uploaded archive is empty")
+    try:
+        with zipfile.ZipFile(io.BytesIO(content), "r") as archive:
+            _validate_zip_limits(archive)
+    except zipfile.BadZipFile as exc:
+        raise ProjectArchiveValidationError(
+            "Uploaded file is not a valid ZIP archive"
+        ) from exc
     uploads_dir = os.path.join(archive_dir, "uploads")
     os.makedirs(uploads_dir, exist_ok=True)
     safe_name = _safe_filename(Path(filename or "upload.zip").stem)

@@ -460,6 +460,21 @@ def test_upload_mapping(client):
             )  # It opens for read at end too
 
 
+def test_upload_mapping_rejects_oversized_file(client):
+    files = {"file": ("mapping.json", b"x" * 1025, "application/json")}
+
+    with patch.dict(
+        os.environ,
+        {"DTVP_SETTINGS_UPLOAD_MAX_BYTES": "1024"},
+        clear=False,
+    ):
+        with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+            response = client.post("/api/settings/mapping", files=files)
+
+    assert response.status_code == 413
+    assert "1024-byte" in response.json()["detail"]
+
+
 def test_upload_mapping_failure(client):
     from unittest.mock import patch
 
