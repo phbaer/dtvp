@@ -51,6 +51,7 @@ from src.api.models import (
     StepFindings,
 )
 from src.benchmark import compare_benchmark_with_llm, deterministic_benchmark_fallback
+from src.job_runtime import JobRuntime, JobStoreUnavailable
 from src.job_store import JobStore
 from src.llm import OllamaClient, OpenWebUIClient, create_llm_client
 from src.llm.base import LLMClient
@@ -187,27 +188,24 @@ async def lifespan(app: FastAPI):
     except OSError:
         _repos_config_mtime = 0.0
     app.state.ollama = create_llm_client()
-    app.state.job_store = JobStore(logger=logger)
-    app.state.jobs = app.state.job_store.load()
-    app.state.job_tasks: Dict[str, asyncio.Task[Any]] = {}
-    app.state.shutting_down = False
-    interrupted_jobs = 0
-    for job in app.state.jobs.values():
-        if job.status != JobStatus.running:
-            continue
-        job.status = JobStatus.failed
-        job.finished_at = _now_iso()
-        job.last_updated_at = job.finished_at
-        job.error = "Assessment interrupted by Agentyzer service restart."
-        job.active_agents.clear()
-        job.current_activity = "Assessment interrupted by service restart"
-        append_job_log(job, job.error, level="error")
-        app.state.job_store.save(job)
-        interrupted_jobs += 1
-    app.state.max_concurrent_jobs = _get_max_concurrent_jobs()
-    app.state.job_semaphore = asyncio.Semaphore(app.state.max_concurrent_jobs)
+    job_runtime = JobRuntime(
+        store=JobStore(logger=logger),
+        max_concurrent_jobs=_get_max_concurrent_jobs(),
+        logger=logger,
+    )
+    recovery = job_runtime.restore()
+    app.state.job_runtime = job_runtime
+    # Compatibility aliases for integrations that inspect FastAPI application state.
+    app.state.job_store = job_runtime.store
+    app.state.jobs = job_runtime.jobs
+    app.state.job_tasks = job_runtime.tasks
+    app.state.max_concurrent_jobs = job_runtime.max_concurrent_jobs
+    app.state.job_semaphore = job_runtime.semaphore
     logger.info("Configured LLM %s", _describe_llm_backend(app.state.ollama))
-    logger.info("Configured async job capacity: %s", app.state.max_concurrent_jobs)
+    logger.info(
+        "Configured async job capacity: %s",
+        job_runtime.max_concurrent_jobs,
+    )
     app.state.llm_healthy = await app.state.ollama.health_check()
     if not app.state.llm_healthy:
         logger.warning(
@@ -219,31 +217,21 @@ async def lifespan(app: FastAPI):
         logger.info(
             "LLM backend is reachable (%s)", _describe_llm_backend(app.state.ollama)
         )
-    if interrupted_jobs:
+    if recovery.interrupted_count:
         logger.warning(
             "Marked %d in-flight assessment job(s) as interrupted",
-            interrupted_jobs,
+            recovery.interrupted_count,
         )
-    resumed_jobs = 0
-    for job in list(app.state.jobs.values()):
-        if job.status != JobStatus.pending:
-            continue
+    for job in recovery.pending_jobs:
         append_job_log(job, "Resuming queued job after service restart")
-        app.state.job_store.save(job)
-        _schedule_job(job)
-        resumed_jobs += 1
-    if resumed_jobs:
-        logger.info("Resumed %d queued assessment job(s)", resumed_jobs)
+        job_runtime.persist(job, required=True)
+        job_runtime.schedule(job, _run_job)
+    if recovery.pending_jobs:
+        logger.info("Resumed %d queued assessment job(s)", len(recovery.pending_jobs))
     try:
         yield
     finally:
-        app.state.shutting_down = True
-        tasks = list(app.state.job_tasks.values())
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await job_runtime.shutdown()
 
 
 app = FastAPI(
@@ -296,53 +284,31 @@ def _resolved_repos_config_path() -> str:
     return _repos_config_path or os.path.join(_CONFIG_DIR, "repos.yaml")
 
 
+def _job_runtime() -> JobRuntime:
+    runtime: JobRuntime | None = getattr(app.state, "job_runtime", None)
+    if runtime is None:
+        raise RuntimeError("Agentyzer job runtime is not initialized")
+    return runtime
+
+
 def _jobs_visible_to(owner: str) -> Dict[str, Job]:
-    _prune_job_store()
-    jobs: Dict[str, Job] = getattr(app.state, "jobs", {})
-    if owner == "*":
-        return jobs
-    return {job_id: job for job_id, job in jobs.items() if job.owner == owner}
-
-
-def _remove_pruned_jobs(job_ids: set[str]) -> None:
-    jobs: Dict[str, Job] = getattr(app.state, "jobs", {})
-    for job_id in job_ids:
-        jobs.pop(job_id, None)
-
-
-def _prune_job_store() -> None:
-    store: JobStore | None = getattr(app.state, "job_store", None)
-    if store is None:
-        return
-    try:
-        _remove_pruned_jobs(store.prune())
-    except Exception:
-        logger.exception("Failed to prune the Agentyzer job store")
+    return _job_runtime().visible_to(owner)
 
 
 def _persist_job(job: Job, *, required: bool = False) -> None:
-    store: JobStore | None = getattr(app.state, "job_store", None)
-    if store is None:
-        return
     try:
-        _remove_pruned_jobs(store.save(job))
-    except Exception as exc:
-        logger.exception("Failed to persist Agentyzer job %s", job.id)
-        if required:
-            raise HTTPException(
-                status_code=503,
-                detail="Assessment job storage is unavailable.",
-            ) from exc
+        _job_runtime().persist(job, required=required)
+    except JobStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Assessment job storage is unavailable.",
+        ) from exc
 
 
 def _delete_persisted_job(job_id: str) -> None:
-    store: JobStore | None = getattr(app.state, "job_store", None)
-    if store is None:
-        return
     try:
-        store.delete(job_id)
-    except Exception as exc:
-        logger.exception("Failed to delete persisted Agentyzer job %s", job_id)
+        _job_runtime().delete(job_id)
+    except JobStoreUnavailable as exc:
         raise HTTPException(
             status_code=503,
             detail="Assessment job storage is unavailable.",
@@ -430,7 +396,7 @@ def _llm_backend_info() -> LlmBackendInfo:
 
 def _backend_information(owner: str) -> BackendInformation:
     jobs = _jobs_visible_to(owner)
-    max_concurrent_jobs = int(getattr(app.state, "max_concurrent_jobs", 1) or 1)
+    max_concurrent_jobs = _job_runtime().max_concurrent_jobs
     status_counts = _job_status_counts(owner)
     running_jobs = status_counts.get(JobStatus.running.value, 0)
     queued_jobs = status_counts.get(JobStatus.pending.value, 0)
@@ -608,15 +574,11 @@ async def _run_job(job: Job) -> None:
     job.last_updated_at = _now_iso()
     _persist_job(job)
     try:
-        semaphore = getattr(app.state, "job_semaphore", None)
-        if semaphore is None:
+        async with _job_runtime().semaphore:
             await _run_job_with_slot(job)
-        else:
-            async with semaphore:
-                await _run_job_with_slot(job)
     except asyncio.CancelledError:
         logger.info("Job %s cancelled", job.id)
-        shutting_down = bool(getattr(app.state, "shutting_down", False))
+        shutting_down = _job_runtime().shutting_down
         if shutting_down and job.status == JobStatus.pending:
             job.current_activity = "Waiting for analyzer execution slot"
             job.last_updated_at = _now_iso()
@@ -681,15 +643,8 @@ def _apply_and_persist_progress(job: Job, event: Dict[str, Any]) -> None:
     _persist_job(job)
 
 
-def _drop_job_task(job_id: str) -> None:
-    tasks: Dict[str, asyncio.Task[Any]] = getattr(app.state, "job_tasks", {})
-    tasks.pop(job_id, None)
-
-
 def _schedule_job(job: Job) -> None:
-    task = asyncio.create_task(_run_job(job))
-    app.state.job_tasks[job.id] = task
-    task.add_done_callback(lambda _task: _drop_job_task(job.id))
+    _job_runtime().schedule(job, _run_job)
 
 
 def _as_model_dict(value: Any) -> Dict[str, Any]:
@@ -1005,10 +960,7 @@ async def assess(
     )
 
     if sync:
-        semaphore = getattr(app.state, "job_semaphore", None)
-        if semaphore is None:
-            return await _run_assessment(req, llm_client=_client_for_request(req))
-        async with semaphore:
+        async with _job_runtime().semaphore:
             return await _run_assessment(req, llm_client=_client_for_request(req))
 
     # Async mode — create a job and return immediately.
@@ -1215,11 +1167,9 @@ async def delete_job(
     caller: Annotated[ServiceCaller, Depends(require_service_caller)],
 ):
     """Cancel running work or remove a finished job."""
-    jobs: Dict[str, Job] = app.state.jobs
     job = _job_for_caller(job_id, caller)
     if job.status in (JobStatus.pending, JobStatus.running):
-        tasks: Dict[str, asyncio.Task[Any]] = getattr(app.state, "job_tasks", {})
-        task = tasks.get(job_id)
+        task = _job_runtime().tasks.get(job_id)
         if task and not task.done():
             task.cancel()
         job.status = JobStatus.cancelled
@@ -1231,4 +1181,3 @@ async def delete_job(
         _persist_job(job, required=True)
         return None
     _delete_persisted_job(job_id)
-    del jobs[job_id]

@@ -130,6 +130,7 @@ from .project_archive_services import (
     project_archive_snapshots_enabled,
     run_project_archive_snapshot_once,
 )
+from .runtime_state import DTVPRuntimeState
 from .runtime_value_services import get_env_int_with_floor
 from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
@@ -188,12 +189,15 @@ from .vulnerability_support_services import (
 logger = logging.getLogger("dtvp")
 logger.setLevel(logging.INFO)
 
-background_tasks: set[asyncio.Task[Any]] = set()
-app_runtime_state: Dict[str, Any] = {
-    "status": "ready",
-    "message": "DTVP is ready.",
-    "error": None,
-}
+runtime_state = DTVPRuntimeState()
+# Compatibility aliases keep existing integrations stable while construction
+# receives each owned state collection explicitly through dependency objects.
+background_tasks = runtime_state.background_tasks
+app_runtime_state = runtime_state.startup
+tasks = runtime_state.grouped_tasks
+project_archive_tasks = runtime_state.archive_tasks
+tmrescore_project_cache = runtime_state.tmrescore_project_cache
+tmrescore_analysis_tasks = runtime_state.tmrescore_analysis_tasks
 _runtime_tasks: StartupRuntimeTasks | None = None
 _startup_task: asyncio.Task[Any] | None = None
 
@@ -366,12 +370,6 @@ async def startup_status():
         build_startup_status_payload(app_runtime_state),
         headers={"Cache-Control": "no-store"},
     )
-
-
-tasks = {}
-project_archive_tasks: Dict[str, Dict[str, Any]] = {}
-tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
-tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
 
 
 def _is_auto_code_analysis_active() -> bool:

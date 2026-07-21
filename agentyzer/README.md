@@ -112,7 +112,8 @@ flowchart TD
     U --> A[FastAPI service]
     C -->|HTTP| A
 
-    A --> J[In-memory job manager]
+    A --> J[Job runtime coordinator]
+    J --> DB[(Bounded SQLite job store)]
     A --> G[Pipeline graph runner]
     J --> G
 
@@ -215,6 +216,8 @@ That separation is deliberate. Historical version evidence widens the set of pot
 ├── src/
 │   ├── cli.py
 │   ├── http.py
+│   ├── job_runtime.py
+│   ├── job_store.py
 │   ├── main.py
 │   ├── agents/
 │   ├── llm/
@@ -224,7 +227,9 @@ That separation is deliberate. Historical version evidence widens the set of pot
 
 The main code responsibilities are:
 
-- `src/main.py`: FastAPI application, request and response models, async job orchestration, startup lifecycle.
+- `src/main.py`: FastAPI composition root, API routes, and service startup lifecycle.
+- `src/job_runtime.py`: async scheduling, restart recovery, owner views, pruning, persistence coordination, and shutdown.
+- `src/job_store.py`: permission-restricted, bounded SQLite job storage and schema initialization.
 - `src/cli.py`: command-line client for health checks, assessment submission, polling, result rendering, and job cleanup.
 - `src/http.py`: shared HTTP client helper that trusts the system CA store.
 - `src/agents/`: dependency scanning, AST analysis, code scanning, web fetch, version analysis, CVSS rescoring, and verdict logic.
