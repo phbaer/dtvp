@@ -238,6 +238,8 @@ def _register_export_routes(
                 async with client_cls(
                     settings.api_url,
                     api_key=settings.api_key,
+                    backend_id=settings.backend_selection.id,
+                    label=settings.backend_selection.label,
                 ) as client:
                     result = await export_project_archive(
                         deps.service_deps,
@@ -322,6 +324,8 @@ def _register_import_routes(
                 async with client_cls(
                     settings.api_url,
                     api_key=settings.api_key,
+                    backend_id=settings.backend_selection.id,
+                    label=settings.backend_selection.label,
                 ) as client:
                     preview = await preview_project_archive(
                         deps.service_deps,
@@ -394,6 +398,8 @@ def _register_import_routes(
                 async with client_cls(
                     settings.api_url,
                     api_key=settings.import_api_key,
+                    backend_id=settings.backend_selection.id,
+                    label=settings.backend_selection.label,
                 ) as client:
                     result = await apply_project_archive(
                         deps.service_deps,

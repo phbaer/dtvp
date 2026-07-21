@@ -23,6 +23,11 @@ from .assessment_outbox_services import (
 )
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
+from .vulnerability_backend import (
+    backend_scoped_directory,
+    get_backend_selection,
+    validate_backend_id,
+)
 
 logger = logging.getLogger(__name__)
 CACHE_STATUS_TTL_SECONDS = 5.0
@@ -41,7 +46,9 @@ def _is_missing_finding_error(exc: Exception) -> bool:
 
 
 def get_dt_cache_path() -> str:
-    return os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
+    return backend_scoped_directory(
+        os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
+    )
 
 
 def _positive_int_env(name: str, default: int, *, minimum: int = 1) -> int:
@@ -234,7 +241,12 @@ class CacheManager:
         active_project_limit: int = None,
         memory_cache_max_entries: int = None,
         project_query_cache_max_entries: int = None,
+        *,
+        backend_id: str | None = None,
     ):
+        self.backend_id = validate_backend_id(
+            backend_id or get_backend_selection().id
+        )
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
             int(os.getenv("DTVP_DT_CACHE_REFRESH_SECONDS", "60"))
@@ -310,6 +322,24 @@ class CacheManager:
 
     def _ensure_directories(self) -> None:
         os.makedirs(self.base_path, exist_ok=True)
+        marker_path = os.path.join(self.base_path, ".backend.json")
+        expected_marker = {
+            "schema": "dtvp.backend-cache/v1",
+            "backend_id": self.backend_id,
+        }
+        if os.path.exists(marker_path):
+            marker = _read_json(marker_path)
+            if marker != expected_marker:
+                raise RuntimeError(
+                    f"Cache path {self.base_path!r} belongs to a different or "
+                    "invalid vulnerability backend namespace"
+                )
+        else:
+            _atomic_write(marker_path, expected_marker)
+            try:
+                os.chmod(marker_path, 0o600)
+            except OSError:
+                logger.warning("Could not restrict cache marker permissions: %s", marker_path)
         for name in ["findings", "project_vulnerabilities", "boms", "analysis"]:
             os.makedirs(os.path.join(self.base_path, name), exist_ok=True)
 
@@ -418,6 +448,7 @@ class CacheManager:
             )
 
             snapshot = {
+                "backend_id": self.backend_id,
                 "fully_cached": self.cache_meta.get("fully_cached", False),
                 "last_refreshed_at": self.cache_meta.get("last_refreshed_at"),
                 "projects": len(projects),
@@ -701,10 +732,12 @@ class CacheManager:
             self._invalidate_cache_status()
         return changed
 
-    def reset(self, base_path: str = None) -> None:
+    def reset(self, base_path: str = None, *, backend_id: str | None = None) -> None:
         self._write_executor.shutdown(wait=True, cancel_futures=False)
         if base_path:
             self.base_path = base_path
+        if backend_id is not None:
+            self.backend_id = validate_backend_id(backend_id)
         self.lock = asyncio.Lock()
         self.pending_updates = []
         self.active_project_uuids = set()
@@ -973,7 +1006,13 @@ class CacheManager:
 
     async def background_sync_loop(self) -> None:
         settings = DTSettings()
-        async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+        selection = settings.backend_selection
+        async with DTClient(
+            settings.api_url,
+            api_key=settings.api_key,
+            backend_id=selection.id,
+            label=selection.label,
+        ) as client:
             next_cache_refresh = 0.0
             while True:
                 try:

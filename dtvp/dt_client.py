@@ -13,6 +13,9 @@ from .integration_auth import read_secret
 from .vulnerability_backend import (
     BackendCapability,
     BackendDescriptor,
+    BackendSelection,
+    get_backend_selection,
+    validate_backend_selection,
 )
 
 logger = logging.getLogger(__name__)
@@ -488,6 +491,18 @@ class DTClient:
 
 
 class DTSettings(BaseSettings):
+    DTVP_VULNERABILITY_BACKEND_ID: str = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_ID",
+        default="dependency-track",
+    )
+    DTVP_VULNERABILITY_BACKEND_TYPE: str = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_TYPE",
+        default="dependency-track",
+    )
+    DTVP_VULNERABILITY_BACKEND_LABEL: str = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_LABEL",
+        default="Dependency-Track",
+    )
     DTVP_DT_API_URL: str = Field(
         alias="DTVP_DT_API_URL", default="http://localhost:8081"
     )
@@ -537,6 +552,35 @@ class DTSettings(BaseSettings):
             self.DTVP_DT_IMPORT_API_KEY_FILE,
         )
 
+    @property
+    def backend_selection(self) -> BackendSelection:
+        return get_backend_selection(
+            {
+                "DTVP_VULNERABILITY_BACKEND_ID": (
+                    self.DTVP_VULNERABILITY_BACKEND_ID
+                ),
+                "DTVP_VULNERABILITY_BACKEND_TYPE": (
+                    self.DTVP_VULNERABILITY_BACKEND_TYPE
+                ),
+                "DTVP_VULNERABILITY_BACKEND_LABEL": (
+                    self.DTVP_VULNERABILITY_BACKEND_LABEL
+                ),
+            }
+        )
+
+
+def get_configured_backend_descriptor(
+    settings: DTSettings | None = None,
+) -> BackendDescriptor:
+    selection = (settings or DTSettings()).backend_selection
+    validate_backend_selection(selection)
+    return BackendDescriptor(
+        id=selection.id,
+        type=selection.type,
+        label=selection.label,
+        capabilities=DTClient.DEFAULT_CAPABILITIES,
+    )
+
 
 class SharedDTClientProvider:
     """Own the API-key client used by request dependencies for one app lifetime."""
@@ -544,16 +588,27 @@ class SharedDTClientProvider:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._client: DTClient | None = None
-        self._settings_key: tuple[str, str] | None = None
+        self._settings_key: tuple[str, str, str, str] | None = None
 
-    async def get(self, base_url: str, api_key: str) -> DTClient:
-        settings_key = (base_url.rstrip("/"), api_key)
+    async def get(
+        self,
+        base_url: str,
+        api_key: str,
+        backend_id: str,
+        label: str,
+    ) -> DTClient:
+        settings_key = (base_url.rstrip("/"), api_key, backend_id, label)
         previous: DTClient | None = None
         with self._lock:
             if self._client is not None and self._settings_key == settings_key:
                 return self._client
             previous = self._client
-            self._client = DTClient(base_url, api_key=api_key)
+            self._client = DTClient(
+                base_url,
+                api_key=api_key,
+                backend_id=backend_id,
+                label=label,
+            )
             self._settings_key = settings_key
             client = self._client
         if previous is not None:
@@ -578,6 +633,7 @@ def validate_dependency_track_configuration(
     environment: str | None = None,
 ) -> None:
     active = settings or DTSettings()
+    validate_backend_selection(active.backend_selection)
     profile = (environment or os.getenv("DTVP_ENVIRONMENT", "production")).lower()
     if profile != "production":
         return
@@ -594,9 +650,12 @@ def validate_dependency_track_configuration(
 
 async def get_client() -> AsyncGenerator[DTClient, None]:
     settings = DTSettings()
+    selection = settings.backend_selection
     yield await _shared_dt_client_provider.get(
         settings.api_url,
         settings.api_key,
+        selection.id,
+        selection.label,
     )
 
 

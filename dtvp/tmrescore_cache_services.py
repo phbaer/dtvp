@@ -3,6 +3,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .vulnerability_backend import backend_scoped_file
+
 
 @dataclass(frozen=True)
 class TMRescoreCacheServiceDeps:
@@ -14,8 +16,10 @@ class TMRescoreCacheServiceDeps:
 def get_tmrescore_cache_path() -> str:
     configured_path = os.getenv("DTVP_TMRESCORE_CACHE_PATH", "").strip()
     if configured_path:
-        return configured_path
-    return os.path.join(os.getcwd(), "data", "tmrescore_proposals.json")
+        return backend_scoped_file(configured_path)
+    return backend_scoped_file(
+        os.path.join(os.getcwd(), "data", "tmrescore_proposals.json")
+    )
 
 
 def load_tmrescore_project_cache(

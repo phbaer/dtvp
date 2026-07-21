@@ -76,6 +76,20 @@ def app_info_client(tmp_path):
     deps = AppInfoRouteDeps(
         version="2.3.4",
         build_commit="abc123",
+        get_vulnerability_backend=lambda: {
+            "id": "dependency-track",
+            "type": "dependency-track",
+            "label": "Dependency-Track",
+            "capabilities": ["finding_read"],
+        },
+        get_backend_adapter_catalog=lambda: [
+            {
+                "type": "dependency-track",
+                "label": "Dependency-Track",
+                "available": True,
+                "status": "available",
+            }
+        ],
         load_pyproject_metadata=lambda: {"name": "dtvp"},
         get_cache_status=lambda: {"ready": True},
         get_performance_status=lambda: {"group_queries": {"active": 0}},
@@ -118,7 +132,16 @@ def test_app_info_routes_return_metadata_and_generated_openapi(app_info_client):
             "free_threading_active": True,
             "free_threading_required": True,
         },
+        "vulnerability_backend": {
+            "id": "dependency-track",
+            "type": "dependency-track",
+            "label": "Dependency-Track",
+            "capabilities": ["finding_read"],
+        },
     }
+    assert client.get("/api/vulnerability-backend").json()["adapters"][0][
+        "available"
+    ] is True
     assert client.get("/api/metadata").json() == {"name": "dtvp"}
     assert client.get("/api/cache-status").json() == {"ready": True}
     assert client.get("/api/performance-status").json() == {

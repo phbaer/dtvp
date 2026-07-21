@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from .analysis_queue_runtime import AnalysisQueueItem
 from .sqlite_migration_services import run_sqlite_migrations
+from .vulnerability_backend import backend_scoped_file
 
 
 ANALYSIS_QUEUE_MIGRATION_NAMESPACE = "analysis_queue"
@@ -18,8 +19,10 @@ ANALYSIS_QUEUE_MIGRATION_NAMESPACE = "analysis_queue"
 def get_analysis_queue_state_path() -> str:
     configured_path = os.getenv("DTVP_ANALYSIS_QUEUE_STATE_PATH", "").strip()
     if configured_path:
-        return configured_path
-    return os.path.join(os.getcwd(), "data", "analysis_queue.sqlite")
+        return backend_scoped_file(configured_path)
+    return backend_scoped_file(
+        os.path.join(os.getcwd(), "data", "analysis_queue.sqlite")
+    )
 
 
 def get_analysis_queue_migrations_path() -> Path:

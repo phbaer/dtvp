@@ -13,11 +13,18 @@ import {
 } from './lib/authSession'
 import ChangelogModal from './components/ChangelogModal.vue'
 import AnalysisQueueIndicator from './components/AnalysisQueueIndicator.vue'
-import type { PythonRuntimeStatus } from './types'
+import type { PythonRuntimeStatus, VulnerabilityBackendDescriptor } from './types'
+import {
+    DEFAULT_VULNERABILITY_BACKEND,
+    VULNERABILITY_BACKEND_KEY,
+} from './lib/vulnerabilityBackend'
 
 const version = ref('')
 const build = ref('')
 const backendRuntime = ref<PythonRuntimeStatus | null>(null)
+const vulnerabilityBackend = ref<VulnerabilityBackendDescriptor>(
+    DEFAULT_VULNERABILITY_BACKEND,
+)
 const user = ref({ username: '', role: '' })
 const realRole = ref('')
 const isAnalystView = ref(false)
@@ -48,6 +55,7 @@ provide('user', computed(() => ({
     role: effectiveRole.value
 })))
 provide('realRole', effectiveRole)
+provide(VULNERABILITY_BACKEND_KEY, computed(() => vulnerabilityBackend.value))
 
 const isAuthFailure = (error: any) => {
     const status = error?.response?.status
@@ -74,6 +82,9 @@ const loadVersionInfo = async () => {
     // Baseline for staleness detection: whatever the server reports now is, by
     // definition, the build this tab just loaded.
     recordServerIdentity(v)
+    vulnerabilityBackend.value = (
+        v.vulnerability_backend || DEFAULT_VULNERABILITY_BACKEND
+    )
 
     const lastSeenVersion = localStorage.getItem('dtvp_last_seen_version')
     if (lastSeenVersion !== v.version && v.version !== '0.0.0') {
@@ -497,7 +508,7 @@ const reloadForUpdate = () => {
         <footer class="z-40 w-full shrink-0 border-t border-gray-700/70 bg-gray-900/70 backdrop-blur-2xl">
             <div class="w-full p-3 flex flex-col gap-1 text-center text-[11px] text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:text-left">
                 <div class="font-medium text-gray-300">
-                    DTVP v{{ version }} (build {{ build }})
+                    DTVP v{{ version }} (build {{ build }}) · {{ vulnerabilityBackend.label }}
                     <span
                         v-if="realRole === 'REVIEWER' && backendRuntimeLabel"
                         class="ml-2 text-cyan-300"

@@ -17,7 +17,7 @@ import type {
     ProjectArchiveSnapshot,
     ProjectArchiveTask,
     BackendPerformanceStatus,
-    DTVPVersionInfo,
+    VersionInfo,
 } from '../types';
 import { getRuntimeConfig } from './env';
 import { notifyAuthExpired } from './authSession';
@@ -87,7 +87,7 @@ export const getTaskStatistics = async (taskId: string): Promise<Statistics> => 
     return res.data;
 };
 
-export const getVersion = async (): Promise<DTVPVersionInfo> => {
+export const getVersion = async (): Promise<VersionInfo> => {
     const res = await api.get('/version');
     return res.data;
 };
