@@ -172,6 +172,7 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     assert await client.start_assessment_sync(
         vuln_id="CVE-2024-1001",
         component_name="libB",
+        affected_product_versions=["2.0.0"],
         debug=False,
     ) == {"job_id": "job-2"}
 
@@ -189,6 +190,9 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
 
     assert dummy_client.post.call_count == 2
     assert dummy_client.post.call_args_list[1].kwargs["params"] == {"sync": "true"}
+    assert dummy_client.post.call_args_list[1].kwargs["json"][
+        "affected_product_versions"
+    ] == ["2.0.0"]
     assert (
         dummy_client.post.call_args_list[0].kwargs["json"]["user_guidance"]
         == "Please review"
@@ -198,6 +202,14 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     assert payload["llm_backend"] == "openwebui"
     assert payload["llm_provider"] == "OpenWebUI"
     dummy_client.aclose.assert_awaited_once()
+
+
+def test_legacy_agenyzer_client_delegates_to_canonical_implementation():
+    assert issubclass(agentizer.AgenyzerClient, code_analysis.CodeAnalysisClient)
+    assert (
+        agentizer.AgenyzerClient.start_assessment
+        is code_analysis.CodeAnalysisClient.start_assessment
+    )
 
 
 @pytest.mark.parametrize(

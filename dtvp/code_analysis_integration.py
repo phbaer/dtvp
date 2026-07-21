@@ -293,6 +293,7 @@ class CodeAnalysisClient:
         llm_provider: Optional[str] = None,
         focus_path: Optional[str] = None,
         dependency_paths: Optional[list] = None,
+        affected_product_versions: Optional[list[str]] = None,
         debug: bool = False,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"component_name": component_name}
@@ -319,6 +320,8 @@ class CodeAnalysisClient:
             payload["focus_path"] = focus_path
         if dependency_paths:
             payload["dependency_paths"] = dependency_paths
+        if affected_product_versions:
+            payload["affected_product_versions"] = affected_product_versions
         payload["debug"] = debug
 
         response = await self.client.post(

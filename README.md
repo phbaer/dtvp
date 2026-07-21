@@ -141,6 +141,11 @@ Important backend components:
 | `dtvp/tmrescore_*` | Threat-model integration, inventory, cache, execution, and task state |
 | `dtvp/code_analysis_*` and `analysis_queue_*` | Analyzer integration, result store, queue, and automatic scans |
 
+`dtvp.code_analysis_integration` is the only maintained analyzer HTTP client.
+The former misspelled `dtvp.agentizer_integration` import remains a thin
+compatibility facade for downstream callers and legacy `DTVP_AGENYZER_*`
+settings; new code must use the provider-neutral `DTVP_CODE_ANALYSIS_*` names.
+
 Important frontend components:
 
 | Component | Role |
