@@ -175,6 +175,17 @@ Important frontend components:
   TMRescore, archive management, global code-analysis controls, bulk queue
   controls, and settings changes enforce reviewer permissions in the backend;
   frontend visibility is not treated as an authorization boundary.
+- Assessment writes are authorized and reconciled by the backend. A normal
+  write must include the current snapshot for every unique finding UUID; DTVP
+  refreshes those findings from Dependency-Track and returns `409` on a stale
+  snapshot or `503` when it cannot verify current state. Analysts can update
+  only a named, non-General team block and cannot alter suppression, review,
+  rescoring, shared text, or another team's block. The backend reconstructs an
+  analyst replacement from the fresh server document. Only reviewers can use
+  force-overwrite, and force requires `REPLACE` mode. The conflict dialog does
+  not expose force-overwrite to analysts.
+- Project dependency-chain reads require an authenticated DTVP session, like
+  the other project and finding endpoints.
 - Live task registries are process-local; the supplied Uvicorn/PM2 launch uses
   one backend worker. A horizontally scaled deployment needs a shared task and
   result store before enabling multiple backend workers.

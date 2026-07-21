@@ -208,12 +208,16 @@ def build_assessment_service_deps(
     logger: Any,
     calculate_aggregated_state: Callable[[str], str],
     process_assessment_details: Callable[..., tuple[str, str]],
+    build_authorized_analyst_assessment_details: Callable[..., tuple[str, str]],
 ) -> AssessmentServiceDeps:
     return AssessmentServiceDeps(
         cache_manager=cache_manager,
         logger=logger,
         calculate_aggregated_state=calculate_aggregated_state,
         process_assessment_details=process_assessment_details,
+        build_authorized_analyst_assessment_details=(
+            build_authorized_analyst_assessment_details
+        ),
     )
 
 

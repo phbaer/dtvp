@@ -20,6 +20,10 @@ def _deps(cache_manager=None) -> AssessmentServiceDeps:
         logger=logging.getLogger(__name__),
         calculate_aggregated_state=lambda _details: "NOT_SET",
         process_assessment_details=lambda *_args, **_kwargs: ("", "NOT_SET"),
+        build_authorized_analyst_assessment_details=lambda **_kwargs: (
+            "",
+            "NOT_SET",
+        ),
     )
 
 

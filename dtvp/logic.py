@@ -1,7 +1,9 @@
 import json
 import logging
+import math
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .authorization import resolve_user_role, validate_user_roles_config
@@ -1219,7 +1221,9 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
 
         # Clean metadata from content to prevent leakage
         content = re.sub(
-            r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date):\s*[^\]]*\]",
+            r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|"
+            r"Justification|Date|Assigned|Evidence Reviewed|Version Coverage|"
+            r"Ticket):\s*[^\]]*\]",
             "",
             content,
         )
@@ -1269,12 +1273,171 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                     "rescored": rescored_val,
                     "vector": parsed_tags.get("Rescored Vector"),
                     "assigned": assigned_list,
+                    "evidence_reviewed": parsed_tags.get(
+                        "Evidence Reviewed", ""
+                    ).casefold()
+                    in {"yes", "true", "checked"},
+                    "version_coverage_checked": parsed_tags.get(
+                        "Version Coverage", ""
+                    ).casefold()
+                    in {"yes", "true", "checked"},
+                    "ticket": parsed_tags.get("Ticket", ""),
                     "timestamp": timestamp,
                     "details": content,
                 }
             )
 
     return shared_text, blocks
+
+
+ASSESSMENT_STATES = frozenset(
+    {
+        "EXPLOITABLE",
+        "FALSE_POSITIVE",
+        "IN_TRIAGE",
+        "NOT_AFFECTED",
+        "NOT_SET",
+        "RESOLVED",
+    }
+)
+
+
+def _assessment_header_value(value: Any) -> str:
+    return re.sub(
+        r"\s+",
+        " ",
+        str(value or "")
+        .replace("[", "")
+        .replace("]", "")
+        .replace("---", ""),
+    ).strip()
+
+
+def _render_assessment_document(
+    shared_text: str,
+    blocks: List[Dict[str, Any]],
+    *,
+    pending_review: bool,
+) -> str:
+    parts = [shared_text.strip()] if shared_text.strip() else []
+    for block in blocks:
+        header_parts = [
+            f"[Team: {_assessment_header_value(block.get('team'))}]",
+            f"[State: {_assessment_header_value(block.get('state') or 'NOT_SET')}]",
+            f"[Assessed By: {_assessment_header_value(block.get('user') or 'unknown')}]",
+        ]
+        if block.get("reviewer"):
+            header_parts.append(
+                f"[Reviewed By: {_assessment_header_value(block['reviewer'])}]"
+            )
+        if block.get("timestamp") is not None:
+            header_parts.append(
+                f"[Date: {_assessment_header_value(block['timestamp'])}]"
+            )
+        if block.get("justification"):
+            header_parts.append(
+                f"[Justification: {_assessment_header_value(block['justification'])}]"
+            )
+        if block.get("rescored") is not None:
+            rescored = float(block["rescored"])
+            if math.isfinite(rescored):
+                header_parts.append(f"[Rescored: {rescored}]")
+        if block.get("vector"):
+            header_parts.append(
+                f"[Rescored Vector: {_assessment_header_value(block['vector'])}]"
+            )
+        if block.get("assigned"):
+            assigned = ", ".join(
+                _assessment_header_value(value) for value in block["assigned"]
+            )
+            header_parts.append(f"[Assigned: {assigned}]")
+        if block.get("evidence_reviewed"):
+            header_parts.append("[Evidence Reviewed: yes]")
+        if block.get("version_coverage_checked"):
+            header_parts.append("[Version Coverage: yes]")
+        if block.get("ticket"):
+            header_parts.append(
+                f"[Ticket: {_assessment_header_value(block['ticket'])}]"
+            )
+        content = str(block.get("details") or "").strip()
+        rendered = f"--- {' '.join(header_parts)} ---"
+        if content:
+            rendered += f"\n{content}"
+        parts.append(rendered)
+    if pending_review:
+        parts.append("[Status: Pending Review]")
+    return "\n\n".join(parts).strip()
+
+
+def build_authorized_analyst_assessment_details(
+    *,
+    requested_details: str,
+    current_details: str,
+    team: str | None,
+    username: str,
+) -> tuple[str, str]:
+    """Apply only the analyst's target-team block to server-owned details."""
+    target_key = _assessment_team_key(team)
+    if not target_key or target_key == "general":
+        raise ValueError("Analysts must update a non-General team assessment")
+
+    _requested_shared, requested_blocks = _parse_assessment_blocks(requested_details)
+    current_shared, current_blocks = _parse_assessment_blocks(current_details)
+
+    requested_keys = [
+        _assessment_team_key(block.get("team")) for block in requested_blocks
+    ]
+    if any(not key for key in requested_keys) or len(set(requested_keys)) != len(
+        requested_keys
+    ):
+        raise ValueError("Assessment contains duplicate or invalid team blocks")
+
+    requested_by_team = {
+        _assessment_team_key(block.get("team")): block for block in requested_blocks
+    }
+    target = requested_by_team.get(target_key)
+    if target is not None:
+        if str(target.get("user") or "") != username:
+            raise ValueError("Assessment author must match the authenticated user")
+        if target.get("reviewer"):
+            raise ValueError("Analysts cannot mark assessments as reviewed")
+        state = str(target.get("state") or "").upper()
+        if state not in ASSESSMENT_STATES:
+            raise ValueError("Assessment state is invalid")
+
+    current = _deduplicate_assessment_blocks(current_blocks)
+    current_target = next(
+        (
+            block
+            for block in current
+            if _assessment_team_key(block.get("team")) == target_key
+        ),
+        None,
+    )
+    current = [
+        block
+        for block in current
+        if _assessment_team_key(block.get("team")) != target_key
+    ]
+    if target is not None:
+        target = {
+            **target,
+            "team": str(team).strip(),
+            "state": str(target.get("state") or "NOT_SET").upper(),
+            "user": username,
+            "reviewer": None,
+            "timestamp": int(time.time() * 1000),
+            "rescored": current_target.get("rescored") if current_target else None,
+            "vector": current_target.get("vector") if current_target else None,
+        }
+        current.append(target)
+
+    final_details = _render_assessment_document(
+        current_shared,
+        current,
+        pending_review=True,
+    )
+    return final_details, calculate_aggregated_state(final_details)
 
 
 def _assessment_team_key(value: Any) -> str:
@@ -1347,7 +1510,9 @@ def process_assessment_details(
     # 3. Clean New Content (Strip all headers and tags)
     content = re.sub(r"---.*?---", "", new_details, flags=re.DOTALL)
     content = re.sub(
-        r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State):\s*[^\]]*\]",
+        r"\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|"
+        r"Justification|Date|Assigned|Evidence Reviewed|Version Coverage|"
+        r"Ticket):\s*[^\]]*\]",
         "",
         content,
     )
@@ -1443,42 +1608,21 @@ def process_assessment_details(
         )
     blocks_list = _deduplicate_assessment_blocks(blocks_list)
 
-    # 6. Reconstruct Final String
-    final_parts = []
-    if shared_text:
-        final_parts.append(shared_text)
-
-    for b in blocks_list:
-        # Skip empty blocks if they aren't the target and aren't set
-        if (
-            _assessment_team_key(b["team"]) != target_key
-            and b["state"] == "NOT_SET"
-            and not b.get("details")
-        ):
-            continue
-
-        h_parts = [
-            f"[Team: {b['team']}]",
-            f"[State: {b['state']}]",
-            f"[Assessed By: {b['user']}]",
-        ]
-        if b.get("reviewer"):
-            h_parts.append(f"[Reviewed By: {b['reviewer']}]")
-        if b.get("rescored") is not None:
-            h_parts.append(f"[Rescored: {b['rescored']}]")
-        if b.get("vector"):
-            h_parts.append(f"[Rescored Vector: {b['vector']}]")
-        if b.get("assigned"):
-            h_parts.append(f"[Assigned: {', '.join(b['assigned'])}]")
-
-        header = "--- " + " ".join(h_parts) + " ---"
-        final_parts.append(f"{header}\n{b.get('details') or ''}")
-
-    final_str = "\n\n".join(final_parts).strip()
-
-    # Add Pending Status if updated by Analyst
-    if role == "ANALYST" and "[Status: Pending Review]" not in final_str:
-        final_str += "\n\n[Status: Pending Review]"
+    # 6. Reconstruct the canonical document while preserving safe metadata.
+    rendered_blocks = [
+        block
+        for block in blocks_list
+        if not (
+            _assessment_team_key(block["team"]) != target_key
+            and block["state"] == "NOT_SET"
+            and not block.get("details")
+        )
+    ]
+    final_str = _render_assessment_document(
+        shared_text,
+        rendered_blocks,
+        pending_review=role == "ANALYST",
+    )
 
     # 7. Aggregate State
     agg_state = calculate_aggregated_state(final_str)

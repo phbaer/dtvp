@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from dtvp.main import app, get_client
+from dtvp.main import app, get_client, get_current_user
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -10,6 +10,14 @@ client = TestClient(app)
 def mock_dt_client():
     with patch("dtvp.main.get_client") as mock:
         yield mock
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[get_current_user] = lambda: "test_user"
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_client, None)
 
 
 @pytest.fixture
@@ -23,7 +31,6 @@ def test_get_dependency_chains_success(mock_dt_client, mock_bom_analysis_cache):
     mock_client_instance = AsyncMock()
     # Mock dependency injection
     app.dependency_overrides[get_client] = lambda: mock_client_instance
-    app.dependency_overrides["get_current_user"] = lambda: "test_user"
 
     # Mock BOM response
     mock_client_instance.get_bom.return_value = {
@@ -55,7 +62,6 @@ def test_get_dependency_chains_success(mock_dt_client, mock_bom_analysis_cache):
 def test_get_dependency_chains_no_bom(mock_dt_client):
     mock_client_instance = AsyncMock()
     app.dependency_overrides[get_client] = lambda: mock_client_instance
-    app.dependency_overrides["get_current_user"] = lambda: "test_user"
 
     mock_client_instance.get_bom.return_value = None
 
@@ -69,7 +75,6 @@ def test_get_dependency_chains_no_bom(mock_dt_client):
 def test_get_dependency_chains_limit_query(mock_dt_client, mock_bom_analysis_cache):
     mock_client_instance = AsyncMock()
     app.dependency_overrides[get_client] = lambda: mock_client_instance
-    app.dependency_overrides["get_current_user"] = lambda: "test_user"
 
     mock_client_instance.get_bom.return_value = {
         "components": [{"uuid": "comp1", "name": "comp1"}]
@@ -91,3 +96,11 @@ def test_get_dependency_chains_limit_query(mock_dt_client, mock_bom_analysis_cac
         component_name="",
         max_paths=10,
     )
+
+
+def test_get_dependency_chains_requires_authentication(mock_dt_client):
+    app.dependency_overrides.pop(get_current_user, None)
+
+    response = client.get("/api/project/proj1/component/comp1/dependency-chains")
+
+    assert response.status_code == 401

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -179,31 +179,32 @@ def test_update_assessment_conflict(api_client, mock_client):
         "isSuppressed": False,
     }
 
-    response = api_client.post(
-        "/api/assessment",
-        json={
-            "instances": [
-                {
-                    "project_uuid": "p1",
-                    "component_uuid": "c1",
-                    "vulnerability_uuid": "v1",
-                    "finding_uuid": "f1",
-                    "project_name": "Pro",
-                    "project_version": "1.0",
-                    "component_name": "Comp",
-                }
-            ],
-            "state": "NOT_AFFECTED",
-            "details": "My local change",
-            "original_analysis": {
-                "f1": {
-                    "analysisState": "NOT_SET",
-                    "analysisDetails": "Original details",
-                    "isSuppressed": False,
-                }
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        response = api_client.post(
+            "/api/assessment",
+            json={
+                "instances": [
+                    {
+                        "project_uuid": "p1",
+                        "component_uuid": "c1",
+                        "vulnerability_uuid": "v1",
+                        "finding_uuid": "f1",
+                        "project_name": "Pro",
+                        "project_version": "1.0",
+                        "component_name": "Comp",
+                    }
+                ],
+                "state": "NOT_AFFECTED",
+                "details": "My local change",
+                "original_analysis": {
+                    "f1": {
+                        "analysisState": "NOT_SET",
+                        "analysisDetails": "Original details",
+                        "isSuppressed": False,
+                    }
+                },
             },
-        },
-    )
+        )
 
     assert response.status_code == 409
     content = response.json()
@@ -219,31 +220,32 @@ def test_update_assessment_ignores_timestamp_differences(api_client, mock_client
         "isSuppressed": False,
     }
 
-    response = api_client.post(
-        "/api/assessment",
-        json={
-            "instances": [
-                {
-                    "project_uuid": "p1",
-                    "component_uuid": "c1",
-                    "vulnerability_uuid": "v1",
-                    "finding_uuid": "f1",
-                    "project_name": "Pro",
-                    "project_version": "1.0",
-                    "component_name": "Comp",
-                }
-            ],
-            "state": "EXPLOITABLE",
-            "details": "My local change",
-            "original_analysis": {
-                "f1": {
-                    "analysisState": "EXPLOITABLE",
-                    "analysisDetails": "--- [Team: General] [State: EXPLOITABLE] [Assessed By: tester2] [Date: 1710001000000] ---\nDetails\n",
-                    "isSuppressed": False,
-                }
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        response = api_client.post(
+            "/api/assessment",
+            json={
+                "instances": [
+                    {
+                        "project_uuid": "p1",
+                        "component_uuid": "c1",
+                        "vulnerability_uuid": "v1",
+                        "finding_uuid": "f1",
+                        "project_name": "Pro",
+                        "project_version": "1.0",
+                        "component_name": "Comp",
+                    }
+                ],
+                "state": "EXPLOITABLE",
+                "details": "My local change",
+                "original_analysis": {
+                    "f1": {
+                        "analysisState": "EXPLOITABLE",
+                        "analysisDetails": "--- [Team: General] [State: EXPLOITABLE] [Assessed By: tester2] [Date: 1710001000000] ---\nDetails\n",
+                        "isSuppressed": False,
+                    }
+                },
             },
-        },
-    )
+        )
 
     assert response.status_code == 200
     results = response.json()
@@ -261,31 +263,32 @@ def test_update_assessment_no_conflict_with_same_analysis_details_key(
         "isSuppressed": False,
     }
 
-    response = api_client.post(
-        "/api/assessment",
-        json={
-            "instances": [
-                {
-                    "project_uuid": "p1",
-                    "component_uuid": "c1",
-                    "vulnerability_uuid": "v1",
-                    "finding_uuid": "f1",
-                    "project_name": "Pro",
-                    "project_version": "1.0",
-                    "component_name": "Comp",
-                }
-            ],
-            "state": "EXPLOITABLE",
-            "details": "My local change",
-            "original_analysis": {
-                "f1": {
-                    "analysisState": "EXPLOITABLE",
-                    "analysis_details": "Same details",
-                    "is_suppressed": False,
-                }
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        response = api_client.post(
+            "/api/assessment",
+            json={
+                "instances": [
+                    {
+                        "project_uuid": "p1",
+                        "component_uuid": "c1",
+                        "vulnerability_uuid": "v1",
+                        "finding_uuid": "f1",
+                        "project_name": "Pro",
+                        "project_version": "1.0",
+                        "component_name": "Comp",
+                    }
+                ],
+                "state": "EXPLOITABLE",
+                "details": "My local change",
+                "original_analysis": {
+                    "f1": {
+                        "analysisState": "EXPLOITABLE",
+                        "analysis_details": "Same details",
+                        "is_suppressed": False,
+                    }
+                },
             },
-        },
-    )
+        )
 
     assert response.status_code == 200
     results = response.json()
@@ -299,31 +302,32 @@ def test_update_assessment_ignores_empty_current_analysis_if_same_baseline(
 ):
     mock_client.get_analysis.return_value = {}
 
-    response = api_client.post(
-        "/api/assessment",
-        json={
-            "instances": [
-                {
-                    "project_uuid": "p1",
-                    "component_uuid": "c1",
-                    "vulnerability_uuid": "v1",
-                    "finding_uuid": "f1",
-                    "project_name": "Pro",
-                    "project_version": "1.0",
-                    "component_name": "Comp",
-                }
-            ],
-            "state": "NOT_SET",
-            "details": "",
-            "original_analysis": {
-                "f1": {
-                    "analysisState": "NOT_SET",
-                    "analysisDetails": "",
-                    "isSuppressed": False,
-                }
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        response = api_client.post(
+            "/api/assessment",
+            json={
+                "instances": [
+                    {
+                        "project_uuid": "p1",
+                        "component_uuid": "c1",
+                        "vulnerability_uuid": "v1",
+                        "finding_uuid": "f1",
+                        "project_name": "Pro",
+                        "project_version": "1.0",
+                        "component_name": "Comp",
+                    }
+                ],
+                "state": "NOT_SET",
+                "details": "",
+                "original_analysis": {
+                    "f1": {
+                        "analysisState": "NOT_SET",
+                        "analysisDetails": "",
+                        "isSuppressed": False,
+                    }
+                },
             },
-        },
-    )
+        )
 
     assert response.status_code == 200
     results = response.json()
@@ -339,29 +343,31 @@ def test_update_assessment_force(api_client, mock_client):
         "isSuppressed": False,
     }
 
-    response = api_client.post(
-        "/api/assessment",
-        json={
-            "instances": [
-                {
-                    "project_uuid": "p1",
-                    "component_uuid": "c1",
-                    "vulnerability_uuid": "v1",
-                    "finding_uuid": "f1",
-                }
-            ],
-            "state": "NOT_AFFECTED",
-            "details": "My local change",
-            "original_analysis": {
-                "f1": {
-                    "analysisState": "NOT_SET",
-                    "analysisDetails": "Original details",
-                    "isSuppressed": False,
-                }
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        response = api_client.post(
+            "/api/assessment",
+            json={
+                "instances": [
+                    {
+                        "project_uuid": "p1",
+                        "component_uuid": "c1",
+                        "vulnerability_uuid": "v1",
+                        "finding_uuid": "f1",
+                    }
+                ],
+                "state": "NOT_AFFECTED",
+                "details": "My local change",
+                "original_analysis": {
+                    "f1": {
+                        "analysisState": "NOT_SET",
+                        "analysisDetails": "Original details",
+                        "isSuppressed": False,
+                    }
+                },
+                "force": True,
+                "comparison_mode": "REPLACE",
             },
-            "force": True,
-        },
-    )
+        )
 
     assert response.status_code == 200
     results = response.json()

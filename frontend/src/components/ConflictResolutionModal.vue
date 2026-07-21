@@ -64,6 +64,7 @@
             Discard My Changes (Use Server)
           </button>
           <button
+            v-if="canForce"
             @click="$emit('force-overwrite')"
             class="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-bold transition-colors disabled:opacity-50"
           >
@@ -80,6 +81,7 @@
 const props = defineProps<{
   show: boolean
   conflictData: Array<any> | null
+  canForce?: boolean
 }>()
 
 const emit = defineEmits<{

@@ -270,10 +270,11 @@ Details A`;
         });
 
         it('should parse review context metadata from block headers', () => {
-            const text = `--- [Team: Platform] [State: IN_TRIAGE] [Assessed By: alice] [Evidence Reviewed: yes] [Version Coverage: checked] [Ticket: SEC-42] ---
+            const text = `--- [Team: Platform] [State: IN_TRIAGE] [Assessed By: alice] [Reviewed By: reviewer] [Evidence Reviewed: yes] [Version Coverage: checked] [Ticket: SEC-42] ---
 Checked direct usage and release branches.`;
             const blocks = parseAssessmentBlocks(text);
             expect(blocks).toHaveLength(1);
+            expect(blocks[0].reviewer).toBe('reviewer');
             expect(blocks[0].evidenceReviewed).toBe(true);
             expect(blocks[0].versionCoverageChecked).toBe(true);
             expect(blocks[0].ticket).toBe('SEC-42');
@@ -318,6 +319,7 @@ Checked direct usage and release branches.`;
                 team: 'Platform',
                 state: 'IN_TRIAGE',
                 user: 'bob',
+                reviewer: 'reviewer',
                 details: 'Reviewed.',
                 justification: 'NOT_SET',
                 evidenceReviewed: true,
@@ -326,6 +328,7 @@ Checked direct usage and release branches.`;
             }];
             const { text } = constructAssessmentDetails(blocks, [], false);
             expect(text).toContain('[Evidence Reviewed: yes]');
+            expect(text).toContain('[Reviewed By: reviewer]');
             expect(text).toContain('[Version Coverage: yes]');
             expect(text).toContain('[Ticket: SEC-42 ignored]');
             expect(text).toContain('Reviewed.');

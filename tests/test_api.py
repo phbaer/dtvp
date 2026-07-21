@@ -1971,6 +1971,12 @@ def test_get_sbom_endpoints(client, tmp_path):
 
 
 def test_assessment_update(client, mock_dt_client):
+    current = {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": False,
+    }
+    mock_dt_client.get_analysis.return_value = current
     payload = {
         "instances": [
             {
@@ -1984,6 +1990,7 @@ def test_assessment_update(client, mock_dt_client):
         "details": "Verified as false positive",
         "comment": "False positive",
         "suppressed": True,
+        "original_analysis": {"fuuid": current},
     }
 
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
@@ -2051,6 +2058,12 @@ def test_assessment_update_refreshes_grouped_task_windows(client, mock_dt_client
         "_group_query_index": build_task_group_query_index(summary_result),
     }
 
+    current = {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": False,
+    }
+    mock_dt_client.get_analysis.return_value = current
     payload = {
         "instances": [
             {
@@ -2063,6 +2076,7 @@ def test_assessment_update_refreshes_grouped_task_windows(client, mock_dt_client
         "state": "NOT_AFFECTED",
         "details": "Reviewed as not affected",
         "suppressed": False,
+        "original_analysis": {"fuuid": current},
     }
 
     try:
@@ -2093,6 +2107,12 @@ def test_assessment_update_refreshes_grouped_task_windows(client, mock_dt_client
 
 def test_assessment_update_failure(client, mock_dt_client):
     mock_dt_client.update_analysis.side_effect = Exception("Analysis update failed")
+    current = {
+        "analysisState": "NOT_SET",
+        "analysisDetails": "",
+        "isSuppressed": False,
+    }
+    mock_dt_client.get_analysis.return_value = current
 
     payload = {
         "instances": [
@@ -2105,9 +2125,11 @@ def test_assessment_update_failure(client, mock_dt_client):
         ],
         "state": "NOT_AFFECTED",
         "details": "Fail",
+        "original_analysis": {"f1": current},
     }
 
-    response = client.post("/api/assessment", json=payload)
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        response = client.post("/api/assessment", json=payload)
     assert response.status_code == 200
     results = response.json()
     assert len(results) == 1

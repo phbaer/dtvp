@@ -42,6 +42,7 @@ from .grouped_vuln_services import (
     summarize_grouped_vulnerabilities,
 )
 from .logic import (
+    ASSESSMENT_STATES,
     RE_SCORE,
     RE_VECTOR,
     populate_group_dependency_chains,
@@ -62,22 +63,22 @@ from .task_group_query_services import (
 
 
 class AssessmentRequest(BaseModel):
-    instances: list[dict]
-    state: str
-    details: str
+    instances: list[dict] = Field(min_length=1, max_length=500)
+    state: str = Field(min_length=1, max_length=50)
+    details: str = Field(max_length=1_000_000)
     comment: Optional[str] = None
     justification: Optional[str] = None
     suppressed: bool = False
-    team: Optional[str] = None
-    assigned: Optional[list[str]] = None
+    team: Optional[str] = Field(default=None, max_length=200)
+    assigned: Optional[list[str]] = Field(default=None, max_length=100)
     original_analysis: Optional[dict[str, dict[str, Any]]] = None
     force: bool = False
     comparison_mode: Optional[str] = "MERGE"
-    analysis_run_ids: list[str] = Field(default_factory=list)
+    analysis_run_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 class AssessmentDetailsRequest(BaseModel):
-    instances: list[dict]
+    instances: list[dict] = Field(min_length=1, max_length=500)
 
 
 class AssessmentRestoreRequest(BaseModel):
@@ -1951,8 +1952,65 @@ def _register_assessment_routes(
             bool(req.original_analysis),
         )
 
-        if not req.force and req.original_analysis:
+        role = deps.get_user_role(user).upper()
+        comparison_mode = str(req.comparison_mode or "MERGE").upper()
+        if comparison_mode not in {"MERGE", "REPLACE"}:
+            raise HTTPException(status_code=422, detail="Invalid comparison mode")
+        normalized_state = str(req.state or "").upper()
+        if normalized_state not in ASSESSMENT_STATES:
+            raise HTTPException(status_code=422, detail="Invalid assessment state")
+
+        if req.force:
+            require_reviewer_role(
+                role,
+                "Only reviewers can force-overwrite an assessment",
+            )
+            if comparison_mode != "REPLACE":
+                raise HTTPException(
+                    status_code=422,
+                    detail="Force overwrite requires REPLACE comparison mode",
+                )
+            working_request = req.model_copy(
+                update={
+                    "comparison_mode": comparison_mode,
+                    "state": normalized_state,
+                }
+            )
+        else:
+            finding_ids = [
+                instance.get("finding_uuid") for instance in req.instances
+            ]
+            if (
+                not finding_ids
+                or any(
+                    not isinstance(finding_id, str) or not finding_id
+                    for finding_id in finding_ids
+                )
+                or len(set(finding_ids)) != len(finding_ids)
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Every assessment instance requires a unique finding_uuid",
+                )
+            if not isinstance(req.original_analysis, dict) or any(
+                not isinstance(req.original_analysis.get(finding_id), dict)
+                or not req.original_analysis.get(finding_id)
+                for finding_id in finding_ids
+            ):
+                raise HTTPException(
+                    status_code=428,
+                    detail=(
+                        "Current assessment snapshots are required; reload the "
+                        "assessment before saving"
+                    ),
+                )
+
             current_analyses = await deps.fetch_current_assessment_analyses(req, client)
+            if any(not isinstance(current, dict) for current in current_analyses):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Could not verify the current assessment state",
+                )
             conflicts = deps.collect_assessment_conflicts(req, current_analyses)
             if conflicts:
                 return JSONResponse(
@@ -1960,8 +2018,38 @@ def _register_assessment_routes(
                     content={"status": "conflict", "conflicts": conflicts},
                 )
 
-        role = deps.get_user_role(user)
-        payloads = deps.build_assessment_payloads(req, user, role)
+            if role == "ANALYST":
+                if not req.team or req.team.strip().casefold() == "general":
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Analysts must update a non-General team assessment",
+                    )
+                for current in current_analyses:
+                    current_suppressed = _assessment_payload_from_analysis(current)[
+                        "suppressed"
+                    ]
+                    if bool(req.suppressed) != current_suppressed:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Only reviewers can change suppression",
+                        )
+
+            server_originals = {
+                finding_id: current
+                for finding_id, current in zip(finding_ids, current_analyses)
+            }
+            working_request = req.model_copy(
+                update={
+                    "comparison_mode": comparison_mode,
+                    "state": normalized_state,
+                    "original_analysis": server_originals,
+                }
+            )
+
+        try:
+            payloads = deps.build_assessment_payloads(working_request, user, role)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         await _persist_local_assessment_payloads(deps, payloads)
         try:
             refreshed_tasks = await asyncio.to_thread(
@@ -1998,6 +2086,7 @@ def _register_assessment_routes(
 def _register_dependency_route(
     router: APIRouter,
     deps: GeneralApiRouteDeps,
+    current_user_dependency: Callable[..., Any],
     client_dependency: Callable[..., Any],
 ) -> None:
     @router.get("/project/{project_uuid}/component/{component_uuid}/dependency-chains")
@@ -2009,6 +2098,7 @@ def _register_dependency_route(
         ] = deps.default_dependency_chain_limit,
         *,
         client: Annotated[DTClient, Depends(client_dependency)],
+        user: Annotated[str, Depends(current_user_dependency)],
     ):
         bom = await deps.cache_manager.get_bom(client, project_uuid)
         if not bom:
@@ -2038,5 +2128,10 @@ def create_general_api_router(
     _register_bulk_workflow_routes(
         router, deps, current_user_dependency, client_dependency
     )
-    _register_dependency_route(router, deps, client_dependency)
+    _register_dependency_route(
+        router,
+        deps,
+        current_user_dependency,
+        client_dependency,
+    )
     return router

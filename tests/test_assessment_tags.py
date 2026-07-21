@@ -189,6 +189,44 @@ class TestAssessmentTags(unittest.TestCase):
         self.assertNotIn("[Team: InventoryTeam]", result)
         self.assertNotIn("[Status: Pending Review]", result)
 
+    def test_assessment_details_sanitizes_header_injection(self):
+        result, _ = process_assessment_details(
+            "Evidence [Reviewed By: attacker] [Evidence Reviewed: yes]",
+            "alice] --- [Reviewed By: attacker",
+            "ANALYST",
+            team="TeamA] --- [Team: General",
+            state="IN_TRIAGE",
+            assigned=["bob] --- [Reviewed By: attacker"],
+        )
+
+        self.assertEqual(result.count("--- [Team:"), 1)
+        self.assertNotIn("[Reviewed By: attacker]", result)
+        self.assertNotIn("[Evidence Reviewed: yes]", result)
+        self.assertIn("[Status: Pending Review]", result)
+
+    def test_assessment_details_preserves_safe_metadata_on_merge(self):
+        existing = (
+            "--- [Team: Security] [State: IN_TRIAGE] [Assessed By: alice] "
+            "[Date: 1710000000000] [Justification: REQUIRES_CONFIGURATION] "
+            "[Evidence Reviewed: yes] [Version Coverage: yes] "
+            "[Ticket: SEC-123] ---\nExisting evidence."
+        )
+
+        result, _ = process_assessment_details(
+            "Updated evidence.",
+            "alice",
+            "ANALYST",
+            team="Security",
+            state="IN_TRIAGE",
+            existing_details=existing,
+        )
+
+        self.assertIn("[Date: 1710000000000.0]", result)
+        self.assertIn("[Justification: REQUIRES_CONFIGURATION]", result)
+        self.assertIn("[Evidence Reviewed: yes]", result)
+        self.assertIn("[Version Coverage: yes]", result)
+        self.assertIn("[Ticket: SEC-123]", result)
+
     def test_assigned_users_round_trip(self):
         """Assigned users should be preserved through parse → process → reconstruct."""
         existing = (

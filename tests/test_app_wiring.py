@@ -47,6 +47,7 @@ def test_build_general_api_route_deps_preserves_provider_contracts():
         logger=object(),
         calculate_aggregated_state=lambda state: state,
         process_assessment_details=lambda *args, **kwargs: ("", ""),
+        build_authorized_analyst_assessment_details=lambda **kwargs: ("", ""),
     )
     deps = build_general_api_route_deps(
         cache_manager=object(),

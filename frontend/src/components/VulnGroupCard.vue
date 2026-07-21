@@ -2478,6 +2478,7 @@ const teamBlockStateColor = (state?: string): string => {
     <ConflictResolutionModal
       :show="showConflictModal"
       :conflictData="conflictData"
+      :canForce="isReviewer"
       @close="showConflictModal = false"
       @use-server-state="handleUseServerState"
       @force-overwrite="() => handleUpdate(true)"

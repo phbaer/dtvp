@@ -104,6 +104,7 @@ from .grouped_vuln_summary_index_services import (
 from .logic import (
     DEFAULT_DEPENDENCY_CHAIN_LIMIT,
     BOMAnalysisCache,
+    build_authorized_analyst_assessment_details,
     calculate_aggregated_state,
     get_auto_analysis_guidance_path,
     get_rescore_rules_path,
@@ -473,6 +474,9 @@ assessment_service_deps = build_assessment_service_deps(
     logger=logger,
     calculate_aggregated_state=calculate_aggregated_state,
     process_assessment_details=process_assessment_details,
+    build_authorized_analyst_assessment_details=(
+        build_authorized_analyst_assessment_details
+    ),
 )
 
 project_archive_service_deps = build_project_archive_service_deps(
