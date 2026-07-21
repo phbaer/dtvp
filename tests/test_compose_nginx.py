@@ -49,12 +49,12 @@ def test_compose_pins_images_and_segments_trust_zones():
 
     assert compose.count("@sha256:") >= 5
     assert (
-        "dependencytrack/apiserver:4.14.1@sha256:"
-        "2d8813e1ba4ada4aa23087d908c1b5a3ffce39261ead5555c397a1d67c7cbe9d"
+        "dependencytrack/apiserver:4.14.2@sha256:"
+        "1ba4f004e1ec4800ec0e0175b0f1cf361a68f6ac3db9274a32d0a47cd4038f51"
     ) in compose
     assert (
-        "dependencytrack/frontend:4.14.1@sha256:"
-        "8217737050b26ea69a6ddd6fe2cb419531a0bae0b903a87a04077a2415fc9f35"
+        "dependencytrack/frontend:4.14.2@sha256:"
+        "00560b57a6cfdec3c02a6e02be80fce97029241a9c653e8b83c0b670dff1f3ca"
     ) in compose
     assert "internal: true" in compose
     for network in (
