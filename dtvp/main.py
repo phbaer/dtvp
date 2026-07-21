@@ -79,6 +79,7 @@ from .auto_analysis_services import (
 from .auto_analysis_services import (
     queue_open_vulnerabilities_for_analysis as queue_open_vulnerabilities_for_analysis_impl,
 )
+from .analysis_queue_state_services import AnalysisQueueStateStore
 from .code_analysis_integration import (
     CodeAnalysisClient,
     CodeAnalysisSettings,
@@ -509,6 +510,7 @@ project_archive_service_deps = build_project_archive_service_deps(
 )
 
 code_analysis_result_store = CodeAnalysisResultStore(logger=logger)
+analysis_queue_state_store = AnalysisQueueStateStore(logger=logger)
 
 
 api_router.include_router(
@@ -666,6 +668,8 @@ analysis_queue = build_analysis_queue(
         item,
         item.result or {},
     ),
+    load_persisted_state=analysis_queue_state_store.load,
+    persist_state=analysis_queue_state_store.save,
 )
 
 

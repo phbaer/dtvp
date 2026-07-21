@@ -61,6 +61,12 @@ class AnalysisQueueDeps:
     create_event: Callable[[], Any]
     create_lock: Callable[[], Any]
     record_completed_result: Callable[[AnalysisQueueItem], None] = lambda _item: None
+    load_persisted_state: Callable[
+        [], tuple[dict[str, AnalysisQueueItem], list[str]]
+    ] = lambda: ({}, [])
+    persist_state: Callable[
+        [dict[str, AnalysisQueueItem], list[str]], None
+    ] = lambda _items, _order: None
 
 
 class AnalysisQueue:
@@ -76,19 +82,69 @@ class AnalysisQueue:
         self._event = self._deps.create_event()
         self._lock = self._deps.create_lock()
         self._running = True
+        self._restore_persisted_state()
+
+    def _logger(self):
+        return getattr(self._deps.runtime_deps, "logger", None)
+
+    def _persist(self) -> None:
+        try:
+            self._deps.persist_state(self._items, self._order)
+        except Exception:
+            logger = self._logger()
+            if logger:
+                logger.exception("Failed to persist analysis queue state")
+
+    def _restore_persisted_state(self) -> None:
+        try:
+            items, order = self._deps.load_persisted_state()
+        except Exception:
+            logger = self._logger()
+            if logger:
+                logger.exception("Failed to restore analysis queue state")
+            return
+
+        self._items = items
+        self._order = [queue_id for queue_id in order if queue_id in items]
+        interrupted = 0
+        for item in self._items.values():
+            if item.status != "running":
+                continue
+            item.status = "failed"
+            item.error = "Analysis interrupted by DTVP service restart."
+            item.finished_at = self._deps.utc_now().isoformat()
+            item.abort_requested = False
+            item.abort_error = None
+            item.position = 0
+            interrupted += 1
+        self._reindex()
+        self.prune_finished()
+        if interrupted:
+            logger = self._logger()
+            if logger:
+                logger.warning(
+                    "Marked %d in-flight analysis queue item(s) as interrupted",
+                    interrupted,
+                )
+            self._persist()
+        if any(item.status == "queued" for item in self._items.values()):
+            self._event.set()
 
     def _reindex(self):
         self._deps.reindex_queue_items(self._items, self._order)
 
     def prune_finished(self, now: Optional[float] = None) -> int:
         current_time = now if now is not None else self._deps.utc_now().timestamp()
-        return self._deps.prune_finished_queue_items(
+        removed = self._deps.prune_finished_queue_items(
             self._items,
             self._order,
             current_time=current_time,
             ttl_seconds=self._deps.get_analysis_queue_ttl_seconds(),
             parse_timestamp=self._deps.parse_iso_timestamp,
         )
+        if removed:
+            self._persist()
+        return removed
 
     def capacity(self) -> int:
         try:
@@ -148,6 +204,7 @@ class AnalysisQueue:
         self._items[queue_id] = item
         self._order.append(queue_id)
         self._reindex()
+        self._persist()
         self._event.set()
         return item
 
@@ -246,6 +303,7 @@ class AnalysisQueue:
         item.finished_at = self._deps.utc_now().isoformat()
         self._order = [qid for qid in self._order if qid != queue_id]
         self._reindex()
+        self._persist()
         return True
 
     def request_abort(self, queue_id: str) -> Optional[AnalysisQueueItem]:
@@ -254,6 +312,7 @@ class AnalysisQueue:
             return None
         item.abort_requested = True
         item.abort_error = None
+        self._persist()
         return item
 
     def clear_abort(self, queue_id: str, error: Optional[str] = None) -> bool:
@@ -262,6 +321,7 @@ class AnalysisQueue:
             return False
         item.abort_requested = False
         item.abort_error = error
+        self._persist()
         return True
 
     def finish_running_cancelled(self, queue_id: str) -> bool:
@@ -270,6 +330,7 @@ class AnalysisQueue:
             return False
         self._finish_item(item, status="cancelled")
         self._reindex()
+        self._persist()
         return True
 
     def remove_finished(self, queue_id: str) -> bool:
@@ -278,6 +339,7 @@ class AnalysisQueue:
             return False
         self._order = [qid for qid in self._order if qid != queue_id]
         del self._items[queue_id]
+        self._persist()
         return True
 
     def remove_finished_by_statuses(self, statuses: set[str]) -> int:
@@ -299,6 +361,7 @@ class AnalysisQueue:
                 queue_id for queue_id in self._order if queue_id in self._items
             ]
             self._reindex()
+            self._persist()
         return removed
 
     def cancel_all_queued(self) -> int:
@@ -336,6 +399,7 @@ class AnalysisQueue:
             self._order,
             item,
         )
+        self._persist()
 
     def _finish_item(
         self,
@@ -353,6 +417,7 @@ class AnalysisQueue:
         if status == "completed" and result:
             self._deps.record_completed_result(item)
         self.prune_finished()
+        self._persist()
 
     async def _process_item(self, item: AnalysisQueueItem) -> None:
         await self._deps.process_analysis_queue_item(

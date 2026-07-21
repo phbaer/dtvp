@@ -601,6 +601,8 @@ def build_analysis_queue(
     run_analysis_queue_cleanup_loop: Callable[..., Any],
     run_analysis_queue_worker: Callable[..., Any],
     record_completed_result: Callable[[Any], None] | None = None,
+    load_persisted_state: Callable[..., Any] | None = None,
+    persist_state: Callable[..., None] | None = None,
 ) -> AnalysisQueue:
     return AnalysisQueue(
         AnalysisQueueDeps(
@@ -620,6 +622,8 @@ def build_analysis_queue(
             create_event=asyncio.Event,
             create_lock=asyncio.Lock,
             record_completed_result=record_completed_result or (lambda _item: None),
+            load_persisted_state=load_persisted_state or (lambda: ({}, [])),
+            persist_state=persist_state or (lambda _items, _order: None),
         )
     )
 
