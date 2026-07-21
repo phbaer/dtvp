@@ -279,7 +279,9 @@ Important frontend components:
   entries and saved results are also private to their creator, while reviewers
   can inspect and manage analyzer work across users. Shared
   Dependency-Track assessments and cached project proposal snapshots remain
-  collaborative application data.
+  shared domain data. Analyzer queue snapshots are persisted in SQLite; queued
+  work resumes after a restart, while work that was running is marked failed as
+  interrupted so DTVP cannot accidentally submit a duplicate external scan.
 - Authorization fails closed: a missing, unreadable, invalid, or incomplete
   `USER_ROLES_PATH` mapping assigns `ANALYST`. Only an explicit `REVIEWER`
   value grants reviewer permissions. Role-file uploads reject unknown roles.
@@ -1361,6 +1363,7 @@ means the integration or override is disabled.
 | `DTVP_ANALYSIS_QUEUE_CAPACITY` | Concurrent DTVP queue items | `1` |
 | `DTVP_ANALYSIS_QUEUE_MAX_PENDING` | Maximum pending DTVP queue items before new submissions receive HTTP 429 | `1000` |
 | `DTVP_ANALYSIS_QUEUE_TTL_SECONDS` | Completed/failed queue retention | `3600` |
+| `DTVP_ANALYSIS_QUEUE_STATE_PATH` | Durable analyzer queue SQLite store | `data/analysis_queue.sqlite` |
 | `DTVP_CODE_ANALYSIS_RESULTS_PATH` | Result/application SQLite store | `data/code_analysis_results.sqlite` |
 | `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS` | Maximum stored results | `2000` |
 | `DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS` | Maximum result age; `0` disables | `0` |
