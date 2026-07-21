@@ -1,7 +1,20 @@
+import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Authentication settings are instantiated while the application modules are
+# imported, so establish a complete, non-production test configuration first.
+os.environ["DTVP_ENVIRONMENT"] = "test"
+os.environ["DTVP_OIDC_AUTHORITY"] = "https://auth.example.com"
+os.environ["DTVP_OIDC_CLIENT_ID"] = "test-client"
+os.environ["DTVP_OIDC_CLIENT_SECRET"] = "test-client-secret"
+os.environ["DTVP_OIDC_REDIRECT_URI"] = "http://localhost:8000/auth/callback"
+os.environ["DTVP_FRONTEND_URL"] = "http://localhost:8000"
+os.environ["DTVP_SESSION_SECRET_KEY"] = (
+    "test-only-session-secret-that-is-long-enough-1234567890"
+)
 
 from dtvp import dt_cache, main
 from dtvp.dt_client import DTClient

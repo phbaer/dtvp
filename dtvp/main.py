@@ -68,7 +68,7 @@ from .app_wiring import (
     build_tmrescore_route_deps,
     build_tmrescore_task_service_deps,
 )
-from .auth import auth_settings, get_current_user
+from .auth import auth_settings, get_current_user, validate_auth_configuration
 from .auth import router as auth_router
 from .auto_analysis_services import (
     AutoAnalysisSweepDeps,
@@ -251,6 +251,7 @@ async def _initialize_application_runtime() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runtime_tasks, _startup_task
+    validate_auth_configuration()
     _runtime_tasks = None
     _startup_task = asyncio.create_task(_initialize_application_runtime())
     try:

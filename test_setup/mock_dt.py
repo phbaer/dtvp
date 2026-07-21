@@ -1,15 +1,37 @@
+import base64
+import hashlib
 import json
+import secrets
 import time
 import uuid
 from pathlib import Path
 from typing import Optional
 
 import uvicorn
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from jose import jwt as jose_jwt
 from pydantic import BaseModel
 
 app = FastAPI()
+
+
+def _base64url_uint(value: int) -> str:
+    raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+_OIDC_KEY_ID = "mock-dtvp-oidc-key"
+_OIDC_PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_OIDC_PRIVATE_PEM = _OIDC_PRIVATE_KEY.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption(),
+)
+_OIDC_PUBLIC_NUMBERS = _OIDC_PRIVATE_KEY.public_key().public_numbers()
+_OIDC_AUTHORIZATION_CODES: dict[str, dict[str, str]] = {}
 
 
 def check_auth(request: Request):
@@ -1203,11 +1225,30 @@ def openid_configuration(request: Request):
     }
 
 
+@app.get("/auth/jwks")
+def oidc_jwks():
+    return {
+        "keys": [
+            {
+                "kty": "RSA",
+                "use": "sig",
+                "alg": "RS256",
+                "kid": _OIDC_KEY_ID,
+                "n": _base64url_uint(_OIDC_PUBLIC_NUMBERS.n),
+                "e": _base64url_uint(_OIDC_PUBLIC_NUMBERS.e),
+            }
+        ]
+    }
+
+
 @app.get("/auth/authorize", response_class=HTMLResponse)
 def authorize(
     client_id: str,
     redirect_uri: str,
     state: Optional[str] = None,
+    nonce: str = "",
+    code_challenge: str = "",
+    code_challenge_method: str = "S256",
     scope: str = "openid",
     response_type: str = "code",
 ):
@@ -1223,16 +1264,24 @@ def authorize(
                 <p class="text-gray-400 mb-8 text-center text-sm">Select a user role to simulate SSO authentication.</p>
                 <div class="space-y-4">
                     <form action="/auth/authorize" method="POST">
+                        <input type="hidden" name="client_id" value="{client_id}">
                         <input type="hidden" name="redirect_uri" value="{redirect_uri}">
                         <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="nonce" value="{nonce}">
+                        <input type="hidden" name="code_challenge" value="{code_challenge}">
+                        <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
                         <input type="hidden" name="username" value="analyst">
                         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
                             Login as Analyst
                         </button>
                     </form>
                     <form action="/auth/authorize" method="POST">
+                        <input type="hidden" name="client_id" value="{client_id}">
                         <input type="hidden" name="redirect_uri" value="{redirect_uri}">
                         <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="nonce" value="{nonce}">
+                        <input type="hidden" name="code_challenge" value="{code_challenge}">
+                        <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
                         <input type="hidden" name="username" value="reviewer">
                         <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
                             Login as Reviewer
@@ -1251,11 +1300,23 @@ def authorize(
 @app.post("/auth/authorize")
 def authorize_post(
     username: str = Form(...),
+    client_id: str = Form(...),
     redirect_uri: str = Form(...),
     state: str = Form(""),
+    nonce: str = Form(""),
+    code_challenge: str = Form(""),
+    code_challenge_method: str = Form("S256"),
 ):
-    # Simulated auth code
-    code = f"mock_code_{username}_{int(time.time())}"
+    if not nonce or not code_challenge or code_challenge_method != "S256":
+        raise HTTPException(status_code=400, detail="Mock OIDC requires nonce and PKCE")
+    code = f"mock_code_{uuid.uuid4()}"
+    _OIDC_AUTHORIZATION_CODES[code] = {
+        "username": username,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "nonce": nonce,
+        "code_challenge": code_challenge,
+    }
     sep = "&" if "?" in redirect_uri else "?"
     url = f"{redirect_uri}{sep}code={code}"
     if state:
@@ -1265,31 +1326,44 @@ def authorize_post(
 
 @app.post("/auth/token")
 def token(
+    request: Request,
     code: str = Form(...),
     grant_type: str = Form(...),
     redirect_uri: str = Form(...),
     client_id: Optional[str] = Form(None),
     client_secret: Optional[str] = Form(None),
+    code_verifier: str = Form(...),
 ):
-    # Extract username from code
-    username = "user"
-    if "mock_code_" in code:
-        username = code.split("_")[2]
+    transaction = _OIDC_AUTHORIZATION_CODES.pop(code, None)
+    if not transaction:
+        raise HTTPException(status_code=400, detail="Unknown or reused authorization code")
+    if grant_type != "authorization_code":
+        raise HTTPException(status_code=400, detail="Unsupported grant type")
+    if redirect_uri != transaction["redirect_uri"] or client_id != transaction["client_id"]:
+        raise HTTPException(status_code=400, detail="Authorization code binding mismatch")
+    verifier_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+    if not secrets.compare_digest(verifier_challenge, transaction["code_challenge"]):
+        raise HTTPException(status_code=400, detail="PKCE verification failed")
 
-    # Create a dummy JWT (signed with something simple or just unverified)
-    # The production code uses jwt.get_unverified_claims, so we don't need a real signature.
-    import jose.jwt as jose_jwt
-
+    username = transaction["username"]
+    now = int(time.time())
+    issuer = str(request.base_url).rstrip("/")
     id_token = jose_jwt.encode(
         {
+            "iss": issuer,
+            "aud": client_id,
             "sub": username,
             "preferred_username": username,
             "name": username.capitalize(),
-            "exp": int(time.time()) + 3600,
-            "iat": int(time.time()),
+            "nonce": transaction["nonce"],
+            "exp": now + 3600,
+            "iat": now,
         },
-        "mock_secret",
-        algorithm="HS256",
+        _OIDC_PRIVATE_PEM,
+        algorithm="RS256",
+        headers={"kid": _OIDC_KEY_ID},
     )
 
     return {

@@ -50,7 +50,9 @@ pm2 start ecosystem.config.js --update-env
 | Mock code analysis | `http://localhost:8095` |
 
 For mock login, open `/login`, choose `Sign in with SSO`, then select
-`Login as Reviewer` on the mock Dependency-Track page.
+`Login as Reviewer` on the mock Dependency-Track page. The mock provider uses
+the same state, nonce, PKCE, JWKS, and signed-ID-token validation path as a real
+OIDC provider.
 
 Stop the stack with:
 
@@ -560,9 +562,11 @@ Then start the backend:
 ```bash
 export DTVP_DT_API_URL=http://127.0.0.1:8081
 export DTVP_DT_API_KEY=mock_key
+export DTVP_ENVIRONMENT=development
 export DTVP_OIDC_AUTHORITY=http://127.0.0.1:8081
 export DTVP_OIDC_CLIENT_ID=mock_id
 export DTVP_OIDC_CLIENT_SECRET=mock_secret
+export DTVP_SESSION_SECRET_KEY=local-development-session-secret-1234567890abcdef
 export DTVP_OIDC_REDIRECT_URI=http://localhost:5173/auth/callback
 export DTVP_FRONTEND_URL=http://localhost:5173
 export DTVP_TMRESCORE_URL=http://127.0.0.1:8090
@@ -571,8 +575,9 @@ uv run uvicorn dtvp.boot:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Use `DTVP_DEV_DISABLE_AUTH=true` to make `/auth/me` resolve to local `devuser`,
-which maps to `REVIEWER` in `data/user_roles.json`. Start the frontend with
-`cd frontend && npm run dev`.
+which maps to `REVIEWER` in `data/user_roles.json`. This bypass is rejected when
+`DTVP_ENVIRONMENT=production`. Start the frontend with `cd frontend && npm run
+dev`.
 
 ### Testing Notes
 
@@ -591,12 +596,16 @@ cp .env.dist .env
 docker compose up -d
 ```
 
-Set at least the Dependency-Track API key and public URL. For a non-default
-gateway:
+Set the Dependency-Track API key, complete OIDC settings, an HTTPS public URL,
+and a random session secret before starting the production profile. Generate a
+session secret with `openssl rand -hex 32`. Production startup rejects missing,
+short, or known placeholder secrets, insecure OIDC callbacks, and the
+development authentication bypass. For a non-default gateway:
 
 ```env
 DTVP_HTTP_PORT=8083
-DTVP_FRONTEND_URL=http://host.example:8083/dtvp
+DTVP_FRONTEND_URL=https://host.example:8083/dtvp
+DTVP_SESSION_SECRET_KEY=<random value from openssl rand -hex 32>
 ```
 
 Deployment rules:
@@ -614,6 +623,10 @@ Deployment rules:
   do not rely only on CIDR entries.
 - DTVP OIDC is independent of Dependency-Track browser sessions. Backend calls
   use `DTVP_DT_API_KEY` and never forward browser credentials.
+- OIDC login uses authorization code with PKCE, state, nonce, discovery issuer
+  validation, JWKS signature verification, and expiring DTVP session cookies.
+  Changing the session key invalidates existing sessions and requires users to
+  sign in again. Logout is a credentialed `POST` from the frontend.
 - nginx proxies `DTVP_CONTEXT_PATH` to DTVP and defaults it to `/dtvp`.
   `DTVP_HTTP_PORT` changes the host gateway port. Direct-container deployments
   must publish port `8000` and include the context path in the URL.
@@ -657,11 +670,18 @@ means the integration or override is disabled.
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
+| `DTVP_ENVIRONMENT` | Security profile: `production`, `development`, or `test` | `production` |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
 | `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |
+| `DTVP_OIDC_CLIENT_SECRET_FILE` | File containing the OIDC client secret when the direct value is unset | unset |
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback | derived from frontend URL/context path |
-| `DTVP_SESSION_SECRET_KEY` | Session signing key | `change_me` |
+| `DTVP_OIDC_ALLOWED_ALGORITHMS` | Comma-separated asymmetric ID-token algorithms | `RS256` |
+| `DTVP_OIDC_TRANSACTION_TTL_SECONDS` | Maximum OIDC state/nonce/PKCE transaction age | `300` |
+| `DTVP_SESSION_SECRET_KEY` | Session signing key; at least 32 characters when authentication is enabled | unset; required outside the development bypass |
+| `DTVP_SESSION_SECRET_KEY_FILE` | File containing the session key when the direct value is unset | unset |
+| `DTVP_SESSION_TTL_SECONDS` | Signed DTVP session lifetime | `28800` (8 hours) |
+| `DTVP_SESSION_COOKIE_SECURE` | Explicit Secure-cookie override | automatic; required `true` in production |
 | `DTVP_DEV_DISABLE_AUTH` | Resolve local requests as `devuser` | `false` |
 | `DTVP_FRONTEND_URL` | Public frontend base URL | `http://localhost:8000` |
 | `DTVP_CONTEXT_PATH` | Application mount path | app `/`; Compose `/dtvp` |

@@ -49,6 +49,7 @@ services:
       - path: .env
         required: false
     environment:
+      DTVP_ENVIRONMENT: ${DTVP_ENVIRONMENT:-production}
       DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}
       DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-change_me} # Generate this in Dependency-Track and update it.
       DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
@@ -56,9 +57,11 @@ services:
       DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}
       DTVP_ATTRIBUTION_AGE_FILTER_DAYS: ${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
       DTVP_JIRA_CREATE_URL: ${DTVP_JIRA_CREATE_URL:-}
-      # If using OIDC via D-T, these might not be needed if we rely on headers,
-      # but we need SESSION_SECRET for the fallback cookie if used.
-      DTVP_SESSION_SECRET_KEY: ${DTVP_SESSION_SECRET_KEY:-change_me}
+      DTVP_SESSION_SECRET_KEY: ${DTVP_SESSION_SECRET_KEY:-}
+      DTVP_SESSION_TTL_SECONDS: ${DTVP_SESSION_TTL_SECONDS:-28800}
+      DTVP_SESSION_COOKIE_SECURE: ${DTVP_SESSION_COOKIE_SECURE:-true}
+      DTVP_OIDC_ALLOWED_ALGORITHMS: ${DTVP_OIDC_ALLOWED_ALGORITHMS:-RS256}
+      DTVP_OIDC_TRANSACTION_TTL_SECONDS: ${DTVP_OIDC_TRANSACTION_TTL_SECONDS:-300}
       DTVP_PROJECT_ARCHIVE_PATH: ${DTVP_PROJECT_ARCHIVE_PATH:-data/project_archives}
       DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED: ${DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED:-false}
       DTVP_PROJECT_ARCHIVE_EXPANDED_PATH: ${DTVP_PROJECT_ARCHIVE_EXPANDED_PATH:-data/project_archives_git}

@@ -1,6 +1,63 @@
+import base64
+import hashlib
+from urllib.parse import parse_qs, urlparse
+
 from fastapi.testclient import TestClient
+from jose import jwt
 
 from test_setup import mock_dt
+
+
+def test_mock_oidc_provider_supports_nonce_pkce_and_jwks():
+    client = TestClient(mock_dt.app)
+    verifier = "mock-code-verifier-that-is-long-enough-for-pkce-1234567890"
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+    params = {
+        "client_id": "mock-client",
+        "redirect_uri": "http://localhost/auth/callback",
+        "state": "expected-state",
+        "nonce": "expected-nonce",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+
+    authorize = client.get("/auth/authorize", params=params)
+    assert authorize.status_code == 200
+    assert 'name="nonce" value="expected-nonce"' in authorize.text
+
+    approved = client.post(
+        "/auth/authorize",
+        data={**params, "username": "reviewer"},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 303
+    callback_query = parse_qs(urlparse(approved.headers["location"]).query)
+    assert callback_query["state"] == ["expected-state"]
+
+    token = client.post(
+        "/auth/token",
+        data={
+            "code": callback_query["code"][0],
+            "grant_type": "authorization_code",
+            "redirect_uri": params["redirect_uri"],
+            "client_id": params["client_id"],
+            "client_secret": "mock-secret",
+            "code_verifier": verifier,
+        },
+    )
+    assert token.status_code == 200
+    jwks = client.get("/auth/jwks").json()
+    claims = jwt.decode(
+        token.json()["id_token"],
+        jwks["keys"][0],
+        algorithms=["RS256"],
+        issuer="http://testserver",
+        audience="mock-client",
+    )
+    assert claims["sub"] == "reviewer"
+    assert claims["nonce"] == "expected-nonce"
 
 
 def test_mock_dt_can_override_analysis_state():

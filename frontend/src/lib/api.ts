@@ -35,7 +35,7 @@ const BASE_WITH_CONTEXT = NORMALIZED_CONTEXT_PATH && BASE_URL.endsWith(NORMALIZE
     : BASE_URL + NORMALIZED_CONTEXT_PATH;
 
 const API_BASE = BASE_WITH_CONTEXT + '/api';
-const AUTH_BASE = BASE_URL + NORMALIZED_CONTEXT_PATH + '/auth';
+const AUTH_BASE = BASE_WITH_CONTEXT + '/auth';
 const api = axios.create({
     baseURL: API_BASE,
     withCredentials: true, // For cookies
@@ -995,8 +995,9 @@ export const login = (username?: string) => {
     window.location.href = url;
 };
 
-export const logout = () => {
-    window.location.href = AUTH_BASE + '/logout';
+export const logout = async () => {
+    await axios.post(AUTH_BASE + '/logout', undefined, { withCredentials: true });
+    window.location.href = BASE_WITH_CONTEXT + '/login';
 };
 
 export const checkSession = async () => {
