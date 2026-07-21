@@ -8,12 +8,23 @@ Public API:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from src.llm.base import LLMClient
 from src.llm.ollama_client import OllamaClient
 from src.llm.openwebui_client import OpenWebUIClient
 
 __all__ = ["LLMClient", "OllamaClient", "OpenWebUIClient", "create_llm_client"]
+
+
+def _read_api_key() -> str:
+    direct = os.environ.get("OPENWEBUI_API_KEY", "").strip()
+    if direct:
+        return direct
+    secret_path = os.environ.get("OPENWEBUI_API_KEY_FILE", "").strip()
+    if not secret_path:
+        return ""
+    return Path(secret_path).read_text(encoding="utf-8").strip()
 
 
 def create_llm_client() -> LLMClient:
@@ -30,7 +41,7 @@ def create_llm_client() -> LLMClient:
         return OpenWebUIClient(
             host=os.environ.get("OPENWEBUI_HOST", "http://localhost:3000"),
             model=os.environ.get("OPENWEBUI_MODEL", "mistral"),
-            api_key=os.environ.get("OPENWEBUI_API_KEY", ""),
+            api_key=_read_api_key(),
             tool_call_mode=os.environ.get("OPENWEBUI_TOOL_CALLS", "auto"),
         )
 
