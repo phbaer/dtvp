@@ -1,6 +1,90 @@
 import asyncio
+import socket
+
+import httpx
 
 from src.agents import web_research
+
+
+def _public_dns(*_args, **_kwargs):
+    return [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+    ]
+
+
+def test_safe_url_rejects_non_https_credentials_ports_and_private_dns(monkeypatch):
+    assert web_research._is_safe_url("http://example.com")[0] is False
+    assert web_research._is_safe_url("https://user@example.com")[0] is False
+    assert web_research._is_safe_url("https://example.com:8443")[0] is False
+    assert web_research._is_safe_url("https://127.0.0.1/")[0] is False
+
+    monkeypatch.setattr(
+        web_research.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 0))
+        ],
+    )
+    safe, reason = web_research._is_safe_url("https://metadata.attacker.test/")
+    assert safe is False
+    assert "non-public" in reason
+
+
+def test_safe_url_fails_closed_when_dns_does_not_resolve(monkeypatch):
+    def fail_dns(*_args, **_kwargs):
+        raise socket.gaierror("not found")
+
+    monkeypatch.setattr(web_research.socket, "getaddrinfo", fail_dns)
+    safe, reason = web_research._is_safe_url("https://unresolved.example/")
+    assert safe is False
+    assert "did not resolve" in reason
+
+
+def test_fetch_url_revalidates_redirect_targets(monkeypatch):
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(
+            302,
+            headers={"Location": "http://127.0.0.1/internal"},
+            request=request,
+        )
+
+    def client_factory(**kwargs):
+        kwargs.pop("verify", None)
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(web_research.socket, "getaddrinfo", _public_dns)
+    monkeypatch.setattr(web_research, "async_client", client_factory)
+
+    result = asyncio.run(web_research.fetch_url("https://public.example/start"))
+
+    assert result["ok"] is False
+    assert result["error"].startswith("Blocked:")
+    assert requests == ["https://public.example/start"]
+
+
+def test_fetch_url_bounds_downloaded_text(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+            content=b"a" * (web_research._MAX_RESPONSE_BYTES * 2),
+            request=request,
+        )
+
+    def client_factory(**kwargs):
+        kwargs.pop("verify", None)
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(web_research.socket, "getaddrinfo", _public_dns)
+    monkeypatch.setattr(web_research, "async_client", client_factory)
+
+    result = asyncio.run(web_research.fetch_url("https://public.example/large"))
+
+    assert result["ok"] is True
+    assert len(result["text"]) == web_research._MAX_TEXT_CHARS
 
 
 class FakeSearchResponse:

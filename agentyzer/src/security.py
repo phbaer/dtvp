@@ -71,6 +71,13 @@ def validate_service_auth_configuration() -> None:
             )
         return
 
+    if environment == "production" and _truthy(
+        os.environ.get("AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH")
+    ):
+        raise RuntimeError(
+            "AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH cannot be enabled in production"
+        )
+
     token = _read_service_token()
     if len(token) < MINIMUM_SERVICE_TOKEN_LENGTH:
         raise RuntimeError(
@@ -85,6 +92,35 @@ def validate_service_auth_configuration() -> None:
         )
     if admin_token and secrets.compare_digest(admin_token, token):
         raise RuntimeError("AGENTYZER_ADMIN_TOKEN must differ from the service token")
+
+
+def validate_focus_path(value: str | None) -> str | None:
+    """Resolve a local checkout path and keep production scans in the repo root."""
+    if value is None:
+        return None
+    raw_path = value.strip()
+    if not raw_path:
+        return None
+    try:
+        path = Path(raw_path).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail="Focus path does not exist") from exc
+    if not path.is_dir():
+        raise HTTPException(status_code=400, detail="Focus path must be a directory")
+
+    environment = os.environ.get("AGENTYZER_ENVIRONMENT", "production").strip().lower()
+    allow_external = environment in {"development", "test"} and _truthy(
+        os.environ.get("AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH")
+    )
+    repo_root = Path(os.environ.get("AGENTYZER_REPOS_DIR", "repos")).resolve(
+        strict=False
+    )
+    if not allow_external and not path.is_relative_to(repo_root):
+        raise HTTPException(
+            status_code=400,
+            detail="Focus path must be inside the configured Agentyzer repository root",
+        )
+    return str(path)
 
 
 def _normalized_owner(value: str | None) -> str:

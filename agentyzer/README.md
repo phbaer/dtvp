@@ -328,6 +328,7 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_ADMIN_TOKEN` | unset | Separate bearer token required for the service-wide `*` owner scope; use at least 32 characters and never reuse the service token. |
 | `AGENTYZER_ADMIN_TOKEN_FILE` | unset | File containing the admin token when the direct value is unset. |
 | `AGENTYZER_ALLOW_UNAUTHENTICATED` | `false` | Explicit bypass for local development/test only; production rejects it. |
+| `AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH` | `false` | Permit local checkout paths outside `AGENTYZER_REPOS_DIR` in development/test only; production rejects it. |
 | `AGENTYZER_CALLER_OWNER` | `cli` | Owner header used by the CLI to isolate its jobs. |
 
 ### Component registry
@@ -759,6 +760,13 @@ configured input, member, expansion, nesting, or count limits. A malformed or
 unsupported archive is recorded as partial evidence while other archives
 continue. The generated directory is removed with the per-run worktree; for a
 caller-supplied `focus_path`, Agentyzer removes only its own analysis directory.
+
+Arbitrary research URLs are restricted to public HTTPS destinations on the
+default port. DNS must resolve entirely to globally routable addresses, every
+redirect is revalidated, response types are limited to textual formats, and
+only a bounded response prefix is read. In production, an assessment
+`focus_path` must resolve inside `AGENTYZER_REPOS_DIR`; symlink escapes and
+arbitrary host filesystem paths are rejected.
 
 All LLM prompts are managed as YAML bundles in `config/prompts/`. Prompt bundles use compact `analysis_protocol` sections instead of bundled few-shot example transcripts. The protocol tells the model to keep analysis private, apply security researcher/remediator/auditor/ticket-author lenses internally, and emit only structured evidence fields such as call paths, dependency chains, exclusions, remediation, and validation notes. Response contracts define exact field order, allowed values, evidence labels, and disallow markdown, JSON, preambles, conclusions, or extra fields. Legacy custom prompt bundles that still provide `few_shot` are accepted as a compatibility alias for `analysis_protocol`.
 
