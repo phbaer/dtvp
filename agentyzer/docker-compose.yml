@@ -1,12 +1,14 @@
-version: '3.8'
 services:
   analyzer:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - AGENTYZER_CONFIG_DIR=/app/config
       - AGENTYZER_REPOS_DIR=/app/repos
+      - AGENTYZER_ENVIRONMENT=development
+      - AGENTYZER_SERVICE_TOKEN=${AGENTYZER_SERVICE_TOKEN}
+      - AGENTYZER_ADMIN_TOKEN=${AGENTYZER_ADMIN_TOKEN:-}
       - AGENTYZER_MAX_CONCURRENT_JOBS=1
       - OLLAMA_HOST=http://host.docker.internal:11434
       - OLLAMA_MODEL=mistral

@@ -23,11 +23,22 @@ from src.llm.openwebui_client import OpenWebUIClient
 from src.main import (
     app,
 )
+from src.security import validate_service_auth_configuration
+
+
+SERVICE_HEADERS = {
+    "Authorization": "Bearer test-only-agentyzer-service-token-1234567890",
+    "X-Agentyzer-Owner": "test-owner",
+}
+ADMIN_HEADERS = {
+    "Authorization": "Bearer test-only-agentyzer-admin-token-123456789012",
+    "X-Agentyzer-Owner": "*",
+}
 
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers=SERVICE_HEADERS) as c:
         yield c
 
 
@@ -35,6 +46,43 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json().get("status") == "ok"
+
+
+def test_service_authentication_is_required(client):
+    response = client.get(
+        "/health",
+        headers={"Authorization": "Bearer invalid"},
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert (
+        client.get(
+            "/openapi.json",
+            headers={"Authorization": "Bearer invalid"},
+        ).status_code
+        == 401
+    )
+
+
+def test_production_service_auth_configuration_fails_closed(monkeypatch):
+    monkeypatch.setenv("AGENTYZER_ENVIRONMENT", "production")
+    monkeypatch.delenv("AGENTYZER_SERVICE_TOKEN", raising=False)
+    monkeypatch.delenv("AGENTYZER_SERVICE_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("AGENTYZER_ALLOW_UNAUTHENTICATED", raising=False)
+
+    with pytest.raises(RuntimeError, match="AGENTYZER_SERVICE_TOKEN"):
+        validate_service_auth_configuration()
+
+
+def test_admin_service_token_must_be_distinct(monkeypatch):
+    token = "test-only-shared-agentyzer-token-1234567890"
+    monkeypatch.setenv("AGENTYZER_ENVIRONMENT", "production")
+    monkeypatch.setenv("AGENTYZER_SERVICE_TOKEN", token)
+    monkeypatch.setenv("AGENTYZER_ADMIN_TOKEN", token)
+
+    with pytest.raises(RuntimeError, match="must differ"):
+        validate_service_auth_configuration()
 
 
 def test_health_exposes_service_configuration_and_backend(client):
@@ -115,6 +163,7 @@ def _seed_completed_parent_job(job_id: str = "parent-follow-up") -> Job:
             vuln_id="CVE-2026-FOLLOW",
             component_name="keycloak-extension",
         ),
+        owner="test-owner",
     )
     job.status = JobStatus.completed
     job.finished_at = "2026-07-06T10:00:00+00:00"
@@ -137,6 +186,41 @@ def _seed_completed_parent_job(job_id: str = "parent-follow-up") -> Job:
     )
     app.state.jobs[job.id] = job
     return job
+
+
+def test_jobs_are_isolated_by_caller_owner(client):
+    alice = Job(
+        "owner-alice-job",
+        AssessRequest(vuln_id="CVE-2026-A", component_name="component-a"),
+        owner="alice",
+    )
+    bob = Job(
+        "owner-bob-job",
+        AssessRequest(vuln_id="CVE-2026-B", component_name="component-b"),
+        owner="bob",
+    )
+    app.state.jobs[alice.id] = alice
+    app.state.jobs[bob.id] = bob
+    try:
+        alice_headers = {"X-Agentyzer-Owner": "alice"}
+        listed = client.get("/jobs", headers=alice_headers)
+        assert listed.status_code == 200
+        assert [job["job_id"] for job in listed.json()["jobs"]] == [alice.id]
+        assert listed.json()["backend"]["jobs"]["known_jobs"] == 1
+
+        assert client.get(f"/jobs/{bob.id}", headers=alice_headers).status_code == 404
+        assert client.delete(f"/jobs/{bob.id}", headers=alice_headers).status_code == 404
+
+        denied = client.get("/jobs", headers={"X-Agentyzer-Owner": "*"})
+        assert denied.status_code == 403
+
+        admin = client.get("/jobs", headers=ADMIN_HEADERS)
+        assert admin.status_code == 200
+        admin_ids = {job["job_id"] for job in admin.json()["jobs"]}
+        assert {alice.id, bob.id}.issubset(admin_ids)
+    finally:
+        app.state.jobs.pop(alice.id, None)
+        app.state.jobs.pop(bob.id, None)
 
 
 def test_job_compaction_and_follow_up_endpoint(client, monkeypatch):

@@ -1,9 +1,17 @@
 import logging
+import os
 from typing import Any, Dict, Optional
 
 import httpx
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .integration_auth import (
+    read_secret,
+    service_request_headers,
+    validate_distinct_service_tokens,
+    validate_service_token,
+)
 
 logger = logging.getLogger("dtvp.code_analysis")
 
@@ -30,6 +38,22 @@ class CodeAnalysisSettings(BaseSettings):
         alias="DTVP_CODE_ANALYSIS_LLM_PROVIDER",
         default="",
     )
+    DTVP_CODE_ANALYSIS_SERVICE_TOKEN: str = Field(
+        alias="DTVP_CODE_ANALYSIS_SERVICE_TOKEN",
+        default="",
+    )
+    DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE: str = Field(
+        alias="DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE",
+        default="",
+    )
+    DTVP_CODE_ANALYSIS_ADMIN_TOKEN: str = Field(
+        alias="DTVP_CODE_ANALYSIS_ADMIN_TOKEN",
+        default="",
+    )
+    DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE: str = Field(
+        alias="DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE",
+        default="",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -45,14 +69,71 @@ class CodeAnalysisSettings(BaseSettings):
     def enabled(self) -> bool:
         return bool(self.base_url)
 
+    @property
+    def service_token(self) -> str:
+        return read_secret(
+            self.DTVP_CODE_ANALYSIS_SERVICE_TOKEN,
+            self.DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE,
+        )
+
+    @property
+    def admin_token(self) -> str:
+        return read_secret(
+            self.DTVP_CODE_ANALYSIS_ADMIN_TOKEN,
+            self.DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE,
+        )
+
+    def token_for_owner(self, owner: Optional[str]) -> str:
+        if owner == "*":
+            return self.admin_token
+        return self.service_token
+
+
+def validate_code_analysis_configuration(
+    settings: Optional[CodeAnalysisSettings] = None,
+) -> None:
+    resolved = settings or CodeAnalysisSettings()
+    validate_service_token(
+        enabled=resolved.enabled,
+        environment=os.environ.get("DTVP_ENVIRONMENT", "production"),
+        token=resolved.service_token,
+        setting_name=(
+            "DTVP_CODE_ANALYSIS_SERVICE_TOKEN or "
+            "DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE"
+        ),
+    )
+    validate_service_token(
+        enabled=resolved.enabled,
+        environment=os.environ.get("DTVP_ENVIRONMENT", "production"),
+        token=resolved.admin_token,
+        setting_name=(
+            "DTVP_CODE_ANALYSIS_ADMIN_TOKEN or "
+            "DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE"
+        ),
+    )
+    validate_distinct_service_tokens(
+        resolved.service_token,
+        resolved.admin_token,
+        setting_name="DTVP_CODE_ANALYSIS_ADMIN_TOKEN",
+    )
+
 
 class CodeAnalysisClient:
-    def __init__(self, settings: Optional[CodeAnalysisSettings] = None):
+    def __init__(
+        self,
+        settings: Optional[CodeAnalysisSettings] = None,
+        *,
+        owner: Optional[str] = None,
+    ):
         self.settings = settings or CodeAnalysisSettings()
         if not self.settings.enabled:
             raise RuntimeError("Code analysis integration is not configured")
         self.client = httpx.AsyncClient(
-            timeout=self.settings.DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS
+            timeout=self.settings.DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS,
+            headers=service_request_headers(
+                self.settings.token_for_owner(owner),
+                owner=owner,
+            ),
         )
 
     async def close(self):

@@ -79,7 +79,11 @@ from .auto_analysis_services import (
 from .auto_analysis_services import (
     queue_open_vulnerabilities_for_analysis as queue_open_vulnerabilities_for_analysis_impl,
 )
-from .code_analysis_integration import CodeAnalysisClient, CodeAnalysisSettings
+from .code_analysis_integration import (
+    CodeAnalysisClient,
+    CodeAnalysisSettings,
+    validate_code_analysis_configuration,
+)
 from .code_analysis_result_services import CodeAnalysisResultStore
 from .code_analysis_routes import create_code_analysis_router
 from .dt_cache import CacheManager, cache_manager
@@ -253,6 +257,7 @@ async def _initialize_application_runtime() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runtime_tasks, _startup_task
     validate_auth_configuration()
+    validate_code_analysis_configuration()
     _runtime_tasks = None
     _startup_task = asyncio.create_task(_initialize_application_runtime())
     try:

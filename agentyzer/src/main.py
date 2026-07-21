@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any, Dict
 
 import yaml
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from src.agents import dependency_scanner
 from src.agents.dependency_scanner import RepoError
@@ -58,6 +59,11 @@ from src.llm.prompt_registry import (
     validate_all_prompt_bundles,
 )
 from src.pipeline import run_pipeline
+from src.security import (
+    ServiceCaller,
+    require_service_caller,
+    validate_service_auth_configuration,
+)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -170,6 +176,7 @@ def _get_repos_config() -> Dict[str, Any]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _repos_config_path, _repos_config_mtime
+    validate_service_auth_configuration()
     _repos_config_path = os.path.join(_CONFIG_DIR, "repos.yaml")
     app.state.repos = load_repos_config(_repos_config_path)
     validate_all_prompt_bundles()
@@ -207,6 +214,10 @@ app = FastAPI(
     ),
     version="0.1.0",
     lifespan=lifespan,
+    dependencies=[Depends(require_service_caller)],
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
     contact={"name": "Agentyzer Maintainers"},
     license_info={"name": "Proprietary"},
     openapi_tags=[
@@ -230,6 +241,11 @@ app = FastAPI(
 )
 
 
+@app.get("/openapi.json", include_in_schema=False)
+async def authenticated_openapi():
+    return JSONResponse(app.openapi())
+
+
 # ===================================================================== #
 # Helpers                                                                #
 # ===================================================================== #
@@ -239,9 +255,23 @@ def _resolved_repos_config_path() -> str:
     return _repos_config_path or os.path.join(_CONFIG_DIR, "repos.yaml")
 
 
-def _job_status_counts() -> Dict[str, int]:
-    counts = {status.value: 0 for status in JobStatus}
+def _jobs_visible_to(owner: str) -> Dict[str, Job]:
     jobs: Dict[str, Job] = getattr(app.state, "jobs", {})
+    if owner == "*":
+        return jobs
+    return {job_id: job for job_id, job in jobs.items() if job.owner == owner}
+
+
+def _job_for_caller(job_id: str, caller: ServiceCaller) -> Job:
+    job = _jobs_visible_to(caller.owner).get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=JOB_NOT_FOUND_DETAIL)
+    return job
+
+
+def _job_status_counts(owner: str) -> Dict[str, int]:
+    counts = {status.value: 0 for status in JobStatus}
+    jobs = _jobs_visible_to(owner)
     for job in jobs.values():
         key = job.status.value if isinstance(job.status, JobStatus) else str(job.status)
         counts[key] = counts.get(key, 0) + 1
@@ -284,6 +314,8 @@ def _service_configuration() -> ServiceConfiguration:
             "context_compaction": True,
             "follow_up_assessments": True,
             "benchmark_comparisons": True,
+            "service_bearer_authentication": True,
+            "owner_scoped_jobs": True,
         },
     )
 
@@ -308,10 +340,10 @@ def _llm_backend_info() -> LlmBackendInfo:
     )
 
 
-def _backend_information() -> BackendInformation:
-    jobs: Dict[str, Job] = getattr(app.state, "jobs", {})
+def _backend_information(owner: str) -> BackendInformation:
+    jobs = _jobs_visible_to(owner)
     max_concurrent_jobs = int(getattr(app.state, "max_concurrent_jobs", 1) or 1)
-    status_counts = _job_status_counts()
+    status_counts = _job_status_counts(owner)
     running_jobs = status_counts.get(JobStatus.running.value, 0)
     queued_jobs = status_counts.get(JobStatus.pending.value, 0)
     return BackendInformation(
@@ -346,7 +378,7 @@ def _backend_information() -> BackendInformation:
     )
 
 
-def _service_info_response() -> HealthResponse:
+def _service_info_response(owner: str) -> HealthResponse:
     metadata = _llm_metadata(
         app.state.ollama,
         healthy=getattr(app.state, "llm_healthy", None),
@@ -358,7 +390,7 @@ def _service_info_response() -> HealthResponse:
         llm_provider=metadata.get("provider"),
         llm=metadata,
         configuration=_service_configuration(),
-        backend=_backend_information(),
+        backend=_backend_information(owner),
     )
 
 
@@ -666,12 +698,13 @@ def _build_follow_up_guidance(
 def _submit_async_job(
     req: AssessRequest,
     *,
+    owner: str,
     parent_job_id: str | None = None,
     follow_up_question: str | None = None,
     compact_context: Dict[str, Any] | None = None,
 ) -> JobSubmittedResponse:
     job_id = uuid.uuid4().hex[:12]
-    job = Job(job_id, req)
+    job = Job(job_id, req, owner=owner)
     job.llm_metadata = _llm_metadata(_client_for_request(req))
     job.parent_job_id = parent_job_id
     job.follow_up_question = follow_up_question
@@ -683,7 +716,12 @@ def _submit_async_job(
     task = asyncio.create_task(_run_job(job))
     app.state.job_tasks[job_id] = task
     task.add_done_callback(lambda _task: _drop_job_task(job_id))
-    logger.info("Job %s created for component %s", job_id, req.component_name)
+    logger.info(
+        "Job %s created for owner %s and component %s",
+        job_id,
+        owner,
+        req.component_name,
+    )
     return JobSubmittedResponse(
         job_id=job_id,
         status=job.status,
@@ -693,7 +731,7 @@ def _submit_async_job(
         llm_provider=job.llm_metadata.get("provider"),
         llm=job.llm_metadata,
         configuration=_service_configuration(),
-        backend=_backend_information(),
+        backend=_backend_information(owner),
     )
 
 
@@ -709,8 +747,10 @@ def _submit_async_job(
     summary="Check service health",
     description="Lightweight liveness probe that confirms the API process is accepting requests.",
 )
-async def health():
-    return _service_info_response()
+async def health(
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
+    return _service_info_response(caller.owner)
 
 
 @app.get(
@@ -723,8 +763,10 @@ async def health():
         "Repository credentials and raw authenticated URLs are never included."
     ),
 )
-async def configuration():
-    return _service_info_response()
+async def configuration(
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
+    return _service_info_response(caller.owner)
 
 
 @app.get(
@@ -817,6 +859,7 @@ async def assess(
             }
         ),
     ],
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
     sync: Annotated[
         bool,
         Query(
@@ -846,7 +889,7 @@ async def assess(
             return await _run_assessment(req, llm_client=_client_for_request(req))
 
     # Async mode — create a job and return immediately.
-    return _submit_async_job(req)
+    return _submit_async_job(req, owner=caller.owner)
 
 
 @app.get(
@@ -857,11 +900,13 @@ async def assess(
     summary="List assessment jobs",
     description="Return all in-memory background jobs known to the current API process.",
 )
-async def list_jobs():
+async def list_jobs(
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
     """List all known jobs."""
-    jobs: Dict[str, Job] = app.state.jobs
+    jobs = _jobs_visible_to(caller.owner)
     configuration = _service_configuration()
-    backend = _backend_information()
+    backend = _backend_information(caller.owner)
     return JobListResponse(
         jobs=[
             job_status_response(j)
@@ -885,16 +930,16 @@ async def list_jobs():
         }
     },
 )
-async def get_job_status(job_id: str):
+async def get_job_status(
+    job_id: str,
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
     """Poll the status of a submitted job."""
-    jobs: Dict[str, Job] = app.state.jobs
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=JOB_NOT_FOUND_DETAIL)
+    job = _job_for_caller(job_id, caller)
     return job_status_response(
         job,
         configuration=_service_configuration(),
-        backend=_backend_information(),
+        backend=_backend_information(caller.owner),
     )
 
 
@@ -916,12 +961,12 @@ async def get_job_status(job_id: str):
         },
     },
 )
-async def get_job_result(job_id: str):
+async def get_job_result(
+    job_id: str,
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
     """Retrieve the result of a completed job."""
-    jobs: Dict[str, Job] = app.state.jobs
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=JOB_NOT_FOUND_DETAIL)
+    job = _job_for_caller(job_id, caller)
     if job.status == JobStatus.failed:
         raise HTTPException(status_code=500, detail=job.error or "Job failed")
     if job.status != JobStatus.completed:
@@ -946,11 +991,11 @@ async def get_job_result(job_id: str):
         409: {"model": ErrorResponse, "description": "The job has no result yet."},
     },
 )
-async def compact_job(job_id: str):
-    jobs: Dict[str, Job] = app.state.jobs
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=JOB_NOT_FOUND_DETAIL)
+async def compact_job(
+    job_id: str,
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
+    job = _job_for_caller(job_id, caller)
     context = _compact_job_context(job)
     return CompactContextResponse(
         job_id=job.id,
@@ -977,11 +1022,12 @@ async def compact_job(job_id: str):
         409: {"model": ErrorResponse, "description": "The parent job has no result yet."},
     },
 )
-async def follow_up_job(job_id: str, req: FollowUpRequest):
-    jobs: Dict[str, Job] = app.state.jobs
-    parent = jobs.get(job_id)
-    if not parent:
-        raise HTTPException(status_code=404, detail=JOB_NOT_FOUND_DETAIL)
+async def follow_up_job(
+    job_id: str,
+    req: FollowUpRequest,
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
+    parent = _job_for_caller(job_id, caller)
     context = _compact_job_context(parent)
     question = req.question.strip()
     if not question:
@@ -1014,6 +1060,7 @@ async def follow_up_job(job_id: str, req: FollowUpRequest):
     )
     return _submit_async_job(
         follow_up_request,
+        owner=caller.owner,
         parent_job_id=parent.id,
         follow_up_question=question,
         compact_context=context,
@@ -1040,12 +1087,13 @@ async def follow_up_job(job_id: str, req: FollowUpRequest):
         },
     },
 )
-async def delete_job(job_id: str):
+async def delete_job(
+    job_id: str,
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
     """Cancel running work or remove a finished job from memory."""
     jobs: Dict[str, Job] = app.state.jobs
-    job = jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail=JOB_NOT_FOUND_DETAIL)
+    job = _job_for_caller(job_id, caller)
     if job.status in (JobStatus.pending, JobStatus.running):
         tasks: Dict[str, asyncio.Task[Any]] = getattr(app.state, "job_tasks", {})
         task = tasks.get(job_id)

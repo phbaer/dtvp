@@ -1,9 +1,16 @@
 import logging
+import os
 from typing import Any, Dict, Optional
 
 import httpx
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .integration_auth import (
+    read_secret,
+    service_request_headers,
+    validate_service_token,
+)
 
 logger = logging.getLogger("dtvp.agenyzer")
 
@@ -23,6 +30,14 @@ class AgenyzerSettings(BaseSettings):
         alias="DTVP_AGENYZER_LLM_PROVIDER",
         default="",
     )
+    DTVP_AGENYZER_SERVICE_TOKEN: str = Field(
+        alias="DTVP_AGENYZER_SERVICE_TOKEN",
+        default="",
+    )
+    DTVP_AGENYZER_SERVICE_TOKEN_FILE: str = Field(
+        alias="DTVP_AGENYZER_SERVICE_TOKEN_FILE",
+        default="",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -38,14 +53,44 @@ class AgenyzerSettings(BaseSettings):
     def enabled(self) -> bool:
         return bool(self.base_url)
 
+    @property
+    def service_token(self) -> str:
+        return read_secret(
+            self.DTVP_AGENYZER_SERVICE_TOKEN,
+            self.DTVP_AGENYZER_SERVICE_TOKEN_FILE,
+        )
+
+
+def validate_agenyzer_configuration(
+    settings: Optional[AgenyzerSettings] = None,
+) -> None:
+    resolved = settings or AgenyzerSettings()
+    validate_service_token(
+        enabled=resolved.enabled,
+        environment=os.environ.get("DTVP_ENVIRONMENT", "production"),
+        token=resolved.service_token,
+        setting_name=(
+            "DTVP_AGENYZER_SERVICE_TOKEN or DTVP_AGENYZER_SERVICE_TOKEN_FILE"
+        ),
+    )
+
 
 class AgenyzerClient:
-    def __init__(self, settings: Optional[AgenyzerSettings] = None):
+    def __init__(
+        self,
+        settings: Optional[AgenyzerSettings] = None,
+        *,
+        owner: Optional[str] = None,
+    ):
         self.settings = settings or AgenyzerSettings()
         if not self.settings.enabled:
             raise RuntimeError("Agenyzer integration is not configured")
         self.client = httpx.AsyncClient(
-            timeout=self.settings.DTVP_AGENYZER_TIMEOUT_SECONDS
+            timeout=self.settings.DTVP_AGENYZER_TIMEOUT_SECONDS,
+            headers=service_request_headers(
+                self.settings.service_token,
+                owner=owner,
+            ),
         )
 
     async def close(self):

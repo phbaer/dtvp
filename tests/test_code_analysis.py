@@ -115,6 +115,10 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     integration_module, settings_cls, client_cls, env_name, monkeypatch
 ):
     monkeypatch.setenv(env_name, "http://example.com/")
+    monkeypatch.setenv(
+        env_name.replace("_URL", "_SERVICE_TOKEN"),
+        "test-only-service-token-1234567890abcdef",
+    )
 
     dummy_client = MagicMock()
     dummy_client.get = AsyncMock(
@@ -143,6 +147,12 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     assert settings.base_url == "http://example.com"
 
     client = client_cls(settings=settings)
+
+    async_client_call = integration_module.httpx.AsyncClient.call_args
+    assert async_client_call.kwargs["headers"] == {
+        "Authorization": "Bearer test-only-service-token-1234567890abcdef",
+        "X-Agentyzer-Owner": "service",
+    }
 
     assert await client.health() == {"health": "ok"}
     assert await client.start_assessment(
@@ -188,6 +198,84 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     assert payload["llm_backend"] == "openwebui"
     assert payload["llm_provider"] == "OpenWebUI"
     dummy_client.aclose.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "validator", "url_env", "token_env", "token_file_env"),
+    [
+        (
+            agentizer.AgenyzerSettings,
+            agentizer.validate_agenyzer_configuration,
+            "DTVP_AGENYZER_URL",
+            "DTVP_AGENYZER_SERVICE_TOKEN",
+            "DTVP_AGENYZER_SERVICE_TOKEN_FILE",
+        ),
+        (
+            code_analysis.CodeAnalysisSettings,
+            code_analysis.validate_code_analysis_configuration,
+            "DTVP_CODE_ANALYSIS_URL",
+            "DTVP_CODE_ANALYSIS_SERVICE_TOKEN",
+            "DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE",
+        ),
+    ],
+)
+def test_enabled_production_analyzer_requires_service_token(
+    settings_cls,
+    validator,
+    url_env,
+    token_env,
+    token_file_env,
+    monkeypatch,
+):
+    monkeypatch.setenv("DTVP_ENVIRONMENT", "production")
+    monkeypatch.setenv(url_env, "http://agentyzer:8000")
+    monkeypatch.delenv(token_env, raising=False)
+    monkeypatch.delenv(token_file_env, raising=False)
+
+    with pytest.raises(RuntimeError, match="SERVICE_TOKEN"):
+        validator(settings_cls())
+
+
+def test_enabled_production_code_analyzer_requires_distinct_admin_token(
+    monkeypatch,
+):
+    token = "test-only-service-token-1234567890abcdef"
+    monkeypatch.setenv("DTVP_ENVIRONMENT", "production")
+    monkeypatch.setenv("DTVP_CODE_ANALYSIS_URL", "http://agentyzer:8000")
+    monkeypatch.setenv("DTVP_CODE_ANALYSIS_SERVICE_TOKEN", token)
+    monkeypatch.delenv("DTVP_CODE_ANALYSIS_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE", raising=False)
+
+    with pytest.raises(RuntimeError, match="ADMIN_TOKEN"):
+        code_analysis.validate_code_analysis_configuration()
+
+    monkeypatch.setenv("DTVP_CODE_ANALYSIS_ADMIN_TOKEN", token)
+    with pytest.raises(RuntimeError, match="must differ"):
+        code_analysis.validate_code_analysis_configuration()
+
+
+def test_code_analysis_client_uses_admin_token_for_wide_scope(monkeypatch):
+    monkeypatch.setenv("DTVP_CODE_ANALYSIS_URL", "http://example.com")
+    monkeypatch.setenv(
+        "DTVP_CODE_ANALYSIS_SERVICE_TOKEN",
+        "test-only-service-token-1234567890abcdef",
+    )
+    monkeypatch.setenv(
+        "DTVP_CODE_ANALYSIS_ADMIN_TOKEN",
+        "test-only-admin-token-1234567890abcdefgh",
+    )
+    client_factory = MagicMock()
+    monkeypatch.setattr(code_analysis.httpx, "AsyncClient", client_factory)
+
+    code_analysis.CodeAnalysisClient(
+        settings=code_analysis.CodeAnalysisSettings(),
+        owner="*",
+    )
+
+    assert client_factory.call_args.kwargs["headers"] == {
+        "Authorization": "Bearer test-only-admin-token-1234567890abcdefgh",
+        "X-Agentyzer-Owner": "*",
+    }
 
 
 @pytest.mark.asyncio
@@ -1408,8 +1496,9 @@ async def test_analysis_queue_worker_passes_user_guidance_to_client(monkeypatch)
     captured: dict[str, object] = {}
 
     class FakeClient:
-        def __init__(self, _settings):
+        def __init__(self, _settings, *, owner=None):
             self._settings = _settings
+            captured["owner"] = owner
 
         async def __aenter__(self):
             return self
@@ -1479,6 +1568,7 @@ async def test_analysis_queue_worker_passes_user_guidance_to_client(monkeypatch)
     await process_analysis_queue_item(deps, item, finish_item)
 
     assert captured["user_guidance"] == "Check GHSA metadata gaps"
+    assert captured["owner"] == "testuser"
     assert captured["affected_product_versions"] == ["1.0.0", "1.1.0"]
     assert captured["model"] == "gpt-config"
     assert captured["llm_backend"] == "openwebui"
@@ -1496,8 +1586,9 @@ async def test_analysis_queue_worker_sends_lean_guidance_to_native_follow_up(
     captured: dict[str, object] = {}
 
     class FakeClient:
-        def __init__(self, _settings):
+        def __init__(self, _settings, *, owner=None):
             self._settings = _settings
+            captured["owner"] = owner
 
         async def __aenter__(self):
             return self
@@ -1551,6 +1642,7 @@ async def test_analysis_queue_worker_sends_lean_guidance_to_native_follow_up(
     await process_analysis_queue_item(deps, item, finish_item)
 
     assert captured["job_id"] == "parent-job"
+    assert captured["owner"] == "testuser"
     assert captured["question"] == "Is Keycloak itself vulnerable?"
     assert captured["user_guidance"] == "Reviewer asks about upstream Keycloak itself."
     assert "DTVP compact prior context" not in str(captured)
@@ -1561,8 +1653,9 @@ async def test_analysis_queue_worker_sends_lean_guidance_to_native_follow_up(
 @pytest.mark.asyncio
 async def test_analysis_queue_worker_treats_analyzer_cancelled_as_terminal(monkeypatch):
     class FakeClient:
-        def __init__(self, _settings):
+        def __init__(self, _settings, *, owner=None):
             self._settings = _settings
+            self.owner = owner
 
         async def __aenter__(self):
             return self

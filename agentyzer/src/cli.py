@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -88,8 +90,40 @@ DEBUG_ORDER = {
 # ===================================================================== #
 
 
-def _client(base_url: str) -> httpx.Client:
-    return httpx.Client(base_url=base_url, timeout=300)
+def _client(
+    base_url: str,
+    *,
+    token: str,
+    owner: str,
+) -> httpx.Client:
+    headers = {"X-Agentyzer-Owner": owner}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return httpx.Client(base_url=base_url, timeout=300, headers=headers)
+
+
+def _service_token(args: argparse.Namespace) -> str:
+    admin_scope = args.owner == "*"
+    direct_setting = (
+        "AGENTYZER_ADMIN_TOKEN" if admin_scope else "AGENTYZER_SERVICE_TOKEN"
+    )
+    direct = os.environ.get(direct_setting, "").strip()
+    if direct:
+        return direct
+    token_file = str(
+        args.admin_token_file if admin_scope else args.token_file
+    ).strip()
+    if token_file:
+        return Path(token_file).read_text(encoding="utf-8").strip()
+    return ""
+
+
+def _command_client(args: argparse.Namespace) -> httpx.Client:
+    return _client(
+        args.url,
+        token=_service_token(args),
+        owner=args.owner,
+    )
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -212,7 +246,7 @@ def _print_debug_mapping(
 
 
 def cmd_health(args: argparse.Namespace) -> None:
-    with _client(args.url) as c:
+    with _command_client(args) as c:
         r = c.get("/health")
         r.raise_for_status()
         _print_json(r.json())
@@ -231,7 +265,7 @@ def cmd_assess(args: argparse.Namespace) -> None:
     if args.debug:
         payload["debug"] = True
 
-    with _client(args.url) as c:
+    with _command_client(args) as c:
         r = c.post("/assess", json=payload, params={"sync": args.sync})
         r.raise_for_status()
         data = r.json()
@@ -268,7 +302,7 @@ def _poll_until_done(c: httpx.Client, job_id: str) -> None:
 
 
 def cmd_jobs(args: argparse.Namespace) -> None:
-    with _client(args.url) as c:
+    with _command_client(args) as c:
         r = c.get("/jobs")
         r.raise_for_status()
         data = r.json()
@@ -287,7 +321,7 @@ def cmd_jobs(args: argparse.Namespace) -> None:
 
 
 def cmd_result(args: argparse.Namespace) -> None:
-    with _client(args.url) as c:
+    with _command_client(args) as c:
         r = c.get(f"/jobs/{args.job_id}/result")
         if r.status_code == 409:
             detail = r.json().get("detail", "")
@@ -297,7 +331,7 @@ def cmd_result(args: argparse.Namespace) -> None:
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
-    with _client(args.url) as c:
+    with _command_client(args) as c:
         r = c.delete(f"/jobs/{args.job_id}")
         if r.status_code == 409:
             _die(r.json().get("detail", "Cannot delete"))
@@ -465,6 +499,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--url",
         default=DEFAULT_BASE_URL,
         help=f"Base URL of the API server (default: {DEFAULT_BASE_URL})",
+    )
+    parser.add_argument(
+        "--token-file",
+        default=os.environ.get("AGENTYZER_SERVICE_TOKEN_FILE", ""),
+        help="File containing the Agentyzer service token",
+    )
+    parser.add_argument(
+        "--admin-token-file",
+        default=os.environ.get("AGENTYZER_ADMIN_TOKEN_FILE", ""),
+        help="File containing the admin token used with --owner '*'",
+    )
+    parser.add_argument(
+        "--owner",
+        default=os.environ.get("AGENTYZER_CALLER_OWNER", "cli"),
+        help="Owner identity used to isolate jobs (default: cli)",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

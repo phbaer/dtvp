@@ -359,7 +359,10 @@ async def process_analysis_queue_item(
     _seed_item_metadata_from_settings(item, settings)
 
     client_cls = deps.get_code_analysis_client_cls()
-    async with client_cls(settings) as client:
+    async with client_cls(
+        settings,
+        owner=str(getattr(item, "submitted_by", None) or "service"),
+    ) as client:
         async def submit_to_analyzer() -> dict[str, Any]:
             parent_job_id = _string_value(getattr(item, "parent_job_id", None))
             follow_up_question = _string_value(

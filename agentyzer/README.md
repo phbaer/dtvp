@@ -20,13 +20,16 @@ The service supports synchronous assessments for direct integrations and asynchr
 Start the API:
 
 ```bash
+export AGENTYZER_ENVIRONMENT=development
+export AGENTYZER_SERVICE_TOKEN="$(openssl rand -hex 32)"
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
 Check service health:
 
 ```bash
-curl http://localhost:8000/health
+curl -H "Authorization: Bearer $AGENTYZER_SERVICE_TOKEN" \
+  -H "X-Agentyzer-Owner: cli" http://localhost:8000/health
 uv run agentyzer health
 ```
 
@@ -40,6 +43,8 @@ Submit an async assessment and inspect it later:
 
 ```bash
 curl -X POST http://localhost:8000/assess \
+  -H "Authorization: Bearer $AGENTYZER_SERVICE_TOKEN" \
+  -H "X-Agentyzer-Owner: cli" \
   -H "Content-Type: application/json" \
   -d '{"component_name":"benchmark","vuln_id":"CVE-2024-49766"}'
 
@@ -57,11 +62,12 @@ Agentyzer exposes two operator surfaces:
 
 At startup the service:
 
-1. Loads and hot-reloads `config/repos.yaml` for component-to-repository mappings.
-2. Validates the prompt bundles used by the LLM-assisted steps.
-3. Constructs the configured LLM backend from environment variables.
-4. Initializes an in-memory job store for async assessments.
-5. Performs an LLM health check and logs whether model-backed steps are available.
+1. Validates service authentication before exposing the API.
+2. Loads and hot-reloads `config/repos.yaml` for component-to-repository mappings.
+3. Validates the prompt bundles used by the LLM-assisted steps.
+4. Constructs the configured LLM backend from environment variables.
+5. Initializes an owner-scoped in-memory job store for async assessments.
+6. Performs an LLM health check and logs whether model-backed steps are available.
 
 ## End-To-End Process
 
@@ -289,6 +295,13 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | `1` | Maximum number of async or sync assessment pipelines allowed to execute at the same time. Extra async jobs remain `pending` until a slot opens. |
+| `AGENTYZER_ENVIRONMENT` | `production` | Security profile: `production`, `development`, or `test`. |
+| `AGENTYZER_SERVICE_TOKEN` | unset | Bearer token required by every HTTP route; use at least 32 characters. |
+| `AGENTYZER_SERVICE_TOKEN_FILE` | unset | File containing the bearer token when the direct value is unset. |
+| `AGENTYZER_ADMIN_TOKEN` | unset | Separate bearer token required for the service-wide `*` owner scope; use at least 32 characters and never reuse the service token. |
+| `AGENTYZER_ADMIN_TOKEN_FILE` | unset | File containing the admin token when the direct value is unset. |
+| `AGENTYZER_ALLOW_UNAUTHENTICATED` | `false` | Explicit bypass for local development/test only; production rejects it. |
+| `AGENTYZER_CALLER_OWNER` | `cli` | Owner header used by the CLI to isolate its jobs. |
 
 ### Component registry
 
@@ -319,13 +332,20 @@ The API is designed for two integration styles:
 - Direct request-response integrations that want a finished assessment immediately.
 - Job-oriented integrations that want polling, progress updates, and deferred result retrieval.
 
+Every API route, including health, configuration, prompt inspection, and
+OpenAPI, requires bearer authentication. Callers also send
+`X-Agentyzer-Owner`; job operations return `404` for another owner's job so
+identifiers do not become an existence oracle. The normal service credential
+cannot request the `*` owner. The trusted DTVP backend uses the separate admin
+credential only for reviewer-wide operational status. The CLI reads the normal
+token from `AGENTYZER_SERVICE_TOKEN` or `--token-file`; `--owner '*'` instead
+uses `AGENTYZER_ADMIN_TOKEN` or `--admin-token-file`.
+
 ### OpenAPI and interactive documentation
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /openapi.json` | Raw OpenAPI document. |
-| `GET /docs` | Swagger UI. |
-| `GET /redoc` | ReDoc view. |
+| `GET /openapi.json` | Authenticated raw OpenAPI document. Interactive docs are disabled to avoid an unauthenticated schema surface. |
 
 ### API endpoints
 
@@ -336,7 +356,7 @@ The API is designed for two integration styles:
 | `GET` | `/prompts` | Prompt bundle metadata; pass `include_values=true` to include configured prompt text. |
 | `POST` | `/assess` | Submit an assessment request, synchronously or asynchronously. |
 | `POST` | `/benchmark/compare` | Probabilistically compare a human assessment artifact with an automated assessment result. |
-| `GET` | `/jobs` | List all in-memory async jobs known to the current process. |
+| `GET` | `/jobs` | List the caller owner's in-memory async jobs. |
 | `GET` | `/jobs/{job_id}` | Fetch job status and progress. |
 | `GET` | `/jobs/{job_id}/result` | Retrieve the final assessment for a completed job. |
 | `POST` | `/jobs/{job_id}/compact` | Build concise structured context from a completed job. |
@@ -414,7 +434,7 @@ Important assessment payload capabilities:
 Async jobs are held in memory inside the FastAPI process. That means:
 
 - Job state is not durable across process restarts.
-- `GET /jobs` only returns jobs known to the current API instance.
+- `GET /jobs` only returns jobs owned by the caller identity in the current API instance.
 - `GET /jobs` returns shared `configuration` and `backend` metadata once on the response envelope; individual jobs carry job-specific request, progress, log, and LLM metadata.
 - `DELETE /jobs/{job_id}` cancels a `pending` or `running` job, and removes a finished job from memory.
 - `POST /jobs/{job_id}/compact` extracts bounded request, verdict, CVSS, evidence, and step-finding context from a completed job so clients can reuse it without replaying the full result.
@@ -437,13 +457,19 @@ The commands in this section were smoke-tested against a local instance on 2026-
 Health check:
 
 ```bash
-curl http://localhost:8000/health
+curl \
+  -H "Authorization: Bearer $AGENTYZER_SERVICE_TOKEN" \
+  -H "X-Agentyzer-Owner: local-cli" \
+  http://localhost:8000/health
 ```
 
 Service configuration:
 
 ```bash
-curl http://localhost:8000/configuration
+curl \
+  -H "Authorization: Bearer $AGENTYZER_SERVICE_TOKEN" \
+  -H "X-Agentyzer-Owner: local-cli" \
+  http://localhost:8000/configuration
 ```
 
 Representative service configuration excerpt:
@@ -711,7 +737,10 @@ Build example:
 
 ```bash
 docker build -t agentyzer .
-docker run --rm -p 8000:8000 agentyzer
+docker run --rm -p 127.0.0.1:8000:8000 \
+  -e AGENTYZER_ENVIRONMENT=development \
+  -e AGENTYZER_SERVICE_TOKEN="$AGENTYZER_SERVICE_TOKEN" \
+  agentyzer
 ```
 
 ### Docker Compose behavior
@@ -719,7 +748,7 @@ docker run --rm -p 8000:8000 agentyzer
 `docker-compose.yml` defines one service named `analyzer` that:
 
 - Builds from the local Dockerfile.
-- Publishes container port `8000` to host port `8000`.
+- Publishes container port `8000` on host loopback port `8000`.
 - Mounts `./config` into `/app/config` as read-only.
 - Points the containerized service at an Ollama instance via `OLLAMA_HOST=http://host.docker.internal:11434`.
 - Defaults to one assessment execution slot through `AGENTYZER_MAX_CONCURRENT_JOBS=1`.
@@ -727,6 +756,8 @@ docker run --rm -p 8000:8000 agentyzer
 Run it with:
 
 ```bash
+export AGENTYZER_SERVICE_TOKEN="$(openssl rand -hex 32)"
+export AGENTYZER_ADMIN_TOKEN="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 
