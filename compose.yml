@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
 
   dtrack-frontend:
-    image: dependencytrack/frontend:4.14.1
+    image: dependencytrack/frontend:4.14.3
     environment:
       - API_BASE_URL=/api
     restart: unless-stopped
