@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { marked } from 'marked';
+import { computed } from 'vue';
+import { renderSafeMarkdown } from '../lib/sanitizeMarkdown';
 
 const props = defineProps<{
     changelog: string;
@@ -10,11 +10,7 @@ const emit = defineEmits<{
     (e: 'acknowledge'): void;
 }>();
 
-const renderedChangelog = ref('');
-
-onMounted(async () => {
-    renderedChangelog.value = await marked.parse(props.changelog);
-});
+const renderedChangelog = computed(() => renderSafeMarkdown(props.changelog));
 </script>
 
 <template>

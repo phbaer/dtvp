@@ -1149,8 +1149,13 @@ Deployment rules:
 - Reviewers see the Python/GIL state in the application footer and can inspect
   live worker capacity, retained grouped tasks, and cache pressure on the
   Settings **Runtime** tab.
-- The frontend image renders `index.html` from its immutable template on every
-  start, so frontend URL and context-path changes are restart-safe.
+- The backend serves a no-store, same-origin `runtime-config.js`; the immutable
+  frontend shell contains no environment-derived inline script. Production
+  responses set a restrictive content security policy, HSTS, clickjacking,
+  MIME-sniffing, referrer, opener, and browser-permission headers. Interactive
+  API documentation and the OpenAPI route are disabled in production.
+- Markdown from changelogs and vulnerability advisories is parsed through a
+  shared DOMPurify allowlist before Vue renders it as HTML.
 
 ### Python Runtime Images
 

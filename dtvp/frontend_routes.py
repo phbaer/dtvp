@@ -1,11 +1,10 @@
 import json
 import os
 from dataclasses import dataclass
-from html import escape
-from typing import Callable
+from typing import Any, Callable
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 
@@ -21,8 +20,8 @@ class FrontendRouteDeps:
     read_text: Callable[[str], str]
 
 
-def _inline_script_json(value: str) -> str:
-    """Return a JSON string that cannot terminate the surrounding script tag."""
+def _script_safe_json(value: Any) -> str:
+    """Serialize JSON without HTML-significant code points."""
     return (
         json.dumps(value)
         .replace("<", "\\u003c")
@@ -33,31 +32,30 @@ def _inline_script_json(value: str) -> str:
     )
 
 
+def _inline_script_json(value: str) -> str:
+    """Compatibility helper for a script-safe JSON string."""
+    return _script_safe_json(value)
+
+
+def _runtime_config_javascript(deps: FrontendRouteDeps) -> str:
+    payload = {
+        "DTVP_CONTEXT_PATH": deps.get_context_path() or "/",
+        "DTVP_FRONTEND_URL": deps.get_frontend_url() or "",
+        "DTVP_DEV_DISABLE_AUTH": (
+            "true" if deps.get_dev_disable_auth() else "false"
+        ),
+        "DTVP_DEFAULT_PROJECT_FILTER": deps.get_default_project_filter(),
+        "DTVP_ATTRIBUTION_AGE_FILTER_DAYS": deps.get_attribution_age_filter_days(),
+        "DTVP_JIRA_CREATE_URL": deps.get_jira_create_url(),
+    }
+    return f"window.__env__ = {_script_safe_json(payload)};\n"
+
+
 def _render_index_html(index_path: str, deps: FrontendRouteDeps) -> HTMLResponse:
     try:
         content = deps.read_text(index_path)
 
-        frontend_url = deps.get_frontend_url() or ""
         current_context_path = deps.get_context_path()
-
-        content = content.replace("${DTVP_CONTEXT_PATH}", current_context_path or "/")
-        content = content.replace("${DTVP_FRONTEND_URL}", frontend_url)
-        content = content.replace(
-            "${DTVP_DEV_DISABLE_AUTH}",
-            "true" if deps.get_dev_disable_auth() else "false",
-        )
-        content = content.replace(
-            "${DTVP_DEFAULT_PROJECT_FILTER}",
-            deps.get_default_project_filter(),
-        )
-        content = content.replace(
-            "${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}",
-            deps.get_attribution_age_filter_days(),
-        )
-        content = content.replace(
-            "'${DTVP_JIRA_CREATE_URL}'",
-            _inline_script_json(deps.get_jira_create_url()),
-        )
 
         if current_context_path:
             content = content.replace('src="/', f'src="{current_context_path}/')
@@ -94,28 +92,21 @@ def register_frontend_routes(app: FastAPI, deps: FrontendRouteDeps) -> None:
     context_path = deps.get_context_path()
     assets_dir = os.path.join(deps.frontend_dist_dir, "assets")
     index_path = os.path.join(deps.frontend_dist_dir, "index.html")
+    runtime_config_path = f"{context_path}/runtime-config.js"
+
+    @app.get(runtime_config_path, include_in_schema=False)
+    async def runtime_config():
+        return Response(
+            _runtime_config_javascript(deps),
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
 
     if context_path:
 
         @app.get("/", include_in_schema=False)
         async def redirect_root_to_context_path():
-            target = f"{context_path}/"
-            escaped_target = escape(target, quote=True)
-            target_json = json.dumps(target)
-            return HTMLResponse(
-                f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta http-equiv="refresh" content="0; url={escaped_target}" />
-  <title>DTVP</title>
-</head>
-<body>
-  <script>window.location.replace({target_json});</script>
-  <a href="{escaped_target}">DTVP</a>
-</body>
-</html>"""
-            )
+            return RedirectResponse(url=f"{context_path}/")
 
         @app.get(context_path)
         async def redirect_to_context_path():

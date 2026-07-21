@@ -151,6 +151,7 @@ from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
 )
 from .settings_routes import create_settings_router
+from .security_headers import add_security_headers
 from .startup_services import (
     StartupRuntimeTasks,
     start_application_runtime,
@@ -381,7 +382,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _set_runtime_state("ready", "DTVP is ready.")
 
 
-app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
+app = FastAPI(
+    title="DTVP",
+    version=VERSION,
+    lifespan=lifespan,
+    docs_url=None if auth_settings.is_production else "/docs",
+    redoc_url=None if auth_settings.is_production else "/redoc",
+    openapi_url=None if auth_settings.is_production else "/openapi.json",
+)
 context_path = normalize_context_path(auth_settings.CONTEXT_PATH)
 
 
@@ -408,6 +416,13 @@ app.add_middleware(
     same_site="lax",
     https_only=auth_settings.secure_cookies,
 )
+
+
+@app.middleware("http")
+async def security_response_headers(request: Request, call_next):
+    response = await call_next(request)
+    add_security_headers(response, production=auth_settings.is_production)
+    return response
 
 
 @app.middleware("http")
