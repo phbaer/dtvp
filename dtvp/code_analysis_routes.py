@@ -756,6 +756,8 @@ async def _status_call_with_timeout(
 async def _fetch_external_code_analysis_status(
     deps: CodeAnalysisRouteDeps,
     settings: Any,
+    *,
+    owner: str,
 ) -> dict[str, Any]:
     external: dict[str, Any] = {
         "health": None,
@@ -775,7 +777,7 @@ async def _fetch_external_code_analysis_status(
 
     jobs_payload: Any = None
     try:
-        async with deps.code_analysis_client_cls(settings) as client:
+        async with deps.code_analysis_client_cls(settings, owner=owner) as client:
             timeout = _status_timeout_seconds(settings)
             health_result, jobs_result = await asyncio.gather(
                 _status_call_with_timeout("health", client.health(), timeout),
@@ -877,7 +879,11 @@ async def build_code_analysis_dashboard_status(
         else 1
     )
     available_slots = max(0, capacity - len(running_items))
-    external = await _fetch_external_code_analysis_status(deps, settings)
+    external = await _fetch_external_code_analysis_status(
+        deps,
+        settings,
+        owner="*" if privileged else user or "service",
+    )
     if not privileged:
         external["health"] = None
         external["jobs"] = []
@@ -1210,7 +1216,7 @@ def _register_code_analysis_routes(
             return benchmark
 
         try:
-            async with deps.code_analysis_client_cls(settings) as client:
+            async with deps.code_analysis_client_cls(settings, owner=user) as client:
                 evaluated = await client.compare_benchmark(benchmark)
             if isinstance(evaluated, dict):
                 return evaluated
@@ -1303,7 +1309,7 @@ def _register_code_analysis_routes(
                 status_code=503,
                 detail=deps.code_analysis_disabled_detail,
             )
-        async with deps.code_analysis_client_cls(settings) as client:
+        async with deps.code_analysis_client_cls(settings, owner=user) as client:
             user_guidance = _append_static_component_guidance(
                 load_auto_analysis_guidance=deps.load_auto_analysis_guidance,
                 vuln_id=req.vuln_id,
@@ -1341,7 +1347,7 @@ def _register_code_analysis_routes(
                 status_code=503,
                 detail=deps.code_analysis_not_configured_detail,
             )
-        async with deps.code_analysis_client_cls(settings) as client:
+        async with deps.code_analysis_client_cls(settings, owner=user) as client:
             return await client.get_job_status(job_id)
 
     @router.get(
@@ -1360,7 +1366,7 @@ def _register_code_analysis_routes(
                 status_code=503,
                 detail=deps.code_analysis_not_configured_detail,
             )
-        async with deps.code_analysis_client_cls(settings) as client:
+        async with deps.code_analysis_client_cls(settings, owner=user) as client:
             return await client.get_job_result(job_id)
 
     @router.get(
@@ -1378,7 +1384,7 @@ def _register_code_analysis_routes(
                 status_code=503,
                 detail=deps.code_analysis_not_configured_detail,
             )
-        async with deps.code_analysis_client_cls(settings) as client:
+        async with deps.code_analysis_client_cls(settings, owner=user) as client:
             return await client.health()
 
     @router.get(
@@ -1398,7 +1404,7 @@ def _register_code_analysis_routes(
                 status_code=503,
                 detail=deps.code_analysis_not_configured_detail,
             )
-        async with deps.code_analysis_client_cls(settings) as client:
+        async with deps.code_analysis_client_cls(settings, owner=user) as client:
             if not hasattr(client, "get_prompts"):
                 raise HTTPException(
                     status_code=404,
@@ -1654,7 +1660,10 @@ def _register_analysis_queue_routes(
                 raise HTTPException(status_code=409, detail=message)
 
             try:
-                async with deps.code_analysis_client_cls(settings) as client:
+                async with deps.code_analysis_client_cls(
+                    settings,
+                    owner=user,
+                ) as client:
                     await client.delete_job(item.job_id)
             except Exception as exc:
                 message = _extract_error_message(exc)

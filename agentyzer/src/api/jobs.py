@@ -23,6 +23,7 @@ class Job:
 
     __slots__ = (
         "id",
+        "owner",
         "status",
         "created_at",
         "finished_at",
@@ -48,8 +49,15 @@ class Job:
         "compact_context",
     )
 
-    def __init__(self, job_id: str, request: AssessRequest) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        request: AssessRequest,
+        *,
+        owner: str = "service",
+    ) -> None:
         self.id = job_id
+        self.owner = owner
         self.status = JobStatus.pending
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.finished_at: Optional[str] = None

@@ -1,4 +1,51 @@
+import argparse
+from unittest.mock import MagicMock
+
 from src import cli
+
+
+def test_command_client_adds_service_auth_and_owner(monkeypatch):
+    client_factory = MagicMock()
+    monkeypatch.setattr(cli.httpx, "Client", client_factory)
+    monkeypatch.setenv(
+        "AGENTYZER_SERVICE_TOKEN",
+        "test-only-agentyzer-service-token-1234567890",
+    )
+    args = argparse.Namespace(
+        url="http://localhost:8000",
+        token_file="",
+        admin_token_file="",
+        owner="alice",
+    )
+
+    cli._command_client(args)
+
+    assert client_factory.call_args.kwargs["headers"] == {
+        "Authorization": "Bearer test-only-agentyzer-service-token-1234567890",
+        "X-Agentyzer-Owner": "alice",
+    }
+
+
+def test_command_client_uses_admin_token_for_service_wide_scope(monkeypatch):
+    client_factory = MagicMock()
+    monkeypatch.setattr(cli.httpx, "Client", client_factory)
+    monkeypatch.setenv(
+        "AGENTYZER_ADMIN_TOKEN",
+        "test-only-agentyzer-admin-token-123456789012",
+    )
+    args = argparse.Namespace(
+        url="http://localhost:8000",
+        token_file="",
+        admin_token_file="",
+        owner="*",
+    )
+
+    cli._command_client(args)
+
+    assert client_factory.call_args.kwargs["headers"] == {
+        "Authorization": "Bearer test-only-agentyzer-admin-token-123456789012",
+        "X-Agentyzer-Owner": "*",
+    }
 
 
 def test_print_assessment_pretty_prints_debug_sections(capsys):

@@ -1071,15 +1071,19 @@ docker compose up -d
 ```
 
 Set the Dependency-Track API key, complete OIDC settings, an HTTPS public URL,
-and a random session secret before starting the production profile. Generate a
-session secret with `openssl rand -hex 32`. Production startup rejects missing,
-short, or known placeholder secrets, insecure OIDC callbacks, and the
-development authentication bypass. For a non-default gateway:
+and random session, Agentyzer service, and Agentyzer admin secrets before
+starting the production profile. Generate each secret with `openssl rand -hex
+32`. Production startup rejects missing, short, or known placeholder session
+secrets, insecure OIDC callbacks, the development authentication bypass, and an
+enabled code-analysis integration without distinct service and admin tokens.
+For a non-default gateway:
 
 ```env
 DTVP_HTTP_PORT=8083
 DTVP_FRONTEND_URL=https://host.example:8083/dtvp
 DTVP_SESSION_SECRET_KEY=<random value from openssl rand -hex 32>
+AGENTYZER_SERVICE_TOKEN=<a second random value from openssl rand -hex 32>
+AGENTYZER_ADMIN_TOKEN=<a third random value from openssl rand -hex 32>
 ```
 
 Deployment rules:
@@ -1089,12 +1093,18 @@ Deployment rules:
 - Compose starts Agentyzer and persists control repositories, worktree locks,
   and transient detached worktrees in the `agentyzer-repos` volume. Populate
   or override the sanitized `agentyzer/config/repos.yaml` before enabling
-  automatic scans; never commit repository credentials. Agentyzer immediately
-  clones or fetches every explicit URL-backed mapping on startup, refreshes
-  those control repositories every `AGENTYZER_REPO_REFRESH_SECONDS`, and fetches
-  again immediately before creating an assessment worktree. The periodic pass
-  is independent of advisory filtering, so references remain current even when
-  an assessment exits before repository preparation.
+  automatic scans; never commit repository credentials. Its host port binds to
+  loopback, and every API route requires a bearer token. DTVP forwards the
+  authenticated username as a trusted owner identity; Agentyzer lists, reads,
+  follows up, cancels, and deletes only that owner's jobs. DTVP reviewer-wide
+  status requests explicitly use a separate admin credential and the trusted
+  service-wide owner scope.
+  Agentyzer immediately clones or fetches every explicit URL-backed mapping on
+  startup, refreshes those control repositories every
+  `AGENTYZER_REPO_REFRESH_SECONDS`, and fetches again immediately before
+  creating an assessment worktree. The periodic pass is independent of
+  advisory filtering, so references remain current even when an assessment
+  exits before repository preparation.
 - Internal services use Compose names and container ports. DTVP reaches
   Dependency-Track at `http://dtrack-apiserver:8080` and Agentyzer at
   `http://agentyzer:8000` unless overridden.
@@ -1292,6 +1302,10 @@ means the integration or override is disabled.
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | Analyzer HTTP timeout | `300` |
 | `DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS` | Dashboard health/jobs timeout | `5` |
 | `DTVP_CODE_ANALYSIS_DASHBOARD_CACHE_SECONDS` | Shared dashboard status snapshot lifetime | `3` |
+| `DTVP_CODE_ANALYSIS_SERVICE_TOKEN` | Bearer token shared with Agentyzer; required in production when enabled | unset |
+| `DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE` | File containing the analyzer bearer token when the direct value is unset | unset |
+| `DTVP_CODE_ANALYSIS_ADMIN_TOKEN` | Separate Agentyzer admin token for reviewer-wide status; required in production when enabled | unset |
+| `DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE` | File containing the analyzer admin token when the direct value is unset | unset |
 | `DTVP_CODE_ANALYSIS_MODEL` | Analyzer model hint | unset |
 | `DTVP_CODE_ANALYSIS_LLM_BACKEND` | LLM backend hint | unset |
 | `DTVP_CODE_ANALYSIS_LLM_PROVIDER` | LLM provider hint | unset |
@@ -1314,6 +1328,12 @@ means the integration or override is disabled.
 | :--- | :--- | :--- |
 | `AGENTYZER_PORT` | Compose host port | `8095` |
 | `AGENTYZER_LOG_LEVEL` | Service log level | `INFO` |
+| `AGENTYZER_ENVIRONMENT` | Security profile: `production`, `development`, or `test` | `production` |
+| `AGENTYZER_SERVICE_TOKEN` | Bearer token required by every Agentyzer API route | unset |
+| `AGENTYZER_SERVICE_TOKEN_FILE` | File containing the bearer token when the direct value is unset | unset |
+| `AGENTYZER_ADMIN_TOKEN` | Separate bearer token required for service-wide owner scope | unset |
+| `AGENTYZER_ADMIN_TOKEN_FILE` | File containing the admin token when the direct value is unset | unset |
+| `AGENTYZER_ALLOW_UNAUTHENTICATED` | Explicit local-only bypass; rejected in production | `false` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
 | `AGENTYZER_REPO_REFRESH_SECONDS` | Background refresh interval for explicit URL-backed repository mappings; `0` disables and positive values have a 60-second minimum | `900` |
 | `AGENTYZER_GITHUB_TOKEN` | Optional GitHub token for authenticated advisory lookups and higher API limits | unset |
