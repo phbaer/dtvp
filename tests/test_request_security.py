@@ -96,6 +96,28 @@ def test_security_audit_is_owner_only_and_redacts_sensitive_detail(tmp_path, mon
     assert len(persisted["event_hash"]) == 64
 
 
+def test_security_audit_rotates_with_bounded_owner_only_backups(tmp_path, monkeypatch):
+    path = tmp_path / "security" / "audit.jsonl"
+    monkeypatch.setenv("DTVP_SECURITY_AUDIT_PATH", str(path))
+    monkeypatch.setenv("DTVP_SECURITY_AUDIT_MAX_BYTES", "1")
+    monkeypatch.setenv("DTVP_SECURITY_AUDIT_BACKUP_COUNT", "2")
+    validate_security_audit_configuration()
+
+    for index in range(4):
+        emit_security_audit(
+            "rotation.test",
+            outcome="success",
+            resource_id=str(index),
+        )
+
+    files = [path, path.with_name("audit.jsonl.1"), path.with_name("audit.jsonl.2")]
+    assert all(item.exists() for item in files)
+    assert not path.with_name("audit.jsonl.3").exists()
+    assert all(stat.S_IMODE(item.stat().st_mode) == 0o600 for item in files)
+    assert json.loads(path.read_text(encoding="utf-8"))["resource_id"] == "3"
+    assert main.audit_health()["backup_count"] == 2
+
+
 def test_http_boundary_rejects_unknown_hosts_and_cross_origin_mutations(client):
     host_response = client.get(
         "/api/version",

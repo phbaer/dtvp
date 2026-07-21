@@ -79,6 +79,15 @@ class GroupedVulnSummaryIndex:
         if directory:
             os.makedirs(directory, exist_ok=True)
         connection = sqlite3.connect(path, timeout=5)
+        connection.execute("PRAGMA busy_timeout = 5000")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            if self.logger:
+                self.logger.warning(
+                    "Could not restrict grouped summary database permissions: %s",
+                    path,
+                )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS grouped_vuln_summary_index (

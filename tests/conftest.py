@@ -33,12 +33,16 @@ def reset_cache_manager(tmp_path, monkeypatch):
         "DTVP_SECURITY_AUDIT_PATH",
         str(tmp_path / "security_audit.jsonl"),
     )
+    monkeypatch.setenv("DTVP_INSTANCE_LOCK_PATH", str(tmp_path / "runtime.lock"))
+    monkeypatch.setenv("DTVP_STORAGE_MIN_FREE_BYTES", "1")
     dt_cache.cache_manager.reset(str(cache_dir))
     main.code_analysis_result_store.reset()
     main.request_rate_limiter.reset()
+    main._set_runtime_state("ready", "DTVP is ready.")
     yield
     main.code_analysis_result_store.reset()
     main.request_rate_limiter.reset()
+    main._set_runtime_state("ready", "DTVP is ready.")
 
 
 # Mock Dependency Track Client

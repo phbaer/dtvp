@@ -1178,6 +1178,10 @@ class HealthResponse(BaseModel):
         default=None,
         description="Operational backend details visible to API consumers.",
     )
+    storage: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Durable job-store integrity, permissions, and retention status.",
+    )
 
 
 class ErrorResponse(BaseModel):
