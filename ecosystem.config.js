@@ -36,11 +36,13 @@ module.exports = {
             args: "run uvicorn dtvp.boot:app --host 0.0.0.0 --port 8000",
             interpreter: "none",
             env: {
+                DTVP_ENVIRONMENT: "development",
                 DTVP_DT_API_URL: "http://127.0.0.1:8081",
                 DTVP_DT_API_KEY: "mock_key",
                 DTVP_OIDC_AUTHORITY: "http://127.0.0.1:8081",
                 DTVP_OIDC_CLIENT_ID: "mock_id",
                 DTVP_OIDC_CLIENT_SECRET: "mock_secret",
+                DTVP_SESSION_SECRET_KEY: "local-development-session-secret-1234567890abcdef",
                 DTVP_OIDC_REDIRECT_URI: "http://localhost:5173/auth/callback",
                 DTVP_FRONTEND_URL: "http://localhost:5173",
                 DTVP_TMRESCORE_URL: "http://127.0.0.1:8090",

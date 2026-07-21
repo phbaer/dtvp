@@ -11,6 +11,7 @@ import {
     getTaskVulnGroups,
     updateAssessment,
     login,
+    logout,
     checkSession,
     getVersion,
     getDependencyChains,
@@ -62,7 +63,8 @@ vi.mock('axios', () => {
                     }
                 }
             }),
-            get: mocks.get
+            get: mocks.get,
+            post: mocks.post,
         }
     }
 })
@@ -865,6 +867,23 @@ describe('api.ts', () => {
 
         login()
         expect(window.location.href).toContain('/auth/login')
+    })
+
+    it('logout uses a credentialed POST before redirecting', async () => {
+        Object.defineProperty(window, 'location', {
+            value: { href: '' },
+            writable: true
+        })
+        mocks.post.mockResolvedValue({ status: 200 })
+
+        await logout()
+
+        expect(mocks.post).toHaveBeenCalledWith(
+            expect.stringContaining('/auth/logout'),
+            undefined,
+            { withCredentials: true },
+        )
+        expect(window.location.href).toContain('/login')
     })
 
     it('checkSession returns true on success', async () => {

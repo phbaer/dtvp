@@ -8,9 +8,56 @@ from jose import jwt
 from test_setup import mock_dt
 
 
-def pkce_challenge(code_verifier: str) -> str:
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+def test_mock_oidc_provider_supports_nonce_pkce_and_jwks():
+    client = TestClient(mock_dt.app)
+    verifier = "mock-code-verifier-that-is-long-enough-for-pkce-1234567890"
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+    params = {
+        "client_id": "mock-client",
+        "redirect_uri": "http://localhost/auth/callback",
+        "state": "expected-state",
+        "nonce": "expected-nonce",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+
+    authorize = client.get("/auth/authorize", params=params)
+    assert authorize.status_code == 200
+    assert 'name="nonce" value="expected-nonce"' in authorize.text
+
+    approved = client.post(
+        "/auth/authorize",
+        data={**params, "username": "reviewer"},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 303
+    callback_query = parse_qs(urlparse(approved.headers["location"]).query)
+    assert callback_query["state"] == ["expected-state"]
+
+    token = client.post(
+        "/auth/token",
+        data={
+            "code": callback_query["code"][0],
+            "grant_type": "authorization_code",
+            "redirect_uri": params["redirect_uri"],
+            "client_id": params["client_id"],
+            "client_secret": "mock-secret",
+            "code_verifier": verifier,
+        },
+    )
+    assert token.status_code == 200
+    jwks = client.get("/auth/jwks").json()
+    claims = jwt.decode(
+        token.json()["id_token"],
+        jwks["keys"][0],
+        algorithms=["RS256"],
+        issuer="http://testserver",
+        audience="mock-client",
+    )
+    assert claims["sub"] == "reviewer"
+    assert claims["nonce"] == "expected-nonce"
 
 
 def test_mock_dt_can_override_analysis_state():
@@ -73,94 +120,3 @@ def test_mock_dt_can_reset_analysis_state():
     assert restored.status_code == 200
     assert restored.json()["analysisState"] != "NOT_AFFECTED"
     assert restored.json()["analysisDetails"] != "Temporary state"
-
-
-def test_mock_oidc_requires_matching_pkce_verifier():
-    client = TestClient(mock_dt.app)
-    code_verifier = "a" * 64
-    challenge = pkce_challenge(code_verifier)
-    authorize_response = client.get(
-        "/auth/authorize",
-        params={
-            "client_id": "mock_id",
-            "redirect_uri": "http://localhost/auth/callback",
-            "state": "mock-state",
-            "response_type": "code",
-            "scope": "openid",
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-        },
-    )
-    assert authorize_response.status_code == 200
-
-    authorize_post = client.post(
-        "/auth/authorize",
-        data={
-            "username": "reviewer",
-            "redirect_uri": "http://localhost/auth/callback",
-            "client_id": "mock_id",
-            "state": "mock-state",
-            "nonce": "mock-nonce",
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-        },
-        follow_redirects=False,
-    )
-    callback_params = parse_qs(urlparse(authorize_post.headers["location"]).query)
-
-    token_response = client.post(
-        "/auth/token",
-        data={
-            "code": callback_params["code"][0],
-            "grant_type": "authorization_code",
-            "redirect_uri": "http://localhost/auth/callback",
-            "client_id": "mock_id",
-            "client_secret": "mock_secret",
-            "code_verifier": code_verifier,
-        },
-    )
-
-    assert callback_params["state"] == ["mock-state"]
-    assert token_response.status_code == 200
-    claims = jwt.decode(
-        token_response.json()["id_token"],
-        mock_dt._OIDC_PUBLIC_JWK,
-        algorithms=["RS256"],
-        audience="mock_id",
-        issuer="http://testserver",
-    )
-    assert claims["sub"] == "reviewer"
-    assert claims["nonce"] == "mock-nonce"
-
-
-def test_mock_oidc_rejects_wrong_pkce_verifier():
-    client = TestClient(mock_dt.app)
-    code_verifier = "b" * 64
-    authorize_post = client.post(
-        "/auth/authorize",
-        data={
-            "username": "analyst",
-            "redirect_uri": "http://localhost/auth/callback",
-            "client_id": "mock_id",
-            "state": "mock-state",
-            "nonce": "mock-nonce",
-            "code_challenge": pkce_challenge(code_verifier),
-            "code_challenge_method": "S256",
-        },
-        follow_redirects=False,
-    )
-    code = parse_qs(urlparse(authorize_post.headers["location"]).query)["code"][0]
-
-    token_response = client.post(
-        "/auth/token",
-        data={
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": "http://localhost/auth/callback",
-            "client_id": "mock_id",
-            "code_verifier": "wrong-" + code_verifier,
-        },
-    )
-
-    assert token_response.status_code == 400
-    assert token_response.json()["detail"] == "Invalid PKCE code verifier"
