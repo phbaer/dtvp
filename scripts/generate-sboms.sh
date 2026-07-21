@@ -1,13 +1,8 @@
 #!/bin/sh
 set -eu
 
-if [ "${NODE_TLS_REJECT_UNAUTHORIZED:-}" = "0" ]; then
-    echo "Refusing to generate SBOMs with Node.js TLS verification disabled." >&2
-    echo "Unset NODE_TLS_REJECT_UNAUTHORIZED and configure a trusted CA instead." >&2
-    exit 1
-fi
-
 repository_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+"$repository_dir/scripts/check-node-tls.sh"
 temporary_dir=$(mktemp -d)
 trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
 

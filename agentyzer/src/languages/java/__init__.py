@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET
 from typing import Any
+
+from defusedxml import ElementTree as ET
 
 from src.agents.ast_analyzer import (
     _JAVA_IMPORT_RE,

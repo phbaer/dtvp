@@ -865,12 +865,13 @@ class CodeAnalysisResultStore:
             with closing(self._connect()) as connection:
                 for start in range(0, len(normalized_ids), 500):
                     batch = normalized_ids[start : start + 500]
+                    # Only bound placeholder tokens are generated here.
                     rows = connection.execute(
                         f"""
                         SELECT analysis_run_id, payload_json
                         FROM code_analysis_results
                         WHERE analysis_run_id IN ({','.join('?' for _ in batch)})
-                        """,
+                        """,  # nosec B608
                         batch,
                     ).fetchall()
                     for run_id, payload_json in rows:
@@ -1029,6 +1030,7 @@ class CodeAnalysisResultStore:
         with self._lock:
             self._ensure_loaded()
             with closing(self._connect()) as connection:
+                # Every optional clause is selected from static field names.
                 rows = connection.execute(
                     f"""
                     SELECT analysis_run_id, finding_uuid, group_id_lower,
@@ -1037,7 +1039,7 @@ class CodeAnalysisResultStore:
                     FROM code_analysis_result_applications
                     {where_sql}
                     ORDER BY applied_at DESC, analysis_run_id, finding_uuid
-                    """,
+                    """,  # nosec B608
                     params,
                 ).fetchall()
         return [
@@ -1092,6 +1094,7 @@ class CodeAnalysisResultStore:
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
             params.append(max_results)
             with closing(self._connect()) as connection:
+                # Every optional clause is selected from static field names.
                 cursor = connection.execute(
                     f"""
                     SELECT payload_json
@@ -1099,7 +1102,7 @@ class CodeAnalysisResultStore:
                     {where_sql}
                     ORDER BY finished_at DESC, submitted_at DESC, analysis_run_id DESC
                     LIMIT ?
-                    """,
+                    """,  # nosec B608
                     params,
                 )
                 filtered: list[dict[str, Any]] = []
@@ -1177,6 +1180,7 @@ class CodeAnalysisResultStore:
                 sql_limit = "LIMIT ?"
                 params.append(max_results)
             with closing(self._connect()) as connection:
+                # Every optional clause is selected from static field names.
                 rows = connection.execute(
                     f"""
                     SELECT
@@ -1205,7 +1209,7 @@ class CodeAnalysisResultStore:
                              results.submitted_at DESC,
                              results.analysis_run_id DESC
                     {sql_limit}
-                    """,
+                    """,  # nosec B608
                     params,
                 ).fetchall()
 
