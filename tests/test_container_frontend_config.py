@@ -47,6 +47,8 @@ def test_application_images_run_as_non_root_users():
     assert "ghcr.io/astral-sh/uv:latest" not in dockerfile
     assert 'CMD ["/app/start.sh"]' in agentyzer_dockerfile
     assert "exec /app/.venv/bin/uvicorn" in agentyzer_start_script
+    assert "type=secret,id=ca-certs" in dockerfile
+    assert "type=secret,id=ca-certs" in agentyzer_dockerfile
 
 
 def test_docker_contexts_exclude_runtime_secrets_and_repository_metadata():
@@ -59,8 +61,12 @@ def test_docker_contexts_exclude_runtime_secrets_and_repository_metadata():
     )
 
     assert dockerignore.startswith("**\n")
+    assert "frontend/**\n" in dockerignore
+    assert "data/**\n" in dockerignore
+    assert "sbom/**\n" in dockerignore
     assert "!.env" not in dockerignore
     assert "!.git" not in dockerignore
     assert agentyzer_dockerignore.startswith("**\n")
+    assert "config/**\n" in agentyzer_dockerignore
     assert "!config/repos.yaml" not in agentyzer_dockerignore
     assert "COPY config/repos.container.yaml ./config/repos.yaml" in agentyzer_dockerfile

@@ -80,6 +80,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Run local-stack UI tests | `cd frontend && npm run test:ui` |
 | Benchmark grouped-query concurrency | `uv run python scripts/benchmark_group_queries.py` |
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
+| Regenerate CycloneDX SBOMs | `./scripts/generate-sboms.sh` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
 
 The root pytest configuration uses importlib import mode so `uv run pytest`
@@ -109,6 +110,11 @@ generation is reproducible and consumes frozen dependency state without
 rewriting project manifests or lockfiles in CI.
 The committed frontend lockfile resolves packages only from the default
 `registry.npmjs.org` registry; do not persist private registry or mirror URLs.
+CI executes pull-request code only for branches in this repository; fork pull
+requests do not run on the project runner. Registry credentials and image
+publishing are limited to trusted `main` and version-tag push events.
+Third-party actions are pinned to immutable commit SHAs with their major
+versions recorded in comments.
 
 ## Repository And Architecture
 
@@ -1075,6 +1081,20 @@ cp .env.dist .env
 docker compose up -d
 ```
 
+Networks with a private certificate authority should pass the CA bundle as a
+BuildKit secret instead of disabling TLS verification:
+
+```bash
+DTVP_CA_CERTS_FILE=/path/to/ca-bundle.crt \
+  docker compose -f compose.yml -f compose.ca-certs.yml build
+docker compose up -d
+```
+
+The bundle is not sent in either Docker build context. It is installed in the
+runtime trust stores so HTTPS OIDC and internal integration endpoints can be
+verified normally; do not set `NODE_TLS_REJECT_UNAUTHORIZED=0` or disable
+certificate checks.
+
 Set the Dependency-Track API key, complete OIDC settings, an HTTPS public URL,
 and random session, Agentyzer service, and Agentyzer admin secrets before
 starting the production profile. Generate each secret with `openssl rand -hex
@@ -1403,6 +1423,13 @@ The DTVP image contains CycloneDX frontend/backend SBOMs. The app exposes the
 combined document at `/api/sbom` and `/api/sbom/html`; CI publishes a separate
 Agentyzer SBOM. Production dependencies come from `frontend/package*.json`,
 `pyproject.toml`, and `uv.lock`; test/development dependencies are excluded.
+The generators are lockfile-managed development dependencies, and CI builds
+the Python documents from separate production-only environments without
+rewriting manifests or locks. Generated DTVP SBOM snapshots and the changelog
+are tracked so a checkout can build the Compose images without CI-only setup;
+CI refreshes them before publishing images. Run `./scripts/generate-sboms.sh`
+after dependency changes and `uv run git-cliff -o CHANGELOG.md` after release
+history changes.
 
 Documentation entry points:
 

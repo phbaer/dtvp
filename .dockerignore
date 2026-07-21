@@ -7,7 +7,10 @@
 !CHANGELOG.md
 !dtvp/
 !dtvp/**
+dtvp/**/__pycache__/
+dtvp/**/*.py[co]
 !frontend/
+frontend/**
 !frontend/package.json
 !frontend/package-lock.json
 !frontend/index.html
@@ -24,7 +27,9 @@
 !frontend/scripts/
 !frontend/scripts/**
 !data/
+data/**
 !data/rescore_rules.json
 !sbom/
+sbom/**
 !sbom/dtvp-backend-cyclonedx.json
 !sbom/dtvp-frontend-cyclonedx.json

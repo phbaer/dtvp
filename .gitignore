@@ -20,6 +20,7 @@ venv/
 frontend/playwright-report
 frontend/test-results
 frontend/coverage
+sbom/agentyzer-cyclonedx.json
 .coverage
 .python-version
 data/tmrescore_proposals.json

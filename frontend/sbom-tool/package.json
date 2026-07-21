@@ -1,0 +1,11 @@
+{
+  "name": "dtvp-frontend-sbom-tool",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "generate": "cyclonedx-npm"
+  },
+  "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "6.0.0"
+  }
+}
