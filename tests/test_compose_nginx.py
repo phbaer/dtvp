@@ -14,6 +14,7 @@ def test_compose_nginx_uses_configured_dtvp_context_path():
     assert "./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro" in compose
     assert "location ${DTVP_CONTEXT_PATH}/" in template
     assert "location /dtvp/" not in template
+    assert "client_max_body_size 105m;" in template
 
 
 def test_compose_uses_dependency_track_internal_api_port():

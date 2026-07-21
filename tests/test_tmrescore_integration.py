@@ -675,6 +675,30 @@ def test_tmrescore_analyze_rejects_llm_enrichment_in_offline_mode(client):
     )
 
 
+def test_tmrescore_analyze_rejects_oversized_upload_before_inventory(client):
+    with patch.dict(
+        os.environ,
+        {
+            "DTVP_TMRESCORE_URL": "http://tmrescore.local",
+            "DTVP_TMRESCORE_UPLOAD_MAX_BYTES": "1024",
+        },
+        clear=False,
+    ):
+        response = client.post(
+            "/api/projects/ExampleApp/tmrescore/analyze",
+            files={
+                "threatmodel": (
+                    "model.tm7",
+                    b"x" * 1025,
+                    "application/octet-stream",
+                )
+            },
+        )
+
+    assert response.status_code == 413
+    assert "1024-byte" in response.json()["detail"]
+
+
 def test_tmrescore_project_cache_persists_to_disk(tmp_path):
     cache_file = tmp_path / "tmrescore-cache.json"
     snapshot = {

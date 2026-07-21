@@ -12,6 +12,7 @@ from dtvp.project_archive_services import (
     export_project_archive,
     load_project_archive,
     preview_project_archive,
+    store_uploaded_archive,
 )
 
 
@@ -268,6 +269,45 @@ def test_load_project_archive_rejects_unsafe_member_path(tmp_path):
 
     with pytest.raises(ProjectArchiveValidationError):
         load_project_archive(str(archive_path))
+
+
+def test_load_project_archive_rejects_excessive_compression_ratio(
+    tmp_path,
+    monkeypatch,
+):
+    archive_path = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(
+        archive_path,
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+    ) as archive:
+        archive.writestr("manifest.json", b"x" * (2 * 1024 * 1024))
+    monkeypatch.setenv("DTVP_PROJECT_ARCHIVE_MAX_COMPRESSION_RATIO", "10")
+
+    with pytest.raises(ProjectArchiveValidationError, match="compression ratio"):
+        load_project_archive(str(archive_path))
+
+
+def test_load_project_archive_rejects_too_many_members(tmp_path, monkeypatch):
+    archive_path = tmp_path / "too-many.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("manifest.json", "{}")
+        archive.writestr("one.json", "{}")
+        archive.writestr("two.json", "{}")
+    monkeypatch.setenv("DTVP_PROJECT_ARCHIVE_MAX_FILES", "2")
+
+    with pytest.raises(ProjectArchiveValidationError, match="more than 2"):
+        load_project_archive(str(archive_path))
+
+
+def test_store_uploaded_archive_rejects_non_zip(tmp_path):
+    with pytest.raises(ProjectArchiveValidationError, match="valid ZIP"):
+        store_uploaded_archive(
+            str(tmp_path),
+            "task-1",
+            "not-an-archive.zip",
+            b"not a zip",
+        )
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ server {
     gzip_proxied any;
     gzip_vary on;
     gzip_types application/json application/javascript text/css text/plain image/svg+xml;
+    client_max_body_size 105m;
 
     # Proxy DTVP backend and SPA under the configured context path.
     location = ${DTVP_CONTEXT_PATH} {
