@@ -10,6 +10,7 @@ from src.api.models import (
     AssessResponse,
     JobStatus,
 )
+from src.job_runtime import JobRuntime
 from src.job_store import JobStore
 
 
@@ -123,3 +124,26 @@ def test_job_store_delete_removes_persisted_job(tmp_path):
     store.delete(job.id)
 
     assert store.load() == {}
+
+
+def test_job_runtime_restores_pending_and_terminalizes_running(tmp_path):
+    store = JobStore(
+        path_provider=lambda: str(tmp_path / "jobs.sqlite"),
+        retention_seconds_provider=lambda: 0,
+    )
+    pending = _job("pending")
+    running = _job("running")
+    running.status = JobStatus.running
+    running.current_activity = "Scanning source"
+    store.save(pending)
+    store.save(running)
+
+    runtime = JobRuntime(store=store, max_concurrent_jobs=2)
+    recovery = runtime.restore()
+
+    assert recovery.pending_jobs == (runtime.jobs[pending.id],)
+    assert recovery.interrupted_count == 1
+    assert runtime.jobs[running.id].status == JobStatus.failed
+    assert "service restart" in (runtime.jobs[running.id].error or "")
+    assert runtime.jobs[running.id].active_agents == {}
+    assert store.load()[running.id].status == JobStatus.failed

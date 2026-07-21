@@ -147,6 +147,7 @@ from .python_runtime_services import (
     validate_python_runtime,
 )
 from .query_execution_services import BoundedQueryExecutor, BoundedWorkExecutor
+from .runtime_state import DTVPRuntimeState
 from .runtime_value_services import get_env_int_with_floor
 from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
@@ -214,7 +215,15 @@ logger.info(
     python_runtime_status["gil_enabled"],
 )
 
-background_tasks: set[asyncio.Task[Any]] = set()
+runtime_state = DTVPRuntimeState()
+# Compatibility aliases keep existing integrations stable while construction
+# receives each owned state collection explicitly through dependency objects.
+background_tasks = runtime_state.background_tasks
+app_runtime_state = runtime_state.startup
+tasks = runtime_state.grouped_tasks
+project_archive_tasks = runtime_state.archive_tasks
+tmrescore_project_cache = runtime_state.tmrescore_project_cache
+tmrescore_analysis_tasks = runtime_state.tmrescore_analysis_tasks
 group_query_executor = BoundedQueryExecutor(
     workers_provider=lambda: get_env_int_with_floor(
         "DTVP_GROUP_QUERY_WORKERS",
@@ -274,11 +283,6 @@ detail_executor = BoundedWorkExecutor(
         logger=logger,
     ),
 )
-app_runtime_state: Dict[str, Any] = {
-    "status": "ready",
-    "message": "DTVP is ready.",
-    "error": None,
-}
 _runtime_tasks: StartupRuntimeTasks | None = None
 _startup_task: asyncio.Task[Any] | None = None
 
@@ -486,11 +490,7 @@ async def startup_status():
     )
 
 
-tasks = {}
 task_event_hub = TaskEventHub()
-project_archive_tasks: Dict[str, Dict[str, Any]] = {}
-tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
-tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
 
 
 def _get_grouped_vuln_task_ttl_seconds() -> int:
