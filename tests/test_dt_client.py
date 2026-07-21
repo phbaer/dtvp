@@ -347,25 +347,19 @@ def test_settings_properties():
         DEPENDENCY_TRACK_API_KEY=None,
     )
     assert s2.api_url == "http://localhost:8081"
-    assert s2.api_key == "change_me"
+    assert s2.api_key == ""
 
 
 @pytest.mark.asyncio
 async def test_get_client():
-    from unittest.mock import MagicMock
-
     await close_shared_dt_client()
     with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
 
-        mock_request = MagicMock()
-        mock_request.headers = {}
-        mock_request.cookies = {}
-
         try:
-            async for c in get_client(mock_request):
+            async for c in get_client():
                 assert c.base_url == "http://mock"
                 assert c.headers["X-Api-Key"] == "mock_key"
                 break
@@ -375,20 +369,14 @@ async def test_get_client():
 
 @pytest.mark.asyncio
 async def test_get_client_does_not_forward_request_credentials():
-    from unittest.mock import MagicMock
-
     await close_shared_dt_client()
     with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
 
-        mock_request = MagicMock()
-        mock_request.headers = {"Authorization": "Bearer test_token"}
-        mock_request.cookies = {"test_cookie": "test_val"}
-
         try:
-            async for c in get_client(mock_request):
+            async for c in get_client():
                 assert "Authorization" not in c.headers
                 assert "test_cookie" not in c.client.cookies
                 break
@@ -398,19 +386,15 @@ async def test_get_client_does_not_forward_request_credentials():
 
 @pytest.mark.asyncio
 async def test_get_client_reuses_api_key_connection_pool():
-    from unittest.mock import MagicMock
-
     await close_shared_dt_client()
     with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         mock_instance.api_url = "http://mock"
         mock_instance.api_key = "mock_key"
-        mock_request = MagicMock()
-
         clients = []
         try:
             for _ in range(2):
-                async for client in get_client(mock_request):
+                async for client in get_client():
                     clients.append(client)
                     break
         finally:

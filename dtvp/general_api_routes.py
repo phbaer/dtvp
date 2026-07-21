@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, Any, Awaitable, Callable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -731,7 +731,6 @@ def _register_task_routes(
     @router.post("/tasks/group-vulns")
     async def start_group_vulns_task(
         name: str,
-        request: Request,
         cve: Optional[str] = None,
         response_mode: str = Query("full", pattern="^(full|summary)$"),
         *,
@@ -781,20 +780,12 @@ def _register_task_routes(
                 "log": ["Starting..."],
             }
 
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        cookies = dict(request.cookies)
-
         async def task_wrapper():
             settings = deps.dt_settings_cls()
             client_cls = deps.get_dt_client_cls()
             async with client_cls(
                 settings.api_url,
                 api_key=settings.api_key,
-                token=token or "",
-                cookies=cookies,
             ) as client:
                 await deps.process_grouped_vulns_task(
                     task_id,
@@ -2244,7 +2235,6 @@ def _register_bulk_workflow_routes(
     async def start_bulk_workflow_apply(
         workflow_id: str,
         req: BulkWorkflowApplyRequest,
-        request: Request,
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
@@ -2254,11 +2244,6 @@ def _register_bulk_workflow_routes(
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
         _completed_task_full_groups(deps, req.task_id, user)
         settings = deps.dt_settings_cls()
-        token = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        cookies = dict(request.cookies)
         operation = _create_bulk_workflow_task(
             deps,
             kind="apply",
@@ -2309,8 +2294,6 @@ def _register_bulk_workflow_routes(
                 async with client_cls(
                     settings.api_url,
                     api_key=settings.api_key,
-                    token=token or "",
-                    cookies=cookies,
                 ) as client:
                     result = await prepare_apply_response(
                         plugin,

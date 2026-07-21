@@ -95,6 +95,7 @@ from .dt_client import (
     DTSettings,
     close_shared_dt_client,
     get_client,
+    validate_dependency_track_configuration,
 )
 from .file_io_services import read_text as read_text_impl
 from .file_io_services import (
@@ -357,6 +358,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runtime_tasks, _startup_task
     validate_auth_configuration()
     validate_code_analysis_configuration()
+    validate_dependency_track_configuration()
     _runtime_tasks = None
     _startup_task = asyncio.create_task(_initialize_application_runtime())
     try:
