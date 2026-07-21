@@ -51,7 +51,7 @@ from src.api.models import (
     StepFindings,
 )
 from src.benchmark import compare_benchmark_with_llm, deterministic_benchmark_fallback
-from src.job_runtime import JobRuntime, JobStoreUnavailable
+from src.job_runtime import JobCapacityExceeded, JobRuntime, JobStoreUnavailable
 from src.job_store import JobStore
 from src.llm import OllamaClient, OpenWebUIClient, create_llm_client
 from src.llm.base import LLMClient
@@ -94,6 +94,15 @@ def _get_max_concurrent_jobs() -> int:
             raw_value,
         )
         return 1
+
+
+def _positive_int_setting(name: str, default: int) -> int:
+    raw_value = os.environ.get(name, str(default))
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r, falling back to %d", name, raw_value, default)
+        return default
 
 
 def _describe_llm_backend(client: object) -> str:
@@ -195,6 +204,14 @@ async def lifespan(app: FastAPI):
         job_runtime = JobRuntime(
             store=JobStore(logger=logger),
             max_concurrent_jobs=_get_max_concurrent_jobs(),
+            max_queued_jobs=_positive_int_setting(
+                "AGENTYZER_MAX_QUEUED_JOBS",
+                100,
+            ),
+            max_active_jobs_per_owner=_positive_int_setting(
+                "AGENTYZER_MAX_ACTIVE_JOBS_PER_OWNER",
+                10,
+            ),
             logger=logger,
         )
         recovery = job_runtime.restore()
@@ -213,8 +230,10 @@ async def lifespan(app: FastAPI):
         app.state.job_semaphore = job_runtime.semaphore
         logger.info("Configured LLM %s", _describe_llm_backend(app.state.ollama))
         logger.info(
-            "Configured async job capacity: %s",
+            "Configured job capacity: %s running, %s queued, %s active per owner",
             job_runtime.max_concurrent_jobs,
+            job_runtime.max_queued_jobs,
+            job_runtime.max_active_jobs_per_owner,
         )
         app.state.llm_healthy = await app.state.ollama.health_check()
         if not app.state.llm_healthy:
@@ -373,6 +392,7 @@ def _service_configuration() -> ServiceConfiguration:
             "async_assessments": True,
             "sync_assessments": True,
             "bounded_async_execution": True,
+            "bounded_job_admission": True,
             "durable_job_store": True,
             "request_model_override": True,
             "debug_responses": True,
@@ -439,8 +459,15 @@ def _backend_information(owner: str) -> BackendInformation:
             execution_model="bounded asyncio background tasks in this API process",
             known_jobs=len(jobs),
             max_concurrent_jobs=max_concurrent_jobs,
+            max_queued_jobs=_job_runtime().max_queued_jobs,
+            max_active_jobs_per_owner=_job_runtime().max_active_jobs_per_owner,
             running_jobs=running_jobs,
             queued_jobs=queued_jobs,
+            available_queue_slots=max(
+                0,
+                _job_runtime().max_queued_jobs
+                - _job_status_counts("*").get(JobStatus.pending.value, 0),
+            ),
             available_slots=max(0, max_concurrent_jobs - running_jobs),
             status_counts=status_counts,
         ),
@@ -797,6 +824,14 @@ def _submit_async_job(
     follow_up_question: str | None = None,
     compact_context: Dict[str, Any] | None = None,
 ) -> JobSubmittedResponse:
+    try:
+        _job_runtime().ensure_submission_capacity(owner)
+    except JobCapacityExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": "30"},
+        ) from exc
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id, req, owner=owner)
     job.llm_metadata = _llm_metadata(_client_for_request(req))

@@ -47,11 +47,90 @@ def _read_service_token() -> str:
     )
 
 
+def _read_previous_service_token() -> str:
+    return _read_token(
+        "AGENTYZER_SERVICE_TOKEN_PREVIOUS",
+        "AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE",
+    )
+
+
 def _read_admin_token() -> str:
     return _read_token(
         "AGENTYZER_ADMIN_TOKEN",
         "AGENTYZER_ADMIN_TOKEN_FILE",
     )
+
+
+def _read_previous_admin_token() -> str:
+    return _read_token(
+        "AGENTYZER_ADMIN_TOKEN_PREVIOUS",
+        "AGENTYZER_ADMIN_TOKEN_PREVIOUS_FILE",
+    )
+
+
+def _configured_tokens(current: str, previous: str) -> tuple[str, ...]:
+    return tuple(token for token in (current, previous) if token)
+
+
+def _matches_token(provided: str, expected_tokens: tuple[str, ...]) -> bool:
+    matched = False
+    for expected in expected_tokens:
+        matched |= secrets.compare_digest(provided, expected)
+    return matched
+
+
+def _validated_auth_tokens() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    service_token = _read_service_token()
+    previous_service_token = _read_previous_service_token()
+    admin_token = _read_admin_token()
+    previous_admin_token = _read_previous_admin_token()
+
+    if len(service_token) < MINIMUM_SERVICE_TOKEN_LENGTH:
+        raise RuntimeError(
+            "AGENTYZER_SERVICE_TOKEN or AGENTYZER_SERVICE_TOKEN_FILE must provide "
+            f"at least {MINIMUM_SERVICE_TOKEN_LENGTH} characters"
+        )
+    if (
+        previous_service_token
+        and len(previous_service_token) < MINIMUM_SERVICE_TOKEN_LENGTH
+    ):
+        raise RuntimeError(
+            "AGENTYZER_SERVICE_TOKEN_PREVIOUS or "
+            "AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE must provide "
+            f"at least {MINIMUM_SERVICE_TOKEN_LENGTH} characters"
+        )
+    if admin_token and len(admin_token) < MINIMUM_SERVICE_TOKEN_LENGTH:
+        raise RuntimeError(
+            "AGENTYZER_ADMIN_TOKEN or AGENTYZER_ADMIN_TOKEN_FILE must provide "
+            f"at least {MINIMUM_SERVICE_TOKEN_LENGTH} characters"
+        )
+    if (
+        previous_admin_token
+        and len(previous_admin_token) < MINIMUM_SERVICE_TOKEN_LENGTH
+    ):
+        raise RuntimeError(
+            "AGENTYZER_ADMIN_TOKEN_PREVIOUS or "
+            "AGENTYZER_ADMIN_TOKEN_PREVIOUS_FILE must provide "
+            f"at least {MINIMUM_SERVICE_TOKEN_LENGTH} characters"
+        )
+    if previous_admin_token and not admin_token:
+        raise RuntimeError(
+            "AGENTYZER_ADMIN_TOKEN_PREVIOUS requires a current admin token"
+        )
+
+    service_tokens = _configured_tokens(service_token, previous_service_token)
+    admin_tokens = _configured_tokens(admin_token, previous_admin_token)
+    if len(service_tokens) != len(set(service_tokens)):
+        raise RuntimeError("Current and previous Agentyzer service tokens must differ")
+    if len(admin_tokens) != len(set(admin_tokens)):
+        raise RuntimeError("Current and previous Agentyzer admin tokens must differ")
+    if any(
+        secrets.compare_digest(service, admin)
+        for service in service_tokens
+        for admin in admin_tokens
+    ):
+        raise RuntimeError("Agentyzer admin tokens must differ from all service tokens")
+    return service_tokens, admin_tokens
 
 
 def _allow_unauthenticated() -> bool:
@@ -78,20 +157,7 @@ def validate_service_auth_configuration() -> None:
             "AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH cannot be enabled in production"
         )
 
-    token = _read_service_token()
-    if len(token) < MINIMUM_SERVICE_TOKEN_LENGTH:
-        raise RuntimeError(
-            "AGENTYZER_SERVICE_TOKEN or AGENTYZER_SERVICE_TOKEN_FILE must provide "
-            f"at least {MINIMUM_SERVICE_TOKEN_LENGTH} characters"
-        )
-    admin_token = _read_admin_token()
-    if admin_token and len(admin_token) < MINIMUM_SERVICE_TOKEN_LENGTH:
-        raise RuntimeError(
-            "AGENTYZER_ADMIN_TOKEN or AGENTYZER_ADMIN_TOKEN_FILE must provide "
-            f"at least {MINIMUM_SERVICE_TOKEN_LENGTH} characters"
-        )
-    if admin_token and secrets.compare_digest(admin_token, token):
-        raise RuntimeError("AGENTYZER_ADMIN_TOKEN must differ from the service token")
+    _validated_auth_tokens()
 
 
 def validate_focus_path(value: str | None) -> str | None:
@@ -141,14 +207,16 @@ async def require_service_caller(
     ] = None,
 ) -> ServiceCaller:
     if not _allow_unauthenticated():
-        expected = _read_service_token()
-        admin_expected = _read_admin_token()
+        try:
+            service_tokens, admin_tokens = _validated_auth_tokens()
+        except (OSError, RuntimeError, UnicodeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Agentyzer service credentials are unavailable",
+            ) from exc
         provided = credentials.credentials if credentials else ""
-        is_service = bool(expected) and secrets.compare_digest(provided, expected)
-        is_admin = bool(admin_expected) and secrets.compare_digest(
-            provided,
-            admin_expected,
-        )
+        is_service = _matches_token(provided, service_tokens)
+        is_admin = _matches_token(provided, admin_tokens)
         if not is_service and not is_admin:
             raise HTTPException(
                 status_code=401,

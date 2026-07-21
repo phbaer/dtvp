@@ -307,10 +307,16 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_ENVIRONMENT` | `production` | Security profile: `production`, `development`, or `test`. |
 | `AGENTYZER_SERVICE_TOKEN` | unset | Bearer token required by every HTTP route; use at least 32 characters. |
 | `AGENTYZER_SERVICE_TOKEN_FILE` | unset | File containing the bearer token when the direct value is unset. |
+| `AGENTYZER_SERVICE_TOKEN_PREVIOUS` | unset | Temporary previous service token accepted during a rotation grace window. |
+| `AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE` | unset | File containing the temporary previous service token. |
 | `AGENTYZER_ADMIN_TOKEN` | unset | Separate bearer token required for the service-wide `*` owner scope; use at least 32 characters and never reuse the service token. |
 | `AGENTYZER_ADMIN_TOKEN_FILE` | unset | File containing the admin token when the direct value is unset. |
+| `AGENTYZER_ADMIN_TOKEN_PREVIOUS` | unset | Temporary previous admin token accepted during a rotation grace window. |
+| `AGENTYZER_ADMIN_TOKEN_PREVIOUS_FILE` | unset | File containing the temporary previous admin token. |
 | `AGENTYZER_ALLOW_UNAUTHENTICATED` | `false` | Explicit bypass for local development/test only; production rejects it. |
 | `AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH` | `false` | Permit local checkout paths outside `AGENTYZER_REPOS_DIR` in development/test only; production rejects it. |
+| `AGENTYZER_MAX_QUEUED_JOBS` | `100` | Maximum accepted async jobs waiting for an execution slot. |
+| `AGENTYZER_MAX_ACTIVE_JOBS_PER_OWNER` | `10` | Maximum pending/running async jobs accepted for one owner. |
 | `AGENTYZER_CALLER_OWNER` | `cli` | Owner header used by the CLI to isolate its jobs. |
 
 ### Component registry

@@ -1,0 +1,11 @@
+services:
+  dtvp:
+    environment:
+      DTVP_SESSION_PREVIOUS_SECRET_KEY: ""
+      DTVP_SESSION_PREVIOUS_SECRET_KEY_FILE: /run/secrets/dtvp_session_previous_secret_key
+    secrets:
+      - dtvp_session_previous_secret_key
+
+secrets:
+  dtvp_session_previous_secret_key:
+    environment: DTVP_SESSION_PREVIOUS_SECRET_KEY

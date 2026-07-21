@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -362,6 +362,19 @@ ERROR_RESPONSE_EXAMPLE = {"detail": JOB_NOT_FOUND_DETAIL}
 # Request / response models                                              #
 # ===================================================================== #
 
+BoundedDependencyNode = Annotated[
+    str,
+    Field(min_length=1, max_length=512),
+]
+BoundedDependencyPath = Annotated[
+    List[BoundedDependencyNode],
+    Field(min_length=1, max_length=100),
+]
+BoundedProductVersion = Annotated[
+    str,
+    Field(min_length=1, max_length=256),
+]
+
 
 class AssessRequest(BaseModel):
     """Input for starting a vulnerability assessment."""
@@ -377,51 +390,62 @@ class AssessRequest(BaseModel):
 
     vuln_id: Optional[str] = Field(
         default=None,
+        max_length=256,
         description="Vulnerability identifier to assess, typically a CVE or GHSA.",
         examples=["CVE-2024-49766"],
     )
     cvss_vector: Optional[str] = Field(
         default=None,
+        max_length=512,
         description="Optional CVSS vector string to rescore when advisory metadata does not already provide one.",
         examples=[DEFAULT_CVSS_VECTOR],
     )
     component_name: str = Field(
+        min_length=1,
+        max_length=256,
         description="Logical component name from config/repos.yaml, or an ad-hoc name when focus_path is provided.",
         examples=["benchmark"],
     )
     focus_path: Optional[str] = Field(
         default=None,
+        max_length=4096,
         description="Optional absolute path to a local checkout to assess instead of cloning or resolving from config/repos.yaml.",
         # This is an OpenAPI example, not a temporary-file operation.
         examples=["/tmp/agentyzer-repos/vuln-benchmark-08dfa46a5b30"],  # nosec B108
     )
-    dependency_paths: Optional[List[List[str]]] = Field(
+    dependency_paths: Optional[List[BoundedDependencyPath]] = Field(
         default=None,
+        max_length=100,
         description="Optional dependency chains to bias transitive reachability analysis. Each nested list represents one path from a top-level dependency to the vulnerable package.",
         examples=[[["flask", "werkzeug"]]],
     )
-    affected_product_versions: Optional[List[str]] = Field(
+    affected_product_versions: Optional[List[BoundedProductVersion]] = Field(
         default=None,
+        max_length=500,
         description="Product/application versions that DTVP already knows are affected. The analyzer tries to map these to repository tags or branches and lists every version in the final version analysis.",
         examples=[["1.0.0", "1.1.0", "2.0.0"]],
     )
     user_guidance: Optional[str] = Field(
         default=None,
+        max_length=24_000,
         description="Optional analyst context passed verbatim to every LLM call.",
         examples=["Treat code reachable from background workers as in scope."],
     )
     model: Optional[str] = Field(
         default=None,
+        max_length=256,
         description="Optional LLM model override for this assessment.",
         examples=["mistral"],
     )
     llm_backend: Optional[str] = Field(
         default=None,
+        max_length=128,
         description="Optional LLM backend label supplied by the caller for tracking.",
         examples=["ollama"],
     )
     llm_provider: Optional[str] = Field(
         default=None,
+        max_length=128,
         description="Optional LLM provider label supplied by the caller for tracking.",
         examples=["ollama"],
     )
@@ -436,43 +460,54 @@ class FollowUpRequest(BaseModel):
     """Input for rerunning an assessment using compacted parent-job context."""
 
     question: str = Field(
+        min_length=1,
+        max_length=4_000,
         description="Reviewer follow-up question to answer in the new assessment.",
         examples=["Is Keycloak itself vulnerable, not only the extension?"],
     )
     vuln_id: Optional[str] = Field(
         default=None,
+        max_length=256,
         description="Optional vulnerability override. Defaults to the parent request.",
     )
     component_name: Optional[str] = Field(
         default=None,
+        max_length=256,
         description="Optional component override. Defaults to the parent request.",
     )
     cvss_vector: Optional[str] = Field(
         default=None,
+        max_length=512,
         description="Optional CVSS vector override. Defaults to the parent request.",
     )
     focus_path: Optional[str] = Field(
         default=None,
+        max_length=4096,
         description="Optional local checkout override. Defaults to the parent request.",
     )
-    dependency_paths: Optional[List[List[str]]] = Field(
+    dependency_paths: Optional[List[BoundedDependencyPath]] = Field(
         default=None,
+        max_length=100,
         description="Optional dependency path override. Defaults to the parent request.",
     )
     user_guidance: Optional[str] = Field(
         default=None,
+        max_length=4_000,
         description="Additional reviewer guidance appended after the compact parent context.",
     )
     model: Optional[str] = Field(
         default=None,
+        max_length=256,
         description="Optional LLM model override for the follow-up assessment.",
     )
     llm_backend: Optional[str] = Field(
         default=None,
+        max_length=128,
         description="Optional LLM backend label supplied by the caller for tracking.",
     )
     llm_provider: Optional[str] = Field(
         default=None,
+        max_length=128,
         description="Optional LLM provider label supplied by the caller for tracking.",
     )
     debug: bool = Field(
@@ -485,6 +520,7 @@ class BenchmarkCompareRequest(BaseModel):
     """Input for comparing human and automated assessment artifacts."""
 
     benchmark: Dict[str, Any] = Field(
+        max_length=100,
         description=(
             "Structured benchmark artifact prepared by DTVP. It includes the "
             "human assessment snapshot, automated Agentyzer assessment summary, "
@@ -493,6 +529,7 @@ class BenchmarkCompareRequest(BaseModel):
     )
     model: Optional[str] = Field(
         default=None,
+        max_length=256,
         description="Optional LLM model override for the probabilistic comparison.",
     )
 
@@ -938,11 +975,23 @@ class JobBackendInfo(BaseModel):
         description="Maximum number of assessment pipelines this process runs at the same time.",
         ge=1,
     )
+    max_queued_jobs: int = Field(
+        description="Maximum number of accepted jobs waiting for an execution slot.",
+        ge=1,
+    )
+    max_active_jobs_per_owner: int = Field(
+        description="Maximum pending and running async jobs accepted for one owner.",
+        ge=1,
+    )
     running_jobs: int = Field(
         description="Number of assessment pipelines currently occupying execution slots."
     )
     queued_jobs: int = Field(
         description="Number of accepted jobs waiting for an execution slot."
+    )
+    available_queue_slots: int = Field(
+        description="Number of global async queue admission slots still available.",
+        ge=0,
     )
     available_slots: int = Field(
         description="Number of execution slots currently available for pending work.",

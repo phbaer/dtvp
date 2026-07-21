@@ -593,6 +593,10 @@ configured analyzer.
 DTVP and Agentyzer default to one running scan. Raise
 `DTVP_ANALYSIS_QUEUE_CAPACITY` and `AGENTYZER_MAX_CONCURRENT_JOBS` together only
 when the analyzer, model backend, and workspaces support parallel scans.
+Agentyzer also caps the accepted async backlog globally and per owner. Requests
+over either admission limit receive `429` with `Retry-After`; completed jobs do
+not consume admission capacity. LLM-facing guidance, follow-up questions, and
+dependency-path collections have explicit request-size bounds.
 
 ## Development
 
@@ -654,6 +658,55 @@ Dependency-Track adapter uses its documented database password-file setting,
 so the overlay does not replace the vendor image entrypoint. Compose no longer
 injects the entire `.env` file into application containers: only the explicit
 configuration allowlist in `compose.yml` crosses the container boundary.
+
+To rotate the DTVP session-signing key without immediately logging out every
+user, move the old value to `DTVP_SESSION_PREVIOUS_SECRET_KEY`, generate a new
+`DTVP_SESSION_SECRET_KEY`, and recreate DTVP with the temporary overlay:
+
+```bash
+docker compose \
+  -f compose.yml \
+  -f compose.secrets.yml \
+  -f compose.session-key-rotation.yml \
+  up -d --force-recreate dtvp
+```
+
+New sessions and OIDC transactions are signed only by the new key; unexpired
+ones signed by the previous key remain valid. After
+`DTVP_SESSION_TTL_SECONDS`, clear the previous value and recreate DTVP without
+the rotation overlay. Remove the previous key immediately instead of using a
+grace window when the old key may have been compromised.
+
+Rotate the Agentyzer service and admin credentials without an authorization
+gap by using the temporary dual-token grace window:
+
+1. Copy the old current values to `AGENTYZER_SERVICE_TOKEN_PREVIOUS` and
+   `AGENTYZER_ADMIN_TOKEN_PREVIOUS`, generate two distinct new current values,
+   and update the four variables atomically in the deployment secret store.
+2. Recreate Agentyzer first with the temporary overlay:
+
+   ```bash
+   docker compose \
+     -f compose.yml \
+     -f compose.secrets.yml \
+     -f compose.agentyzer-token-rotation.yml \
+     up -d --force-recreate agentyzer
+   ```
+
+   Agentyzer accepts both generations, so the still-running DTVP can continue
+   using its old credential. Only admin generations can use service-wide owner
+   scope.
+3. Recreate DTVP with the base and secrets files. It switches outbound calls to
+   the new current credentials while Agentyzer still accepts both generations.
+4. Verify `/api/code-analysis/status` from a reviewer session and inspect the
+   authenticated Agentyzer `/health` response.
+5. Clear both `*_PREVIOUS` values and recreate Agentyzer without the rotation
+   overlay. Do not leave grace credentials mounted after the rollout.
+
+Agentyzer rejects short, duplicated, or service/admin-colliding generations at
+startup. Token files are read for every request, so standalone secret-file
+deployments can replace them atomically; Compose secrets take effect when the
+container is recreated.
 
 Archive apply is disabled by the hardened overlay unless the dedicated import
 key is mounted with the additional overlay:
@@ -747,6 +800,11 @@ Deployment rules:
   OIDC provider, but DTVP intentionally uses service credentials for durable
   background work and records the human actor in its own authorization/audit
   boundary.
+  Rotate the review credential by creating a new key on the same restricted
+  team, updating `DTVP_DT_API_KEY`, recreating DTVP, and checking a project read
+  plus an assessment write before revoking the old key. Dependency-Track keeps
+  both keys valid during this handover, so DTVP does not retain a fallback key.
+  Rotate the archive-import team key independently with the same sequence.
 - `/api/vulnerability-backend` publishes the active non-secret adapter
   descriptor, capabilities, and adapter catalog. Dependency-Track is the active
   implementation. Cybeats is registered as a fail-closed scaffold until its
@@ -754,8 +812,9 @@ Deployment rules:
   silently route data through Dependency-Track-shaped behavior.
 - OIDC login uses authorization code with PKCE, state, nonce, discovery issuer
   validation, JWKS signature verification, and expiring DTVP session cookies.
-  Changing the session key invalidates existing sessions and requires users to
-  sign in again. Logout is a credentialed `POST` from the frontend.
+  A direct session-key replacement invalidates existing sessions; use the
+  temporary previous-key overlay above for a planned grace period. Logout is a
+  credentialed `POST` from the frontend.
 - nginx proxies `DTVP_CONTEXT_PATH` to DTVP and defaults it to `/dtvp`.
   `DTVP_HTTP_PORT` changes the host gateway port and `DTVP_SERVER_NAME` is the
   exact public host accepted by nginx. Unknown hosts are rejected at nginx and
@@ -867,6 +926,8 @@ means the integration or override is disabled.
 | `DTVP_OIDC_TRANSACTION_TTL_SECONDS` | Maximum OIDC state/nonce/PKCE transaction age | `300` |
 | `DTVP_SESSION_SECRET_KEY` | Session signing key; at least 32 characters when authentication is enabled | unset; required outside the development bypass |
 | `DTVP_SESSION_SECRET_KEY_FILE` | File containing the session key when the direct value is unset | unset |
+| `DTVP_SESSION_PREVIOUS_SECRET_KEY` | Temporary previous session key accepted during a rotation grace window | unset |
+| `DTVP_SESSION_PREVIOUS_SECRET_KEY_FILE` | File containing the temporary previous session key | unset |
 | `DTVP_SESSION_TTL_SECONDS` | Signed DTVP session lifetime | `28800` (8 hours) |
 | `DTVP_SESSION_COOKIE_SECURE` | Explicit Secure-cookie override | automatic; required `true` in production |
 | `DTVP_DEV_DISABLE_AUTH` | Resolve local requests as `devuser` | `false` |
@@ -964,10 +1025,16 @@ means the integration or override is disabled.
 | `AGENTYZER_STORAGE_MIN_FREE_BYTES` | Minimum free bytes required for the job/repository volume | `134217728` (128 MiB) |
 | `AGENTYZER_SERVICE_TOKEN` | Bearer token required by every Agentyzer API route | unset |
 | `AGENTYZER_SERVICE_TOKEN_FILE` | File containing the bearer token when the direct value is unset | unset |
+| `AGENTYZER_SERVICE_TOKEN_PREVIOUS` | Temporary previous service token accepted only during a rotation grace window | unset |
+| `AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE` | File containing the temporary previous service token | unset |
 | `AGENTYZER_ADMIN_TOKEN` | Separate bearer token required for service-wide owner scope | unset |
 | `AGENTYZER_ADMIN_TOKEN_FILE` | File containing the admin token when the direct value is unset | unset |
+| `AGENTYZER_ADMIN_TOKEN_PREVIOUS` | Temporary previous admin token retaining admin scope during rotation | unset |
+| `AGENTYZER_ADMIN_TOKEN_PREVIOUS_FILE` | File containing the temporary previous admin token | unset |
 | `AGENTYZER_ALLOW_UNAUTHENTICATED` | Explicit local-only bypass; rejected in production | `false` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
+| `AGENTYZER_MAX_QUEUED_JOBS` | Maximum accepted async jobs waiting for execution | `100` |
+| `AGENTYZER_MAX_ACTIVE_JOBS_PER_OWNER` | Maximum pending/running async jobs for one owner | `10` |
 | `AGENTYZER_WORKTREE_RETENTION_SECONDS` | Maximum age of orphaned per-run Git worktrees after an interrupted process | `86400` (1 day; minimum 300) |
 | `AGENTYZER_JOB_STORE_PATH` | Durable async-job SQLite store | Compose: `/app/repos/agentyzer_jobs.sqlite`; standalone: `repos/agentyzer_jobs.sqlite` |
 | `AGENTYZER_JOB_RETENTION_SECONDS` | Terminal-job retention; `0` disables age pruning | `604800` (7 days) |

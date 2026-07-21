@@ -72,6 +72,8 @@ def test_compose_pins_images_and_segments_trust_zones():
 def test_compose_secret_overlays_keep_credentials_out_of_service_environment():
     overlay = (ROOT / "compose.secrets.yml").read_text()
     import_overlay = (ROOT / "compose.archive-import-secret.yml").read_text()
+    rotation_overlay = (ROOT / "compose.agentyzer-token-rotation.yml").read_text()
+    session_rotation_overlay = (ROOT / "compose.session-key-rotation.yml").read_text()
 
     assert "POSTGRES_PASSWORD_FILE: /run/secrets/dtrack_database_password" in overlay
     assert "ALPINE_DATABASE_PASSWORD_FILE: /run/secrets/dtrack_database_password" in overlay
@@ -81,6 +83,18 @@ def test_compose_secret_overlays_keep_credentials_out_of_service_environment():
     assert "AGENTYZER_SERVICE_TOKEN_FILE: /run/secrets/agentyzer_service_token" in overlay
     assert "environment: DTRACK_DB_PASSWORD" in overlay
     assert "environment: DTVP_DT_IMPORT_API_KEY" in import_overlay
+    assert "AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE: \"\"" in overlay
+    assert "AGENTYZER_ADMIN_TOKEN_PREVIOUS_FILE: \"\"" in overlay
+    assert (
+        "AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE: "
+        "/run/secrets/agentyzer_service_token_previous"
+    ) in rotation_overlay
+    assert "environment: AGENTYZER_ADMIN_TOKEN_PREVIOUS" in rotation_overlay
+    assert "DTVP_SESSION_PREVIOUS_SECRET_KEY_FILE: \"\"" in overlay
+    assert (
+        "DTVP_SESSION_PREVIOUS_SECRET_KEY_FILE: "
+        "/run/secrets/dtvp_session_previous_secret_key"
+    ) in session_rotation_overlay
 
 
 def test_agentyzer_and_archive_credentials_are_not_exposed_by_default():

@@ -82,6 +82,12 @@ class AuthSettings(BaseSettings):
     SESSION_SECRET_KEY_FILE: Optional[str] = Field(
         alias="DTVP_SESSION_SECRET_KEY_FILE", default=None
     )
+    SESSION_PREVIOUS_SECRET_KEY: Optional[str] = Field(
+        alias="DTVP_SESSION_PREVIOUS_SECRET_KEY", default=None
+    )
+    SESSION_PREVIOUS_SECRET_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_SESSION_PREVIOUS_SECRET_KEY_FILE", default=None
+    )
     SESSION_TTL_SECONDS: int = Field(
         alias="DTVP_SESSION_TTL_SECONDS", default=28800, ge=300, le=86400
     )
@@ -133,6 +139,21 @@ class AuthSettings(BaseSettings):
     def session_secret(self) -> str:
         direct = (self.SESSION_SECRET_KEY or "").strip()
         return direct or self._read_secret_file(self.SESSION_SECRET_KEY_FILE)
+
+    @property
+    def previous_session_secret(self) -> str:
+        direct = (self.SESSION_PREVIOUS_SECRET_KEY or "").strip()
+        return direct or self._read_secret_file(
+            self.SESSION_PREVIOUS_SECRET_KEY_FILE
+        )
+
+    @property
+    def session_verification_secrets(self) -> tuple[str, ...]:
+        current = self.session_secret
+        previous = self.previous_session_secret
+        if previous and not secrets.compare_digest(previous, current):
+            return (current, previous)
+        return (current,)
 
     @property
     def allowed_oidc_algorithms(self) -> tuple[str, ...]:
@@ -209,6 +230,21 @@ def validate_auth_configuration(settings: AuthSettings = auth_settings) -> None:
             "DTVP_SESSION_SECRET_KEY must be a non-default value of at least "
             f"{MINIMUM_SESSION_SECRET_LENGTH} characters"
         )
+    previous_session_secret = settings.previous_session_secret
+    if previous_session_secret:
+        if (
+            len(previous_session_secret) < MINIMUM_SESSION_SECRET_LENGTH
+            or previous_session_secret.lower() in WEAK_SESSION_SECRETS
+        ):
+            raise RuntimeError(
+                "DTVP_SESSION_PREVIOUS_SECRET_KEY must be a non-default value of "
+                f"at least {MINIMUM_SESSION_SECRET_LENGTH} characters"
+            )
+        if secrets.compare_digest(previous_session_secret, session_secret):
+            raise RuntimeError(
+                "DTVP_SESSION_PREVIOUS_SECRET_KEY must differ from the current "
+                "session secret"
+            )
 
     algorithms = settings.allowed_oidc_algorithms
     if not algorithms or any(
@@ -249,16 +285,36 @@ def _encode_transaction(*, state: str, nonce: str, code_verifier: str) -> str:
     )
 
 
+def _decode_with_session_secrets(
+    token: str,
+    *,
+    audience: str,
+    required_claims: list[str],
+) -> dict[str, Any]:
+    first_error: JWTError | None = None
+    for secret in auth_settings.session_verification_secrets:
+        try:
+            return jwt.decode(
+                token,
+                secret,
+                algorithms=[SESSION_ALGORITHM],
+                issuer=SESSION_ISSUER,
+                audience=audience,
+                options={"require": required_claims},
+            )
+        except JWTError as exc:
+            if first_error is None:
+                first_error = exc
+    if first_error is not None:
+        raise first_error
+    raise JWTError("No session verification key is configured")
+
+
 def _decode_transaction(token: str) -> dict[str, Any]:
-    payload = jwt.decode(
+    payload = _decode_with_session_secrets(
         token,
-        auth_settings.session_secret,
-        algorithms=[SESSION_ALGORITHM],
-        issuer=SESSION_ISSUER,
         audience=OIDC_TRANSACTION_AUDIENCE,
-        options={
-            "require": ["aud", "exp", "iat", "iss", "jti"],
-        },
+        required_claims=["aud", "exp", "iat", "iss", "jti"],
     )
     for claim in ("state", "nonce", "code_verifier"):
         if not isinstance(payload.get(claim), str) or not payload[claim]:
@@ -284,15 +340,10 @@ def create_session_token(*, subject: str, username: str) -> str:
 
 
 def decode_session_token(token: str) -> dict[str, Any]:
-    payload = jwt.decode(
+    payload = _decode_with_session_secrets(
         token,
-        auth_settings.session_secret,
-        algorithms=[SESSION_ALGORITHM],
-        issuer=SESSION_ISSUER,
         audience=SESSION_AUDIENCE,
-        options={
-            "require": ["aud", "exp", "iat", "iss", "jti", "sub"],
-        },
+        required_claims=["aud", "exp", "iat", "iss", "jti", "sub"],
     )
     username = payload.get("username")
     if not isinstance(username, str) or not username.strip():

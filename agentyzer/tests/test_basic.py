@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import os
 
 import httpx
 import pytest
@@ -88,6 +89,120 @@ def test_admin_service_token_must_be_distinct(monkeypatch):
         validate_service_auth_configuration()
 
 
+def test_previous_credentials_are_accepted_during_rotation(client, monkeypatch):
+    previous_service = "previous-agentyzer-service-token-1234567890"
+    previous_admin = "previous-agentyzer-admin-token-123456789012"
+    monkeypatch.setenv("AGENTYZER_SERVICE_TOKEN_PREVIOUS", previous_service)
+    monkeypatch.setenv("AGENTYZER_ADMIN_TOKEN_PREVIOUS", previous_admin)
+
+    service_response = client.get(
+        "/health",
+        headers={
+            "Authorization": f"Bearer {previous_service}",
+            "X-Agentyzer-Owner": "rotating-owner",
+        },
+    )
+    admin_response = client.get(
+        "/health",
+        headers={
+            "Authorization": f"Bearer {previous_admin}",
+            "X-Agentyzer-Owner": "*",
+        },
+    )
+
+    assert service_response.status_code == 200
+    assert admin_response.status_code == 200
+
+
+def test_file_credentials_reload_without_restarting(client, monkeypatch, tmp_path):
+    token_file = tmp_path / "service-token"
+    first_token = "first-file-agentyzer-service-token-1234567890"
+    second_token = "second-file-agentyzer-service-token-123456789"
+    token_file.write_text(first_token, encoding="utf-8")
+    monkeypatch.delenv("AGENTYZER_SERVICE_TOKEN", raising=False)
+    monkeypatch.setenv("AGENTYZER_SERVICE_TOKEN_FILE", str(token_file))
+
+    assert (
+        client.get(
+            "/health",
+            headers={"Authorization": f"Bearer {first_token}"},
+        ).status_code
+        == 200
+    )
+
+    token_file.write_text(second_token, encoding="utf-8")
+
+    assert (
+        client.get(
+            "/health",
+            headers={"Authorization": f"Bearer {first_token}"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.get(
+            "/health",
+            headers={"Authorization": f"Bearer {second_token}"},
+        ).status_code
+        == 200
+    )
+    token_file.write_text("short", encoding="utf-8")
+    assert (
+        client.get(
+            "/health",
+            headers={"Authorization": f"Bearer {second_token}"},
+        ).status_code
+        == 503
+    )
+
+
+def test_runtime_token_collision_fails_closed(client, monkeypatch):
+    admin_token = os.environ["AGENTYZER_ADMIN_TOKEN"]
+    monkeypatch.setenv("AGENTYZER_SERVICE_TOKEN_PREVIOUS", admin_token)
+
+    response = client.get(
+        "/health",
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "X-Agentyzer-Owner": "*",
+        },
+    )
+
+    assert response.status_code == 503
+
+
+@pytest.mark.parametrize(
+    ("setting", "value_setting", "message"),
+    [
+        (
+            "AGENTYZER_SERVICE_TOKEN_PREVIOUS",
+            "AGENTYZER_SERVICE_TOKEN",
+            "service tokens must differ",
+        ),
+        (
+            "AGENTYZER_ADMIN_TOKEN_PREVIOUS",
+            "AGENTYZER_ADMIN_TOKEN",
+            "admin tokens must differ",
+        ),
+        (
+            "AGENTYZER_SERVICE_TOKEN_PREVIOUS",
+            "AGENTYZER_ADMIN_TOKEN",
+            "admin tokens must differ from all service tokens",
+        ),
+    ],
+)
+def test_rotation_credentials_cannot_collide(
+    monkeypatch,
+    setting,
+    value_setting,
+    message,
+):
+    monkeypatch.setenv(setting, os.environ[value_setting])
+
+    with pytest.raises(RuntimeError, match=message):
+        validate_service_auth_configuration()
+
+
 def test_production_focus_path_is_confined_to_repository_root(
     monkeypatch,
     tmp_path,
@@ -126,6 +241,9 @@ def test_health_exposes_service_configuration_and_backend(client):
     assert backend["llm"]["model"] == data["model"]
     assert backend["jobs"]["job_store"] == "sqlite"
     assert backend["jobs"]["max_concurrent_jobs"] >= 1
+    assert backend["jobs"]["max_queued_jobs"] >= 1
+    assert backend["jobs"]["max_active_jobs_per_owner"] >= 1
+    assert backend["jobs"]["available_queue_slots"] >= 0
     assert backend["jobs"]["available_slots"] >= 0
     assert "running" in backend["jobs"]["status_counts"]
     assert "AGENTYZER_MAX_CONCURRENT_JOBS" in backend["repositories"]["parallel_safety"]
@@ -180,6 +298,56 @@ def test_jobs_list_uses_envelope_metadata(client):
 
     client.delete(f"/jobs/{job_id}")
     assert job_id not in app.state.job_store.load()
+
+
+def test_async_submission_returns_retryable_429_at_owner_capacity(client, monkeypatch):
+    runtime = app.state.job_runtime
+    existing = Job(
+        "owner-capacity-job",
+        AssessRequest(vuln_id="CVE-2026-CAP", component_name="component"),
+        owner="capacity-owner",
+    )
+    app.state.jobs[existing.id] = existing
+    monkeypatch.setattr(runtime, "max_active_jobs_per_owner", 1)
+    try:
+        response = client.post(
+            "/assess",
+            headers={"X-Agentyzer-Owner": "capacity-owner"},
+            json={"vuln_id": "CVE-2026-NEXT", "component_name": "component"},
+        )
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "30"
+        assert "maximum number" in response.json()["detail"]
+    finally:
+        app.state.jobs.pop(existing.id, None)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"component_name": "x" * 257},
+        {"component_name": "component", "user_guidance": "x" * 24_001},
+        {
+            "component_name": "component",
+            "dependency_paths": [["dependency"]] * 101,
+        },
+        {
+            "component_name": "component",
+            "dependency_paths": [["dependency"] * 101],
+        },
+        {
+            "component_name": "component",
+            "dependency_paths": [["x" * 513]],
+        },
+        {
+            "component_name": "component",
+            "affected_product_versions": ["x" * 257],
+        },
+    ],
+)
+def test_assessment_rejects_unbounded_llm_inputs(client, payload):
+    response = client.post("/assess", json=payload)
+    assert response.status_code == 422
 
 
 def _seed_completed_parent_job(job_id: str = "parent-follow-up") -> Job:
