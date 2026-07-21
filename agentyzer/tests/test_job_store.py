@@ -12,7 +12,7 @@ from src.api.models import (
     AssessResponse,
     JobStatus,
 )
-from src.job_runtime import JobRuntime
+from src.job_runtime import JobCapacityExceeded, JobRuntime
 from src.job_store import JobStore
 from src.runtime_coordination import ProcessLease
 
@@ -172,3 +172,25 @@ def test_job_runtime_restores_pending_and_terminalizes_running(tmp_path):
     assert "service restart" in (runtime.jobs[running.id].error or "")
     assert runtime.jobs[running.id].active_agents == {}
     assert store.load()[running.id].status == JobStatus.failed
+
+
+def test_job_runtime_bounds_global_queue_and_per_owner_active_jobs(tmp_path):
+    runtime = JobRuntime(
+        store=JobStore(path_provider=lambda: str(tmp_path / "jobs.sqlite")),
+        max_concurrent_jobs=1,
+        max_queued_jobs=2,
+        max_active_jobs_per_owner=1,
+    )
+    alice = _job("alice-pending", owner="alice")
+    runtime.jobs[alice.id] = alice
+
+    with pytest.raises(JobCapacityExceeded, match="maximum number"):
+        runtime.ensure_submission_capacity("alice")
+
+    runtime.ensure_submission_capacity("bob")
+    runtime.jobs["bob-pending"] = _job("bob-pending", owner="bob")
+    with pytest.raises(JobCapacityExceeded, match="queue is full"):
+        runtime.ensure_submission_capacity("charlie")
+
+    alice.status = JobStatus.completed
+    runtime.ensure_submission_capacity("alice")

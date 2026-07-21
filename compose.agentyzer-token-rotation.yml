@@ -1,0 +1,16 @@
+services:
+  agentyzer:
+    environment:
+      AGENTYZER_SERVICE_TOKEN_PREVIOUS: ""
+      AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE: /run/secrets/agentyzer_service_token_previous
+      AGENTYZER_ADMIN_TOKEN_PREVIOUS: ""
+      AGENTYZER_ADMIN_TOKEN_PREVIOUS_FILE: /run/secrets/agentyzer_admin_token_previous
+    secrets:
+      - agentyzer_service_token_previous
+      - agentyzer_admin_token_previous
+
+secrets:
+  agentyzer_service_token_previous:
+    environment: AGENTYZER_SERVICE_TOKEN_PREVIOUS
+  agentyzer_admin_token_previous:
+    environment: AGENTYZER_ADMIN_TOKEN_PREVIOUS

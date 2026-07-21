@@ -10,6 +10,7 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
+from jwt.exceptions import InvalidSignatureError
 
 from dtvp import auth
 from dtvp.auth import (
@@ -406,6 +407,90 @@ def test_validate_auth_configuration_rejects_weak_secret():
         DTVP_SESSION_SECRET_KEY="change_me",
     )
     with pytest.raises(RuntimeError, match="at least 32 characters"):
+        validate_auth_configuration(settings)
+
+
+def test_session_key_rotation_signs_with_current_and_accepts_previous():
+    current = "current-session-signing-secret-1234567890abcdef"
+    previous = "previous-session-signing-secret-123456789abcdef"
+    settings = AuthSettings(
+        DTVP_ENVIRONMENT="test",
+        DTVP_OIDC_AUTHORITY=OIDC_ISSUER,
+        DTVP_OIDC_CLIENT_ID="test-client",
+        DTVP_OIDC_CLIENT_SECRET="test-client-secret",
+        DTVP_SESSION_SECRET_KEY=current,
+        DTVP_SESSION_PREVIOUS_SECRET_KEY=previous,
+    )
+    now = int(time.time())
+    previous_token = jwt.encode(
+        {
+            "iss": SESSION_ISSUER,
+            "aud": SESSION_AUDIENCE,
+            "iat": now,
+            "exp": now + 300,
+            "jti": str(uuid.uuid4()),
+            "sub": "subject",
+            "username": "rotating-user",
+        },
+        previous,
+        algorithm=SESSION_ALGORITHM,
+    )
+    previous_transaction = jwt.encode(
+        {
+            "iss": SESSION_ISSUER,
+            "aud": auth.OIDC_TRANSACTION_AUDIENCE,
+            "iat": now,
+            "exp": now + 300,
+            "jti": str(uuid.uuid4()),
+            "state": "rotation-state",
+            "nonce": "rotation-nonce",
+            "code_verifier": "rotation-verifier",
+        },
+        previous,
+        algorithm=SESSION_ALGORITHM,
+    )
+
+    validate_auth_configuration(settings)
+    with patch("dtvp.auth.auth_settings", settings):
+        assert decode_session_token(previous_token)["username"] == "rotating-user"
+        assert auth._decode_transaction(previous_transaction)["state"] == "rotation-state"
+        current_token = create_session_token(
+            subject="current-subject",
+            username="current-user",
+        )
+
+    assert jwt.decode(
+        current_token,
+        current,
+        algorithms=[SESSION_ALGORITHM],
+        issuer=SESSION_ISSUER,
+        audience=SESSION_AUDIENCE,
+    )["username"] == "current-user"
+    with pytest.raises(InvalidSignatureError):
+        jwt.decode(
+            current_token,
+            previous,
+            algorithms=[SESSION_ALGORITHM],
+            issuer=SESSION_ISSUER,
+            audience=SESSION_AUDIENCE,
+        )
+
+
+@pytest.mark.parametrize(
+    "previous",
+    ["short", "current-session-signing-secret-1234567890abcdef"],
+)
+def test_session_key_rotation_rejects_weak_or_duplicate_previous_secret(previous):
+    settings = AuthSettings(
+        DTVP_ENVIRONMENT="test",
+        DTVP_OIDC_AUTHORITY=OIDC_ISSUER,
+        DTVP_OIDC_CLIENT_ID="test-client",
+        DTVP_OIDC_CLIENT_SECRET="test-client-secret",
+        DTVP_SESSION_SECRET_KEY="current-session-signing-secret-1234567890abcdef",
+        DTVP_SESSION_PREVIOUS_SECRET_KEY=previous,
+    )
+
+    with pytest.raises(RuntimeError, match="PREVIOUS_SECRET_KEY"):
         validate_auth_configuration(settings)
 
 

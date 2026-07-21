@@ -16,6 +16,10 @@ class JobStoreUnavailable(RuntimeError):
     """Raised when a required durable job-store operation fails."""
 
 
+class JobCapacityExceeded(RuntimeError):
+    """Raised when accepting another async job would exceed configured limits."""
+
+
 @dataclass(frozen=True)
 class JobRecovery:
     interrupted_count: int
@@ -26,6 +30,8 @@ class JobRecovery:
 class JobRuntime:
     store: JobStore
     max_concurrent_jobs: int
+    max_queued_jobs: int = 100
+    max_active_jobs_per_owner: int = 10
     logger: Any = None
     jobs: dict[str, Job] = field(default_factory=dict, init=False)
     tasks: dict[str, asyncio.Task[Any]] = field(default_factory=dict, init=False)
@@ -34,7 +40,33 @@ class JobRuntime:
 
     def __post_init__(self) -> None:
         self.max_concurrent_jobs = max(1, int(self.max_concurrent_jobs))
+        self.max_queued_jobs = max(1, int(self.max_queued_jobs))
+        self.max_active_jobs_per_owner = max(
+            1,
+            int(self.max_active_jobs_per_owner),
+        )
         self.semaphore = asyncio.Semaphore(self.max_concurrent_jobs)
+
+    def ensure_submission_capacity(self, owner: str) -> None:
+        """Reject new work before it can create an unbounded task backlog."""
+        pending = sum(
+            job.status == JobStatus.pending for job in self.jobs.values()
+        )
+        if pending >= self.max_queued_jobs:
+            raise JobCapacityExceeded(
+                "The Agentyzer assessment queue is full; retry later."
+            )
+
+        owner_active = sum(
+            job.owner == owner
+            and job.status in (JobStatus.pending, JobStatus.running)
+            for job in self.jobs.values()
+        )
+        if owner_active >= self.max_active_jobs_per_owner:
+            raise JobCapacityExceeded(
+                "This caller already has the maximum number of active assessment "
+                "jobs; retry after one finishes."
+            )
 
     def _remove_pruned(self, job_ids: set[str]) -> None:
         for job_id in job_ids:
