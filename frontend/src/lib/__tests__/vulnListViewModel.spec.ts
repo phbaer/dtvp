@@ -13,7 +13,7 @@ import {
 import type { VulnListViewFilters } from '../vulnListViewModel'
 
 const dayMs = 24 * 60 * 60 * 1000
-const nowMs = Date.UTC(2026, 5, 30)
+const nowMs = Date.now()
 
 const makeGroup = (overrides: Partial<GroupedVuln>): GroupedVuln => ({
     id: 'CVE-2026-0001',
