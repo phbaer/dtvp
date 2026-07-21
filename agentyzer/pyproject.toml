@@ -19,6 +19,7 @@ dependencies = [
   "toml",
   "langgraph>=1.1.9",
   "cvss>=3.6",
+  "defusedxml>=0.7.1",
 ]
 
 [project.scripts]

@@ -372,6 +372,22 @@ class TestAdditionalLockExtraction:
 
 
 class TestJavaProjectFileParsing:
+    def test_maven_parsers_reject_xml_entities(self):
+        from src.languages.java import _pom_dependencies
+
+        malicious_pom = """<!DOCTYPE project [
+<!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<project><dependencies><dependency>
+  <groupId>&xxe;</groupId><artifactId>example</artifactId><version>1.0</version>
+</dependency></dependencies></project>
+"""
+
+        assert _pom_dependencies(malicious_pom) == []
+        assert va._scan_manifests_in_texts(
+            {"pom.xml": malicious_pom}, "example"
+        ) == []
+
     def test_maven_pom_namespace_and_property_version(self):
         texts = {
             "pom.xml": """<project xmlns="http://maven.apache.org/POM/4.0.0">

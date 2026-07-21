@@ -74,7 +74,8 @@ ASSESS_SYNC_REQUEST_EXAMPLE = {
         "vuln_id": "CVE-2024-49766",
         "component_name": "benchmark",
         "debug": True,
-        "focus_path": "/tmp/agentyzer-repos/vuln-benchmark-08dfa46a5b30",
+        # This is an OpenAPI example, not a temporary-file operation.
+        "focus_path": "/tmp/agentyzer-repos/vuln-benchmark-08dfa46a5b30",  # nosec B108
         "user_guidance": "Prioritize code paths reachable from HTTP request handlers.",
     },
 }
@@ -391,7 +392,8 @@ class AssessRequest(BaseModel):
     focus_path: Optional[str] = Field(
         default=None,
         description="Optional absolute path to a local checkout to assess instead of cloning or resolving from config/repos.yaml.",
-        examples=["/tmp/agentyzer-repos/vuln-benchmark-08dfa46a5b30"],
+        # This is an OpenAPI example, not a temporary-file operation.
+        examples=["/tmp/agentyzer-repos/vuln-benchmark-08dfa46a5b30"],  # nosec B108
     )
     dependency_paths: Optional[List[List[str]]] = Field(
         default=None,

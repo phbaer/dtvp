@@ -130,6 +130,7 @@ class JobStore:
         if excess:
             placeholders = ",".join("?" for _ in removed)
             exclusion = f"AND job_id NOT IN ({placeholders})" if removed else ""
+            # Only bound placeholder tokens are generated here.
             rows = connection.execute(
                 f"""
                 SELECT job_id
@@ -138,15 +139,16 @@ class JobStore:
                 {exclusion}
                 ORDER BY COALESCE(finished_at, created_at) ASC
                 LIMIT ?
-                """,
+                """,  # nosec B608
                 (*TERMINAL_JOB_STATUSES, *sorted(removed), excess),
             ).fetchall()
             removed.update(str(row[0]) for row in rows)
 
         if removed:
             placeholders = ",".join("?" for _ in removed)
+            # Only bound placeholder tokens are generated here.
             connection.execute(
-                f"DELETE FROM jobs WHERE job_id IN ({placeholders})",
+                f"DELETE FROM jobs WHERE job_id IN ({placeholders})",  # nosec B608
                 tuple(sorted(removed)),
             )
         return removed

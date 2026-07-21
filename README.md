@@ -955,6 +955,27 @@ CI refreshes them before publishing images. Run `./scripts/generate-sboms.sh`
 after dependency changes and `uv run git-cliff -o CHANGELOG.md` after release
 history changes.
 
+The publish workflow is fail-closed around the software supply chain. It audits
+the locked Python graph with `pip-audit`, scans the DTVP and Agentyzer Python
+source with Bandit, audits both npm lockfiles, and rejects Node operations when
+TLS certificate verification has been disabled. Before a tag is created or an
+image is published, separate local DTVP and Agentyzer image candidates are
+scanned for all HIGH and CRITICAL operating-system and library vulnerabilities,
+including vulnerabilities that do not yet have a fix. Every published image
+carries BuildKit SBOM and maximum-mode provenance attestations in the registry.
+
+Release images are signed by immutable digest with cosign. Configure an
+encrypted cosign private key and its password as protected CI secrets named
+`COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`, and distribute the corresponding
+`cosign.pub` through a trusted channel. Tag builds fail when either signing
+secret is absent; mutable `dev` images from `main` are deliberately not signed.
+Verify a release against its displayed digest, for example:
+
+```sh
+cosign verify --key cosign.pub registry.example/owner/dtvp@sha256:<digest>
+cosign verify --key cosign.pub registry.example/owner/agentyzer@sha256:<digest>
+```
+
 Documentation entry points:
 
 - [Screen guide](docs/screens.md) and generated images under `docs/screenshots/`

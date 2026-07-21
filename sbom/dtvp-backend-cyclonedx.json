@@ -1,6 +1,35 @@
 {
   "components": [
     {
+      "bom-ref": "PyJWT==2.13.0",
+      "description": "JSON Web Token implementation in Python",
+      "externalReferences": [
+        {
+          "comment": "from packaging metadata Project-URL: Homepage",
+          "type": "website",
+          "url": "https://github.com/jpadilla/pyjwt"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "acknowledgement": "declared",
+            "id": "MIT"
+          }
+        }
+      ],
+      "name": "PyJWT",
+      "properties": [
+        {
+          "name": "cdx:python:package:required-extra",
+          "value": "crypto"
+        }
+      ],
+      "purl": "pkg:pypi/pyjwt@2.13.0",
+      "type": "library",
+      "version": "2.13.0"
+    },
+    {
       "bom-ref": "annotated-doc==0.0.4",
       "description": "Document parameters, class attributes, return types, and variables inline, with Annotated.",
       "externalReferences": [
@@ -324,29 +353,6 @@
       "version": "3.6"
     },
     {
-      "bom-ref": "ecdsa==0.19.2",
-      "description": "ECDSA cryptographic signature library (pure python)",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata: Home-page",
-          "type": "website",
-          "url": "http://github.com/tlsfuzzer/python-ecdsa"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "ecdsa",
-      "purl": "pkg:pypi/ecdsa@0.19.2",
-      "type": "library",
-      "version": "0.19.2"
-    },
-    {
       "bom-ref": "fastapi==0.139.0",
       "description": "FastAPI framework, high performance, easy to learn, fast to code, ready for production",
       "externalReferences": [
@@ -523,49 +529,6 @@
       "version": "3.18"
     },
     {
-      "bom-ref": "pyasn1==0.6.4",
-      "description": "Pure-Python implementation of ASN.1 types and DER/BER/CER codecs (X.208)",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Documentation",
-          "type": "documentation",
-          "url": "https://pyasn1.readthedocs.io"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Issues",
-          "type": "issue-tracker",
-          "url": "https://github.com/pyasn1/pyasn1/issues"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Source",
-          "type": "other",
-          "url": "https://github.com/pyasn1/pyasn1"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Changelog",
-          "type": "release-notes",
-          "url": "https://pyasn1.readthedocs.io/en/latest/changelog.html"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://github.com/pyasn1/pyasn1"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "BSD-2-Clause"
-          }
-        }
-      ],
-      "name": "pyasn1",
-      "purl": "pkg:pypi/pyasn1@0.6.4",
-      "type": "library",
-      "version": "0.6.4"
-    },
-    {
       "bom-ref": "pycparser==3.0",
       "description": "C parser in Python",
       "externalReferences": [
@@ -736,55 +699,6 @@
       "version": "1.2.2"
     },
     {
-      "bom-ref": "python-jose==3.5.0",
-      "description": "JOSE implementation in Python",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Documentation",
-          "type": "documentation",
-          "url": "https://python-jose.readthedocs.io/en/latest/"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Tracker",
-          "type": "issue-tracker",
-          "url": "https://github.com/mpdavis/python-jose/issues/"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Source",
-          "type": "other",
-          "url": "https://github.com/mpdavis/python-jose/"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Changelog",
-          "type": "release-notes",
-          "url": "https://github.com/mpdavis/python-jose/blob/master/CHANGELOG.md"
-        },
-        {
-          "comment": "from packaging metadata: Home-page",
-          "type": "website",
-          "url": "http://github.com/mpdavis/python-jose"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "python-jose",
-      "properties": [
-        {
-          "name": "cdx:python:package:required-extra",
-          "value": "cryptography"
-        }
-      ],
-      "purl": "pkg:pypi/python-jose@3.5.0",
-      "type": "library",
-      "version": "3.5.0"
-    },
-    {
       "bom-ref": "python-multipart==0.0.32",
       "description": "A streaming multipart parser for Python",
       "externalReferences": [
@@ -821,63 +735,6 @@
       "purl": "pkg:pypi/python-multipart@0.0.32",
       "type": "library",
       "version": "0.0.32"
-    },
-    {
-      "bom-ref": "rsa==4.9.1",
-      "description": "Pure-Python RSA implementation",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata Project-URL: Repository",
-          "type": "vcs",
-          "url": "https://github.com/sybrenstuvel/python-rsa"
-        },
-        {
-          "comment": "from packaging metadata Project-URL: Homepage",
-          "type": "website",
-          "url": "https://stuvel.eu/rsa"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "Apache-2.0"
-          }
-        },
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "name": "License :: OSI Approved :: Apache Software License"
-          }
-        }
-      ],
-      "name": "rsa",
-      "purl": "pkg:pypi/rsa@4.9.1",
-      "type": "library",
-      "version": "4.9.1"
-    },
-    {
-      "bom-ref": "six==1.17.0",
-      "description": "Python 2 and 3 compatibility utilities",
-      "externalReferences": [
-        {
-          "comment": "from packaging metadata: Home-page",
-          "type": "website",
-          "url": "https://github.com/benjaminp/six"
-        }
-      ],
-      "licenses": [
-        {
-          "license": {
-            "acknowledgement": "declared",
-            "id": "MIT"
-          }
-        }
-      ],
-      "name": "six",
-      "purl": "pkg:pypi/six@1.17.0",
-      "type": "library",
-      "version": "1.17.0"
     },
     {
       "bom-ref": "starlette==1.3.1",
@@ -1055,6 +912,13 @@
   ],
   "dependencies": [
     {
+      "dependsOn": [
+        "cryptography==49.0.0",
+        "typing_extensions==4.16.0"
+      ],
+      "ref": "PyJWT==2.13.0"
+    },
+    {
       "ref": "annotated-doc==0.0.4"
     },
     {
@@ -1091,12 +955,6 @@
     },
     {
       "ref": "cvss==3.6"
-    },
-    {
-      "dependsOn": [
-        "six==1.17.0"
-      ],
-      "ref": "ecdsa==0.19.2"
     },
     {
       "dependsOn": [
@@ -1137,9 +995,6 @@
       "ref": "idna==3.18"
     },
     {
-      "ref": "pyasn1==0.6.4"
-    },
-    {
       "ref": "pycparser==3.0"
     },
     {
@@ -1172,37 +1027,19 @@
       "ref": "python-dotenv==1.2.2"
     },
     {
-      "dependsOn": [
-        "cryptography==49.0.0",
-        "ecdsa==0.19.2",
-        "pyasn1==0.6.4",
-        "rsa==4.9.1"
-      ],
-      "ref": "python-jose==3.5.0"
-    },
-    {
       "ref": "python-multipart==0.0.32"
     },
     {
       "dependsOn": [
+        "PyJWT==2.13.0",
         "cvss==3.6",
         "fastapi==0.139.0",
         "httpx==0.28.1",
         "pydantic-settings==2.14.2",
-        "python-jose==3.5.0",
         "python-multipart==0.0.32",
         "uvicorn==0.51.0"
       ],
       "ref": "root-component"
-    },
-    {
-      "dependsOn": [
-        "pyasn1==0.6.4"
-      ],
-      "ref": "rsa==4.9.1"
-    },
-    {
-      "ref": "six==1.17.0"
     },
     {
       "dependsOn": [

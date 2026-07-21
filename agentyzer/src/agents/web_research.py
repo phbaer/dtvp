@@ -140,7 +140,8 @@ def research_tool_schemas() -> list[dict[str, Any]]:
 _BLOCKED_HOSTS = {
     "localhost",
     "127.0.0.1",
-    "0.0.0.0",
+    # This is an SSRF denylist entry, not a bind address.
+    "0.0.0.0",  # nosec B104
     "::1",
     "metadata.google.internal",
 }

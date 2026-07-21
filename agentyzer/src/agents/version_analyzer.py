@@ -1,10 +1,10 @@
 import json
 import os
 import re
-import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Tuple
 
 import toml
+from defusedxml import ElementTree as ET
 from git import GitCommandError, Repo
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version

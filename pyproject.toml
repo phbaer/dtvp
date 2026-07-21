@@ -28,6 +28,7 @@ dev = [
     "git-cliff>=2.7.0",
     "cyclonedx-bom>=7.2.2",
     "pip-audit==2.10.0",
+    "bandit[toml]==1.9.4",
 ]
 
 [tool.uv.sources]
@@ -55,3 +56,6 @@ exclude_lines = [
     "raise AssertionError",
     "raise NotImplementedError",
 ]
+
+[tool.bandit]
+exclude_dirs = ["tests", "frontend", ".venv"]
