@@ -1,6 +1,12 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   nginx:
-    image: nginx:alpine
+    image: nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
     ports:
       - "${DTVP_HTTP_PORT:-80}:80"
     environment:
@@ -12,33 +18,105 @@ services:
       - dtvp
       - dtrack-frontend
       - dtrack-apiserver
+    networks:
+      - gateway
+      - application
+    read_only: true
+    tmpfs:
+      - /etc/nginx/conf.d:size=1m,mode=1777
+      - /var/cache/nginx:size=16m,mode=1777
+      - /var/run:size=1m,mode=1777
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    pids_limit: 200
+    logging: *default-logging
+    restart: unless-stopped
 
   dtrack-apiserver:
-    image: dependencytrack/apiserver:4.14.1
+    image: dependencytrack/apiserver:4.14.2@sha256:1ba4f004e1ec4800ec0e0175b0f1cf361a68f6ac3db9274a32d0a47cd4038f51
     environment:
-      - ALPINE_DATABASE_MODE=external
-      - ALPINE_DATABASE_URL=jdbc:postgresql://postgres:5432/dtrack
-      - ALPINE_DATABASE_DRIVER=org.postgresql.Driver
-      - ALPINE_DATABASE_USERNAME=dtrack
-      - ALPINE_DATABASE_PASSWORD=dtrack
+      ALPINE_DATABASE_MODE: external
+      ALPINE_DATABASE_URL: jdbc:postgresql://postgres:5432/dtrack
+      ALPINE_DATABASE_DRIVER: org.postgresql.Driver
+      ALPINE_DATABASE_USERNAME: dtrack
+      ALPINE_DATABASE_PASSWORD: ${DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD in .env}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    volumes:
+      - dependency-track-data:/data
+    networks:
+      - application
+      - data
+      - dtrack-outbound
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    logging: *default-logging
     restart: unless-stopped
 
   dtrack-frontend:
-    image: dependencytrack/frontend:4.14.1
+    image: dependencytrack/frontend:4.14.2@sha256:00560b57a6cfdec3c02a6e02be80fce97029241a9c653e8b83c0b670dff1f3ca
     environment:
       - API_BASE_URL=/api
+    networks:
+      - application
+    read_only: true
+    tmpfs:
+      - /etc/nginx/conf.d:size=1m,mode=1777
+      - /var/cache/nginx:size=16m,mode=1777
+      - /var/run:size=1m,mode=1777
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 200
+    logging: *default-logging
     restart: unless-stopped
 
   postgres:
-    image: postgres:18-alpine
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     environment:
-      - POSTGRES_USER=dtrack
-      - POSTGRES_PASSWORD=dtrack
-      - POSTGRES_DB=dtrack
+      POSTGRES_USER: dtrack
+      POSTGRES_PASSWORD: ${DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD in .env}
+      POSTGRES_DB: dtrack
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dtrack -d dtrack"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /run/postgresql:size=16m,mode=1777
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    pids_limit: 200
+    logging: *default-logging
     restart: unless-stopped
 
   dtvp:
@@ -46,11 +124,11 @@ services:
       context: .
       args:
         DTVP_CONTEXT_PATH: /dtvp
-    env_file:
-      - path: .env
-        required: false
     environment:
       DTVP_ENVIRONMENT: ${DTVP_ENVIRONMENT:-production}
+      DTVP_VULNERABILITY_BACKEND_ID: ${DTVP_VULNERABILITY_BACKEND_ID:-dependency-track}
+      DTVP_VULNERABILITY_BACKEND_TYPE: ${DTVP_VULNERABILITY_BACKEND_TYPE:-dependency-track}
+      DTVP_VULNERABILITY_BACKEND_LABEL: ${DTVP_VULNERABILITY_BACKEND_LABEL:-Dependency-Track}
       DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}
       DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-}
       DTVP_DT_API_KEY_FILE: ${DTVP_DT_API_KEY_FILE:-}
@@ -59,6 +137,7 @@ services:
       DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
       DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}
+      DTVP_CORS_ORIGINS: ${DTVP_CORS_ORIGINS:-}
       DTVP_ALLOWED_HOSTS: ${DTVP_ALLOWED_HOSTS:-}
       DTVP_TRUSTED_PROXY_CIDRS: ${DTVP_TRUSTED_PROXY_CIDRS:-}
       DTVP_SECURITY_AUDIT_PATH: ${DTVP_SECURITY_AUDIT_PATH:-data/security_audit.jsonl}
@@ -68,12 +147,31 @@ services:
       DTVP_EXPENSIVE_RATE_LIMIT: ${DTVP_EXPENSIVE_RATE_LIMIT:-20}
       DTVP_MUTATION_RATE_LIMIT: ${DTVP_MUTATION_RATE_LIMIT:-120}
       DTVP_ATTRIBUTION_AGE_FILTER_DAYS: ${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
+      DTVP_DEFAULT_PROJECT_FILTER: ${DTVP_DEFAULT_PROJECT_FILTER:-}
       DTVP_JIRA_CREATE_URL: ${DTVP_JIRA_CREATE_URL:-}
       DTVP_SESSION_SECRET_KEY: ${DTVP_SESSION_SECRET_KEY:-}
+      DTVP_SESSION_SECRET_KEY_FILE: ${DTVP_SESSION_SECRET_KEY_FILE:-}
       DTVP_SESSION_TTL_SECONDS: ${DTVP_SESSION_TTL_SECONDS:-28800}
       DTVP_SESSION_COOKIE_SECURE: ${DTVP_SESSION_COOKIE_SECURE:-true}
+      DTVP_OIDC_AUTHORITY: ${DTVP_OIDC_AUTHORITY:-}
+      DTVP_OIDC_CLIENT_ID: ${DTVP_OIDC_CLIENT_ID:-}
+      DTVP_OIDC_CLIENT_SECRET: ${DTVP_OIDC_CLIENT_SECRET:-}
+      DTVP_OIDC_CLIENT_SECRET_FILE: ${DTVP_OIDC_CLIENT_SECRET_FILE:-}
+      DTVP_OIDC_REDIRECT_URI: ${DTVP_OIDC_REDIRECT_URI:-}
       DTVP_OIDC_ALLOWED_ALGORITHMS: ${DTVP_OIDC_ALLOWED_ALGORITHMS:-RS256}
       DTVP_OIDC_TRANSACTION_TTL_SECONDS: ${DTVP_OIDC_TRANSACTION_TTL_SECONDS:-300}
+      DTVP_DEV_DISABLE_AUTH: ${DTVP_DEV_DISABLE_AUTH:-false}
+      DTVP_VERSION_FETCH_CONCURRENCY: ${DTVP_VERSION_FETCH_CONCURRENCY:-4}
+      DTVP_ASSESSMENT_IO_CONCURRENCY: ${DTVP_ASSESSMENT_IO_CONCURRENCY:-4}
+      DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS: ${DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS:-3}
+      DTVP_DT_CACHE_REFRESH_SECONDS: ${DTVP_DT_CACHE_REFRESH_SECONDS:-60}
+      DTVP_GROUPED_VULN_TASK_TTL_SECONDS: ${DTVP_GROUPED_VULN_TASK_TTL_SECONDS:-3600}
+      DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH: ${DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH:-}
+      DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES: ${DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES:-64}
+      TEAM_MAPPING_PATH: ${TEAM_MAPPING_PATH:-data/team_mapping.json}
+      USER_ROLES_PATH: ${USER_ROLES_PATH:-data/user_roles.json}
+      RESCORE_RULES_PATH: ${RESCORE_RULES_PATH:-data/rescore_rules.json}
+      DTVP_SETTINGS_UPLOAD_MAX_BYTES: ${DTVP_SETTINGS_UPLOAD_MAX_BYTES:-1048576}
       DTVP_PROJECT_ARCHIVE_PATH: ${DTVP_PROJECT_ARCHIVE_PATH:-data/project_archives}
       DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED: ${DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED:-false}
       DTVP_PROJECT_ARCHIVE_EXPANDED_PATH: ${DTVP_PROJECT_ARCHIVE_EXPANDED_PATH:-data/project_archives_git}
@@ -81,13 +179,38 @@ services:
       DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS: ${DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS:-86400}
       DTVP_PROJECT_ARCHIVE_RETENTION_COUNT: ${DTVP_PROJECT_ARCHIVE_RETENTION_COUNT:-30}
       DTVP_PROJECT_ARCHIVE_INCLUDE: ${DTVP_PROJECT_ARCHIVE_INCLUDE:-}
+      DTVP_PROJECT_ARCHIVE_UPLOAD_MAX_BYTES: ${DTVP_PROJECT_ARCHIVE_UPLOAD_MAX_BYTES:-104857600}
+      DTVP_PROJECT_ARCHIVE_MAX_FILES: ${DTVP_PROJECT_ARCHIVE_MAX_FILES:-10000}
+      DTVP_PROJECT_ARCHIVE_MAX_MEMBER_BYTES: ${DTVP_PROJECT_ARCHIVE_MAX_MEMBER_BYTES:-104857600}
+      DTVP_PROJECT_ARCHIVE_MAX_UNCOMPRESSED_BYTES: ${DTVP_PROJECT_ARCHIVE_MAX_UNCOMPRESSED_BYTES:-524288000}
+      DTVP_PROJECT_ARCHIVE_MAX_COMPRESSION_RATIO: ${DTVP_PROJECT_ARCHIVE_MAX_COMPRESSION_RATIO:-200}
+      DTVP_TMRESCORE_URL: ${DTVP_TMRESCORE_URL:-}
+      DTVP_TMRESCORE_TIMEOUT_SECONDS: ${DTVP_TMRESCORE_TIMEOUT_SECONDS:-180}
+      DTVP_TMRESCORE_CACHE_PATH: ${DTVP_TMRESCORE_CACHE_PATH:-data/tmrescore_proposals.json}
+      DTVP_TMRESCORE_OLLAMA_MODEL: ${DTVP_TMRESCORE_OLLAMA_MODEL:-qwen2.5:7b}
+      DTVP_TMRESCORE_TASK_TTL_SECONDS: ${DTVP_TMRESCORE_TASK_TTL_SECONDS:-3600}
+      DTVP_TMRESCORE_UPLOAD_MAX_BYTES: ${DTVP_TMRESCORE_UPLOAD_MAX_BYTES:-20971520}
       DTVP_CODE_ANALYSIS_URL: ${DTVP_CODE_ANALYSIS_URL:-http://agentyzer:8000}
       DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS: ${DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS:-300}
       DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS: ${DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS:-5}
       DTVP_CODE_ANALYSIS_SERVICE_TOKEN: ${AGENTYZER_SERVICE_TOKEN:-}
+      DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE: ${DTVP_CODE_ANALYSIS_SERVICE_TOKEN_FILE:-}
       DTVP_CODE_ANALYSIS_ADMIN_TOKEN: ${AGENTYZER_ADMIN_TOKEN:-}
+      DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE: ${DTVP_CODE_ANALYSIS_ADMIN_TOKEN_FILE:-}
+      DTVP_CODE_ANALYSIS_MODEL: ${DTVP_CODE_ANALYSIS_MODEL:-}
+      DTVP_CODE_ANALYSIS_LLM_BACKEND: ${DTVP_CODE_ANALYSIS_LLM_BACKEND:-}
+      DTVP_CODE_ANALYSIS_LLM_PROVIDER: ${DTVP_CODE_ANALYSIS_LLM_PROVIDER:-}
       DTVP_ANALYSIS_QUEUE_CAPACITY: ${DTVP_ANALYSIS_QUEUE_CAPACITY:-1}
+      DTVP_ANALYSIS_QUEUE_TTL_SECONDS: ${DTVP_ANALYSIS_QUEUE_TTL_SECONDS:-3600}
       DTVP_ANALYSIS_QUEUE_STATE_PATH: ${DTVP_ANALYSIS_QUEUE_STATE_PATH:-data/analysis_queue.sqlite}
+      DTVP_AUTO_ANALYSIS_GUIDANCE_PATH: ${DTVP_AUTO_ANALYSIS_GUIDANCE_PATH:-data/auto_analysis_guidance.json}
+      DTVP_AUTO_CODE_ANALYSIS_ENABLED: ${DTVP_AUTO_CODE_ANALYSIS_ENABLED:-false}
+      DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS: ${DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS:-300}
+      DTVP_CODE_ANALYSIS_RESULTS_PATH: ${DTVP_CODE_ANALYSIS_RESULTS_PATH:-data/code_analysis_results.json}
+      DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS: ${DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS:-90}
+      DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS: ${DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS:-5000}
+      DTVP_CODE_ANALYSIS_RESULTS_STORE_GUIDANCE: ${DTVP_CODE_ANALYSIS_RESULTS_STORE_GUIDANCE:-false}
+      DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS: ${DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS:-7}
     volumes:
       - ./data:/app/data
     user: "${DTVP_RUNTIME_UID:-1000}:${DTVP_RUNTIME_GID:-1000}"
@@ -99,6 +222,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      - application
+      - analysis
+      - dtvp-outbound
+    pids_limit: 256
+    logging: *default-logging
     depends_on:
       - dtrack-apiserver
       - agentyzer
@@ -107,15 +236,14 @@ services:
   agentyzer:
     build:
       context: ./agentyzer
-    env_file:
-      - path: .env
-        required: false
     environment:
       AGENTYZER_CONFIG_DIR: /app/config
       AGENTYZER_REPOS_DIR: /app/repos
       AGENTYZER_ENVIRONMENT: production
       AGENTYZER_SERVICE_TOKEN: ${AGENTYZER_SERVICE_TOKEN:-}
+      AGENTYZER_SERVICE_TOKEN_FILE: ${AGENTYZER_SERVICE_TOKEN_FILE:-}
       AGENTYZER_ADMIN_TOKEN: ${AGENTYZER_ADMIN_TOKEN:-}
+      AGENTYZER_ADMIN_TOKEN_FILE: ${AGENTYZER_ADMIN_TOKEN_FILE:-}
       LLM_BACKEND: ${AGENTYZER_LLM_BACKEND:-ollama}
       OLLAMA_HOST: ${AGENTYZER_OLLAMA_HOST:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${AGENTYZER_OLLAMA_MODEL:-mistral}
@@ -146,19 +274,22 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      - analysis
+      - agentyzer-outbound
+    pids_limit: 512
+    logging: *default-logging
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   dtvp-archive-git-push:
-    image: alpine/git:latest
+    image: alpine/git:latest@sha256:77418e6e7c7f434c4a98eaff04ef16840cf03649c881c03948e3e213923e3136
     profiles:
       - archive-git
     working_dir: /repo
-    env_file:
-      - path: .env
-        required: false
     environment:
+      HOME: /tmp
       DTVP_ARCHIVE_GIT_REMOTE: ${DTVP_ARCHIVE_GIT_REMOTE:-}
       DTVP_ARCHIVE_GIT_BRANCH: ${DTVP_ARCHIVE_GIT_BRANCH:-main}
       DTVP_ARCHIVE_GIT_AUTHOR_NAME: ${DTVP_ARCHIVE_GIT_AUTHOR_NAME:-DTVP Archive Bot}
@@ -169,6 +300,17 @@ services:
       - archive-git-repo:/repo
       - ./data/project_archives_git:/archive-tree:ro
       - ./secrets:/ssh:ro
+    networks:
+      - archive-outbound
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    logging: *default-logging
     entrypoint:
       - /bin/sh
       - -lc
@@ -186,21 +328,33 @@ services:
           exit 0
         fi
 
-        git config --global user.name "$${DTVP_ARCHIVE_GIT_AUTHOR_NAME}"
-        git config --global user.email "$${DTVP_ARCHIVE_GIT_AUTHOR_EMAIL}"
-        git config --global --add safe.directory /repo
-
         if [ -f "$${DTVP_ARCHIVE_GIT_SSH_KEY_FILE}" ]; then
           export GIT_SSH_COMMAND="ssh -i $${DTVP_ARCHIVE_GIT_SSH_KEY_FILE} -o UserKnownHostsFile=$${DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE} -o StrictHostKeyChecking=yes"
         fi
 
         if [ ! -d .git ]; then
-          git clone "$${DTVP_ARCHIVE_GIT_REMOTE}" .
+          git init
+          git remote add origin "$${DTVP_ARCHIVE_GIT_REMOTE}"
+        elif [ "$$(git remote get-url origin)" != "$${DTVP_ARCHIVE_GIT_REMOTE}" ]; then
+          echo "Archive Git remote differs from the initialized repository" >&2
+          exit 1
         fi
 
-        git fetch origin "$${DTVP_ARCHIVE_GIT_BRANCH}" || true
-        git checkout "$${DTVP_ARCHIVE_GIT_BRANCH}" || git checkout -b "$${DTVP_ARCHIVE_GIT_BRANCH}"
-        git pull --ff-only origin "$${DTVP_ARCHIVE_GIT_BRANCH}" || true
+        git config user.name "$${DTVP_ARCHIVE_GIT_AUTHOR_NAME}"
+        git config user.email "$${DTVP_ARCHIVE_GIT_AUTHOR_EMAIL}"
+        git config --global --add safe.directory /repo
+
+        if git ls-remote --exit-code --heads origin "refs/heads/$${DTVP_ARCHIVE_GIT_BRANCH}" >/dev/null; then
+          git fetch --prune origin "$${DTVP_ARCHIVE_GIT_BRANCH}"
+          git checkout -B "$${DTVP_ARCHIVE_GIT_BRANCH}" FETCH_HEAD
+        else
+          status=$$?
+          if [ "$$status" -ne 2 ]; then
+            echo "Unable to query archive Git remote" >&2
+            exit "$$status"
+          fi
+          git checkout -B "$${DTVP_ARCHIVE_GIT_BRANCH}"
+        fi
 
         rm -rf project_archives
         mkdir -p project_archives
@@ -216,5 +370,19 @@ services:
 
 volumes:
   postgres-data:
+  dependency-track-data:
   archive-git-repo:
   agentyzer-repos:
+
+networks:
+  gateway:
+  application:
+    internal: true
+  analysis:
+    internal: true
+  data:
+    internal: true
+  dtvp-outbound:
+  dtrack-outbound:
+  agentyzer-outbound:
+  archive-outbound:

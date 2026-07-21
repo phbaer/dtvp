@@ -31,9 +31,52 @@ def test_compose_hardens_application_containers():
     compose = (ROOT / "compose.yml").read_text()
 
     assert 'user: "${DTVP_RUNTIME_UID:-1000}:${DTVP_RUNTIME_GID:-1000}"' in compose
-    assert compose.count("read_only: true") >= 2
-    assert compose.count("no-new-privileges:true") >= 2
-    assert compose.count("cap_drop:") >= 2
+    assert compose.count("read_only: true") >= 7
+    assert compose.count("no-new-privileges:true") >= 7
+    assert compose.count("cap_drop:") >= 7
+    assert compose.count("pids_limit:") >= 7
+    assert "env_file:" not in compose
+    assert "ALPINE_DATABASE_PASSWORD=dtrack" not in compose
+    assert "POSTGRES_PASSWORD=dtrack" not in compose
+    assert "DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD" in compose
+
+
+def test_compose_pins_images_and_segments_trust_zones():
+    compose = (ROOT / "compose.yml").read_text()
+
+    assert compose.count("@sha256:") >= 5
+    assert "internal: true" in compose
+    for network in (
+        "application",
+        "analysis",
+        "data",
+        "dtvp-outbound",
+        "dtrack-outbound",
+        "agentyzer-outbound",
+        "archive-outbound",
+    ):
+        assert f"{network}:" in compose
+
+
+def test_compose_secret_overlays_keep_credentials_out_of_service_environment():
+    overlay = (ROOT / "compose.secrets.yml").read_text()
+    import_overlay = (ROOT / "compose.archive-import-secret.yml").read_text()
+
+    assert "POSTGRES_PASSWORD_FILE: /run/secrets/dtrack_database_password" in overlay
+    assert "DTVP_DT_API_KEY_FILE: /run/secrets/dtvp_dt_api_key" in overlay
+    assert "DTVP_SESSION_SECRET_KEY_FILE: /run/secrets/dtvp_session_secret_key" in overlay
+    assert "AGENTYZER_SERVICE_TOKEN_FILE: /run/secrets/agentyzer_service_token" in overlay
+    assert "environment: DTRACK_DB_PASSWORD" in overlay
+    assert "environment: DTVP_DT_IMPORT_API_KEY" in import_overlay
+
+
+def test_archive_helper_fails_closed_on_remote_errors():
+    compose = (ROOT / "compose.yml").read_text()
+
+    assert "git fetch origin" not in compose or "git fetch --prune origin" in compose
+    assert "git pull --ff-only" not in compose
+    assert "|| true" not in compose
+    assert "Archive Git remote differs" in compose
 
 
 def test_private_ca_overlay_uses_build_secrets():

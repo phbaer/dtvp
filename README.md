@@ -634,7 +634,27 @@ in `docs/screenshots/conflict-resolution.png`.
 
 ```bash
 cp .env.dist .env
-docker compose up -d
+# Fill every required value in .env, including DTRACK_DB_PASSWORD.
+docker compose -f compose.yml -f compose.secrets.yml up -d
+```
+
+The base file keeps direct environment-value support for local compatibility.
+Production deployments should include `compose.secrets.yml`; it converts the
+database password, Dependency-Track API key, session key, OIDC client secret,
+and both analyzer credentials into `/run/secrets` mounts and clears their
+direct environment entries. Compose no longer injects the entire `.env` file
+into application containers: only the explicit configuration allowlist in
+`compose.yml` crosses the container boundary.
+
+Archive apply is disabled by the hardened overlay unless the dedicated import
+key is mounted with the additional overlay:
+
+```bash
+docker compose \
+  -f compose.yml \
+  -f compose.secrets.yml \
+  -f compose.archive-import-secret.yml \
+  up -d
 ```
 
 Networks with a private certificate authority should pass the CA bundle as a
@@ -670,11 +690,19 @@ AGENTYZER_ADMIN_TOKEN=<a third random value from openssl rand -hex 32>
 Deployment rules:
 
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
-  archives survive container restarts. DTVP and Agentyzer run as non-root
-  users with read-only root filesystems, no Linux capabilities, and writable
-  mounts only for data, cloned repositories, and temporary files. Set
+  archives survive container restarts. Dependency-Track also has a dedicated
+  `/data` volume. Application and third-party containers use immutable image
+  digests, read-only root filesystems where supported, bounded process counts,
+  rotated local logs, and reduced Linux capabilities. DTVP and Agentyzer run as
+  non-root users with writable mounts only for data, cloned repositories, and
+  temporary files. Set
   `DTVP_RUNTIME_UID` and `DTVP_RUNTIME_GID` to the numeric owner of `./data`
   (for example, `id -u` and `id -g`) when it is not `1000:1000`.
+- Compose separates gateway, application, analyzer, and database traffic on
+  distinct networks. Internal networks cannot reach the internet. DTVP,
+  Dependency-Track, Agentyzer, and the archive helper each receive a separate
+  outbound bridge so an egress-capable service does not create a lateral path
+  between trust zones.
 - Compose starts Agentyzer and persists credential-free cached Git repositories plus its bounded
   async-job SQLite store in the `agentyzer-repos` volume. Populate or override the sanitized
   `agentyzer/config/repos.yaml` before enabling automatic scans; never commit
@@ -690,6 +718,10 @@ Deployment rules:
   backed by the persistent clone, so repeat scans reuse Git objects without
   sharing mutable files. Normal completion removes only the per-run worktree;
   stale crash leftovers are pruned after the configured retention window.
+- The archive Git helper uses a digest-pinned image, read-only root filesystem,
+  dropped capabilities, strict SSH host-key checking, and a dedicated outbound
+  network. Remote lookup/fetch failures abort the job; they are never treated
+  as an empty branch, and an initialized volume refuses a changed remote.
 - Internal services use Compose names and container ports. DTVP reaches
   Dependency-Track at `http://dtrack-apiserver:8080` and Agentyzer at
   `http://agentyzer:8000` unless overridden.
@@ -764,6 +796,7 @@ means the integration or override is disabled.
 | `DTVP_VULNERABILITY_BACKEND_ID` | Stable backend-instance namespace used for local state and resource identity | `dependency-track` |
 | `DTVP_VULNERABILITY_BACKEND_TYPE` | Adapter implementation; currently only `dependency-track` is runnable | `dependency-track` |
 | `DTVP_VULNERABILITY_BACKEND_LABEL` | Non-secret display label returned by backend discovery | `Dependency-Track` |
+| `DTRACK_DB_PASSWORD` | Required random password shared only by the bundled Dependency-Track API and PostgreSQL; mounted as a secret with `compose.secrets.yml` | unset |
 | `DTVP_DT_API_URL` | Dependency-Track API base URL | `http://localhost:8081`; Compose: `http://dtrack-apiserver:8080` |
 | `DTVP_DT_API_KEY` | Least-privilege Dependency-Track review service-team API key; required in production | unset |
 | `DTVP_DT_API_KEY_FILE` | API-key file used when the direct value is unset | unset |
