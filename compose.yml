@@ -5,6 +5,7 @@ services:
       - "${DTVP_HTTP_PORT:-80}:80"
     environment:
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
+      DTVP_SERVER_NAME: ${DTVP_SERVER_NAME:-localhost}
     volumes:
       - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
     depends_on:
@@ -64,6 +65,14 @@ services:
       # The packaged deployment defaults to the verified CPython 3.14t image.
       # The application refuses to serve if the GIL is unexpectedly active.
       DTVP_REQUIRE_FREE_THREADED: "true"
+      DTVP_ALLOWED_HOSTS: ${DTVP_ALLOWED_HOSTS:-}
+      DTVP_TRUSTED_PROXY_CIDRS: ${DTVP_TRUSTED_PROXY_CIDRS:-}
+      DTVP_SECURITY_AUDIT_PATH: ${DTVP_SECURITY_AUDIT_PATH:-data/security_audit.jsonl}
+      DTVP_SECURITY_AUDIT_FSYNC: ${DTVP_SECURITY_AUDIT_FSYNC:-false}
+      DTVP_RATE_LIMIT_WINDOW_SECONDS: ${DTVP_RATE_LIMIT_WINDOW_SECONDS:-60}
+      DTVP_AUTH_RATE_LIMIT: ${DTVP_AUTH_RATE_LIMIT:-30}
+      DTVP_EXPENSIVE_RATE_LIMIT: ${DTVP_EXPENSIVE_RATE_LIMIT:-20}
+      DTVP_MUTATION_RATE_LIMIT: ${DTVP_MUTATION_RATE_LIMIT:-120}
       DTVP_ATTRIBUTION_AGE_FILTER_DAYS: ${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
       DTVP_GROUPED_VULN_TASK_TTL_SECONDS: ${DTVP_GROUPED_VULN_TASK_TTL_SECONDS:-900}
       DTVP_JIRA_CREATE_URL: ${DTVP_JIRA_CREATE_URL:-}

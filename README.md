@@ -1185,8 +1185,10 @@ Deployment rules:
   completed grouped tasks have a separate retained-count cap. These bounds keep
   long-running and multi-user instances from growing without limit.
 - nginx proxies `DTVP_CONTEXT_PATH` to DTVP and defaults it to `/dtvp`.
-  `DTVP_HTTP_PORT` changes the host gateway port. Direct-container deployments
-  must publish port `8000` and include the context path in the URL.
+  `DTVP_HTTP_PORT` changes the host gateway port and `DTVP_SERVER_NAME` is the
+  exact public host accepted by nginx. Unknown hosts are rejected at nginx and
+  by the application. Direct-container deployments must publish port `8000`,
+  include the context path in the URL, and configure `DTVP_ALLOWED_HOSTS`.
 - The Compose nginx gateway keeps upstream HTTP/1.1 connections open,
   compresses JSON/static text responses, and disables buffering for grouped
   task event streams. Uvicorn keeps those upstream connections for 30 seconds
@@ -1215,6 +1217,18 @@ Deployment rules:
   narrower limits to settings uploads, each tmrescore input, and project
   archives, so the same controls remain active when port `8000` is exposed
   directly.
+- nginx applies connection and per-IP request limits. DTVP additionally applies
+  bounded session/IP quotas to login, mutation, and expensive task-creation
+  requests. Cookie-authenticated unsafe requests require an Origin in the exact
+  CORS allowlist; requests with a cross-site fetch indicator or a different
+  Origin are rejected. CORS permits only the methods and headers used by the
+  application.
+- Every state-changing request, login outcome, reviewer denial, host/origin
+  rejection, and rate-limit denial produces a structured event. Production
+  appends those events to an owner-only JSONL file as well as the
+  `dtvp.security_audit` logger; `/api/security/health` exposes persistence
+  health and active quotas to reviewers. Ship that logger/file to immutable
+  external retention for production investigations.
 
 ### Python Runtime Images
 
@@ -1332,6 +1346,15 @@ means the integration or override is disabled.
 | `DTVP_HTTP_PORT` | Compose nginx host port | `80` |
 | `DTVP_UVICORN_KEEP_ALIVE_SECONDS` | Backend upstream keep-alive timeout | `30` |
 | `DTVP_REQUIRE_FREE_THREADED` | Fail startup unless CPython supports free threading and its GIL is actually disabled | local Python: `false`; Compose: `true` |
+| `DTVP_SERVER_NAME` | Exact nginx virtual host; space-separated nginx names are supported | `localhost` |
+| `DTVP_ALLOWED_HOSTS` | Comma-separated application Host allowlist; defaults to the frontend host plus local development names | derived |
+| `DTVP_TRUSTED_PROXY_CIDRS` | Immediate proxy networks allowed to supply `X-Forwarded-For` | unset |
+| `DTVP_SECURITY_AUDIT_PATH` | Owner-only structured JSONL security audit target | production: `data/security_audit.jsonl` |
+| `DTVP_SECURITY_AUDIT_FSYNC` | Flush every audit event to durable storage before returning | `false` |
+| `DTVP_RATE_LIMIT_WINDOW_SECONDS` | Application quota window | `60` |
+| `DTVP_AUTH_RATE_LIMIT` | Login/callback requests per IP and window | `30` |
+| `DTVP_EXPENSIVE_RATE_LIMIT` | Expensive task mutations per session/IP and window | `20` |
+| `DTVP_MUTATION_RATE_LIMIT` | Other state-changing requests per session/IP and window | `120` |
 | `DTVP_RUNTIME_UID` / `DTVP_RUNTIME_GID` | Non-root DTVP process and `./data` owner IDs | `1000` / `1000` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
 | `DTVP_CORS_ORIGINS` | Additional comma-separated CORS origins | unset |

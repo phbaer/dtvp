@@ -13,10 +13,21 @@ upstream dependency_track_frontend {
     keepalive 16;
 }
 
+limit_req_zone $binary_remote_addr zone=dtvp_general:10m rate=20r/s;
+limit_req_zone $binary_remote_addr zone=dtvp_auth:10m rate=5r/m;
+limit_conn_zone $binary_remote_addr zone=dtvp_connections:10m;
+
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+
 server {
     listen 80;
-    server_name localhost;
-    keepalive_timeout 65;
+    server_name ${DTVP_SERVER_NAME};
+    server_tokens off;
+    keepalive_timeout 30s;
     keepalive_requests 1000;
 
     gzip on;
@@ -26,6 +37,11 @@ server {
     gzip_vary on;
     gzip_types application/json application/javascript text/css text/plain image/svg+xml;
     client_max_body_size 105m;
+    client_body_timeout 30s;
+    client_header_timeout 15s;
+    limit_conn dtvp_connections 40;
+    limit_req_status 429;
+    proxy_hide_header Server;
 
     # Proxy DTVP backend and SPA under the configured context path.
     location = ${DTVP_CONTEXT_PATH} {
@@ -34,6 +50,7 @@ server {
 
     # Event streams must reach clients immediately and stay unbuffered.
     location ~ ^${DTVP_CONTEXT_PATH}/api/tasks/[^/]+/events$ {
+        limit_req zone=dtvp_general burst=60 nodelay;
         proxy_pass http://dtvp_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -41,6 +58,9 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 300s;
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 1h;
@@ -49,34 +69,64 @@ server {
     }
 
     location ${DTVP_CONTEXT_PATH}/ {
+        limit_req zone=dtvp_general burst=60 nodelay;
         proxy_pass http://dtvp_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 3600s;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
+    location = ${DTVP_CONTEXT_PATH}/auth/login {
+        limit_req zone=dtvp_auth burst=5 nodelay;
+        proxy_pass http://dtvp_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
     }
 
     # Proxy Dependency-Track API requests to the apiserver.
     location /api/ {
+        limit_req zone=dtvp_general burst=60 nodelay;
         proxy_pass http://dependency_track_api/api/;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
     }
 
     # Route all other traffic to the Dependency-Track frontend.
     location / {
+        limit_req zone=dtvp_general burst=60 nodelay;
         proxy_pass http://dependency_track_frontend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
     }
 }

@@ -418,7 +418,10 @@ def test_logout_is_post_only_and_clears_session(client):
         SESSION_COOKIE_NAME,
         create_session_token(subject="subject", username="testuser"),
     )
-    response = client.post("/auth/logout")
+    response = client.post(
+        "/auth/logout",
+        headers={"Origin": "http://localhost:8000"},
+    )
     assert response.status_code == 200
     assert response.json() == {"status": "logged_out"}
     assert response.cookies.get(SESSION_COOKIE_NAME) is None

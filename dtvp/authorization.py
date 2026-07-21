@@ -4,6 +4,8 @@ from typing import Any, Mapping
 
 from fastapi import HTTPException
 
+from .security_audit import emit_security_audit
+
 
 class Role(StrEnum):
     ANALYST = "ANALYST"
@@ -60,6 +62,11 @@ def require_reviewer(
     detail: str = "Reviewer role required",
 ) -> None:
     if not is_reviewer(role):
+        emit_security_audit(
+            "authorization.reviewer",
+            outcome="denied",
+            details={"required_role": Role.REVIEWER.value},
+        )
         raise HTTPException(status_code=403, detail=detail)
 
 
@@ -77,5 +84,10 @@ def require_owned_resource_access(
     not_found_detail: str,
 ) -> None:
     if not can_access_owned_resource(username=username, owner=owner, role=role):
+        emit_security_audit(
+            "authorization.owned_resource",
+            outcome="denied",
+            details={"requested_owner": str(owner)[:256]},
+        )
         # Return 404 so callers cannot use object IDs to enumerate other users' work.
         raise HTTPException(status_code=404, detail=not_found_detail)
