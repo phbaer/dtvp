@@ -42,6 +42,17 @@ def get_job_max_records() -> int:
         return 1000
 
 
+def get_storage_min_free_bytes() -> int:
+    raw_value = os.environ.get(
+        "AGENTYZER_STORAGE_MIN_FREE_BYTES",
+        str(128 * 1024 * 1024),
+    )
+    try:
+        return max(0, int(raw_value))
+    except (TypeError, ValueError):
+        return 128 * 1024 * 1024
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -228,3 +239,48 @@ class JobStore:
         with self._lock, closing(self._connect_locked()) as connection:
             with connection:
                 connection.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+
+    def health(self) -> dict[str, Any]:
+        path = self.path_provider()
+        try:
+            with self._lock, closing(self._connect_locked()) as connection:
+                integrity_row = connection.execute("PRAGMA quick_check").fetchone()
+                record_count = int(
+                    connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                )
+            integrity = str(integrity_row[0]) if integrity_row else "no result"
+            mode = os.stat(path, follow_symlinks=False).st_mode & 0o777
+            parent = os.path.dirname(path) or "."
+            filesystem = os.statvfs(parent)
+            free_bytes = int(filesystem.f_bavail * filesystem.f_frsize)
+            writable = os.access(parent, os.W_OK)
+            error = None
+        except (OSError, sqlite3.DatabaseError) as exc:
+            integrity = None
+            record_count = None
+            mode = None
+            free_bytes = None
+            writable = False
+            error = f"{exc.__class__.__name__}: {exc}"
+        minimum_free_bytes = get_storage_min_free_bytes()
+        owner_only = mode is not None and mode & 0o077 == 0
+        return {
+            "healthy": (
+                error is None
+                and integrity == "ok"
+                and owner_only
+                and writable
+                and free_bytes is not None
+                and free_bytes >= minimum_free_bytes
+            ),
+            "path": path,
+            "integrity": integrity,
+            "record_count": record_count,
+            "retention_seconds": self.retention_seconds_provider(),
+            "max_records": self.max_records_provider(),
+            "owner_only_permissions": owner_only,
+            "writable": writable,
+            "free_bytes": free_bytes,
+            "minimum_free_bytes": minimum_free_bytes,
+            "error": error,
+        }

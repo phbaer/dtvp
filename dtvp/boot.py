@@ -113,6 +113,12 @@ class BootApp:
     def _is_startup_page_path(self, path: str) -> bool:
         return path == contextual_path(self.context_path, "/startup")
 
+    def _is_liveness_path(self, path: str) -> bool:
+        return path == contextual_path(self.context_path, "/livez")
+
+    def _is_readiness_path(self, path: str) -> bool:
+        return path == contextual_path(self.context_path, "/readyz")
+
     def _is_api_or_auth_path(self, path: str) -> bool:
         return any(
             path == prefix or path.startswith(f"{prefix}/")
@@ -220,6 +226,29 @@ class BootApp:
             extra_headers=[(b"retry-after", b"2")] if status_code == 503 else None,
         )
 
+    async def _send_probe(
+        self,
+        scope: dict[str, Any],
+        receive: ASGIReceive,
+        send: ASGISend,
+        *,
+        status: str,
+        available: bool,
+    ) -> None:
+        body = json.dumps(
+            {"status": status},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        await self._send_response(
+            scope,
+            receive,
+            send,
+            status_code=200 if available else 503,
+            body=body,
+            media_type="application/json",
+            extra_headers=None if available else [(b"retry-after", b"2")],
+        )
+
     async def _send_startup_page(
         self,
         scope: dict[str, Any],
@@ -277,6 +306,22 @@ class BootApp:
 
         if scope.get("method", "").upper() == "OPTIONS":
             await self._send_options_response(scope, receive, send)
+        elif self._is_liveness_path(path):
+            await self._send_probe(
+                scope,
+                receive,
+                send,
+                status="alive",
+                available=True,
+            )
+        elif self._is_readiness_path(path):
+            await self._send_probe(
+                scope,
+                receive,
+                send,
+                status="not_ready",
+                available=False,
+            )
         elif self._is_startup_page_path(path):
             await self._send_startup_page(scope, receive, send)
         elif self._is_startup_path(path):

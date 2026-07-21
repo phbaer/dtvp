@@ -15,6 +15,9 @@ htmlcov/
 .ruff_cache/
 .coverage/
 data/dt_cache/
+backups/
+data/backup_status.json
+data/dtvp-runtime.lock
 
 # Virtual environments
 .venv

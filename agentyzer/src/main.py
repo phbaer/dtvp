@@ -61,6 +61,7 @@ from src.llm.prompt_registry import (
     validate_all_prompt_bundles,
 )
 from src.pipeline import run_pipeline
+from src.runtime_coordination import ProcessLease, get_instance_lock_path
 from src.security import (
     ServiceCaller,
     require_service_caller,
@@ -183,55 +184,69 @@ async def lifespan(app: FastAPI):
     _repos_config_path = os.path.join(_CONFIG_DIR, "repos.yaml")
     app.state.repos = load_repos_config(_repos_config_path)
     validate_all_prompt_bundles()
+    process_lease = ProcessLease(get_instance_lock_path(), "Agentyzer")
+    process_lease.acquire()
     try:
-        _repos_config_mtime = os.path.getmtime(_repos_config_path)
-    except OSError:
-        _repos_config_mtime = 0.0
-    app.state.ollama = create_llm_client()
-    job_runtime = JobRuntime(
-        store=JobStore(logger=logger),
-        max_concurrent_jobs=_get_max_concurrent_jobs(),
-        logger=logger,
-    )
-    recovery = job_runtime.restore()
-    app.state.job_runtime = job_runtime
-    # Compatibility aliases for integrations that inspect FastAPI application state.
-    app.state.job_store = job_runtime.store
-    app.state.jobs = job_runtime.jobs
-    app.state.job_tasks = job_runtime.tasks
-    app.state.max_concurrent_jobs = job_runtime.max_concurrent_jobs
-    app.state.job_semaphore = job_runtime.semaphore
-    logger.info("Configured LLM %s", _describe_llm_backend(app.state.ollama))
-    logger.info(
-        "Configured async job capacity: %s",
-        job_runtime.max_concurrent_jobs,
-    )
-    app.state.llm_healthy = await app.state.ollama.health_check()
-    if not app.state.llm_healthy:
-        logger.warning(
-            "LLM backend is not reachable — requests requiring the model will fail (%s, error=%s)",
-            _describe_llm_backend(app.state.ollama),
-            getattr(app.state.ollama, "last_error", "unknown"),
+        try:
+            _repos_config_mtime = os.path.getmtime(_repos_config_path)
+        except OSError:
+            _repos_config_mtime = 0.0
+        app.state.ollama = create_llm_client()
+        job_runtime = JobRuntime(
+            store=JobStore(logger=logger),
+            max_concurrent_jobs=_get_max_concurrent_jobs(),
+            logger=logger,
         )
-    else:
+        recovery = job_runtime.restore()
+        job_store_health = job_runtime.store.health()
+        if not job_store_health["healthy"]:
+            raise RuntimeError(
+                "Agentyzer durable job storage is unavailable, corrupt, insecure, "
+                "or below its free-space threshold"
+            )
+        app.state.job_runtime = job_runtime
+        # Compatibility aliases for integrations that inspect FastAPI application state.
+        app.state.job_store = job_runtime.store
+        app.state.jobs = job_runtime.jobs
+        app.state.job_tasks = job_runtime.tasks
+        app.state.max_concurrent_jobs = job_runtime.max_concurrent_jobs
+        app.state.job_semaphore = job_runtime.semaphore
+        logger.info("Configured LLM %s", _describe_llm_backend(app.state.ollama))
         logger.info(
-            "LLM backend is reachable (%s)", _describe_llm_backend(app.state.ollama)
+            "Configured async job capacity: %s",
+            job_runtime.max_concurrent_jobs,
         )
-    if recovery.interrupted_count:
-        logger.warning(
-            "Marked %d in-flight assessment job(s) as interrupted",
-            recovery.interrupted_count,
-        )
-    for job in recovery.pending_jobs:
-        append_job_log(job, "Resuming queued job after service restart")
-        job_runtime.persist(job, required=True)
-        job_runtime.schedule(job, _run_job)
-    if recovery.pending_jobs:
-        logger.info("Resumed %d queued assessment job(s)", len(recovery.pending_jobs))
-    try:
-        yield
+        app.state.llm_healthy = await app.state.ollama.health_check()
+        if not app.state.llm_healthy:
+            logger.warning(
+                "LLM backend is not reachable — requests requiring the model will fail (%s, error=%s)",
+                _describe_llm_backend(app.state.ollama),
+                getattr(app.state.ollama, "last_error", "unknown"),
+            )
+        else:
+            logger.info(
+                "LLM backend is reachable (%s)",
+                _describe_llm_backend(app.state.ollama),
+            )
+        if recovery.interrupted_count:
+            logger.warning(
+                "Marked %d in-flight assessment job(s) as interrupted",
+                recovery.interrupted_count,
+            )
+        for job in recovery.pending_jobs:
+            append_job_log(job, "Resuming queued job after service restart")
+            job_runtime.persist(job, required=True)
+            job_runtime.schedule(job, _run_job)
+        if recovery.pending_jobs:
+            logger.info(
+                "Resumed %d queued assessment job(s)", len(recovery.pending_jobs)
+            )
+        try:
+            yield
+        finally:
+            await job_runtime.shutdown()
     finally:
-        await job_runtime.shutdown()
+        process_lease.release()
 
 
 app = FastAPI(
@@ -445,6 +460,7 @@ def _service_info_response(owner: str) -> HealthResponse:
         llm=metadata,
         configuration=_service_configuration(),
         backend=_backend_information(owner),
+        storage=_job_runtime().store.health(),
     )
 
 
@@ -828,6 +844,23 @@ async def health(
     caller: Annotated[ServiceCaller, Depends(require_service_caller)],
 ):
     return _service_info_response(caller.owner)
+
+
+@app.get(
+    "/readyz",
+    tags=["system"],
+    include_in_schema=False,
+)
+async def readiness(
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
+    del caller
+    storage = _job_runtime().store.health()
+    return JSONResponse(
+        {"status": "ready" if storage["healthy"] else "not_ready"},
+        status_code=200 if storage["healthy"] else 503,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get(

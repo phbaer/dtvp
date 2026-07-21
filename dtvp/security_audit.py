@@ -30,8 +30,24 @@ _request_context: contextvars.ContextVar[AuditRequestContext | None] = (
     contextvars.ContextVar("dtvp_security_audit_context", default=None)
 )
 _health_guard = threading.Lock()
+_write_guard = threading.Lock()
 _last_write_error: str | None = None
 _last_write_at: str | None = None
+
+
+def _integer_setting(name: str, default: int, *, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def get_security_audit_max_bytes() -> int:
+    return _integer_setting("DTVP_SECURITY_AUDIT_MAX_BYTES", 100 * 1024 * 1024)
+
+
+def get_security_audit_backup_count() -> int:
+    return _integer_setting("DTVP_SECURITY_AUDIT_BACKUP_COUNT", 10, minimum=1)
 
 
 def set_audit_request_context(
@@ -46,7 +62,7 @@ def reset_audit_request_context(
     _request_context.reset(token)
 
 
-def _audit_path() -> str:
+def get_security_audit_path() -> str:
     configured = os.getenv("DTVP_SECURITY_AUDIT_PATH")
     if configured is not None:
         return configured.strip()
@@ -81,18 +97,45 @@ def _set_health(*, error: str | None, written_at: str | None = None) -> None:
 
 
 def audit_health() -> dict[str, Any]:
+    path_text = get_security_audit_path()
+    try:
+        size_bytes = Path(path_text).stat().st_size if path_text else None
+    except OSError:
+        size_bytes = None
     with _health_guard:
         return {
-            "configured": bool(_audit_path()),
+            "configured": bool(path_text),
             "healthy": _last_write_error is None,
             "last_write_at": _last_write_at,
             "last_error": _last_write_error,
+            "size_bytes": size_bytes,
+            "max_bytes": get_security_audit_max_bytes(),
+            "backup_count": get_security_audit_backup_count(),
         }
+
+
+def _rotate_audit_file(path: Path, incoming_bytes: int) -> None:
+    max_bytes = get_security_audit_max_bytes()
+    if max_bytes <= 0 or not path.exists():
+        return
+    current_size = path.stat().st_size
+    if current_size == 0 or current_size + incoming_bytes <= max_bytes:
+        return
+
+    backup_count = get_security_audit_backup_count()
+    oldest = Path(f"{path}.{backup_count}")
+    if oldest.exists():
+        oldest.unlink()
+    for index in range(backup_count - 1, 0, -1):
+        source = Path(f"{path}.{index}")
+        if source.exists():
+            os.replace(source, Path(f"{path}.{index + 1}"))
+    os.replace(path, Path(f"{path}.1"))
 
 
 def validate_security_audit_configuration() -> None:
     """Fail production startup when the append-only audit target is unavailable."""
-    path_text = _audit_path()
+    path_text = get_security_audit_path()
     if not path_text:
         if os.getenv("DTVP_ENVIRONMENT", "production").lower() == "production":
             raise RuntimeError("DTVP_SECURITY_AUDIT_PATH is required in production")
@@ -139,30 +182,33 @@ def emit_security_audit(
     serialized = json.dumps(event, sort_keys=True, separators=(",", ":"))
     logger.info(serialized)
 
-    path_text = _audit_path()
+    path_text = get_security_audit_path()
     if not path_text:
         return event
     try:
+        encoded = f"{serialized}\n".encode("utf-8")
         path = Path(path_text)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        descriptor = os.open(path, flags, 0o600)
-        try:
-            os.fchmod(descriptor, 0o600)
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            os.write(descriptor, f"{serialized}\n".encode("utf-8"))
-            if os.getenv("DTVP_SECURITY_AUDIT_FSYNC", "false").lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }:
-                os.fsync(descriptor)
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-        finally:
-            os.close(descriptor)
+        with _write_guard:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _rotate_audit_file(path, len(encoded))
+            flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            descriptor = os.open(path, flags, 0o600)
+            try:
+                os.fchmod(descriptor, 0o600)
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                os.write(descriptor, encoded)
+                if os.getenv("DTVP_SECURITY_AUDIT_FSYNC", "false").lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }:
+                    os.fsync(descriptor)
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
         _set_health(error=None, written_at=timestamp)
     except OSError as exc:
         message = f"{exc.__class__.__name__}: {exc}"

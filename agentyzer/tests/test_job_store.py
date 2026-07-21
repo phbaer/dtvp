@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from src.api.jobs import Job
 from src.api.models import (
     AnalysisJustification,
@@ -12,6 +14,7 @@ from src.api.models import (
 )
 from src.job_runtime import JobRuntime
 from src.job_store import JobStore
+from src.runtime_coordination import ProcessLease
 
 
 NOW = datetime(2026, 7, 21, 10, 0, tzinfo=UTC)
@@ -124,6 +127,28 @@ def test_job_store_delete_removes_persisted_job(tmp_path):
     store.delete(job.id)
 
     assert store.load() == {}
+
+
+def test_job_store_health_and_single_process_lease(tmp_path, monkeypatch):
+    store = JobStore(path_provider=lambda: str(tmp_path / "jobs.sqlite"))
+    health = store.health()
+    assert health["healthy"] is True
+    assert health["integrity"] == "ok"
+    assert health["owner_only_permissions"] is True
+    assert health["writable"] is True
+
+    monkeypatch.setenv("AGENTYZER_STORAGE_MIN_FREE_BYTES", str(2**63))
+    assert store.health()["healthy"] is False
+    monkeypatch.setenv("AGENTYZER_STORAGE_MIN_FREE_BYTES", "1")
+
+    first = ProcessLease(str(tmp_path / "runtime.lock"), "Agentyzer")
+    second = ProcessLease(str(tmp_path / "runtime.lock"), "Agentyzer")
+    first.acquire()
+    try:
+        with pytest.raises(RuntimeError, match="Multiple API workers"):
+            second.acquire()
+    finally:
+        first.release()
 
 
 def test_job_runtime_restores_pending_and_terminalizes_running(tmp_path):

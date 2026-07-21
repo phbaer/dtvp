@@ -82,6 +82,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
 | Regenerate CycloneDX SBOMs | `./scripts/generate-sboms.sh` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
+| Back up packaged durable state | `./scripts/backup-compose-state.sh /absolute/backup/root` |
 
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml`. When upgrading `@playwright/test`, update
@@ -204,12 +205,16 @@ Important frontend components:
 - Project dependency-chain reads require an authenticated DTVP session, like
   the other project and finding endpoints.
 - Grouping, archive, and live tmrescore task registries remain process-local;
-  the supplied Uvicorn/PM2 launch uses one backend worker. Analyzer queue and
-  Agentyzer job records are durable but their execution coordination is still
-  process-local. A horizontally scaled deployment needs shared coordination
-  before enabling multiple backend workers.
+  the supplied Uvicorn/PM2 launch uses one backend worker. DTVP takes an
+  owner-only exclusive lease on its state volume and fails startup if a second
+  process targets it; Agentyzer does the same on its repository volume. This
+  prevents duplicate schedulers from racing over durable queue data. A
+  horizontally scaled deployment needs shared coordination and must replace
+  those leases before enabling multiple API workers.
 - Startup status exists at `/startup` and `/api/startup`, in the static first
-  paint, and in the Vue initialization view.
+  paint, and in the Vue initialization view. Minimal unauthenticated `/livez`
+  and `/readyz` probes distinguish process liveness from runtime and durable-
+  storage readiness; normal host validation still applies.
 
 ### Capacity Planning
 
@@ -781,6 +786,33 @@ Deployment rules:
   `dtvp.security_audit` logger; `/api/security/health` exposes persistence
   health and active quotas to reviewers. Ship that logger/file to immutable
   external retention for production investigations.
+- The same reviewer health endpoint performs read-only JSON validation and
+  SQLite `quick_check` operations across durable stores, reports available
+  bytes, and can enforce an external-backup freshness SLO. Audit JSONL files
+  rotate at a bounded size with owner-only backups. DTVP refuses startup when
+  a configured state path is unreadable, unwritable, corrupt, or below the
+  free-space threshold.
+
+`./scripts/backup-compose-state.sh /absolute/backup/root` provides a consistent
+Compose backup. It briefly pauses DTVP, Agentyzer, and the Dependency-Track API,
+takes a PostgreSQL custom-format dump, and archives `./data`, the preserved
+Agentyzer repository/worktree volume, and Dependency-Track's data volume. It
+validates the dump and gzip stream, writes SHA-256 checksums, resumes every
+writer even after an error, and only then atomically updates
+`DTVP_BACKUP_STATUS_PATH`. The isolated maintenance container has no network;
+its read-only source mounts and narrow DAC capabilities let it read files owned
+by the two different non-root runtime users.
+
+Set `DTVP_BACKUP_MAX_AGE_SECONDS` to the recovery policy;
+`/api/security/health` becomes unhealthy when the verified marker is missing,
+invalid, or stale. Freshness enforcement is disabled by default so a new
+deployment can start before its first backup. Store backup directories
+encrypted and outside the checkout. To test recovery, first verify
+`sha256sum -c SHA256SUMS`, restore `persistent-files.tar.gz` into fresh matching
+volumes while all writers are stopped, restore `dependency-track.pgdump` with
+`pg_restore` into a fresh database, then start the stack and exercise both
+health endpoints plus a representative project and scan. Never restore over a
+running deployment.
 
 Archive imports require a dedicated `DTVP_DT_IMPORT_API_KEY` with read, BOM
 upload, project-creation when needed, and vulnerability-analysis update
@@ -846,6 +878,12 @@ means the integration or override is disabled.
 | `DTVP_TRUSTED_PROXY_CIDRS` | Immediate proxy networks allowed to supply `X-Forwarded-For` | unset |
 | `DTVP_SECURITY_AUDIT_PATH` | Owner-only structured JSONL security audit target | production: `data/security_audit.jsonl` |
 | `DTVP_SECURITY_AUDIT_FSYNC` | Flush every audit event to durable storage before returning | `false` |
+| `DTVP_SECURITY_AUDIT_MAX_BYTES` | Rotate the active audit JSONL before this size; `0` disables built-in rotation | `104857600` (100 MiB) |
+| `DTVP_SECURITY_AUDIT_BACKUP_COUNT` | Owner-only rotated audit files retained | `10` |
+| `DTVP_INSTANCE_LOCK_PATH` | Exclusive lease that prevents unsafe multiple backend workers on one state volume | `data/dtvp-runtime.lock` |
+| `DTVP_STORAGE_MIN_FREE_BYTES` | Minimum available bytes required for every durable state path | `134217728` (128 MiB) |
+| `DTVP_BACKUP_STATUS_PATH` | Atomic status marker written only after a verified external backup | `data/backup_status.json` |
+| `DTVP_BACKUP_MAX_AGE_SECONDS` | Maximum accepted backup-marker age; `0` disables age enforcement | `0` |
 | `DTVP_RATE_LIMIT_WINDOW_SECONDS` | Application quota window | `60` |
 | `DTVP_AUTH_RATE_LIMIT` | Login/callback requests per IP and window | `30` |
 | `DTVP_EXPENSIVE_RATE_LIMIT` | Expensive task mutations per session/IP and window | `20` |
@@ -922,6 +960,8 @@ means the integration or override is disabled.
 | `AGENTYZER_PORT` | Compose host port | `8095` |
 | `AGENTYZER_LOG_LEVEL` | Service log level | `INFO` |
 | `AGENTYZER_ENVIRONMENT` | Security profile: `production`, `development`, or `test` | `production` |
+| `AGENTYZER_INSTANCE_LOCK_PATH` | Exclusive lease preventing multiple job executors on one repository volume | Compose: `/app/repos/.agentyzer-runtime.lock` |
+| `AGENTYZER_STORAGE_MIN_FREE_BYTES` | Minimum free bytes required for the job/repository volume | `134217728` (128 MiB) |
 | `AGENTYZER_SERVICE_TOKEN` | Bearer token required by every Agentyzer API route | unset |
 | `AGENTYZER_SERVICE_TOKEN_FILE` | File containing the bearer token when the direct value is unset | unset |
 | `AGENTYZER_ADMIN_TOKEN` | Separate bearer token required for service-wide owner scope | unset |

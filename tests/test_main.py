@@ -92,6 +92,22 @@ def test_startup_gate_returns_503_for_api_routes(client):
     assert response.json()["ready"] is False
 
 
+def test_runtime_probes_distinguish_liveness_and_readiness(client, monkeypatch):
+    assert client.get("/livez").json() == {"status": "alive"}
+    assert client.get("/readyz").status_code == 200
+
+    monkeypatch.setattr(
+        main,
+        "durable_storage_health",
+        lambda: {"healthy": False, "stores_healthy": False},
+    )
+    response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "2"
+    assert response.json() == {"status": "not_ready"}
+
+
 def test_lifespan_serves_startup_page_while_runtime_initializes():
     async def slow_initialize():
         await asyncio.sleep(1)
@@ -556,7 +572,7 @@ def test_serve_index_no_frontend_url():
 
     # Patch FRONTEND_URL to trigger line 356
     with patch("dtvp.main.auth_settings.FRONTEND_URL", None):
-        client = TestClient(main.app)
-        resp = client.get("/any-path")
+        with TestClient(main.app) as index_client:
+            resp = index_client.get("/any-path")
         assert resp.status_code == 200
         assert b"runtime-config.js" in resp.content

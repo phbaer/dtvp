@@ -47,6 +47,8 @@ def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json().get("status") == "ok"
+    assert r.json()["storage"]["healthy"] is True
+    assert client.get("/readyz").json() == {"status": "ready"}
 
 
 def test_service_authentication_is_required(client):
@@ -127,6 +129,9 @@ def test_health_exposes_service_configuration_and_backend(client):
     assert backend["jobs"]["available_slots"] >= 0
     assert "running" in backend["jobs"]["status_counts"]
     assert "AGENTYZER_MAX_CONCURRENT_JOBS" in backend["repositories"]["parallel_safety"]
+    assert data["storage"]["healthy"] is True
+    assert data["storage"]["integrity"] == "ok"
+    assert data["storage"]["owner_only_permissions"] is True
 
     config_r = client.get("/configuration")
     assert config_r.status_code == 200

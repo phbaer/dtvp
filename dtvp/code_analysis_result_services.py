@@ -27,6 +27,10 @@ def get_code_analysis_results_path() -> str:
     )
 
 
+def get_code_analysis_results_sqlite_path() -> str:
+    return _sqlite_path_for_configured_path(get_code_analysis_results_path())
+
+
 def get_code_analysis_result_migrations_path() -> Path:
     return Path(__file__).resolve().parent / "migrations" / "code_analysis_results"
 
@@ -526,6 +530,15 @@ class CodeAnalysisResultStore:
         if directory:
             os.makedirs(directory, exist_ok=True)
         connection = sqlite3.connect(path, timeout=5)
+        connection.execute("PRAGMA busy_timeout = 5000")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            if self.logger:
+                self.logger.warning(
+                    "Could not restrict code-analysis database permissions: %s",
+                    path,
+                )
         run_sqlite_migrations(
             connection,
             namespace=CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE,

@@ -171,6 +171,8 @@ from .security_audit import (
     set_audit_request_context,
     validate_security_audit_configuration,
 )
+from .runtime_coordination import ProcessLease, get_instance_lock_path
+from .storage_health import durable_storage_health, validate_durable_storage
 from .security_headers import add_security_headers
 from .startup_services import (
     StartupRuntimeTasks,
@@ -264,6 +266,13 @@ def _is_startup_status_path(path: str) -> bool:
     }
 
 
+def _is_probe_path(path: str) -> bool:
+    return path in {
+        _path_with_context("/livez"),
+        _path_with_context("/readyz"),
+    }
+
+
 def _is_api_or_auth_path(path: str) -> bool:
     return any(
         path == prefix or path.startswith(f"{prefix}/")
@@ -298,32 +307,38 @@ async def _initialize_application_runtime() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runtime_tasks, _startup_task
-    validate_auth_configuration()
-    validate_code_analysis_configuration()
-    validate_dependency_track_configuration()
-    validate_security_audit_configuration()
-    _runtime_tasks = None
-    _startup_task = asyncio.create_task(_initialize_application_runtime())
+    process_lease = ProcessLease(get_instance_lock_path(), "DTVP")
+    process_lease.acquire()
     try:
+        validate_auth_configuration()
+        validate_code_analysis_configuration()
+        validate_dependency_track_configuration()
+        validate_security_audit_configuration()
+        validate_durable_storage()
+        _runtime_tasks = None
+        _startup_task = asyncio.create_task(_initialize_application_runtime())
         try:
-            await asyncio.wait_for(asyncio.shield(_startup_task), timeout=0.25)
-        except TimeoutError:
-            pass
-        yield
-    finally:
-        if _startup_task and not _startup_task.done():
-            _startup_task.cancel()
             try:
-                await _startup_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(asyncio.shield(_startup_task), timeout=0.25)
+            except TimeoutError:
                 pass
-        if _runtime_tasks:
-            await stop_application_runtime(
-                _runtime_tasks,
-                analysis_queue,
-                background_tasks,
-            )
-        _set_runtime_state("ready", "DTVP is ready.")
+            yield
+        finally:
+            if _startup_task and not _startup_task.done():
+                _startup_task.cancel()
+                try:
+                    await _startup_task
+                except asyncio.CancelledError:
+                    pass
+            if _runtime_tasks:
+                await stop_application_runtime(
+                    _runtime_tasks,
+                    analysis_queue,
+                    background_tasks,
+                )
+            _set_runtime_state("stopped", "DTVP has stopped.")
+    finally:
+        process_lease.release()
 
 
 app = FastAPI(
@@ -497,7 +512,11 @@ async def security_response_headers(request: Request, call_next):
 
 @app.middleware("http")
 async def runtime_startup_gate(request: Request, call_next):
-    if _runtime_ready() or _is_startup_status_path(request.url.path):
+    if (
+        _runtime_ready()
+        or _is_startup_status_path(request.url.path)
+        or _is_probe_path(request.url.path)
+    ):
         return await call_next(request)
 
     headers = {"Cache-Control": "no-store"}
@@ -537,6 +556,7 @@ async def security_health(user: str = Depends(get_current_user)):
         raise
     return {
         "security_audit": audit_health(),
+        "durable_storage": durable_storage_health(),
         "rate_limits": {
             "window_seconds": int(os.getenv("DTVP_RATE_LIMIT_WINDOW_SECONDS", "60")),
             "authentication": int(os.getenv("DTVP_AUTH_RATE_LIMIT", "30")),
@@ -564,6 +584,28 @@ async def startup_status():
     return JSONResponse(
         build_startup_status_payload(app_runtime_state),
         headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get(_path_with_context("/livez"), include_in_schema=False)
+async def liveness_probe():
+    return JSONResponse(
+        {"status": "alive"},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get(_path_with_context("/readyz"), include_in_schema=False)
+async def readiness_probe():
+    storage_healthy = durable_storage_health()["stores_healthy"]
+    ready = _runtime_ready() and storage_healthy
+    headers = {"Cache-Control": "no-store"}
+    if not ready:
+        headers["Retry-After"] = "2"
+    return JSONResponse(
+        {"status": "ready" if ready else "not_ready"},
+        status_code=200 if ready else 503,
+        headers=headers,
     )
 
 

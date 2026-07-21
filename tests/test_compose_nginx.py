@@ -39,6 +39,9 @@ def test_compose_hardens_application_containers():
     assert "ALPINE_DATABASE_PASSWORD=dtrack" not in compose
     assert "POSTGRES_PASSWORD=dtrack" not in compose
     assert "DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD" in compose
+    assert 'condition: service_healthy' in compose
+    assert 'context + "/readyz"' in compose
+    assert 'connection.request("GET", "/readyz"' in compose
 
 
 def test_compose_pins_images_and_segments_trust_zones():

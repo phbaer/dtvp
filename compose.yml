@@ -15,9 +15,12 @@ services:
     volumes:
       - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
     depends_on:
-      - dtvp
-      - dtrack-frontend
-      - dtrack-apiserver
+      dtvp:
+        condition: service_healthy
+      dtrack-frontend:
+        condition: service_started
+      dtrack-apiserver:
+        condition: service_started
     networks:
       - gateway
       - application
@@ -142,6 +145,12 @@ services:
       DTVP_TRUSTED_PROXY_CIDRS: ${DTVP_TRUSTED_PROXY_CIDRS:-}
       DTVP_SECURITY_AUDIT_PATH: ${DTVP_SECURITY_AUDIT_PATH:-data/security_audit.jsonl}
       DTVP_SECURITY_AUDIT_FSYNC: ${DTVP_SECURITY_AUDIT_FSYNC:-false}
+      DTVP_SECURITY_AUDIT_MAX_BYTES: ${DTVP_SECURITY_AUDIT_MAX_BYTES:-104857600}
+      DTVP_SECURITY_AUDIT_BACKUP_COUNT: ${DTVP_SECURITY_AUDIT_BACKUP_COUNT:-10}
+      DTVP_INSTANCE_LOCK_PATH: ${DTVP_INSTANCE_LOCK_PATH:-data/dtvp-runtime.lock}
+      DTVP_BACKUP_STATUS_PATH: ${DTVP_BACKUP_STATUS_PATH:-data/backup_status.json}
+      DTVP_BACKUP_MAX_AGE_SECONDS: ${DTVP_BACKUP_MAX_AGE_SECONDS:-172800}
+      DTVP_STORAGE_MIN_FREE_BYTES: ${DTVP_STORAGE_MIN_FREE_BYTES:-134217728}
       DTVP_RATE_LIMIT_WINDOW_SECONDS: ${DTVP_RATE_LIMIT_WINDOW_SECONDS:-60}
       DTVP_AUTH_RATE_LIMIT: ${DTVP_AUTH_RATE_LIMIT:-30}
       DTVP_EXPENSIVE_RATE_LIMIT: ${DTVP_EXPENSIVE_RATE_LIMIT:-20}
@@ -213,6 +222,26 @@ services:
       DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS: ${DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS:-7}
     volumes:
       - ./data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - |
+          import http.client, os, urllib.parse
+          context = "/" + os.environ.get("DTVP_CONTEXT_PATH", "/").strip("/")
+          context = "" if context == "/" else context
+          frontend = urllib.parse.urlsplit(os.environ["DTVP_FRONTEND_URL"])
+          connection = http.client.HTTPConnection("127.0.0.1", 8000, timeout=5)
+          connection.request("GET", context + "/readyz", headers={"Host": frontend.netloc})
+          response = connection.getresponse()
+          response.read()
+          connection.close()
+          raise SystemExit(0 if response.status == 200 else 1)
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
     user: "${DTVP_RUNTIME_UID:-1000}:${DTVP_RUNTIME_GID:-1000}"
     read_only: true
     tmpfs:
@@ -229,8 +258,10 @@ services:
     pids_limit: 256
     logging: *default-logging
     depends_on:
-      - dtrack-apiserver
-      - agentyzer
+      dtrack-apiserver:
+        condition: service_started
+      agentyzer:
+        condition: service_healthy
     restart: unless-stopped
 
   agentyzer:
@@ -258,11 +289,33 @@ services:
       AGENTYZER_MAX_CONCURRENT_JOBS: ${AGENTYZER_MAX_CONCURRENT_JOBS:-1}
       AGENTYZER_WORKTREE_RETENTION_SECONDS: ${AGENTYZER_WORKTREE_RETENTION_SECONDS:-86400}
       AGENTYZER_JOB_STORE_PATH: ${AGENTYZER_JOB_STORE_PATH:-/app/repos/agentyzer_jobs.sqlite}
+      AGENTYZER_INSTANCE_LOCK_PATH: ${AGENTYZER_INSTANCE_LOCK_PATH:-/app/repos/.agentyzer-runtime.lock}
+      AGENTYZER_STORAGE_MIN_FREE_BYTES: ${AGENTYZER_STORAGE_MIN_FREE_BYTES:-134217728}
       AGENTYZER_JOB_RETENTION_SECONDS: ${AGENTYZER_JOB_RETENTION_SECONDS:-604800}
       AGENTYZER_JOB_MAX_RECORDS: ${AGENTYZER_JOB_MAX_RECORDS:-1000}
       LOG_LEVEL: ${AGENTYZER_LOG_LEVEL:-INFO}
     expose:
       - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - /app/.venv/bin/python
+        - -c
+        - |
+          import http.client, os, pathlib
+          token = os.environ.get("AGENTYZER_SERVICE_TOKEN", "").strip()
+          token_file = os.environ.get("AGENTYZER_SERVICE_TOKEN_FILE", "").strip()
+          token = token or pathlib.Path(token_file).read_text(encoding="utf-8").strip()
+          connection = http.client.HTTPConnection("127.0.0.1", 8000, timeout=5)
+          connection.request("GET", "/readyz", headers={"Authorization": "Bearer " + token, "X-Agentyzer-Owner": "healthcheck"})
+          response = connection.getresponse()
+          response.read()
+          connection.close()
+          raise SystemExit(0 if response.status == 200 else 1)
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
     volumes:
       - agentyzer-repos:/app/repos
       - ./agentyzer/config/repos.yaml:/app/config/repos.yaml:ro
@@ -282,6 +335,34 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+
+  dtvp-state-backup:
+    image: alpine/git:latest@sha256:77418e6e7c7f434c4a98eaff04ef16840cf03649c881c03948e3e213923e3136
+    profiles:
+      - maintenance
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - tar -czf /backup/persistent-files.tar.gz -C /state dtvp agentyzer dependency-track
+    volumes:
+      - ./data:/state/dtvp:ro
+      - agentyzer-repos:/state/agentyzer:ro
+      - dependency-track-data:/state/dependency-track:ro
+      - ${DTVP_BACKUP_PATH:-./backups}:/backup
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
+    pids_limit: 100
+    logging: *default-logging
 
   dtvp-archive-git-push:
     image: alpine/git:latest@sha256:77418e6e7c7f434c4a98eaff04ef16840cf03649c881c03948e3e213923e3136
