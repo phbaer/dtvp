@@ -749,7 +749,9 @@ async def _run_pipeline_with_workspace(
     details = build_structured_details(
         vuln_id=final_state.get("vuln_id", vuln_id or ""),
         component_name=component_cfg.get("name", ""),
-        repo_url=component_cfg.get("url", ""),
+        repo_url=nodes.dependency_scanner._credential_free_url(
+            component_cfg.get("url", "")
+        ),
         repo_path=final_state.get("repo_path", ""),
         verdict_label=verdict_label,
         confidence=result.get("confidence", "Low"),

@@ -808,6 +808,14 @@ fetched without resetting their working trees. A background task performs that
 clone/fetch pass at service startup and at the configured refresh interval,
 even when no assessment reaches repository preparation. Logs identify refresh
 cycle start/completion and each component's cache and resolved commit.
+plus a SHA-256 hash of the credential-free URL. Credentials are injected only
+into the clone or fetch child process, and persisted origins are scrubbed after
+every operation, including for caches created by older versions. Initial clones
+are built in a temporary directory and atomically moved into place. Existing
+caches are fetched without resetting their working trees. A background task
+performs that clone/fetch pass at service startup and at the configured refresh
+interval, even when no assessment reaches repository preparation. Logs identify
+refresh cycle start/completion and each component's cache and resolved commit.
 
 Repository preparation takes a filesystem-backed, per-repository advisory
 lock before cloning or fetching, resolving the remote default branch to a
@@ -947,6 +955,9 @@ uv run pytest --junitxml=test-reports/results.xml
 - LLM-backed stages depend on backend reachability; startup logs warn when the backend is unavailable.
 - The CLI does not perform scanning itself; it only calls the API.
 - `focus_path` is documented as an absolute path and is the safest way to assess an already checked-out repository.
-- When `AGENTYZER_MAX_CONCURRENT_JOBS` is raised, configured repositories use isolated worktrees even when jobs share one repository URL. Concurrent use of a caller-supplied `focus_path` remains caller-managed.
+- When `AGENTYZER_MAX_CONCURRENT_JOBS` is raised, repository updates are
+  serialized and configured repositories use isolated worktrees even when jobs
+  share one URL. Size the limit for model, CPU, and disk throughput; concurrent
+  use of a caller-supplied `focus_path` remains caller-managed.
 - The service trusts the system CA store for outbound HTTP calls and can also consume injected CA certificates at image-build time.
 - The shipped `config/repos.yaml` in this repository is intentionally empty. Populate it with environment-specific component mappings, and keep credential-bearing variants out of public branches.

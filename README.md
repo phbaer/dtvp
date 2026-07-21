@@ -1139,6 +1139,12 @@ Deployment rules:
   cancels, and deletes only that owner's jobs. DTVP reviewer-wide status
   requests explicitly use a separate admin credential and the trusted
   service-wide owner scope.
+  Repository authentication is injected only into the child `git` process;
+  stored remote URLs are scrubbed in place. Each scan uses a detached worktree
+  backed by the persistent control repository, so repeat scans reuse Git
+  objects without sharing mutable files. Normal completion removes only the
+  per-run worktree, and the next repository preparation reclaims unlocked crash
+  leftovers.
   Agentyzer immediately clones or fetches every explicit URL-backed mapping on
   startup, refreshes those control repositories every
   `AGENTYZER_REPO_REFRESH_SECONDS`, and fetches again immediately before

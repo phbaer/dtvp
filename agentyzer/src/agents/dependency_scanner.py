@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import fcntl
 import hashlib
 import logging
@@ -10,7 +11,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any, Dict, Iterator, List
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from git import GitCommandError, Repo
 
@@ -33,9 +34,13 @@ _worktree_leases: dict[str, IO[str]] = {}
 _CREDENTIAL_RE = re.compile(r"://[^@/]+@")
 
 
-def _sanitize(text: str) -> str:
+def _sanitize(text: str, secrets: tuple[str, ...] = ()) -> str:
     """Remove embedded credentials from a string (URLs, git stderr, etc.)."""
-    return _CREDENTIAL_RE.sub("://***@", text)
+    sanitized = _CREDENTIAL_RE.sub("://***@", text)
+    for secret in secrets:
+        if secret:
+            sanitized = sanitized.replace(secret, "***")
+    return sanitized
 
 
 class RepoError(RuntimeError):
@@ -46,8 +51,8 @@ def _repo_dir(url: str) -> str:
     """Derive a stable, unique local directory name from the repo URL."""
     # Strip credentials from the URL before hashing so the same repo
     # always maps to the same directory regardless of auth changes.
-    parts = urlsplit(url)
-    clean = urlunsplit((parts.scheme, parts.hostname or "", parts.path, "", ""))
+    parts = urlsplit(_credential_free_url(url))
+    clean = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
     digest = hashlib.sha256(clean.encode()).hexdigest()[:12]
     # Use the last path component (repo name) for readability.
     name = Path(parts.path).stem or "repo"
@@ -98,34 +103,93 @@ def _repository_lock(url: str) -> Iterator[None]:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _auth_url(url: str, auth: Dict[str, Any]) -> str:
-    """Embed credentials into the clone URL."""
-    username = auth.get("username")
-    password = auth.get("password")
-    token = auth.get("token")
+def _credential_free_url(url: str) -> str:
+    """Return a remote URL that is safe to persist in ``.git/config``."""
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.hostname:
+        # SCP-style SSH URLs and local paths do not use URL user-info. They are
+        # returned unchanged rather than risking an invalid rewrite.
+        return url
+    host = parts.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    return urlunsplit((parts.scheme, host, parts.path, "", ""))
+
+
+def _auth_secrets(auth: Dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        str(value)
+        for key in ("username", "password", "token")
+        if (value := auth.get(key))
+    )
+
+
+def _effective_auth(url: str, configured: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert legacy URL user-info to transient auth during in-place migration."""
+    auth = dict(configured)
+    if any(auth.get(key) for key in ("username", "password", "token")):
+        return auth
+    parts = urlsplit(url)
+    if parts.username is None:
+        return auth
+    if parts.password is None:
+        auth["token"] = unquote(parts.username)
+    else:
+        auth["username"] = unquote(parts.username)
+        auth["password"] = unquote(parts.password)
+    return auth
+
+
+def _git_environment(url: str, auth: Dict[str, Any]) -> dict[str, str]:
+    """Build per-command Git authentication without command-line secrets.
+
+    ``GIT_CONFIG_*`` injects an HTTP authorization header into only the child
+    Git process. The remote itself always receives the credential-free URL, so
+    neither a successful clone nor a failed update persists the credential.
+    """
+
+    env = {
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    username = str(auth.get("username") or "")
+    password = str(auth.get("password") or "")
+    token = str(auth.get("token") or "")
+    scheme = str(auth.get("scheme") or "basic").strip().lower()
+    if scheme == "bearer" and token:
+        authorization = f"Authorization: Bearer {token}"
+    elif username and password:
+        credential = f"{username}:{password}"
+        header = base64.b64encode(credential.encode("utf-8")).decode("ascii")
+        authorization = f"Authorization: Basic {header}"
+    elif token:
+        # Preserve the previous token-in-URL semantics: token as the HTTP basic
+        # username with an empty password.
+        credential = f"{token}:"
+        header = base64.b64encode(credential.encode("utf-8")).decode("ascii")
+        authorization = f"Authorization: Basic {header}"
+    else:
+        return env
 
     parts = urlsplit(url)
-
-    if username and password:
-        netloc = (
-            f"{quote(username, safe='')}:{quote(password, safe='')}@{parts.hostname}"
-        )
-        if parts.port:
-            netloc += f":{parts.port}"
-        url = urlunsplit(
-            (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
-        )
-        logger.debug("Clone URL rewritten with basic auth (user/pass)")
-    elif token:
-        netloc = f"{quote(token, safe='')}@{parts.hostname}"
-        if parts.port:
-            netloc += f":{parts.port}"
-        url = urlunsplit(
-            (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
-        )
-        logger.debug("Clone URL rewritten with token auth")
-
-    return url
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise RepoError("Configured repository authentication requires an HTTP(S) URL")
+    host = parts.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    scope = f"{parts.scheme}://{host}/"
+    env.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": f"http.{scope}.extraHeader",
+            "GIT_CONFIG_VALUE_0": authorization,
+        }
+    )
+    return env
 
 
 async def prepare_repo(
@@ -151,9 +215,8 @@ async def prepare_repo(
     if not url:
         raise RepoError("No url in component config")
 
-    safe_url = _sanitize(url)
-    auth = component_cfg.get("auth") or {}
-    authenticated_url = _auth_url(url, auth)
+    safe_url = _credential_free_url(url)
+    auth = _effective_auth(url, component_cfg.get("auth") or {})
 
     dest = _repo_dir(url)
     os.makedirs(_REPOS_DIR, exist_ok=True)
@@ -161,8 +224,8 @@ async def prepare_repo(
     return await asyncio.to_thread(
         _prepare_worktree,
         url,
-        authenticated_url,
         safe_url,
+        auth,
         dest,
         workspace_id,
     )
@@ -219,8 +282,8 @@ async def cleanup_repo_worktree(
 
 def _prepare_worktree(
     url: str,
-    authenticated_url: str,
     safe_url: str,
+    auth: Dict[str, Any],
     dest: str,
     workspace_id: str,
 ) -> str:
@@ -229,7 +292,7 @@ def _prepare_worktree(
     lease = _lease_path(url, workspace_id)
 
     with _repository_lock(url):
-        repo, commit = _sync_repo(authenticated_url, safe_url, dest)
+        repo, commit = _sync_repo(safe_url, auth, dest)
         _cleanup_stale_worktrees(repo, url)
         lease_file = _acquire_worktree_lease(lease)
         try:
@@ -379,25 +442,35 @@ def _remove_path(path: str) -> None:
             pass
 
 
-def _sync_repo(authenticated_url: str, safe_url: str, dest: str) -> tuple[Repo, str]:
+def _sync_repo(
+    safe_url: str,
+    auth: Dict[str, Any],
+    dest: str,
+) -> tuple[Repo, str]:
     """Clone/fetch the control repository and resolve an immutable commit."""
+    git_env = _git_environment(safe_url, auth)
+    secrets = _auth_secrets(auth)
+
     if os.path.isdir(os.path.join(dest, ".git")):
         logger.info("Repository cache exists at %s — fetching latest changes", dest)
         try:
             repo = Repo(dest)
+            _scrub_repo_credentials(repo, safe_url)
             origin = repo.remotes.origin
-            with origin.config_writer as cw:
-                cw.set("url", authenticated_url)
-            origin.fetch(prune=True)
+            with repo.git.custom_environment(**git_env):
+                origin.fetch(prune=True)
             try:
                 repo.git.remote("set-head", "origin", "--auto")
             except GitCommandError:
                 logger.debug("Could not refresh origin/HEAD for %s", safe_url)
         except Exception as exc:
-            logger.exception("Update failed for %s", safe_url)
-            raise RepoError(
-                f"Failed to update repository {safe_url}: {_sanitize(str(exc))}"
-            ) from None
+            message = _sanitize(str(exc), secrets)
+            logger.error(
+                "Update failed for %s; cached repository preserved: %s",
+                safe_url,
+                message,
+            )
+            raise RepoError(f"Failed to update repository {safe_url}: {message}") from None
     else:
         if os.path.lexists(dest):
             logger.warning("Removing incomplete repository cache at %s", dest)
@@ -413,28 +486,37 @@ def _sync_repo(authenticated_url: str, safe_url: str, dest: str) -> tuple[Repo, 
                 dir=os.path.dirname(dest),
             ) as temp_root:
                 candidate = os.path.join(temp_root, "repository")
-                Repo.clone_from(authenticated_url, candidate, no_checkout=True)
+                repo = Repo.clone_from(
+                    safe_url,
+                    candidate,
+                    no_checkout=True,
+                    env=git_env,
+                )
+                _scrub_repo_credentials(repo, safe_url)
                 os.replace(candidate, dest)
             repo = Repo(dest)
             logger.info("Clone successful: %s", dest)
         except GitCommandError as exc:
-            logger.error("Clone failed for %s: %s", safe_url, _sanitize(str(exc)))
+            message = _sanitize(exc.stderr or str(exc), secrets)
+            logger.error("Clone failed for %s: %s", safe_url, message)
             raise RepoError(
-                f"Failed to clone repository {safe_url}: {_sanitize(exc.stderr or str(exc))}"
+                f"Failed to clone repository {safe_url}: {message}"
             ) from None
+        except RepoError:
+            raise
         except Exception as exc:
-            logger.error("Clone failed for %s: %s", safe_url, _sanitize(str(exc)))
-            raise RepoError(
-                f"Failed to clone repository {safe_url}: {_sanitize(str(exc))}"
-            ) from None
+            message = _sanitize(str(exc), secrets)
+            logger.error("Clone failed for %s: %s", safe_url, message)
+            raise RepoError(f"Failed to clone repository {safe_url}: {message}") from None
 
+    _scrub_repo_credentials(repo, safe_url)
     try:
         default_branch = _default_branch(repo)
         commit = repo.commit(f"origin/{default_branch}").hexsha
     except Exception as exc:
         raise RepoError(
             f"Failed to resolve remote default branch for {safe_url}: "
-            f"{_sanitize(str(exc))}"
+            f"{_sanitize(str(exc), secrets)}"
         ) from None
     logger.info(
         "Repository cache %s resolved origin/%s at %s",
@@ -443,6 +525,42 @@ def _sync_repo(authenticated_url: str, safe_url: str, dest: str) -> tuple[Repo, 
         commit,
     )
     return repo, commit
+
+
+def _scrub_repo_credentials(repo: Repo, safe_url: str) -> None:
+    """Migrate a cached checkout without deleting its objects or history."""
+    try:
+        origin = repo.remotes.origin
+    except (AttributeError, IndexError):
+        raise RepoError(
+            f"Cached repository has no origin remote: {repo.working_tree_dir}"
+        ) from None
+
+    with origin.config_writer as writer:
+        writer.set("url", safe_url)
+        try:
+            writer.remove_option("pushurl")
+        except Exception:
+            pass
+
+    # Older/manual configurations may contain persisted HTTP authorization
+    # headers. They are never required now that auth is injected per command.
+    try:
+        configured_headers = repo.git.config(
+            "--local",
+            "--get-regexp",
+            r"^http\..*\.extraheader$",
+        )
+    except GitCommandError:
+        configured_headers = ""
+    for line in configured_headers.splitlines():
+        key, _, _value = line.partition(" ")
+        if not key:
+            continue
+        try:
+            repo.git.config("--local", "--unset-all", key)
+        except GitCommandError:
+            pass
 
 
 def _default_branch(repo: Repo) -> str:
