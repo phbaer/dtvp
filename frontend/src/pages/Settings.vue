@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, inject, watch } from 'vue'
+import { computed, ref, onMounted, inject, watch } from 'vue'
 import { Archive, Download, RefreshCw, Upload, X } from 'lucide-vue-next'
 import {
     applyProjectArchiveImport,
@@ -23,9 +23,34 @@ import {
     getRescoreRules,
 } from '../lib/api'
 import type { ProjectArchiveApplyResult, ProjectArchivePreview, ProjectArchiveSnapshot, ProjectArchiveTask } from '../types'
+import {
+    DEFAULT_VULNERABILITY_BACKEND,
+    VULNERABILITY_BACKEND_KEY,
+    backendSupports,
+} from '../lib/vulnerabilityBackend'
 
 const user = inject<any>('user', { role: 'ANALYST' })
 const realRole = inject<any>('realRole', ref('ANALYST'))
+const vulnerabilityBackend = inject(
+    VULNERABILITY_BACKEND_KEY,
+    computed(() => DEFAULT_VULNERABILITY_BACKEND),
+)
+const canExportArchives = computed(() => backendSupports(
+    vulnerabilityBackend.value,
+    'finding_read',
+    'sbom_read',
+    'assessment_read',
+))
+const canPreviewArchiveImports = computed(() => backendSupports(
+    vulnerabilityBackend.value,
+    'project_search',
+))
+const canApplyArchiveImports = computed(() => backendSupports(
+    vulnerabilityBackend.value,
+    'assessment_write',
+    'sbom_upload',
+    'project_create',
+))
 const activeTab = ref('mapping')
 
 // Mapping state
@@ -923,7 +948,7 @@ watch(() => activeTab.value, (newTab) => {
         <h3 class="text-xl font-bold mb-6 text-gray-200">Project Archives</h3>
 
         <div class="grid gap-6 xl:grid-cols-2">
-            <section class="space-y-4 rounded border border-gray-700 bg-gray-900/40 p-4">
+            <section v-if="canExportArchives" class="space-y-4 rounded border border-gray-700 bg-gray-900/40 p-4">
                 <h4 class="text-xs font-bold uppercase text-gray-500">Export</h4>
                 <div>
                     <label class="block text-xs font-semibold text-gray-400 mb-2">Project name</label>
@@ -965,7 +990,7 @@ watch(() => activeTab.value, (newTab) => {
                 </div>
             </section>
 
-            <section class="space-y-4 rounded border border-gray-700 bg-gray-900/40 p-4">
+            <section v-if="canPreviewArchiveImports" class="space-y-4 rounded border border-gray-700 bg-gray-900/40 p-4">
                 <h4 class="text-xs font-bold uppercase text-gray-500">Import</h4>
                 <input
                     ref="archiveFileInput"
@@ -988,7 +1013,7 @@ watch(() => activeTab.value, (newTab) => {
                         {{ archiveImporting ? 'Previewing...' : 'Upload Preview' }}
                     </button>
                     <button
-                        v-if="archiveImportTask?.status === 'completed' && archiveImportTask.kind === 'import_preview'"
+                        v-if="canApplyArchiveImports && archiveImportTask?.status === 'completed' && archiveImportTask.kind === 'import_preview'"
                         type="button"
                         @click="applyArchive('create_missing')"
                         :disabled="archiveApplying"
@@ -997,7 +1022,7 @@ watch(() => activeTab.value, (newTab) => {
                         Create Missing
                     </button>
                     <button
-                        v-if="archiveImportTask?.status === 'completed' && archiveImportTask.kind === 'import_preview'"
+                        v-if="canApplyArchiveImports && archiveImportTask?.status === 'completed' && archiveImportTask.kind === 'import_preview'"
                         type="button"
                         @click="applyArchive('update')"
                         :disabled="archiveApplying"

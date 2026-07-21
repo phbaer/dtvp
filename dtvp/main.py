@@ -101,6 +101,7 @@ from .dt_cache import CacheManager, cache_manager
 from .dt_client import (
     DTClient,
     DTSettings,
+    get_configured_backend_descriptor,
     get_client,
     validate_dependency_track_configuration,
 )
@@ -187,6 +188,7 @@ from .tmrescore_cache_services import (
 from .tmrescore_cache_services import (
     persist_tmrescore_project_snapshot as persist_tmrescore_project_snapshot_impl,
 )
+from .vulnerability_backend import get_backend_adapter_catalog
 from .tmrescore_errors import InventoryPreparationError
 from .tmrescore_integration import (
     SUPPORTED_TMRESCORE_SCOPES,
@@ -710,6 +712,10 @@ api_router.include_router(
         build_app_info_route_deps(
             version=VERSION,
             build_commit=BUILD_COMMIT,
+            get_vulnerability_backend=lambda: (
+                get_configured_backend_descriptor().as_dict()
+            ),
+            get_backend_adapter_catalog=get_backend_adapter_catalog,
             cache_manager=cache_manager,
             load_pyproject_metadata=load_pyproject_metadata_impl,
             load_changelog_content=load_changelog_content,
@@ -891,6 +897,7 @@ def _build_auto_analysis_sweep_worker_deps() -> AutoAnalysisSweepDeps:
     worker_cache_manager = CacheManager(
         base_path=cache_manager.base_path,
         refresh_interval_seconds=cache_manager.refresh_interval_seconds,
+        backend_id=cache_manager.backend_id,
     )
     worker_cache_manager.load_persisted_runtime_state()
     worker_grouped_vuln_service_deps = build_grouped_vuln_service_deps(
@@ -934,9 +941,12 @@ def _build_auto_analysis_sweep_worker_deps() -> AutoAnalysisSweepDeps:
 def _run_auto_analysis_sweep_worker():
     async def _run():
         settings = DTSettings()
+        selection = settings.backend_selection
         async with DTClient(
             settings.api_url,
             api_key=settings.api_key,
+            backend_id=selection.id,
+            label=selection.label,
         ) as client:
             return await build_existing_open_vulnerability_sweep_plan(
                 _build_auto_analysis_sweep_worker_deps(),
@@ -1080,7 +1090,13 @@ async def run_project_archive_snapshot_loop() -> None:
         if project_archive_snapshots_enabled():
             try:
                 settings = DTSettings()
-                async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+                selection = settings.backend_selection
+                async with DTClient(
+                    settings.api_url,
+                    api_key=settings.api_key,
+                    backend_id=selection.id,
+                    label=selection.label,
+                ) as client:
                     results = await run_project_archive_snapshot_once(
                         project_archive_service_deps,
                         client,

@@ -16,6 +16,7 @@ import type {
     ProjectArchivePreview,
     ProjectArchiveSnapshot,
     ProjectArchiveTask,
+    VersionInfo,
 } from '../types';
 import { getRuntimeConfig } from './env';
 
@@ -66,7 +67,7 @@ export const getTaskStatistics = async (taskId: string): Promise<Statistics> => 
     return res.data;
 };
 
-export const getVersion = async (): Promise<{ version: string, build: string }> => {
+export const getVersion = async (): Promise<VersionInfo> => {
     const res = await api.get('/version');
     return res.data;
 };

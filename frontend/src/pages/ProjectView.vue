@@ -63,6 +63,11 @@ import BulkWorkflowModal from '../components/BulkWorkflowModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
 import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from 'lucide-vue-next'
+import {
+    DEFAULT_VULNERABILITY_BACKEND,
+    VULNERABILITY_BACKEND_KEY,
+    backendSupports,
+} from '../lib/vulnerabilityBackend'
 
 const TASK_LIST_WINDOW_LIMIT = 250
 
@@ -113,6 +118,16 @@ const closeSelectedGroupWithDraftGuard = async () => {
 }
 const user = inject<any>('user', { role: 'ANALYST' })
 const currentUserRole = computed(() => (user?.value ?? user)?.role || 'ANALYST')
+const vulnerabilityBackend = inject(
+    VULNERABILITY_BACKEND_KEY,
+    computed(() => DEFAULT_VULNERABILITY_BACKEND),
+)
+const canExportArchives = computed(() => backendSupports(
+    vulnerabilityBackend.value,
+    'finding_read',
+    'sbom_read',
+    'assessment_read',
+))
 const groups = ref<GroupedVuln[]>([])
 const currentVulnTaskId = ref<string | null>(null)
 const loadedProjectName = ref<string | null>(null)
@@ -1401,7 +1416,7 @@ watch(currentUserRole, (role) => {
                     </div>
                 </div>
                 <button
-                    v-if="currentUserRole === 'REVIEWER'"
+                    v-if="currentUserRole === 'REVIEWER' && canExportArchives"
                     type="button"
                     title="Export project archive"
                     :disabled="archiveExporting"

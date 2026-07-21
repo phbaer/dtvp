@@ -454,6 +454,8 @@ def build_app_info_route_deps(
     *,
     version: str,
     build_commit: str,
+    get_vulnerability_backend: Callable[[], dict[str, Any]],
+    get_backend_adapter_catalog: Callable[[], list[dict[str, Any]]],
     cache_manager: Any,
     load_pyproject_metadata: Callable[[], dict[str, Any] | None],
     load_changelog_content: Callable[[], str],
@@ -475,6 +477,8 @@ def build_app_info_route_deps(
     return AppInfoRouteDeps(
         version=version,
         build_commit=build_commit,
+        get_vulnerability_backend=get_vulnerability_backend,
+        get_backend_adapter_catalog=get_backend_adapter_catalog,
         load_pyproject_metadata=load_pyproject_metadata,
         get_cache_status=get_cache_status,
         load_changelog_content=load_changelog_content,

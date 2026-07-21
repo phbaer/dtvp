@@ -11,6 +11,11 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
+from .vulnerability_backend import (
+    backend_scoped_directory,
+    get_backend_selection,
+    validate_backend_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +25,9 @@ class PendingUpdateExistsError(Exception):
 
 
 def get_dt_cache_path() -> str:
-    return os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
+    return backend_scoped_directory(
+        os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
+    )
 
 
 def _safe_filename(value: str) -> str:
@@ -197,7 +204,16 @@ def _vulnerability_cache_identity(vulnerability: Dict[str, Any]) -> Optional[Tup
 
 
 class CacheManager:
-    def __init__(self, base_path: str = None, refresh_interval_seconds: int = None):
+    def __init__(
+        self,
+        base_path: str = None,
+        refresh_interval_seconds: int = None,
+        *,
+        backend_id: str | None = None,
+    ):
+        self.backend_id = validate_backend_id(
+            backend_id or get_backend_selection().id
+        )
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
             int(os.getenv("DTVP_DT_CACHE_REFRESH_SECONDS", "60"))
@@ -215,6 +231,24 @@ class CacheManager:
 
     def _ensure_directories(self) -> None:
         os.makedirs(self.base_path, exist_ok=True)
+        marker_path = os.path.join(self.base_path, ".backend.json")
+        expected_marker = {
+            "schema": "dtvp.backend-cache/v1",
+            "backend_id": self.backend_id,
+        }
+        if os.path.exists(marker_path):
+            marker = _read_json(marker_path)
+            if marker != expected_marker:
+                raise RuntimeError(
+                    f"Cache path {self.base_path!r} belongs to a different or "
+                    "invalid vulnerability backend namespace"
+                )
+        else:
+            _atomic_write(marker_path, expected_marker)
+            try:
+                os.chmod(marker_path, 0o600)
+            except OSError:
+                logger.warning("Could not restrict cache marker permissions: %s", marker_path)
         for name in ["findings", "project_vulnerabilities", "boms", "analysis"]:
             os.makedirs(os.path.join(self.base_path, name), exist_ok=True)
 
@@ -277,6 +311,7 @@ class CacheManager:
         cached_analyses = len([f for f in os.listdir(analysis_dir) if f.endswith(".json")]) if os.path.isdir(analysis_dir) else 0
 
         return {
+            "backend_id": self.backend_id,
             "fully_cached": self.cache_meta.get("fully_cached", False),
             "last_refreshed_at": self.cache_meta.get("last_refreshed_at"),
             "projects": len(projects),
@@ -399,9 +434,11 @@ class CacheManager:
             self._active_projects_path(), sorted(set(uuids)), touch_meta=False
         )
 
-    def reset(self, base_path: str = None) -> None:
+    def reset(self, base_path: str = None, *, backend_id: str | None = None) -> None:
         if base_path:
             self.base_path = base_path
+        if backend_id is not None:
+            self.backend_id = validate_backend_id(backend_id)
         self.lock = asyncio.Lock()
         self.pending_updates = []
         self.active_project_uuids = set()
@@ -494,17 +531,29 @@ class CacheManager:
             )
 
         settings = DTSettings()
+        selection = settings.backend_selection
         try:
-            async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+            async with DTClient(
+                settings.api_url,
+                api_key=settings.api_key,
+                backend_id=selection.id,
+                label=selection.label,
+            ) as client:
                 await self.flush_pending_updates(client)
         except Exception as exc:
             logger.warning("Dependency-Track cache initialization failed: %s", exc)
 
     async def background_sync_loop(self) -> None:
         settings = DTSettings()
+        selection = settings.backend_selection
         while True:
             try:
-                async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+                async with DTClient(
+                    settings.api_url,
+                    api_key=settings.api_key,
+                    backend_id=selection.id,
+                    label=selection.label,
+                ) as client:
                     await self.flush_pending_updates(client)
                     await self._refresh_project_list(client)
                     await self._refresh_active_projects(client)

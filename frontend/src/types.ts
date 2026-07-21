@@ -6,6 +6,31 @@ export interface Project {
     active: boolean;
 }
 
+export type BackendCapability =
+    | 'project_search'
+    | 'finding_read'
+    | 'sbom_read'
+    | 'assessment_read'
+    | 'assessment_write'
+    | 'sbom_upload'
+    | 'project_create'
+    | 'dependency_graph'
+    | 'audit_history'
+    | 'vex_exchange';
+
+export interface VulnerabilityBackendDescriptor {
+    id: string;
+    type: string;
+    label: string;
+    capabilities: BackendCapability[];
+}
+
+export interface VersionInfo {
+    version: string;
+    build: string;
+    vulnerability_backend?: VulnerabilityBackendDescriptor;
+}
+
 export type TagValue = string | { name?: string; tag?: string } | null;
 export type Tags = Array<string | TagValue>;
 
@@ -139,6 +164,7 @@ export interface Statistics {
 }
 
 export interface CacheStatus {
+    backend_id?: string;
     fully_cached: boolean;
     last_refreshed_at: string | null;
     projects: number;

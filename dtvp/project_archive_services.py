@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .dt_client import DTClient
+from .vulnerability_backend import backend_scoped_directory
 
 
 ARCHIVE_SCHEMA_VERSION = "dtvp.project-archive/v1"
@@ -54,7 +55,9 @@ class ProjectArchiveServiceDeps:
 
 
 def get_project_archive_path() -> str:
-    return os.getenv("DTVP_PROJECT_ARCHIVE_PATH", "data/project_archives")
+    return backend_scoped_directory(
+        os.getenv("DTVP_PROJECT_ARCHIVE_PATH", "data/project_archives")
+    )
 
 
 def project_archive_expanded_exports_enabled() -> bool:
@@ -67,7 +70,9 @@ def project_archive_expanded_exports_enabled() -> bool:
 
 
 def get_project_archive_expanded_path() -> str:
-    return os.getenv("DTVP_PROJECT_ARCHIVE_EXPANDED_PATH", "data/project_archives_git")
+    return backend_scoped_directory(
+        os.getenv("DTVP_PROJECT_ARCHIVE_EXPANDED_PATH", "data/project_archives_git")
+    )
 
 
 def project_archive_snapshots_enabled() -> bool:

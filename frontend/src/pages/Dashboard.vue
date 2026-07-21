@@ -4,10 +4,25 @@ import { getProjectArchiveTaskDownloadUrl, getProjects, startProjectArchiveExpor
 import { getRuntimeConfig } from '../lib/env'
 import type { Project, ProjectArchiveTask } from '../types'
 import { Archive, Download, Loader2, Search } from 'lucide-vue-next'
+import {
+    DEFAULT_VULNERABILITY_BACKEND,
+    VULNERABILITY_BACKEND_KEY,
+    backendSupports,
+} from '../lib/vulnerabilityBackend'
 
 const query = ref(getRuntimeConfig('DTVP_DEFAULT_PROJECT_FILTER', '')) // Kept for client-side filtering
 const cveFilter = ref('') // Optional global CVE filter
 const realRole = inject<any>('realRole', ref('ANALYST'))
+const vulnerabilityBackend = inject(
+    VULNERABILITY_BACKEND_KEY,
+    computed(() => DEFAULT_VULNERABILITY_BACKEND),
+)
+const canExportArchives = computed(() => backendSupports(
+    vulnerabilityBackend.value,
+    'finding_read',
+    'sbom_read',
+    'assessment_read',
+))
 const allProjects = ref<Project[]>([])
 const loading = ref(false)
 const exportingProject = ref('')
@@ -205,14 +220,14 @@ const exportProject = async (name: string) => {
                             {{ p.name }}
                         </router-link>
                         <router-link
-                            v-if="realRole === 'REVIEWER'"
+                            v-if="realRole === 'REVIEWER' && canExportArchives"
                             :to="`/project/${p.name}/tmrescore`"
                             class="shrink-0 rounded-lg border border-blue-500/30 bg-blue-600/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-200 transition-colors hover:bg-blue-600/20"
                         >
                             Threat Model
                         </router-link>
                         <button
-                            v-if="realRole === 'REVIEWER'"
+                            v-if="realRole === 'REVIEWER' && canExportArchives"
                             type="button"
                             :disabled="exportingProject === p.name"
                             class="inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-gray-600 bg-gray-900/70 px-2 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-wait disabled:opacity-60"

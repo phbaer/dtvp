@@ -168,7 +168,10 @@ Important frontend components:
   vulnerability details, BOMs, local overlays, and pending writes. Stale cached
   data remains readable while Dependency-Track is unavailable. Concurrent
   misses for the same resource share one Dependency-Track request, while each
-  caller receives an isolated mutable snapshot.
+  caller receives an isolated mutable snapshot. Non-default backend instance
+  IDs place caches, queues, archives, tmrescore proposals, and analyzer results
+  in separate `backends/<id>` namespaces. Cache markers reject accidental reuse
+  by a different instance.
 - Grouped-vulnerability tasks, their bulk-workflow operations, uploaded or
   generated archive tasks, live tmrescore sessions, analyzer queue entries,
   and saved analysis results are private to the authenticated user who created
@@ -702,6 +705,11 @@ Deployment rules:
   OIDC provider, but DTVP intentionally uses service credentials for durable
   background work and records the human actor in its own authorization/audit
   boundary.
+- `/api/vulnerability-backend` publishes the active non-secret adapter
+  descriptor, capabilities, and adapter catalog. Dependency-Track is the active
+  implementation. Cybeats is registered as a fail-closed scaffold until its
+  private API contract and a test tenant are supplied; selecting it cannot
+  silently route data through Dependency-Track-shaped behavior.
 - OIDC login uses authorization code with PKCE, state, nonce, discovery issuer
   validation, JWKS signature verification, and expiring DTVP session cookies.
   Changing the session key invalidates existing sessions and requires users to
@@ -753,6 +761,9 @@ means the integration or override is disabled.
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
+| `DTVP_VULNERABILITY_BACKEND_ID` | Stable backend-instance namespace used for local state and resource identity | `dependency-track` |
+| `DTVP_VULNERABILITY_BACKEND_TYPE` | Adapter implementation; currently only `dependency-track` is runnable | `dependency-track` |
+| `DTVP_VULNERABILITY_BACKEND_LABEL` | Non-secret display label returned by backend discovery | `Dependency-Track` |
 | `DTVP_DT_API_URL` | Dependency-Track API base URL | `http://localhost:8081`; Compose: `http://dtrack-apiserver:8080` |
 | `DTVP_DT_API_KEY` | Least-privilege Dependency-Track review service-team API key; required in production | unset |
 | `DTVP_DT_API_KEY_FILE` | API-key file used when the direct value is unset | unset |

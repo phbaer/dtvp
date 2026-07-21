@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .sqlite_migration_services import run_sqlite_migrations
+from .vulnerability_backend import backend_scoped_file
 
 
 CODE_ANALYSIS_RESULT_SCHEMA_VERSION = "dtvp.code-analysis-result/v1"
@@ -20,8 +21,10 @@ FOLLOW_UP_CONTEXT_PROMPT_LIMIT = 12_000
 def get_code_analysis_results_path() -> str:
     configured_path = os.getenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", "").strip()
     if configured_path:
-        return configured_path
-    return os.path.join(os.getcwd(), "data", "code_analysis_results.sqlite")
+        return backend_scoped_file(configured_path)
+    return backend_scoped_file(
+        os.path.join(os.getcwd(), "data", "code_analysis_results.sqlite")
+    )
 
 
 def get_code_analysis_result_migrations_path() -> Path:

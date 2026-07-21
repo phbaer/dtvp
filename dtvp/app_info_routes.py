@@ -10,6 +10,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 class AppInfoRouteDeps:
     version: str
     build_commit: str
+    get_vulnerability_backend: Callable[[], dict[str, Any]]
+    get_backend_adapter_catalog: Callable[[], list[dict[str, Any]]]
     load_pyproject_metadata: Callable[[], Optional[dict[str, Any]]]
     get_cache_status: Callable[[], dict[str, Any]]
     load_changelog_content: Callable[[], str]
@@ -32,7 +34,18 @@ def create_app_info_router(
 
     @router.get("/version")
     def get_version():
-        return {"version": deps.version, "build": deps.build_commit}
+        return {
+            "version": deps.version,
+            "build": deps.build_commit,
+            "vulnerability_backend": deps.get_vulnerability_backend(),
+        }
+
+    @router.get("/vulnerability-backend")
+    def get_vulnerability_backend():
+        return {
+            "active": deps.get_vulnerability_backend(),
+            "adapters": deps.get_backend_adapter_catalog(),
+        }
 
     @router.get("/metadata", responses=not_found_response)
     def get_metadata():
