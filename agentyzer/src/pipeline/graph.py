@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import uuid
 from typing import Any, Awaitable, Callable, Dict, Mapping
 
 from langgraph.graph import END, StateGraph
@@ -522,10 +523,12 @@ async def run_pipeline(
         steps       — ordered list of per-step reports (each with title,
                       status, findings, evidence)
     """
+    scan_id = uuid.uuid4().hex
+    scan_component_cfg = {**component_cfg, "_scan_id": scan_id}
     initial_state: PipelineState = {
         "vuln_id": vuln_id or "",
-        "component_cfg": component_cfg,
-        "component_name": component_cfg.get("name") or "",
+        "component_cfg": scan_component_cfg,
+        "component_name": scan_component_cfg.get("name") or "",
         "scan_targets": [],
         "debug": debug,
         "ollama": ollama,
@@ -535,7 +538,7 @@ async def run_pipeline(
             for version in (affected_product_versions or [])
             if str(version).strip()
         ],
-        "sbom_attributed": bool(component_cfg.get("sbom_attributed", True)),
+        "sbom_attributed": bool(scan_component_cfg.get("sbom_attributed", True)),
         "user_guidance": user_guidance or "",
         "cvss_vector": cvss_vector or "",
         "progress_callback": progress_callback,
@@ -558,7 +561,10 @@ async def run_pipeline(
         "step_reports": {},
         "evidence": [],
     }
-    final_state = await graph.ainvoke(initial_state)
+    try:
+        final_state = await graph.ainvoke(initial_state)
+    finally:
+        await nodes.dependency_scanner.release_scan_worktree(scan_id)
 
     result = final_state["result"]
     step_reports = final_state.get("step_reports", {})
@@ -641,7 +647,9 @@ async def run_pipeline(
     details = build_structured_details(
         vuln_id=final_state.get("vuln_id", vuln_id or ""),
         component_name=component_cfg.get("name", ""),
-        repo_url=component_cfg.get("url", ""),
+        repo_url=nodes.dependency_scanner._credential_free_url(
+            component_cfg.get("url", "")
+        ),
         repo_path=final_state.get("repo_path", ""),
         verdict_label=verdict_label,
         confidence=result.get("confidence", "Low"),

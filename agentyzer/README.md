@@ -300,6 +300,7 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | `1` | Maximum number of async or sync assessment pipelines allowed to execute at the same time. Extra async jobs remain `pending` until a slot opens. |
+| `AGENTYZER_WORKTREE_RETENTION_SECONDS` | `86400` | Maximum age of an orphaned per-run worktree left by an interrupted process; minimum 300 seconds. Normal runs clean up immediately. |
 | `AGENTYZER_JOB_STORE_PATH` | `repos/agentyzer_jobs.sqlite` | SQLite path for durable async job state. The Compose deployment places it on `/app/repos`. |
 | `AGENTYZER_JOB_RETENTION_SECONDS` | `604800` | Retain terminal jobs for this many seconds; `0` disables age pruning. |
 | `AGENTYZER_JOB_MAX_RECORDS` | `1000` | Maximum durable records. Oldest terminal jobs are pruned first; active jobs are never pruned. |
@@ -716,25 +717,25 @@ Multiple async jobs can be submitted to the FastAPI process. Accepted jobs are c
 
 Inside one running pipeline, Agentyzer still exposes parallel branch visibility through `progress.active_agents` and `progress.step_statuses`; the pipeline graph can fan out into dependency/version and code/LLM branches after repository preparation.
 
-Repository workspaces are already reused across runs. `src/agents/dependency_scanner.py` maps each repository URL to a stable directory under `AGENTYZER_REPOS_DIR` (default: `repos`) using the repo name plus a SHA-256 hash of the sanitized URL. That means repeated runs for the same configured repository use the same local workspace instead of cloning repeatedly.
+Repository objects are reused across runs. `src/agents/dependency_scanner.py` maps each repository URL to a stable clone under `AGENTYZER_REPOS_DIR` (default: `repos`) using the repo name plus a SHA-256 hash of the credential-free URL. Credentials are injected into only the clone or fetch child process; the persisted `origin` is scrubbed after every operation, including existing caches created by older versions.
+
+Updating a stable clone is serialized by an in-process async lock and a
+cross-process file lock. After the update, every scan receives a detached
+worktree at the resolved commit. Worktrees share the persistent clone's Git
+object database but not its mutable files, so repeated and concurrent scans
+remain fast and isolated. A normal pipeline removes its worktree in a `finally`
+block while retaining the clone. Cross-process lease files protect active
+worktrees; unlocked worktrees left by an interrupted process are pruned after
+`AGENTYZER_WORKTREE_RETENTION_SECONDS`.
 
 For different projects, raising `AGENTYZER_MAX_CONCURRENT_JOBS` can be realistic with the current design:
 
-- Different repository URLs map to different workspace directories.
+- Different repository URLs map to different persistent clones.
 - Clone/fetch work is offloaded to worker threads, so large Git operations do not block the event loop.
 - The main shared bottlenecks are CPU/disk IO during scans and the configured LLM backend throughput.
 - The global execution limit is process-local and applies before a pipeline starts. There is not yet a separate LLM-stage rate limiter.
 
-For the same project or any two jobs that resolve to the same workspace, the current implementation is not fully parallel-safe. Existing workspaces are refreshed by updating the remote URL, fetching, and resetting the working tree to the remote default branch. If two jobs do that against the same directory at once, one run can reset, re-clone, or mutate files while the other run is scanning.
-
-The recommended implementation path is:
-
-1. Add a per-workspace async lock around clone/fetch/reset so only one job updates a given cached repository at a time.
-2. After the update, analyze an isolated per-run checkout created with `git worktree add --detach` at the resolved commit, or another snapshot mechanism. This reuses the Git object database and avoids a full clone while keeping each scan's files stable.
-3. Clean up per-run worktrees when the job is deleted or after a retention window.
-4. Add optional per-LLM-stage semaphores or provider-specific rate limiting when a deployment needs more than one overall pipeline slot.
-
-So, multiple parallel runs for different projects are feasible when capacity is raised deliberately; robust parallel runs sharing the same underlying repository need workspace locking plus per-run worktrees or snapshots to preserve reuse without repeated clones.
+For the same project, clone updates wait on the workspace lock and then each pipeline scans its own immutable worktree. Parallel scans therefore preserve repository reuse without allowing one fetch/reset to mutate another scan. The remaining parallelism constraint is process-local execution coordination and the lack of a separate LLM-stage/provider rate limiter.
 
 ## Docker Setup
 
@@ -846,6 +847,6 @@ uv run pytest --junitxml=test-reports/results.xml
 - LLM-backed stages depend on backend reachability; startup logs warn when the backend is unavailable.
 - The CLI does not perform scanning itself; it only calls the API.
 - `focus_path` is documented as an absolute path and is the safest way to assess an already checked-out repository.
-- When `AGENTYZER_MAX_CONCURRENT_JOBS` is raised, concurrent jobs for different repository workspaces can run in parallel; concurrent jobs sharing one mutable workspace need locking or isolated worktrees for robust production use.
+- When `AGENTYZER_MAX_CONCURRENT_JOBS` is raised, repository updates are serialized per cache and every scan uses an isolated detached worktree; size the limit for model, CPU, and disk throughput.
 - The service trusts the system CA store for outbound HTTP calls and can also consume injected CA certificates at image-build time.
 - The shipped `config/repos.yaml` in this repository is intentionally empty. Populate it with environment-specific component mappings, and keep credential-bearing variants out of public branches.

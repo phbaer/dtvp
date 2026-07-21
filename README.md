@@ -671,7 +671,7 @@ Deployment rules:
   mounts only for data, cloned repositories, and temporary files. Set
   `DTVP_RUNTIME_UID` and `DTVP_RUNTIME_GID` to the numeric owner of `./data`
   (for example, `id -u` and `id -g`) when it is not `1000:1000`.
-- Compose starts Agentyzer and persists cloned repositories plus its bounded
+- Compose starts Agentyzer and persists credential-free cached Git repositories plus its bounded
   async-job SQLite store in the `agentyzer-repos` volume. Populate or override the sanitized
   `agentyzer/config/repos.yaml` before enabling automatic scans; never commit
   repository credentials. Docker builds use an empty container-only repository
@@ -681,6 +681,11 @@ Deployment rules:
   a trusted owner identity; Agentyzer lists, reads, follows up, cancels, and
   deletes only that owner's jobs. DTVP reviewer-wide status requests explicitly
   use a separate admin credential and the trusted service-wide owner scope.
+  Repository authentication is injected only into the child `git` process;
+  stored remote URLs are scrubbed in place. Each scan uses a detached worktree
+  backed by the persistent clone, so repeat scans reuse Git objects without
+  sharing mutable files. Normal completion removes only the per-run worktree;
+  stale crash leftovers are pruned after the configured retention window.
 - Internal services use Compose names and container ports. DTVP reaches
   Dependency-Track at `http://dtrack-apiserver:8080` and Agentyzer at
   `http://agentyzer:8000` unless overridden.
@@ -837,6 +842,7 @@ means the integration or override is disabled.
 | `AGENTYZER_ADMIN_TOKEN_FILE` | File containing the admin token when the direct value is unset | unset |
 | `AGENTYZER_ALLOW_UNAUTHENTICATED` | Explicit local-only bypass; rejected in production | `false` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
+| `AGENTYZER_WORKTREE_RETENTION_SECONDS` | Maximum age of orphaned per-run Git worktrees after an interrupted process | `86400` (1 day; minimum 300) |
 | `AGENTYZER_JOB_STORE_PATH` | Durable async-job SQLite store | Compose: `/app/repos/agentyzer_jobs.sqlite`; standalone: `repos/agentyzer_jobs.sqlite` |
 | `AGENTYZER_JOB_RETENTION_SECONDS` | Terminal-job retention; `0` disables age pruning | `604800` (7 days) |
 | `AGENTYZER_JOB_MAX_RECORDS` | Maximum records; active jobs are never pruned | `1000` |
