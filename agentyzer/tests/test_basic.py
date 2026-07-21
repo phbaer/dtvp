@@ -122,7 +122,7 @@ def test_health_exposes_service_configuration_and_backend(client):
 
     backend = data["backend"]
     assert backend["llm"]["model"] == data["model"]
-    assert backend["jobs"]["job_store"] == "in_memory"
+    assert backend["jobs"]["job_store"] == "sqlite"
     assert backend["jobs"]["max_concurrent_jobs"] >= 1
     assert backend["jobs"]["available_slots"] >= 0
     assert "running" in backend["jobs"]["status_counts"]
@@ -169,10 +169,12 @@ def test_jobs_list_uses_envelope_metadata(client):
     assert data["backend"]["jobs"]["max_concurrent_jobs"] >= 1
     listed = [job for job in data["jobs"] if job["job_id"] == job_id]
     assert listed
+    assert job_id in app.state.job_store.load()
     assert "configuration" not in listed[0] or listed[0]["configuration"] is None
     assert "backend" not in listed[0] or listed[0]["backend"] is None
 
     client.delete(f"/jobs/{job_id}")
+    assert job_id not in app.state.job_store.load()
 
 
 def _seed_completed_parent_job(job_id: str = "parent-follow-up") -> Job:

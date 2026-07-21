@@ -51,6 +51,7 @@ from src.api.models import (
     StepFindings,
 )
 from src.benchmark import compare_benchmark_with_llm, deterministic_benchmark_fallback
+from src.job_store import JobStore
 from src.llm import OllamaClient, OpenWebUIClient, create_llm_client
 from src.llm.base import LLMClient
 from src.llm.prompt_registry import (
@@ -186,8 +187,23 @@ async def lifespan(app: FastAPI):
     except OSError:
         _repos_config_mtime = 0.0
     app.state.ollama = create_llm_client()
-    app.state.jobs: Dict[str, Job] = {}
+    app.state.job_store = JobStore(logger=logger)
+    app.state.jobs = app.state.job_store.load()
     app.state.job_tasks: Dict[str, asyncio.Task[Any]] = {}
+    app.state.shutting_down = False
+    interrupted_jobs = 0
+    for job in app.state.jobs.values():
+        if job.status != JobStatus.running:
+            continue
+        job.status = JobStatus.failed
+        job.finished_at = _now_iso()
+        job.last_updated_at = job.finished_at
+        job.error = "Assessment interrupted by Agentyzer service restart."
+        job.active_agents.clear()
+        job.current_activity = "Assessment interrupted by service restart"
+        append_job_log(job, job.error, level="error")
+        app.state.job_store.save(job)
+        interrupted_jobs += 1
     app.state.max_concurrent_jobs = _get_max_concurrent_jobs()
     app.state.job_semaphore = asyncio.Semaphore(app.state.max_concurrent_jobs)
     logger.info("Configured LLM %s", _describe_llm_backend(app.state.ollama))
@@ -203,7 +219,31 @@ async def lifespan(app: FastAPI):
         logger.info(
             "LLM backend is reachable (%s)", _describe_llm_backend(app.state.ollama)
         )
-    yield
+    if interrupted_jobs:
+        logger.warning(
+            "Marked %d in-flight assessment job(s) as interrupted",
+            interrupted_jobs,
+        )
+    resumed_jobs = 0
+    for job in list(app.state.jobs.values()):
+        if job.status != JobStatus.pending:
+            continue
+        append_job_log(job, "Resuming queued job after service restart")
+        app.state.job_store.save(job)
+        _schedule_job(job)
+        resumed_jobs += 1
+    if resumed_jobs:
+        logger.info("Resumed %d queued assessment job(s)", resumed_jobs)
+    try:
+        yield
+    finally:
+        app.state.shutting_down = True
+        tasks = list(app.state.job_tasks.values())
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 app = FastAPI(
@@ -257,10 +297,56 @@ def _resolved_repos_config_path() -> str:
 
 
 def _jobs_visible_to(owner: str) -> Dict[str, Job]:
+    _prune_job_store()
     jobs: Dict[str, Job] = getattr(app.state, "jobs", {})
     if owner == "*":
         return jobs
     return {job_id: job for job_id, job in jobs.items() if job.owner == owner}
+
+
+def _remove_pruned_jobs(job_ids: set[str]) -> None:
+    jobs: Dict[str, Job] = getattr(app.state, "jobs", {})
+    for job_id in job_ids:
+        jobs.pop(job_id, None)
+
+
+def _prune_job_store() -> None:
+    store: JobStore | None = getattr(app.state, "job_store", None)
+    if store is None:
+        return
+    try:
+        _remove_pruned_jobs(store.prune())
+    except Exception:
+        logger.exception("Failed to prune the Agentyzer job store")
+
+
+def _persist_job(job: Job, *, required: bool = False) -> None:
+    store: JobStore | None = getattr(app.state, "job_store", None)
+    if store is None:
+        return
+    try:
+        _remove_pruned_jobs(store.save(job))
+    except Exception as exc:
+        logger.exception("Failed to persist Agentyzer job %s", job.id)
+        if required:
+            raise HTTPException(
+                status_code=503,
+                detail="Assessment job storage is unavailable.",
+            ) from exc
+
+
+def _delete_persisted_job(job_id: str) -> None:
+    store: JobStore | None = getattr(app.state, "job_store", None)
+    if store is None:
+        return
+    try:
+        store.delete(job_id)
+    except Exception as exc:
+        logger.exception("Failed to delete persisted Agentyzer job %s", job_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Assessment job storage is unavailable.",
+        ) from exc
 
 
 def _job_for_caller(job_id: str, caller: ServiceCaller) -> Job:
@@ -306,6 +392,7 @@ def _service_configuration() -> ServiceConfiguration:
             "async_assessments": True,
             "sync_assessments": True,
             "bounded_async_execution": True,
+            "durable_job_store": True,
             "request_model_override": True,
             "debug_responses": True,
             "job_cancellation": True,
@@ -367,7 +454,7 @@ def _backend_information(owner: str) -> BackendInformation:
             ),
         ),
         jobs=JobBackendInfo(
-            job_store="in_memory",
+            job_store="sqlite",
             execution_model="bounded asyncio background tasks in this API process",
             known_jobs=len(jobs),
             max_concurrent_jobs=max_concurrent_jobs,
@@ -519,6 +606,7 @@ async def _run_job(job: Job) -> None:
     """Background task that executes the pipeline for a job."""
     job.current_activity = "Waiting for analyzer execution slot"
     job.last_updated_at = _now_iso()
+    _persist_job(job)
     try:
         semaphore = getattr(app.state, "job_semaphore", None)
         if semaphore is None:
@@ -528,11 +616,26 @@ async def _run_job(job: Job) -> None:
                 await _run_job_with_slot(job)
     except asyncio.CancelledError:
         logger.info("Job %s cancelled", job.id)
-        job.status = JobStatus.cancelled
+        shutting_down = bool(getattr(app.state, "shutting_down", False))
+        if shutting_down and job.status == JobStatus.pending:
+            job.current_activity = "Waiting for analyzer execution slot"
+            job.last_updated_at = _now_iso()
+            append_job_log(job, "Queued job paused for service shutdown")
+            _persist_job(job)
+            return
+        job.status = JobStatus.failed if shutting_down else JobStatus.cancelled
         job.active_agents.clear()
-        job.current_activity = "Assessment cancelled"
-        job.error = "Cancelled by request."
-        append_job_log(job, "Assessment cancelled", level="warning")
+        job.current_activity = (
+            "Assessment interrupted by service shutdown"
+            if shutting_down
+            else "Assessment cancelled"
+        )
+        job.error = (
+            "Assessment interrupted by Agentyzer service shutdown."
+            if shutting_down
+            else "Cancelled by request."
+        )
+        append_job_log(job, job.error, level="warning")
     except Exception as exc:
         logger.exception("Job %s failed", job.id)
         job.status = JobStatus.failed
@@ -540,7 +643,13 @@ async def _run_job(job: Job) -> None:
         job.error = f"Internal pipeline error: {message}"
         append_job_log(job, job.error, level="error")
     finally:
-        job.finished_at = _now_iso()
+        if job.status in (
+            JobStatus.completed,
+            JobStatus.failed,
+            JobStatus.cancelled,
+        ):
+            job.finished_at = _now_iso()
+        _persist_job(job)
 
 
 async def _run_job_with_slot(job: Job) -> None:
@@ -550,9 +659,10 @@ async def _run_job_with_slot(job: Job) -> None:
     append_job_log(job, "Assessment job started")
     llm_client = _client_for_request(job.request)
     job.llm_metadata = _llm_metadata(llm_client)
+    _persist_job(job)
     job.result = await _run_assessment(
         job.request,
-        progress_callback=lambda event: apply_progress_event(job, event),
+        progress_callback=lambda event: _apply_and_persist_progress(job, event),
         llm_client=llm_client,
     )
     job.status = JobStatus.completed
@@ -563,11 +673,23 @@ async def _run_job_with_slot(job: Job) -> None:
     job.current_activity = "Assessment complete"
     append_job_log(job, "Assessment complete")
     _recompute_job_progress(job)
+    _persist_job(job)
+
+
+def _apply_and_persist_progress(job: Job, event: Dict[str, Any]) -> None:
+    apply_progress_event(job, event)
+    _persist_job(job)
 
 
 def _drop_job_task(job_id: str) -> None:
     tasks: Dict[str, asyncio.Task[Any]] = getattr(app.state, "job_tasks", {})
     tasks.pop(job_id, None)
+
+
+def _schedule_job(job: Job) -> None:
+    task = asyncio.create_task(_run_job(job))
+    app.state.job_tasks[job.id] = task
+    task.add_done_callback(lambda _task: _drop_job_task(job.id))
 
 
 def _as_model_dict(value: Any) -> Dict[str, Any]:
@@ -713,10 +835,9 @@ def _submit_async_job(
     append_job_log(job, "Queued assessment job")
     if parent_job_id:
         append_job_log(job, f"Follow-up of job {parent_job_id}")
+    _persist_job(job, required=True)
     app.state.jobs[job_id] = job
-    task = asyncio.create_task(_run_job(job))
-    app.state.job_tasks[job_id] = task
-    task.add_done_callback(lambda _task: _drop_job_task(job_id))
+    _schedule_job(job)
     logger.info(
         "Job %s created for owner %s and component %s",
         job_id,
@@ -900,7 +1021,7 @@ async def assess(
     response_model_exclude_none=True,
     tags=["jobs"],
     summary="List assessment jobs",
-    description="Return all in-memory background jobs known to the current API process.",
+    description="Return all durable background jobs visible to the caller.",
 )
 async def list_jobs(
     caller: Annotated[ServiceCaller, Depends(require_service_caller)],
@@ -1076,7 +1197,7 @@ async def follow_up_job(
     summary="Cancel or delete a job",
     description=(
         "Cancel a pending/running job or remove a completed, failed, or cancelled "
-        "job from the in-memory job store."
+        "job from the durable job store."
     ),
     responses={
         404: {
@@ -1093,7 +1214,7 @@ async def delete_job(
     job_id: str,
     caller: Annotated[ServiceCaller, Depends(require_service_caller)],
 ):
-    """Cancel running work or remove a finished job from memory."""
+    """Cancel running work or remove a finished job."""
     jobs: Dict[str, Job] = app.state.jobs
     job = _job_for_caller(job_id, caller)
     if job.status in (JobStatus.pending, JobStatus.running):
@@ -1107,5 +1228,7 @@ async def delete_job(
         job.active_agents.clear()
         job.current_activity = "Assessment cancelled"
         append_job_log(job, "Assessment cancelled by request.", level="warning")
+        _persist_job(job, required=True)
         return None
+    _delete_persisted_job(job_id)
     del jobs[job_id]

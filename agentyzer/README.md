@@ -66,7 +66,7 @@ At startup the service:
 2. Loads and hot-reloads `config/repos.yaml` for component-to-repository mappings.
 3. Validates the prompt bundles used by the LLM-assisted steps.
 4. Constructs the configured LLM backend from environment variables.
-5. Initializes an owner-scoped in-memory job store for async assessments.
+5. Restores the owner-scoped, bounded SQLite job store for async assessments.
 6. Performs an LLM health check and logs whether model-backed steps are available.
 
 ## End-To-End Process
@@ -82,7 +82,7 @@ Assessment request
 │   ├── sync=true
 │   │   └── Run pipeline inline and return AssessResponse
 │   └── sync=false
-│       ├── Create in-memory job record
+│       ├── Create durable job record
 │       ├── Run pipeline in background task
 │       ├── Poll GET /jobs/{job_id}
 │       ├── Fetch GET /jobs/{job_id}/result
@@ -295,6 +295,9 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | `1` | Maximum number of async or sync assessment pipelines allowed to execute at the same time. Extra async jobs remain `pending` until a slot opens. |
+| `AGENTYZER_JOB_STORE_PATH` | `repos/agentyzer_jobs.sqlite` | SQLite path for durable async job state. The Compose deployment places it on `/app/repos`. |
+| `AGENTYZER_JOB_RETENTION_SECONDS` | `604800` | Retain terminal jobs for this many seconds; `0` disables age pruning. |
+| `AGENTYZER_JOB_MAX_RECORDS` | `1000` | Maximum durable records. Oldest terminal jobs are pruned first; active jobs are never pruned. |
 | `AGENTYZER_ENVIRONMENT` | `production` | Security profile: `production`, `development`, or `test`. |
 | `AGENTYZER_SERVICE_TOKEN` | unset | Bearer token required by every HTTP route; use at least 32 characters. |
 | `AGENTYZER_SERVICE_TOKEN_FILE` | unset | File containing the bearer token when the direct value is unset. |
@@ -357,12 +360,12 @@ uses `AGENTYZER_ADMIN_TOKEN` or `--admin-token-file`.
 | `GET` | `/prompts` | Prompt bundle metadata; pass `include_values=true` to include configured prompt text. |
 | `POST` | `/assess` | Submit an assessment request, synchronously or asynchronously. |
 | `POST` | `/benchmark/compare` | Probabilistically compare a human assessment artifact with an automated assessment result. |
-| `GET` | `/jobs` | List the caller owner's in-memory async jobs. |
+| `GET` | `/jobs` | List the caller owner's durable async jobs. |
 | `GET` | `/jobs/{job_id}` | Fetch job status and progress. |
 | `GET` | `/jobs/{job_id}/result` | Retrieve the final assessment for a completed job. |
 | `POST` | `/jobs/{job_id}/compact` | Build concise structured context from a completed job. |
 | `POST` | `/jobs/{job_id}/follow-up` | Start another assessment using the compacted parent job context plus a reviewer question. |
-| `DELETE` | `/jobs/{job_id}` | Cancel a pending/running job or remove a completed/failed/cancelled job from memory. |
+| `DELETE` | `/jobs/{job_id}` | Cancel a pending/running job or remove a completed/failed/cancelled durable job. |
 
 ### Assessment request fields
 
@@ -409,7 +412,7 @@ The benchmark judge prompt is loaded from
 `GET /health`, `GET /configuration`, async submission responses, and job status responses include operational metadata for consumers:
 
 - `configuration`: sanitized service configuration, including service name/version, config paths, repository workspace directory, configured component names/counts, alias names, and enabled interface features.
-- `backend`: runtime backend details, including LLM provider/client/model/health, repository workspace reuse behavior, and in-memory job-store counts.
+- `backend`: runtime backend details, including LLM provider/client/model/health, repository workspace reuse behavior, and durable job-store counts.
 - `model`, `llm_backend`, `llm_provider`, and `llm`: compatibility fields with the configured or accepted LLM backend metadata.
 
 The configuration payload is intentionally sanitized. It does not return repository credentials, authenticated clone URLs, or raw component auth blocks from `repos.yaml`.
@@ -432,12 +435,14 @@ Important assessment payload capabilities:
 
 ### Async job capabilities
 
-Async jobs are held in memory inside the FastAPI process. That means:
+Async jobs are held in memory while active and synchronously checkpointed to a
+bounded SQLite store. That means:
 
-- Job state is not durable across process restarts.
-- `GET /jobs` only returns jobs owned by the caller identity in the current API instance.
+- Pending jobs resume after a restart. A previously running job is marked failed
+  as interrupted instead of being executed twice.
+- `GET /jobs` only returns jobs owned by the caller identity.
 - `GET /jobs` returns shared `configuration` and `backend` metadata once on the response envelope; individual jobs carry job-specific request, progress, log, and LLM metadata.
-- `DELETE /jobs/{job_id}` cancels a `pending` or `running` job, and removes a finished job from memory.
+- `DELETE /jobs/{job_id}` cancels a `pending` or `running` job, and removes a finished job from memory and SQLite.
 - `POST /jobs/{job_id}/compact` extracts bounded request, verdict, CVSS, evidence, and step-finding context from a completed job so clients can reuse it without replaying the full result.
 - `POST /jobs/{job_id}/follow-up` creates a new async job from that compact context and an analyst question. DTVP uses this path for follow-up vulnerability assessment questions. The rendered compact context is capped before it is embedded into model guidance.
 - `AGENTYZER_MAX_CONCURRENT_JOBS` bounds how many pipelines run at once. The default is `1`, matching the usual single-LLM-backend deployment. Raise it only when the configured model backend and repository workspace strategy can handle parallel scans.
@@ -503,7 +508,7 @@ Representative service configuration excerpt:
       "reuse_strategy": "stable directory per sanitized repository URL using the repo name and a SHA-256 URL hash"
     },
     "jobs": {
-      "job_store": "in_memory",
+      "job_store": "sqlite",
       "known_jobs": 0
     }
   }
@@ -702,7 +707,7 @@ with a 131072-token context can use `OPENWEBUI_CONTEXT_WINDOW=131072`.
 
 ## Parallel Project Runs And Workspace Reuse
 
-Multiple async jobs can be submitted to the FastAPI process. Accepted jobs are kept in the in-memory job store; at most `AGENTYZER_MAX_CONCURRENT_JOBS` pipelines run at the same time, and the rest stay `pending` until an execution slot opens. The default is `1` because DTVP's packaged deployment usually points Agentyzer at one LLM backend. Increase the value only when the model backend, CPU/disk resources, and repository workspace strategy can support parallel scans.
+Multiple async jobs can be submitted to the FastAPI process. Accepted jobs are checkpointed to SQLite; at most `AGENTYZER_MAX_CONCURRENT_JOBS` pipelines run at the same time, and the rest stay `pending` until an execution slot opens. The default is `1` because DTVP's packaged deployment usually points Agentyzer at one LLM backend. Increase the value only when the model backend, CPU/disk resources, and repository workspace strategy can support parallel scans.
 
 Inside one running pipeline, Agentyzer still exposes parallel branch visibility through `progress.active_agents` and `progress.step_statuses`; the pipeline graph can fan out into dependency/version and code/LLM branches after repository preparation.
 
@@ -830,7 +835,9 @@ uv run pytest --junitxml=test-reports/results.xml
 
 ## Notes And Constraints
 
-- Async jobs are process-local and not persisted.
+- Async jobs are persisted in bounded SQLite storage. Protect the containing
+  volume because request guidance, compact follow-up context, logs, and results
+  may contain sensitive code-analysis information.
 - LLM-backed stages depend on backend reachability; startup logs warn when the backend is unavailable.
 - The CLI does not perform scanning itself; it only calls the API.
 - `focus_path` is documented as an absolute path and is the safest way to assess an already checked-out repository.

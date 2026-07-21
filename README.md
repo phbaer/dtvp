@@ -176,6 +176,10 @@ Important frontend components:
   shared domain data. Analyzer queue snapshots are persisted in SQLite; queued
   work resumes after a restart, while work that was running is marked failed as
   interrupted so DTVP cannot accidentally submit a duplicate external scan.
+- Agentyzer stores owner-scoped async jobs in bounded SQLite storage on its
+  repository volume. Pending jobs resume after restart; running jobs are marked
+  interrupted. Terminal jobs default to seven-day retention and a 1,000-record
+  cap, and the database is created with owner-only permissions.
 - Authorization fails closed: a missing, unreadable, invalid, or incomplete
   `USER_ROLES_PATH` mapping assigns `ANALYST`. Only an explicit `REVIEWER`
   value grants reviewer permissions. Role-file uploads reject unknown roles.
@@ -193,9 +197,11 @@ Important frontend components:
   not expose force-overwrite to analysts.
 - Project dependency-chain reads require an authenticated DTVP session, like
   the other project and finding endpoints.
-- Live task registries are process-local; the supplied Uvicorn/PM2 launch uses
-  one backend worker. A horizontally scaled deployment needs a shared task and
-  result store before enabling multiple backend workers.
+- Grouping, archive, and live tmrescore task registries remain process-local;
+  the supplied Uvicorn/PM2 launch uses one backend worker. Analyzer queue and
+  Agentyzer job records are durable but their execution coordination is still
+  process-local. A horizontally scaled deployment needs shared coordination
+  before enabling multiple backend workers.
 - Startup status exists at `/startup` and `/api/startup`, in the static first
   paint, and in the Vue initialization view.
 
@@ -665,8 +671,8 @@ Deployment rules:
   mounts only for data, cloned repositories, and temporary files. Set
   `DTVP_RUNTIME_UID` and `DTVP_RUNTIME_GID` to the numeric owner of `./data`
   (for example, `id -u` and `id -g`) when it is not `1000:1000`.
-- Compose starts Agentyzer and persists cloned repositories in the
-  `agentyzer-repos` volume. Populate or override the sanitized
+- Compose starts Agentyzer and persists cloned repositories plus its bounded
+  async-job SQLite store in the `agentyzer-repos` volume. Populate or override the sanitized
   `agentyzer/config/repos.yaml` before enabling automatic scans; never commit
   repository credentials. Docker builds use an empty container-only repository
   map, so the mounted environment-specific file and local `.env` are not sent
@@ -831,6 +837,9 @@ means the integration or override is disabled.
 | `AGENTYZER_ADMIN_TOKEN_FILE` | File containing the admin token when the direct value is unset | unset |
 | `AGENTYZER_ALLOW_UNAUTHENTICATED` | Explicit local-only bypass; rejected in production | `false` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
+| `AGENTYZER_JOB_STORE_PATH` | Durable async-job SQLite store | Compose: `/app/repos/agentyzer_jobs.sqlite`; standalone: `repos/agentyzer_jobs.sqlite` |
+| `AGENTYZER_JOB_RETENTION_SECONDS` | Terminal-job retention; `0` disables age pruning | `604800` (7 days) |
+| `AGENTYZER_JOB_MAX_RECORDS` | Maximum records; active jobs are never pruned | `1000` |
 | `AGENTYZER_LLM_BACKEND` | `ollama` or `openwebui` | `ollama` |
 | `AGENTYZER_OLLAMA_HOST` / `AGENTYZER_OLLAMA_MODEL` | Ollama endpoint and model | `http://host.docker.internal:11434` / `mistral` |
 | `AGENTYZER_OPENWEBUI_HOST` / `AGENTYZER_OPENWEBUI_MODEL` | OpenWebUI endpoint and model | `http://host.docker.internal:3000` / `mistral` |
