@@ -1,8 +1,8 @@
-# Build arguments for Python version
-ARG PYTHON_VERSION=3.14
+# Override the complete reference only when intentionally updating the pinned base.
+ARG PYTHON_IMAGE=python:3.14-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
 
 # Stage 1: Build the frontend
-FROM node:lts-alpine AS frontend-build
+FROM node:lts-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS frontend-build
 
 # Baked into the bundle so a running tab can detect that the server has since
 # been redeployed with a different build (see lib/buildVersion.ts).
@@ -32,7 +32,7 @@ COPY data/rescore_rules.json /app/data/rescore_rules.json
 RUN npm run build
 
 # Stage 2: Build the backend and include frontend assets
-FROM python:${PYTHON_VERSION}-alpine
+FROM ${PYTHON_IMAGE}
 
 ARG BUILD_COMMIT=unknown
 ARG BUILD_NUMBER=unknown

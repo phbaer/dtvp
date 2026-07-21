@@ -45,6 +45,7 @@ def test_application_images_run_as_non_root_users():
     assert "USER 10001:10001" in dockerfile
     assert "USER 10001:10001" in agentyzer_dockerfile
     assert "ghcr.io/astral-sh/uv:latest" not in dockerfile
+    assert dockerfile.count("@sha256:") >= 3
     assert 'CMD ["/app/start.sh"]' in agentyzer_dockerfile
     assert "exec /app/.venv/bin/uvicorn" in agentyzer_start_script
     assert "type=secret,id=ca-certs" in dockerfile
