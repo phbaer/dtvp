@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import socket
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -13,7 +14,9 @@ from typing import (
 
 from fastapi import (
     APIRouter,
+    Depends,
     FastAPI,
+    HTTPException,
     Request,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -68,8 +71,15 @@ from .app_wiring import (
     build_tmrescore_route_deps,
     build_tmrescore_task_service_deps,
 )
-from .auth import auth_settings, get_current_user, validate_auth_configuration
+from .auth import (
+    SESSION_COOKIE_NAME,
+    auth_settings,
+    decode_session_token,
+    get_current_user,
+    validate_auth_configuration,
+)
 from .auth import router as auth_router
+from .authorization import require_reviewer
 from .auto_analysis_services import (
     AutoAnalysisSweepDeps,
     apply_auto_analysis_sweep_plan,
@@ -141,6 +151,25 @@ from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
 )
 from .settings_routes import create_settings_router
+from .request_security import (
+    UNSAFE_METHODS,
+    SlidingWindowRateLimiter,
+    allowed_hosts,
+    host_is_allowed,
+    origin_is_allowed,
+    rate_limit_for_request,
+    request_identity,
+    resolve_client_ip,
+    trusted_request_id,
+)
+from .security_audit import (
+    AuditRequestContext,
+    audit_health,
+    emit_security_audit,
+    reset_audit_request_context,
+    set_audit_request_context,
+    validate_security_audit_configuration,
+)
 from .security_headers import add_security_headers
 from .startup_services import (
     StartupRuntimeTasks,
@@ -270,6 +299,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     validate_auth_configuration()
     validate_code_analysis_configuration()
     validate_dependency_track_configuration()
+    validate_security_audit_configuration()
     _runtime_tasks = None
     _startup_task = asyncio.create_task(_initialize_application_runtime())
     try:
@@ -309,16 +339,151 @@ origins = build_cors_origins(
     os.getenv("DTVP_CORS_ORIGINS"),
     socket.gethostname,
 )
+hosts = allowed_hosts(
+    frontend_url=auth_settings.FRONTEND_URL,
+    production=auth_settings.is_production,
+)
+request_rate_limiter = SlidingWindowRateLimiter()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "X-Request-ID",
+    ],
 )
 
 context_path = normalize_context_path(auth_settings.CONTEXT_PATH)
+
+
+def _request_actor(request: Request) -> tuple[str, str]:
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if not token:
+        return "anonymous", "UNAUTHENTICATED"
+    try:
+        payload = decode_session_token(token)
+        username = str(payload.get("username") or "").strip()
+        if username:
+            return username, str(get_user_role(username)).upper()
+    except Exception:
+        pass
+    return "anonymous", "UNAUTHENTICATED"
+
+
+def _security_denial(
+    *,
+    request_id: str,
+    status_code: int,
+    detail: str,
+    retry_after: int | None = None,
+) -> JSONResponse:
+    headers = {"X-Request-ID": request_id, "Cache-Control": "no-store"}
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    response = JSONResponse({"detail": detail}, status_code=status_code, headers=headers)
+    add_security_headers(response, production=auth_settings.is_production)
+    return response
+
+
+@app.middleware("http")
+async def security_request_boundary(request: Request, call_next):
+    request_id = trusted_request_id(request.headers.get("x-request-id")) or str(
+        uuid.uuid4()
+    )
+    remote_ip = resolve_client_ip(request)
+    actor, role = _request_actor(request)
+    context_token = set_audit_request_context(
+        AuditRequestContext(
+            request_id=request_id,
+            actor=actor,
+            role=role,
+            remote_ip=remote_ip,
+        )
+    )
+    try:
+        hostname = request.url.hostname or ""
+        if not host_is_allowed(hostname, hosts):
+            emit_security_audit(
+                "http.host_validation",
+                outcome="denied",
+                details={"host": hostname},
+            )
+            return _security_denial(
+                request_id=request_id,
+                status_code=400,
+                detail="Invalid host header",
+            )
+
+        if request.method.upper() in UNSAFE_METHODS:
+            origin = request.headers.get("origin")
+            fetch_site = request.headers.get("sec-fetch-site", "").lower()
+            cookie_authenticated = SESSION_COOKIE_NAME in request.cookies
+            if (
+                fetch_site == "cross-site"
+                or (cookie_authenticated and origin is None)
+                or (origin is not None and not origin_is_allowed(origin, origins))
+            ):
+                emit_security_audit(
+                    "http.origin_validation",
+                    outcome="denied",
+                    details={"origin": origin or "", "fetch_site": fetch_site},
+                )
+                return _security_denial(
+                    request_id=request_id,
+                    status_code=403,
+                    detail="Cross-origin state change rejected",
+                )
+
+        limit = rate_limit_for_request(request)
+        if limit:
+            scope, count, window = limit
+            identity = request_identity(request, remote_ip, SESSION_COOKIE_NAME)
+            decision = request_rate_limiter.check(
+                scope,
+                identity,
+                limit=count,
+                window_seconds=window,
+            )
+            if not decision.allowed:
+                emit_security_audit(
+                    "http.rate_limit",
+                    outcome="denied",
+                    details={"scope": scope, "path": request.url.path},
+                )
+                return _security_denial(
+                    request_id=request_id,
+                    status_code=429,
+                    detail="Request rate limit exceeded",
+                    retry_after=decision.retry_after,
+                )
+
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        if request.method.upper() in UNSAFE_METHODS:
+            route = request.scope.get("route")
+            resource_id = getattr(route, "path", request.url.path)
+            status_code = response.status_code
+            outcome = (
+                "success"
+                if status_code < 400
+                else "denied"
+                if status_code in {401, 403, 404}
+                else "failure"
+            )
+            emit_security_audit(
+                f"http.{request.method.lower()}",
+                outcome=outcome,
+                resource_id=resource_id,
+                details={"status_code": status_code, "path": request.url.path},
+            )
+        return response
+    finally:
+        reset_audit_request_context(context_token)
 
 
 @app.middleware("http")
@@ -355,6 +520,28 @@ app.include_router(auth_router, prefix=context_path)
 
 # API Router
 api_router = APIRouter(prefix="/api", tags=["api"])
+
+
+@api_router.get("/security/health", include_in_schema=False)
+async def security_health(user: str = Depends(get_current_user)):
+    try:
+        require_reviewer(get_user_role(user))
+    except HTTPException:
+        emit_security_audit(
+            "security.health.read",
+            outcome="denied",
+            resource_type="security_status",
+        )
+        raise
+    return {
+        "security_audit": audit_health(),
+        "rate_limits": {
+            "window_seconds": int(os.getenv("DTVP_RATE_LIMIT_WINDOW_SECONDS", "60")),
+            "authentication": int(os.getenv("DTVP_AUTH_RATE_LIMIT", "30")),
+            "expensive": int(os.getenv("DTVP_EXPENSIVE_RATE_LIMIT", "20")),
+            "mutation": int(os.getenv("DTVP_MUTATION_RATE_LIMIT", "120")),
+        },
+    }
 
 
 @app.get(_path_with_context("/startup"), include_in_schema=False)
@@ -533,6 +720,7 @@ api_router.include_router(
             frontend_sbom_filename=FRONTEND_SBOM_FILENAME,
             html_sbom_filename=HTML_SBOM_FILENAME,
             media_type_json=MEDIA_TYPE_JSON,
+            additional_health=lambda: {"security_audit": audit_health()},
         ),
         not_found_response=NOT_FOUND_RESPONSE,
     )

@@ -17,6 +17,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .authorization import Principal, normalize_role
+from .security_audit import emit_security_audit
 from .logic import get_user_role
 
 logger = logging.getLogger(__name__)
@@ -505,6 +506,7 @@ async def login():
         value=transaction,
         max_age=auth_settings.OIDC_TRANSACTION_TTL_SECONDS,
     )
+    emit_security_audit("auth.login.start", outcome="success")
     return response
 
 
@@ -512,6 +514,11 @@ async def login():
 async def callback(request: Request, code: str, state: str):
     transaction_token = request.cookies.get(OIDC_TRANSACTION_COOKIE_NAME)
     if not transaction_token:
+        emit_security_audit(
+            "auth.login.callback",
+            outcome="denied",
+            details={"reason": "missing_transaction"},
+        )
         raise HTTPException(status_code=400, detail="Login transaction is missing")
     try:
         transaction = _decode_transaction(transaction_token)
@@ -519,6 +526,11 @@ async def callback(request: Request, code: str, state: str):
             raise JWTError("OIDC state mismatch")
     except JWTError as exc:
         logger.info("Rejected invalid OIDC transaction: %s", exc)
+        emit_security_audit(
+            "auth.login.callback",
+            outcome="denied",
+            details={"reason": "invalid_transaction"},
+        )
         raise HTTPException(status_code=400, detail="Login transaction is invalid") from exc
 
     config = await get_oidc_config()
@@ -539,6 +551,11 @@ async def callback(request: Request, code: str, state: str):
             token_data = token_response.json()
     except (httpx.HTTPError, ValueError) as exc:
         logger.info("OIDC token exchange failed: %s", exc)
+        emit_security_audit(
+            "auth.login.callback",
+            outcome="failure",
+            details={"reason": "token_exchange"},
+        )
         raise HTTPException(status_code=400, detail="Authentication failed") from exc
 
     try:
@@ -550,6 +567,11 @@ async def callback(request: Request, code: str, state: str):
         )
     except (JWTError, HTTPException) as exc:
         logger.info("OIDC ID token validation failed: %s", exc)
+        emit_security_audit(
+            "auth.login.callback",
+            outcome="denied",
+            details={"reason": "token_validation"},
+        )
         if isinstance(exc, HTTPException) and exc.status_code == 503:
             raise
         raise HTTPException(status_code=400, detail="Authentication failed") from exc
@@ -559,6 +581,11 @@ async def callback(request: Request, code: str, state: str):
         claims.get("preferred_username") or claims.get("email") or subject
     ).strip()
     if not subject or not username:
+        emit_security_audit(
+            "auth.login.callback",
+            outcome="denied",
+            details={"reason": "missing_identity"},
+        )
         raise HTTPException(status_code=400, detail="Authentication failed")
 
     session_token = create_session_token(subject=subject, username=username)
@@ -570,11 +597,18 @@ async def callback(request: Request, code: str, state: str):
         max_age=auth_settings.SESSION_TTL_SECONDS,
     )
     _delete_auth_cookie(response, OIDC_TRANSACTION_COOKIE_NAME)
+    emit_security_audit(
+        "auth.login.callback",
+        outcome="success",
+        resource_type="user",
+        resource_id=username,
+    )
     return response
 
 
 @router.post("/logout")
 async def logout(response: Response):
+    emit_security_audit("auth.logout", outcome="success")
     _delete_auth_cookie(response, SESSION_COOKIE_NAME)
     _delete_auth_cookie(response, OIDC_TRANSACTION_COOKIE_NAME)
     return {"status": "logged_out"}
@@ -602,6 +636,7 @@ async def get_current_principal(request: Request) -> Principal:
         except JWTError as exc:
             logger.debug("Failed to decode DTVP session: %s", exc)
 
+    emit_security_audit("auth.session", outcome="denied")
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 

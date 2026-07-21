@@ -29,10 +29,16 @@ def reset_cache_manager(tmp_path, monkeypatch):
     monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
     monkeypatch.setenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", str(analysis_results_path))
     monkeypatch.setenv("DTVP_ANALYSIS_QUEUE_STATE_PATH", str(analysis_queue_path))
+    monkeypatch.setenv(
+        "DTVP_SECURITY_AUDIT_PATH",
+        str(tmp_path / "security_audit.jsonl"),
+    )
     dt_cache.cache_manager.reset(str(cache_dir))
     main.code_analysis_result_store.reset()
+    main.request_rate_limiter.reset()
     yield
     main.code_analysis_result_store.reset()
+    main.request_rate_limiter.reset()
 
 
 # Mock Dependency Track Client

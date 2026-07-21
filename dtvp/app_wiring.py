@@ -464,12 +464,19 @@ def build_app_info_route_deps(
     frontend_sbom_filename: str,
     html_sbom_filename: str,
     media_type_json: str,
+    additional_health: Callable[[], dict[str, Any]] | None = None,
 ) -> AppInfoRouteDeps:
+    def get_cache_status() -> dict[str, Any]:
+        status = dict(cache_manager.get_cache_status())
+        if additional_health is not None:
+            status.update(additional_health())
+        return status
+
     return AppInfoRouteDeps(
         version=version,
         build_commit=build_commit,
         load_pyproject_metadata=load_pyproject_metadata,
-        get_cache_status=lambda: cache_manager.get_cache_status(),
+        get_cache_status=get_cache_status,
         load_changelog_content=load_changelog_content,
         get_sbom_path=get_sbom_path,
         read_text=read_text,
