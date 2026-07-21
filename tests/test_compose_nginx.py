@@ -71,13 +71,14 @@ def test_compose_secret_overlays_keep_credentials_out_of_service_environment():
     import_overlay = (ROOT / "compose.archive-import-secret.yml").read_text()
 
     assert "POSTGRES_PASSWORD_FILE: /run/secrets/dtrack_database_password" in overlay
-    assert "ALPINE_DATABASE_PASSWORD_FILE: /run/secrets/dtrack_database_password" in overlay
+    assert "DTRACK_DATABASE_PASSWORD_FILE: /run/secrets/dtrack_database_password" in overlay
+    assert 'export ALPINE_DATABASE_PASSWORD="$$(cat' in overlay
+    assert "exec java $${JAVA_OPTIONS} $${EXTRA_JAVA_OPTIONS}" in overlay
     assert "DTVP_DT_API_KEY_FILE: /run/secrets/dtvp_dt_api_key" in overlay
     assert "DTVP_SESSION_SECRET_KEY_FILE: /run/secrets/dtvp_session_secret_key" in overlay
     assert "AGENTYZER_SERVICE_TOKEN_FILE: /run/secrets/agentyzer_service_token" in overlay
     assert "environment: DTRACK_DB_PASSWORD" in overlay
     assert "environment: DTVP_DT_IMPORT_API_KEY" in import_overlay
-    assert "exec java" not in overlay
 
 
 def test_agentyzer_and_archive_credentials_are_not_exposed_by_default():
