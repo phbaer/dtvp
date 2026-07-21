@@ -51,7 +51,10 @@ services:
     environment:
       DTVP_ENVIRONMENT: ${DTVP_ENVIRONMENT:-production}
       DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}
-      DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-change_me} # Generate this in Dependency-Track and update it.
+      DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-}
+      DTVP_DT_API_KEY_FILE: ${DTVP_DT_API_KEY_FILE:-}
+      DTVP_DT_IMPORT_API_KEY: ${DTVP_DT_IMPORT_API_KEY:-}
+      DTVP_DT_IMPORT_API_KEY_FILE: ${DTVP_DT_IMPORT_API_KEY_FILE:-}
       DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
       DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Callable, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -143,18 +143,6 @@ def _archive_http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(exc))
 
 
-def _client_context_from_request(
-    deps: ProjectArchiveRouteDeps,
-    request: Request,
-) -> tuple[Any, str | None, dict[str, str]]:
-    settings = deps.dt_settings_cls()
-    token = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-    return settings, token, dict(request.cookies)
-
-
 def _register_task_routes(
     router: APIRouter,
     deps: ProjectArchiveRouteDeps,
@@ -227,7 +215,6 @@ def _register_export_routes(
     @router.post("/project-archives/exports")
     async def start_project_archive_export(
         req: ProjectArchiveExportRequest,
-        request: Request,
         user: CurrentUser,
     ):
         _require_reviewer(deps, user)
@@ -237,7 +224,7 @@ def _register_export_routes(
             message=f"Queued export for {req.project_name}",
             user=user,
         )
-        settings, token, cookies = _client_context_from_request(deps, request)
+        settings = deps.dt_settings_cls()
 
         async def run_export():
             _update_task(
@@ -251,8 +238,6 @@ def _register_export_routes(
                 async with client_cls(
                     settings.api_url,
                     api_key=settings.api_key,
-                    token=token or "",
-                    cookies=cookies,
                 ) as client:
                     result = await export_project_archive(
                         deps.service_deps,
@@ -295,7 +280,6 @@ def _register_import_routes(
     @router.post("/project-archives/imports")
     async def upload_project_archive_import(
         file: Annotated[UploadFile, File(...)],
-        request: Request,
         user: CurrentUser,
     ):
         _require_reviewer(deps, user)
@@ -324,7 +308,7 @@ def _register_import_routes(
             raise _archive_http_error(exc) from exc
 
         task["_archive_path"] = archive_path
-        settings, token, cookies = _client_context_from_request(deps, request)
+        settings = deps.dt_settings_cls()
 
         async def run_preview():
             _update_task(
@@ -338,8 +322,6 @@ def _register_import_routes(
                 async with client_cls(
                     settings.api_url,
                     api_key=settings.api_key,
-                    token=token or "",
-                    cookies=cookies,
                 ) as client:
                     preview = await preview_project_archive(
                         deps.service_deps,
@@ -370,7 +352,6 @@ def _register_import_routes(
     async def apply_project_archive_import(
         task_id: str,
         req: ProjectArchiveApplyRequest,
-        request: Request,
         user: CurrentUser,
     ):
         _require_reviewer(deps, user)
@@ -382,6 +363,15 @@ def _register_import_routes(
         archive_path = task.get("_archive_path")
         if not archive_path:
             raise HTTPException(status_code=409, detail="No uploaded archive to apply")
+        settings = deps.dt_settings_cls()
+        if not settings.import_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "A dedicated Dependency-Track archive-import credential is "
+                    "not configured"
+                ),
+            )
 
         task["_preview_result"] = task.get("result")
         task["kind"] = "import_apply"
@@ -392,8 +382,6 @@ def _register_import_routes(
             message=f"Queued project archive import apply ({req.mode}).",
             progress=0,
         )
-        settings, token, cookies = _client_context_from_request(deps, request)
-
         async def run_apply():
             _update_task(
                 task,
@@ -405,9 +393,7 @@ def _register_import_routes(
                 client_cls = deps.get_dt_client_cls()
                 async with client_cls(
                     settings.api_url,
-                    api_key=settings.api_key,
-                    token=token or "",
-                    cookies=cookies,
+                    api_key=settings.import_api_key,
                 ) as client:
                     result = await apply_project_archive(
                         deps.service_deps,

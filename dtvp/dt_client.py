@@ -1,34 +1,62 @@
-import httpx
 import asyncio
-import os
-import logging
 import json
-from typing import List, Dict, Any, Optional, AsyncGenerator
-from fastapi import Request
+import logging
+import os
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
+import httpx
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .integration_auth import read_secret
+from .vulnerability_backend import (
+    BackendCapability,
+    BackendDescriptor,
+)
+
 logger = logging.getLogger(__name__)
 
+
 class DTClient:
+    """Dependency-Track adapter for the vendor-neutral backend contract."""
+
+    DEFAULT_CAPABILITIES = frozenset(
+        {
+            BackendCapability.PROJECT_SEARCH,
+            BackendCapability.FINDING_READ,
+            BackendCapability.SBOM_READ,
+            BackendCapability.ASSESSMENT_READ,
+            BackendCapability.ASSESSMENT_WRITE,
+            BackendCapability.SBOM_UPLOAD,
+            BackendCapability.PROJECT_CREATE,
+            BackendCapability.DEPENDENCY_GRAPH,
+            BackendCapability.AUDIT_HISTORY,
+            BackendCapability.VEX_EXCHANGE,
+        }
+    )
+
     def __init__(
         self,
         base_url: str,
         api_key: str = None,
-        token: str = None,
-        cookies: dict = None,
+        *,
+        backend_id: str = "dependency-track",
+        label: str = "Dependency-Track",
     ):
         self.base_url = base_url.rstrip("/")
+        self.descriptor = BackendDescriptor(
+            id=backend_id,
+            type="dependency-track",
+            label=label,
+            capabilities=self.DEFAULT_CAPABILITIES,
+        )
         self.headers = {"Accept": "application/json"}
         if api_key:
             self.headers["X-Api-Key"] = api_key
-        if token:
-            self.headers["Authorization"] = f"Bearer {token}"
 
         # Create a persistent client with increased timeout and connection limits
         self.client = httpx.AsyncClient(
             headers=self.headers,
-            cookies=cookies,
             timeout=60.0,
             limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
         )
@@ -359,9 +387,17 @@ class DTSettings(BaseSettings):
     DTVP_DT_API_URL: str = Field(
         alias="DTVP_DT_API_URL", default="http://localhost:8081"
     )
-    DTVP_DT_API_KEY: str = Field(alias="DTVP_DT_API_KEY", default="change_me")
+    DTVP_DT_API_KEY: str = Field(alias="DTVP_DT_API_KEY", default="")
     DTVP_DT_API_KEY_FILE: Optional[str] = Field(
         alias="DTVP_DT_API_KEY_FILE", default=None
+    )
+    DTVP_DT_IMPORT_API_KEY: str = Field(
+        alias="DTVP_DT_IMPORT_API_KEY",
+        default="",
+    )
+    DTVP_DT_IMPORT_API_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_DT_IMPORT_API_KEY_FILE",
+        default=None,
     )
 
     # Support aliases from the deployment compose file
@@ -381,20 +417,44 @@ class DTSettings(BaseSettings):
 
     @property
     def api_key(self) -> str:
-        # Priority: DTVP_DT_API_KEY > DTVP_DT_API_KEY_FILE > DEPENDENCY_TRACK_API_KEY > default
-        key = self.DTVP_DT_API_KEY
-        if key == "change_me" and self.DTVP_DT_API_KEY_FILE:
-            if os.path.exists(self.DTVP_DT_API_KEY_FILE):
-                with open(self.DTVP_DT_API_KEY_FILE, "r") as f:
-                    key = f.read().strip()
+        # Direct values remain supported for local use; production Compose
+        # mounts secret files so credentials are absent from container metadata.
+        direct = str(self.DTVP_DT_API_KEY or "").strip()
+        if direct.lower() in {"change_me", "changeme", "changeit"}:
+            direct = ""
+        return read_secret(direct, self.DTVP_DT_API_KEY_FILE) or str(
+            self.DEPENDENCY_TRACK_API_KEY or ""
+        ).strip()
 
-        if key == "change_me":
-            key = self.DEPENDENCY_TRACK_API_KEY or "change_me"
+    @property
+    def import_api_key(self) -> str:
+        return read_secret(
+            self.DTVP_DT_IMPORT_API_KEY,
+            self.DTVP_DT_IMPORT_API_KEY_FILE,
+        )
 
-        return key
+
+def validate_dependency_track_configuration(
+    settings: DTSettings | None = None,
+    *,
+    environment: str | None = None,
+) -> None:
+    active = settings or DTSettings()
+    profile = (environment or os.getenv("DTVP_ENVIRONMENT", "production")).lower()
+    if profile != "production":
+        return
+    key = active.api_key
+    if not key or key.lower() in {"change_me", "changeme", "changeit"}:
+        raise RuntimeError(
+            "DTVP_DT_API_KEY or DTVP_DT_API_KEY_FILE is required in production"
+        )
+    if len(key) < 16:
+        raise RuntimeError(
+            "The production Dependency-Track service API key is unexpectedly short"
+        )
 
 
-async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
+async def get_client() -> AsyncGenerator[DTClient, None]:
     settings = DTSettings()
 
     async with DTClient(settings.api_url, api_key=settings.api_key) as client:

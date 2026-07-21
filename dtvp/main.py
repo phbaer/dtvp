@@ -88,7 +88,12 @@ from .code_analysis_integration import (
 from .code_analysis_result_services import CodeAnalysisResultStore
 from .code_analysis_routes import create_code_analysis_router
 from .dt_cache import CacheManager, cache_manager
-from .dt_client import DTClient, DTSettings, get_client
+from .dt_client import (
+    DTClient,
+    DTSettings,
+    get_client,
+    validate_dependency_track_configuration,
+)
 from .file_io_services import read_text as read_text_impl
 from .file_io_services import (
     write_and_validate_json_bytes as write_and_validate_json_bytes_impl,
@@ -264,6 +269,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global _runtime_tasks, _startup_task
     validate_auth_configuration()
     validate_code_analysis_configuration()
+    validate_dependency_track_configuration()
     _runtime_tasks = None
     _startup_task = asyncio.create_task(_initialize_application_runtime())
     try:

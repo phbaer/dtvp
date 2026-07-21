@@ -15,6 +15,7 @@ os.environ["DTVP_FRONTEND_URL"] = "http://localhost:8000"
 os.environ["DTVP_SESSION_SECRET_KEY"] = (
     "test-only-session-secret-that-is-long-enough-1234567890"
 )
+os.environ["DTVP_DT_IMPORT_API_KEY"] = "test-import-key"
 
 from dtvp import dt_cache, main
 from dtvp.dt_client import DTClient

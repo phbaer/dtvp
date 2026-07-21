@@ -115,7 +115,8 @@ The generic project skill is `skills/project-entrypoint/SKILL.md`;
 Browser
   -> Vue SPA (Vite in development, FastAPI/nginx in production)
   -> FastAPI backend
-  -> Dependency-Track API + local cache
+  -> vulnerability-backend adapter + backend-scoped local cache
+     -> Dependency-Track today; capability contract for Cybeats/other vendors
   -> optional tmrescore and code-analysis services
 ```
 
@@ -132,7 +133,7 @@ Important backend components:
 | `dtvp/logic.py` | Grouping, ownership, assessment parsing, CVSS, statistics, and dependency analysis |
 | `dtvp/assessment_*` and `rescore_rule_services.py` | Assessment writes, conflict handling, metadata recovery, and CVSS rules |
 | `dtvp/bulk_workflows/` | Registry-backed bulk-change plug-ins |
-| `dtvp/dt_client.py` and `dt_cache.py` | Dependency-Track access, cached data, overlays, and pending writes |
+| `dtvp/vulnerability_backend.py`, `dt_client.py`, and `dt_cache.py` | Vendor-neutral capabilities/resource references, Dependency-Track adapter, cached data, overlays, and pending writes |
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
 | `dtvp/tmrescore_*` | Threat-model integration, inventory, cache, execution, and task state |
 | `dtvp/code_analysis_*` and `analysis_queue_*` | Analyzer integration, result store, queue, and automatic scans |
@@ -692,7 +693,15 @@ Deployment rules:
 - If proxies are configured, list exact internal hostnames/IPs in `NO_PROXY`;
   do not rely only on CIDR entries.
 - DTVP OIDC is independent of Dependency-Track browser sessions. Backend calls
-  use `DTVP_DT_API_KEY` and never forward browser credentials.
+  use `DTVP_DT_API_KEY` and never forward browser credentials, authorization
+  headers, or session cookies. Use a single-purpose Dependency-Track team with
+  only portfolio/finding read and vulnerability-analysis permissions, plus
+  Portfolio Access Control where available. Archive apply uses a separate
+  importer team credential so normal review traffic does not carry BOM-upload
+  or project-creation privilege. Dependency-Track may share DTVP's external
+  OIDC provider, but DTVP intentionally uses service credentials for durable
+  background work and records the human actor in its own authorization/audit
+  boundary.
 - OIDC login uses authorization code with PKCE, state, nonce, discovery issuer
   validation, JWKS signature verification, and expiring DTVP session cookies.
   Changing the session key invalidates existing sessions and requires users to
@@ -714,7 +723,8 @@ Deployment rules:
   archives, so the same controls remain active when port `8000` is exposed
   directly.
 
-Archive imports require read, BOM upload, and vulnerability-analysis update
+Archive imports require a dedicated `DTVP_DT_IMPORT_API_KEY` with read, BOM
+upload, project-creation when needed, and vulnerability-analysis update
 permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
 are controlled by the archive variables below. The optional
 `dtvp-archive-git-push` Compose job pushes an expanded tree; schedule it with
@@ -730,8 +740,10 @@ means the integration or override is disabled.
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
 | `DTVP_DT_API_URL` | Dependency-Track API base URL | `http://localhost:8081`; Compose: `http://dtrack-apiserver:8080` |
-| `DTVP_DT_API_KEY` | Dependency-Track API key | `change_me` |
+| `DTVP_DT_API_KEY` | Least-privilege Dependency-Track review service-team API key; required in production | unset |
 | `DTVP_DT_API_KEY_FILE` | API-key file used when the direct value is unset | unset |
+| `DTVP_DT_IMPORT_API_KEY` | Separate Dependency-Track archive-import team key | unset; archive apply unavailable |
+| `DTVP_DT_IMPORT_API_KEY_FILE` | Archive-import key file used when the direct value is unset | unset |
 | `DEPENDENCY_TRACK_URL` / `DEPENDENCY_TRACK_API_KEY` | Deployment aliases | unset |
 | `DTVP_DT_CACHE_PATH` | Dependency-Track cache and pending update queue | `data/dt_cache` |
 | `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
