@@ -30,7 +30,7 @@ ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT
 WORKDIR /app
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.9@sha256:6b6fa841d71a48fbc9e2c55651c5ad570e01104d7a7d701f57b2b22c0f58e9b1 /uv /bin/uv
 
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
@@ -49,6 +49,17 @@ RUN chmod +x start.sh
 
 # Copy the built frontend from the frontend-build stage
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
+
+# Run the service without root privileges. Compose can override this UID/GID
+# to match the owner of its bind-mounted data directory.
+RUN addgroup -S -g 10001 dtvp \
+    && adduser -S -D -H -u 10001 -G dtvp dtvp \
+    && mkdir -p /app/data \
+    && chown -R 10001:10001 /app/data
+ENV HOME=/tmp \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+USER 10001:10001
 
 # Expose the port
 EXPOSE 8000

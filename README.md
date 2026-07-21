@@ -639,12 +639,18 @@ AGENTYZER_ADMIN_TOKEN=<a third random value from openssl rand -hex 32>
 Deployment rules:
 
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
-  archives survive container restarts.
+  archives survive container restarts. DTVP and Agentyzer run as non-root
+  users with read-only root filesystems, no Linux capabilities, and writable
+  mounts only for data, cloned repositories, and temporary files. Set
+  `DTVP_RUNTIME_UID` and `DTVP_RUNTIME_GID` to the numeric owner of `./data`
+  (for example, `id -u` and `id -g`) when it is not `1000:1000`.
 - Compose starts Agentyzer and persists cloned repositories in the
   `agentyzer-repos` volume. Populate or override the sanitized
   `agentyzer/config/repos.yaml` before enabling automatic scans; never commit
-  repository credentials. Its host port binds to loopback, and every API route
-  requires a bearer token. DTVP forwards the authenticated username as
+  repository credentials. Docker builds use an empty container-only repository
+  map, so the mounted environment-specific file and local `.env` are not sent
+  in either application build context. Its host port binds to loopback, and
+  every API route requires a bearer token. DTVP forwards the authenticated username as
   a trusted owner identity; Agentyzer lists, reads, follows up, cancels, and
   deletes only that owner's jobs. DTVP reviewer-wide status requests explicitly
   use a separate admin credential and the trusted service-wide owner scope.
@@ -728,6 +734,7 @@ means the integration or override is disabled.
 | `DTVP_FRONTEND_URL` | Public frontend base URL | `http://localhost:8000` |
 | `DTVP_CONTEXT_PATH` | Application mount path | app `/`; Compose `/dtvp` |
 | `DTVP_HTTP_PORT` | Compose nginx host port | `80` |
+| `DTVP_RUNTIME_UID` / `DTVP_RUNTIME_GID` | Non-root DTVP process and `./data` owner IDs | `1000` / `1000` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
 | `DTVP_CORS_ORIGINS` | Additional comma-separated CORS origins | unset |
 | `DTVP_API_URL` | Frontend API base override; Vite alias `VITE_DTVP_API_URL` | empty |

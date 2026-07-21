@@ -20,3 +20,32 @@ def test_runtime_config_is_not_interpolated_by_the_shell():
     assert 'exec /app/.venv/bin/uvicorn dtvp.boot:app' in start_script
     assert '<script src="/runtime-config.js"></script>' in index_html
     assert "window.__env__ =" not in index_html
+
+
+def test_application_images_run_as_non_root_users():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    agentyzer_dockerfile = (ROOT / "agentyzer" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "USER 10001:10001" in dockerfile
+    assert "USER 10001:10001" in agentyzer_dockerfile
+    assert "ghcr.io/astral-sh/uv:latest" not in dockerfile
+    assert 'CMD ["/app/.venv/bin/uvicorn"' in agentyzer_dockerfile
+
+
+def test_docker_contexts_exclude_runtime_secrets_and_repository_metadata():
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    agentyzer_dockerignore = (ROOT / "agentyzer" / ".dockerignore").read_text(
+        encoding="utf-8"
+    )
+    agentyzer_dockerfile = (ROOT / "agentyzer" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert dockerignore.startswith("**\n")
+    assert "!.env" not in dockerignore
+    assert "!.git" not in dockerignore
+    assert agentyzer_dockerignore.startswith("**\n")
+    assert "!config/repos.yaml" not in agentyzer_dockerignore
+    assert "COPY config/repos.container.yaml ./config/repos.yaml" in agentyzer_dockerfile

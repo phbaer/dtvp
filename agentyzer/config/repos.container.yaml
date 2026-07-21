@@ -1,0 +1,3 @@
+# Images ship without environment-specific repository mappings or credentials.
+# Mount config/repos.yaml at runtime to configure component repositories.
+components: {}

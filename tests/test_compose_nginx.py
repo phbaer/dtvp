@@ -25,3 +25,12 @@ def test_compose_uses_dependency_track_internal_api_port():
     assert "proxy_pass http://dtrack-apiserver:8080/api/;" in template
     assert "dtrack-apiserver:8081" not in compose
     assert "dtrack-apiserver:8081" not in template
+
+
+def test_compose_hardens_application_containers():
+    compose = (ROOT / "compose.yml").read_text()
+
+    assert 'user: "${DTVP_RUNTIME_UID:-1000}:${DTVP_RUNTIME_GID:-1000}"' in compose
+    assert compose.count("read_only: true") >= 2
+    assert compose.count("no-new-privileges:true") >= 2
+    assert compose.count("cap_drop:") >= 2
