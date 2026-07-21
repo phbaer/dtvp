@@ -26,7 +26,7 @@ import re
 import socket
 from html.parser import HTMLParser
 from typing import Any, Dict, List
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import parse_qs, quote, quote_plus, urljoin, urlparse
 
 from src.http import async_client
 from src.llm.prompt_registry import get_prompt_value
@@ -45,6 +45,7 @@ _MAX_TEXT_CHARS = 12_000
 MAX_FETCHES_PER_TURN = 3
 # Maximum total fetch rounds (LLM → fetch → LLM → fetch → …).
 MAX_RESEARCH_ROUNDS = 2
+_MAX_REDIRECTS = 3
 
 _RESEARCH_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
@@ -140,7 +141,7 @@ _BLOCKED_HOSTS = {
     "localhost",
     "127.0.0.1",
     "0.0.0.0",
-    "[::1]",
+    "::1",
     "metadata.google.internal",
 }
 
@@ -152,28 +153,48 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
     except Exception:
         return False, "invalid URL"
 
-    if parsed.scheme not in ("https", "http"):
+    if parsed.scheme != "https":
         return False, f"scheme '{parsed.scheme}' not allowed (use https)"
 
-    host = parsed.hostname or ""
+    if parsed.username is not None or parsed.password is not None:
+        return False, "URL credentials are not allowed"
+
+    try:
+        if parsed.port not in {None, 443}:
+            return False, "only the default HTTPS port is allowed"
+    except ValueError:
+        return False, "invalid port"
+
+    host = (parsed.hostname or "").casefold().rstrip(".")
     if not host:
         return False, "no hostname"
 
     if host in _BLOCKED_HOSTS:
         return False, f"blocked host: {host}"
 
-    # Resolve and check for private IPs
     try:
+        literal_ip = ipaddress.ip_address(host)
+    except ValueError:
+        literal_ip = None
+    if literal_ip is not None and not literal_ip.is_global:
+        return False, f"non-public IP address: {literal_ip}"
+
+    # Resolve every address family and reject the host if any answer is not
+    # globally routable. This also blocks mixed public/private DNS responses.
+    try:
+        resolved_any = False
         for info in socket.getaddrinfo(
             host, None, socket.AF_UNSPEC, socket.SOCK_STREAM
         ):
+            resolved_any = True
             addr = info[4][0]
             ip = ipaddress.ip_address(addr)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                return False, f"resolved to private/reserved IP: {addr}"
-    except socket.gaierror:
-        # Can't resolve — allow the fetch to fail naturally
-        pass
+            if not ip.is_global:
+                return False, f"resolved to non-public IP: {addr}"
+        if not resolved_any:
+            return False, "hostname did not resolve"
+    except (socket.gaierror, OSError, ValueError):
+        return False, "hostname did not resolve to a public address"
 
     return True, "ok"
 
@@ -226,42 +247,101 @@ async def fetch_url(url: str) -> Dict[str, Any]:
 
     Returns ``{"url": str, "ok": bool, "text": str, "error": str | None}``.
     """
-    safe, reason = _is_safe_url(url)
-    if not safe:
-        logger.warning("[web_research] Blocked unsafe URL %s: %s", url, reason)
-        return {"url": url, "ok": False, "text": "", "error": f"Blocked: {reason}"}
-
     logger.info("[web_research] Fetching %s", url)
     try:
         async with async_client(timeout=15) as client:
-            r = await client.get(
-                url,
-                follow_redirects=True,
-                headers={
-                    "User-Agent": "agentyzer/1.0 (vulnerability-analysis-bot)",
-                    "Accept": "text/html, application/json, text/plain",
-                },
-            )
-            if r.status_code >= 400:
-                return {
-                    "url": url,
-                    "ok": False,
-                    "text": "",
-                    "error": f"HTTP {r.status_code}",
-                }
+            current_url = url
+            for redirect_count in range(_MAX_REDIRECTS + 1):
+                safe, reason = _is_safe_url(current_url)
+                if not safe:
+                    logger.warning(
+                        "[web_research] Blocked unsafe URL %s: %s",
+                        current_url,
+                        reason,
+                    )
+                    return {
+                        "url": url,
+                        "ok": False,
+                        "text": "",
+                        "error": f"Blocked: {reason}",
+                    }
 
-            content_type = r.headers.get("content-type", "")
-            body = r.text[:_MAX_RESPONSE_BYTES]
+                async with client.stream(
+                    "GET",
+                    current_url,
+                    follow_redirects=False,
+                    headers={
+                        "User-Agent": "agentyzer/1.0 (vulnerability-analysis-bot)",
+                        "Accept": "text/html, application/json, text/plain",
+                    },
+                ) as response:
+                    if response.is_redirect:
+                        location = response.headers.get("location")
+                        if not location:
+                            return {
+                                "url": url,
+                                "ok": False,
+                                "text": "",
+                                "error": "Redirect response omitted Location",
+                            }
+                        if redirect_count >= _MAX_REDIRECTS:
+                            return {
+                                "url": url,
+                                "ok": False,
+                                "text": "",
+                                "error": "Too many redirects",
+                            }
+                        current_url = urljoin(current_url, location)
+                        continue
 
-            if "json" in content_type:
-                text = body[:_MAX_TEXT_CHARS]
-            elif "html" in content_type:
-                text = _html_to_text(body)[:_MAX_TEXT_CHARS]
-            else:
-                text = body[:_MAX_TEXT_CHARS]
+                    if response.status_code >= 400:
+                        return {
+                            "url": url,
+                            "ok": False,
+                            "text": "",
+                            "error": f"HTTP {response.status_code}",
+                        }
 
-            logger.info("[web_research] Fetched %s: %d chars extracted", url, len(text))
-            return {"url": url, "ok": True, "text": text, "error": None}
+                    content_type = response.headers.get("content-type", "").lower()
+                    if not any(
+                        allowed in content_type
+                        for allowed in ("text/", "json", "xml")
+                    ):
+                        return {
+                            "url": url,
+                            "ok": False,
+                            "text": "",
+                            "error": f"Unsupported content type: {content_type or 'unknown'}",
+                        }
+
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        remaining = _MAX_RESPONSE_BYTES - len(body)
+                        if remaining <= 0:
+                            break
+                        body.extend(chunk[:remaining])
+                    decoded = bytes(body).decode(
+                        response.encoding or "utf-8",
+                        errors="replace",
+                    )
+
+                    if "html" in content_type:
+                        text = _html_to_text(decoded)[:_MAX_TEXT_CHARS]
+                    else:
+                        text = decoded[:_MAX_TEXT_CHARS]
+
+                    logger.info(
+                        "[web_research] Fetched %s: %d chars extracted",
+                        current_url,
+                        len(text),
+                    )
+                    return {
+                        "url": url,
+                        "final_url": current_url,
+                        "ok": True,
+                        "text": text,
+                        "error": None,
+                    }
     except Exception as e:
         logger.warning("[web_research] Fetch failed for %s: %s", url, e)
         return {"url": url, "ok": False, "text": "", "error": str(e)}
@@ -272,16 +352,18 @@ async def fetch_package_info(package_name: str) -> Dict[str, Any]:
 
     Returns ``{"package": str, "ok": bool, "text": str, "error": str | None}``.
     """
+    package_name = _squash_text(package_name)[:200]
+    encoded_package = quote(package_name, safe="@")
     logger.info("[web_research] Looking up package '%s'", package_name)
     registries = [
         (
             "npm",
-            f"https://registry.npmjs.org/{package_name}",
+            f"https://registry.npmjs.org/{encoded_package}",
             _extract_npm_info,
         ),
         (
             "pypi",
-            f"https://pypi.org/pypi/{package_name}/json",
+            f"https://pypi.org/pypi/{encoded_package}/json",
             _extract_pypi_info,
         ),
     ]
@@ -289,7 +371,7 @@ async def fetch_package_info(package_name: str) -> Dict[str, Any]:
     for registry_name, url, extractor in registries:
         try:
             async with async_client(timeout=10) as client:
-                r = await client.get(url, follow_redirects=True)
+                r = await client.get(url, follow_redirects=False)
                 if r.status_code == 200:
                     data = r.json()
                     text = extractor(data, package_name)
@@ -581,7 +663,7 @@ async def search_web(query: str) -> Dict[str, Any]:
             try:
                 r = await client.get(
                     search_url,
-                    follow_redirects=True,
+                    follow_redirects=False,
                     headers={
                         "User-Agent": (
                             "Mozilla/5.0 (compatible; agentyzer/1.0; "
@@ -736,12 +818,13 @@ async def fetch_component_source(
 
 async def _find_source_repo(package_name: str) -> str | None:
     """Look up a package on PyPI and npm to find its source repository URL."""
+    encoded_package = quote(_squash_text(package_name)[:200], safe="@")
     # Try PyPI first
     try:
         async with async_client(timeout=10) as client:
             r = await client.get(
-                f"https://pypi.org/pypi/{package_name}/json",
-                follow_redirects=True,
+                f"https://pypi.org/pypi/{encoded_package}/json",
+                follow_redirects=False,
             )
             if r.status_code == 200:
                 data = r.json()
@@ -768,8 +851,8 @@ async def _find_source_repo(package_name: str) -> str | None:
     try:
         async with async_client(timeout=10) as client:
             r = await client.get(
-                f"https://registry.npmjs.org/{package_name}",
-                follow_redirects=True,
+                f"https://registry.npmjs.org/{encoded_package}",
+                follow_redirects=False,
             )
             if r.status_code == 200:
                 data = r.json()
@@ -806,7 +889,7 @@ async def _github_code_search(owner: str, repo: str, component: str) -> str | No
         async with async_client(timeout=15) as client:
             r = await client.get(
                 search_url,
-                follow_redirects=True,
+                follow_redirects=False,
                 headers={
                     "Accept": "application/vnd.github.v3+json",
                     "User-Agent": "agentyzer/1.0",
@@ -848,7 +931,7 @@ async def _github_tree_scan(owner: str, repo: str, component: str) -> str | None
         async with async_client(timeout=15) as client:
             r = await client.get(
                 tree_url,
-                follow_redirects=True,
+                follow_redirects=False,
                 headers={
                     "Accept": "application/vnd.github.v3+json",
                     "User-Agent": "agentyzer/1.0",
@@ -929,7 +1012,7 @@ async def _fetch_raw_file(client: Any, url: str) -> str | None:
     try:
         r = await client.get(
             url,
-            follow_redirects=True,
+            follow_redirects=False,
             headers={"User-Agent": "agentyzer/1.0"},
         )
         if r.status_code == 200:

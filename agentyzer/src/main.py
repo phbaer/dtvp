@@ -62,6 +62,7 @@ from src.pipeline import run_pipeline
 from src.security import (
     ServiceCaller,
     require_service_caller,
+    validate_focus_path,
     validate_service_auth_configuration,
 )
 
@@ -874,6 +875,7 @@ async def assess(
     for polling.  Pass ``?sync=true`` to block until the result is ready
     (original behaviour).
     """
+    req.focus_path = validate_focus_path(req.focus_path)
     logger.info(
         "POST /assess  vuln_id=%s  component_name=%s  sync=%s",
         req.vuln_id,
@@ -1038,7 +1040,7 @@ async def follow_up_job(
         vuln_id=req.vuln_id or parent_request.vuln_id,
         component_name=req.component_name or parent_request.component_name,
         cvss_vector=req.cvss_vector or parent_request.cvss_vector,
-        focus_path=(
+        focus_path=validate_focus_path(
             req.focus_path
             if req.focus_path is not None
             else parent_request.focus_path

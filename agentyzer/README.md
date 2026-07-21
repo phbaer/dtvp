@@ -301,6 +301,7 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_ADMIN_TOKEN` | unset | Separate bearer token required for the service-wide `*` owner scope; use at least 32 characters and never reuse the service token. |
 | `AGENTYZER_ADMIN_TOKEN_FILE` | unset | File containing the admin token when the direct value is unset. |
 | `AGENTYZER_ALLOW_UNAUTHENTICATED` | `false` | Explicit bypass for local development/test only; production rejects it. |
+| `AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH` | `false` | Permit local checkout paths outside `AGENTYZER_REPOS_DIR` in development/test only; production rejects it. |
 | `AGENTYZER_CALLER_OWNER` | `cli` | Owner header used by the CLI to isolate its jobs. |
 
 ### Component registry
@@ -682,6 +683,13 @@ The pipeline state contract lives in `src/pipeline/state.py` and carries:
 - Structured `step_reports` and append-only `evidence` for auditing.
 
 The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. With OpenWebUI and `OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`); Agentyzer executes them locally through its existing allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
+
+Arbitrary research URLs are restricted to public HTTPS destinations on the
+default port. DNS must resolve entirely to globally routable addresses, every
+redirect is revalidated, response types are limited to textual formats, and
+only a bounded response prefix is read. In production, an assessment
+`focus_path` must resolve inside `AGENTYZER_REPOS_DIR`; symlink escapes and
+arbitrary host filesystem paths are rejected.
 
 All LLM prompts are managed as YAML bundles in `config/prompts/`. Prompt bundles use compact `analysis_protocol` sections instead of bundled few-shot example transcripts. The protocol tells the model to keep analysis private, apply security researcher/remediator/auditor/ticket-author lenses internally, and emit only structured evidence fields such as call paths, dependency chains, exclusions, remediation, and validation notes. Response contracts define exact field order, allowed values, evidence labels, and disallow markdown, JSON, preambles, conclusions, or extra fields. Legacy custom prompt bundles that still provide `few_shot` are accepted as a compatibility alias for `analysis_protocol`.
 

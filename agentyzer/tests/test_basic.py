@@ -4,6 +4,7 @@ import json
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.api.jobs import Job
@@ -23,7 +24,7 @@ from src.llm.openwebui_client import OpenWebUIClient
 from src.main import (
     app,
 )
-from src.security import validate_service_auth_configuration
+from src.security import validate_focus_path, validate_service_auth_configuration
 
 
 SERVICE_HEADERS = {
@@ -83,6 +84,24 @@ def test_admin_service_token_must_be_distinct(monkeypatch):
 
     with pytest.raises(RuntimeError, match="must differ"):
         validate_service_auth_configuration()
+
+
+def test_production_focus_path_is_confined_to_repository_root(
+    monkeypatch,
+    tmp_path,
+):
+    repo_root = tmp_path / "repos"
+    checkout = repo_root / "project"
+    checkout.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("AGENTYZER_ENVIRONMENT", "production")
+    monkeypatch.setenv("AGENTYZER_REPOS_DIR", str(repo_root))
+    monkeypatch.delenv("AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH", raising=False)
+
+    assert validate_focus_path(str(checkout)) == str(checkout.resolve())
+    with pytest.raises(HTTPException, match="repository root"):
+        validate_focus_path(str(outside))
 
 
 def test_health_exposes_service_configuration_and_backend(client):
