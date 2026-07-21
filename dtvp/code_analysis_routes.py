@@ -8,6 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .analysis_queue_runtime import AnalysisQueueFullError
+from .authorization import (
+    can_access_owned_resource,
+    is_reviewer,
+    require_owned_resource_access,
+    require_reviewer,
+)
 from .auto_analysis_services import (
     AutoAnalysisTarget,
     build_component_auto_analysis_guidance_block,
@@ -27,6 +33,7 @@ class CodeAnalysisRouteDeps:
     code_analysis_client_cls: type
     analysis_queue: Any
     result_store: Any
+    get_user_role: Callable[[str], str]
     load_auto_analysis_guidance: Callable[[], dict[str, Any]]
     get_auto_analysis_sweep_status: Callable[[], dict[str, Any]]
     run_auto_analysis_sweep_now: Callable[[], Awaitable[dict[str, Any]]]
@@ -186,6 +193,57 @@ class CodeAnalysisCleanupRequest(BaseModel):
     remove_assessments: bool = True
     remove_runs: bool = True
     cancel_active: bool = False
+
+
+def _can_access_record(
+    deps: CodeAnalysisRouteDeps,
+    user: str,
+    record: Any,
+) -> bool:
+    owner = record.get("submitted_by") if isinstance(record, dict) else None
+    return can_access_owned_resource(
+        username=user,
+        owner=owner,
+        role=deps.get_user_role(user),
+    )
+
+
+def _require_record_access(
+    deps: CodeAnalysisRouteDeps,
+    user: str,
+    record: dict[str, Any],
+) -> None:
+    require_owned_resource_access(
+        username=user,
+        owner=record.get("submitted_by"),
+        role=deps.get_user_role(user),
+        not_found_detail="Analysis result not found.",
+    )
+
+
+def _can_access_queue_item(
+    deps: CodeAnalysisRouteDeps,
+    user: str,
+    item: Any,
+) -> bool:
+    return can_access_owned_resource(
+        username=user,
+        owner=getattr(item, "submitted_by", None),
+        role=deps.get_user_role(user),
+    )
+
+
+def _require_queue_item_access(
+    deps: CodeAnalysisRouteDeps,
+    user: str,
+    item: Any,
+) -> None:
+    require_owned_resource_access(
+        username=user,
+        owner=getattr(item, "submitted_by", None),
+        role=deps.get_user_role(user),
+        not_found_detail="Queue item not found.",
+    )
 
 
 def _utc_now_iso() -> str:
@@ -798,9 +856,14 @@ async def _fetch_external_code_analysis_status(
 
 async def build_code_analysis_dashboard_status(
     deps: CodeAnalysisRouteDeps,
+    *,
+    user: str | None = None,
 ) -> dict[str, Any]:
     settings = deps.code_analysis_settings_cls()
+    privileged = user is None or is_reviewer(deps.get_user_role(user))
     items = deps.analysis_queue.list_all()
+    if user is not None:
+        items = [item for item in items if _can_access_queue_item(deps, user, item)]
     running_items = [
         item for item in items if getattr(item, "status", "") == "running"
     ]
@@ -815,6 +878,11 @@ async def build_code_analysis_dashboard_status(
     )
     available_slots = max(0, capacity - len(running_items))
     external = await _fetch_external_code_analysis_status(deps, settings)
+    if not privileged:
+        external["health"] = None
+        external["jobs"] = []
+        external["configuration"] = None
+        external["backend"] = None
     sweep_status = deps.get_auto_analysis_sweep_status()
 
     queue_progress_agents: list[dict[str, Any]] = []
@@ -838,18 +906,20 @@ async def build_code_analysis_dashboard_status(
                 _settings_metadata_value(
                     settings,
                     ("DTVP_CODE_ANALYSIS_MODEL", "DTVP_AGENYZER_MODEL"),
-                ),
+                ) if privileged else None,
                 "settings",
             ),
             (
                 _find_metadata_value(
                     external.get("health"),
                     ("model", "llm_model"),
-                ),
+                ) if privileged else None,
                 "health",
             ),
             (
-                _find_metadata_value(external.get("jobs"), ("model", "llm_model")),
+                _find_metadata_value(external.get("jobs"), ("model", "llm_model"))
+                if privileged
+                else None,
                 "jobs",
             ),
             (
@@ -874,21 +944,21 @@ async def build_code_analysis_dashboard_status(
                         "DTVP_CODE_ANALYSIS_LLM_BACKEND",
                         "DTVP_AGENYZER_LLM_BACKEND",
                     ),
-                ),
+                ) if privileged else None,
                 "settings",
             ),
             (
                 _find_metadata_value(
                     external.get("health"),
                     ("llm_backend", "backend", "base_url", "llm_base_url"),
-                ),
+                ) if privileged else None,
                 "health",
             ),
             (
                 _find_metadata_value(
                     external.get("jobs"),
                     ("llm_backend", "backend", "base_url", "llm_base_url"),
-                ),
+                ) if privileged else None,
                 "jobs",
             ),
         ]
@@ -906,21 +976,21 @@ async def build_code_analysis_dashboard_status(
                         "DTVP_CODE_ANALYSIS_LLM_PROVIDER",
                         "DTVP_AGENYZER_LLM_PROVIDER",
                     ),
-                ),
+                ) if privileged else None,
                 "settings",
             ),
             (
                 _find_metadata_value(
                     external.get("health"),
                     ("llm_provider", "provider"),
-                ),
+                ) if privileged else None,
                 "health",
             ),
             (
                 _find_metadata_value(
                     external.get("jobs"),
                     ("llm_provider", "provider"),
-                ),
+                ) if privileged else None,
                 "jobs",
             ),
         ]
@@ -944,8 +1014,19 @@ async def build_code_analysis_dashboard_status(
     )
     recent_results = await asyncio.to_thread(
         deps.result_store.list_result_metadata,
-        limit=10,
+        limit=100 if user is not None else 10,
     )
+    if user is not None:
+        recent_results = [
+            record for record in recent_results if _can_access_record(deps, user, record)
+        ][:10]
+    if result_cache is not None and not privileged:
+        result_cache = {
+            key: value
+            for key, value in result_cache.items()
+            if key not in {"path", "legacy_json_path", "record_count"}
+        }
+        result_cache["record_count"] = len(recent_results)
 
     return {
         "overall_state": overall_state,
@@ -993,7 +1074,9 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        return await dashboard_status_cache.get(deps, refresh=refresh)
+        if is_reviewer(deps.get_user_role(user)):
+            return await dashboard_status_cache.get(deps, refresh=refresh)
+        return await build_code_analysis_dashboard_status(deps, user=user)
 
     @router.get("/code-analysis/results")
     async def code_analysis_list_results(
@@ -1007,23 +1090,27 @@ def _register_code_analysis_routes(
         include_result: Annotated[bool, Query()] = False,
     ):
         if include_result:
-            return await asyncio.to_thread(
+            records = await asyncio.to_thread(
                 deps.result_store.list,
                 project_name=project_name,
                 vuln_id=vuln_id,
                 component_name=component_name,
                 source=source,
-                limit=_coerce_limit(limit),
+                limit=500,
                 include_result=True,
             )
-        return await asyncio.to_thread(
-            deps.result_store.list_result_metadata,
-            project_name=project_name,
-            vuln_id=vuln_id,
-            component_name=component_name,
-            source=source,
-            limit=_coerce_limit(limit),
-        )
+        else:
+            records = await asyncio.to_thread(
+                deps.result_store.list_result_metadata,
+                project_name=project_name,
+                vuln_id=vuln_id,
+                component_name=component_name,
+                source=source,
+                limit=500,
+            )
+        return [
+            record for record in records if _can_access_record(deps, user, record)
+        ][:_coerce_limit(limit)]
 
     @router.get("/code-analysis/assessment-index")
     async def code_analysis_assessment_index(
@@ -1038,6 +1125,9 @@ def _register_code_analysis_routes(
             diagnostics,
             project_name=project_name,
         )
+        records = [
+            record for record in records if _can_access_record(deps, user, record)
+        ]
         return {
             "records": build_assessment_index(records),
             "summary": {
@@ -1058,6 +1148,7 @@ def _register_code_analysis_routes(
         record = await asyncio.to_thread(deps.result_store.get, run_id)
         if not record:
             raise HTTPException(status_code=404, detail="Analysis result not found.")
+        _require_record_access(deps, user, record)
         return record
 
     @router.delete(
@@ -1069,6 +1160,10 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        record = await asyncio.to_thread(deps.result_store.get, run_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Analysis result not found.")
+        _require_record_access(deps, user, record)
         if not await asyncio.to_thread(deps.result_store.delete, run_id):
             raise HTTPException(status_code=404, detail="Analysis result not found.")
         dashboard_status_cache.invalidate()
@@ -1083,6 +1178,10 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        record = await asyncio.to_thread(deps.result_store.get, run_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Analysis result not found.")
+        _require_record_access(deps, user, record)
         compact_context = await asyncio.to_thread(
             deps.result_store.compact_context,
             run_id,
@@ -1104,6 +1203,7 @@ def _register_code_analysis_routes(
         record = await asyncio.to_thread(deps.result_store.get, run_id)
         if not record:
             raise HTTPException(status_code=404, detail="Analysis result not found.")
+        _require_record_access(deps, user, record)
         benchmark = build_code_analysis_benchmark(record, req.model_dump())
         settings = deps.code_analysis_settings_cls()
         if not settings.enabled:
@@ -1145,20 +1245,23 @@ def _register_code_analysis_routes(
             "limit": _coerce_limit(limit),
             "offset": offset,
         }
+        if not is_reviewer(deps.get_user_role(user)):
+            list_options["submitted_by"] = user
+        metadata = await asyncio.to_thread(
+            deps.result_store.list_result_metadata,
+            **list_options,
+        )
         if include_result:
-            metadata = await asyncio.to_thread(
-                deps.result_store.list_result_metadata,
-                **list_options,
-            )
             records = await asyncio.gather(*(
                 asyncio.to_thread(deps.result_store.get, record["analysis_run_id"])
                 for record in metadata
             ))
-            return [record for record in records if record]
-        return await asyncio.to_thread(
-            deps.result_store.list_result_metadata,
-            **list_options,
-        )
+            records = [record for record in records if record]
+        else:
+            records = metadata
+        return [
+            record for record in records if _can_access_record(deps, user, record)
+        ]
 
     @router.post(
         "/projects/{project_name}/vulnerabilities/{vuln_id}/analysis-cleanup",
@@ -1193,6 +1296,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        require_reviewer(deps.get_user_role(user))
         settings = deps.code_analysis_settings_cls()
         if not settings.enabled:
             raise HTTPException(
@@ -1230,6 +1334,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        require_reviewer(deps.get_user_role(user))
         settings = deps.code_analysis_settings_cls()
         if not settings.enabled:
             raise HTTPException(
@@ -1248,6 +1353,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        require_reviewer(deps.get_user_role(user))
         settings = deps.code_analysis_settings_cls()
         if not settings.enabled:
             raise HTTPException(
@@ -1265,6 +1371,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        require_reviewer(deps.get_user_role(user))
         settings = deps.code_analysis_settings_cls()
         if not settings.enabled:
             raise HTTPException(
@@ -1284,6 +1391,7 @@ def _register_code_analysis_routes(
         include_values: Annotated[bool, Query()] = False,
         system_only: Annotated[bool, Query()] = True,
     ):
+        require_reviewer(deps.get_user_role(user))
         settings = deps.code_analysis_settings_cls()
         if not settings.enabled:
             raise HTTPException(
@@ -1313,6 +1421,7 @@ def _register_code_analysis_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        require_reviewer(deps.get_user_role(user))
         return await deps.run_auto_analysis_sweep_now()
 
 
@@ -1372,6 +1481,12 @@ def _register_analysis_queue_routes(
                 status_code=404,
                 detail="Parent analysis result not found.",
             )
+        require_owned_resource_access(
+            username=user,
+            owner=parent.get("submitted_by"),
+            role=deps.get_user_role(user),
+            not_found_detail="Parent analysis result not found.",
+        )
         question = req.question.strip()
         if not question:
             raise HTTPException(
@@ -1425,7 +1540,11 @@ def _register_analysis_queue_routes(
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=200)] = 100,
     ):
-        items = deps.analysis_queue.list_page(offset=offset, limit=limit)
+        items = [
+            item
+            for item in reversed(deps.analysis_queue.list_all())
+            if _can_access_queue_item(deps, user, item)
+        ][offset : offset + limit]
         return [item.model_dump(exclude={"result"}) for item in items]
 
     @router.get("/analysis-queue/status")
@@ -1434,7 +1553,11 @@ def _register_analysis_queue_routes(
         user: Annotated[str, Depends(current_user_dependency)],
         recent_limit: Annotated[int, Query(ge=0, le=100)] = 20,
     ):
-        items = deps.analysis_queue.list_all()
+        items = [
+            item
+            for item in deps.analysis_queue.list_all()
+            if _can_access_queue_item(deps, user, item)
+        ]
         active_items = [
             item
             for item in items
@@ -1467,6 +1590,7 @@ def _register_analysis_queue_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        require_reviewer(deps.get_user_role(user))
         statuses = set(
             (req.statuses if req else None)
             or ["completed", "failed", "cancelled"]
@@ -1479,6 +1603,7 @@ def _register_analysis_queue_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        require_reviewer(deps.get_user_role(user))
         cancelled = deps.analysis_queue.cancel_all_queued()
         return {"status": "cancelled", "cancelled": cancelled}
 
@@ -1491,6 +1616,7 @@ def _register_analysis_queue_routes(
         item = deps.analysis_queue.get(queue_id)
         if not item:
             raise HTTPException(status_code=404, detail="Queue item not found.")
+        _require_queue_item_access(deps, user, item)
         return item.model_dump()
 
     @router.delete(
@@ -1508,6 +1634,7 @@ def _register_analysis_queue_routes(
         item = deps.analysis_queue.get(queue_id)
         if not item:
             raise HTTPException(status_code=404, detail="Queue item not found.")
+        _require_queue_item_access(deps, user, item)
 
         if item.status in ("queued",):
             deps.analysis_queue.cancel(queue_id)

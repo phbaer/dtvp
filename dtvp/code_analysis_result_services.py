@@ -1124,6 +1124,7 @@ class CodeAnalysisResultStore:
         component_name: Optional[str] = None,
         component_names: Optional[list[str]] = None,
         source: Optional[str] = None,
+        submitted_by: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
         assessments_only: bool = False,
@@ -1136,6 +1137,7 @@ class CodeAnalysisResultStore:
             [component_name, *(component_names or [])],
         )))
         source_filter = _lower(source)
+        owner_filter = _lower(submitted_by)
         result_offset = max(0, int(offset or 0))
         max_results = max(
             1,
@@ -1237,12 +1239,14 @@ class CodeAnalysisResultStore:
                     source_aliases.add("automatic")
                 if source_filter not in source_aliases:
                     continue
+            record_data = _decode_json_dict(row[16])
+            if owner_filter and _lower(record_data.get("submitted_by")) != owner_filter:
+                continue
             if matched_records < result_offset:
                 matched_records += 1
                 continue
             matched_records += 1
             assessment = _decode_json_dict(row[15])
-            record_data = _decode_json_dict(row[16])
             records.append(
                 {
                     **record_data,

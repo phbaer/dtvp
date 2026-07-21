@@ -38,7 +38,7 @@ from test_setup import mock_tmrescore
 @pytest.fixture(autouse=True)
 def override_auth():
     main_module.app.dependency_overrides[main_module.get_current_user] = lambda: (
-        "testuser"
+        "reviewer"
     )
     yield
     main_module.app.dependency_overrides.pop(main_module.get_current_user, None)
@@ -59,6 +59,16 @@ def wait_for_tmrescore_progress(
     pytest.fail(
         f"Timed out waiting for tmrescore session {session_id} to reach {expected_status}: {last_payload}"
     )
+
+
+def test_tmrescore_routes_require_reviewer_role(client):
+    main_module.app.dependency_overrides[main_module.get_current_user] = lambda: (
+        "analyst"
+    )
+    response = client.get("/api/projects/example/tmrescore/context")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Reviewer role required"
 
 
 @pytest.mark.parametrize(
@@ -221,7 +231,7 @@ def test_tmrescore_session_lookup_is_scoped_to_user():
 def test_tmrescore_project_state_returns_latest_cached_task(client):
     main_module.tmrescore_analysis_tasks.clear()
     main_module.tmrescore_analysis_tasks["session-older"] = {
-        "_owner": "testuser",
+        "_owner": "reviewer",
         "session_id": "session-older",
         "project_name": "ExampleApp",
         "scope": "merged_versions",
@@ -238,7 +248,7 @@ def test_tmrescore_project_state_returns_latest_cached_task(client):
         "completed_at": 100.0,
     }
     main_module.tmrescore_analysis_tasks["session-latest"] = {
-        "_owner": "testuser",
+        "_owner": "reviewer",
         "session_id": "session-latest",
         "project_name": "ExampleApp",
         "scope": "latest_only",

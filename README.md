@@ -146,6 +146,7 @@ Important backend components:
 | :--- | :--- |
 | `dtvp/boot.py` | Binds early, serves startup status, then loads the real ASGI app |
 | `dtvp/main.py` and `app_wiring.py` | App lifecycle, middleware, dependency construction, routers, and task stores |
+| `dtvp/auth.py` and `authorization.py` | OIDC/session principals, role normalization, and reusable reviewer/owner policies |
 | `dtvp/general_api_routes.py` | Projects, grouped tasks, task windows, statistics, assessments, and dependency chains |
 | `dtvp/grouped_vuln_services.py` | Concurrent finding, vulnerability, and BOM collection before grouping |
 | `dtvp/task_group_query_services.py` | Backend filtering, sorting, facets, pagination, and task-window queries |
@@ -268,10 +269,17 @@ Important frontend components:
   requested the exact project/CVE/mode/cache/mapping snapshot; those matching
   requests share one task and result allocation. Their bulk-workflow
   operations, uploaded or generated archive tasks, and live tmrescore sessions
-  remain private to the authenticated user who created them. Shared
-  Dependency-Track assessments, the workspace-wide analyzer queue and saved
-  analysis results, and cached project proposal snapshots remain collaborative
-  application data.
+  remain private to the authenticated user who created them. Analyzer queue
+  entries and saved results are also private to their creator, while reviewers
+  can inspect and manage analyzer work across users. Shared
+  Dependency-Track assessments and cached project proposal snapshots remain
+  collaborative application data.
+- Authorization fails closed: a missing, unreadable, invalid, or incomplete
+  `USER_ROLES_PATH` mapping assigns `ANALYST`. Only an explicit `REVIEWER`
+  value grants reviewer permissions. Role-file uploads reject unknown roles.
+  TMRescore, archive management, global code-analysis controls, bulk queue
+  controls, and settings changes enforce reviewer permissions in the backend;
+  frontend visibility is not treated as an authorization boundary.
 - Live task registries are process-local; the supplied Uvicorn/PM2 launch uses
   one backend worker. A horizontally scaled deployment needs a shared task and
   result store before enabling multiple backend workers.
