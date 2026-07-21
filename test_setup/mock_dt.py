@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
+import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from jose import jwt as jose_jwt
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -1350,7 +1350,7 @@ def token(
     username = transaction["username"]
     now = int(time.time())
     issuer = str(request.base_url).rstrip("/")
-    id_token = jose_jwt.encode(
+    id_token = jwt.encode(
         {
             "iss": issuer,
             "aud": client_id,

@@ -10,9 +10,10 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 import httpx
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
-from jose import JWTError, jwt
+from jwt.exceptions import PyJWTError as JWTError
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -256,11 +257,7 @@ def _decode_transaction(token: str) -> dict[str, Any]:
         issuer=SESSION_ISSUER,
         audience=OIDC_TRANSACTION_AUDIENCE,
         options={
-            "require_aud": True,
-            "require_exp": True,
-            "require_iat": True,
-            "require_iss": True,
-            "require_jti": True,
+            "require": ["aud", "exp", "iat", "iss", "jti"],
         },
     )
     for claim in ("state", "nonce", "code_verifier"):
@@ -294,12 +291,7 @@ def decode_session_token(token: str) -> dict[str, Any]:
         issuer=SESSION_ISSUER,
         audience=SESSION_AUDIENCE,
         options={
-            "require_aud": True,
-            "require_exp": True,
-            "require_iat": True,
-            "require_iss": True,
-            "require_jti": True,
-            "require_sub": True,
+            "require": ["aud", "exp", "iat", "iss", "jti", "sub"],
         },
     )
     username = payload.get("username")
@@ -419,18 +411,18 @@ async def _validate_id_token(
 
     claims = jwt.decode(
         id_token,
-        signing_key,
+        jwt.PyJWK.from_dict(signing_key),
         algorithms=[algorithm],
         audience=auth_settings.client_id,
         issuer=str(config["issuer"]),
-        access_token=access_token,
         options={
-            "require_aud": True,
-            "require_exp": True,
-            "require_iat": True,
-            "require_iss": True,
-            "require_sub": True,
+            "require": ["aud", "exp", "iat", "iss", "sub"],
         },
+    )
+    _validate_oidc_access_token_hash(
+        claims,
+        access_token=access_token,
+        algorithm=algorithm,
     )
     nonce = claims.get("nonce")
     if not isinstance(nonce, str) or not secrets.compare_digest(nonce, expected_nonce):
@@ -440,6 +432,35 @@ async def _validate_id_token(
         if claims.get("azp") != auth_settings.client_id:
             raise JWTError("ID token authorized party mismatch")
     return claims
+
+
+def _validate_oidc_access_token_hash(
+    claims: dict[str, Any],
+    *,
+    access_token: Optional[str],
+    algorithm: str,
+) -> None:
+    claimed_hash = claims.get("at_hash")
+    if claimed_hash is None:
+        return
+    if not isinstance(claimed_hash, str) or not claimed_hash or not access_token:
+        raise JWTError("ID token access-token hash is invalid")
+
+    digest_factory = {
+        "256": hashlib.sha256,
+        "384": hashlib.sha384,
+        "512": hashlib.sha512,
+    }.get(algorithm[-3:])
+    if digest_factory is None:
+        raise JWTError("ID token access-token hash algorithm is unsupported")
+    try:
+        encoded_access_token = access_token.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise JWTError("ID token access-token hash input is invalid") from exc
+    digest = digest_factory(encoded_access_token).digest()
+    expected_hash = base64.urlsafe_b64encode(digest[: len(digest) // 2]).rstrip(b"=")
+    if not secrets.compare_digest(claimed_hash, expected_hash.decode("ascii")):
+        raise JWTError("ID token access-token hash mismatch")
 
 
 def _code_challenge(code_verifier: str) -> str:

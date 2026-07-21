@@ -2,8 +2,8 @@ import base64
 import hashlib
 from urllib.parse import parse_qs, urlparse
 
+import jwt
 from fastapi.testclient import TestClient
-from jose import jwt
 
 from test_setup import mock_dt
 
@@ -51,7 +51,7 @@ def test_mock_oidc_provider_supports_nonce_pkce_and_jwks():
     jwks = client.get("/auth/jwks").json()
     claims = jwt.decode(
         token.json()["id_token"],
-        jwks["keys"][0],
+        jwt.PyJWK.from_dict(jwks["keys"][0]),
         algorithms=["RS256"],
         issuer="http://testserver",
         audience="mock-client",

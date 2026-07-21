@@ -10,7 +10,7 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "httpx",
-    "python-jose[cryptography]",
+    "PyJWT[crypto]>=2.10.1",
     "pydantic-settings",
     "python-multipart",
     "cvss>=3.6"
@@ -27,6 +27,7 @@ dev = [
     "respx>=0.22.0",
     "git-cliff>=2.7.0",
     "cyclonedx-bom>=7.2.2",
+    "pip-audit==2.10.0",
 ]
 
 [tool.uv.sources]
