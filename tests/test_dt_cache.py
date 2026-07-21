@@ -2,7 +2,21 @@ import asyncio
 
 import pytest
 from unittest.mock import AsyncMock, patch
-from dtvp.dt_cache import CacheManager, PendingUpdateExistsError
+from dtvp.dt_cache import CacheManager, PendingUpdateExistsError, get_dt_cache_path
+
+
+def test_cache_is_backend_scoped_and_rejects_namespace_reuse(tmp_path, monkeypatch):
+    monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(tmp_path / "cache"))
+    monkeypatch.setenv("DTVP_VULNERABILITY_BACKEND_ID", "cybeats-eu")
+    monkeypatch.setenv("DTVP_VULNERABILITY_BACKEND_TYPE", "dependency-track")
+
+    scoped_path = get_dt_cache_path()
+    manager = CacheManager(base_path=scoped_path, backend_id="cybeats-eu")
+
+    assert manager.base_path.endswith("cache/backends/cybeats-eu")
+    assert manager.get_cache_status()["backend_id"] == "cybeats-eu"
+    with pytest.raises(RuntimeError, match="different or invalid"):
+        CacheManager(base_path=scoped_path, backend_id="another-backend")
 
 
 @pytest.mark.asyncio
