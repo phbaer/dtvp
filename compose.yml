@@ -86,6 +86,15 @@ services:
       DTVP_ANALYSIS_QUEUE_MAX_PENDING: ${DTVP_ANALYSIS_QUEUE_MAX_PENDING:-1000}
     volumes:
       - ./data:/app/data
+    user: "${DTVP_RUNTIME_UID:-1000}:${DTVP_RUNTIME_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       - dtrack-apiserver
       - agentyzer
@@ -132,6 +141,14 @@ services:
     volumes:
       - agentyzer-repos:/app/repos
       - ./agentyzer/config/repos.yaml:/app/config/repos.yaml:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

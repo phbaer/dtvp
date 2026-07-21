@@ -39,3 +39,12 @@ def test_nginx_reuses_upstreams_compresses_json_and_preserves_event_streaming():
     assert "location ~ ^${DTVP_CONTEXT_PATH}/api/tasks/[^/]+/events$" in template
     assert "proxy_buffering off;" in template
     assert "add_header X-Accel-Buffering no always;" in template
+
+
+def test_compose_hardens_application_containers():
+    compose = (ROOT / "compose.yml").read_text()
+
+    assert 'user: "${DTVP_RUNTIME_UID:-1000}:${DTVP_RUNTIME_GID:-1000}"' in compose
+    assert compose.count("read_only: true") >= 2
+    assert compose.count("no-new-privileges:true") >= 2
+    assert compose.count("cap_drop:") >= 2

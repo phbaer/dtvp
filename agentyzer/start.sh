@@ -11,4 +11,4 @@ AGENTYZER_VERSION=${AGENTYZER_VERSION:-unknown}
 AGENTYZER_BUILD_NUMBER=${AGENTYZER_BUILD_NUMBER:-unknown}
 printf 'Agentyzer version: %s (build number: %s)\n' "${AGENTYZER_VERSION}" "${AGENTYZER_BUILD_NUMBER}"
 
-exec uv run --no-sync uvicorn src.main:app --host 0.0.0.0 --port 8000
+exec /app/.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port 8000

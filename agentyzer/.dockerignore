@@ -12,3 +12,15 @@ htmlcov
 repos
 *.egg-info
 .vscode
+**
+!.dockerignore
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+!config/
+!config/prompts/
+!config/prompts/**
+!config/repos.container.yaml

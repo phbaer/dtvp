@@ -31,3 +31,36 @@ def test_start_script_keeps_upstream_connections_alive_and_uses_large_backlog():
     ) in start_script
     assert '--timeout-keep-alive "${DTVP_UVICORN_KEEP_ALIVE_SECONDS}"' in start_script
     assert "--backlog 2048" in start_script
+
+
+def test_application_images_run_as_non_root_users():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    agentyzer_dockerfile = (ROOT / "agentyzer" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    agentyzer_start_script = (ROOT / "agentyzer" / "start.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "USER 10001:10001" in dockerfile
+    assert "USER 10001:10001" in agentyzer_dockerfile
+    assert "ghcr.io/astral-sh/uv:latest" not in dockerfile
+    assert 'CMD ["/app/start.sh"]' in agentyzer_dockerfile
+    assert "exec /app/.venv/bin/uvicorn" in agentyzer_start_script
+
+
+def test_docker_contexts_exclude_runtime_secrets_and_repository_metadata():
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    agentyzer_dockerignore = (ROOT / "agentyzer" / ".dockerignore").read_text(
+        encoding="utf-8"
+    )
+    agentyzer_dockerfile = (ROOT / "agentyzer" / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert dockerignore.startswith("**\n")
+    assert "!.env" not in dockerignore
+    assert "!.git" not in dockerignore
+    assert agentyzer_dockerignore.startswith("**\n")
+    assert "!config/repos.yaml" not in agentyzer_dockerignore
+    assert "COPY config/repos.container.yaml ./config/repos.yaml" in agentyzer_dockerfile
