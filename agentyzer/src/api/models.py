@@ -288,6 +288,7 @@ JOB_SUBMITTED_EXAMPLE = {
             "async_assessments": True,
             "sync_assessments": True,
             "bounded_async_execution": True,
+            "durable_job_store": True,
             "request_model_override": True,
             "debug_responses": True,
             "job_cancellation": True,
@@ -313,7 +314,7 @@ JOB_SUBMITTED_EXAMPLE = {
             "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; configured repositories use isolated worktrees, while focus_path concurrency is caller-managed",
         },
         "jobs": {
-            "job_store": "in_memory",
+            "job_store": "sqlite",
             "execution_model": "bounded asyncio background tasks in this API process",
             "known_jobs": 1,
             "max_concurrent_jobs": 1,
@@ -987,7 +988,7 @@ class JobBackendInfo(BaseModel):
 
     job_store: str = Field(description="Persistence backend used for job records.")
     execution_model: str = Field(description="How background assessments are run.")
-    known_jobs: int = Field(description="Number of jobs known to this API process.")
+    known_jobs: int = Field(description="Number of durable jobs loaded by this API process.")
     max_concurrent_jobs: int = Field(
         description="Maximum number of assessment pipelines this process runs at the same time.",
         ge=1,
@@ -1004,7 +1005,7 @@ class JobBackendInfo(BaseModel):
     )
     status_counts: Dict[str, int] = Field(
         default_factory=dict,
-        description="Current in-memory job count by lifecycle status.",
+        description="Current loaded job count by lifecycle status.",
     )
 
 
@@ -1112,7 +1113,7 @@ class JobSubmittedResponse(BaseModel):
 
 
 class JobListResponse(BaseModel):
-    jobs: List[JobStatusResponse] = Field(description="Currently known in-memory jobs.")
+    jobs: List[JobStatusResponse] = Field(description="Currently known durable jobs.")
     configuration: Optional[ServiceConfiguration] = Field(
         default=None,
         description="Sanitized service configuration shared by all listed jobs.",

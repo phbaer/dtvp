@@ -1,4 +1,4 @@
-"""Job management — in-memory job record and progress tracking helpers."""
+"""Job records, durable serialization, and progress tracking helpers."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from src.pipeline.graph import PIPELINE_STEP_ORDER
 
 
 class Job:
-    """In-memory record for a background assessment job."""
+    """Record for a background assessment job."""
 
     __slots__ = (
         "id",
@@ -81,6 +81,69 @@ class Job:
         self.parent_job_id: Optional[str] = None
         self.follow_up_question: Optional[str] = None
         self.compact_context: Optional[Dict[str, Any]] = None
+
+    def to_record(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable durable representation."""
+        return {
+            "id": self.id,
+            "owner": self.owner,
+            "status": self.status.value,
+            "created_at": self.created_at,
+            "finished_at": self.finished_at,
+            "request": self.request.model_dump(mode="json"),
+            "result": (
+                self.result.model_dump(mode="json") if self.result is not None else None
+            ),
+            "error": self.error,
+            "completed_steps": self.completed_steps,
+            "total_steps": self.total_steps,
+            "progress_percent": self.progress_percent,
+            "current_step": self.current_step,
+            "current_title": self.current_title,
+            "current_agent": self.current_agent,
+            "current_activity": self.current_activity,
+            "last_completed_step": self.last_completed_step,
+            "last_updated_at": self.last_updated_at,
+            "active_agents": self.active_agents,
+            "step_statuses": self.step_statuses,
+            "completed_step_names": sorted(self.completed_step_names),
+            "logs": self.logs,
+            "llm_metadata": self.llm_metadata,
+            "parent_job_id": self.parent_job_id,
+            "follow_up_question": self.follow_up_question,
+            "compact_context": self.compact_context,
+        }
+
+    @classmethod
+    def from_record(cls, record: Dict[str, Any]) -> "Job":
+        """Validate and restore a durable job representation."""
+        request = AssessRequest.model_validate(record["request"])
+        job = cls(str(record["id"]), request, owner=str(record["owner"]))
+        job.status = JobStatus(str(record["status"]))
+        job.created_at = str(record["created_at"])
+        job.finished_at = record.get("finished_at")
+        result = record.get("result")
+        job.result = AssessResponse.model_validate(result) if result is not None else None
+        job.error = record.get("error")
+        job.completed_steps = int(record.get("completed_steps", 0))
+        job.total_steps = int(record.get("total_steps", len(PIPELINE_STEP_ORDER)))
+        job.progress_percent = int(record.get("progress_percent", 0))
+        job.current_step = record.get("current_step")
+        job.current_title = record.get("current_title")
+        job.current_agent = record.get("current_agent")
+        job.current_activity = record.get("current_activity")
+        job.last_completed_step = record.get("last_completed_step")
+        job.last_updated_at = record.get("last_updated_at")
+        job.active_agents = dict(record.get("active_agents") or {})
+        job.step_statuses = dict(record.get("step_statuses") or {})
+        job.completed_step_names = set(record.get("completed_step_names") or [])
+        job.logs = list(record.get("logs") or [])[-200:]
+        job.llm_metadata = dict(record.get("llm_metadata") or {})
+        job.parent_job_id = record.get("parent_job_id")
+        job.follow_up_question = record.get("follow_up_question")
+        compact_context = record.get("compact_context")
+        job.compact_context = dict(compact_context) if compact_context else None
+        return job
 
 
 # ===================================================================== #
