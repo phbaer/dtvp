@@ -6,10 +6,10 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
-from jose import jwt
 
 from dtvp import auth
 from dtvp.auth import (
@@ -111,6 +111,13 @@ def _id_token(
     )
 
 
+def _access_token_hash(access_token: str = "access-token") -> str:
+    digest = hashlib.sha256(access_token.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest[: len(digest) // 2]).rstrip(b"=").decode(
+        "ascii"
+    )
+
+
 def _mock_successful_token_exchange(respx_mock, *, nonce: str, **token_kwargs):
     respx_mock.get(OIDC_CONFIG["jwks_uri"]).respond(json=OIDC_JWKS)
     return respx_mock.post(OIDC_CONFIG["token_endpoint"]).respond(
@@ -199,6 +206,47 @@ async def test_callback_validates_token_and_creates_expiring_session(client, res
         hashlib.sha256(verifier.encode("ascii")).digest()
     ).rstrip(b"=").decode("ascii")
     assert challenge == login_params["code_challenge"]
+
+
+@pytest.mark.asyncio
+async def test_callback_validates_oidc_access_token_hash(client, respx_mock):
+    with patch(
+        "dtvp.auth.get_oidc_config",
+        new=AsyncMock(return_value=OIDC_CONFIG),
+    ):
+        login_params = _start_login(client)
+        _mock_successful_token_exchange(
+            respx_mock,
+            nonce=login_params["nonce"],
+            extra_claims={"at_hash": _access_token_hash()},
+        )
+        response = client.get(
+            f"/auth/callback?code=safe-code&state={login_params['state']}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 307
+
+
+@pytest.mark.asyncio
+async def test_callback_rejects_oidc_access_token_hash_mismatch(client, respx_mock):
+    with patch(
+        "dtvp.auth.get_oidc_config",
+        new=AsyncMock(return_value=OIDC_CONFIG),
+    ):
+        login_params = _start_login(client)
+        _mock_successful_token_exchange(
+            respx_mock,
+            nonce=login_params["nonce"],
+            extra_claims={"at_hash": "invalid-hash"},
+        )
+        response = client.get(
+            f"/auth/callback?code=safe-code&state={login_params['state']}",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400
+    assert response.cookies.get(SESSION_COOKIE_NAME) is None
 
 
 @pytest.mark.asyncio
