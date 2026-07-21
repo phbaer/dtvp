@@ -1,5 +1,7 @@
 # DTVP Threat Model
 
+Last reviewed: 2026-07-21
+
 This document records DTVP's security boundaries, abuse cases, implemented
 controls, and residual risks. The canonical architecture and deployment model
 remain in the repository [README](../README.md); update this model whenever a
@@ -110,7 +112,7 @@ hard tenant boundary.
 
 | ID / STRIDE | Threat and impact | Implemented controls | Residual risk / required operation |
 | :--- | :--- | :--- | :--- |
-| T1 Spoofing | Stolen or forged browser session impersonates a reviewer. | OIDC authorization code with PKCE/state/nonce, issuer/JWKS/signature/claim checks, short-lived signed cookies, Secure cookie in production, session-key rotation. | IdP compromise, endpoint malware, or XSS can still steal an active session. Keep IdP MFA and endpoint controls outside DTVP. |
+| T1 Spoofing | Stolen or forged browser session impersonates a reviewer. | OIDC authorization code with PKCE/state/nonce, issuer/JWKS/signature/claim checks, expiring signed cookies, Secure cookie in production, session-key rotation. | IdP compromise, endpoint malware, or XSS can still steal an active session. Keep IdP MFA and endpoint controls outside DTVP. |
 | T2 Spoofing / elevation | Service token is reused as admin or a stale file becomes unsafe during rotation. | Separate service/admin tokens, minimum length, constant-time comparison, collision/duplicate rejection at startup and request time, temporary previous generations, authenticated owner scope. | Anyone holding the admin token can use `*`. Keep it only in DTVP/Agentyzer secret mounts and remove grace values promptly. |
 | T3 Tampering | Analyst changes global, reviewer-only, stale, or another team's assessment. | Backend role enforcement, server-side reconstruction, fresh finding reconciliation, snapshot conflicts, explicit reviewer-only force replace, structured audit events. | A reviewer is intentionally powerful. Dependency-Track changes made outside DTVP may have different attribution and policy. |
 | T4 Tampering | Cache or queue state from one vendor/tenant is applied to another. | Stable backend ID, backend-scoped paths and resource references, namespace marker validation, fail-closed adapter selection, durable queue/result state. | Changing an instance ID intentionally creates a new namespace; operators must migrate state explicitly if required. |
@@ -131,10 +133,12 @@ hard tenant boundary.
 
 The service-key approach is intentional. Dependency-Track API keys represent
 teams and are suitable for workload authorization; Dependency-Track users are
-not an identity provider for DTVP. Using a human API key or browser session for
-background scans would couple jobs to one person's privileges, employment, key
-rotation, and login lifetime. It would also blur which application made the
-authorization decision.
+not an identity provider for DTVP. Dependency-Track documents that
+[API keys belong to teams and a team may have multiple keys](https://docs.dependencytrack.org/integrations/rest-api/),
+which permits overlap-safe key rotation. Using a human API key or browser
+session for background scans would couple jobs to one person's privileges,
+employment, key rotation, and login lifetime. It would also blur which
+application made the authorization decision.
 
 Use a dedicated Dependency-Track team with only the portfolio/finding reads and
 vulnerability-analysis writes needed by DTVP, plus Portfolio Access Control
