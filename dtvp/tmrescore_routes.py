@@ -7,6 +7,7 @@ from typing import Annotated, Any, Awaitable, Callable, Coroutine
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 
+from .authorization import require_reviewer
 from .dt_client import DTClient
 from .tmrescore_integration import (
     TMRescoreClient,
@@ -25,6 +26,7 @@ def _merge_responses(
 
 @dataclass(frozen=True)
 class TMRescoreRouteDeps:
+    get_user_role: Callable[[str], str]
     prepare_tmrescore_inventory_or_raise: Callable[
         [str, str, DTClient], Awaitable[dict[str, Any]]
     ]
@@ -595,11 +597,17 @@ def create_tmrescore_router(
 ) -> APIRouter:
     router = APIRouter()
 
+    async def reviewer_user(
+        user: Annotated[str, Depends(current_user_dependency)],
+    ) -> str:
+        require_reviewer(deps.get_user_role(user))
+        return user
+
     _register_tmrescore_context_route(
         router,
         deps,
         client_dependency,
-        current_user_dependency,
+        reviewer_user,
     )
     _register_tmrescore_inventory_routes(
         router,
@@ -608,32 +616,32 @@ def create_tmrescore_router(
         not_found_response,
         service_unavailable_response,
         client_dependency,
-        current_user_dependency,
+        reviewer_user,
     )
     _register_tmrescore_analysis_route(
         router,
         deps,
         client_dependency,
-        current_user_dependency,
+        reviewer_user,
     )
     _register_tmrescore_cached_state_routes(
         router,
         deps,
         not_found_response,
-        current_user_dependency,
+        reviewer_user,
     )
     _register_tmrescore_progress_route(
         router,
         deps,
         service_unavailable_response,
-        current_user_dependency,
+        reviewer_user,
     )
-    _register_tmrescore_results_route(router, deps, current_user_dependency)
+    _register_tmrescore_results_route(router, deps, reviewer_user)
     _register_tmrescore_download_routes(
         router,
         deps,
         service_unavailable_response,
-        current_user_dependency,
+        reviewer_user,
     )
 
     return router

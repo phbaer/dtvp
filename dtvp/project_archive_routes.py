@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .authorization import require_reviewer
 from .dt_client import DTClient
 from .project_archive_services import (
     ARCHIVE_FILE_SUFFIX,
@@ -58,8 +59,7 @@ def _require_reviewer(
     user: str,
     detail: str = "Only reviewers can manage project archives",
 ) -> None:
-    if deps.get_user_role(user) != "REVIEWER":
-        raise HTTPException(status_code=403, detail=detail)
+    require_reviewer(deps.get_user_role(user), detail)
 
 
 def _task_public(task: dict[str, Any]) -> dict[str, Any]:

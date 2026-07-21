@@ -22,6 +22,7 @@ from dtvp.auth import (
     auth_settings,
     create_session_token,
     decode_session_token,
+    get_current_principal,
     get_oidc_config,
     validate_auth_configuration,
 )
@@ -450,6 +451,24 @@ async def test_get_current_user_dev_disable_auth():
 
     with patch("dtvp.auth.auth_settings.DEV_DISABLE_AUTH", new=True):
         assert await get_current_user(DummyRequest()) == "devuser"
+
+
+@pytest.mark.asyncio
+async def test_current_principal_preserves_subject_username_and_role():
+    class DummyRequest:
+        cookies = {
+            SESSION_COOKIE_NAME: create_session_token(
+                subject="stable-subject",
+                username="alice",
+            )
+        }
+
+    with patch("dtvp.auth.get_user_role", return_value="REVIEWER"):
+        principal = await get_current_principal(DummyRequest())
+
+    assert principal.subject == "stable-subject"
+    assert principal.username == "alice"
+    assert principal.role.value == "REVIEWER"
 
 
 @pytest.mark.asyncio

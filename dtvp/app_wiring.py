@@ -315,6 +315,7 @@ def build_general_api_route_deps(
 
 def build_tmrescore_route_deps(
     *,
+    get_user_role: Callable[[str], str],
     prepare_tmrescore_inventory_or_raise: Callable[..., Any],
     tmrescore_task_service_deps: TMRescoreTaskServiceDeps,
     tmrescore_cache_service_deps: TMRescoreCacheServiceDeps,
@@ -329,6 +330,7 @@ def build_tmrescore_route_deps(
     tmrescore_disabled_detail: str,
 ) -> TMRescoreRouteDeps:
     return TMRescoreRouteDeps(
+        get_user_role=get_user_role,
         prepare_tmrescore_inventory_or_raise=prepare_tmrescore_inventory_or_raise,
         prune_tmrescore_analysis_tasks=lambda: prune_tmrescore_analysis_tasks_impl(
             tmrescore_task_service_deps
@@ -396,6 +398,7 @@ def build_code_analysis_route_deps(
     code_analysis_client_cls: type,
     analysis_queue: Any,
     result_store: Any,
+    get_user_role: Callable[[str], str],
     load_auto_analysis_guidance: Callable[[], dict[str, Any]],
     get_auto_analysis_sweep_status: Callable[[], dict[str, Any]],
     run_auto_analysis_sweep_now: Callable[[], Any],
@@ -409,6 +412,7 @@ def build_code_analysis_route_deps(
         code_analysis_client_cls=code_analysis_client_cls,
         analysis_queue=analysis_queue,
         result_store=result_store,
+        get_user_role=get_user_role,
         load_auto_analysis_guidance=load_auto_analysis_guidance,
         get_auto_analysis_sweep_status=get_auto_analysis_sweep_status,
         run_auto_analysis_sweep_now=run_auto_analysis_sweep_now,

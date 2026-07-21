@@ -77,6 +77,18 @@ def test_update_roles_analyst_forbidden(client):
         assert "Only reviewers" in response.json()["detail"]
 
 
+def test_update_roles_rejects_unknown_role(client):
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        response = client.put(
+            "/api/settings/roles",
+            json={"alice": "ADMIN"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+    assert "Invalid role" in response.json()["message"]
+
+
 def test_update_auto_analysis_guidance_reviewer(client):
     guidance = {"components": {"keycloak-extension": "Check upstream Keycloak too."}}
 

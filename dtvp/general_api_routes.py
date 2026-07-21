@@ -16,6 +16,7 @@ from .assessment_restore_services import (
     refresh_group_restore_metadata,
     update_component_restore_metadata,
 )
+from .authorization import require_reviewer as require_reviewer_role
 from .bulk_workflows.assessment_restore import (
     build_assessment_restore_payloads as workflow_assessment_restore_payloads,
     build_assessment_restore_preview as workflow_assessment_restore_preview,
@@ -1332,8 +1333,7 @@ def _register_bulk_workflow_routes(
     client_dependency: Callable[..., Any],
 ) -> None:
     def require_reviewer(user: str) -> None:
-        if deps.get_user_role(user).upper() != "REVIEWER":
-            raise HTTPException(status_code=403, detail="Reviewer role required")
+        require_reviewer_role(deps.get_user_role(user))
 
     def load_rescore_rules_or_raise() -> dict[str, Any]:
         rules = deps.load_rescore_rules()
@@ -1846,8 +1846,7 @@ def _register_assessment_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        if deps.get_user_role(user).upper() != "REVIEWER":
-            raise HTTPException(status_code=403, detail="Reviewer role required")
+        require_reviewer_role(deps.get_user_role(user))
 
         groups = _completed_task_full_groups(deps, req.task_id, user)
         preview = workflow_assessment_restore_preview(groups, req.group_ids)
@@ -1859,8 +1858,7 @@ def _register_assessment_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        if deps.get_user_role(user).upper() != "REVIEWER":
-            raise HTTPException(status_code=403, detail="Reviewer role required")
+        require_reviewer_role(deps.get_user_role(user))
 
         groups = _completed_task_full_groups(deps, req.task_id, user)
         try:
@@ -1880,8 +1878,7 @@ def _register_assessment_routes(
         client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        if deps.get_user_role(user).upper() != "REVIEWER":
-            raise HTTPException(status_code=403, detail="Reviewer role required")
+        require_reviewer_role(deps.get_user_role(user))
 
         groups = _completed_task_full_groups(deps, req.task_id, user)
         try:
@@ -1915,8 +1912,7 @@ def _register_assessment_routes(
         client: Annotated[DTClient, Depends(client_dependency)],
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        if deps.get_user_role(user).upper() != "REVIEWER":
-            raise HTTPException(status_code=403, detail="Reviewer role required")
+        require_reviewer_role(deps.get_user_role(user))
 
         groups = _completed_task_full_groups(deps, req.task_id, user)
         payloads, skipped = workflow_assessment_restore_payloads(groups, req.group_ids)

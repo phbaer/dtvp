@@ -4,8 +4,9 @@ import os
 from dataclasses import dataclass
 from typing import Annotated, Any, Callable
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 
+from .authorization import require_reviewer, validate_user_roles_config
 from .rescore_rule_services import validate_rescore_rule_config
 
 
@@ -26,8 +27,7 @@ class SettingsRouteDeps:
 
 
 def _require_reviewer(deps: SettingsRouteDeps, user: str, detail: str) -> None:
-    if deps.get_user_role(user) != "REVIEWER":
-        raise HTTPException(status_code=403, detail=detail)
+    require_reviewer(deps.get_user_role(user), detail)
 
 
 def _ensure_parent_dir(path: str) -> None:
@@ -122,14 +122,15 @@ def _register_role_routes(
                 parsed = json.loads(content)
             except json.JSONDecodeError:
                 return {"status": "error", "message": "Invalid JSON"}
-            validation_errors = validate_rescore_rule_config(parsed)
-            if validation_errors:
+            try:
+                roles = validate_user_roles_config(parsed)
+            except ValueError as exc:
                 return {
                     "status": "error",
-                    "message": "; ".join(validation_errors),
+                    "message": str(exc),
                 }
 
-            await asyncio.to_thread(deps.write_bytes, target_path, content)
+            await asyncio.to_thread(deps.write_json, target_path, roles)
             return {
                 "status": "success",
                 "message": f"User roles updated at {target_path}",
@@ -148,7 +149,8 @@ def _register_role_routes(
         _ensure_parent_dir(target_path)
 
         try:
-            await asyncio.to_thread(deps.write_json, target_path, roles)
+            normalized_roles = validate_user_roles_config(roles)
+            await asyncio.to_thread(deps.write_json, target_path, normalized_roles)
             return {
                 "status": "success",
                 "message": f"User roles updated at {target_path}",
@@ -158,10 +160,7 @@ def _register_role_routes(
 
     @router.get("/known-users")
     async def get_known_users(user: CurrentUser):
-        roles = deps.load_user_roles()
-        if roles is None:
-            return []
-        return sorted(roles.keys())
+        return sorted(deps.load_user_roles().keys())
 
 
 def _register_auto_analysis_guidance_routes(

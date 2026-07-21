@@ -4,6 +4,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .authorization import resolve_user_role, validate_user_roles_config
 from .assessment_restore_services import (
     build_missing_rescoring_vector_restore_candidate,
     refresh_group_restore_metadata,
@@ -199,10 +200,10 @@ def load_user_roles(path: str = None) -> Dict[str, str]:
         path = get_user_roles_path()
 
     if not os.path.exists(path):
-        return None
+        return {}
     try:
         with open(path, "r") as f:
-            return json.load(f)
+            return validate_user_roles_config(json.load(f))
     except Exception as e:
         logger.warning(f"Failed to load user roles from {path}: {e}")
         return {}
@@ -229,17 +230,12 @@ def load_rescore_rules(path: str = None) -> Optional[Dict[str, Any]]:
 def get_user_role(username: str, roles_map: Dict[str, str] = None) -> str:
     """
     Returns 'REVIEWER' or 'ANALYST'.
-    If roles_map is None (no config file), everyone is REVIEWER.
-    If roles_map matches username, return that.
-    Otherwise (config exists but user not in it), return 'ANALYST'.
+    Missing, unreadable, invalid, and incomplete role mappings fail closed to
+    ANALYST. Only an explicit REVIEWER assignment grants reviewer privileges.
     """
     if roles_map is None:
         roles_map = load_user_roles()
-
-    if roles_map is None:
-        return "REVIEWER"
-
-    return roles_map.get(username, "ANALYST").upper()
+    return resolve_user_role(username, roles_map).value
 
 
 def build_parent_map(bom: Dict[str, Any]) -> Dict[str, List[str]]:

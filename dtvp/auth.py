@@ -16,6 +16,7 @@ from jose import JWTError, jwt
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .authorization import Principal, normalize_role
 from .logic import get_user_role
 
 logger = logging.getLogger(__name__)
@@ -579,19 +580,33 @@ async def logout(response: Response):
     return {"status": "logged_out"}
 
 
-async def get_current_user(request: Request) -> str:
+async def get_current_principal(request: Request) -> Principal:
     if auth_settings.DEV_DISABLE_AUTH:
-        return "devuser"
+        username = "devuser"
+        return Principal(
+            subject="development:devuser",
+            username=username,
+            role=normalize_role(get_user_role(username)),
+        )
 
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:
         try:
             payload = decode_session_token(token)
-            return str(payload["username"])
+            username = str(payload["username"])
+            return Principal(
+                subject=str(payload["sub"]),
+                username=username,
+                role=normalize_role(get_user_role(username)),
+            )
         except JWTError as exc:
             logger.debug("Failed to decode DTVP session: %s", exc)
 
     raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+async def get_current_user(request: Request) -> str:
+    return (await get_current_principal(request)).username
 
 
 @router.get("/me")

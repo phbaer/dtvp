@@ -37,7 +37,8 @@ class DummyResponse:
 @pytest.fixture(autouse=True)
 def override_auth():
     main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
-    yield
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        yield
     main.app.dependency_overrides.pop(main.get_current_user, None)
 
 
@@ -667,6 +668,73 @@ def test_analysis_queue_submit_list_get_cancel(client):
 
     list_after_cancel = client.get("/api/analysis-queue")
     assert all(item["queue_id"] != queue_id for item in list_after_cancel.json())
+
+
+def test_analysis_queue_and_results_are_scoped_for_analysts(client):
+    owned = main.analysis_queue.submit(
+        vuln_id="CVE-2026-OWNED",
+        component_name="owned-component",
+        submitted_by="testuser",
+    )
+    other = main.analysis_queue.submit(
+        vuln_id="CVE-2026-OTHER",
+        component_name="other-component",
+        submitted_by="other-user",
+    )
+    for item in (owned, other):
+        item.status = "running"
+        main.analysis_queue._finish_item(
+            item,
+            status="completed",
+            result={
+                "assessment": {
+                    "affected": False,
+                    "verdict": "Not Affected",
+                    "confidence": "High",
+                    "exposure": "none",
+                    "summary": "No vulnerable path.",
+                    "reasoning": "No reachable code.",
+                },
+                "steps": [],
+            },
+        )
+
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        queue_response = client.get("/api/analysis-queue")
+        result_response = client.get(
+            "/api/code-analysis/results?vuln_id=CVE-2026-OWNED"
+        )
+        status_response = client.get("/api/code-analysis/status")
+        other_queue_response = client.get(f"/api/analysis-queue/{other.queue_id}")
+        other_result_response = client.get(
+            f"/api/code-analysis/results/{other.queue_id}"
+        )
+        other_cancel_response = client.delete(
+            f"/api/analysis-queue/{other.queue_id}"
+        )
+
+    assert [item["queue_id"] for item in queue_response.json()] == [owned.queue_id]
+    assert [item["analysis_run_id"] for item in result_response.json()] == [
+        owned.queue_id
+    ]
+    status = status_response.json()
+    assert [item["queue_id"] for item in status["queue"]["items"]] == [
+        owned.queue_id
+    ]
+    assert "path" not in status["result_cache"]
+    assert "legacy_json_path" not in status["result_cache"]
+    assert other_queue_response.status_code == 404
+    assert other_result_response.status_code == 404
+    assert other_cancel_response.status_code == 404
+
+
+def test_global_code_analysis_controls_require_reviewer(client):
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        assert client.get("/api/code-analysis/health").status_code == 403
+        assert client.get("/api/code-analysis/prompts").status_code == 403
+        assert client.post("/api/code-analysis/auto-sweep/run").status_code == 403
+        assert client.post("/api/analysis-queue/clear").status_code == 403
+        assert client.post("/api/analysis-queue/cancel-queued").status_code == 403
 
 
 def test_analysis_queue_submit_accepts_benchmark_source(client):

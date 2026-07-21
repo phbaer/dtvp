@@ -560,6 +560,7 @@ api_router.include_router(
 api_router.include_router(
     create_tmrescore_router(
         build_tmrescore_route_deps(
+            get_user_role=lambda user: get_user_role(user),
             prepare_tmrescore_inventory_or_raise=prepare_tmrescore_inventory_or_raise,
             tmrescore_task_service_deps=tmrescore_task_service_deps,
             tmrescore_cache_service_deps=tmrescore_cache_service_deps,
@@ -901,6 +902,7 @@ api_router.include_router(
             code_analysis_client_cls=CodeAnalysisClient,
             analysis_queue=analysis_queue,
             result_store=code_analysis_result_store,
+            get_user_role=lambda user: get_user_role(user),
             load_auto_analysis_guidance=lambda: load_auto_analysis_guidance(),
             get_auto_analysis_sweep_status=get_auto_analysis_sweep_status,
             run_auto_analysis_sweep_now=run_auto_analysis_sweep_now,
