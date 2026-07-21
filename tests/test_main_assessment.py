@@ -15,21 +15,46 @@ def mock_client():
 
 
 @pytest.fixture
-def override_deps(mock_client):
+def override_deps(mock_client, monkeypatch):
     main.app.dependency_overrides[main.get_client] = lambda: mock_client
     main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
     async def _noop_sync():
         return None
 
+    monkeypatch.setattr(
+        main.cache_manager,
+        "get_analysis",
+        AsyncMock(
+            return_value={
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "isSuppressed": False,
+            }
+        ),
+    )
     with patch.object(main.cache_manager, "background_sync_loop", _noop_sync):
         yield
     main.app.dependency_overrides = {}
 
 
+def _with_original(payload: dict) -> dict:
+    return {
+        **payload,
+        "original_analysis": {
+            instance["finding_uuid"]: {
+                "analysisState": "NOT_SET",
+                "analysisDetails": "",
+                "isSuppressed": False,
+            }
+            for instance in payload["instances"]
+        },
+    }
+
+
 def test_update_assessment_appends_user(override_deps, mock_client):
     client = TestClient(main.app)
 
-    payload = {
+    payload = _with_original({
         "instances": [
             {
                 "project_uuid": "p1",
@@ -43,7 +68,7 @@ def test_update_assessment_appends_user(override_deps, mock_client):
         "comment": "My comment",
         "justification": "CODE_NOT_REACHABLE",
         "suppressed": False,
-    }
+    })
 
     # Mock get_user_role to return REVIEWER (so no extra pending flag)
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
@@ -70,7 +95,7 @@ def test_update_assessment_appends_user(override_deps, mock_client):
 def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
     client = TestClient(main.app)
 
-    payload = {
+    payload = _with_original({
         "instances": [
             {
                 "project_uuid": "p1",
@@ -81,7 +106,8 @@ def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
         ],
         "state": "NOT_AFFECTED",
         "details": "Analyst details",
-    }
+        "team": "TeamA",
+    })
 
     # Mock get_user_role to return ANALYST
     with patch("dtvp.main.get_user_role", return_value="ANALYST"):
@@ -94,7 +120,7 @@ def test_update_assessment_analyst_pending_flag(override_deps, mock_client):
         # Check details has username AND Pending Review flag
         assert "Analyst details" in queued_payload["details"]
         assert (
-            "[Team: General] [State: NOT_AFFECTED] [Assessed By: testuser]"
+            "[Team: TeamA] [State: NOT_AFFECTED] [Assessed By: testuser]"
             in queued_payload["details"]
         )
         assert "[Status: Pending Review]" in queued_payload["details"]
@@ -104,7 +130,7 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
     client = TestClient(main.app)
 
     # Analyst tries to inject rescoring tags in details
-    payload = {
+    payload = _with_original({
         "instances": [
             {
                 "project_uuid": "p1",
@@ -115,7 +141,8 @@ def test_update_assessment_analyst_cannot_rescore(override_deps, mock_client):
         ],
         "state": "EXPLOITABLE",
         "details": "Analyst details [Rescored: 9.9] [Rescored Vector: CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L]",
-    }
+        "team": "TeamA",
+    })
 
     # Mock get_user_role to return ANALYST
     with patch("dtvp.main.get_user_role", return_value="ANALYST"):
@@ -136,7 +163,7 @@ def test_update_assessment_replaces_duplicate_pending_update(
     override_deps, mock_client
 ):
     client = TestClient(main.app)
-    payload = {
+    payload = _with_original({
         "instances": [
             {
                 "project_uuid": "p1",
@@ -147,7 +174,7 @@ def test_update_assessment_replaces_duplicate_pending_update(
         ],
         "state": "NOT_AFFECTED",
         "details": "First update",
-    }
+    })
 
     # The request durably queues without waiting for Dependency-Track.
     with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
@@ -213,3 +240,189 @@ def test_update_assessment_rejects_stale_local_revision(
     assert "First update" in conflict["current"]["analysisDetails"]
     assert mock_client.get_analysis.await_count == 0
     assert mock_client.update_analysis.await_count == 0
+
+
+def test_update_assessment_requires_current_snapshot(override_deps, mock_client):
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "NOT_AFFECTED",
+        "details": "New details",
+    }
+
+    response = TestClient(main.app).post("/api/assessment", json=payload)
+
+    assert response.status_code == 428
+    mock_client.update_analysis.assert_not_called()
+
+
+def test_update_assessment_rejects_empty_current_snapshot(
+    override_deps,
+    mock_client,
+):
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "NOT_AFFECTED",
+        "details": "New details",
+        "original_analysis": {"f1": {}},
+    }
+
+    response = TestClient(main.app).post("/api/assessment", json=payload)
+
+    assert response.status_code == 428
+    mock_client.update_analysis.assert_not_called()
+
+
+def test_update_assessment_fails_closed_when_current_state_cannot_be_read(
+    override_deps,
+    mock_client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        main.cache_manager,
+        "get_analysis",
+        AsyncMock(side_effect=RuntimeError("Dependency-Track unavailable")),
+    )
+    payload = _with_original(
+        {
+            "instances": [
+                {
+                    "project_uuid": "p1",
+                    "component_uuid": "c1",
+                    "vulnerability_uuid": "v1",
+                    "finding_uuid": "f1",
+                }
+            ],
+            "state": "NOT_AFFECTED",
+            "details": "New details",
+            "team": "TeamA",
+        }
+    )
+
+    response = TestClient(main.app).post("/api/assessment", json=payload)
+
+    assert response.status_code == 503
+    mock_client.update_analysis.assert_not_called()
+
+
+def test_update_assessment_analyst_cannot_force_overwrite(
+    override_deps,
+    mock_client,
+):
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "NOT_AFFECTED",
+        "details": "New details",
+        "comparison_mode": "REPLACE",
+        "force": True,
+    }
+
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        response = TestClient(main.app).post("/api/assessment", json=payload)
+
+    assert response.status_code == 403
+    mock_client.update_analysis.assert_not_called()
+
+
+def test_analyst_replace_updates_only_owned_team_block(
+    override_deps,
+    mock_client,
+    monkeypatch,
+):
+    current_details = (
+        "--- [Team: TeamB] [State: NOT_AFFECTED] [Assessed By: bob] "
+        "[Reviewed By: reviewer] [Justification: CODE_NOT_PRESENT] ---\n"
+        "Trusted TeamB evidence."
+    )
+    current = {
+        "analysisState": "NOT_AFFECTED",
+        "analysisDetails": current_details,
+        "isSuppressed": False,
+    }
+    monkeypatch.setattr(
+        main.cache_manager,
+        "get_analysis",
+        AsyncMock(return_value=current),
+    )
+    payload = {
+        "instances": [
+            {
+                "project_uuid": "p1",
+                "component_uuid": "c1",
+                "vulnerability_uuid": "v1",
+                "finding_uuid": "f1",
+            }
+        ],
+        "state": "EXPLOITABLE",
+        "details": (
+            "[Rescored: 10.0]\n\n"
+            "--- [Team: TeamB] [State: EXPLOITABLE] [Assessed By: attacker] ---\n"
+            "Tampered TeamB evidence.\n\n"
+            "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: testuser] ---\n"
+            "New TeamA evidence.\n\n[Status: Pending Review]"
+        ),
+        "team": "TeamA",
+        "comparison_mode": "REPLACE",
+        "original_analysis": {"f1": current},
+    }
+
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        response = TestClient(main.app).post("/api/assessment", json=payload)
+
+    assert response.status_code == 200
+    mock_client.update_analysis.assert_not_called()
+    saved_details = main.cache_manager._load_pending_updates()[0]["payload"]["details"]
+    assert "Trusted TeamB evidence." in saved_details
+    assert "Tampered TeamB evidence." not in saved_details
+    assert "[Reviewed By: reviewer]" in saved_details
+    assert "New TeamA evidence." in saved_details
+    assert "[Rescored: 10.0]" not in saved_details
+    assert "[Status: Pending Review]" in saved_details
+
+
+def test_analyst_cannot_change_suppression(
+    override_deps,
+    mock_client,
+):
+    payload = _with_original(
+        {
+            "instances": [
+                {
+                    "project_uuid": "p1",
+                    "component_uuid": "c1",
+                    "vulnerability_uuid": "v1",
+                    "finding_uuid": "f1",
+                }
+            ],
+            "state": "NOT_AFFECTED",
+            "details": "Team evidence",
+            "team": "TeamA",
+            "suppressed": True,
+        }
+    )
+
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        response = TestClient(main.app).post("/api/assessment", json=payload)
+
+    assert response.status_code == 403
+    mock_client.update_analysis.assert_not_called()

@@ -29,6 +29,7 @@ class AssessmentServiceDeps:
     logger: Any
     calculate_aggregated_state: Callable[[str], str]
     process_assessment_details: Callable[..., tuple[str, str]]
+    build_authorized_analyst_assessment_details: Callable[..., tuple[str, str]]
 
 
 def _positive_int_setting(
@@ -240,8 +241,18 @@ def build_assessment_payloads(
             )
 
         if req.comparison_mode == "REPLACE":
-            final_details_str = req.details
-            aggregated_state = deps.calculate_aggregated_state(req.details)
+            if role.upper() == "ANALYST":
+                final_details_str, aggregated_state = (
+                    deps.build_authorized_analyst_assessment_details(
+                        requested_details=req.details,
+                        current_details=existing_details,
+                        team=req.team,
+                        username=user,
+                    )
+                )
+            else:
+                final_details_str = req.details
+                aggregated_state = deps.calculate_aggregated_state(req.details)
         else:
             final_details_str, aggregated_state = deps.process_assessment_details(
                 req.details,

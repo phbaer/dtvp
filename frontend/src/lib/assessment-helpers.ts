@@ -5,6 +5,7 @@ export interface AssessmentBlock {
     team: string; // 'General' or specific team name
     state: string;
     user: string;
+    reviewer?: string;
     details: string;
     justification: string;
     timestamp?: number;
@@ -278,6 +279,8 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const assigned: string[] = assignedMatch
             ? assignedMatch[1].split(',').map(u => u.trim()).filter(u => u.length > 0)
             : [];
+        const reviewerMatch = headerText.match(/\[Reviewed By:\s*([^\]]+)\]/);
+        const reviewer = reviewerMatch?.[1]?.trim() || undefined;
         const evidenceReviewed = /\[Evidence Reviewed:\s*(?:yes|true|checked)\]/i.test(headerText);
         const versionCoverageChecked = /\[Version Coverage:\s*(?:yes|true|checked)\]/i.test(headerText);
         const ticketMatch = headerText.match(/\[Ticket:\s*([^\]]+)\]/);
@@ -315,6 +318,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
             team,
             state,
             user,
+            reviewer,
             details: content,
             justification,
             timestamp,
@@ -346,10 +350,11 @@ export function constructAssessmentDetails(
     for (const b of uniqueBlocks) {
         const dateStr = b.timestamp ? ` [Date: ${b.timestamp}]` : '';
         const assignedStr = b.assigned && b.assigned.length > 0 ? ` [Assigned: ${b.assigned.join(', ')}]` : '';
+        const reviewerStr = b.reviewer?.trim() ? ` [Reviewed By: ${formatAssessmentHeaderValue(b.reviewer)}]` : '';
         const evidenceStr = b.evidenceReviewed ? ' [Evidence Reviewed: yes]' : '';
         const versionCoverageStr = b.versionCoverageChecked ? ' [Version Coverage: yes]' : '';
         const ticketStr = b.ticket?.trim() ? ` [Ticket: ${formatAssessmentHeaderValue(b.ticket)}]` : '';
-        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr} ---`;
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${reviewerStr}${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr} ---`;
         parts.push(header);
         if (b.details) parts.push(b.details);
     }

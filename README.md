@@ -259,9 +259,9 @@ Important frontend components:
   retrying. Legacy
   `pending_updates.json` entries import once on first use. Interactive and bulk
   assessment requests return after the outbox transaction commits instead of
-  waiting for Dependency-Track. Per-finding local revisions reject stale DTVP
-  edits atomically; optional strict conflict mode additionally performs live
-  Dependency-Track reads before accepting a save. Grouped-task artifacts carry
+  waiting for Dependency-Track writes. Per-finding local revisions reject
+  stale DTVP edits atomically, and normal assessment saves refresh the current
+  Dependency-Track state before committing. Grouped-task artifacts carry
   reverse finding indexes, so accepted changes copy and re-summarize only
   affected groups; their list-query index is rebuilt lazily on the next read
   instead of delaying the save.
@@ -280,6 +280,17 @@ Important frontend components:
   TMRescore, archive management, global code-analysis controls, bulk queue
   controls, and settings changes enforce reviewer permissions in the backend;
   frontend visibility is not treated as an authorization boundary.
+- Assessment writes are authorized and reconciled by the backend. A normal
+  write must include the current snapshot for every unique finding UUID; DTVP
+  refreshes those findings from Dependency-Track and returns `409` on a stale
+  snapshot or `503` when it cannot verify current state. Analysts can update
+  only a named, non-General team block and cannot alter suppression, review,
+  rescoring, shared text, or another team's block. The backend reconstructs an
+  analyst replacement from the fresh server document. Only reviewers can use
+  force-overwrite, and force requires `REPLACE` mode. The conflict dialog does
+  not expose force-overwrite to analysts.
+- Project dependency-chain reads require an authenticated DTVP session, like
+  the other project and finding endpoints.
 - Live task registries are process-local; the supplied Uvicorn/PM2 launch uses
   one backend worker. A horizontally scaled deployment needs a shared task and
   result store before enabling multiple backend workers.
@@ -1199,7 +1210,6 @@ means the integration or override is disabled.
 | `DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES` | Process-local named-project query LRU entries | `128` |
 | `DTVP_ASSESSMENT_OUTBOX_PATH` | Transactional assessment overlay and synchronization outbox | `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` |
 | `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
-| `DTVP_ASSESSMENT_STRICT_DT_CONFLICTS` | Perform live Dependency-Track conflict reads before accepting assessment saves | `false` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |
 | `DTVP_ASSESSMENT_IO_CONCURRENCY` | Concurrent Dependency-Track assessment reads or writes per operation | `4` |
 | `DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS` | Attempts for transient assessment-write timeouts, rate limits, and HTTP 5xx responses | `3` |
