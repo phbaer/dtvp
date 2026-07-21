@@ -876,8 +876,8 @@ means the integration or override is disabled.
 | `DTVP_ARCHIVE_GIT_BRANCH` | Archive Git branch | `main` |
 | `DTVP_ARCHIVE_GIT_AUTHOR_NAME` | Commit author name | `DTVP Archive Bot` |
 | `DTVP_ARCHIVE_GIT_AUTHOR_EMAIL` | Commit author email | `dtvp-archive@example.invalid` |
-| `DTVP_ARCHIVE_GIT_SSH_KEY_FILE` | SSH key inside Git helper | `/ssh/dtvp_archive_deploy_key` |
-| `DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE` | Known-hosts file inside Git helper | `/ssh/known_hosts` |
+| `DTVP_ARCHIVE_GIT_SSH_KEY_FILE` | SSH key inside Git helper | `/run/secrets/dtvp_archive_deploy_key` |
+| `DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE` | Known-hosts file inside Git helper | `/run/secrets/known_hosts` |
 | `DTVP_ARCHIVE_GIT_SSH_KEY_HOST_FILE` | Host SSH key mounted only into the archive helper | `./secrets/dtvp_archive_deploy_key` |
 | `DTVP_ARCHIVE_GIT_KNOWN_HOSTS_HOST_FILE` | Host known-hosts file mounted only into the archive helper | `./secrets/known_hosts` |
 

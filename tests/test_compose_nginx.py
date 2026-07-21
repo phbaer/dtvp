@@ -89,6 +89,7 @@ def test_agentyzer_and_archive_credentials_are_not_exposed_by_default():
     assert "./secrets:/ssh:ro" not in compose
     assert "source: archive_git_ssh_key" in compose
     assert "source: archive_git_known_hosts" in compose
+    assert 'git check-ref-format "refs/heads/$${DTVP_ARCHIVE_GIT_BRANCH}"' in compose
 
 
 def test_archive_helper_fails_closed_on_remote_errors():
