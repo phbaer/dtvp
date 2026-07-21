@@ -1,0 +1,14 @@
+services:
+  dtvp:
+    build:
+      secrets:
+        - ca-certs
+
+  agentyzer:
+    build:
+      secrets:
+        - ca-certs
+
+secrets:
+  ca-certs:
+    file: ${DTVP_CA_CERTS_FILE}

@@ -5,9 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 
 # Trust local / corporate CA certificates injected at build time
 RUN --mount=type=secret,id=ca-certs,target=/tmp/ca-certs.crt \
-    if [ -f /tmp/ca-certs.crt ]; then \
-        cp /tmp/ca-certs.crt /usr/local/share/ca-certificates/extra.crt && \
-        update-ca-certificates; \
+    if [ -s /tmp/ca-certs.crt ]; then \
+        cat /tmp/ca-certs.crt >> /etc/ssl/certs/ca-certificates.crt; \
     fi
 
 COPY pyproject.toml uv.lock README.md ./
@@ -26,6 +25,7 @@ ENV PYTHONPATH=/app \
     AGENTYZER_CONFIG_DIR=/app/config \
     AGENTYZER_REPOS_DIR=/app/repos \
     HOME=/tmp \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 USER 10001:10001

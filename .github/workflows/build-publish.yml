@@ -7,18 +7,26 @@ on:
     tags:
       - 'v*'
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-publish-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-backend:
-    if: github.event.action != 'closed'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: node
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Install dependencies
-        uses: nick-fields/retry@v4
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -32,7 +40,7 @@ jobs:
       - name: Run tests with coverage
         run: uv run pytest
       - name: Upload Python Coverage Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: python-coverage-report
@@ -40,12 +48,13 @@ jobs:
           retention-days: 30
 
   test-frontend:
-    if: github.event.action != 'closed'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: node
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
-        uses: nick-fields/retry@v4
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -54,7 +63,7 @@ jobs:
         working-directory: frontend
         run: npm run test:unit -- --run --coverage
       - name: Upload Vitest Coverage Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: vitest-coverage-report
@@ -62,14 +71,15 @@ jobs:
           retention-days: 30
 
   test-agentyzer:
-    if: github.event.action != 'closed'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: node
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Install dependencies
-        uses: nick-fields/retry@v4
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -79,14 +89,15 @@ jobs:
         run: uv run pytest
 
   test-e2e:
-    if: github.event.action != 'closed'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: node
+    timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v1.61.1-noble
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
-        uses: nick-fields/retry@v4
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4
         with:
           timeout_minutes: 10
           max_attempts: 3
@@ -95,7 +106,7 @@ jobs:
         working-directory: frontend
         run: npx playwright test --reporter=line
       - name: Upload Playwright Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: playwright-report
@@ -106,16 +117,17 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [test-backend, test-frontend, test-agentyzer, test-e2e]
     runs-on: node
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.get_version.outputs.VERSION }}
       tag: ${{ steps.get_version.outputs.TAG }}
       tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Extract Version
         id: get_version
         run: |
@@ -138,9 +150,10 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.check-version.outputs.tag_exists == 'false'
     needs: [check-version]
     runs-on: node
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
@@ -155,17 +168,17 @@ jobs:
           git push origin "refs/tags/$TAG"
 
   build-push-images:
-    if: github.event.action != 'closed' && (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
-    needs: [test-backend, test-frontend, test-agentyzer]
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
+    needs: [test-backend, test-frontend, test-agentyzer, test-e2e]
     runs-on: node
+    timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Install Docker Cli
         run: |-
           install -m 0755 -d /etc/apt/keyrings
@@ -177,42 +190,27 @@ jobs:
           for i in {1..3}; do apt-get -qq update && break || sleep 5; done
           DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -qq -y docker-ce-cli docker-buildx-plugin docker-compose-plugin
       - name: Registry Login
-        uses: docker/login-action@v4
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
           username: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}
           password: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
-      - name: Generate Backend CycloneDX SBOM (Python)
-        run: |
-          mkdir -p sbom
-          uv add --dev cyclonedx-bom
-          uv run cyclonedx-py environment --short-PURLs -o sbom/dtvp-backend-cyclonedx.json --sv 1.6 --mc-type application --pyproject pyproject.toml
-
-      - name: Generate Frontend CycloneDX SBOM (npm)
-        run: |
-          cd frontend
-          npm install --save-dev --silent @cyclonedx/bom
-          ./node_modules/.bin/cyclonedx-npm --omit dev --mc-type application -o ../sbom/dtvp-frontend-cyclonedx.json --ignore-npm-errors --package-lock-only package.json
-      - name: Generate Agentyzer CycloneDX SBOM (Python)
-        working-directory: agentyzer
-        run: |
-          mkdir -p ../sbom
-          uv add --dev cyclonedx-bom
-          uv run cyclonedx-py environment --short-PURLs -o ../sbom/agentyzer-cyclonedx.json --sv 1.6 --mc-type application --pyproject pyproject.toml
+      - name: Generate CycloneDX SBOMs
+        run: ./scripts/generate-sboms.sh
       - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dtvp-sbom
           path: sbom/*.json
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
         with:
           platforms: linux/amd64
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
       - name: Extract Version
         id: get_version
         run: |
@@ -227,47 +225,42 @@ jobs:
         run: |
           uv run git-cliff -o CHANGELOG.md
       - name: Build and Push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
             ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/dtvp:dev', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
           context: .
           build-args: |
             BUILD_COMMIT=${{ github.sha }}
-          secrets: |
-            GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
       - name: Build and Push Agentyzer
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ github.event_name == 'pull_request' && format('{0}/{1}/agentyzer:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
             ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/agentyzer:dev', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/agentyzer:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/agentyzer:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
           context: ./agentyzer
-          secrets: |
-            GIT_AUTH_TOKEN=${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-push-images]
     runs-on: node
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -310,19 +303,3 @@ jobs:
               --arg body "${{ steps.release_notes.outputs.NOTES }}" \
               '{tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false}'\
             )"
-
-  delete-pr-images:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: node
-    steps:
-      - name: Delete PR Image Tag
-        run: |-
-          VERSION="pr-${{ github.event.pull_request.number }}"
-          echo "Deleting version $VERSION for dtvp"
-          curl -fsS -X DELETE \
-            -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
-            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/packages/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/container/dtvp/$VERSION" || true
-          echo "Deleting version $VERSION for agentyzer"
-          curl -fsS -X DELETE \
-            -H "Authorization: token ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}" \
-            "https://${{ vars.RUNNER_PACKAGE_PUSH_HOST }}/api/v1/packages/${{ vars.RUNNER_PACKAGE_PUSH_USER }}/container/agentyzer/$VERSION" || true

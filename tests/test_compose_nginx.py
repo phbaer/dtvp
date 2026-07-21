@@ -34,3 +34,10 @@ def test_compose_hardens_application_containers():
     assert compose.count("read_only: true") >= 2
     assert compose.count("no-new-privileges:true") >= 2
     assert compose.count("cap_drop:") >= 2
+
+
+def test_private_ca_overlay_uses_build_secrets():
+    overlay = (ROOT / "compose.ca-certs.yml").read_text()
+
+    assert overlay.count("- ca-certs") == 2
+    assert "file: ${DTVP_CA_CERTS_FILE}" in overlay

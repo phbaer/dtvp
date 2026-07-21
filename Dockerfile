@@ -10,7 +10,12 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 
 # Install frontend dependencies, including native optional packages used by Vite/Rolldown.
-RUN npm ci --include=optional
+RUN --mount=type=secret,id=ca-certs,target=/tmp/ca-certs.crt \
+    if [ -s /tmp/ca-certs.crt ]; then \
+        NODE_EXTRA_CA_CERTS=/tmp/ca-certs.crt npm ci --include=optional; \
+    else \
+        npm ci --include=optional; \
+    fi
 
 # Copy frontend source code
 COPY frontend/ ./
@@ -28,6 +33,13 @@ ARG BUILD_COMMIT=unknown
 ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT
 
 WORKDIR /app
+
+# Optionally add a private CA to the runtime trust store for internal OIDC and
+# integration HTTPS endpoints. BuildKit keeps the source bundle out of context.
+RUN --mount=type=secret,id=ca-certs,target=/tmp/ca-certs.crt \
+    if [ -s /tmp/ca-certs.crt ]; then \
+        cat /tmp/ca-certs.crt >> /etc/ssl/certs/ca-certificates.crt; \
+    fi
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:0.11.9@sha256:6b6fa841d71a48fbc9e2c55651c5ad570e01104d7a7d701f57b2b22c0f58e9b1 /uv /bin/uv
@@ -57,6 +69,7 @@ RUN addgroup -S -g 10001 dtvp \
     && mkdir -p /app/data \
     && chown -R 10001:10001 /app/data
 ENV HOME=/tmp \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 USER 10001:10001
