@@ -641,10 +641,12 @@ docker compose -f compose.yml -f compose.secrets.yml up -d
 The base file keeps direct environment-value support for local compatibility.
 Production deployments should include `compose.secrets.yml`; it converts the
 database password, Dependency-Track API key, session key, OIDC client secret,
-and both analyzer credentials into `/run/secrets` mounts and clears their
-direct environment entries. Compose no longer injects the entire `.env` file
-into application containers: only the explicit configuration allowlist in
-`compose.yml` crosses the container boundary.
+both analyzer credentials, and the optional OpenWebUI API key into
+`/run/secrets` mounts and clears their direct environment entries. The
+Dependency-Track adapter uses its documented database password-file setting,
+so the overlay does not replace the vendor image entrypoint. Compose no longer
+injects the entire `.env` file into application containers: only the explicit
+configuration allowlist in `compose.yml` crosses the container boundary.
 
 Archive apply is disabled by the hardened overlay unless the dedicated import
 key is mounted with the additional overlay:
@@ -708,8 +710,9 @@ Deployment rules:
   `agentyzer/config/repos.yaml` before enabling automatic scans; never commit
   repository credentials. Docker builds use an empty container-only repository
   map, so the mounted environment-specific file and local `.env` are not sent
-  in either application build context. Its host port binds to loopback, and
-  every API route requires a bearer token. DTVP forwards the authenticated username as
+  in either application build context. It is not published on the host by
+  default; add `-f compose.agentyzer-debug.yml` for an authenticated loopback
+  debugging port. Every API route requires a bearer token. DTVP forwards the authenticated username as
   a trusted owner identity; Agentyzer lists, reads, follows up, cancels, and
   deletes only that owner's jobs. DTVP reviewer-wide status requests explicitly
   use a separate admin credential and the trusted service-wide owner scope.
@@ -875,6 +878,8 @@ means the integration or override is disabled.
 | `DTVP_ARCHIVE_GIT_AUTHOR_EMAIL` | Commit author email | `dtvp-archive@example.invalid` |
 | `DTVP_ARCHIVE_GIT_SSH_KEY_FILE` | SSH key inside Git helper | `/ssh/dtvp_archive_deploy_key` |
 | `DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE` | Known-hosts file inside Git helper | `/ssh/known_hosts` |
+| `DTVP_ARCHIVE_GIT_SSH_KEY_HOST_FILE` | Host SSH key mounted only into the archive helper | `./secrets/dtvp_archive_deploy_key` |
+| `DTVP_ARCHIVE_GIT_KNOWN_HOSTS_HOST_FILE` | Host known-hosts file mounted only into the archive helper | `./secrets/known_hosts` |
 
 ### Threat Model And Code Analysis
 
@@ -929,6 +934,7 @@ means the integration or override is disabled.
 | `AGENTYZER_OLLAMA_HOST` / `AGENTYZER_OLLAMA_MODEL` | Ollama endpoint and model | `http://host.docker.internal:11434` / `mistral` |
 | `AGENTYZER_OPENWEBUI_HOST` / `AGENTYZER_OPENWEBUI_MODEL` | OpenWebUI endpoint and model | `http://host.docker.internal:3000` / `mistral` |
 | `AGENTYZER_OPENWEBUI_API_KEY` | Optional OpenWebUI bearer token | unset |
+| `AGENTYZER_OPENWEBUI_API_KEY_FILE` | File containing the OpenWebUI token when the direct value is unset | unset |
 | `AGENTYZER_OPENWEBUI_TOOL_CALLS` | Native tool calls: `auto` or `off` | `auto` |
 | `AGENTYZER_OPENWEBUI_CONTEXT_WINDOW` | Optional context limit | `0` |
 | `AGENTYZER_OPENWEBUI_CONTEXT_SAFETY_MARGIN` | Reserved token margin | `256` |

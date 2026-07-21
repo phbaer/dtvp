@@ -1,0 +1,4 @@
+services:
+  agentyzer:
+    ports:
+      - "127.0.0.1:${AGENTYZER_PORT:-8095}:8000"

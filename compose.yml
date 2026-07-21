@@ -261,8 +261,8 @@ services:
       AGENTYZER_JOB_RETENTION_SECONDS: ${AGENTYZER_JOB_RETENTION_SECONDS:-604800}
       AGENTYZER_JOB_MAX_RECORDS: ${AGENTYZER_JOB_MAX_RECORDS:-1000}
       LOG_LEVEL: ${AGENTYZER_LOG_LEVEL:-INFO}
-    ports:
-      - "127.0.0.1:${AGENTYZER_PORT:-8095}:8000"
+    expose:
+      - "8000"
     volumes:
       - agentyzer-repos:/app/repos
       - ./agentyzer/config/repos.yaml:/app/config/repos.yaml:ro
@@ -299,7 +299,13 @@ services:
     volumes:
       - archive-git-repo:/repo
       - ./data/project_archives_git:/archive-tree:ro
-      - ./secrets:/ssh:ro
+    secrets:
+      - source: archive_git_ssh_key
+        target: dtvp_archive_deploy_key
+        mode: 0400
+      - source: archive_git_known_hosts
+        target: known_hosts
+        mode: 0400
     networks:
       - archive-outbound
     read_only: true
@@ -374,8 +380,15 @@ volumes:
   archive-git-repo:
   agentyzer-repos:
 
+secrets:
+  archive_git_ssh_key:
+    file: ${DTVP_ARCHIVE_GIT_SSH_KEY_HOST_FILE:-./secrets/dtvp_archive_deploy_key}
+  archive_git_known_hosts:
+    file: ${DTVP_ARCHIVE_GIT_KNOWN_HOSTS_HOST_FILE:-./secrets/known_hosts}
+
 networks:
   gateway:
+    internal: true
   application:
     internal: true
   analysis:
