@@ -24,6 +24,7 @@
     "ae-cvss-calculator": "^1.0.13",
     "autoprefixer": "^10.5.2",
     "axios": "^1.18.1",
+    "dompurify": "^3.4.12",
     "lucide-vue-next": "^1.0.0",
     "marked": "^18.0.6",
     "postcss": "^8.5.18",

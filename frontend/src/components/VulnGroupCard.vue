@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick, type Component } from 'vue'
 import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/api'
-import { marked } from 'marked'
+import { renderSafeMarkdown } from '../lib/sanitizeMarkdown'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, ClipboardList, Bot, ShieldCheck, Tags } from 'lucide-vue-next'
@@ -39,17 +39,8 @@ const props = defineProps<{
 
 const DESCRIPTION_FALLBACK = 'No description available.'
 
-const sanitizeRenderedMarkdown = (html: string): string => html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-    .replace(/<(iframe|object|embed|form|input|button|textarea|select|option|link|meta)\b[^>]*>/gi, '')
-    .replace(/<\/(iframe|object|embed|form|input|button|textarea|select|option)>/gi, '')
-    .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s(?:href|src)\s*=\s*(['"])\s*(?:javascript:|data:text\/html)[\s\S]*?\1/gi, '')
-
 const renderAdvisoryMarkdown = (text?: string): string => {
-    const source = text?.trim() || DESCRIPTION_FALLBACK
-    return sanitizeRenderedMarkdown(marked.parse(source) as string)
+    return renderSafeMarkdown(text || '', DESCRIPTION_FALLBACK)
 }
 
 const renderedDescription = computed(() => renderAdvisoryMarkdown(props.group.description))

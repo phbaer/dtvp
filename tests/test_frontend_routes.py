@@ -5,6 +5,7 @@ from dtvp.frontend_routes import (
     FrontendRouteDeps,
     _inline_script_json,
     _render_index_html,
+    _runtime_config_javascript,
     register_frontend_routes,
 )
 
@@ -18,19 +19,31 @@ def test_inline_script_json_escapes_script_terminators():
     )
 
 
-def test_render_index_html_replaces_frontend_runtime_config(tmp_path):
+def test_runtime_config_javascript_escapes_untrusted_values(tmp_path):
+    script = _runtime_config_javascript(
+        FrontendRouteDeps(
+            frontend_dist_dir=str(tmp_path),
+            get_context_path=lambda: "/ctx",
+            get_frontend_url=lambda: "https://frontend.example/</script>",
+            get_dev_disable_auth=lambda: True,
+            get_default_project_filter=lambda: "Platform",
+            get_attribution_age_filter_days=lambda: "5d,10d",
+            get_jira_create_url=lambda: "https://jira.example/?next=</script>",
+            read_text=lambda path: "",
+        )
+    )
+
+    assert script.startswith("window.__env__ = {")
+    assert "</script>" not in script
+    assert "\\u003c/script\\u003e" in script
+    assert '"DTVP_DEV_DISABLE_AUTH": "true"' in script
+
+
+def test_render_index_html_rewrites_same_origin_asset_paths(tmp_path):
     index_path = tmp_path / "index.html"
     index_path.write_text(
-        "|".join(
-            [
-                "${DTVP_CONTEXT_PATH}",
-                "${DTVP_FRONTEND_URL}",
-                "${DTVP_DEV_DISABLE_AUTH}",
-                "${DTVP_DEFAULT_PROJECT_FILTER}",
-                "${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}",
-                "'${DTVP_JIRA_CREATE_URL}'",
-            ]
-        ),
+        '<script src="/runtime-config.js"></script>'
+        '<script type="module" src="/assets/app.js"></script>',
         encoding="utf-8",
     )
 
@@ -49,8 +62,8 @@ def test_render_index_html_replaces_frontend_runtime_config(tmp_path):
     )
 
     assert response.body.decode() == (
-        '/ctx|https://frontend.example|true|Platform|5d,10d|'
-        '"https://jira.example/secure/CreateIssue!default.jspa"'
+        '<script src="/ctx/runtime-config.js"></script>'
+        '<script type="module" src="/ctx/assets/app.js"></script>'
     )
 
 
@@ -76,6 +89,10 @@ def test_context_path_frontend_routes_redirect_root_to_context(tmp_path):
 
     with TestClient(app) as client:
         response = client.get("/", follow_redirects=False)
+        runtime_config = client.get("/dtvp-stage/runtime-config.js")
 
-    assert response.status_code == 200
-    assert "/dtvp-stage/" in response.text
+    assert response.status_code == 307
+    assert response.headers["location"] == "/dtvp-stage/"
+    assert runtime_config.status_code == 200
+    assert runtime_config.headers["cache-control"] == "no-store"
+    assert "window.__env__" in runtime_config.text

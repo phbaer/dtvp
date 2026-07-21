@@ -49,7 +49,6 @@ RUN chmod +x start.sh
 
 # Copy the built frontend from the frontend-build stage
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
-RUN cp ./frontend/dist/index.html ./frontend/dist/index.html.template
 
 # Expose the port
 EXPOSE 8000

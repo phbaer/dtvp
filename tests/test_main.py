@@ -398,7 +398,7 @@ def test_spa_traversal_logic():
     assert resp.status_code == 200
     # Should serve modified index.html
     # We expect some replacements
-    assert b"window.__env__ =" in resp.content
+    assert b"runtime-config.js" in resp.content
 
 
 def test_serve_index_with_context():
@@ -544,4 +544,4 @@ def test_serve_index_no_frontend_url():
         client = TestClient(main.app)
         resp = client.get("/any-path")
         assert resp.status_code == 200
-        assert b"window.__env__ =" in resp.content
+        assert b"runtime-config.js" in resp.content
