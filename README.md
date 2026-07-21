@@ -1092,6 +1092,7 @@ cosign verify --key cosign.pub registry.example/owner/agentyzer@sha256:<digest>
 
 Documentation entry points:
 
+- [Security threat model and residual-risk register](docs/threat-model.md)
 - [Screen guide](docs/screens.md) and generated images under `docs/screenshots/`
 - [Integration API surface](docs/integration-api-surface.md)
 - [Workflow diagrams](docs/workflow-flowcharts.md)
