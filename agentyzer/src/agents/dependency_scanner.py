@@ -242,8 +242,8 @@ async def refresh_repo_cache(component_cfg: Dict[str, Any]) -> Dict[str, str]:
     if not url:
         raise RepoError("No url in component config")
 
-    safe_url = _sanitize(url)
-    authenticated_url = _auth_url(url, component_cfg.get("auth") or {})
+    safe_url = _credential_free_url(url)
+    auth = _effective_auth(url, component_cfg.get("auth") or {})
     dest = _repo_dir(url)
     os.makedirs(_REPOS_DIR, exist_ok=True)
     component_name = str(component_cfg.get("name") or "unlabeled").strip()
@@ -255,8 +255,8 @@ async def refresh_repo_cache(component_cfg: Dict[str, Any]) -> Dict[str, str]:
     commit = await asyncio.to_thread(
         _refresh_control_repository,
         url,
-        authenticated_url,
         safe_url,
+        auth,
         dest,
     )
     logger.info(
@@ -314,13 +314,13 @@ def _prepare_worktree(
 
 def _refresh_control_repository(
     url: str,
-    authenticated_url: str,
     safe_url: str,
+    auth: Dict[str, Any],
     dest: str,
 ) -> str:
     """Synchronize one control repository and return its resolved commit."""
     with _repository_lock(url):
-        _repo, commit = _sync_repo(authenticated_url, safe_url, dest)
+        _repo, commit = _sync_repo(safe_url, auth, dest)
     return commit
 
 

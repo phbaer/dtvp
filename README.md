@@ -1262,6 +1262,10 @@ Deployment rules:
   Dependency-Track, Agentyzer, and the archive helper each receive a separate
   outbound bridge so an egress-capable service does not create a lateral path
   between trust zones.
+  preparation reclaims unlocked crash leftovers. The source scanner reads only
+  bounded, non-symlink regular files whose resolved paths remain inside that
+  worktree, preventing a malicious checkout from exposing host files through
+  source-like symlinks.
 - The archive Git helper uses a digest-pinned image, read-only root filesystem,
   dropped capabilities, strict SSH host-key checking, and a dedicated outbound
   network. Remote lookup/fetch failures abort the job; they are never treated

@@ -2,6 +2,7 @@ import logging
 import os
 import re
 from typing import Any, Dict, List
+from urllib.parse import quote
 
 from src.http import async_client
 
@@ -77,6 +78,18 @@ _ECOSYSTEM_HINTS: dict[str, str] = {
     "*.csproj": "NuGet",
     "packages.config": "NuGet",
 }
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
 
 
 def guess_ecosystem(
@@ -156,11 +169,28 @@ async def discover_vulnerabilities(
                 )
                 break
 
-            for v in data.get("vulns", []):
-                vulns.append(_summarise_vuln(v))
+            if not isinstance(data, dict):
+                logger.warning(
+                    "OSV query for %s/%s returned a non-object payload",
+                    ecosystem,
+                    package_name,
+                )
+                break
+
+            response_vulns = data.get("vulns", [])
+            if not isinstance(response_vulns, list):
+                logger.warning(
+                    "OSV query for %s/%s returned an invalid vulnerabilities list",
+                    ecosystem,
+                    package_name,
+                )
+                break
+            for v in response_vulns:
+                if isinstance(v, dict):
+                    vulns.append(_summarise_vuln(v))
 
             page_token = data.get("next_page_token")
-            if not page_token:
+            if not isinstance(page_token, str) or not page_token:
                 break
 
     # Sort: highest severity first, then by ID for stability.
@@ -177,8 +207,10 @@ async def discover_vulnerabilities(
 def _summarise_vuln(v: Dict[str, Any]) -> Dict[str, Any]:
     """Extract a compact summary from an OSV vuln record."""
     vuln_id = v.get("id", "")
-    summary = v.get("summary", "")
+    summary = _text(v.get("summary"))
     aliases = v.get("aliases", [])
+    if not isinstance(aliases, list):
+        aliases = []
 
     # Extract best CVSS score available.
     score = _extract_best_cvss(v)
@@ -188,11 +220,12 @@ def _summarise_vuln(v: Dict[str, Any]) -> Dict[str, Any]:
     dbs = v.get("database_specific", {})
     if isinstance(dbs, dict):
         for c in dbs.get("cwe_ids", []):
-            if c.startswith("CWE-"):
+            if isinstance(c, str) and c.startswith("CWE-"):
                 cwes.append(c)
     # Fallback: text scan
     if not cwes:
-        for m in re.findall(r"CWE-\d+", summary + " " + v.get("details", "")):
+        details = _text(v.get("details"))
+        for m in re.findall(r"CWE-\d+", summary + " " + details):
             if m not in cwes:
                 cwes.append(m)
 
@@ -209,7 +242,7 @@ def _extract_best_cvss(v: Dict[str, Any]) -> float:
     """Return the highest numeric CVSS score from an OSV record."""
     best = 0.0
     # severity array (CVSS vectors)
-    for sev in v.get("severity", []):
+    for sev in _dict_list(v.get("severity")):
         vec = sev.get("score", "")
         parsed = _score_from_vector(vec)
         if parsed > best:
@@ -252,7 +285,9 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         # OSV
         try:
             logger.debug("Querying OSV for %s", lookup_id)
-            r = await client.get(f"https://api.osv.dev/v1/vulns/{lookup_id}")
+            r = await client.get(
+                f"https://api.osv.dev/v1/vulns/{quote(lookup_id, safe='')}"
+            )
             if r.status_code == 200:
                 results["osv"] = r.json()
                 logger.info("OSV: found advisory for %s", lookup_id)
@@ -267,12 +302,14 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         # (SEMVER/ECOSYSTEM) ranges, also fetch the GHSA entry which often
         # has proper npm/pypi/etc. ranges.
         osv_data = results.get("osv")
-        if osv_data:
+        if isinstance(osv_data, dict):
             aliases = osv_data.get("aliases", [])
+            if not isinstance(aliases, list):
+                aliases = []
             has_semver = any(
-                r.get("type") in ("SEMVER", "ECOSYSTEM")
-                for a in osv_data.get("affected", [])
-                for r in a.get("ranges", [])
+                advisory_range.get("type") in ("SEMVER", "ECOSYSTEM")
+                for affected in _dict_list(osv_data.get("affected"))
+                for advisory_range in _dict_list(affected.get("ranges"))
             )
             if not has_semver:
                 for alias in aliases:
@@ -285,7 +322,8 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                                 lookup_id,
                             )
                             gr = await client.get(
-                                f"https://api.osv.dev/v1/vulns/{canonical_alias}"
+                                "https://api.osv.dev/v1/vulns/"
+                                f"{quote(canonical_alias, safe='')}"
                             )
                             if gr.status_code == 200:
                                 results["osv_ghsa"] = gr.json()
@@ -310,10 +348,13 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
             {"id": lookup_id},
             prefix="CVE-",
         )
+        if not nvd_id and lookup_id.upper().startswith("CVE-"):
+            nvd_id = lookup_id
         if nvd_id:
             try:
                 r2 = await client.get(
-                    f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={nvd_id}"
+                    "https://services.nvd.nist.gov/rest/json/cves/2.0",
+                    params={"cveId": nvd_id},
                 )
                 if r2.status_code == 200:
                     results["nvd"] = r2.json()
@@ -338,7 +379,8 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         for ghsa_id in ghsa_ids:
             try:
                 ga = await client.get(
-                    f"https://api.github.com/advisories/{ghsa_id}",
+                    "https://api.github.com/advisories/"
+                    f"{quote(ghsa_id, safe='')}",
                     headers=_github_headers(),
                 )
                 if ga.status_code == 200:
@@ -363,7 +405,8 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         if not results.get("osv") and not results.get("github_advisory"):
             try:
                 gh = await client.get(
-                    f"https://api.github.com/search/issues?q={lookup_id}",
+                    "https://api.github.com/search/issues",
+                    params={"q": lookup_id},
                     headers=_github_headers(),
                 )
                 if gh.status_code == 200:
@@ -430,8 +473,10 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         source_label: str,
     ) -> None:
         """Extract package, range, and version info from an OSV affected block."""
-        for a in osv.get("affected", []):
+        for a in _dict_list(osv.get("affected")):
             pkg = a.get("package", {})
+            if not isinstance(pkg, dict):
+                pkg = {}
             ecosystem = str(pkg.get("ecosystem") or "").strip()
             package_name = str(pkg.get("name") or "").strip()
             if pkg and (pkg.get("name") or pkg.get("ecosystem")):
@@ -458,9 +503,9 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
 
             # Pair each introduced event with the next OSV terminating event.
             # last_affected is inclusive; fixed and limit are exclusive.
-            for r in a.get("ranges", []) or []:
+            for r in _dict_list(a.get("ranges")):
                 typ = r.get("type")
-                events = r.get("events", []) or []
+                events = _dict_list(r.get("events"))
                 i = 0
                 while i < len(events):
                     ev = events[i]
@@ -500,7 +545,12 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                     i += 1
 
             # Explicit affected versions list
-            for v in a.get("versions", []) or []:
+            versions = a.get("versions")
+            if not isinstance(versions, list):
+                versions = []
+            for v in versions:
+                if not isinstance(v, str):
+                    continue
                 # Strip leading "v" for consistency
                 clean = v.lstrip("v") if v.startswith("v") else v
                 if clean and clean not in normalized["affected_versions"]:
@@ -517,12 +567,14 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                     normalized["affected_version_entries"].append(version_entry)
 
     # Parse OSV (primary)
-    osv = results.get("osv")
+    osv_result = results.get("osv")
+    osv = osv_result if isinstance(osv_result, dict) else None
     if osv:
         _parse_osv_affected(osv, "osv")
 
     # Parse GHSA alias (may have ecosystem-specific SEMVER ranges)
-    osv_ghsa = results.get("osv_ghsa")
+    osv_ghsa_result = results.get("osv_ghsa")
+    osv_ghsa = osv_ghsa_result if isinstance(osv_ghsa_result, dict) else None
     if osv_ghsa:
         _parse_osv_affected(osv_ghsa, "osv_ghsa")
 
@@ -530,8 +582,15 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
     def _collect_cwes(dbs: Any) -> None:
         if not isinstance(dbs, dict):
             return
-        for cwe_id in dbs.get("cwe_ids", []):
-            if cwe_id and cwe_id.startswith("CWE-") and cwe_id not in normalized["cwe"]:
+        cwe_ids = dbs.get("cwe_ids")
+        if not isinstance(cwe_ids, list):
+            return
+        for cwe_id in cwe_ids:
+            if (
+                isinstance(cwe_id, str)
+                and cwe_id.startswith("CWE-")
+                and cwe_id not in normalized["cwe"]
+            ):
                 normalized["cwe"].append(cwe_id)
 
     # ---- Extract CWE + CVSS from OSV / GHSA ----
@@ -541,7 +600,7 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         # Top-level database_specific (where OSV/GHSA store cwe_ids)
         _collect_cwes(osv_entry.get("database_specific"))
         # Per-affected database_specific entries
-        for aff in osv_entry.get("affected", []):
+        for aff in _dict_list(osv_entry.get("affected")):
             _collect_cwes(aff.get("database_specific"))
 
         # CVSS from top-level database_specific
@@ -566,7 +625,7 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                     normalized["cvss"].append(cvss_raw)
 
         # CVSS from OSV severity array (CVSS_V3 / CVSS_V4 vectors)
-        for sev in osv_entry.get("severity", []):
+        for sev in _dict_list(osv_entry.get("severity")):
             vec = sev.get("score", "")
             # Extract baseScore from the CVSS vector string if present
             if vec.startswith("CVSS:"):
@@ -579,12 +638,14 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
     gh_adv = results.get("github_advisory")
     if isinstance(gh_adv, dict):
         if not normalized["summary"]:
-            normalized["summary"] = (
-                gh_adv.get("summary") or gh_adv.get("description") or ""
+            normalized["summary"] = _text(
+                gh_adv.get("summary") or gh_adv.get("description")
             ).strip()
 
-        for vuln in gh_adv.get("vulnerabilities", []) or []:
+        for vuln in _dict_list(gh_adv.get("vulnerabilities")):
             pkg = vuln.get("package") or {}
+            if not isinstance(pkg, dict):
+                pkg = {}
             ecosystem = pkg.get("ecosystem")
             name = pkg.get("name")
             if ecosystem and name:
@@ -592,8 +653,8 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                 if entry not in normalized["affected_packages"]:
                     normalized["affected_packages"].append(entry)
 
-            vuln_range = (vuln.get("vulnerable_version_range") or "").strip()
-            fixed = (vuln.get("first_patched_version") or "").strip()
+            vuln_range = _text(vuln.get("vulnerable_version_range")).strip()
+            fixed = _text(vuln.get("first_patched_version")).strip()
             if fixed:
                 fixed = fixed.lstrip("=")
             if vuln_range:
@@ -629,7 +690,10 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                 if fixed_entry not in normalized["fixed_version_entries"]:
                     normalized["fixed_version_entries"].append(fixed_entry)
 
-            for fn_name in vuln.get("vulnerable_functions", []) or []:
+            vulnerable_functions = vuln.get("vulnerable_functions")
+            if not isinstance(vulnerable_functions, list):
+                vulnerable_functions = []
+            for fn_name in vulnerable_functions:
                 if fn_name and fn_name not in normalized["vulnerable_symbols"]:
                     normalized["vulnerable_symbols"].append(fn_name)
 
@@ -642,7 +706,7 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
             if score not in normalized["cvss"]:
                 normalized["cvss"].append(score)
 
-        for cwe in gh_adv.get("cwes", []) or []:
+        for cwe in _dict_list(gh_adv.get("cwes")):
             cwe_id = cwe.get("cwe_id")
             if cwe_id and cwe_id not in normalized["cwe"]:
                 normalized["cwe"].append(cwe_id)
@@ -719,7 +783,7 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
 
     # Try to extract vulnerable symbols from text in OSV or GitHub search results
     def extract_symbols(text: str) -> List[str]:
-        if not text:
+        if not isinstance(text, str) or not text:
             return []
         # crude heuristic: look for word-like tokens with parentheses or dot notation
         syms = set()
@@ -732,8 +796,8 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
 
     if osv:
         # Prefer the short OSV summary; fall back to the first paragraph of details.
-        osv_summary = osv.get("summary") or ""
-        osv_details = osv.get("details") or ""
+        osv_summary = _text(osv.get("summary"))
+        osv_details = _text(osv.get("details"))
         if not osv_summary and osv_details:
             # Take first paragraph (up to blank line) as the summary.
             osv_summary = osv_details.split("\n\n")[0].strip()
@@ -756,9 +820,10 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         except Exception:
             pass
 
-    gh = results.get("github_search")
+    gh_result = results.get("github_search")
+    gh = gh_result if isinstance(gh_result, dict) else None
     if gh:
-        items = gh.get("items", [])
+        items = _dict_list(gh.get("items"))
         for it in items:
             t = it.get("title", "") + "\n" + (it.get("body", "") or "")
             normalized["vulnerable_symbols"].extend(extract_symbols(t))
@@ -770,7 +835,7 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         if osv:
             text_sources.append(osv.get("details", "") or "")
         if gh:
-            for it in gh.get("items", []):
+            for it in _dict_list(gh.get("items")):
                 text_sources.append(it.get("title", ""))
                 text_sources.append(it.get("body", "") or "")
         combined_text = "\n".join(text_sources)
