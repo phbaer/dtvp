@@ -4,17 +4,12 @@ import { LayoutList, Copy } from 'lucide-vue-next'
 import CustomSelect from './CustomSelect.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
 import type { CacheStatus, InconsistencyReason } from '../types'
+import type { TaskVulnGroupListCounts } from '../lib/api'
 
 export interface TeamEntry {
     team: string
     open: number
     assessed: number
-}
-
-export interface DependencyCounts {
-    direct: number
-    transitive: number
-    unknown: number
 }
 
 export interface FilterOption {
@@ -45,20 +40,14 @@ export interface FilterState {
 
 const props = defineProps<{
     filters: FilterState
-    filterCounts: Record<string, number>
     availableVersions: string[]
     lifecycleOptions: FilterOption[]
     inconsistencyReasonOptions: ReadonlyArray<Omit<FilterOption, 'color'>>
-    inconsistencyReasonCounts: Record<InconsistencyReason, number>
     analysisOptions: FilterOption[]
     copiedUrl: boolean
-    filteredCount: number
-    dependencyCounts: DependencyCounts
-    dependencyFilterCounts: DependencyCounts
-    tmrescoreCounts: Record<string, number>
-    automaticAssessmentCounts: Record<string, number>
-    analysisCounts: Record<string, number>
-    teamTagList: TeamEntry[]
+    resultCounts: TaskVulnGroupListCounts
+    countsUpdating: boolean
+    teamOptions: string[]
     cacheStatusState: 'cached' | 'partial' | 'unknown' | 'loading'
     cacheStatusLabel: string
     cacheStatusAge: string
@@ -68,8 +57,6 @@ const props = defineProps<{
     dependencyOptions: ReadonlyArray<{ value: string; label: string }>
     tmrescoreOptions: ReadonlyArray<{ value: string; label: string }>
     automaticAssessmentOptions: ReadonlyArray<{ value: string; label: string }>
-    cvssVersionMismatchCount?: number
-    attributionRangeCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -147,19 +134,60 @@ const toggleAnalysisFilter = (val: string) => {
     updateFilter('analysisFilters', current)
 }
 
+const countLabel = (count: number | undefined) => props.countsUpdating ? '…' : String(count || 0)
 
+const teamCountEntries = computed<TeamEntry[]>(() => props.teamOptions
+    .map(team => ({
+        team,
+        open: props.resultCounts.team_tags?.[team]?.open || 0,
+        assessed: props.resultCounts.team_tags?.[team]?.assessed || 0,
+    })))
+
+const filteredTeamTagList = computed(() => teamCountEntries.value
+    .filter(entry => entry.open + entry.assessed > 0)
+    .sort((left, right) => left.team.localeCompare(
+        right.team,
+        undefined,
+        { numeric: true, sensitivity: 'base' },
+    )))
+
+const teamFilterOptions = computed(() => [
+    { value: '', label: 'All teams' },
+    ...teamCountEntries.value
+        .filter(entry => entry.team.trim().length > 0)
+        .slice()
+        .sort((left, right) => left.team.localeCompare(
+            right.team,
+            undefined,
+            { numeric: true, sensitivity: 'base' },
+        ))
+        .map(entry => ({
+            value: entry.team,
+            label: entry.team,
+            suffix: props.countsUpdating
+                ? 'Updating…'
+                : `${entry.open + entry.assessed} vulnerabilities · ${entry.open} open · ${entry.assessed} assessed`,
+        })),
+])
+
+const attributionRangeCount = computed(() =>
+    props.filters.attributionAgeDays == null
+        ? props.resultCounts.total
+        : (props.resultCounts.attribution_age ?? props.resultCounts.total)
+)
 
 const statsText = computed(() => {
+    if (props.countsUpdating) return 'Updating vulnerability counts…'
     const lines = [
-        `Findings: ${props.filteredCount}`,
-        `Direct: ${props.dependencyCounts.direct}`,
-        `Transitive: ${props.dependencyCounts.transitive}`,
-        `Unknown: ${props.dependencyCounts.unknown}`
+        `Vulnerabilities: ${props.resultCounts.total}`,
+        `Direct: ${props.resultCounts.dependency_relationship.direct}`,
+        `Transitive: ${props.resultCounts.dependency_relationship.transitive}`,
+        `Unknown: ${props.resultCounts.dependency_relationship.unknown}`
     ]
 
-    if (props.teamTagList.length) {
+    if (filteredTeamTagList.value.length) {
         lines.push('Per Team:')
-        props.teamTagList.forEach(entry => {
+        filteredTeamTagList.value.forEach(entry => {
             lines.push(`  ${entry.team}: Open ${entry.open}, Assessed ${entry.assessed}`)
         })
     }
@@ -267,11 +295,24 @@ const handleCopy = () => {
                         <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                             <div class="space-y-3">
                                 <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Team</label>
+                                    <CustomSelect
+                                        data-testid="team-filter-select"
+                                        :modelValue="props.filters.tagFilter"
+                                        :options="teamFilterOptions"
+                                        placeholder="All teams"
+                                        searchable
+                                        search-placeholder="Search teams..."
+                                        @update:modelValue="(value) => updateFilter('tagFilter', value)"
+                                    />
+                                </div>
+
+                                <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Attribution Age</label>
                                     <AttributionAgeFilter
                                         :days="props.filters.attributionAgeDays"
                                         :mode="props.filters.attributionAgeMode"
-                                        :count="props.attributionRangeCount"
+                                        :count="props.countsUpdating ? undefined : attributionRangeCount"
                                         @update:days="updateFilter('attributionAgeDays', $event)"
                                         @update:mode="updateFilter('attributionAgeMode', $event)"
                                     />
@@ -297,7 +338,7 @@ const handleCopy = () => {
                                                 class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
                                                 :class="props.filters.lifecycleFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
                                             >
-                                                {{ props.filterCounts[opt.value] || 0 }}
+                                                {{ countLabel(props.resultCounts.lifecycle[opt.value]) }}
                                             </span>
                                         </button>
                                     </div>
@@ -320,7 +361,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">
-                                                {{ props.inconsistencyReasonCounts[opt.value as InconsistencyReason] || 0 }}
+                                                {{ countLabel(props.resultCounts.inconsistency_reason?.[opt.value as InconsistencyReason]) }}
                                             </span>
                                         </button>
                                     </div>
@@ -342,7 +383,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.dependencyFilter.includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN') ? 'text-white' : 'text-gray-500'">
-                                                {{ props.dependencyFilterCounts[opt.value === 'DIRECT' ? 'direct' : opt.value === 'TRANSITIVE' ? 'transitive' : 'unknown'] || 0 }}
+                                                {{ countLabel(props.resultCounts.dependency_relationship[opt.value === 'DIRECT' ? 'direct' : opt.value === 'TRANSITIVE' ? 'transitive' : 'unknown']) }}
                                             </span>
                                         </button>
                                     </div>
@@ -364,7 +405,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.tmrescoreFilter.includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') ? 'text-white' : 'text-gray-500'">
-                                                {{ props.tmrescoreCounts[opt.value] || 0 }}
+                                                {{ countLabel(props.resultCounts.tmrescore?.[opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']) }}
                                             </span>
                                         </button>
                                     </div>
@@ -386,13 +427,13 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT') ? 'text-white' : 'text-gray-500'">
-                                                {{ props.automaticAssessmentCounts[opt.value] || 0 }}
+                                                {{ countLabel(props.resultCounts.automatic_assessment?.[opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT']) }}
                                             </span>
                                         </button>
                                     </div>
                                 </div>
 
-                                <div v-if="props.cvssVersionMismatchCount != null" class="space-y-0.5">
+                                <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">CVSS Version</label>
                                     <div class="flex flex-wrap gap-2">
                                         <button
@@ -406,7 +447,7 @@ const handleCopy = () => {
                                         >
                                             Mismatch
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.cvssVersionMismatchOnly ? 'text-white' : 'text-gray-500'">
-                                                {{ props.cvssVersionMismatchCount }}
+                                                {{ countLabel(props.resultCounts.cvss_version_mismatch) }}
                                             </span>
                                         </button>
                                     </div>
@@ -431,7 +472,7 @@ const handleCopy = () => {
                                                 class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
                                                 :class="props.filters.analysisFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
                                             >
-                                                {{ props.analysisCounts[opt.value] || 0 }}
+                                                {{ countLabel(props.resultCounts.analysis[opt.value]) }}
                                             </span>
                                         </button>
                                     </div>
@@ -447,25 +488,25 @@ const handleCopy = () => {
                         <div class="text-[10px] font-medium uppercase tracking-widest text-gray-500">Statistics</div>
                         <div class="flex items-center gap-2 px-3 py-1.5 my-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
                             <LayoutList :size="12" class="text-blue-400" />
-                            <span class="text-[10px] font-black text-blue-400 uppercase tracking-widest">{{ props.filteredCount }} Findings</span>
+                            <span class="text-[10px] font-black text-blue-400 uppercase tracking-widest">{{ props.countsUpdating ? 'Updating…' : `${props.resultCounts.total} Vulnerabilities` }}</span>
                         </div>
                         <div class="flex flex-col gap-1">
                             <div class="flex justify-between items-center px-2 py-0.5 rounded bg-green-500/10">
                                 <span class="text-[10px] text-green-300">Direct</span>
-                                <span class="text-[10px] font-bold text-green-200">{{ props.dependencyCounts.direct }}</span>
+                                <span class="text-[10px] font-bold text-green-200">{{ countLabel(props.resultCounts.dependency_relationship.direct) }}</span>
                             </div>
                             <div class="flex justify-between items-center px-2 py-0.5 rounded bg-purple-500/10">
                                 <span class="text-[10px] text-purple-300">Transitive</span>
-                                <span class="text-[10px] font-bold text-purple-200">{{ props.dependencyCounts.transitive }}</span>
+                                <span class="text-[10px] font-bold text-purple-200">{{ countLabel(props.resultCounts.dependency_relationship.transitive) }}</span>
                             </div>
                             <div class="flex justify-between items-center px-2 py-0.5 rounded bg-gray-500/10">
                                 <span class="text-[10px] text-gray-400">Unknown</span>
-                                <span class="text-[10px] font-bold text-gray-300">{{ props.dependencyCounts.unknown }}</span>
+                                <span class="text-[10px] font-bold text-gray-300">{{ countLabel(props.resultCounts.dependency_relationship.unknown) }}</span>
                             </div>
                         </div>
                     </div>
 
-                    <div v-if="props.teamTagList.length > 0" class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
+                    <div v-if="filteredTeamTagList.length > 0" class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
                         <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Per Team</div>
                         <div class="overflow-y-auto max-h-[20rem]">
                             <table class="min-w-full table-auto text-left text-[10px] text-gray-300 border-separate border-spacing-0">
@@ -478,7 +519,7 @@ const handleCopy = () => {
                                 </thead>
                                 <tbody>
                                     <tr
-                                        v-for="entry in props.teamTagList"
+                                        v-for="entry in filteredTeamTagList"
                                         :key="entry.team"
                                         class="border-t border-white/5"
                                     >

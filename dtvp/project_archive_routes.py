@@ -75,11 +75,13 @@ def _create_task(
     *,
     kind: str,
     message: str,
+    user: str,
 ) -> dict[str, Any]:
     task_id = str(uuid.uuid4())
     now = _now()
     task = {
         "id": task_id,
+        "_owner": user,
         "kind": kind,
         "status": "pending",
         "message": message,
@@ -90,6 +92,17 @@ def _create_task(
         "log": [message],
     }
     deps.archive_tasks[task_id] = task
+    return task
+
+
+def _task_for_user(
+    deps: ProjectArchiveRouteDeps,
+    task_id: str,
+    user: str,
+) -> dict[str, Any] | None:
+    task = deps.archive_tasks.get(task_id)
+    if not isinstance(task, dict) or task.get("_owner") != user:
+        return None
     return task
 
 
@@ -148,7 +161,7 @@ def _register_task_routes(
     @router.get("/project-archives/tasks/{task_id}")
     async def get_archive_task(task_id: str, user: CurrentUser):
         _require_reviewer(deps, user)
-        task = deps.archive_tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Archive task not found")
         return _task_public(task)
@@ -160,7 +173,7 @@ def _register_task_routes(
         async def event_stream():
             last_payload = ""
             while True:
-                task = deps.archive_tasks.get(task_id)
+                task = _task_for_user(deps, task_id, user)
                 if not task:
                     payload = {"status": "not_found"}
                 else:
@@ -182,7 +195,7 @@ def _register_task_routes(
     @router.get("/project-archives/tasks/{task_id}/download")
     async def download_archive_task(task_id: str, user: CurrentUser):
         _require_reviewer(deps, user)
-        task = deps.archive_tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Archive task not found")
         if task.get("status") != "completed" or not task.get("_archive_path"):
@@ -218,6 +231,7 @@ def _register_export_routes(
             deps,
             kind="export",
             message=f"Queued export for {req.project_name}",
+            user=user,
         )
         settings, token, cookies = _client_context_from_request(deps, request)
 
@@ -285,6 +299,7 @@ def _register_import_routes(
             deps,
             kind="import_preview",
             message="Queued project archive import preview.",
+            user=user,
         )
         content = await file.read()
         try:
@@ -349,7 +364,7 @@ def _register_import_routes(
         user: CurrentUser,
     ):
         _require_reviewer(deps, user)
-        task = deps.archive_tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Archive task not found")
         if task.get("status") == "running":

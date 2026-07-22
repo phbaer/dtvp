@@ -47,6 +47,7 @@ def test_grouped_vuln_task_status_prunes_expired_terminal_tasks(client, monkeypa
     monkeypatch.setenv("DTVP_GROUPED_VULN_TASK_TTL_SECONDS", "60")
     task_id = "expired-grouped-vuln-task"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "id": task_id,
         "status": "completed",
         "result": [],
@@ -65,6 +66,7 @@ def test_grouped_vuln_task_status_prunes_expired_terminal_tasks(client, monkeypa
 def test_grouped_vuln_task_events_stream_status_without_result(client):
     task_id = "task-events"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "id": task_id,
         "status": "completed",
         "message": "Done",
@@ -86,6 +88,31 @@ def test_grouped_vuln_task_events_stream_status_without_result(client):
     assert event["status"] == "completed"
     assert event["progress"] == 100
     assert "result" not in event
+
+
+def test_grouped_vuln_tasks_are_private_to_the_creating_user(client):
+    task_id = "another-users-grouped-task"
+    main.tasks[task_id] = {
+        "_owner": "another-user",
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [{"id": "CVE-PRIVATE"}],
+        "_full_result_by_id": {"CVE-PRIVATE": {"id": "CVE-PRIVATE"}},
+    }
+
+    try:
+        status = client.get(f"/api/tasks/{task_id}")
+        groups = client.get(f"/api/tasks/{task_id}/groups")
+        detail = client.get(f"/api/tasks/{task_id}/groups/CVE-PRIVATE")
+        statistics = client.get(f"/api/tasks/{task_id}/statistics")
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert status.status_code == 200
+    assert status.json() == {"status": "not_found"}
+    assert groups.status_code == 404
+    assert detail.status_code == 404
+    assert statistics.status_code == 404
 
 
 def test_cache_status_endpoint(client):
@@ -176,6 +203,7 @@ def test_assessment_restore_preview_and_apply(client, mock_dt_client):
     group, vector = _restore_group()
     task_id = "restore-task"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "_full_result": [group],
@@ -210,7 +238,8 @@ def test_assessment_restore_preview_and_apply(client, mock_dt_client):
         assert "[Rescored: 0.0]" in kwargs["details"]
         assert f"[Rescored Vector: {vector}]" in kwargs["details"]
         assert "sqlite not used in the product" in kwargs["details"]
-        assert group["assessment_restore_count"] == 0
+        refreshed_group = main.tasks[task_id]["_full_result_by_id"][group["id"]]
+        assert refreshed_group["assessment_restore_count"] == 0
     finally:
         main.tasks.pop(task_id, None)
 
@@ -220,6 +249,7 @@ def test_bulk_workflow_preview_runs_as_polled_background_task(client):
     task_id = "background-bulk-preview-source"
     operation_id = None
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "_full_result": [group],
@@ -299,6 +329,7 @@ def test_incomplete_bulk_workflow_preview_hydrates_summary_lifecycle(client):
     summaries = summarize_grouped_vulnerabilities([group], {})
     assert summaries[0]["list_metadata"]["lifecycle"] == "INCOMPLETE"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "_full_result": [group],
@@ -329,6 +360,7 @@ def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_clie
     task_id = "background-bulk-apply-source"
     operation_id = None
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "_full_result": [group],
@@ -382,6 +414,10 @@ def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_clie
         assert status["status"] == "completed"
         assert status["kind"] == "bulk_workflow_apply"
         assert status["result"]["summary"]["attempted"] == 1
+        assert any(
+            "Submitted 1 of 1 assessment updates" in entry
+            for entry in status["log"]
+        )
         mock_dt_client.update_analysis.assert_called_once()
     finally:
         main.tasks.pop(task_id, None)
@@ -422,6 +458,7 @@ def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(clie
     }
     task_id = "automatic-assessment-manual-run-task"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "_full_result": [group],
@@ -533,6 +570,7 @@ def test_bulk_automatic_assessment_preview_imports_source_less_legacy_result(cli
     }
     task_id = "automatic-assessment-source-less-run-task"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "_full_result": [group],
@@ -665,6 +703,7 @@ def test_rescore_rule_sync_preview_and_apply(client, mock_dt_client):
     summarize_grouped_vulnerabilities([group], {})
     task_id = "rescore-rule-sync-task"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "_full_result": [group],
@@ -699,10 +738,11 @@ def test_rescore_rule_sync_preview_and_apply(client, mock_dt_client):
         assert kwargs["justification"] == "CODE_NOT_REACHABLE"
         assert kwargs["suppressed"] is True
 
-        refreshed_component = group["affected_versions"][0]["components"][0]
+        refreshed_group = main.tasks[task_id]["_full_result_by_id"][group["id"]]
+        refreshed_component = refreshed_group["affected_versions"][0]["components"][0]
         assert "CR:L/IR:L/AR:L" in refreshed_component["analysis_details"]
-        assert group["rescored_vector"] == finding["proposed_vector"]
-        assert group["rescored_cvss"] == finding["proposed_score"]
+        assert refreshed_group["rescored_vector"] == finding["proposed_vector"]
+        assert refreshed_group["rescored_cvss"] == finding["proposed_score"]
     finally:
         main.tasks.pop(task_id, None)
 
@@ -710,6 +750,7 @@ def test_rescore_rule_sync_preview_and_apply(client, mock_dt_client):
 def test_get_task_statistics_reuses_completed_grouped_result(client):
     task_id = "task-statistics"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "_full_result": [
             {
@@ -751,6 +792,7 @@ def test_get_task_statistics_reuses_completed_grouped_result(client):
 def test_get_task_groups_filters_sorts_and_windows(client):
     task_id = "task-list-query"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [
@@ -885,6 +927,7 @@ def test_get_task_groups_filters_sorts_and_windows(client):
 def test_get_task_groups_filters_by_inconsistency_reason(client):
     task_id = "task-inconsistency-reason"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [
@@ -928,6 +971,7 @@ def test_get_task_groups_filters_by_inconsistency_reason(client):
 def test_get_task_groups_accepts_cursor(client):
     task_id = "task-list-query-cursor"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [
@@ -1023,6 +1067,7 @@ def test_get_task_groups_serves_running_partial_summary_window(client):
         }
     ]
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "running",
         "result_mode": "summary",
         "result": groups,
@@ -1048,6 +1093,7 @@ def test_get_task_groups_serves_running_partial_summary_window(client):
 def test_get_task_groups_field_filters_accept_multiple_terms(client):
     task_id = "task-list-query-terms"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [
@@ -1109,9 +1155,62 @@ def test_get_task_groups_field_filters_accept_multiple_terms(client):
     assert [item["id"] for item in data["items"]] == ["CVE-2026-TERMS"]
 
 
+def test_get_task_groups_team_filter_matches_the_complete_name(client):
+    task_id = "task-list-query-exact-team"
+    group_metadata = {
+        "lifecycle": "OPEN",
+        "is_open": True,
+        "is_pending": False,
+        "technical_state": "NOT_SET",
+        "component_names": ["component"],
+        "versions": ["1.0.0"],
+        "dependency_relationship": "DIRECT",
+        "cvss_version_mismatch": False,
+    }
+    main.tasks[task_id] = {
+        "_owner": "testuser",
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [
+            {
+                "id": "CVE-2026-PLATFORM",
+                "title": "Platform finding",
+                "tags": ["Platform"],
+                "aliases": [],
+                "assignees": [],
+                "list_metadata": group_metadata,
+                "affected_versions": [],
+            },
+            {
+                "id": "CVE-2026-PLATFORM-SECURITY",
+                "title": "Platform Security finding",
+                "tags": ["Platform Security"],
+                "aliases": [],
+                "assignees": [],
+                "list_metadata": group_metadata,
+                "affected_versions": [],
+            },
+        ],
+    }
+
+    try:
+        response = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={"team": "platform"},
+        )
+    finally:
+        main.tasks.pop(task_id, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filtered"] == 1
+    assert [item["id"] for item in data["items"]] == ["CVE-2026-PLATFORM"]
+
+
 def test_get_task_group_details_window_returns_full_groups(client):
     task_id = "task-detail-window"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [
@@ -1204,6 +1303,7 @@ def test_get_task_group_details_window_returns_full_groups(client):
 def test_get_task_groups_filters_by_tmrescore_proposal_ids_and_aliases(client):
     task_id = "task-list-query-tmrescore"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [
@@ -1288,6 +1388,7 @@ def test_get_task_groups_filters_by_tmrescore_proposal_ids_and_aliases(client):
 def test_get_task_groups_filters_by_automatic_assessment_ids_and_aliases(client):
     task_id = "task-list-query-auto-assessment"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [
@@ -1407,6 +1508,7 @@ def test_get_task_groups_filters_and_annotates_from_persisted_assessment_metadat
         "id": "CVE-2026-NO-PERSISTED-ASSESSMENT",
     }
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": [assessed_group, unassessed_group],
@@ -1456,7 +1558,11 @@ def test_get_task_groups_filters_and_annotates_from_persisted_assessment_metadat
 
 def test_get_task_groups_rejects_incomplete_task(client):
     task_id = "task-list-running"
-    main.tasks[task_id] = {"status": "running", "result": []}
+    main.tasks[task_id] = {
+        "_owner": "testuser",
+        "status": "running",
+        "result": [],
+    }
     try:
         response = client.get(f"/api/tasks/{task_id}/groups")
     finally:
@@ -1469,6 +1575,7 @@ def test_get_task_groups_rejects_incomplete_task(client):
 def test_get_task_status_can_omit_result(client):
     task_id = "task-status-lean"
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "id": task_id,
         "status": "completed",
         "message": "Done",
@@ -1935,6 +2042,7 @@ def test_assessment_update_refreshes_grouped_task_windows(client, mock_dt_client
     full_result = [full_group]
     summary_result = summarize_grouped_vulnerabilities(full_result, {})
     main.tasks[task_id] = {
+        "_owner": "testuser",
         "status": "completed",
         "result_mode": "summary",
         "result": summary_result,

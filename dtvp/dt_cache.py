@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import re
@@ -6,7 +7,7 @@ import tempfile
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
@@ -209,6 +210,7 @@ class CacheManager:
         self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
         self.cache_meta: Dict[str, Any] = {"fully_cached": False, "last_refreshed_at": None}
         self._memory_cache: Dict[str, Any] = {}
+        self._inflight_fetches: Dict[Tuple[str, ...], asyncio.Task[Any]] = {}
         self._ensure_directories()
 
     def _ensure_directories(self) -> None:
@@ -406,7 +408,41 @@ class CacheManager:
         self.project_query_cache = {}
         self.cache_meta = {"fully_cached": False, "last_refreshed_at": None}
         self._memory_cache = {}
+        self._inflight_fetches = {}
         self._ensure_directories()
+
+    async def _singleflight_fetch(
+        self,
+        key: Tuple[str, ...],
+        loader: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        """Share one upstream fetch without sharing its mutable result."""
+        async with self.lock:
+            task = self._inflight_fetches.get(key)
+            if task is None:
+                task = asyncio.create_task(loader())
+                self._inflight_fetches[key] = task
+
+                def cleanup(completed: asyncio.Task[Any]) -> None:
+                    asyncio.create_task(self._remove_inflight_fetch(key, completed))
+
+                task.add_done_callback(cleanup)
+
+        try:
+            result = await asyncio.shield(task)
+        finally:
+            if task.done():
+                await self._remove_inflight_fetch(key, task)
+        return copy.deepcopy(result)
+
+    async def _remove_inflight_fetch(
+        self,
+        key: Tuple[str, ...],
+        task: asyncio.Task[Any],
+    ) -> None:
+        async with self.lock:
+            if self._inflight_fetches.get(key) is task:
+                self._inflight_fetches.pop(key, None)
 
     def load_persisted_runtime_state(self) -> None:
         (
@@ -505,6 +541,8 @@ class CacheManager:
 
     async def record_project_access(self, project_uuid: str) -> None:
         async with self.lock:
+            if project_uuid in self.active_project_uuids:
+                return
             self.active_project_uuids.add(project_uuid)
             self._save_active_projects(list(self.active_project_uuids))
 
@@ -517,11 +555,21 @@ class CacheManager:
 
         if not name:
             try:
-                projects = await client.get_projects("")
-                async with self.lock:
-                    self._save_project_cache(self._projects_path(), projects)
-                    self.cache_meta["fully_cached"] = True
-                    self._touch_cache_meta()
+
+                async def fetch_all_projects() -> List[Dict[str, Any]]:
+                    fresh_projects = await client.get_projects("")
+                    async with self.lock:
+                        self._save_project_cache(
+                            self._projects_path(), fresh_projects
+                        )
+                        self.cache_meta["fully_cached"] = True
+                        self._touch_cache_meta()
+                    return fresh_projects
+
+                projects = await self._singleflight_fetch(
+                    ("projects", "all"),
+                    fetch_all_projects,
+                )
                 return projects
             except Exception:
                 if projects:
@@ -530,21 +578,47 @@ class CacheManager:
                         "cached project list with %d entries",
                         len(projects),
                     )
-                    return projects
+                    return copy.deepcopy(projects)
                 raise
 
         if projects_meta.get("fully_cached"):
-            return [
-                project
-                for project in projects
-                if name.lower() in (project.get("name", "") or "").lower()
-            ]
+            return copy.deepcopy(
+                [
+                    project
+                    for project in projects
+                    if name.lower() in (project.get("name", "") or "").lower()
+                ]
+            )
 
         if name in self.project_query_cache:
-            return self.project_query_cache[name]
+            return copy.deepcopy(self.project_query_cache[name])
 
         try:
-            results = await client.get_projects(name)
+
+            async def fetch_matching_projects() -> List[Dict[str, Any]]:
+                fresh_results = await client.get_projects(name)
+                async with self.lock:
+                    self.project_query_cache[name] = fresh_results
+                    if fresh_results:
+                        current = self._load_project_cache(
+                            self._projects_path(), []
+                        ) or []
+                        existing_uuids = {
+                            project.get("uuid")
+                            for project in current
+                            if project.get("uuid")
+                        }
+                        merged = list(current)
+                        for project in fresh_results:
+                            if project.get("uuid") not in existing_uuids:
+                                merged.append(project)
+                        self._save_project_cache(self._projects_path(), merged)
+                return fresh_results
+
+            results = await self._singleflight_fetch(
+                ("projects", "query", name),
+                fetch_matching_projects,
+            )
         except Exception:
             cached_matches = [
                 project
@@ -558,19 +632,8 @@ class CacheManager:
                     name,
                     len(cached_matches),
                 )
-                return cached_matches
+                return copy.deepcopy(cached_matches)
             raise
-
-        self.project_query_cache[name] = results
-        if results:
-            async with self.lock:
-                current = self._load_project_cache(self._projects_path(), []) or []
-                existing_uuids = {p.get("uuid") for p in current if p.get("uuid")}
-                merged = list(current)
-                for project in results:
-                    if project.get("uuid") not in existing_uuids:
-                        merged.append(project)
-                self._save_project_cache(self._projects_path(), merged)
         return results
 
     async def get_vulnerabilities(
@@ -583,25 +646,39 @@ class CacheManager:
         await self.record_project_access(project_uuid)
         path = self._findings_path(project_uuid)
         findings = None
-        previous_findings = None
 
         if not refresh:
             async with self.lock:
                 findings = self._load_project_cache(path, None)
 
         if findings is None:
-            async with self.lock:
-                previous_findings = self._load_project_cache(path, None)
-            findings = await client.get_vulnerabilities(project_uuid, cve=None)
-            findings = self._restore_recreated_finding_assessments(
-                project_uuid,
-                findings,
-                previous_findings or [],
+
+            async def fetch_findings() -> List[Dict[str, Any]]:
+                async with self.lock:
+                    cached_findings = self._load_project_cache(path, None)
+                fresh_findings = await client.get_vulnerabilities(
+                    project_uuid,
+                    cve=None,
+                )
+                fresh_findings = self._restore_recreated_finding_assessments(
+                    project_uuid,
+                    fresh_findings,
+                    cached_findings or [],
+                )
+                fresh_findings = self._overlay_local_analysis(
+                    project_uuid,
+                    fresh_findings,
+                )
+                async with self.lock:
+                    self._save_project_cache(path, fresh_findings)
+                return fresh_findings
+
+            findings = await self._singleflight_fetch(
+                ("vulnerabilities", project_uuid),
+                fetch_findings,
             )
-            findings = self._overlay_local_analysis(project_uuid, findings)
-            async with self.lock:
-                self._save_project_cache(path, findings)
         else:
+            findings = copy.deepcopy(findings)
             findings = self._overlay_local_analysis(project_uuid, findings)
 
         if cve:
@@ -636,10 +713,18 @@ class CacheManager:
             async with self.lock:
                 vulns = self._load_project_cache(path, None)
         if vulns is None:
-            vulns = await client.get_project_vulnerabilities(project_uuid)
-            async with self.lock:
-                self._save_project_cache(path, vulns)
-        return vulns
+
+            async def fetch_project_vulnerabilities() -> List[Dict[str, Any]]:
+                fresh_vulns = await client.get_project_vulnerabilities(project_uuid)
+                async with self.lock:
+                    self._save_project_cache(path, fresh_vulns)
+                return fresh_vulns
+
+            return await self._singleflight_fetch(
+                ("project_vulnerabilities", project_uuid),
+                fetch_project_vulnerabilities,
+            )
+        return copy.deepcopy(vulns)
 
     async def get_bom(
         self,
@@ -654,10 +739,18 @@ class CacheManager:
             async with self.lock:
                 bom = self._load_project_cache(path, None)
         if bom is None:
-            bom = await client.get_bom(project_uuid)
-            async with self.lock:
-                self._save_project_cache(path, bom)
-        return bom
+
+            async def fetch_bom() -> Optional[Dict[str, Any]]:
+                fresh_bom = await client.get_bom(project_uuid)
+                async with self.lock:
+                    self._save_project_cache(path, fresh_bom)
+                return fresh_bom
+
+            return await self._singleflight_fetch(
+                ("bom", project_uuid),
+                fetch_bom,
+            )
+        return copy.deepcopy(bom)
 
     async def get_analysis(
         self,
@@ -669,22 +762,37 @@ class CacheManager:
     ) -> Optional[Dict[str, Any]]:
         path = self._analysis_path(project_uuid, component_uuid, vulnerability_uuid)
         analysis = None
-        cached_analysis = None
         if not refresh:
             async with self.lock:
                 analysis = self._load_project_cache(path, None)
         if analysis is None:
-            async with self.lock:
-                cached_analysis = self._load_project_cache(path, None)
-            analysis = await client.get_analysis(
-                project_uuid=project_uuid,
-                component_uuid=component_uuid,
-                vulnerability_uuid=vulnerability_uuid,
+
+            async def fetch_analysis() -> Optional[Dict[str, Any]]:
+                async with self.lock:
+                    previous_analysis = self._load_project_cache(path, None)
+                fresh_analysis = await client.get_analysis(
+                    project_uuid=project_uuid,
+                    component_uuid=component_uuid,
+                    vulnerability_uuid=vulnerability_uuid,
+                )
+                fresh_analysis = self._merge_blank_source_analysis(
+                    previous_analysis,
+                    fresh_analysis,
+                )
+                async with self.lock:
+                    self._save_project_cache(path, fresh_analysis)
+                return fresh_analysis
+
+            return await self._singleflight_fetch(
+                (
+                    "analysis",
+                    project_uuid,
+                    component_uuid,
+                    vulnerability_uuid,
+                ),
+                fetch_analysis,
             )
-            analysis = self._merge_blank_source_analysis(cached_analysis, analysis)
-            async with self.lock:
-                self._save_project_cache(path, analysis)
-        return analysis
+        return copy.deepcopy(analysis)
 
     def _finding_cache_identity(
         self, finding: Dict[str, Any]
@@ -867,6 +975,72 @@ class CacheManager:
             self._save_local_analysis(payload)
         return update_id
 
+    async def queue_analysis_updates(
+        self,
+        payloads: List[Dict[str, Any]],
+        replace: bool = False,
+    ) -> List[str]:
+        """Persist several failed writes with one pending-queue rewrite."""
+        if not payloads:
+            return []
+
+        entries = [
+            {
+                "id": str(uuid.uuid4()),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "payload": payload,
+            }
+            for payload in payloads
+        ]
+        async with self.lock:
+            pending = list(self._load_pending_updates())
+            pending_keys = {
+                key
+                for queued in pending
+                if (
+                    key := self._pending_update_key(queued.get("payload", {}))
+                )
+                is not None
+            }
+            entry_keys = [
+                self._pending_update_key(entry["payload"])
+                for entry in entries
+            ]
+            if not replace:
+                seen_keys: Set[tuple[str, str, str]] = set()
+                for key in entry_keys:
+                    if key is None:
+                        continue
+                    if key in pending_keys or key in seen_keys:
+                        raise PendingUpdateExistsError(
+                            "A pending update already exists for this finding."
+                        )
+                    seen_keys.add(key)
+                persisted_entries = entries
+                pending.extend(persisted_entries)
+            else:
+                replacement_keys = {key for key in entry_keys if key is not None}
+                pending = [
+                    queued
+                    for queued in pending
+                    if self._pending_update_key(queued.get("payload", {}))
+                    not in replacement_keys
+                ]
+                deduplicated_reversed = []
+                seen_keys: Set[tuple[str, str, str]] = set()
+                for entry, key in reversed(list(zip(entries, entry_keys))):
+                    if key is not None and key in seen_keys:
+                        continue
+                    if key is not None:
+                        seen_keys.add(key)
+                    deduplicated_reversed.append(entry)
+                persisted_entries = list(reversed(deduplicated_reversed))
+                pending.extend(persisted_entries)
+
+            self._save_pending_updates(pending)
+            self._save_local_analyses(payloads)
+        return [str(entry["id"]) for entry in persisted_entries]
+
     async def remove_pending_update(self, update_id: str) -> None:
         async with self.lock:
             pending = self._load_pending_updates()
@@ -914,6 +1088,33 @@ class CacheManager:
             self._analysis_path(project_uuid, component_uuid, vulnerability_uuid),
             analysis_data,
         )
+
+    def _save_local_analyses(self, payloads: List[Dict[str, Any]]) -> None:
+        """Persist local overlays while updating cache metadata only once."""
+        saved = False
+        for payload in payloads:
+            project_uuid = payload.get("project_uuid")
+            component_uuid = payload.get("component_uuid")
+            vulnerability_uuid = payload.get("vulnerability_uuid")
+            if not (project_uuid and component_uuid and vulnerability_uuid):
+                continue
+            analysis_data = {
+                "analysisState": payload.get("state"),
+                "analysisDetails": payload.get("details"),
+                "isSuppressed": payload.get("suppressed", False),
+            }
+            self._save_cache_file(
+                self._analysis_path(
+                    project_uuid,
+                    component_uuid,
+                    vulnerability_uuid,
+                ),
+                analysis_data,
+                touch_meta=False,
+            )
+            saved = True
+        if saved:
+            self._touch_cache_meta()
 
 
 cache_manager = CacheManager()

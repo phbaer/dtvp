@@ -169,11 +169,13 @@ def build_tmrescore_cached_state(
 def get_latest_tmrescore_project_task(
     deps: TMRescoreTaskServiceDeps,
     project_name: str,
+    user: str,
 ) -> Optional[dict[str, Any]]:
     matching_tasks = [
         task
         for task in deps.tmrescore_analysis_tasks.values()
         if task.get("project_name") == project_name
+        and task.get("_owner") == user
     ]
     if not matching_tasks:
         return None

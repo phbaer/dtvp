@@ -1,6 +1,8 @@
 import asyncio
+import copy
 import hashlib
 import json
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,6 +31,7 @@ from .bulk_workflows.incomplete_sync import create_incomplete_sync_workflow
 from .bulk_workflows.rescore_rule_sync import create_rescore_rule_sync_workflow
 from .code_analysis_assessment_services import (
     assessment_status_for_group,
+    build_assessment_match_index,
     discover_assessment_metadata,
     record_vulnerability_id,
 )
@@ -87,6 +90,7 @@ class BulkWorkflowFilters(BaseModel):
     inconsistency_reason: list[str] = Field(default_factory=list)
     analysis: list[str] = Field(default_factory=list)
     tag: str = ""
+    team: str = ""
     id: str = ""
     component: str = ""
     assignee: str = ""
@@ -136,7 +140,7 @@ class GeneralApiRouteDeps:
     prune_grouped_vuln_tasks: Callable[[], list[str]]
     get_user_role: Callable[[str], str]
     fetch_current_assessment_analyses: Callable[
-        [AssessmentRequest, DTClient], Awaitable[list[Any]]
+        [Any, DTClient], Awaitable[list[Any]]
     ]
     collect_assessment_conflicts: Callable[
         [AssessmentRequest, list[Any]], list[dict[str, Any]]
@@ -144,9 +148,7 @@ class GeneralApiRouteDeps:
     build_assessment_payloads: Callable[
         [AssessmentRequest, str, str], list[tuple[dict, dict]]
     ]
-    apply_assessment_payloads: Callable[
-        [DTClient, list[tuple[dict, dict]]], Awaitable[list[dict[str, Any]]]
-    ]
+    apply_assessment_payloads: Callable[..., Awaitable[list[dict[str, Any]]]]
     finalize_assessment_results: Callable[
         [list[dict[str, Any]]], Awaitable[list[dict[str, Any]]]
     ]
@@ -162,6 +164,18 @@ ASSESSMENT_INSTANCE_KEY_FIELDS = (
     "component_uuid",
     "vulnerability_uuid",
 )
+_TASK_SNAPSHOT_REFRESH_LOCK = threading.RLock()
+
+
+def _task_for_user(
+    deps: GeneralApiRouteDeps,
+    task_id: str,
+    user: str,
+) -> dict[str, Any] | None:
+    task = deps.tasks.get(task_id)
+    if not isinstance(task, dict) or task.get("_owner") != user:
+        return None
+    return task
 
 
 def _assessment_identity_key(source: dict[str, Any]) -> tuple[str, str, str] | None:
@@ -250,6 +264,23 @@ def _apply_assessment_payload_to_group(
     return changed
 
 
+def _group_has_assessment_payload(
+    group: dict[str, Any],
+    by_finding_uuid: dict[str, dict[str, Any]],
+    by_identity: dict[tuple[str, str, str], dict[str, Any]],
+) -> bool:
+    return any(
+        _assessment_payload_for_component(
+            component,
+            by_finding_uuid,
+            by_identity,
+        )
+        is not None
+        for affected_version in group.get("affected_versions") or []
+        for component in affected_version.get("components") or []
+    )
+
+
 def _refresh_group_rescoring_metadata(group: dict[str, Any]) -> None:
     """Rebuild aggregate rescoring fields after component detail updates."""
     best_score: float | None = None
@@ -293,32 +324,48 @@ def _refresh_grouped_task_groups(
     by_finding_uuid: dict[str, dict[str, Any]],
     by_identity: dict[tuple[str, str, str], dict[str, Any]],
     team_mapping: dict[str, Any],
-) -> bool:
-    changed_group_ids: set[str] = set()
+) -> list[dict[str, Any]] | None:
+    refreshed_groups: list[dict[str, Any]] = []
+    changed = False
     for group in groups:
-        if _apply_assessment_payload_to_group(
+        if not _group_has_assessment_payload(
             group,
             by_finding_uuid,
             by_identity,
         ):
-            group_id = group.get("id")
-            if group_id:
-                changed_group_ids.add(str(group_id))
-
-    if not changed_group_ids:
-        return False
-
-    for group in groups:
-        if str(group.get("id") or "") not in changed_group_ids:
+            refreshed_groups.append(group)
             continue
-        refresh_group_restore_metadata(group)
-        summary = summarize_grouped_vulnerabilities([group], team_mapping)
-        if summary:
-            group["list_metadata"] = summary[0].get("list_metadata") or {}
-    return True
+        candidate = copy.deepcopy(group)
+        if _apply_assessment_payload_to_group(
+            candidate,
+            by_finding_uuid,
+            by_identity,
+        ):
+            refresh_group_restore_metadata(candidate)
+            summary = summarize_grouped_vulnerabilities([candidate], team_mapping)
+            if summary:
+                candidate["list_metadata"] = summary[0].get("list_metadata") or {}
+            refreshed_groups.append(candidate)
+            changed = True
+        else:
+            refreshed_groups.append(group)
+    return refreshed_groups if changed else None
 
 
 def _refresh_grouped_vuln_task_snapshots(
+    tasks: dict[str, Any],
+    payloads: list[tuple[dict, dict]],
+    team_mapping: dict[str, Any],
+) -> int:
+    with _TASK_SNAPSHOT_REFRESH_LOCK:
+        return _refresh_grouped_vuln_task_snapshots_locked(
+            tasks,
+            payloads,
+            team_mapping,
+        )
+
+
+def _refresh_grouped_vuln_task_snapshots_locked(
     tasks: dict[str, Any],
     payloads: list[tuple[dict, dict]],
     team_mapping: dict[str, Any],
@@ -327,62 +374,91 @@ def _refresh_grouped_vuln_task_snapshots(
     now = datetime.now(timezone.utc)
     by_finding_uuid, by_identity = _build_assessment_payload_lookup(payloads)
 
-    for task in tasks.values():
+    for task in list(tasks.values()):
         if not isinstance(task, dict):
             continue
 
-        full_result = task.get("_full_result")
-        partial_full_result = task.get("_partial_full_result")
-        result = task.get("result")
-        full_changed = isinstance(full_result, list) and _refresh_grouped_task_groups(
-            full_result,
-            by_finding_uuid,
-            by_identity,
-            team_mapping,
-        )
-        partial_changed = (
-            isinstance(partial_full_result, list)
-            and partial_full_result is not full_result
-            and _refresh_grouped_task_groups(
-                partial_full_result,
-                by_finding_uuid,
-                by_identity,
-                team_mapping,
+        for _attempt in range(3):
+            full_result = task.get("_full_result")
+            partial_full_result = task.get("_partial_full_result")
+            result = task.get("result")
+            refreshed_full = (
+                _refresh_grouped_task_groups(
+                    full_result,
+                    by_finding_uuid,
+                    by_identity,
+                    team_mapping,
+                )
+                if isinstance(full_result, list)
+                else None
             )
-        )
-        result_changed = False
+            refreshed_partial = (
+                isinstance(partial_full_result, list)
+                and partial_full_result is not full_result
+                and _refresh_grouped_task_groups(
+                    partial_full_result,
+                    by_finding_uuid,
+                    by_identity,
+                    team_mapping,
+                )
+            )
+            refreshed_result = None
+            if refreshed_full is None and not refreshed_partial and isinstance(
+                result, list
+            ):
+                refreshed_result = _refresh_grouped_task_groups(
+                    result,
+                    by_finding_uuid,
+                    by_identity,
+                    team_mapping,
+                )
 
-        if full_changed:
-            task["_full_result_by_id"] = {
-                item.get("id"): item for item in full_result if item.get("id")
-            }
-            task["result"] = (
-                summarize_grouped_vulnerabilities(full_result, team_mapping)
-                if task.get("result_mode") == "summary"
-                else full_result
-            )
-        elif partial_changed:
-            task["result"] = (
-                summarize_grouped_vulnerabilities(partial_full_result, team_mapping)
-                if task.get("result_mode") == "summary"
-                else partial_full_result
-            )
-        elif isinstance(result, list):
-            result_changed = _refresh_grouped_task_groups(
-                result,
-                by_finding_uuid,
-                by_identity,
-                team_mapping,
-            )
+            if not (refreshed_full or refreshed_partial or refreshed_result):
+                break
 
-        if not (full_changed or partial_changed or result_changed):
-            continue
+            if (
+                task.get("_full_result") is not full_result
+                or task.get("_partial_full_result") is not partial_full_result
+                or task.get("result") is not result
+            ):
+                continue
 
-        task["_group_query_index"] = build_task_group_query_index(
-            task.get("result") if isinstance(task.get("result"), list) else []
-        )
-        task["updated_at"] = now
-        refreshed += 1
+            if refreshed_full is not None:
+                task["_full_result"] = refreshed_full
+                task["_full_result_by_id"] = {
+                    item.get("id"): item
+                    for item in refreshed_full
+                    if item.get("id")
+                }
+                task["result"] = (
+                    summarize_grouped_vulnerabilities(
+                        refreshed_full,
+                        team_mapping,
+                    )
+                    if task.get("result_mode") == "summary"
+                    else refreshed_full
+                )
+            elif refreshed_partial:
+                task["result"] = (
+                    summarize_grouped_vulnerabilities(
+                        refreshed_partial,
+                        team_mapping,
+                    )
+                    if task.get("result_mode") == "summary"
+                    else refreshed_partial
+                )
+            elif refreshed_result is not None:
+                task["result"] = refreshed_result
+
+            if refreshed_partial:
+                task["_partial_full_result"] = refreshed_partial
+
+            task["_group_query_index"] = build_task_group_query_index(
+                task.get("result") if isinstance(task.get("result"), list) else []
+            )
+            task["updated_at"] = now
+            refreshed += 1
+            break
 
     return refreshed
 
@@ -429,6 +505,8 @@ def _register_task_routes(
         now = datetime.now(timezone.utc)
         deps.tasks[task_id] = {
             "id": task_id,
+            "_owner": user,
+            "_project_name": name,
             "status": "pending",
             "message": "Starting...",
             "progress": 0,
@@ -472,7 +550,7 @@ def _register_task_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_grouped_vuln_tasks()
-        task = deps.tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             return {"status": "not_found"}
         return {
@@ -491,7 +569,7 @@ def _register_task_routes(
             last_payload = ""
             while True:
                 deps.prune_grouped_vuln_tasks()
-                task = deps.tasks.get(task_id)
+                task = _task_for_user(deps, task_id, user)
                 if not task:
                     payload = {"status": "not_found"}
                 else:
@@ -523,6 +601,7 @@ def _register_task_routes(
         inconsistency_reason: list[str] | None = Query(default=None),
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
+        team: str = "",
         vuln_id: str = Query("", alias="id"),
         component: str = "",
         assignee: str = "",
@@ -544,7 +623,7 @@ def _register_task_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_grouped_vuln_tasks()
-        task = deps.tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         is_partial_summary = (
@@ -555,41 +634,44 @@ def _register_task_routes(
         if task.get("status") != "completed" and not is_partial_summary:
             raise HTTPException(status_code=409, detail="Task is not completed")
 
-        assessment_records = await asyncio.to_thread(
-            discover_assessment_metadata,
-            deps.code_analysis_result_store,
-        )
-        effective_assessment_ids = _assessment_filter_ids(
-            assessment_records,
-            split_query_values(automatic_assessment_ids),
-        )
         try:
             response = await asyncio.to_thread(
-                lambda: query_task_groups(
-                    get_or_build_task_group_query_index(task),
-                    q=q,
-                    lifecycle=split_query_values(lifecycle),
-                    inconsistency_reason=split_query_values(inconsistency_reason),
-                    analysis=split_query_values(analysis),
-                    tag=tag,
-                    vuln_id=vuln_id,
-                    component=component,
-                    assignee=assignee,
-                    dependency=split_query_values(dependency),
-                    versions=split_query_values(versions),
-                    cvss_mismatch=cvss_mismatch,
-                    attributed_before_days=attributed_before_days,
-                    attribution_mode=attribution_mode,
-                    tmrescore=split_query_values(tmrescore),
-                    tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
-                    automatic_assessment=split_query_values(automatic_assessment),
-                    automatic_assessment_ids=effective_assessment_ids,
-                    sort_by=sort,
-                    sort_order=order,
-                    offset=offset,
-                    limit=limit,
-                    cursor=cursor,
-                )
+                _query_task_group_window,
+                deps,
+                task,
+                {
+                    "q": q,
+                    "lifecycle": split_query_values(lifecycle),
+                    "inconsistency_reason": split_query_values(
+                        inconsistency_reason
+                    ),
+                    "analysis": split_query_values(analysis),
+                    "tag": tag,
+                    "team": team,
+                    "vuln_id": vuln_id,
+                    "component": component,
+                    "assignee": assignee,
+                    "dependency": split_query_values(dependency),
+                    "versions": split_query_values(versions),
+                    "cvss_mismatch": cvss_mismatch,
+                    "attributed_before_days": attributed_before_days,
+                    "attribution_mode": attribution_mode,
+                    "tmrescore": split_query_values(tmrescore),
+                    "tmrescore_proposal_ids": split_query_values(
+                        tmrescore_proposal_ids
+                    ),
+                    "automatic_assessment": split_query_values(
+                        automatic_assessment
+                    ),
+                    "automatic_assessment_ids": split_query_values(
+                        automatic_assessment_ids
+                    ),
+                    "sort_by": sort,
+                    "sort_order": order,
+                    "offset": offset,
+                    "limit": limit,
+                    "cursor": cursor,
+                },
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -602,7 +684,6 @@ def _register_task_routes(
         )
         response["versions_completed"] = task.get("versions_completed")
         response["versions_total"] = task.get("versions_total")
-        _annotate_code_assessment_status(response["items"], assessment_records)
         return response
 
     @router.get("/tasks/{task_id}/group-details")
@@ -613,6 +694,7 @@ def _register_task_routes(
         inconsistency_reason: list[str] | None = Query(default=None),
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
+        team: str = "",
         vuln_id: str = Query("", alias="id"),
         component: str = "",
         assignee: str = "",
@@ -634,56 +716,54 @@ def _register_task_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_grouped_vuln_tasks()
-        task = deps.tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         if task.get("status") != "completed":
             raise HTTPException(status_code=409, detail="Task is not completed")
 
-        assessment_records = await asyncio.to_thread(
-            discover_assessment_metadata,
-            deps.code_analysis_result_store,
-        )
-        effective_assessment_ids = _assessment_filter_ids(
-            assessment_records,
-            split_query_values(automatic_assessment_ids),
-        )
         try:
             response = await asyncio.to_thread(
-                lambda: query_task_groups(
-                    get_or_build_task_group_query_index(task),
-                    q=q,
-                    lifecycle=split_query_values(lifecycle),
-                    inconsistency_reason=split_query_values(inconsistency_reason),
-                    analysis=split_query_values(analysis),
-                    tag=tag,
-                    vuln_id=vuln_id,
-                    component=component,
-                    assignee=assignee,
-                    dependency=split_query_values(dependency),
-                    versions=split_query_values(versions),
-                    cvss_mismatch=cvss_mismatch,
-                    attributed_before_days=attributed_before_days,
-                    attribution_mode=attribution_mode,
-                    tmrescore=split_query_values(tmrescore),
-                    tmrescore_proposal_ids=split_query_values(tmrescore_proposal_ids),
-                    automatic_assessment=split_query_values(automatic_assessment),
-                    automatic_assessment_ids=effective_assessment_ids,
-                    sort_by=sort,
-                    sort_order=order,
-                    offset=offset,
-                    limit=limit,
-                    cursor=cursor,
-                )
+                _query_task_group_window,
+                deps,
+                task,
+                {
+                    "q": q,
+                    "lifecycle": split_query_values(lifecycle),
+                    "inconsistency_reason": split_query_values(
+                        inconsistency_reason
+                    ),
+                    "analysis": split_query_values(analysis),
+                    "tag": tag,
+                    "team": team,
+                    "vuln_id": vuln_id,
+                    "component": component,
+                    "assignee": assignee,
+                    "dependency": split_query_values(dependency),
+                    "versions": split_query_values(versions),
+                    "cvss_mismatch": cvss_mismatch,
+                    "attributed_before_days": attributed_before_days,
+                    "attribution_mode": attribution_mode,
+                    "tmrescore": split_query_values(tmrescore),
+                    "tmrescore_proposal_ids": split_query_values(
+                        tmrescore_proposal_ids
+                    ),
+                    "automatic_assessment": split_query_values(
+                        automatic_assessment
+                    ),
+                    "automatic_assessment_ids": split_query_values(
+                        automatic_assessment_ids
+                    ),
+                    "sort_by": sort,
+                    "sort_order": order,
+                    "offset": offset,
+                    "limit": limit,
+                    "cursor": cursor,
+                },
+                hydrate_full=True,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        full_by_id = task.get("_full_result_by_id") or {}
-        response["items"] = [
-            full_by_id.get(item.get("id"), item) if isinstance(item, dict) else item
-            for item in response["items"]
-        ]
-        _annotate_code_assessment_status(response["items"], assessment_records)
         response["result_mode"] = "full"
         response["source_result_mode"] = task.get("result_mode")
         return response
@@ -696,7 +776,7 @@ def _register_task_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_grouped_vuln_tasks()
-        task = deps.tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
@@ -704,13 +784,21 @@ def _register_task_routes(
         group = full_by_id.get(group_id)
         if group is None:
             raise HTTPException(status_code=404, detail="Vulnerability group not found")
-        populate_group_dependency_chains(group, task.get("_bom_cache_map") or {})
-        assessment_records = await asyncio.to_thread(
-            discover_assessment_metadata,
-            deps.code_analysis_result_store,
-        )
-        _annotate_code_assessment_status([group], assessment_records)
-        return group
+
+        def hydrate_group_detail() -> dict[str, Any]:
+            hydrated = copy.deepcopy(group)
+            populate_group_dependency_chains(
+                hydrated,
+                task.get("_bom_cache_map") or {},
+            )
+            assessment_records = discover_assessment_metadata(
+                deps.code_analysis_result_store,
+                project_name=task.get("_project_name") or None,
+            )
+            _annotate_code_assessment_status([hydrated], assessment_records)
+            return hydrated
+
+        return await asyncio.to_thread(hydrate_group_detail)
 
     @router.get("/tasks/{task_id}/statistics")
     async def get_task_statistics(
@@ -719,7 +807,7 @@ def _register_task_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_grouped_vuln_tasks()
-        task = deps.tasks.get(task_id)
+        task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
         if task.get("status") != "completed":
@@ -729,7 +817,7 @@ def _register_task_routes(
         if not isinstance(grouped, list):
             grouped = task.get("result") if isinstance(task.get("result"), list) else []
 
-        stats = deps.calculate_statistics(grouped)
+        stats = await asyncio.to_thread(deps.calculate_statistics, grouped)
         stats.update(task.get("_statistics_rollup") or {})
         return stats
 
@@ -802,9 +890,10 @@ def _register_statistics_route(
 def _completed_task_full_groups(
     deps: GeneralApiRouteDeps,
     task_id: str,
+    user: str,
 ) -> list[dict[str, Any]]:
     deps.prune_grouped_vuln_tasks()
-    task = deps.tasks.get(task_id)
+    task = _task_for_user(deps, task_id, user)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.get("status") != "completed":
@@ -840,10 +929,53 @@ def _annotate_code_assessment_status(
     groups: list[dict[str, Any]],
     records: list[dict[str, Any]],
 ) -> None:
+    record_index = build_assessment_match_index(records)
     for group in groups:
         if not isinstance(group, dict):
             continue
-        group["code_assessment_status"] = assessment_status_for_group(group, records)
+        group["code_assessment_status"] = assessment_status_for_group(
+            group,
+            records,
+            record_index,
+        )
+
+
+def _query_task_group_window(
+    deps: GeneralApiRouteDeps,
+    task: dict[str, Any],
+    query_options: dict[str, Any],
+    *,
+    hydrate_full: bool = False,
+) -> dict[str, Any]:
+    assessment_records = discover_assessment_metadata(
+        deps.code_analysis_result_store,
+        project_name=task.get("_project_name") or None,
+    )
+    options = dict(query_options)
+    requested_assessment_ids = options.pop("automatic_assessment_ids", [])
+    options["automatic_assessment_ids"] = _assessment_filter_ids(
+        assessment_records,
+        requested_assessment_ids,
+    )
+    response = query_task_groups(
+        get_or_build_task_group_query_index(task),
+        **options,
+    )
+    if hydrate_full:
+        full_by_id = task.get("_full_result_by_id") or {}
+        response["items"] = [
+            dict(full_by_id.get(item.get("id"), item))
+            if isinstance(item, dict)
+            else item
+            for item in response["items"]
+        ]
+    else:
+        response["items"] = [
+            dict(item) if isinstance(item, dict) else item
+            for item in response["items"]
+        ]
+    _annotate_code_assessment_status(response["items"], assessment_records)
+    return response
 
 
 def _filter_bulk_workflow_groups(
@@ -857,6 +989,7 @@ def _filter_bulk_workflow_groups(
         inconsistency_reason=filters.inconsistency_reason,
         analysis=filters.analysis,
         tag=filters.tag,
+        team=filters.team,
         vuln_id=filters.id,
         component=filters.component,
         assignee=filters.assignee,
@@ -886,10 +1019,13 @@ def _filter_bulk_workflow_task_groups(
     deps: GeneralApiRouteDeps,
     task_id: str,
     filters: BulkWorkflowFilters,
+    user: str,
     assessment_records: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    full_groups = _completed_task_full_groups(deps, task_id)
-    task = deps.tasks[task_id]
+    full_groups = _completed_task_full_groups(deps, task_id, user)
+    task = _task_for_user(deps, task_id, user)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
     summary_index = get_or_build_task_group_query_index(task)
     assessment_filter = {
         str(value or "").strip().upper()
@@ -932,16 +1068,28 @@ def _filter_bulk_workflow_task_groups(
     }:
         return filtered_groups
     if assessment_filter == {"WITH_AUTOMATIC_ASSESSMENT"}:
+        record_index = build_assessment_match_index(assessment_records or [])
         return [
             group
             for group in filtered_groups
-            if assessment_status_for_group(group, assessment_records or []) is not None
+            if assessment_status_for_group(
+                group,
+                assessment_records or [],
+                record_index,
+            )
+            is not None
         ]
     if assessment_filter == {"WITHOUT_AUTOMATIC_ASSESSMENT"}:
+        record_index = build_assessment_match_index(assessment_records or [])
         return [
             group
             for group in filtered_groups
-            if assessment_status_for_group(group, assessment_records or []) is None
+            if assessment_status_for_group(
+                group,
+                assessment_records or [],
+                record_index,
+            )
+            is None
         ]
     return []
 
@@ -984,6 +1132,7 @@ def _bulk_workflow_context(
             deps,
             req.task_id,
             req.filters,
+            user,
             assessment_records,
         ),
         user=user,
@@ -1062,12 +1211,14 @@ async def _apply_bulk_workflow_payloads(
     deps: GeneralApiRouteDeps,
     client: DTClient,
     payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+    *,
+    progress_callback: Callable[[int, int, dict[str, Any]], Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    for _instance, payload in payloads:
-        deps.cache_manager._save_local_analysis(payload)
+    await _persist_local_assessment_payloads(deps, payloads)
 
     try:
-        _refresh_grouped_vuln_task_snapshots(
+        await asyncio.to_thread(
+            _refresh_grouped_vuln_task_snapshots,
             deps.tasks,
             payloads,
             deps.load_team_mapping(),
@@ -1075,7 +1226,11 @@ async def _apply_bulk_workflow_payloads(
     except Exception:
         deps.logger.exception("Failed to refresh grouped task snapshots after bulk workflow")
 
-    api_results = await deps.apply_assessment_payloads(client, payloads)
+    api_results = await deps.apply_assessment_payloads(
+        client,
+        payloads,
+        progress_callback=progress_callback,
+    )
     finalized = await deps.finalize_assessment_results(api_results)
     outcome = {
         "succeeded": sum(1 for result in finalized if result.get("status") == "success"),
@@ -1087,6 +1242,23 @@ async def _apply_bulk_workflow_payloads(
         ),
     }
     return finalized, outcome
+
+
+async def _persist_local_assessment_payloads(
+    deps: GeneralApiRouteDeps,
+    payloads: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> None:
+    raw_payloads = [payload for _instance, payload in payloads]
+    bulk_saver = getattr(deps.cache_manager, "_save_local_analyses", None)
+    batch_size = 25
+    for offset in range(0, len(raw_payloads), batch_size):
+        batch = raw_payloads[offset : offset + batch_size]
+        if callable(bulk_saver):
+            bulk_saver(batch)
+        else:
+            for payload in batch:
+                deps.cache_manager._save_local_analysis(payload)
+        await asyncio.sleep(0)
 
 
 def _create_bulk_workflow_task(
@@ -1106,6 +1278,7 @@ def _create_bulk_workflow_task(
         "source_task_id": source_task_id,
         "workflow_id": workflow_id,
         "created_by": user,
+        "_owner": user,
         "status": "pending",
         "message": message,
         "progress": 0,
@@ -1126,13 +1299,15 @@ def _update_bulk_workflow_task(
     progress: int | None = None,
     result: Any = None,
     error: str | None = None,
+    append_log: bool = True,
 ) -> None:
     now = datetime.now(timezone.utc)
     if status is not None:
         task["status"] = status
     if message is not None:
         task["message"] = message
-        task.setdefault("log", []).append(message)
+        if append_log:
+            task.setdefault("log", []).append(message)
     if progress is not None:
         task["progress"] = progress
     if result is not None:
@@ -1199,6 +1374,7 @@ def _register_bulk_workflow_routes(
         req: BulkWorkflowApplyRequest,
         user: str,
         client: DTClient,
+        progress_callback: Callable[[int, int, dict[str, Any]], Any] | None = None,
     ) -> dict[str, Any]:
         context = await asyncio.to_thread(
             _bulk_workflow_context,
@@ -1232,7 +1408,10 @@ def _register_bulk_workflow_routes(
             selected,
         )
         finalized, outcome = await _apply_bulk_workflow_payloads(
-            deps, client, payloads
+            deps,
+            client,
+            payloads,
+            progress_callback=progress_callback,
         )
         await asyncio.to_thread(
             _record_code_analysis_applications,
@@ -1302,7 +1481,7 @@ def _register_bulk_workflow_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         require_reviewer(user)
-        _completed_task_full_groups(deps, req.task_id)
+        _completed_task_full_groups(deps, req.task_id, user)
         workflows = [
             {
                 **plugin.metadata(),
@@ -1370,7 +1549,7 @@ def _register_bulk_workflow_routes(
     ):
         require_reviewer(user)
         deps.prune_grouped_vuln_tasks()
-        operation = deps.tasks.get(operation_id)
+        operation = _task_for_user(deps, operation_id, user)
         if not operation or not str(operation.get("kind", "")).startswith(
             "bulk_workflow_"
         ):
@@ -1392,7 +1571,7 @@ def _register_bulk_workflow_routes(
         plugin = registry.get(workflow_id)
         if plugin is None:
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
-        _completed_task_full_groups(deps, req.task_id)
+        _completed_task_full_groups(deps, req.task_id, user)
         operation = _create_bulk_workflow_task(
             deps,
             kind="preview",
@@ -1442,7 +1621,7 @@ def _register_bulk_workflow_routes(
         plugin = registry.get(workflow_id)
         if plugin is None:
             raise HTTPException(status_code=404, detail="Bulk workflow not found")
-        _completed_task_full_groups(deps, req.task_id)
+        _completed_task_full_groups(deps, req.task_id, user)
         settings = deps.dt_settings_cls()
         token = None
         auth_header = request.headers.get("Authorization")
@@ -1465,6 +1644,36 @@ def _register_bulk_workflow_routes(
                 progress=10,
             )
             try:
+                progress_counts = {"succeeded": 0, "failed": 0}
+                last_progress = 10
+
+                def update_progress(
+                    completed: int,
+                    total: int,
+                    result: dict[str, Any],
+                ) -> None:
+                    nonlocal last_progress
+                    outcome_key = (
+                        "succeeded"
+                        if result.get("status") == "success"
+                        else "failed"
+                    )
+                    progress_counts[outcome_key] += 1
+                    progress = 20 + int(70 * completed / max(1, total))
+                    if progress <= last_progress and completed < total:
+                        return
+                    last_progress = progress
+                    _update_bulk_workflow_task(
+                        operation,
+                        message=(
+                            f"Submitted {completed} of {total} assessment updates "
+                            f"({progress_counts['succeeded']} succeeded, "
+                            f"{progress_counts['failed']} awaiting durable fallback)."
+                        ),
+                        progress=progress,
+                        append_log=(completed == total or progress % 10 == 0),
+                    )
+
                 client_cls = deps.get_dt_client_cls()
                 async with client_cls(
                     settings.api_url,
@@ -1472,7 +1681,13 @@ def _register_bulk_workflow_routes(
                     token=token or "",
                     cookies=cookies,
                 ) as client:
-                    result = await prepare_apply_response(plugin, req, user, client)
+                    result = await prepare_apply_response(
+                        plugin,
+                        req,
+                        user,
+                        client,
+                        progress_callback=update_progress,
+                    )
                 _update_bulk_workflow_task(
                     operation,
                     status="completed",
@@ -1509,7 +1724,7 @@ def _register_bulk_workflow_routes(
                 status_code=409,
                 detail="This bulk workflow does not provide a document",
             )
-        _completed_task_full_groups(deps, req.task_id)
+        _completed_task_full_groups(deps, req.task_id, user)
         operation = _create_bulk_workflow_task(
             deps,
             kind="document",
@@ -1572,17 +1787,10 @@ def _register_assessment_routes(
             len(req.instances),
             user,
         )
-        analysis_tasks = [
-            deps.cache_manager.get_analysis(
-                client,
-                project_uuid=instance["project_uuid"],
-                component_uuid=instance["component_uuid"],
-                vulnerability_uuid=instance["vulnerability_uuid"],
-                refresh=True,
-            )
-            for instance in req.instances
-        ]
-        gathered_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+        gathered_results = await deps.fetch_current_assessment_analyses(
+            req,
+            client,
+        )
 
         results = []
         refreshed_payloads: list[tuple[dict, dict]] = []
@@ -1612,7 +1820,8 @@ def _register_assessment_routes(
 
         if refreshed_payloads:
             try:
-                refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
+                refreshed_tasks = await asyncio.to_thread(
+                    _refresh_grouped_vuln_task_snapshots,
                     deps.tasks,
                     refreshed_payloads,
                     deps.load_team_mapping(),
@@ -1640,7 +1849,7 @@ def _register_assessment_routes(
         if deps.get_user_role(user).upper() != "REVIEWER":
             raise HTTPException(status_code=403, detail="Reviewer role required")
 
-        groups = _completed_task_full_groups(deps, req.task_id)
+        groups = _completed_task_full_groups(deps, req.task_id, user)
         preview = workflow_assessment_restore_preview(groups, req.group_ids)
         return {"task_id": req.task_id, **preview}
 
@@ -1653,7 +1862,7 @@ def _register_assessment_routes(
         if deps.get_user_role(user).upper() != "REVIEWER":
             raise HTTPException(status_code=403, detail="Reviewer role required")
 
-        groups = _completed_task_full_groups(deps, req.task_id)
+        groups = _completed_task_full_groups(deps, req.task_id, user)
         try:
             preview = build_rescore_rule_sync_preview(
                 groups,
@@ -1674,7 +1883,7 @@ def _register_assessment_routes(
         if deps.get_user_role(user).upper() != "REVIEWER":
             raise HTTPException(status_code=403, detail="Reviewer role required")
 
-        groups = _completed_task_full_groups(deps, req.task_id)
+        groups = _completed_task_full_groups(deps, req.task_id, user)
         try:
             payloads, skipped = build_rescore_rule_sync_payloads(
                 groups,
@@ -1684,43 +1893,16 @@ def _register_assessment_routes(
         except RescoreRuleError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-        for _instance, payload in payloads:
-            deps.cache_manager._save_local_analysis(payload)
-
-        try:
-            refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
-                deps.tasks,
-                payloads,
-                deps.load_team_mapping(),
-            )
-            if refreshed_tasks:
-                deps.logger.info(
-                    "Refreshed %d grouped vulnerability task snapshot(s) "
-                    "after CVSS rule sync",
-                    refreshed_tasks,
-                )
-        except Exception:
-            deps.logger.exception(
-                "Failed to refresh grouped vulnerability task snapshots "
-                "after CVSS rule sync"
-            )
-
-        api_results = await deps.apply_assessment_payloads(client, payloads)
-        finalized = await deps.finalize_assessment_results(api_results)
-        queued = sum(1 for result in finalized if result.get("queued"))
-        succeeded = sum(1 for result in finalized if result.get("status") == "success")
-        failed = sum(
-            1
-            for result in finalized
-            if result.get("status") == "error" and not result.get("queued")
+        finalized, outcome = await _apply_bulk_workflow_payloads(
+            deps,
+            client,
+            payloads,
         )
         return {
             "task_id": req.task_id,
             "summary": {
                 "attempted": len(payloads),
-                "succeeded": succeeded,
-                "queued": queued,
-                "failed": failed,
+                **outcome,
                 **skipped,
             },
             "results": finalized,
@@ -1736,45 +1918,18 @@ def _register_assessment_routes(
         if deps.get_user_role(user).upper() != "REVIEWER":
             raise HTTPException(status_code=403, detail="Reviewer role required")
 
-        groups = _completed_task_full_groups(deps, req.task_id)
+        groups = _completed_task_full_groups(deps, req.task_id, user)
         payloads, skipped = workflow_assessment_restore_payloads(groups, req.group_ids)
-        for _instance, payload in payloads:
-            deps.cache_manager._save_local_analysis(payload)
-
-        try:
-            refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
-                deps.tasks,
-                payloads,
-                deps.load_team_mapping(),
-            )
-            if refreshed_tasks:
-                deps.logger.info(
-                    "Refreshed %d grouped vulnerability task snapshot(s) "
-                    "after assessment restore",
-                    refreshed_tasks,
-                )
-        except Exception:
-            deps.logger.exception(
-                "Failed to refresh grouped vulnerability task snapshots "
-                "after assessment restore"
-            )
-
-        api_results = await deps.apply_assessment_payloads(client, payloads)
-        finalized = await deps.finalize_assessment_results(api_results)
-        queued = sum(1 for result in finalized if result.get("queued"))
-        succeeded = sum(1 for result in finalized if result.get("status") == "success")
-        failed = sum(
-            1
-            for result in finalized
-            if result.get("status") == "error" and not result.get("queued")
+        finalized, outcome = await _apply_bulk_workflow_payloads(
+            deps,
+            client,
+            payloads,
         )
         return {
             "task_id": req.task_id,
             "summary": {
                 "attempted": len(payloads),
-                "succeeded": succeeded,
-                "queued": queued,
-                "failed": failed,
+                **outcome,
                 **skipped,
             },
             "results": finalized,
@@ -1811,10 +1966,10 @@ def _register_assessment_routes(
 
         role = deps.get_user_role(user)
         payloads = deps.build_assessment_payloads(req, user, role)
-        for _instance, payload in payloads:
-            deps.cache_manager._save_local_analysis(payload)
+        await _persist_local_assessment_payloads(deps, payloads)
         try:
-            refreshed_tasks = _refresh_grouped_vuln_task_snapshots(
+            refreshed_tasks = await asyncio.to_thread(
+                _refresh_grouped_vuln_task_snapshots,
                 deps.tasks,
                 payloads,
                 deps.load_team_mapping(),

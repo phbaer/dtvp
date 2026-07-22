@@ -554,6 +554,88 @@ describe('ProjectView.vue', () => {
         expect(wrapper.text()).toContain('300')
     })
 
+    it('uses final filtered counts for the top result and every filter chip', async () => {
+        vi.mocked(getGroupedVulns).mockImplementation(async (_name, _cve, _progress, options: any) => {
+            options?.onTaskId?.('task-filtered-counts')
+            return [] as any
+        })
+        const countSet = (total: number, open: number, assessed: number, mismatch: number) => ({
+            total,
+            lifecycle: {
+                OPEN: open,
+                ASSESSED: assessed,
+                ASSESSED_LEGACY: 0,
+                INCOMPLETE: 0,
+                INCONSISTENT: 0,
+                NEEDS_APPROVAL: 0,
+            },
+            inconsistency_reason: {
+                MISSING_RESCORING_VECTOR: 0,
+                ANALYSIS_STATE_MISMATCH: 0,
+                TEAM_ASSESSMENT_MISMATCH: 0,
+                ASSESSMENT_DETAILS_MISMATCH: 0,
+            },
+            analysis: {
+                NOT_SET: open,
+                EXPLOITABLE: 0,
+                IN_TRIAGE: 0,
+                RESOLVED: 0,
+                FALSE_POSITIVE: assessed,
+                NOT_AFFECTED: 0,
+            },
+            dependency_relationship: { direct: open, transitive: assessed, unknown: 0 },
+            cvss_version_mismatch: mismatch,
+            versions: {},
+            tags: { Platform: total },
+            assignees: {},
+            components: {},
+            team_tags: { Platform: { open, assessed } },
+            tmrescore: { WITH_PROPOSAL: mismatch, WITHOUT_PROPOSAL: total - mismatch },
+            automatic_assessment: {
+                WITH_AUTOMATIC_ASSESSMENT: mismatch,
+                WITHOUT_AUTOMATIC_ASSESSMENT: total - mismatch,
+            },
+            attribution_age: total,
+        })
+        vi.mocked(getTaskVulnGroups).mockResolvedValue({
+            items: [{
+                id: 'CVE-FILTERED',
+                tags: ['Platform'],
+                list_metadata: {
+                    lifecycle: 'OPEN',
+                    is_open: true,
+                    is_pending: false,
+                    technical_state: 'NOT_SET',
+                    dependency_relationship: 'DIRECT',
+                },
+                affected_versions: [],
+            }],
+            total: 6,
+            filtered: 1,
+            counts: {
+                all: countSet(6, 4, 2, 3),
+                filtered: countSet(1, 1, 0, 0),
+            },
+            offset: 0,
+            limit: 250,
+            sort: 'rescored-severity',
+            order: 'desc',
+        } as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        await flushPromises()
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.text()).toContain('1 of 6 vulnerabilities')
+        const buttonText = (label: string) => wrapper.findAll('button')
+            .find(button => button.text().trim().startsWith(label))?.text() || ''
+        expect(buttonText('Open')).toMatch(/Open\s+1/)
+        expect(buttonText('Assessed')).toMatch(/Assessed\s+0/)
+        expect(buttonText('Mismatch')).toMatch(/Mismatch\s+0/)
+        expect(buttonText('Direct')).toMatch(/Direct\s+1/)
+        expect(buttonText('Transitive')).toMatch(/Transitive\s+0/)
+    })
+
     it('refreshes backend task windows as partial grouping progress advances', async () => {
         const taskWindow = (id: string, total: number, partial: boolean, completed?: number) => {
             const counts = {

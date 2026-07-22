@@ -1,5 +1,7 @@
+import asyncio
+
 import pytest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from dtvp.dt_cache import CacheManager, PendingUpdateExistsError
 
 
@@ -75,6 +77,78 @@ async def test_get_vulnerabilities_caches_results(tmp_path):
 
     loaded = manager._load_project_cache(manager._findings_path("uuid1"), None)
     assert loaded[0]["component"]["name"] == "lib"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cache_misses_share_fetch_but_not_mutable_results(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    fetch_started = asyncio.Event()
+    release_fetch = asyncio.Event()
+
+    async def fetch_findings(_project_uuid, cve=None):
+        fetch_started.set()
+        await release_fetch.wait()
+        return [
+            {
+                "vulnerability": {"vulnId": "CVE-1", "uuid": "v1"},
+                "component": {"uuid": "c1", "name": "shared-lib"},
+            }
+        ]
+
+    client.get_vulnerabilities.side_effect = fetch_findings
+    first_request = asyncio.create_task(
+        manager.get_vulnerabilities(client, "project-1")
+    )
+    await fetch_started.wait()
+    second_request = asyncio.create_task(
+        manager.get_vulnerabilities(client, "project-1")
+    )
+    await asyncio.sleep(0)
+    release_fetch.set()
+
+    first, second = await asyncio.gather(first_request, second_request)
+    first[0]["component"]["name"] = "changed-by-first-request"
+    cached = await manager.get_vulnerabilities(client, "project-1")
+
+    assert client.get_vulnerabilities.call_count == 1
+    assert second[0]["component"]["name"] == "shared-lib"
+    assert cached[0]["component"]["name"] == "shared-lib"
+
+
+@pytest.mark.asyncio
+async def test_failed_shared_fetch_can_be_retried_immediately(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_vulnerabilities.side_effect = [
+        RuntimeError("temporarily unavailable"),
+        [],
+    ]
+
+    with pytest.raises(RuntimeError, match="temporarily unavailable"):
+        await manager.get_vulnerabilities(client, "project-1")
+
+    assert await manager.get_vulnerabilities(client, "project-1") == []
+    assert client.get_vulnerabilities.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_record_project_access_skips_redundant_persistence(tmp_path, monkeypatch):
+    manager = CacheManager(base_path=str(tmp_path))
+    saved: list[list[str]] = []
+    monkeypatch.setattr(
+        manager,
+        "_save_active_projects",
+        lambda project_uuids: saved.append(project_uuids),
+    )
+
+    await asyncio.gather(
+        manager.record_project_access("project-1"),
+        manager.record_project_access("project-1"),
+        manager.record_project_access("project-1"),
+    )
+
+    assert saved == [["project-1"]]
 
 
 def test_cached_project_snapshot_discovers_persisted_findings(tmp_path):
@@ -214,6 +288,60 @@ async def test_queue_duplicate_pending_update_rejected(tmp_path):
 
     with pytest.raises(PendingUpdateExistsError):
         await manager.queue_analysis_update(payload)
+
+
+@pytest.mark.asyncio
+async def test_queue_analysis_updates_rewrites_pending_file_once(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    original = {
+        "project_uuid": "project",
+        "component_uuid": "component-0",
+        "vulnerability_uuid": "vulnerability-0",
+        "state": "IN_TRIAGE",
+        "details": "Old value",
+        "suppressed": False,
+    }
+    await manager.queue_analysis_update(original)
+    replacements = [
+        {
+            "project_uuid": "project",
+            "component_uuid": f"component-{index}",
+            "vulnerability_uuid": f"vulnerability-{index}",
+            "state": "NOT_AFFECTED",
+            "details": f"Replacement {index}",
+            "suppressed": False,
+        }
+        for index in range(100)
+    ]
+
+    with (
+        patch.object(
+            manager,
+            "_save_pending_updates",
+            wraps=manager._save_pending_updates,
+        ) as save_pending,
+        patch.object(
+            manager,
+            "_save_local_analyses",
+            wraps=manager._save_local_analyses,
+        ) as save_local,
+    ):
+        update_ids = await manager.queue_analysis_updates(
+            replacements,
+            replace=True,
+        )
+
+    assert len(update_ids) == 100
+    assert save_pending.call_count == 1
+    assert save_local.call_count == 1
+    pending = manager._load_pending_updates()
+    assert len(pending) == 100
+    assert pending[0]["payload"]["details"] == "Replacement 0"
+    stored = manager._load_project_cache(
+        manager._analysis_path("project", "component-99", "vulnerability-99"),
+        None,
+    )
+    assert stored["analysisDetails"] == "Replacement 99"
 
 
 @pytest.mark.asyncio

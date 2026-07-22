@@ -301,7 +301,11 @@ def test_summary_task_seeds_from_persistent_summary_index():
 
     summary_index = FakeSummaryIndex()
 
+    group_calls = 0
+
     def group_vulnerabilities(combined_data, **kwargs):
+        nonlocal group_calls
+        group_calls += 1
         return [
             {
                 "id": "CVE-LIVE",
@@ -361,6 +365,7 @@ def test_summary_task_seeds_from_persistent_summary_index():
     assert tasks[task_id]["status"] == "completed"
     assert tasks[task_id]["result"][0]["id"] == "CVE-LIVE"
     assert tasks[task_id]["partial_result_available"] is False
+    assert group_calls == 1
     assert summary_index.saved[0]["summaries"][0]["id"] == "CVE-LIVE"
     assert summary_index.saved[0]["total_versions"] == 1
 

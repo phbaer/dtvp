@@ -501,10 +501,15 @@ class CodeAnalysisResultStore:
     logger: Any = None
     _loaded_path: Optional[str] = field(default=None, init=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False)
+    _assessment_metadata_cache: Optional[dict[str, Any]] = field(
+        default=None,
+        init=False,
+    )
 
     def reset(self) -> None:
         with self._lock:
             self._loaded_path = None
+            self._assessment_metadata_cache = None
 
     def _path(self) -> str:
         return _sqlite_path_for_configured_path(self.path_provider())
@@ -530,12 +535,16 @@ class CodeAnalysisResultStore:
         path = self._path()
         if self._loaded_path == path:
             return
+        self._assessment_metadata_cache = None
         with closing(self._connect()) as connection:
             with connection:
                 self._import_legacy_json_locked(connection)
                 self._backfill_assessment_metadata_locked(connection)
                 self._prune_locked(connection)
         self._loaded_path = path
+
+    def _invalidate_assessment_metadata_cache_locked(self) -> None:
+        self._assessment_metadata_cache = None
 
     def _legacy_import_key(self, legacy_path: str) -> str:
         return f"legacy_json_imported:{os.path.abspath(legacy_path)}"
@@ -767,6 +776,7 @@ class CodeAnalysisResultStore:
                 with connection:
                     self._upsert_record_locked(connection, record)
                     self._prune_locked(connection)
+            self._invalidate_assessment_metadata_cache_locked()
         return record
 
     def get(self, run_id: str) -> Optional[dict[str, Any]]:
@@ -839,7 +849,10 @@ class CodeAnalysisResultStore:
                         (normalized,),
                     )
                     self._prune_locked(connection)
-                    return cursor.rowcount > 0
+                    deleted = cursor.rowcount > 0
+            if deleted:
+                self._invalidate_assessment_metadata_cache_locked()
+            return deleted
 
     def record_application(
         self,
@@ -1179,30 +1192,49 @@ class CodeAnalysisResultStore:
     ) -> dict[str, Any]:
         with self._lock:
             self._ensure_loaded()
-            with closing(self._connect()) as connection:
-                stored_count = int(
-                    connection.execute(
-                        "SELECT COUNT(*) FROM code_analysis_results"
-                    ).fetchone()[0]
+            if self._assessment_metadata_cache is None:
+                with closing(self._connect()) as connection:
+                    stored_count = int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM code_analysis_results"
+                        ).fetchone()[0]
+                    )
+                    usable_count = int(
+                        connection.execute(
+                            """
+                            SELECT COUNT(*)
+                            FROM code_analysis_assessment_metadata
+                            WHERE has_assessment = 1
+                            """
+                        ).fetchone()[0]
+                    )
+                records = self.list_result_metadata(
+                    limit=get_code_analysis_results_max_records(),
+                    assessments_only=True,
                 )
-                usable_count = int(
-                    connection.execute(
-                        """
-                        SELECT COUNT(*)
-                        FROM code_analysis_assessment_metadata
-                        WHERE has_assessment = 1
-                        """
-                    ).fetchone()[0]
-                )
-        records = self.list_result_metadata(
-            project_name=project_name,
-            limit=get_code_analysis_results_max_records(),
-            assessments_only=True,
-        )
+                self._assessment_metadata_cache = {
+                    "records": records,
+                    "stored_analysis_results": stored_count,
+                    "usable_assessment_results": usable_count,
+                }
+            cached = self._assessment_metadata_cache
+
+            normalized_project = _lower(project_name)
+            records = list(cached["records"])
+            if normalized_project and normalized_project != "_all_":
+                records = [
+                    record
+                    for record in records
+                    if normalized_project
+                    in {
+                        *map(_lower, record.get("project_names") or []),
+                        _lower(record.get("project_name")),
+                    }
+                ]
         return {
             "records": records,
-            "stored_analysis_results": stored_count,
-            "usable_assessment_results": usable_count,
+            "stored_analysis_results": cached["stored_analysis_results"],
+            "usable_assessment_results": cached["usable_assessment_results"],
         }
 
     def find_latest(

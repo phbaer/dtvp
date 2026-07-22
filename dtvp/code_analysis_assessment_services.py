@@ -317,18 +317,55 @@ def group_component_names(group: dict[str, Any]) -> set[str]:
 def records_for_group(
     group: dict[str, Any],
     records: list[dict[str, Any]],
+    record_index: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     vulnerability_ids = group_vulnerability_ids(group)
     project_names = group_project_names(group)
+    if record_index is not None:
+        candidates = [
+            record
+            for vulnerability_id in vulnerability_ids
+            for record in record_index["by_vulnerability_id"].get(
+                vulnerability_id,
+                (),
+            )
+        ]
+    else:
+        candidates = records
     matched: list[dict[str, Any]] = []
-    for record in records:
+    seen_run_ids: set[str] = set()
+    for record in candidates:
         if record_vulnerability_id(record) not in vulnerability_ids:
             continue
         projects = record_project_names(record)
         if project_names and projects and project_names.isdisjoint(projects):
             continue
+        run_id = record_run_id(record)
+        if run_id and run_id in seen_run_ids:
+            continue
+        if run_id:
+            seen_run_ids.add(run_id)
         matched.append(record)
     return matched
+
+
+def build_assessment_match_index(
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    records_by_run_id = {
+        run_id: record
+        for record in records
+        if (run_id := record_run_id(record))
+    }
+    by_vulnerability_id: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        vulnerability_id = record_vulnerability_id(record)
+        if vulnerability_id:
+            by_vulnerability_id.setdefault(vulnerability_id, []).append(record)
+    return {
+        "by_vulnerability_id": by_vulnerability_id,
+        "records_by_run_id": records_by_run_id,
+    }
 
 
 def record_source_kind(
@@ -420,15 +457,13 @@ def build_record_assessment_metadata(record: dict[str, Any]) -> dict[str, Any]:
 def assessment_status_for_group(
     group: dict[str, Any],
     records: list[dict[str, Any]],
+    record_index: dict[str, Any] | None = None,
 ) -> str | None:
-    matched = records_for_group(group, records)
+    effective_index = record_index or build_assessment_match_index(records)
+    matched = records_for_group(group, records, effective_index)
     if not matched:
         return None
-    records_by_run_id = {
-        run_id: record
-        for record in records
-        if (run_id := record_run_id(record))
-    }
+    records_by_run_id = effective_index["records_by_run_id"]
     source_kinds = {
         record_source_kind(record, records_by_run_id) for record in matched
     }

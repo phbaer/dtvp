@@ -13,7 +13,7 @@ import {
     startProjectArchiveExport,
     waitForProjectArchiveTask,
 } from '../lib/api'
-import type { BulkWorkflowApplyResponse, TaskResponse, TaskVulnGroupListQuery } from '../lib/api'
+import type { BulkWorkflowApplyResponse, TaskResponse, TaskVulnGroupListCounts, TaskVulnGroupListQuery } from '../lib/api'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { useCacheStatus } from '../lib/useCacheStatus'
 import type { GroupedVuln, ProjectArchiveTask, Statistics, TMRescoreProposal, TMRescoreProposalSnapshot } from '../types'
@@ -51,6 +51,7 @@ import {
     deriveVulnListBaseIndex,
     deriveVulnListGroupLookup,
     deriveVulnListFilterModel,
+    deriveVulnListResultCounts,
     sortVulnListItems,
 } from '../lib/vulnListViewModel'
 import { deriveVulnListFacetsFromTaskCounts } from '../lib/vulnListFacets'
@@ -820,81 +821,19 @@ const taskListStatusMessage = computed(() => {
     return ''
 })
 
-const filterCounts = computed(() => {
-    const counts = taskListCounts.value
-    if (currentVulnTaskId.value && counts) {
-        return {
-            ...counts.all.lifecycle,
-            ...counts.filtered.analysis,
-        }
-    }
-    return listView.value.filterCounts
-})
+const localVisibleResultCounts = computed(() =>
+    deriveVulnListResultCounts(listView.value.matchingItems)
+)
 
-const cvssVersionMismatchCount = computed(() =>
+const visibleResultCounts = computed<TaskVulnGroupListCounts>(() =>
     currentVulnTaskId.value && taskListCounts.value
-        ? taskListCounts.value.all.cvss_version_mismatch
-        : listStaticStats.value.cvssVersionMismatchCount
+        ? taskListCounts.value.filtered
+        : localVisibleResultCounts.value
 )
 
-const teamTagCounts = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value?.all.team_tags
-        ? taskListCounts.value.all.team_tags
-        : listStaticStats.value.teamTagCounts
+const resultCountsUpdating = computed(() =>
+    !!currentVulnTaskId.value && taskListWindowLoading.value
 )
-
-const teamTagList = computed(() => {
-    return Object.entries(teamTagCounts.value)
-        .map(([team, counts]) => ({ team, ...counts }))
-        .sort((a, b) => a.team.localeCompare(b.team))
-})
-
-const dependencyFilterCounts = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value
-        ? taskListCounts.value.filtered.dependency_relationship
-        : listView.value.dependencyFilterCounts
-)
-
-const dependencyRelationshipCounts = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value
-        ? taskListCounts.value.filtered.dependency_relationship
-        : listView.value.dependencyRelationshipCounts
-)
-
-const tmrescoreProposalCounts = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value?.filtered.tmrescore
-        ? taskListCounts.value.filtered.tmrescore
-        : listView.value.tmrescoreProposalCounts
-)
-
-const automaticAssessmentCounts = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value?.filtered.automatic_assessment
-        ? taskListCounts.value.filtered.automatic_assessment
-        : listView.value.automaticAssessmentCounts
-)
-
-const attributionAgeCount = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value?.filtered.attribution_age != null
-        ? taskListCounts.value.filtered.attribution_age
-        : listView.value.attributionAgeCount
-)
-
-const analysisCounts = computed(() =>
-    currentVulnTaskId.value && taskListCounts.value
-        ? taskListCounts.value.filtered.analysis
-        : listView.value.analysisCounts
-)
-
-const inconsistencyReasonCounts = computed(() => {
-    const taskCounts = taskListCounts.value?.all.inconsistency_reason
-    const counts = { ...listStaticStats.value.inconsistencyReasonCounts }
-    if (currentVulnTaskId.value && taskCounts) {
-        for (const option of INCONSISTENCY_REASON_OPTIONS) {
-            counts[option.value] = taskCounts[option.value] || 0
-        }
-    }
-    return counts
-})
 
 const selectedListGroup = computed(() => {
     if (!selectedGroupId.value) return null
@@ -1270,20 +1209,14 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
 
 const filterSidebarProps = computed(() => ({
     filters: filterState.value,
-    filterCounts: filterCounts.value,
     availableVersions: availableVersions.value,
     lifecycleOptions: LIFECYCLE_OPTIONS,
     inconsistencyReasonOptions: INCONSISTENCY_REASON_OPTIONS,
-    inconsistencyReasonCounts: inconsistencyReasonCounts.value,
     analysisOptions: ANALYSIS_OPTIONS,
     copiedUrl: copiedUrl.value,
-    filteredCount: filteredGroupCount.value,
-    dependencyCounts: dependencyRelationshipCounts.value,
-    dependencyFilterCounts: dependencyFilterCounts.value,
-    tmrescoreCounts: tmrescoreProposalCounts.value,
-    automaticAssessmentCounts: automaticAssessmentCounts.value,
-    analysisCounts: analysisCounts.value,
-    teamTagList: teamTagList.value,
+    resultCounts: visibleResultCounts.value,
+    countsUpdating: resultCountsUpdating.value,
+    teamOptions: taskWideFacets.value.teams,
     cacheStatusState: cacheStatusState.value,
     cacheStatusLabel: cacheStatusLabel.value,
     cacheStatusAge: cacheStatusAge.value,
@@ -1293,8 +1226,6 @@ const filterSidebarProps = computed(() => ({
     dependencyOptions: DEPENDENCY_OPTIONS,
     tmrescoreOptions: TMRESCORE_FILTER_OPTIONS,
     automaticAssessmentOptions: AUTOMATIC_ASSESSMENT_FILTER_OPTIONS,
-    cvssVersionMismatchCount: cvssVersionMismatchCount.value,
-    attributionRangeCount: attributionAgeCount.value,
 }))
 
 const syncProjectHeaderState = () => {
@@ -1481,9 +1412,18 @@ watch(currentUserRole, (role) => {
                     <Archive v-else :size="14" />
                     <span class="hidden sm:inline">{{ archiveExporting ? 'Exporting' : 'Archive' }}</span>
                 </button>
-                <div class="hidden shrink-0 text-right text-[11px] leading-tight text-gray-400 md:block">
-                    <div><span class="font-semibold text-white">{{ filteredGroupCount }}</span> matched</div>
-                    <div>{{ loadedGroupCount }} loaded · {{ totalGroupCount }} total<span v-if="taskListPartial"> · provisional</span></div>
+                <div
+                    class="hidden shrink-0 text-right text-[11px] leading-tight text-gray-400 md:block"
+                    role="status"
+                    aria-live="polite"
+                >
+                    <div v-if="resultCountsUpdating" class="font-semibold text-blue-200">Updating results…</div>
+                    <div v-else>
+                        <span class="font-semibold text-white">{{ filteredGroupCount }}</span>
+                        <span v-if="filteredGroupCount !== totalGroupCount"> of {{ totalGroupCount }}</span>
+                        {{ filteredGroupCount === 1 && totalGroupCount === 1 ? 'vulnerability' : 'vulnerabilities' }}
+                        <span v-if="taskListPartial"> · provisional</span>
+                    </div>
                 </div>
                 <button
                     v-if="hasCustomFilterState"

@@ -293,8 +293,13 @@ def build_general_api_route_deps(
             user,
             role,
         ),
-        apply_assessment_payloads=lambda client, payloads: apply_assessment_payloads(
-            assessment_service_deps, client, payloads
+        apply_assessment_payloads=(
+            lambda client, payloads, progress_callback=None: apply_assessment_payloads(
+                assessment_service_deps,
+                client,
+                payloads,
+                progress_callback=progress_callback,
+            )
         ),
         finalize_assessment_results=lambda api_results: finalize_assessment_results(
             assessment_service_deps,
@@ -360,10 +365,11 @@ def build_tmrescore_route_deps(
                 include_result=include_result,
             )
         ),
-        get_latest_tmrescore_project_task=lambda project_name: (
+        get_latest_tmrescore_project_task=lambda project_name, user: (
             get_latest_tmrescore_project_task_impl(
                 tmrescore_task_service_deps,
                 project_name,
+                user,
             )
         ),
         persist_tmrescore_project_snapshot=lambda project_name, snapshot: (

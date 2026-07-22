@@ -146,14 +146,76 @@ Important frontend components:
   `/api/tasks/{task_id}/groups` serves filtered windows and facets, and
   `/api/tasks/{task_id}/groups/{group_id}` hydrates full details.
 - Partial version results appear while grouping continues. CPU-heavy grouping,
-  indexing, and filtering run outside the async event loop.
+  indexing, and filtering run outside the async event loop. When the final
+  partial publish already contains every version, it becomes the completed
+  snapshot without repeating grouping and index construction.
+- Grouped-task searches use thread-safe per-task query caches, share identical
+  in-flight queries, and reuse sort orders across filter changes. Lightweight
+  code-assessment metadata is cached and invalidated when analyzer results
+  change.
 - The frontend viewport-windows list rows, coalesces partial refreshes, and
   hydrates dependency paths and full assessment details only when needed.
 - The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
   vulnerability details, BOMs, local overlays, and pending writes. Stale cached
-  data remains readable while Dependency-Track is unavailable.
+  data remains readable while Dependency-Track is unavailable. Concurrent
+  misses for the same resource share one Dependency-Track request, while each
+  caller receives an isolated mutable snapshot.
+- Grouped-vulnerability tasks, their bulk-workflow operations, uploaded or
+  generated archive tasks, and live tmrescore sessions are private to the
+  authenticated user who created them. Shared Dependency-Track assessments,
+  the workspace-wide analyzer queue and saved analysis results, and cached
+  project proposal snapshots remain collaborative application data.
+- Live task registries are process-local; the supplied Uvicorn/PM2 launch uses
+  one backend worker. A horizontally scaled deployment needs a shared task and
+  result store before enabling multiple backend workers.
 - Startup status exists at `/startup` and `/api/startup`, in the static first
   paint, and in the Vue initialization view.
+
+### Capacity Planning
+
+The current single-process deployment should be planned for roughly 8-12
+simultaneously active users on very large projects, or 30-50 active users on
+medium projects. Mostly idle or dashboard users are substantially cheaper;
+100-300 concurrent sessions is a reasonable starting estimate when they are
+not all retaining large grouped-vulnerability tasks.
+
+These are sizing estimates, not production guarantees. A synthetic benchmark
+on a 20-CPU, 15 GiB host with the Python GIL enabled measured eight concurrent
+cold searches as follows:
+
+| Grouped vulnerabilities | Throughput | p95 search latency |
+| :--- | ---: | ---: |
+| 1,000 | about 730 queries/second | 1.3 ms |
+| 5,000 | about 176 queries/second | 50 ms |
+| 10,000 | about 99 queries/second | 96 ms |
+| 20,000 | about 25-40 queries/second | 260-470 ms |
+
+At 16 simultaneous cold searches over 20,000 groups, p95 latency approached
+one second. An identical cached search took about 0.07 ms, so new search terms
+and filter combinations are the limiting case rather than pagination or repeat
+requests.
+
+A synthetic 20,000-group summary and query index retained about 78 MB of live
+Python allocations and increased initial process RSS by about 175 MB. Real
+tasks also retain full vulnerability, component, dependency, and BOM details;
+budget roughly 150-300 MB or more for each large retained task. The default
+one-hour `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` therefore makes memory, rather
+than request throughput, the likely limit when many users open large projects.
+
+For conservative per-instance planning:
+
+- large projects with active searching: 8-12 users comfortably; around 20 is
+  likely to show latency or memory pressure;
+- medium projects: 30-50 active users;
+- mostly browsing or dashboard use: 100-300 sessions, assuming few retained
+  large tasks;
+- code-analysis jobs: one runs concurrently by default through
+  `DTVP_ANALYSIS_QUEUE_CAPACITY`; additional jobs wait in the shared queue.
+
+Before increasing those ranges, use production-shaped load tests. The first
+scaling steps are reducing grouped-task retention (for example, to 900
+seconds), increasing the frontend search debounce, and introducing a shared
+task/result store so multiple backend processes can use additional CPU cores.
 
 ## Domain Model
 
@@ -238,6 +300,18 @@ and code-assessment availability. The Open selection matches the displayed
 `OPEN` lifecycle category, and vulnerability-ID searches are combined with all
 active filters.
 
+The Filters sidebar provides a searchable, alphabetically sorted Team dropdown
+from the complete task facet list. Selecting a team uses a case-insensitive
+exact name match; `team:` smart-search tokens remain available for free-form
+team searches. The top search result count is the final number of grouped
+vulnerabilities after every active filter, independent of how many paginated
+rows are currently loaded. When filters reduce the task, it is shown relative
+to the unfiltered task total. Every filter-chip count and the Team open/assessed
+breakdown is calculated from that same final filtered result. Complete
+task-wide facets remain available as filter choices even when their current
+filtered count is zero. Overlapping properties such as teams and inconsistency
+reasons can therefore have counts whose sum exceeds the final result count.
+
 The detail workspace provides:
 
 | Tab | Purpose |
@@ -284,6 +358,12 @@ visible filtered list.
 The UI starts preview, apply, and document work as background operations and
 polls their short status endpoint. The operation survives the initiating HTTP
 request, so reverse-proxy request timeouts do not cancel long bulk changes.
+Apply operations use a bounded worker pool for Dependency-Track writes, retry
+transient timeouts, rate limits, and gateway/server errors, and expose
+item-level progress through the task status. Failed writes are persisted to the
+local pending-update queue in one batch and retried by the cache synchronizer;
+local cache overlays are also written in small yielding batches so large
+updates do not stall status polling or unrelated API requests.
 Endpoints are:
 
 - `POST /api/bulk-workflows/summary`
@@ -564,6 +644,8 @@ means the integration or override is disabled.
 | `DTVP_DT_CACHE_PATH` | Dependency-Track cache and pending update queue | `data/dt_cache` |
 | `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |
+| `DTVP_ASSESSMENT_IO_CONCURRENCY` | Concurrent Dependency-Track assessment reads or writes per operation | `4` |
+| `DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS` | Attempts for transient assessment-write timeouts, rate limits, and HTTP 5xx responses | `3` |
 | `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` | Completed/failed grouped-task retention | `3600` |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH` | Persisted summary-index SQLite path | sibling of cache path |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES` | Maximum persisted summary indexes | `64` |

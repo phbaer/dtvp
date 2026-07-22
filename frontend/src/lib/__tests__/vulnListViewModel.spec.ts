@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GroupedVuln } from '../../types'
 import { buildVulnListItems } from '../vulnListIndex'
 import {
     deriveVulnListBaseIndex,
     deriveVulnListGroupLookup,
     deriveVulnListFilterModel,
+    deriveVulnListResultCounts,
     deriveVulnListStaticStats,
     deriveVulnListViewModel,
     sortVulnListItems,
@@ -70,6 +71,15 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
 })
 
 describe('vulnListViewModel', () => {
+    beforeEach(() => {
+        vi.useFakeTimers()
+        vi.setSystemTime(nowMs)
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
     it('counts ambiguous restoration gaps for the restore preview entry point', () => {
         const items = buildVulnListItems([
             makeGroup({
@@ -407,5 +417,46 @@ describe('vulnListViewModel', () => {
         expect(view.matchingItems.map(item => item.id)).toEqual(['CVE-2026-0001'])
         expect(view.attributionAgeCount).toBe(1)
         expect(view.analysisCounts.NOT_SET).toBe(1)
+    })
+
+    it('derives every displayed counter from the final matching list', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'CVE-OPEN', tags: ['team-a'] }),
+            makeGroup({
+                id: 'CVE-ASSESSED',
+                tags: ['team-b'],
+                affected_versions: [{
+                    project_name: 'Project',
+                    project_uuid: 'project-uuid',
+                    project_version: '1.0.0',
+                    components: [{
+                        project_name: 'Project',
+                        project_version: '1.0.0',
+                        project_uuid: 'project-uuid',
+                        component_name: 'library-b',
+                        component_version: '3.0.0',
+                        component_uuid: 'component-b',
+                        vulnerability_uuid: 'vuln-b',
+                        finding_uuid: 'finding-b',
+                        analysis_state: 'FALSE_POSITIVE',
+                        analysis_details: 'Reviewed',
+                        is_suppressed: false,
+                        is_direct_dependency: false,
+                    }],
+                }],
+            }),
+        ], {}, {})
+        const view = deriveVulnListViewModel(items, baseFilters({ tagFilter: 'team-a' }))
+
+        const counts = deriveVulnListResultCounts(view.matchingItems)
+
+        expect(counts.total).toBe(1)
+        expect(counts.lifecycle.OPEN).toBe(1)
+        expect(counts.lifecycle.ASSESSED).toBe(0)
+        expect(counts.analysis.NOT_SET).toBe(1)
+        expect(counts.analysis.FALSE_POSITIVE).toBe(0)
+        expect(counts.dependency_relationship).toEqual({ direct: 1, transitive: 0, unknown: 0 })
+        expect(counts.team_tags).toEqual({ 'team-a': { open: 1, assessed: 0 } })
+        expect(counts.attribution_age).toBe(1)
     })
 })

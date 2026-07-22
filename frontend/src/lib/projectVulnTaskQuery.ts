@@ -133,7 +133,8 @@ export function buildTaskVulnGroupListQuery({
         lifecycle,
         inconsistency_reason: [...inconsistencyReasonFilters],
         analysis,
-        tag: joinSearchTerms([tagFilter, ...parsedSearch.teamTerms]),
+        tag: joinSearchTerms(parsedSearch.teamTerms),
+        team: tagFilter,
         id: joinSearchTerms([idFilter, ...parsedSearch.idTerms]),
         component: joinSearchTerms([componentFilter, ...parsedSearch.componentTerms]),
         assignee: joinSearchTerms([assigneeFilter, ...parsedSearch.assigneeTerms]),
@@ -143,7 +144,9 @@ export function buildTaskVulnGroupListQuery({
         attributed_before_days: attributionAgeDays,
         attribution_mode: attributionAgeMode,
         tmrescore: isTMRescoreRestricted ? tmrescore : [],
-        tmrescore_proposal_ids: isTMRescoreRestricted ? [...meaningfulTMRescoreProposalIds] : [],
+        // Proposal IDs are also needed when the selection is unrestricted so
+        // the backend can return accurate WITH/WITHOUT facet counts.
+        tmrescore_proposal_ids: [...meaningfulTMRescoreProposalIds],
         automatic_assessment: isAutomaticAssessmentRestricted ? automaticAssessment : [],
         automatic_assessment_ids: [...automaticAssessmentIds],
         sort: sortBy,

@@ -1,4 +1,5 @@
 import type { FilterCounts, TeamCounts } from './group-classifier'
+import type { TaskVulnGroupListCounts } from './api'
 import type { InconsistencyReason } from '../types'
 import type { VulnListFacets } from './vulnListFacets'
 import {
@@ -89,6 +90,117 @@ export interface RelationshipCounts {
     direct: number
     transitive: number
     unknown: number
+}
+
+const incrementResultCount = (counts: Record<string, number>, value: unknown) => {
+    const key = String(value || '').trim()
+    if (key) counts[key] = (counts[key] || 0) + 1
+}
+
+const incrementUniqueResultCounts = (
+    counts: Record<string, number>,
+    values: readonly unknown[],
+) => {
+    const seen = new Set<string>()
+    for (const value of values) {
+        const key = String(value || '').trim()
+        const normalized = key.toLowerCase()
+        if (!key || seen.has(normalized)) continue
+        seen.add(normalized)
+        incrementResultCount(counts, key)
+    }
+}
+
+/**
+ * Build the same count shape as a backend task window from an already-filtered
+ * local list. This keeps the pre-task and legacy list paths aligned with the
+ * server-owned filtered counter contract.
+ */
+export const deriveVulnListResultCounts = (
+    items: readonly VulnListItem[],
+): TaskVulnGroupListCounts => {
+    const counts: TaskVulnGroupListCounts = {
+        total: items.length,
+        lifecycle: {
+            OPEN: 0,
+            ASSESSED: 0,
+            ASSESSED_LEGACY: 0,
+            INCOMPLETE: 0,
+            INCONSISTENT: 0,
+            NEEDS_APPROVAL: 0,
+        },
+        inconsistency_reason: createInconsistencyReasonCounts(),
+        analysis: createAnalysisCounts(),
+        dependency_relationship: createRelationshipCounts(),
+        cvss_version_mismatch: 0,
+        ids: {},
+        versions: {},
+        tags: {},
+        assignees: {},
+        components: {},
+        team_tags: {},
+        tmrescore: createTMRescoreCounts(),
+        automatic_assessment: createAutomaticAssessmentCounts(),
+        assessment_restore: {
+            WITH_RESTORE: 0,
+            RECOVERABLE: 0,
+            AMBIGUOUS: 0,
+            NO_HISTORY: 0,
+        },
+        attribution_age: items.length,
+    }
+
+    for (const item of items) {
+        if (item.lifecycle === 'OPEN') counts.lifecycle.OPEN++
+        else if (item.lifecycle in counts.lifecycle && item.lifecycle !== 'NEEDS_APPROVAL') {
+            counts.lifecycle[item.lifecycle]++
+        }
+        if (item.isPending) counts.lifecycle.NEEDS_APPROVAL++
+
+        incrementResultCount(counts.analysis, item.technicalState)
+        counts.dependency_relationship[item.dependencyRelationship.toLowerCase() as keyof RelationshipCounts]++
+        if (item.cvssVersionMismatch) counts.cvss_version_mismatch++
+
+        incrementUniqueResultCounts(counts.ids!, [item.id, ...(item.group.aliases || [])])
+        incrementUniqueResultCounts(counts.versions, item.versions)
+        incrementUniqueResultCounts(counts.tags, item.normalizedTags)
+        incrementUniqueResultCounts(counts.assignees, item.group.assignees || [])
+        incrementUniqueResultCounts(counts.components, item.componentNames)
+
+        for (const team of new Set(item.normalizedTags)) {
+            const teamCounts = counts.team_tags![team] ||= { open: 0, assessed: 0 }
+            if (item.isOpen) teamCounts.open++
+            else teamCounts.assessed++
+        }
+        for (const reason of item.inconsistencyReasons) {
+            incrementResultCount(counts.inconsistency_reason!, reason)
+        }
+
+        if (item.hasTmrescoreProposal) counts.tmrescore!.WITH_PROPOSAL++
+        else counts.tmrescore!.WITHOUT_PROPOSAL++
+        if (item.hasAutomaticAssessment) {
+            counts.automatic_assessment!.WITH_AUTOMATIC_ASSESSMENT++
+        } else {
+            counts.automatic_assessment!.WITHOUT_AUTOMATIC_ASSESSMENT++
+        }
+
+        if (item.assessmentRestoreCount > 0) {
+            counts.assessment_restore!.WITH_RESTORE++
+            switch (item.assessmentRestoreStatus) {
+                case 'RECOVERABLE':
+                    counts.assessment_restore!.RECOVERABLE++
+                    break
+                case 'AMBIGUOUS':
+                    counts.assessment_restore!.AMBIGUOUS++
+                    break
+                case 'NO_HISTORY':
+                    counts.assessment_restore!.NO_HISTORY++
+                    break
+            }
+        }
+    }
+
+    return counts
 }
 
 const ANALYSIS_STATE_ORDER: Record<string, number> = {

@@ -558,7 +558,7 @@ describe('ProjectView Filters', () => {
         expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V9')
     })
 
-    it('should match partial team identifiers like 3p when filtering', async () => {
+    it('matches the complete selected team name instead of similarly named teams', async () => {
         const mockData = [
             {
                 id: 'V10',
@@ -576,6 +576,23 @@ describe('ProjectView Filters', () => {
                         ]
                     }
                 ]
+            },
+            {
+                id: 'V11',
+                severity: 'LOW',
+                cvss_score: 1.0,
+                tags: ['3p-security'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                component_name: 'CompB',
+                                analysis_state: 'NOT_SET',
+                                analysis_details: ''
+                            }
+                        ]
+                    }
+                ]
             }
         ];
 
@@ -586,18 +603,20 @@ describe('ProjectView Filters', () => {
         ;(wrapper.vm as any).analysisFilters = ['NOT_SET']
         await wrapper.vm.$nextTick()
 
-        // Should match on partial input
+        // Partial names do not represent a dropdown selection.
         ;(wrapper.vm as any).tagFilter = ' 3 '
         await wrapper.vm.$nextTick()
-        expect(wrapper.findAll('.vuln-card').length).toBe(1)
+        expect(wrapper.findAll('.vuln-card').length).toBe(0)
 
+        // The complete selection is trimmed and matched case-insensitively.
         ;(wrapper.vm as any).tagFilter = ' 3p '
         await wrapper.vm.$nextTick()
         expect(wrapper.findAll('.vuln-card').length).toBe(1)
+        expect(wrapper.findAll('.vuln-card')[0]?.text()).toContain('V10')
 
         ;(wrapper.vm as any).tagFilter = ' p '
         await wrapper.vm.$nextTick()
-        expect(wrapper.findAll('.vuln-card').length).toBe(1)
+        expect(wrapper.findAll('.vuln-card').length).toBe(0)
     })
 
     it('calculates hierarchical counts correctly', async () => {

@@ -180,6 +180,53 @@ def test_code_analysis_result_store_tracks_application_provenance(tmp_path):
     assert store.list_applications(analysis_run_ids=["auto-run"]) == []
 
 
+def test_assessment_metadata_reads_are_cached_and_invalidated(tmp_path, monkeypatch):
+    store = CodeAnalysisResultStore(
+        path_provider=lambda: str(tmp_path / "code_analysis_results.sqlite")
+    )
+
+    def record(run_id: str, vuln_id: str) -> None:
+        store.record_queue_item_result(
+            SimpleNamespace(
+                queue_id=run_id,
+                project_name="ExampleApp",
+                vuln_id=vuln_id,
+                component_name="owned-api",
+                source="automatic",
+                submitted_at="2026-01-03T03:00:00+00:00",
+                finished_at="2026-01-03T03:04:05+00:00",
+                result=None,
+            ),
+            {
+                "assessment": {
+                    "affected": True,
+                    "verdict": "Affected",
+                }
+            },
+        )
+
+    record("run-1", "CVE-2026-ONE")
+    original_list = store.list_result_metadata
+    calls = 0
+
+    def counted_list(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_list(*args, **kwargs)
+
+    monkeypatch.setattr(store, "list_result_metadata", counted_list)
+
+    first = store.list_assessment_metadata(project_name="ExampleApp")
+    second = store.list_assessment_metadata(project_name="ExampleApp")
+    record("run-2", "CVE-2026-TWO")
+    third = store.list_assessment_metadata(project_name="ExampleApp")
+
+    assert calls == 2
+    assert len(first["records"]) == 1
+    assert second == first
+    assert len(third["records"]) == 2
+
+
 def test_code_analysis_result_store_summarizes_legacy_results_for_compact_lists(tmp_path):
     legacy_path = tmp_path / "code_analysis_results.json"
     legacy_path.write_text(
