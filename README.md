@@ -475,7 +475,8 @@ vulnerability details, and normalized assessments.
 - Export: `POST /api/project-archives/exports`
 - Import preview: `POST /api/project-archives/imports`
 - Apply: `POST /api/project-archives/imports/{task_id}/apply` with
-  `create_missing` or `update`
+  `create_missing` or `update`; apply is available only after a successful
+  preview, and a failed apply may be retried after the underlying issue is fixed
 - Stored snapshots: `GET /api/project-archives/snapshots`
 - Schema: `dtvp.project-archive/v1`
 
