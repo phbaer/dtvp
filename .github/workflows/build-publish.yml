@@ -48,7 +48,7 @@ jobs:
       - name: Run tests with coverage
         run: uv run pytest
       - name: Upload Python Coverage Report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: https://data.forgejo.org/forgejo/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         if: always()
         with:
           name: python-coverage-report
@@ -85,7 +85,7 @@ jobs:
         working-directory: frontend
         run: npm run test:unit -- --run --coverage
       - name: Upload Vitest Coverage Report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: https://data.forgejo.org/forgejo/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         if: always()
         with:
           name: vitest-coverage-report
@@ -128,7 +128,7 @@ jobs:
         working-directory: frontend
         run: npx playwright test --reporter=line
       - name: Upload Playwright Report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: https://data.forgejo.org/forgejo/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         if: always()
         with:
           name: playwright-report
@@ -273,7 +273,7 @@ jobs:
       - name: Generate CycloneDX SBOMs
         run: ./scripts/generate-sboms.sh
       - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: https://data.forgejo.org/forgejo/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
           name: dtvp-sbom
           path: sbom/*.json
