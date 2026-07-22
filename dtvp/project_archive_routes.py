@@ -140,7 +140,7 @@ def _archive_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=422, detail=str(exc))
     if isinstance(exc, ProjectArchiveValidationError):
         return HTTPException(status_code=400, detail=str(exc))
-    return HTTPException(status_code=500, detail=str(exc))
+    return HTTPException(status_code=500, detail="Project archive operation failed")
 
 
 def _register_task_routes(
@@ -307,6 +307,7 @@ def _register_import_routes(
             )
         except ProjectArchiveError as exc:
             deps.archive_tasks.pop(task["id"], None)
+            deps.logger.exception("Project archive upload validation failed")
             raise _archive_http_error(exc) from exc
 
         task["_archive_path"] = archive_path
@@ -362,8 +363,27 @@ def _register_import_routes(
         task = _task_for_user(deps, task_id, user)
         if not task:
             raise HTTPException(status_code=404, detail="Archive task not found")
-        if task.get("status") == "running":
+        task_status = str(task.get("status") or "")
+        task_kind = str(task.get("kind") or "")
+        if task_status in {"pending", "running"}:
             raise HTTPException(status_code=409, detail="Archive task is running")
+        if task_kind == "import_preview":
+            if task_status != "completed":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Archive preview is not ready",
+                )
+        elif task_kind == "import_apply":
+            if task_status != "failed" or "_preview_result" not in task:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Archive import cannot be applied again",
+                )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail="Task is not an archive import",
+            )
         archive_path = task.get("_archive_path")
         if not archive_path:
             raise HTTPException(status_code=409, detail="No uploaded archive to apply")
@@ -377,7 +397,8 @@ def _register_import_routes(
                 ),
             )
 
-        task["_preview_result"] = task.get("result")
+        if task_kind == "import_preview":
+            task["_preview_result"] = task.get("result")
         task["kind"] = "import_apply"
         task["result"] = None
         _update_task(
@@ -450,7 +471,10 @@ def _register_snapshot_routes(
                 deps.archive_path_provider(),
                 filename,
             )
+        except ProjectArchiveValidationError as exc:
+            raise HTTPException(status_code=404, detail="Archive not found") from exc
         except ProjectArchiveError as exc:
+            deps.logger.exception("Project archive snapshot download failed")
             raise _archive_http_error(exc) from exc
         return FileResponse(
             archive_path,
