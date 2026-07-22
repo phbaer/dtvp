@@ -1,8 +1,11 @@
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dtvp.project_archive_routes import (
     ProjectArchiveRouteDeps,
+    _task_for_user,
     create_project_archive_router,
 )
 from dtvp.project_archive_services import ProjectArchiveServiceDeps
@@ -11,6 +14,13 @@ from dtvp.project_archive_services import ProjectArchiveServiceDeps
 class FakeLogger:
     def exception(self, *args, **kwargs):
         return None
+
+
+def test_project_archive_tasks_are_scoped_to_user():
+    deps = SimpleNamespace(archive_tasks={"task-1": {"_owner": "alice"}})
+
+    assert _task_for_user(deps, "task-1", "alice") is deps.archive_tasks["task-1"]
+    assert _task_for_user(deps, "task-1", "bob") is None
 
 
 def test_project_archive_routes_require_reviewer(tmp_path):

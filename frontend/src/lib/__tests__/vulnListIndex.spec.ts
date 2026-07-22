@@ -279,7 +279,7 @@ describe('vulnListIndex', () => {
         expect(matchesListFilters(item, {
             dependencyFilter: 'TRANSITIVE',
             tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
-            tagFilter: '3p',
+            tagFilter: '3p-security',
             idFilter: 'ghsa',
             componentFilter: 'handler',
             assigneeFilter: 'bo',
@@ -290,6 +290,19 @@ describe('vulnListIndex', () => {
             dependencyFilter: 'DIRECT',
             tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
         })).toBe(false)
+    })
+
+    it('matches a selected team name exactly', () => {
+        const platform = buildVulnListItem(makeGroup({ tags: ['Platform'] }), {}, {})
+        const platformSecurity = buildVulnListItem(makeGroup({ tags: ['Platform Security'] }), {}, {})
+        const filters = {
+            dependencyFilter: 'UNKNOWN' as const,
+            tmrescoreProposalFilter: 'WITHOUT_PROPOSAL' as const,
+            tagFilter: 'platform',
+        }
+
+        expect(matchesListFilters(platform, filters)).toBe(true)
+        expect(matchesListFilters(platformSecurity, filters)).toBe(false)
     })
 
     it('matches compiled list filters without per-item filter normalization', () => {
@@ -324,7 +337,7 @@ describe('vulnListIndex', () => {
         const compiled = compileVulnListFilters({
             dependencyFilter: 'DIRECT',
             tmrescoreProposalFilter: 'WITHOUT_PROPOSAL',
-            tagFilter: 'TEAM',
+            tagFilter: 'TEAM-A',
             idFilter: 'cve-2026',
             componentFilter: 'LIBRARY',
             assigneeFilter: '',

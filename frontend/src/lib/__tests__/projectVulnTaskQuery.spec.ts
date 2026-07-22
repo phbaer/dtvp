@@ -77,7 +77,8 @@ describe('projectVulnTaskQuery', () => {
             lifecycle: ['OPEN'],
             inconsistency_reason: ['ANALYSIS_STATE_MISMATCH'],
             analysis: ['RESOLVED'],
-            tag: 'backend platform',
+            tag: 'platform',
+            team: 'backend',
             id: 'GHSA-1234 cve-2026-9999',
             component: 'gateway spring',
             assignee: 'bob alice',
@@ -127,11 +128,11 @@ describe('projectVulnTaskQuery', () => {
         expect(query.dependency).toEqual([NO_MATCH_FILTER])
     })
 
-    it('omits tmrescore filters and proposal IDs when the TM selection is unrestricted', () => {
+    it('omits unrestricted tmrescore filtering while retaining proposal IDs for counts', () => {
         const query = buildTaskVulnGroupListQuery(baseInput())
 
         expect(query.tmrescore).toEqual([])
-        expect(query.tmrescore_proposal_ids).toEqual([])
+        expect(query.tmrescore_proposal_ids).toEqual(['CVE-2026-0001'])
     })
 
     it('passes automatic assessment ids and only restricts when selection is customized', () => {

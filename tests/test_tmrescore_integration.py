@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -25,8 +26,10 @@ from dtvp.tmrescore_integration import (
     is_meaningful_tmrescore_proposal,
     normalize_tmrescore_snapshot,
 )
+from dtvp.tmrescore_routes import _tmrescore_task_for_user
 from dtvp.tmrescore_task_services import (
     calculate_tmrescore_progress,
+    get_latest_tmrescore_project_task,
     prune_tmrescore_analysis_tasks,
 )
 from test_setup import mock_tmrescore
@@ -172,9 +175,53 @@ def test_prune_tmrescore_analysis_tasks_removes_expired_terminal_entries():
     assert "running" in main_module.tmrescore_analysis_tasks
 
 
+def test_latest_tmrescore_project_task_is_scoped_to_user():
+    main_module.tmrescore_analysis_tasks.clear()
+    main_module.tmrescore_analysis_tasks.update(
+        {
+            "alice-older": {
+                "project_name": "ExampleApp",
+                "_owner": "alice",
+                "updated_at": 100.0,
+            },
+            "alice-latest": {
+                "project_name": "ExampleApp",
+                "_owner": "alice",
+                "updated_at": 200.0,
+            },
+            "bob-latest": {
+                "project_name": "ExampleApp",
+                "_owner": "bob",
+                "updated_at": 300.0,
+            },
+        }
+    )
+
+    task = get_latest_tmrescore_project_task(
+        main_module.tmrescore_task_service_deps,
+        "ExampleApp",
+        "alice",
+    )
+
+    assert task is main_module.tmrescore_analysis_tasks["alice-latest"]
+
+
+def test_tmrescore_session_lookup_is_scoped_to_user():
+    deps = SimpleNamespace(
+        tmrescore_analysis_tasks={"session-1": {"_owner": "alice"}}
+    )
+
+    assert (
+        _tmrescore_task_for_user(deps, "session-1", "alice")
+        is deps.tmrescore_analysis_tasks["session-1"]
+    )
+    assert _tmrescore_task_for_user(deps, "session-1", "bob") is None
+
+
 def test_tmrescore_project_state_returns_latest_cached_task(client):
     main_module.tmrescore_analysis_tasks.clear()
     main_module.tmrescore_analysis_tasks["session-older"] = {
+        "_owner": "testuser",
         "session_id": "session-older",
         "project_name": "ExampleApp",
         "scope": "merged_versions",
@@ -191,6 +238,7 @@ def test_tmrescore_project_state_returns_latest_cached_task(client):
         "completed_at": 100.0,
     }
     main_module.tmrescore_analysis_tasks["session-latest"] = {
+        "_owner": "testuser",
         "session_id": "session-latest",
         "project_name": "ExampleApp",
         "scope": "latest_only",

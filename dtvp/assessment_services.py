@@ -1,10 +1,26 @@
 import asyncio
+import inspect
+import os
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
+
+import httpx
 
 from .dt_client import DTClient
 from .general_api_routes import AssessmentRequest
+
+
+ASSESSMENT_WRITE_RETRY_STATUS_CODES = frozenset(
+    {408, 425, 429, 500, 502, 503, 504}
+)
+DEFAULT_ASSESSMENT_IO_CONCURRENCY = 4
+DEFAULT_ASSESSMENT_WRITE_MAX_ATTEMPTS = 3
+DEFAULT_ASSESSMENT_WRITE_RETRY_BASE_SECONDS = 0.5
+MAX_ASSESSMENT_WRITE_RETRY_DELAY_SECONDS = 30.0
+AssessmentWriteProgress = Callable[
+    [int, int, Dict[str, Any]], Awaitable[None] | None
+]
 
 
 @dataclass(frozen=True)
@@ -13,6 +29,64 @@ class AssessmentServiceDeps:
     logger: Any
     calculate_aggregated_state: Callable[[str], str]
     process_assessment_details: Callable[..., tuple[str, str]]
+
+
+def _positive_int_setting(
+    deps: AssessmentServiceDeps,
+    name: str,
+    default: int,
+) -> int:
+    raw_value = os.getenv(name, str(default))
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        deps.logger.warning(
+            "Invalid %s=%r, falling back to %d",
+            name,
+            raw_value,
+            default,
+        )
+        return default
+
+
+def get_assessment_io_concurrency(deps: AssessmentServiceDeps) -> int:
+    return _positive_int_setting(
+        deps,
+        "DTVP_ASSESSMENT_IO_CONCURRENCY",
+        DEFAULT_ASSESSMENT_IO_CONCURRENCY,
+    )
+
+
+def get_assessment_write_max_attempts(deps: AssessmentServiceDeps) -> int:
+    return _positive_int_setting(
+        deps,
+        "DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS",
+        DEFAULT_ASSESSMENT_WRITE_MAX_ATTEMPTS,
+    )
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    if not isinstance(exc, httpx.HTTPStatusError) or exc.response is None:
+        return None
+    retry_after = exc.response.headers.get("Retry-After")
+    if retry_after is None:
+        return None
+    try:
+        return max(
+            0.0,
+            min(float(retry_after), MAX_ASSESSMENT_WRITE_RETRY_DELAY_SECONDS),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _retryable_assessment_write_error(exc: Exception) -> bool:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return (
+            exc.response is not None
+            and exc.response.status_code in ASSESSMENT_WRITE_RETRY_STATUS_CODES
+        )
+    return isinstance(exc, httpx.TransportError)
 
 
 def _normalize_analysis_details(details: Optional[str]) -> str:
@@ -44,17 +118,39 @@ async def fetch_current_assessment_analyses(
     req: AssessmentRequest,
     client: DTClient,
 ) -> List[Dict[str, Any] | BaseException | None]:
-    analysis_tasks = [
-        deps.cache_manager.get_analysis(
-            client,
-            project_uuid=instance["project_uuid"],
-            component_uuid=instance["component_uuid"],
-            vulnerability_uuid=instance["vulnerability_uuid"],
-            refresh=True,
+    if not req.instances:
+        return []
+
+    results: list[Dict[str, Any] | BaseException | None] = [None] * len(
+        req.instances
+    )
+    next_index = 0
+
+    async def worker() -> None:
+        nonlocal next_index
+        while next_index < len(req.instances):
+            index = next_index
+            next_index += 1
+            instance = req.instances[index]
+            try:
+                results[index] = await deps.cache_manager.get_analysis(
+                    client,
+                    project_uuid=instance["project_uuid"],
+                    component_uuid=instance["component_uuid"],
+                    vulnerability_uuid=instance["vulnerability_uuid"],
+                    refresh=True,
+                )
+            except Exception as exc:
+                results[index] = exc
+
+    workers = [
+        asyncio.create_task(worker())
+        for _ in range(
+            min(get_assessment_io_concurrency(deps), len(req.instances))
         )
-        for instance in req.instances
     ]
-    return await asyncio.gather(*analysis_tasks, return_exceptions=True)
+    await asyncio.gather(*workers)
+    return results
 
 
 def collect_assessment_conflicts(
@@ -175,40 +271,127 @@ async def _try_update_assessment_payload(
     client: DTClient,
     instance: dict,
     payload: dict,
+    *,
+    max_attempts: int,
+    retry_base_delay_seconds: float,
 ) -> Dict[str, Any]:
-    try:
-        deps.logger.debug(
-            "Updating instance: %s (Vulnerability: %s)",
-            instance.get("finding_uuid"),
-            instance.get("vulnerability_uuid"),
-        )
-        await client.update_analysis(**payload)
-        return {
-            "status": "success",
-            "uuid": instance["finding_uuid"],
-            "new_state": payload["state"],
-            "new_details": payload["details"],
-        }
-    except Exception as exc:
-        return {
-            "status": "error",
-            "uuid": instance.get("finding_uuid"),
-            "error": str(exc),
-            "payload": payload,
-        }
+    for attempt in range(1, max_attempts + 1):
+        try:
+            deps.logger.debug(
+                "Updating instance: %s (Vulnerability: %s; attempt %d/%d)",
+                instance.get("finding_uuid"),
+                instance.get("vulnerability_uuid"),
+                attempt,
+                max_attempts,
+            )
+            await client.update_analysis(**payload)
+            result = {
+                "status": "success",
+                "uuid": instance.get("finding_uuid"),
+                "new_state": payload["state"],
+                "new_details": payload["details"],
+            }
+            if attempt > 1:
+                result["attempts"] = attempt
+            return result
+        except Exception as exc:
+            if attempt >= max_attempts or not _retryable_assessment_write_error(exc):
+                return {
+                    "status": "error",
+                    "uuid": instance.get("finding_uuid"),
+                    "error": str(exc),
+                    "attempts": attempt,
+                    "payload": payload,
+                }
+
+            retry_after = _retry_after_seconds(exc)
+            delay = (
+                retry_after
+                if retry_after is not None
+                else min(
+                    retry_base_delay_seconds * (2 ** (attempt - 1)),
+                    MAX_ASSESSMENT_WRITE_RETRY_DELAY_SECONDS,
+                )
+            )
+            deps.logger.warning(
+                "Transient Dependency-Track assessment write failure for %s "
+                "(attempt %d/%d); retrying in %.2fs: %s",
+                instance.get("finding_uuid"),
+                attempt,
+                max_attempts,
+                delay,
+                exc,
+            )
+            if delay > 0:
+                await asyncio.sleep(delay)
+
+    raise AssertionError("assessment write retry loop exited unexpectedly")
 
 
 async def apply_assessment_payloads(
     deps: AssessmentServiceDeps,
     client: DTClient,
     payloads: List[tuple[dict, dict]],
+    *,
+    concurrency: int | None = None,
+    max_attempts: int | None = None,
+    retry_base_delay_seconds: float = DEFAULT_ASSESSMENT_WRITE_RETRY_BASE_SECONDS,
+    progress_callback: AssessmentWriteProgress | None = None,
 ) -> List[Dict[str, Any]]:
-    return await asyncio.gather(
-        *[
-            _try_update_assessment_payload(deps, client, instance, payload)
-            for instance, payload in payloads
-        ]
+    if not payloads:
+        return []
+
+    resolved_concurrency = max(
+        1,
+        concurrency or get_assessment_io_concurrency(deps),
     )
+    resolved_attempts = max(
+        1,
+        max_attempts or get_assessment_write_max_attempts(deps),
+    )
+    results: list[Dict[str, Any] | None] = [None] * len(payloads)
+    next_index = 0
+    completed = 0
+    progress_lock = asyncio.Lock()
+
+    async def worker() -> None:
+        nonlocal completed, next_index
+        while next_index < len(payloads):
+            index = next_index
+            next_index += 1
+            instance, payload = payloads[index]
+            result = await _try_update_assessment_payload(
+                deps,
+                client,
+                instance,
+                payload,
+                max_attempts=resolved_attempts,
+                retry_base_delay_seconds=max(0.0, retry_base_delay_seconds),
+            )
+            results[index] = result
+            if progress_callback is None:
+                continue
+            async with progress_lock:
+                completed += 1
+                try:
+                    callback_result = progress_callback(
+                        completed,
+                        len(payloads),
+                        result,
+                    )
+                    if inspect.isawaitable(callback_result):
+                        await callback_result
+                except Exception:
+                    deps.logger.exception(
+                        "Assessment write progress callback failed"
+                    )
+
+    workers = [
+        asyncio.create_task(worker())
+        for _ in range(min(resolved_concurrency, len(payloads)))
+    ]
+    await asyncio.gather(*workers)
+    return [result for result in results if result is not None]
 
 
 async def finalize_assessment_results(
@@ -216,14 +399,37 @@ async def finalize_assessment_results(
     api_results: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
+    failed_results: list[tuple[Dict[str, Any], dict[str, Any]]] = []
     for result in api_results:
         if result["status"] == "error":
             payload = result.pop("payload")
-            try:
-                await deps.cache_manager.queue_analysis_update(payload, replace=True)
-                result["queued"] = True
-            except Exception as queue_error:
-                result["queued"] = False
-                result["error"] += f" (queue failed: {queue_error})"
+            failed_results.append((result, payload))
         results.append(result)
+
+    if not failed_results:
+        return results
+
+    bulk_queue = getattr(deps.cache_manager, "queue_analysis_updates", None)
+    if callable(bulk_queue):
+        try:
+            await bulk_queue(
+                [payload for _result, payload in failed_results],
+                replace=True,
+            )
+            for result, _payload in failed_results:
+                result["queued"] = True
+            return results
+        except Exception:
+            deps.logger.exception(
+                "Failed to queue assessment updates as one batch; "
+                "falling back to individual queue writes"
+            )
+
+    for result, payload in failed_results:
+        try:
+            await deps.cache_manager.queue_analysis_update(payload, replace=True)
+            result["queued"] = True
+        except Exception as queue_error:
+            result["queued"] = False
+            result["error"] += f" (queue failed: {queue_error})"
     return results

@@ -25,7 +25,10 @@ from dtvp.general_api_routes import (
     _filter_bulk_workflow_groups,
     _filter_bulk_workflow_task_groups,
     _record_code_analysis_applications,
+    _refresh_grouped_vuln_task_snapshots,
 )
+from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
+from dtvp.task_group_query_services import build_task_group_query_index
 
 
 def _group(group_id: str, lifecycle: str, state: str = "NOT_SET"):
@@ -41,6 +44,72 @@ def _group(group_id: str, lifecycle: str, state: str = "NOT_SET"):
         },
         "affected_versions": [],
     }
+
+
+def test_task_snapshot_refresh_is_copy_on_write():
+    full_group = {
+        "id": "CVE-COPY-ON-WRITE",
+        "aliases": [],
+        "affected_versions": [
+            {
+                "project_name": "Project",
+                "project_version": "1.0.0",
+                "components": [
+                    {
+                        "project_uuid": "project-1",
+                        "component_uuid": "component-1",
+                        "vulnerability_uuid": "vulnerability-1",
+                        "finding_uuid": "finding-1",
+                        "component_name": "library-a",
+                        "analysis_state": "NOT_SET",
+                        "analysis_details": "",
+                    }
+                ],
+            }
+        ],
+    }
+    summary = summarize_grouped_vulnerabilities([full_group], {})
+    old_index = build_task_group_query_index(summary)
+    task = {
+        "_owner": "reviewer",
+        "status": "completed",
+        "result_mode": "summary",
+        "result": summary,
+        "_full_result": [full_group],
+        "_full_result_by_id": {full_group["id"]: full_group},
+        "_group_query_index": old_index,
+    }
+
+    refreshed = _refresh_grouped_vuln_task_snapshots(
+        {"task-1": task},
+        [
+            (
+                {
+                    "project_uuid": "project-1",
+                    "component_uuid": "component-1",
+                    "vulnerability_uuid": "vulnerability-1",
+                    "finding_uuid": "finding-1",
+                },
+                {
+                    "state": "NOT_AFFECTED",
+                    "details": "Reviewed",
+                    "suppressed": False,
+                },
+            )
+        ],
+        {},
+    )
+
+    assert refreshed == 1
+    assert full_group["affected_versions"][0]["components"][0][
+        "analysis_state"
+    ] == "NOT_SET"
+    assert old_index["rows"][0]["fields"]["lifecycle"] == "OPEN"
+    assert task["_full_result"][0] is not full_group
+    assert (
+        task["_group_query_index"]["rows"][0]["fields"]["lifecycle"]
+        == "ASSESSED_LEGACY"
+    )
 
 
 def test_bulk_workflow_registry_and_preview_token_are_deterministic():
@@ -131,6 +200,7 @@ def test_bulk_workflow_task_filter_reuses_the_visible_summary_index():
         "affected_versions": [{"components": []}],
     }
     task = {
+        "_owner": "reviewer",
         "status": "completed",
         "result_mode": "summary",
         "result": [selected_summary, other_summary],
@@ -157,6 +227,7 @@ def test_bulk_workflow_task_filter_reuses_the_visible_summary_index():
             lifecycle=["ASSESSED"],
             analysis=["NOT_AFFECTED"],
         ),
+        "reviewer",
     )
 
     assert len(filtered) == 1
@@ -199,6 +270,7 @@ def test_incomplete_bulk_preview_keeps_lifecycle_when_hydrating_full_groups():
         ],
     }
     task = {
+        "_owner": "reviewer",
         "status": "completed",
         "result_mode": "summary",
         "result": [summary],
@@ -218,6 +290,7 @@ def test_incomplete_bulk_preview_keeps_lifecycle_when_hydrating_full_groups():
         deps,
         "task-1",
         BulkWorkflowFilters(lifecycle=["INCOMPLETE"]),
+        "reviewer",
     )
     preview = build_incomplete_sync_preview(filtered)
 
@@ -253,6 +326,7 @@ def test_visible_filtered_cvss_rule_candidate_is_included_in_preview():
         ],
     }
     task = {
+        "_owner": "reviewer",
         "status": "completed",
         "result_mode": "summary",
         "result": [summary],
@@ -275,6 +349,7 @@ def test_visible_filtered_cvss_rule_candidate_is_included_in_preview():
             lifecycle=["ASSESSED"],
             analysis=["NOT_AFFECTED"],
         ),
+        "reviewer",
     )
     rules = json.loads(Path("data/rescore_rules.json").read_text())
     plugin = create_rescore_rule_sync_workflow(lambda: rules)

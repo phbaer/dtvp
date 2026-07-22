@@ -1,5 +1,7 @@
 import base64
 import json
+import threading
+from concurrent.futures import Future
 from datetime import datetime
 from typing import Any
 
@@ -364,6 +366,7 @@ def _matches_task_group_fields(
     inconsistency_reason: set[str],
     analysis: set[str],
     tag_terms: tuple[str, ...],
+    team: str,
     vuln_id_terms: tuple[str, ...],
     component_terms: tuple[str, ...],
     assignee_terms: tuple[str, ...],
@@ -387,6 +390,8 @@ def _matches_task_group_fields(
     if analysis and fields["technical_state"] not in analysis:
         return False
     if tag_terms and not _matches_all_terms(fields["tags_lower"], tag_terms):
+        return False
+    if team and team not in fields["tags_lower"]:
         return False
     if vuln_id_terms and not _matches_all_terms(
         [fields["id_lower"], *fields["aliases_lower"]],
@@ -708,6 +713,10 @@ def build_task_group_query_index(groups: list[dict[str, Any]]) -> dict[str, Any]
         "total": len(groups),
         "counts": _build_counts(rows),
         "query_cache": {},
+        "sort_cache": {},
+        "_query_inflight": {},
+        "_sort_inflight": {},
+        "_cache_lock": threading.RLock(),
     }
 
 
@@ -742,6 +751,7 @@ def _query_cache_key(
     inconsistency_reason: list[str],
     analysis: list[str],
     tag: str,
+    team: str,
     vuln_id: str,
     component: str,
     assignee: str,
@@ -769,6 +779,7 @@ def _query_cache_key(
         _normalized_upper_tuple(inconsistency_reason),
         _normalized_upper_tuple(analysis),
         _lower(tag),
+        _lower(team),
         _lower(vuln_id),
         _lower(component),
         _lower(assignee),
@@ -790,6 +801,103 @@ def _query_cache_key(
 def _get_query_cache(index: dict[str, Any]) -> dict[tuple[Any, ...], dict[str, Any]]:
     cache = index.setdefault("query_cache", {})
     return cache if isinstance(cache, dict) else {}
+
+
+def _get_cache_lock(index: dict[str, Any]) -> threading.RLock:
+    lock = index.get("_cache_lock")
+    if lock is not None:
+        return lock
+    return index.setdefault("_cache_lock", threading.RLock())
+
+
+def _reserve_query_cache_entry(
+    index: dict[str, Any],
+    key: tuple[Any, ...],
+) -> tuple[dict[str, Any] | None, Future[dict[str, Any]], bool]:
+    lock = _get_cache_lock(index)
+    with lock:
+        cache = _get_query_cache(index)
+        cached = cache.get(key)
+        if cached is not None:
+            completed: Future[dict[str, Any]] = Future()
+            completed.set_result(cached)
+            return cached, completed, False
+
+        inflight = index.setdefault("_query_inflight", {})
+        pending = inflight.get(key)
+        if pending is not None:
+            return None, pending, False
+
+        pending = Future()
+        inflight[key] = pending
+        return None, pending, True
+
+
+def _complete_query_cache_entry(
+    index: dict[str, Any],
+    key: tuple[Any, ...],
+    pending: Future[dict[str, Any]],
+    entry: dict[str, Any],
+) -> None:
+    lock = _get_cache_lock(index)
+    with lock:
+        cache = _get_query_cache(index)
+        _remember_query_cache_entry(cache, key, entry)
+        index.get("_query_inflight", {}).pop(key, None)
+        pending.set_result(entry)
+
+
+def _fail_query_cache_entry(
+    index: dict[str, Any],
+    key: tuple[Any, ...],
+    pending: Future[dict[str, Any]],
+    exc: BaseException,
+) -> None:
+    lock = _get_cache_lock(index)
+    with lock:
+        index.get("_query_inflight", {}).pop(key, None)
+        pending.set_exception(exc)
+
+
+def _sorted_row_indices(
+    index: dict[str, Any],
+    sort_by: str,
+    sort_order: str,
+) -> list[int]:
+    key = (sort_by, sort_order)
+    lock = _get_cache_lock(index)
+    with lock:
+        sort_cache = index.setdefault("sort_cache", {})
+        cached = sort_cache.get(key)
+        if cached is not None:
+            return cached
+        sort_inflight = index.setdefault("_sort_inflight", {})
+        pending = sort_inflight.get(key)
+        owns_reservation = pending is None
+        if owns_reservation:
+            pending = Future()
+            sort_inflight[key] = pending
+
+    if not owns_reservation:
+        return pending.result()
+
+    try:
+        rows = index["rows"]
+        sorted_indices = sorted(
+            range(len(rows)),
+            key=lambda row_index: _task_group_sort_key(rows[row_index], sort_by),
+            reverse=sort_order != "asc",
+        )
+        with lock:
+            existing = sort_cache.setdefault(key, sorted_indices)
+            sort_inflight.pop(key, None)
+            pending.set_result(existing)
+        return existing
+    except BaseException as exc:
+        with lock:
+            sort_inflight.pop(key, None)
+            pending.set_exception(exc)
+        raise
 
 
 def _remember_query_cache_entry(
@@ -829,6 +937,7 @@ def query_task_groups(
     automatic_assessment: list[str] | None = None,
     automatic_assessment_ids: list[str] | None = None,
     inconsistency_reason: list[str] | None = None,
+    team: str = "",
 ) -> dict[str, Any]:
     now_ms = int(datetime.now().timestamp() * 1000)
     effective_offset = decode_task_group_cursor(cursor) if cursor else offset
@@ -839,13 +948,13 @@ def query_task_groups(
         groups = groups_or_index if isinstance(groups_or_index, list) else []
         index = build_task_group_query_index(groups)
     rows = index["rows"]
-    cache = _get_query_cache(index)
     cache_key = _query_cache_key(
         q=q,
         lifecycle=lifecycle,
         inconsistency_reason=inconsistency_reason or [],
         analysis=analysis,
         tag=tag,
+        team=team,
         vuln_id=vuln_id,
         component=component,
         assignee=assignee,
@@ -862,93 +971,146 @@ def query_task_groups(
         sort_order=sort_order,
         now_ms=now_ms,
     )
-    cached = cache.get(cache_key)
+    cached, pending, owns_reservation = _reserve_query_cache_entry(
+        index,
+        cache_key,
+    )
+
+    if cached is None and not owns_reservation:
+        cached = pending.result()
 
     if cached:
         filtered_indices = cached["indices"]
         counts = cached["counts"]
     else:
-        q_terms = tuple(_lower(q).split())
-        lifecycle_set = _normalized_upper_set(lifecycle)
-        inconsistency_reason_set = _normalized_upper_set(inconsistency_reason or [])
-        analysis_set = _normalized_upper_set(analysis)
-        tag_terms = tuple(_lower(tag).split())
-        vuln_id_terms = tuple(_lower(vuln_id).split())
-        component_terms = tuple(_lower(component).split())
-        assignee_terms = tuple(_lower(assignee).split())
-        dependency_set = _normalized_upper_set(dependency)
-        version_set = _normalized_lower_set(versions)
-        tmrescore_set = _normalized_upper_set(tmrescore)
-        tmrescore_proposal_id_set = _normalized_lower_set(tmrescore_proposal_ids)
-        automatic_assessment_set = _normalized_upper_set(automatic_assessment or [])
-        automatic_assessment_id_set = _normalized_lower_set(
-            automatic_assessment_ids or []
-        )
-        filtered_with_indices = [
-            (index, row)
-            for index, row in enumerate(rows)
-            if _matches_task_group_fields(
-                row["fields"],
-                q_terms=q_terms,
-                lifecycle=lifecycle_set,
-                inconsistency_reason=inconsistency_reason_set,
-                analysis=analysis_set,
-                tag_terms=tag_terms,
-                vuln_id_terms=vuln_id_terms,
-                component_terms=component_terms,
-                assignee_terms=assignee_terms,
-                dependency=dependency_set,
-                versions=version_set,
-                cvss_mismatch=cvss_mismatch,
+        try:
+            q_terms = tuple(_lower(q).split())
+            lifecycle_set = _normalized_upper_set(lifecycle)
+            inconsistency_reason_set = _normalized_upper_set(
+                inconsistency_reason or []
+            )
+            analysis_set = _normalized_upper_set(analysis)
+            tag_terms = tuple(_lower(tag).split())
+            team_filter = _lower(team)
+            vuln_id_terms = tuple(_lower(vuln_id).split())
+            component_terms = tuple(_lower(component).split())
+            assignee_terms = tuple(_lower(assignee).split())
+            dependency_set = _normalized_upper_set(dependency)
+            version_set = _normalized_lower_set(versions)
+            tmrescore_set = _normalized_upper_set(tmrescore)
+            tmrescore_proposal_id_set = _normalized_lower_set(
+                tmrescore_proposal_ids
+            )
+            automatic_assessment_set = _normalized_upper_set(
+                automatic_assessment or []
+            )
+            automatic_assessment_id_set = _normalized_lower_set(
+                automatic_assessment_ids or []
+            )
+            has_filter_predicates = bool(
+                q_terms
+                or lifecycle_set
+                or inconsistency_reason_set
+                or analysis_set
+                or tag_terms
+                or team_filter
+                or vuln_id_terms
+                or component_terms
+                or assignee_terms
+                or dependency_set
+                or version_set
+                or cvss_mismatch
+                or attributed_before_days is not None
+                or tmrescore_set
+                or automatic_assessment_set
+            )
+            if has_filter_predicates:
+                filtered_with_indices = [
+                    (row_index, row)
+                    for row_index, row in enumerate(rows)
+                    if _matches_task_group_fields(
+                        row["fields"],
+                        q_terms=q_terms,
+                        lifecycle=lifecycle_set,
+                        inconsistency_reason=inconsistency_reason_set,
+                        analysis=analysis_set,
+                        tag_terms=tag_terms,
+                        team=team_filter,
+                        vuln_id_terms=vuln_id_terms,
+                        component_terms=component_terms,
+                        assignee_terms=assignee_terms,
+                        dependency=dependency_set,
+                        versions=version_set,
+                        cvss_mismatch=cvss_mismatch,
+                        attributed_before_days=attributed_before_days,
+                        attribution_mode=normalized_mode,
+                        tmrescore=tmrescore_set,
+                        tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                        automatic_assessment=automatic_assessment_set,
+                        automatic_assessment_id_set=automatic_assessment_id_set,
+                        now_ms=now_ms,
+                    )
+                ]
+                filtered_with_indices.sort(
+                    key=lambda item: _task_group_sort_key(item[1], sort_by),
+                    reverse=sort_order != "asc",
+                )
+                filtered_indices = [
+                    row_index for row_index, _ in filtered_with_indices
+                ]
+                filtered = [row for _, row in filtered_with_indices]
+            else:
+                filtered_indices = _sorted_row_indices(
+                    index,
+                    sort_by,
+                    sort_order,
+                )
+                filtered = rows
+
+            all_counts = _add_dynamic_counts(
+                index["counts"],
+                rows,
+                tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                automatic_assessment_id_set=automatic_assessment_id_set,
                 attributed_before_days=attributed_before_days,
                 attribution_mode=normalized_mode,
-                tmrescore=tmrescore_set,
-                tmrescore_proposal_id_set=tmrescore_proposal_id_set,
-                automatic_assessment=automatic_assessment_set,
-                automatic_assessment_id_set=automatic_assessment_id_set,
                 now_ms=now_ms,
             )
-        ]
-        filtered_with_indices.sort(
-            key=lambda item: _task_group_sort_key(item[1], sort_by),
-            reverse=sort_order != "asc",
-        )
-        filtered_indices = [index for index, _ in filtered_with_indices]
-        filtered = [row for _, row in filtered_with_indices]
-        all_counts = _add_dynamic_counts(
-            index["counts"],
-            rows,
-            tmrescore_proposal_id_set=tmrescore_proposal_id_set,
-            automatic_assessment_id_set=automatic_assessment_id_set,
-            attributed_before_days=attributed_before_days,
-            attribution_mode=normalized_mode,
-            now_ms=now_ms,
-        )
-        filtered_counts = (
-            all_counts
-            if len(filtered_indices) == len(rows)
-            else _add_dynamic_counts(
-                _build_counts(filtered),
-                filtered,
-                tmrescore_proposal_id_set=tmrescore_proposal_id_set,
-                automatic_assessment_id_set=automatic_assessment_id_set,
-                attributed_before_days=attributed_before_days,
-                attribution_mode=normalized_mode,
-                now_ms=now_ms,
+            filtered_counts = (
+                all_counts
+                if len(filtered_indices) == len(rows)
+                else _add_dynamic_counts(
+                    _build_counts(filtered),
+                    filtered,
+                    tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                    automatic_assessment_id_set=automatic_assessment_id_set,
+                    attributed_before_days=attributed_before_days,
+                    attribution_mode=normalized_mode,
+                    now_ms=now_ms,
+                )
             )
-        )
-        counts = {
-            "all": all_counts,
-            "filtered": filtered_counts,
-        }
-        _remember_query_cache_entry(
-            cache,
-            cache_key,
-            {
+            counts = {
+                "all": all_counts,
+                "filtered": filtered_counts,
+            }
+            entry = {
                 "indices": filtered_indices,
                 "counts": counts,
-            },
-        )
+            }
+            _complete_query_cache_entry(
+                index,
+                cache_key,
+                pending,
+                entry,
+            )
+        except BaseException as exc:
+            _fail_query_cache_entry(
+                index,
+                cache_key,
+                pending,
+                exc,
+            )
+            raise
 
     filtered_count = len(filtered_indices)
     window_indices = filtered_indices[effective_offset : effective_offset + limit]

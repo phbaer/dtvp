@@ -46,4 +46,42 @@ describe('CustomSelect', () => {
 
         wrapper.unmount()
     })
+
+    it('searches the complete option list without truncating it', async () => {
+        const options = Array.from({ length: 12 }, (_, index) => ({
+            value: `team-${index + 1}`,
+            label: `Team ${index + 1}`,
+        }))
+        const wrapper = mount(CustomSelect, {
+            attachTo: document.body,
+            props: {
+                modelValue: '',
+                options,
+                searchable: true,
+                searchPlaceholder: 'Search teams...',
+            },
+            global: {
+                stubs: {
+                    teleport: false,
+                },
+            },
+        })
+
+        await wrapper.find('button').trigger('click')
+        await nextTick()
+
+        const menu = document.body.querySelector('[data-testid="custom-select-menu"]') as HTMLElement
+        expect(menu.querySelectorAll('button')).toHaveLength(12)
+
+        const search = menu.querySelector('input[placeholder="Search teams..."]') as HTMLInputElement
+        search.value = 'Team 12'
+        search.dispatchEvent(new Event('input', { bubbles: true }))
+        await nextTick()
+
+        expect(menu.querySelectorAll('button')).toHaveLength(1)
+        expect(menu.textContent).toContain('Team 12')
+        expect(menu.textContent).not.toContain('Team 11')
+
+        wrapper.unmount()
+    })
 })

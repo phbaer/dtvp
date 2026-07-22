@@ -973,7 +973,7 @@ export function matchesCompiledListFilters(
         return false
     }
 
-    if (filters.tagFilterLower && !item.tagsLower.some(tag => tag.includes(filters.tagFilterLower))) {
+    if (filters.tagFilterLower && !item.tagsLower.includes(filters.tagFilterLower)) {
         return false
     }
 

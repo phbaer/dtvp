@@ -10,6 +10,7 @@ export interface SelectOption {
     value: string
     label: string
     description?: string
+    suffix?: string
 }
 
 const props = withDefaults(defineProps<{
@@ -17,9 +18,13 @@ const props = withDefaults(defineProps<{
     options: SelectOption[]
     placeholder?: string
     size?: 'sm' | 'md'
+    searchable?: boolean
+    searchPlaceholder?: string
 }>(), {
     placeholder: 'Select...',
     size: 'md',
+    searchable: false,
+    searchPlaceholder: 'Search...',
 })
 
 const emit = defineEmits<{
@@ -29,8 +34,10 @@ const emit = defineEmits<{
 const attrs = useAttrs()
 
 const isOpen = ref(false)
+const searchQuery = ref('')
 const triggerRef = ref<HTMLElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
+const searchInputRef = ref<HTMLInputElement | null>(null)
 const menuStyle = ref<Record<string, string>>({})
 const VIEWPORT_MARGIN = 8
 const MENU_GAP = 4
@@ -96,6 +103,15 @@ const currentLabel = computed(() => {
     return props.options.find(o => o.value === props.modelValue)?.label ?? props.placeholder
 })
 
+const filteredOptions = computed(() => {
+    const query = searchQuery.value.trim().toLowerCase()
+    if (!query) return props.options
+    return props.options.filter(option =>
+        option.value.toLowerCase().includes(query)
+        || option.label.toLowerCase().includes(query)
+    )
+})
+
 const btnClass = computed(() =>
     props.size === 'sm'
         ? 'px-2.5 h-8 text-xs'
@@ -123,6 +139,7 @@ const handleDocumentKeydown = (event: KeyboardEvent) => {
 
 watch(isOpen, async (open) => {
     if (!open) {
+        searchQuery.value = ''
         document.removeEventListener('mousedown', handleDocumentPointerDown)
         document.removeEventListener('focusin', handleDocumentFocusIn)
         document.removeEventListener('keydown', handleDocumentKeydown)
@@ -133,6 +150,9 @@ watch(isOpen, async (open) => {
 
     await nextTick()
     updateMenuPosition()
+    if (props.searchable) {
+        searchInputRef.value?.focus()
+    }
     document.addEventListener('mousedown', handleDocumentPointerDown)
     document.addEventListener('focusin', handleDocumentFocusIn)
     document.addEventListener('keydown', handleDocumentKeydown)
@@ -183,8 +203,17 @@ onBeforeUnmount(() => {
                 class="absolute z-50 overflow-y-auto bg-[#1e1e2e] border border-white/10 rounded-lg shadow-xl"
             >
                 <slot name="menu">
+                    <div v-if="searchable" class="sticky top-0 z-10 border-b border-white/10 bg-[#1e1e2e] p-2">
+                        <input
+                            ref="searchInputRef"
+                            v-model="searchQuery"
+                            type="search"
+                            :placeholder="searchPlaceholder"
+                            class="h-9 w-full rounded-lg border border-white/10 bg-black/35 px-3 text-sm font-medium text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500/50"
+                        />
+                    </div>
                     <button
-                        v-for="opt in options"
+                        v-for="opt in filteredOptions"
                         :key="opt.value"
                         type="button"
                         @mousedown.prevent="selectOption(opt.value)"
@@ -198,8 +227,14 @@ onBeforeUnmount(() => {
                         ]"
                     >
                         <span class="truncate">{{ opt.label }}</span>
-                        <span v-if="modelValue === opt.value" class="text-blue-400 text-xs ml-2 shrink-0">&#10003;</span>
+                        <span class="ml-2 flex shrink-0 items-center gap-2">
+                            <span v-if="opt.suffix" class="text-[10px] text-gray-500">{{ opt.suffix }}</span>
+                            <span v-if="modelValue === opt.value" class="text-blue-400 text-xs">&#10003;</span>
+                        </span>
                     </button>
+                    <div v-if="filteredOptions.length === 0" class="px-3 py-3 text-center text-xs text-gray-500">
+                        No matches
+                    </div>
                 </slot>
             </div>
         </Teleport>

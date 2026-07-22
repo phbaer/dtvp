@@ -159,7 +159,8 @@ def test_get_assessment_details_refreshes_grouped_task_snapshot(api_client, mock
         )
 
         assert response.status_code == 200
-        component = group["affected_versions"][0]["components"][0]
+        refreshed_group = main.tasks[task_id]["_full_result_by_id"][group["id"]]
+        component = refreshed_group["affected_versions"][0]["components"][0]
         assert component["analysis_state"] == "EXPLOITABLE"
         assert component["analysis_details"] == "Reloaded directly from Dependency-Track"
         assert component["justification"] == "REQUIRES_CONFIGURATION"

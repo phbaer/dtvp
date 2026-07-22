@@ -14,9 +14,6 @@ from .tmrescore_integration import (
     normalize_tmrescore_snapshot,
     sort_projects_by_version,
 )
-from .tmrescore_task_services import calculate_tmrescore_progress
-
-
 def _merge_responses(
     *responses: dict[int | str, dict[str, Any]],
 ) -> dict[int | str, dict[str, Any]]:
@@ -35,7 +32,7 @@ class TMRescoreRouteDeps:
     create_tracked_task: Callable[[Coroutine[Any, Any, Any]], asyncio.Task[Any]]
     run_tmrescore_analysis_task: Callable[..., Coroutine[Any, Any, Any]]
     build_tmrescore_cached_state: Callable[[dict[str, Any], bool], dict[str, Any]]
-    get_latest_tmrescore_project_task: Callable[[str], dict[str, Any] | None]
+    get_latest_tmrescore_project_task: Callable[[str, str], dict[str, Any] | None]
     persist_tmrescore_project_snapshot: Callable[[str, dict[str, Any]], None]
     describe_tmrescore_progress: Callable[[str, int], str]
     tmrescore_project_cache: dict[str, dict[str, Any]]
@@ -55,6 +52,28 @@ def _safe_project_filename(project_name: str) -> str:
         ).strip("-")
         or "project"
     )
+
+
+def _tmrescore_task_for_user(
+    deps: TMRescoreRouteDeps,
+    session_id: str,
+    user: str,
+) -> dict[str, Any] | None:
+    task = deps.tmrescore_analysis_tasks.get(session_id)
+    if not isinstance(task, dict) or task.get("_owner") != user:
+        return None
+    return task
+
+
+def _require_tmrescore_task_for_user(
+    deps: TMRescoreRouteDeps,
+    session_id: str,
+    user: str,
+) -> dict[str, Any]:
+    task = _tmrescore_task_for_user(deps, session_id, user)
+    if task is None:
+        raise HTTPException(status_code=404, detail="TMRescore session not found")
+    return task
 
 
 def _register_tmrescore_context_route(
@@ -329,6 +348,7 @@ def _register_tmrescore_analysis_route(
             )
 
         task = {
+            "_owner": user,
             "session_id": session_id,
             "project_name": project_name,
             "session": session,
@@ -421,7 +441,7 @@ def _register_tmrescore_cached_state_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_tmrescore_analysis_tasks()
-        task = deps.get_latest_tmrescore_project_task(project_name)
+        task = deps.get_latest_tmrescore_project_task(project_name, user)
         if not task:
             raise HTTPException(
                 status_code=404,
@@ -447,37 +467,8 @@ def _register_tmrescore_progress_route(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_tmrescore_analysis_tasks()
-        task = deps.tmrescore_analysis_tasks.get(session_id)
-        if task:
-            return deps.build_tmrescore_cached_state(task, False)
-
-        settings = TMRescoreSettings()
-        if not settings.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail=deps.tmrescore_not_configured_detail,
-            )
-
-        async with TMRescoreClient(settings) as tmrescore_client:
-            payload = await tmrescore_client.get_progress(session_id)
-
-        status = str(payload.get("status") or "running")
-        progress = calculate_tmrescore_progress(payload)
-        message = payload.get("message") or deps.describe_tmrescore_progress(
-            status,
-            progress,
-        )
-        return {
-            "session_id": session_id,
-            "status": status,
-            "progress": progress,
-            "step": payload.get("step"),
-            "total_steps": payload.get("total_steps"),
-            "message": message,
-            "log": [message],
-            "error": None,
-            "result": None,
-        }
+        task = _require_tmrescore_task_for_user(deps, session_id, user)
+        return deps.build_tmrescore_cached_state(task, False)
 
 
 def _register_tmrescore_results_route(
@@ -498,30 +489,19 @@ def _register_tmrescore_results_route(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         deps.prune_tmrescore_analysis_tasks()
-        task = deps.tmrescore_analysis_tasks.get(session_id)
-        if task:
-            if task.get("result"):
-                return task["result"]
-            status = str(task.get("status") or "running").lower()
-            if status == "failed":
-                raise HTTPException(
-                    status_code=409,
-                    detail=task.get("error") or "TMRescore analysis failed",
-                )
+        task = _require_tmrescore_task_for_user(deps, session_id, user)
+        if task.get("result"):
+            return task["result"]
+        status = str(task.get("status") or "running").lower()
+        if status == "failed":
             raise HTTPException(
                 status_code=409,
-                detail="TMRescore analysis is not complete yet. Poll /progress until status is completed.",
+                detail=task.get("error") or "TMRescore analysis failed",
             )
-
-        settings = TMRescoreSettings()
-        if not settings.enabled:
-            raise HTTPException(
-                status_code=503,
-                detail=deps.tmrescore_not_configured_detail,
-            )
-
-        async with TMRescoreClient(settings) as tmrescore_client:
-            return await tmrescore_client.get_results(session_id)
+        raise HTTPException(
+            status_code=409,
+            detail="TMRescore analysis is not complete yet. Poll /progress until status is completed.",
+        )
 
 
 def _register_tmrescore_download_routes(
@@ -539,6 +519,8 @@ def _register_tmrescore_download_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        deps.prune_tmrescore_analysis_tasks()
+        _require_tmrescore_task_for_user(deps, session_id, user)
         settings = TMRescoreSettings()
         if not settings.enabled:
             raise HTTPException(
@@ -558,6 +540,8 @@ def _register_tmrescore_download_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        deps.prune_tmrescore_analysis_tasks()
+        _require_tmrescore_task_for_user(deps, session_id, user)
         settings = TMRescoreSettings()
         if not settings.enabled:
             raise HTTPException(
@@ -578,6 +562,8 @@ def _register_tmrescore_download_routes(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
+        deps.prune_tmrescore_analysis_tasks()
+        _require_tmrescore_task_for_user(deps, session_id, user)
         settings = TMRescoreSettings()
         if not settings.enabled:
             raise HTTPException(

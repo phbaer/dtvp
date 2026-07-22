@@ -913,11 +913,14 @@ async def process_grouped_vulns_task(
             deps.tasks[task_id]["message"] = msg
             deps.tasks[task_id].setdefault("log", []).append(msg)
 
+        complete_partial_artifacts: Dict[str, Any] | None = None
+
         async def publish_partial_summary(
             partial_combined_data: List[Dict[str, Any]],
             partial_bom_cache_map: Dict[str, Any],
             partial_version_severity_counts: Dict[str, Dict[str, int]],
         ) -> None:
+            nonlocal complete_partial_artifacts
             if response_mode != "summary" or not partial_combined_data:
                 return
 
@@ -958,6 +961,8 @@ async def process_grouped_vulns_task(
             deps.tasks[task_id]["_partial_full_result"] = artifacts["full_result"]
             deps.tasks[task_id]["_group_query_index"] = artifacts["query_index"]
             deps.tasks[task_id]["_statistics_rollup"] = artifacts["statistics_rollup"]
+            if partial_completed == len(versions):
+                complete_partial_artifacts = artifacts
 
         (
             combined_data,
@@ -985,16 +990,18 @@ async def process_grouped_vulns_task(
             "Grouping vulnerabilities and preparing filtered result windows..."
         )
 
-        artifacts = await asyncio.to_thread(
-            _build_grouped_vuln_task_artifacts,
-            deps.group_vulnerabilities,
-            combined_data,
-            bom_cache_map,
-            team_mapping,
-            versions,
-            version_severity_counts,
-            response_mode,
-        )
+        artifacts = complete_partial_artifacts
+        if artifacts is None:
+            artifacts = await asyncio.to_thread(
+                _build_grouped_vuln_task_artifacts,
+                deps.group_vulnerabilities,
+                combined_data,
+                bom_cache_map,
+                team_mapping,
+                versions,
+                version_severity_counts,
+                response_mode,
+            )
         result = artifacts["full_result"]
 
         now = datetime.now(timezone.utc)

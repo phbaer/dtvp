@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import StatsSidebar, { type FilterState } from '../StatsSidebar.vue'
+import type { TaskVulnGroupListCounts } from '../../lib/api'
 
 const filters = (): FilterState => ({
     sortBy: 'id',
@@ -21,10 +22,27 @@ const filters = (): FilterState => ({
     attributionAgeMode: 'older',
 })
 
+const resultCounts: TaskVulnGroupListCounts = {
+    total: 2,
+    lifecycle: { INCONSISTENT: 2 },
+    inconsistency_reason: {
+        MISSING_RESCORING_VECTOR: 0,
+        ANALYSIS_STATE_MISMATCH: 1,
+        TEAM_ASSESSMENT_MISMATCH: 0,
+        ASSESSMENT_DETAILS_MISMATCH: 0,
+    },
+    analysis: {},
+    dependency_relationship: { direct: 0, transitive: 0, unknown: 0 },
+    cvss_version_mismatch: 0,
+    versions: {},
+    tags: {},
+    assignees: {},
+    components: {},
+}
+
 const mountSidebar = () => mount(StatsSidebar, {
     props: {
         filters: filters(),
-        filterCounts: { INCONSISTENT: 2 },
         availableVersions: [],
         lifecycleOptions: [{
             value: 'INCONSISTENT',
@@ -36,21 +54,11 @@ const mountSidebar = () => mount(StatsSidebar, {
             label: 'Analysis states differ',
             description: 'States differ.',
         }],
-        inconsistencyReasonCounts: {
-            MISSING_RESCORING_VECTOR: 0,
-            ANALYSIS_STATE_MISMATCH: 1,
-            TEAM_ASSESSMENT_MISMATCH: 0,
-            ASSESSMENT_DETAILS_MISMATCH: 0,
-        },
         analysisOptions: [],
         copiedUrl: false,
-        filteredCount: 2,
-        dependencyCounts: { direct: 0, transitive: 0, unknown: 0 },
-        dependencyFilterCounts: { direct: 0, transitive: 0, unknown: 0 },
-        tmrescoreCounts: {},
-        automaticAssessmentCounts: {},
-        analysisCounts: {},
-        teamTagList: [],
+        resultCounts,
+        countsUpdating: false,
+        teamOptions: [],
         cacheStatusState: 'unknown',
         cacheStatusLabel: 'Unknown',
         cacheStatusAge: '',

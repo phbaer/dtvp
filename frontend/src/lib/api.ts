@@ -254,6 +254,7 @@ export interface TaskVulnGroupListQuery {
     inconsistency_reason?: string[];
     analysis?: string[];
     tag?: string;
+    team?: string;
     id?: string;
     component?: string;
     assignee?: string;
