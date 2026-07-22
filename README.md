@@ -94,6 +94,14 @@ commit SHAs with their major versions recorded in comments. Coverage, browser,
 and SBOM artifacts use Forgejo's patched v4 upload action because the upstream
 GitHub v4 artifact protocol is not compatible with Forgejo Actions.
 
+Coverage reports measure production sources even when a module is never
+imported by a test. Python coverage is branch-aware and limited to `dtvp/` and
+`agentyzer/src/`; frontend coverage is limited to runtime TypeScript and Vue
+sources and excludes test helpers and application bootstrap files. CI enforces
+conservative aggregate floors of 70% for Python and, for the frontend, 78%
+statements, 67% branches, 75% functions, and 80% lines. Raise these ratchets as
+targeted tests improve the baseline.
+
 ## Repository And Architecture
 
 ### Repository Map

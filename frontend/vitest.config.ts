@@ -13,9 +13,18 @@ export default mergeConfig(
             coverage: {
                 provider: 'v8',
                 reporter: ['text', 'json', 'html'],
+                include: ['src/**/*.{ts,vue}'],
+                thresholds: {
+                    statements: 78,
+                    branches: 67,
+                    functions: 75,
+                    lines: 80
+                },
                 exclude: [
                     'node_modules/**',
                     'dist/**',
+                    'src/**/__tests__/**',
+                    'src/setupTests.ts',
                     '**/*.d.ts',
                     '**/*.test.ts',
                     '**/*.spec.ts',

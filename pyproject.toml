@@ -37,16 +37,18 @@ agentyzer = { path = "agentyzer", editable = true }
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = "."
-addopts = "--cov=. --cov-report=term-missing --cov-report=html"
+addopts = "--cov=dtvp --cov=agentyzer/src --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
+branch = true
 omit = [
-    "tests/*",
     "reproduce_issue.py",
     "debug_finding.py",
 ]
 
 [tool.coverage.report]
+fail_under = 70
+precision = 1
 show_missing = true
 exclude_lines = [
     "pragma: no cover",
