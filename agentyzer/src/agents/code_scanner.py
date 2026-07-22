@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 _MAX_CONTEXT_CHARS = 24_000
 # Extra budget for structural context (imports + signatures).
 _MAX_STRUCTURE_CHARS = 8_000
+# Ignore unexpectedly large source files from untrusted repositories. This
+# bounds memory/LLM-context work and avoids following generated-file bait.
+_MAX_SOURCE_FILE_BYTES = 1_000_000
 # Context lines around a hit to include.
 _CONTEXT_LINES = 5
 
@@ -153,6 +156,25 @@ def _is_source_file(fname: str) -> bool:
     return ext.lower() in _SOURCE_EXTS
 
 
+def _is_safe_repo_file(file_path: str, repo_path: str) -> bool:
+    """Return whether a source candidate is a bounded file inside the repo.
+
+    Git repositories are untrusted input. Refuse symlinks so a checkout cannot
+    make the scanner copy host files into an LLM prompt, and cap source size to
+    prevent a single generated file from consuming excessive resources.
+    """
+    try:
+        if os.path.islink(file_path) or not os.path.isfile(file_path):
+            return False
+        repo_real = os.path.realpath(repo_path)
+        file_real = os.path.realpath(file_path)
+        if os.path.commonpath((repo_real, file_real)) != repo_real:
+            return False
+        return os.path.getsize(file_path) <= _MAX_SOURCE_FILE_BYTES
+    except (OSError, ValueError):
+        return False
+
+
 def _extract_structure(file_path: str, repo_path: str) -> str | None:
     """Extract imports and function/class signatures from any source file.
 
@@ -160,6 +182,8 @@ def _extract_structure(file_path: str, repo_path: str) -> str | None:
     works across languages.  The LLM receives the compact output and does
     the real semantic analysis.
     """
+    if not _is_safe_repo_file(file_path, repo_path):
+        return None
     try:
         with open(file_path, "r", errors="ignore") as f:
             source = f.read()
@@ -211,6 +235,8 @@ def search_usage(repo_path: str, component_name: str, symbols: List[str]) -> Lis
             if not _is_source_file(fname):
                 continue
             fpath = os.path.join(root, fname)
+            if not _is_safe_repo_file(fpath, repo_path):
+                continue
             try:
                 with open(fpath, "r", errors="ignore") as f:
                     for i, line in enumerate(f, start=1):
@@ -248,6 +274,8 @@ def collect_snippets(
         if len(parts) < 2:
             continue
         fpath, lineno_s = parts[0], parts[1]
+        if not _is_safe_repo_file(fpath, repo_path):
+            continue
         try:
             lineno = int(lineno_s.strip())
         except ValueError:
@@ -301,6 +329,8 @@ def collect_structure(
             if not _is_source_file(fname):
                 continue
             fpath = os.path.join(root, fname)
+            if not _is_safe_repo_file(fpath, repo_path):
+                continue
             try:
                 with open(fpath, "r", errors="ignore") as f:
                     source = f.read()
@@ -536,7 +566,10 @@ def _build_file_index(repo_path: str) -> Dict[str, List[str]]:
         for fname in filenames:
             if not _is_source_file(fname):
                 continue
-            rel = os.path.relpath(os.path.join(root, fname), repo_path)
+            file_path = os.path.join(root, fname)
+            if not _is_safe_repo_file(file_path, repo_path):
+                continue
+            rel = os.path.relpath(file_path, repo_path)
             index.setdefault(fname, []).append(rel)
     return index
 
@@ -557,7 +590,7 @@ def _resolve_file(
        (or ``pkg/module/__init__.py``) and retry direct + basename.
     """
     # 1. Direct
-    if os.path.isfile(os.path.join(repo_path, candidate)):
+    if _is_safe_repo_file(os.path.join(repo_path, candidate), repo_path):
         return candidate
 
     # Helper: pick best from a list of matches
@@ -590,13 +623,13 @@ def _resolve_file(
             for ext in (".py", ".js", ".ts", ".java", ".go", ".rs"):
                 mod_file = stem + ext
                 mod_basename = os.path.basename(mod_file)
-                if os.path.isfile(os.path.join(repo_path, mod_file)):
+                if _is_safe_repo_file(os.path.join(repo_path, mod_file), repo_path):
                     return mod_file
                 if mod_basename in file_index:
                     return _best(file_index[mod_basename], mod_file)
             # __init__.py for package dirs
             init_file = stem + "/__init__.py"
-            if os.path.isfile(os.path.join(repo_path, init_file)):
+            if _is_safe_repo_file(os.path.join(repo_path, init_file), repo_path):
                 return init_file
 
     return None
@@ -651,7 +684,7 @@ def extract_path_context(
             len(snippet_files),
         )
         for sf in snippet_files:
-            if os.path.isfile(os.path.join(repo_path, sf)):
+            if _is_safe_repo_file(os.path.join(repo_path, sf), repo_path):
                 resolved[sf] = sf
 
     if not resolved:
@@ -675,7 +708,7 @@ def extract_path_context(
 
     for rel_path in ordered:
         abs_path = os.path.join(repo_path, rel_path)
-        if not os.path.isfile(abs_path):
+        if not _is_safe_repo_file(abs_path, repo_path):
             continue
         try:
             with open(abs_path, "r", errors="ignore") as f:

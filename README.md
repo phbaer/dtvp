@@ -795,7 +795,10 @@ Deployment rules:
   stored remote URLs are scrubbed in place. Each scan uses a detached worktree
   backed by the persistent clone, so repeat scans reuse Git objects without
   sharing mutable files. Normal completion removes only the per-run worktree;
-  stale crash leftovers are pruned after the configured retention window.
+  stale crash leftovers are pruned after the configured retention window. The
+  source scanner reads only bounded, non-symlink regular files whose resolved
+  paths remain inside that worktree, preventing a malicious checkout from
+  exposing host files through source-like symlinks.
 - The archive Git helper uses a digest-pinned image, read-only root filesystem,
   dropped capabilities, strict SSH host-key checking, and a dedicated outbound
   network. Remote lookup/fetch failures abort the job; they are never treated
