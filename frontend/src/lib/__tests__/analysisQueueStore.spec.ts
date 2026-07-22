@@ -258,4 +258,144 @@ describe('analysisQueueStore', () => {
 
         expect(analysisQueueStore.items.value.map(item => item.queue_id)).toEqual(['newer', 'middle', 'older'])
     })
+
+    it.each([
+        ['failed', 'Analyzer rejected the request', 'Analyzer rejected the request'],
+        ['failed', undefined, 'Analysis failed'],
+        ['cancelled', undefined, 'Analysis cancelled'],
+    ] as const)('releases callbacks when a submitted item becomes %s', async (status, error, expectedError) => {
+        const api = await import('../api')
+        vi.mocked(api.analysisQueueSubmit).mockResolvedValue({
+            queue_id: `queue-${status}`,
+            vuln_id: 'CVE-1',
+            component_name: 'component',
+            submitted_by: 'tester',
+            submitted_at: '2026-05-01T10:00:00Z',
+            status: 'queued',
+            position: 1,
+        } as any)
+        vi.mocked(api.analysisQueueList).mockResolvedValue([{
+            queue_id: `queue-${status}`,
+            vuln_id: 'CVE-1',
+            component_name: 'component',
+            submitted_by: 'tester',
+            submitted_at: '2026-05-01T10:00:00Z',
+            status,
+            error,
+            position: 0,
+        }] as any)
+
+        const onComplete = vi.fn()
+        const onError = vi.fn()
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+
+        await analysisQueueStore.submit(
+            'CVE-1',
+            'component',
+            undefined,
+            undefined,
+            undefined,
+            onComplete,
+            onError,
+        )
+
+        expect(onComplete).not.toHaveBeenCalled()
+        expect(onError).toHaveBeenCalledOnce()
+        expect(onError).toHaveBeenCalledWith(expectedError)
+        analysisQueueStore.stopPolling()
+    })
+
+    it('retries fetching a completed result after a transient API failure', async () => {
+        vi.useFakeTimers()
+        const api = await import('../api')
+        vi.mocked(api.analysisQueueSubmit).mockResolvedValue({
+            queue_id: 'queue-retry',
+            vuln_id: 'CVE-1',
+            component_name: 'component',
+            submitted_by: 'tester',
+            submitted_at: '2026-05-01T10:00:00Z',
+            status: 'queued',
+            position: 1,
+        } as any)
+        vi.mocked(api.analysisQueueList).mockResolvedValue([{
+            queue_id: 'queue-retry',
+            vuln_id: 'CVE-1',
+            component_name: 'component',
+            submitted_by: 'tester',
+            submitted_at: '2026-05-01T10:00:00Z',
+            status: 'completed',
+            position: 0,
+        }] as any)
+        vi.mocked(api.analysisQueueGet)
+            .mockRejectedValueOnce(new Error('temporary outage'))
+            .mockResolvedValue({
+                queue_id: 'queue-retry',
+                vuln_id: 'CVE-1',
+                component_name: 'component',
+                submitted_by: 'tester',
+                submitted_at: '2026-05-01T10:00:00Z',
+                status: 'completed',
+                position: 0,
+                result: { summary: 'retried result' },
+            } as any)
+
+        const onComplete = vi.fn()
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+        await analysisQueueStore.submit('CVE-1', 'component', undefined, undefined, undefined, onComplete)
+        await vi.advanceTimersByTimeAsync(10_000)
+
+        expect(api.analysisQueueGet).toHaveBeenCalledTimes(2)
+        expect(onComplete).toHaveBeenCalledWith(
+            { summary: 'retried result' },
+            expect.objectContaining({ queue_id: 'queue-retry' }),
+        )
+        analysisQueueStore.stopPolling()
+    })
+
+    it('preserves the current queue snapshot when refresh fails', async () => {
+        const api = await import('../api')
+        vi.mocked(api.analysisQueueList)
+            .mockResolvedValueOnce([{
+                queue_id: 'existing',
+                vuln_id: 'CVE-1',
+                component_name: 'component',
+                submitted_by: 'tester',
+                submitted_at: 'invalid timestamp',
+                status: 'running',
+                position: 1,
+            }] as any)
+            .mockRejectedValueOnce(new Error('offline'))
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+
+        await analysisQueueStore.refresh()
+        await analysisQueueStore.refresh()
+
+        expect(analysisQueueStore.items.value.map(item => item.queue_id)).toEqual(['existing'])
+        expect(analysisQueueStore.activeCount.value).toBe(1)
+        expect(analysisQueueStore.runningItem.value?.queue_id).toBe('existing')
+        expect(analysisQueueStore.hasActivity.value).toBe(true)
+    })
+
+    it('dismisses a cached result even when the server-side delete already disappeared', async () => {
+        const api = await import('../api')
+        vi.mocked(api.analysisQueueGet).mockResolvedValue({
+            queue_id: 'finished',
+            vuln_id: 'CVE-1',
+            component_name: 'component',
+            submitted_by: 'tester',
+            submitted_at: '2026-05-01T10:00:00Z',
+            status: 'completed',
+            position: 0,
+            result: { summary: 'cached' },
+        } as any)
+        vi.mocked(api.analysisQueueCancel).mockRejectedValue(new Error('not found'))
+        vi.mocked(api.analysisQueueList).mockResolvedValue([])
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+
+        await analysisQueueStore.fetchResult('finished')
+        await analysisQueueStore.dismiss('finished')
+
+        expect(analysisQueueStore.getCachedResult('finished')).toBeUndefined()
+        expect(analysisQueueStore.items.value).toEqual([])
+    })
 })

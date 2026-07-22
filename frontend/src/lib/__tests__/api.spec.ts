@@ -1,5 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+    analysisQueueCancel,
+    analysisQueueCancelQueued,
+    analysisQueueClear,
+    analysisQueueGet,
+    analysisQueueList,
+    analysisQueueSubmit,
+    analysisQueueSubmitFollowUp,
     drainTaskVulnGroupDetails,
     drainTaskVulnGroups,
     getProjects,
@@ -38,11 +45,13 @@ import {
     resumeTMRescoreAnalysis,
     runTMRescoreAnalysis,
     startProjectArchiveExport,
+    streamProjectArchiveTaskEvents,
     uploadProjectArchiveImport,
     waitForProjectArchiveTask,
 } from '../api'
 
 const mocks = vi.hoisted(() => ({
+    delete: vi.fn(),
     get: vi.fn(),
     post: vi.fn(),
     createConfig: undefined as any,
@@ -54,6 +63,7 @@ vi.mock('axios', () => {
             create: vi.fn((config) => {
                 mocks.createConfig = config
                 return {
+                    delete: mocks.delete,
                     get: mocks.get,
                     post: mocks.post,
                     interceptors: {
@@ -72,6 +82,12 @@ describe('api.ts', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.useRealTimers()
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+        vi.unstubAllGlobals()
+        vi.restoreAllMocks()
     })
 
     it.each([
@@ -242,6 +258,124 @@ describe('api.ts', () => {
         expect(onProgress).toHaveBeenCalledWith(running)
         expect(onProgress).toHaveBeenCalledWith(completed)
         vi.useRealTimers()
+    })
+
+    it('streams newline-delimited archive status updates across chunk boundaries', async () => {
+        const encoder = new TextEncoder()
+        const read = vi.fn()
+            .mockResolvedValueOnce({
+                done: false,
+                value: encoder.encode('{"id":"archive-task","status":"running","progress":25}\n{"id":"archive-task",'),
+            })
+            .mockResolvedValueOnce({
+                done: true,
+                value: encoder.encode('"status":"completed","progress":100}'),
+            })
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            body: { getReader: () => ({ read }) },
+        })
+        vi.stubGlobal('fetch', fetchMock)
+        const onStatus = vi.fn()
+
+        await streamProjectArchiveTaskEvents('archive/task', onStatus)
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            expect.stringContaining('/project-archives/tasks/archive%2Ftask/events'),
+            { credentials: 'include' },
+        )
+        expect(onStatus).toHaveBeenNthCalledWith(1, expect.objectContaining({ status: 'running', progress: 25 }))
+        expect(onStatus).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 'completed', progress: 100 }))
+    })
+
+    it.each([
+        ['fetch is unavailable', undefined],
+        ['the server rejects the stream', vi.fn().mockResolvedValue({ ok: false, body: null })],
+    ])('rejects archive event streaming when %s', async (_label, fetchImplementation) => {
+        vi.stubGlobal('fetch', fetchImplementation)
+
+        await expect(streamProjectArchiveTaskEvents('archive-task', vi.fn()))
+            .rejects.toThrow('Archive task event stream unavailable')
+    })
+
+    it('falls back to polling when the archive event stream fails before a terminal status', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('stream offline')))
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        const completed = { id: 'archive-task', status: 'completed', progress: 100, message: 'Ready' }
+        mocks.get.mockResolvedValue({ data: completed })
+
+        await expect(waitForProjectArchiveTask('archive-task', undefined, { useEventStream: true }))
+            .resolves.toEqual(completed)
+
+        expect(warning).toHaveBeenCalledWith(
+            'Archive task event stream failed; falling back to polling.',
+            expect.any(Error),
+        )
+        expect(mocks.get).toHaveBeenCalledWith('/project-archives/tasks/archive-task')
+    })
+
+    it('does not hide a failed terminal status received from the archive event stream', async () => {
+        const encoder = new TextEncoder()
+        const read = vi.fn().mockResolvedValue({
+            done: false,
+            value: encoder.encode('{"id":"archive-task","status":"failed","error":"Invalid archive"}\n'),
+        })
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            body: { getReader: () => ({ read }) },
+        }))
+
+        await expect(waitForProjectArchiveTask('archive-task', undefined, { useEventStream: true }))
+            .rejects.toThrow('Invalid archive')
+        expect(mocks.get).not.toHaveBeenCalled()
+    })
+
+    it('rejects archive polling when the task disappears', async () => {
+        mocks.get.mockResolvedValue({
+            data: { id: 'archive-task', status: 'not_found', progress: 0, message: 'Missing' },
+        })
+
+        await expect(waitForProjectArchiveTask('archive-task'))
+            .rejects.toThrow('Archive task not found')
+    })
+
+    it('forwards analysis queue commands and URL-encodes queue identifiers', async () => {
+        const submitted = { queue_id: 'queue/1', status: 'queued' }
+        const followUp = { queue_id: 'queue/2', status: 'queued' }
+        mocks.post
+            .mockResolvedValueOnce({ data: submitted })
+            .mockResolvedValueOnce({ data: followUp })
+            .mockResolvedValueOnce({ data: { status: 'cleared', removed: 2 } })
+            .mockResolvedValueOnce({ data: { status: 'cleared', removed: 1 } })
+            .mockResolvedValueOnce({ data: { status: 'cancelled', cancelled: 3 } })
+        mocks.get
+            .mockResolvedValueOnce({ data: [submitted] })
+            .mockResolvedValueOnce({ data: submitted })
+        mocks.delete.mockResolvedValue({ data: { status: 'cancelled' } })
+
+        await expect(analysisQueueSubmit({ vuln_id: 'CVE-1', component_name: 'library' }))
+            .resolves.toEqual(submitted)
+        await expect(analysisQueueSubmitFollowUp({ parent_run_id: 'run-1', question: 'Why?' }))
+            .resolves.toEqual(followUp)
+        await expect(analysisQueueList()).resolves.toEqual([submitted])
+        await expect(analysisQueueGet('queue/1')).resolves.toEqual(submitted)
+        await expect(analysisQueueCancel('queue/1')).resolves.toEqual({ status: 'cancelled' })
+        await expect(analysisQueueClear(['failed', 'cancelled'])).resolves.toEqual({ status: 'cleared', removed: 2 })
+        await expect(analysisQueueClear()).resolves.toEqual({ status: 'cleared', removed: 1 })
+        await expect(analysisQueueCancelQueued()).resolves.toEqual({ status: 'cancelled', cancelled: 3 })
+
+        expect(mocks.get).toHaveBeenLastCalledWith('/analysis-queue/queue%2F1')
+        expect(mocks.delete).toHaveBeenCalledWith('/analysis-queue/queue%2F1')
+        expect(mocks.post).toHaveBeenCalledWith('/analysis-queue/clear', { statuses: ['failed', 'cancelled'] })
+        expect(mocks.post).toHaveBeenCalledWith('/analysis-queue/clear', {})
+    })
+
+    it('propagates analysis queue API failures to the calling store', async () => {
+        const failure = new Error('queue unavailable')
+        mocks.get.mockRejectedValue(failure)
+
+        await expect(analysisQueueGet('queue-1')).rejects.toBe(failure)
+        await expect(analysisQueueList()).rejects.toBe(failure)
     })
 
     it('getGroupedVulns starts task and polls for result', async () => {

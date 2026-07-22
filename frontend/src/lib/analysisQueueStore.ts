@@ -115,7 +115,8 @@ async function handleCompletedItem(item: AnalysisQueueItem) {
 function handleFailedItem(item: AnalysisQueueItem) {
     const callback = failureCallbacks.get(item.queue_id)
     if (callback) {
-        callback(item.error || 'Analysis failed')
+        const fallback = item.status === 'cancelled' ? 'Analysis cancelled' : 'Analysis failed'
+        callback(item.error || fallback)
     }
     completionCallbacks.delete(item.queue_id)
     failureCallbacks.delete(item.queue_id)
@@ -133,7 +134,7 @@ async function processStatusTransitions(previousStatuses: Map<string, AnalysisQu
             continue
         }
 
-        if (item.status === 'failed') {
+        if (item.status === 'failed' || item.status === 'cancelled') {
             handleFailedItem(item)
         }
     }

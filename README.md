@@ -98,8 +98,8 @@ Coverage reports measure production sources even when a module is never
 imported by a test. Python coverage is branch-aware and limited to `dtvp/` and
 `agentyzer/src/`; frontend coverage is limited to runtime TypeScript and Vue
 sources and excludes test helpers and application bootstrap files. CI enforces
-conservative aggregate floors of 70% for Python and, for the frontend, 78%
-statements, 67% branches, 75% functions, and 80% lines. Raise these ratchets as
+conservative aggregate floors of 70% for Python and, for the frontend, 79%
+statements, 68% branches, 76% functions, and 81% lines. Raise these ratchets as
 targeted tests improve the baseline.
 
 ## Repository And Architecture
@@ -536,6 +536,10 @@ fingerprint of the vulnerability, target, versions, components, dependency
 context, aliases, CVSS, and static guidance. A changed fingerprint is eligible
 again; `DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS` can additionally age out a
 matching result.
+
+Queue clients treat failed and cancelled runs as terminal outcomes. Both paths
+release registered completion/error callbacks; cancellation reports the
+backend error when present and otherwise uses a stable cancellation message.
 
 Follow-ups use `source=follow-up`, retain `parent_run_id`, and prefer the
 analyzer's `/jobs/{job_id}/follow-up` endpoint. Otherwise DTVP sends a normal

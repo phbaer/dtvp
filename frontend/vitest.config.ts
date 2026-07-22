@@ -15,10 +15,10 @@ export default mergeConfig(
                 reporter: ['text', 'json', 'html'],
                 include: ['src/**/*.{ts,vue}'],
                 thresholds: {
-                    statements: 78,
-                    branches: 67,
-                    functions: 75,
-                    lines: 80
+                    statements: 79,
+                    branches: 68,
+                    functions: 76,
+                    lines: 81
                 },
                 exclude: [
                     'node_modules/**',
