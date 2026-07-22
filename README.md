@@ -119,6 +119,9 @@ requests do not run on the project runner. Registry credentials and image
 publishing are limited to trusted `main` and version-tag push events.
 Third-party actions are pinned to immutable commit SHAs with their major
 versions recorded in comments.
+Coverage, browser, and SBOM artifacts use Forgejo's patched v4 upload action
+because the upstream GitHub v4 artifact protocol is not compatible with Forgejo
+Actions.
 
 ## Repository And Architecture
 
