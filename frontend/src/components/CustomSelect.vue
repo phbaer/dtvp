@@ -219,17 +219,27 @@ onBeforeUnmount(() => {
                         @mousedown.prevent="selectOption(opt.value)"
                         :title="opt.description"
                         :class="[
-                            'w-full text-left px-3 py-1.5 transition-colors flex items-center justify-between',
+                            'w-full text-left px-3 py-1.5 transition-colors flex items-start',
                             props.size === 'sm' ? 'text-xs' : 'text-sm',
                             modelValue === opt.value
                                 ? 'bg-blue-500/15 text-blue-200'
                                 : 'text-gray-300 hover:bg-white/5'
                         ]"
                     >
-                        <span class="truncate">{{ opt.label }}</span>
-                        <span class="ml-2 flex shrink-0 items-center gap-2">
-                            <span v-if="opt.suffix" class="text-[10px] text-gray-500">{{ opt.suffix }}</span>
-                            <span v-if="modelValue === opt.value" class="text-blue-400 text-xs">&#10003;</span>
+                        <span class="min-w-0 flex-1">
+                            <span class="block whitespace-normal break-words">{{ opt.label }}</span>
+                            <span
+                                v-if="opt.suffix"
+                                class="mt-0.5 block whitespace-normal text-[10px] leading-4 text-gray-500"
+                            >
+                                {{ opt.suffix }}
+                            </span>
+                        </span>
+                        <span
+                            v-if="modelValue === opt.value"
+                            class="ml-2 shrink-0 text-xs text-blue-400"
+                        >
+                            &#10003;
                         </span>
                     </button>
                     <div v-if="filteredOptions.length === 0" class="px-3 py-3 text-center text-xs text-gray-500">
