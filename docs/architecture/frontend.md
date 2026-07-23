@@ -37,8 +37,17 @@ review workflows but is not an authorization boundary.
 The project review consumes backend summary windows rather than loading every
 full grouped vulnerability into the DOM. It viewport-windows list rows,
 coalesces partial task refreshes, and hydrates dependency paths and complete
-assessment details only when needed. Local models and composables coordinate
-filters, task progress, project state, cache invalidation, and write results.
+assessment details only when needed. Refreshed full-detail groups remain
+distinguishable from lightweight list summaries even when both carry current
+list metadata. Follow-up pages and full-result drains omit facet counts they do
+not consume; a Team-filter request renders its card window without facet
+counts, then refreshes complete task-wide and filtered counts in the
+background. Local models and composables coordinate filters, task progress,
+project state, cache invalidation, and write results.
+
+Grouped-task event streams fall back to status polling if no data or heartbeat
+arrives for 35 seconds. This prevents an outer reverse proxy that buffers or
+leaves a connection half-open from stalling project loading indefinitely.
 
 Authentication and startup handling live in the app shell. Page and control
 visibility guide users, but every protected read or mutation is authorized by
@@ -56,4 +65,3 @@ components/composables.
 - [Screen guide](../screens.md)
 - [Workflow diagrams](../workflow-flowcharts.md)
 - [Threat model](../threat-model.md)
-

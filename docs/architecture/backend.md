@@ -34,6 +34,7 @@ TMRescore and code-analysis clients.
 | `dtvp/task_group_query_services.py` | Backend filtering, sorting, facets, pagination, and task-window queries |
 | `dtvp/logic.py` | Grouping, ownership, assessment parsing, CVSS, statistics, and dependency analysis |
 | `dtvp/assessment_*` and `rescore_rule_services.py` | Assessment writes, conflict handling, metadata recovery, and CVSS rules |
+| `dtvp/assessment_outbox_services.py` | Transactional assessment overlays, local revisions, and pending provider synchronization |
 | `dtvp/bulk_workflows/` | Registry-backed bulk-change plug-ins |
 | `dtvp/vulnerability_backend.py`, `dt_client.py`, and `dt_cache.py` | Vendor-neutral capabilities/resource references, Dependency-Track adapter, cached data, overlays, and pending writes |
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
@@ -50,20 +51,34 @@ provider-neutral `DTVP_CODE_ANALYSIS_*` names.
 - Grouped-vulnerability tasks use `response_mode=summary` for compact list
   rows. `/api/tasks/{task_id}/events` streams progress,
   `/api/tasks/{task_id}/groups` serves filtered windows and facets, and
-  `/api/tasks/{task_id}/groups/{group_id}` hydrates full details.
-- Partial version results appear while grouping continues. CPU-heavy grouping,
+  `/api/tasks/{task_id}/groups/{group_id}` hydrates full details. A shared event
+  hub wakes stream clients, a 15-second heartbeat keeps connections active, and
+  responses emit `X-Accel-Buffering: no` for reverse proxies.
+- Partial version results appear while grouping continues. Version fetching is
+  not blocked by partial construction; pending milestones coalesce to the
+  newest snapshot instead of queuing stale builds. CPU-heavy grouping,
   indexing, and filtering run outside the async event loop. When the final
   partial publish already contains every version, it becomes the completed
   snapshot without repeating grouping and index construction.
 - Grouped-task searches use thread-safe per-task query caches, share identical
-  in-flight queries, and reuse sort orders across filter changes. Lightweight
-  code-assessment metadata is cached and invalidated when analyzer results
-  change.
+  in-flight queries, and reuse sort orders across filter changes. A dedicated
+  bounded executor prevents cold searches from exhausting the application
+  thread pool; packed result indexes are evicted against entry-count and byte
+  budgets. Exact Team filters start from a per-task inverted index, and a
+  count-less cached result reuses its filtered order when the corresponding
+  facet-count request arrives. Lightweight code-assessment metadata is cached
+  and invalidated when analyzer results change.
+- Grouped snapshot construction uses two dedicated workers by default so
+  independent users can progress on free-threaded Python. Automatic-analysis
+  planning runs in a separate post-processing pool after clients are notified
+  that the snapshot is complete. Detail hydration has its own reserved pool.
 - The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
   vulnerability details, BOMs, local overlays, and pending writes. Stale cached
   data remains readable while the provider is unavailable. Concurrent misses
   for one resource share one provider request, while each caller receives an
-  isolated mutable snapshot.
+  isolated mutable snapshot. Unchanged JSON refreshes are skipped. Grouped
+  snapshots use project-scoped revisions and selected-version metadata, so
+  unrelated project activity does not invalidate a reusable result.
 - Non-default backend instance IDs place caches, queues, archives, TMRescore
   proposals, and analyzer results in separate `backends/<id>` namespaces.
   Cache markers reject accidental reuse by a different instance.
@@ -98,6 +113,12 @@ authorization, attribution, and policy enforcement. Future adapters such as
 Cybeats implement the same capability contract without exposing vendor
 credentials or identifiers to frontend policy.
 
+Project dependency-chain reads require an authenticated DTVP session like
+other project and finding endpoints. Startup status is available at `/startup`
+and `/api/startup`; minimal unauthenticated `/livez` and `/readyz` probes
+distinguish process liveness from runtime and durable-storage readiness. Normal
+host validation still applies.
+
 ## Process Model And Capacity
 
 Grouping, archive, and live TMRescore task registries remain process-local. The
@@ -113,26 +134,40 @@ sessions is a reasonable starting estimate when they are not all retaining
 large grouped-vulnerability tasks. These are sizing estimates, not production
 guarantees.
 
-A synthetic benchmark on a 20-CPU, 15 GiB host with the Python GIL enabled
-measured eight concurrent cold searches:
+A reproducible synthetic benchmark on a 20-CPU, 15 GiB host with 20,000 groups,
+filtered facet counts, and ten cold searches per simulated user measured:
 
-| Grouped vulnerabilities | Throughput | p95 search latency |
-| :--- | ---: | ---: |
-| 1,000 | about 730 queries/second | 1.3 ms |
-| 5,000 | about 176 queries/second | 50 ms |
-| 10,000 | about 99 queries/second | 96 ms |
-| 20,000 | about 25–40 queries/second | 260–470 ms |
+| Runtime | Simultaneous searches | Throughput | p95 search latency |
+| :--- | ---: | ---: | ---: |
+| CPython 3.14.4, GIL enabled | 1 | 19.6 queries/s | 78 ms |
+| CPython 3.14.4, GIL enabled | 4 | 21.1 queries/s | 355 ms |
+| CPython 3.14.4, GIL enabled | 8 | 22.0 queries/s | 523 ms |
+| CPython 3.14.4, free-threaded | 1 | 18.1 queries/s | 71 ms |
+| CPython 3.14.4, free-threaded | 4 | 57.2 queries/s | 91 ms |
+| CPython 3.14.4, free-threaded | 8 | 67.8 queries/s | 155 ms |
 
-At 16 simultaneous cold searches over 20,000 groups, p95 latency approached
-one second. An identical cached search took about 0.07 ms. A synthetic
-20,000-group summary and query index retained about 78 MB of live Python
-allocations and increased initial process RSS by about 175 MB. Real tasks also
-retain full vulnerability, component, dependency, and BOM details, so budget
-roughly 150–300 MB or more for each large retained task.
+At four simultaneous searches, free threading delivered about 2.7 times the
+throughput and reduced p95 latency by roughly three quarters. Increasing from
+four to eight free-threaded searches yielded about 19% more throughput while
+raising p95 by about 71%, so four query workers remains the balanced default.
+Identical cached searches stayed below 1 ms.
 
-Before increasing these ranges, use production-shaped load tests. Initial
-scaling steps are reducing grouped-task retention, increasing frontend search
-debounce, and introducing a shared task/result store.
+The same 20,000-group query index retained about 65 MiB of traced Python
+allocations with the GIL build and 69 MiB with the free-threaded build. Real
+tasks also retain full vulnerability, component, dependency, and BOM details;
+budget roughly 150–300 MB or more for each large retained task. Matching
+project/CVE/mode/cache/mapping requests share one access-controlled task, and
+completed tasks are retained for 15 minutes by default. Memory remains the
+likely limit when many users retain large tasks.
+
+Before increasing these ranges, use production-shaped load tests. The next
+scaling steps are validating the free-threaded image with real project mixes,
+tuning grouped-task retention and count caps, and introducing a shared
+task/result store before enabling multiple backend processes. Code analysis
+runs one job concurrently by default through `DTVP_ANALYSIS_QUEUE_CAPACITY`;
+additional jobs wait in the shared queue. Reproduce the measurements with
+`scripts/benchmark_group_queries.py`; compare the normal project runtime with a
+clean `3.14t` interpreter on the same host.
 
 ## Related Concepts
 
@@ -141,4 +176,3 @@ debounce, and introducing a shared task/result store.
 - [Integration API surface](../integration-api-surface.md)
 - [Threat model](../threat-model.md)
 - [Workflow diagrams](../workflow-flowcharts.md)
-
