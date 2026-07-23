@@ -85,9 +85,13 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Back up packaged durable state | `./scripts/backup-compose-state.sh /absolute/backup/root` |
 
 The CI end-to-end job uses the Playwright container image in
-`.github/workflows/build-publish.yml`. When upgrading `@playwright/test`, update
-that image tag in the same change. CI executes pull-request code only for
-branches in this repository; fork pull requests do not run on the project
+`.github/workflows/build-publish.yml` and its Forgejo-native counterpart at
+`.forgejo/workflows/build-publish.yml`. Forgejo prefers its native directory;
+that copy omits GitHub's unsupported `permissions` field, while the GitHub copy
+retains a read-only default. A security test requires the files to remain
+identical apart from that block. When upgrading `@playwright/test`, update that
+image tag in both files in the same change. CI executes pull-request code only
+for branches in this repository; fork pull requests do not run on the project
 runner. Registry credentials and image publishing are limited to trusted
 `main` and version-tag push events. Third-party actions are pinned to immutable
 commit SHAs with their major versions recorded in comments. Coverage, browser,

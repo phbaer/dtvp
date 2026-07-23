@@ -4,12 +4,22 @@ from urllib.parse import urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
+GITHUB_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "build-publish.yml"
+FORGEJO_WORKFLOW_PATH = ROOT / ".forgejo" / "workflows" / "build-publish.yml"
+
+
+def test_forgejo_workflow_omits_only_github_permissions():
+    github_workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
+    forgejo_workflow = FORGEJO_WORKFLOW_PATH.read_text(encoding="utf-8")
+    github_permissions = "permissions:\n  contents: read\n\n"
+
+    assert github_permissions in github_workflow
+    assert "permissions:" not in forgejo_workflow
+    assert github_workflow.replace(github_permissions, "", 1) == forgejo_workflow
 
 
 def test_pull_requests_cannot_publish_or_receive_registry_credentials():
-    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert "types: [opened, synchronize, reopened]" in workflow
     assert workflow.count("head.repo.full_name == github.repository") == 5
@@ -19,9 +29,7 @@ def test_pull_requests_cannot_publish_or_receive_registry_credentials():
 
 
 def test_ci_uses_locked_dependencies_and_read_only_default_permissions():
-    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
     sbom_script = (ROOT / "scripts" / "generate-sboms.sh").read_text(
         encoding="utf-8"
     )
@@ -46,9 +54,7 @@ def test_ci_uses_locked_dependencies_and_read_only_default_permissions():
 
 
 def test_ci_gates_dependencies_and_images_before_publishing():
-    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert "pip-audit --local --progress-spinner=off" in workflow
     assert "--vulnerability-service=osv --timeout=30" in workflow
@@ -73,9 +79,7 @@ def test_ci_gates_dependencies_and_images_before_publishing():
 
 
 def test_ci_attaches_build_evidence_and_signs_release_digests():
-    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert workflow.count("provenance: mode=max") == 2
     assert workflow.count("sbom: true") == 2
@@ -106,9 +110,7 @@ def test_node_network_tools_reject_disabled_tls_verification():
 
 
 def test_ci_actions_are_pinned_to_immutable_commits():
-    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
 
     action_lines = [line.strip() for line in workflow.splitlines() if "uses:" in line]
     assert action_lines
