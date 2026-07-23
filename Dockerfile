@@ -42,7 +42,7 @@ RUN --mount=type=secret,id=ca-certs,target=/tmp/ca-certs.crt \
     fi
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.11.9@sha256:6b6fa841d71a48fbc9e2c55651c5ad570e01104d7a7d701f57b2b22c0f58e9b1 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.31@sha256:ecd4de2f060c64bea0ff8ecb182ddf46ba3fcccdc8a60cfdbaf20d1a047d7437 /uv /bin/uv
 
 # Copy dependency files
 COPY pyproject.toml uv.lock ./

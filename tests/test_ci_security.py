@@ -64,10 +64,11 @@ def test_ci_gates_dependencies_and_images_before_publishing():
     assert "./scripts/check-node-tls.sh" in workflow
     assert "aquasecurity/setup-trivy@" not in workflow
     assert "aquasecurity/trivy-action@" not in workflow
-    assert "TRIVY_VERSION: 0.70.0" in workflow
+    assert 'TRIVY_DISABLE_VEX_NOTICE: "true"' in workflow
+    assert "TRIVY_VERSION: 0.72.0" in workflow
     assert (
         "TRIVY_SHA256: "
-        "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
+        "bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea"
     ) in workflow
     assert workflow.count("trivy image") == 2
     assert workflow.count("--exit-code 1") == 2

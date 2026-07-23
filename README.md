@@ -103,6 +103,9 @@ downloads the pinned Trivy release archive once, verifies its hard-coded
 SHA-256, and invokes the binary directly so the Forgejo `act` runner does not
 depend on an action mirror, nested installer, or action-cache service. Both
 candidate-image scans reuse that installation and its local database cache.
+The application containers use checksum-pinned minimal Alpine runtimes;
+Agentyzer copies a separately pinned `uv` binary and adds Git as its only
+runtime package.
 
 Coverage reports measure production sources even when a module is never
 imported by a test. Python coverage is branch-aware and limited to `dtvp/` and

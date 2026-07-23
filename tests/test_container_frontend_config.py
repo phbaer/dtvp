@@ -36,8 +36,14 @@ def test_application_images_run_as_non_root_users():
     assert "USER 10001:10001" in dockerfile
     assert "USER 10001:10001" in agentyzer_dockerfile
     assert "ghcr.io/astral-sh/uv:latest" not in dockerfile
+    assert "COPY --from=ghcr.io/astral-sh/uv:0.11.31@sha256:" in dockerfile
     assert "FROM node:24-alpine@sha256:" in dockerfile
     assert dockerfile.count("@sha256:") >= 3
+    assert "ARG PYTHON_IMAGE=python:3.14-alpine@sha256:" in agentyzer_dockerfile
+    assert "COPY --from=ghcr.io/astral-sh/uv:0.11.31@sha256:" in agentyzer_dockerfile
+    assert "&& apk add --no-cache git" in agentyzer_dockerfile
+    assert "apt-get" not in agentyzer_dockerfile
+    assert agentyzer_dockerfile.count("@sha256:") >= 2
     assert 'CMD ["/app/.venv/bin/uvicorn"' in agentyzer_dockerfile
     assert "type=secret,id=ca-certs" in dockerfile
     assert "type=secret,id=ca-certs" in agentyzer_dockerfile

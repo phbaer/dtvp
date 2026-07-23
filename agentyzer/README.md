@@ -749,14 +749,16 @@ For the same project, clone updates wait on the workspace lock and then each pip
 
 The top-level `Dockerfile`:
 
-1. Uses `ghcr.io/astral-sh/uv:python3.14-trixie-slim` as the base image.
-2. Installs Git because repository cloning and tag inspection are required.
+1. Uses a checksum-pinned Python 3.14 Alpine runtime image.
+2. Copies a separately checksum-pinned `uv` binary and installs Git because
+   repository cloning and tag inspection are required.
 3. Optionally mounts a CA certificate secret at build time and installs it into the system trust store.
 4. Installs locked production dependencies with `uv sync --frozen --no-dev`.
 5. Copies `config/` and `src/` into `/app`.
 6. Sets `PYTHONPATH=/app`, `AGENTYZER_CONFIG_DIR=/app/config`, and `AGENTYZER_REPOS_DIR=/app/repos`.
 7. Exposes port `8000`.
-8. Starts the service with `uv run --no-sync uvicorn src.main:app --host 0.0.0.0 --port 8000`.
+8. Runs as UID/GID `10001:10001` and starts `/app/.venv/bin/uvicorn`
+   directly.
 
 Build example:
 
