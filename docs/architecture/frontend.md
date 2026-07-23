@@ -27,7 +27,7 @@ review workflows but is not an authorization boundary.
 | Component | Role |
 | :--- | :--- |
 | `frontend/src/main.ts`, `App.vue`, `router.ts` | App shell, routing, authentication, and startup handling |
-| `frontend/src/lib/api.ts` and `types.ts` | Backend client and shared integration/domain types |
+| `frontend/src/lib/api.ts`, `frontend/src/lib/api/`, and `frontend/src/types.ts` | Compatibility API facade, domain clients, and shared integration/domain types |
 | `frontend/src/pages/` | Dashboard, project review, statistics, settings, TMRescore, and code analysis |
 | `frontend/src/components/` | Vulnerability rows/details, filters, dialogs, queue UI, CVSS, and dependency paths |
 | `frontend/src/lib/` | Filter/task-window models, composables, caching, updates, and project state |
@@ -42,8 +42,11 @@ distinguishable from lightweight list summaries even when both carry current
 list metadata. Follow-up pages and full-result drains omit facet counts they do
 not consume; a Team-filter request renders its card window without facet
 counts, then refreshes complete task-wide and filtered counts in the
-background. Local models and composables coordinate filters, task progress,
-project state, cache invalidation, and write results.
+background. Filtering, result counts, facets, and sorting are owned by the
+backend task-window query; the frontend serializes filter state into that query
+and renders the returned order without a second local filtering pass.
+Composables coordinate task progress, project state, cache invalidation, and
+write results.
 
 Grouped-task event streams fall back to status polling if no data or heartbeat
 arrives for 35 seconds. This prevents an outer reverse proxy that buffers or
@@ -54,10 +57,17 @@ visibility guide users, but every protected read or mutation is authorized by
 the backend. In particular, reviewer-only controls must remain protected even
 when a client calls the API directly.
 
-Shared domain and integration types belong in `frontend/src/lib/types.ts`;
-HTTP behavior belongs in `frontend/src/lib/api.ts`. Pages orchestrate workflows,
-while reusable presentation and focused interaction logic belong in
-components/composables.
+Shared domain and integration types belong in `frontend/src/types.ts`. The
+`frontend/src/lib/api.ts` facade preserves stable imports while cohesive HTTP
+clients live under `frontend/src/lib/api/`. Pages orchestrate workflows, while
+reusable presentation and focused interaction logic belong in components and
+composables. CVSS construction/version detection is centralized in
+`frontend/src/lib/cvss.ts`; code-analysis ticket drafting is isolated in
+`frontend/src/lib/useCodeAnalysisTicketDraft.ts`.
+
+Frontend tests own query serialization and rendering of backend windows.
+Filtering/counting/sorting semantics are tested with the backend task-query
+service rather than duplicated through an in-browser model.
 
 ## Related Concepts
 
