@@ -92,9 +92,13 @@ can collect the DTVP and nested Agentyzer suites together even when both suites
 contain test modules with the same filename.
 
 The CI end-to-end job uses the Playwright container image in
-`.github/workflows/build-publish.yml`. Its image tag must exactly match the
-resolved `@playwright/test` version in `frontend/package-lock.json`; update both
-in the same change. The regular, manual, and real-stack Playwright
+`.github/workflows/build-publish.yml` and its Forgejo-native counterpart at
+`.forgejo/workflows/build-publish.yml`. Forgejo prefers its native directory;
+that copy omits GitHub's unsupported `permissions` field, while the GitHub copy
+retains a read-only default. A security test requires the files to remain
+identical apart from that block. Their image tags must exactly match the
+resolved `@playwright/test` version in `frontend/package-lock.json`; update all
+three in the same change. The regular, manual, and real-stack Playwright
 configurations cover Chromium, Firefox, and WebKit desktop browsers.
 The Vitest configuration keeps local TypeScript config imports explicit so it
 also loads with Vite's native config loader. It caps the process pool at four
