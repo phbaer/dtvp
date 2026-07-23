@@ -10,7 +10,9 @@ tags:
 source_paths:
   - dtvp/tmrescore_integration.py
   - dtvp/code_analysis_integration.py
+  - agentyzer/src/
   - openapi/
+  - scripts/generate-agentyzer-openapi.py
 review_when:
   - Optional integration endpoints, authentication, request schemas, result schemas, or provider capabilities change.
 ---
@@ -83,7 +85,7 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 
 - Static OpenAPI specifications for the integrations are available in `openapi/`.
 - TMRescore has a static spec at `openapi/tmrescore-openapi.json`.
-- Code Analysis has a static spec at `openapi/code-analysis-openapi.json`.
+- Code Analysis has a generated spec at `openapi/code-analysis-openapi.json`.
 - In the mock environment, both service mocks expose a dynamic OpenAPI definition at `/openapi.json`.
 
 ## Code Analysis Service
@@ -202,6 +204,9 @@ The repository includes Agentyzer under `agentyzer/` as the first-party implemen
 
 ### Notes
 
-- A static OpenAPI specification for Code Analysis is available at `openapi/code-analysis-openapi.json`.
+- The checked-in Code Analysis OpenAPI specification is generated from
+  Agentyzer's live FastAPI schema. Regenerate it with
+  `cd agentyzer && uv run python ../scripts/generate-agentyzer-openapi.py`;
+  CI runs the same command with `--check` to reject contract drift.
 - The expected Code Analysis API surface is also implemented by the mock service in `test_setup/mock_code_analysis.py`.
 - In the mock environment, Code Analysis exposes a dynamic OpenAPI definition at `/openapi.json`.

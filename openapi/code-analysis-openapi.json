@@ -21,6 +21,29 @@
         "summary": "Check service health",
         "description": "Lightweight liveness probe that confirms the API process is accepting requests.",
         "operationId": "health_health_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -28,6 +51,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -43,6 +76,29 @@
         "summary": "Get service configuration",
         "description": "Return sanitized runtime configuration and backend information for API consumers. Repository credentials and raw authenticated URLs are never included.",
         "operationId": "configuration_configuration_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -50,6 +106,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -65,6 +131,11 @@
         "summary": "Inspect configured prompt bundles",
         "description": "Return prompt bundle metadata and, when requested, the configured system prompt text. Prompt values are omitted by default.",
         "operationId": "prompts_prompts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "include_values",
@@ -89,6 +160,22 @@
               "title": "System Only"
             },
             "description": "Limit values to system prompts."
+          },
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
+            }
           }
         ],
         "responses": {
@@ -121,15 +208,38 @@
         "summary": "Compare human and automated assessment artifacts",
         "description": "Probabilistically compare a human vulnerability assessment with an automated Agentyzer assessment result. This endpoint evaluates the assessment artifacts only; it does not run repository or source-code analysis.",
         "operationId": "benchmark_compare_benchmark_compare_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BenchmarkCompareRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -163,6 +273,11 @@
         "summary": "Start a vulnerability assessment",
         "description": "Submit a vulnerability assessment request. By default the API enqueues a background job and returns a poll URL. Pass `sync=true` to wait for completion and receive the full assessment immediately.",
         "operationId": "assess_assess_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "sync",
@@ -178,6 +293,22 @@
               "title": "Sync"
             },
             "description": "When true, block until the assessment completes and return the result instead of a job handle."
+          },
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
+            }
           }
         ],
         "requestBody": {
@@ -270,7 +401,7 @@
                           "detected_version": "2.0.0",
                           "version_source": "lock file",
                           "affected": true,
-                          "note": "lock file \u2014 version 2.0.0 is in the explicit affected versions list",
+                          "note": "lock file — version 2.0.0 is in the explicit affected versions list",
                           "affected_ranges_summary": [
                             "SEMVER range: introduced=0 fixed=3.0.6 (source=osv_ghsa)"
                           ],
@@ -295,7 +426,7 @@
                               "ref_type": "lock",
                               "version": "2.0.0",
                               "affected": true,
-                              "notes": "lock file \u2014 version 2.0.0 is in the explicit affected versions list"
+                              "notes": "lock file — version 2.0.0 is in the explicit affected versions list"
                             },
                             {
                               "ref": "WORKTREE",
@@ -349,15 +480,15 @@
                           "adjusted_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A",
                           "version": "4.0",
                           "reasons": [
-                            "version 2.0.0 (lock file) confirmed in affected range \u2014 lock file \u2014 version 2.0.0 is in the explicit affected versions list",
-                            "LLM confirmed exploitable code path \u2192 E:A"
+                            "version 2.0.0 (lock file) confirmed in affected range — lock file — version 2.0.0 is in the explicit affected versions list",
+                            "LLM confirmed exploitable code path → E:A"
                           ],
-                          "summary": "6.3 \u2192 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)",
+                          "summary": "6.3 → 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)",
                           "version_context": {
                             "detected_version": "2.0.0",
                             "version_source": "lock file",
                             "affected": true,
-                            "note": "lock file \u2014 version 2.0.0 is in the explicit affected versions list",
+                            "note": "lock file — version 2.0.0 is in the explicit affected versions list",
                             "affected_ranges_summary": [
                               "SEMVER range: introduced=0 fixed=3.0.6 (source=osv_ghsa)"
                             ],
@@ -383,7 +514,7 @@
                         "analysis": "EXPLOITABLE",
                         "justification": "NOT_SET",
                         "response": "UPDATE",
-                        "details": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\nCVSS: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A (score: 6.3)\nRescoring: LLM confirmed exploitable code path \u2192 E:A",
+                        "details": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\nCVSS: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A (score: 6.3)\nRescoring: LLM confirmed exploitable code path → E:A",
                         "cvss_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A",
                         "cvss_score": 6.3
                       },
@@ -430,6 +561,7 @@
                           "async_assessments": true,
                           "sync_assessments": true,
                           "bounded_async_execution": true,
+                          "durable_job_store": true,
                           "request_model_override": true,
                           "debug_responses": true,
                           "job_cancellation": true,
@@ -454,7 +586,7 @@
                           "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; raise it only when the LLM backend and repository workspaces can handle parallel scans"
                         },
                         "jobs": {
-                          "job_store": "in_memory",
+                          "job_store": "sqlite",
                           "execution_model": "bounded asyncio background tasks in this API process",
                           "known_jobs": 1,
                           "max_concurrent_jobs": 1,
@@ -495,8 +627,31 @@
           "jobs"
         ],
         "summary": "List assessment jobs",
-        "description": "Return all in-memory background jobs known to the current API process.",
+        "description": "Return all durable background jobs visible to the caller.",
         "operationId": "list_jobs_jobs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -504,6 +659,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -519,6 +684,11 @@
         "summary": "Get job status",
         "description": "Retrieve the current state of a previously submitted asynchronous assessment job.",
         "operationId": "get_job_status_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "job_id",
@@ -527,6 +697,22 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
             }
           }
         ],
@@ -568,8 +754,13 @@
           "jobs"
         ],
         "summary": "Cancel or delete a job",
-        "description": "Cancel a pending/running job or remove a completed, failed, or cancelled job from the in-memory job store.",
+        "description": "Cancel a pending/running job or remove a completed, failed, or cancelled job from the durable job store.",
         "operationId": "delete_job_jobs__job_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "job_id",
@@ -578,6 +769,22 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
             }
           }
         ],
@@ -626,6 +833,11 @@
         "summary": "Fetch completed job result",
         "description": "Return the full assessment payload for a completed asynchronous job.",
         "operationId": "get_job_result_jobs__job_id__result_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "job_id",
@@ -634,6 +846,22 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
             }
           }
         ],
@@ -699,6 +927,11 @@
         "summary": "Compact a completed job for follow-up context",
         "description": "Return a concise structured context extracted from a completed assessment job.",
         "operationId": "compact_job_jobs__job_id__compact_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "job_id",
@@ -707,6 +940,22 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
             }
           }
         ],
@@ -762,6 +1011,11 @@
         "summary": "Start a follow-up assessment from compacted parent context",
         "description": "Create a new asynchronous assessment job using the parent job request and compacted result context as guidance.",
         "operationId": "follow_up_job_jobs__job_id__follow_up_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "job_id",
@@ -770,6 +1024,22 @@
             "schema": {
               "type": "string",
               "title": "Job Id"
+            }
+          },
+          {
+            "name": "X-Agentyzer-Owner",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Agentyzer-Owner"
             }
           }
         ],
@@ -916,7 +1186,8 @@
           "vuln_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -931,7 +1202,8 @@
           "cvss_vector": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 512
               },
               {
                 "type": "null"
@@ -945,6 +1217,8 @@
           },
           "component_name": {
             "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
             "title": "Component Name",
             "description": "Logical component name from config/repos.yaml, or an ad-hoc name when focus_path is provided.",
             "examples": [
@@ -954,7 +1228,8 @@
           "focus_path": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4096
               },
               {
                 "type": "null"
@@ -971,11 +1246,16 @@
               {
                 "items": {
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1
                   },
-                  "type": "array"
+                  "type": "array",
+                  "maxItems": 100,
+                  "minItems": 1
                 },
-                "type": "array"
+                "type": "array",
+                "maxItems": 100
               },
               {
                 "type": "null"
@@ -996,9 +1276,12 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1
                 },
-                "type": "array"
+                "type": "array",
+                "maxItems": 500
               },
               {
                 "type": "null"
@@ -1017,7 +1300,8 @@
           "user_guidance": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 24000
               },
               {
                 "type": "null"
@@ -1032,7 +1316,8 @@
           "model": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -1047,7 +1332,8 @@
           "llm_backend": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128
               },
               {
                 "type": "null"
@@ -1062,7 +1348,8 @@
           "llm_provider": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128
               },
               {
                 "type": "null"
@@ -1141,7 +1428,7 @@
           "steps"
         ],
         "title": "AssessResponse",
-        "description": "Top-level response \u2014 assessment + per-step detail.",
+        "description": "Top-level response — assessment + per-step detail.",
         "example": {
           "assessment": {
             "adjusted_cvss": {
@@ -1150,10 +1437,10 @@
               "original_score": 6.3,
               "original_vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N",
               "reasons": [
-                "version 2.0.0 (lock file) confirmed in affected range \u2014 lock file \u2014 version 2.0.0 is in the explicit affected versions list",
-                "LLM confirmed exploitable code path \u2192 E:A"
+                "version 2.0.0 (lock file) confirmed in affected range — lock file — version 2.0.0 is in the explicit affected versions list",
+                "LLM confirmed exploitable code path → E:A"
               ],
-              "summary": "6.3 \u2192 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)",
+              "summary": "6.3 → 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)",
               "version": "4.0",
               "version_context": {
                 "affected": true,
@@ -1176,7 +1463,7 @@
                   "version=2.0.0: MATCH in explicit affected versions list"
                 ],
                 "detected_version": "2.0.0",
-                "note": "lock file \u2014 version 2.0.0 is in the explicit affected versions list",
+                "note": "lock file — version 2.0.0 is in the explicit affected versions list",
                 "version_source": "lock file"
               }
             },
@@ -1220,7 +1507,7 @@
               "sbom_attributed": true,
               "transitive": false
             },
-            "details": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\nCVSS: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A (score: 6.3)\nRescoring: LLM confirmed exploitable code path \u2192 E:A",
+            "details": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.\nCVSS: CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:A (score: 6.3)\nRescoring: LLM confirmed exploitable code path → E:A",
             "exposure": "direct",
             "justification": "NOT_SET",
             "reasoning": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.",
@@ -1257,7 +1544,7 @@
               "checked_versions": [
                 {
                   "affected": true,
-                  "notes": "lock file \u2014 version 2.0.0 is in the explicit affected versions list",
+                  "notes": "lock file — version 2.0.0 is in the explicit affected versions list",
                   "ref": "LOCKED",
                   "ref_type": "lock",
                   "version": "2.0.0"
@@ -1288,7 +1575,7 @@
               ],
               "detected_version": "2.0.0",
               "historical_affected": [],
-              "note": "lock file \u2014 version 2.0.0 is in the explicit affected versions list",
+              "note": "lock file — version 2.0.0 is in the explicit affected versions list",
               "version_source": "lock file"
             }
           },
@@ -1551,13 +1838,15 @@
           "benchmark": {
             "additionalProperties": true,
             "type": "object",
+            "maxProperties": 100,
             "title": "Benchmark",
             "description": "Structured benchmark artifact prepared by DTVP. It includes the human assessment snapshot, automated Agentyzer assessment summary, deterministic state/CVSS deltas, and fallback rating."
           },
           "model": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -1765,7 +2054,7 @@
             "title": "Summary",
             "description": "One-line explanation summarizing the original and adjusted score relationship.",
             "examples": [
-              "6.3 \u2192 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)"
+              "6.3 → 6.3 (version 2.0.0 confirmed in affected range; LLM confirmed exploitable code path)"
             ]
           },
           "version_context": {
@@ -1880,6 +2169,8 @@
         "properties": {
           "question": {
             "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
             "title": "Question",
             "description": "Reviewer follow-up question to answer in the new assessment.",
             "examples": [
@@ -1889,7 +2180,8 @@
           "vuln_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -1901,7 +2193,8 @@
           "component_name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -1913,7 +2206,8 @@
           "cvss_vector": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 512
               },
               {
                 "type": "null"
@@ -1925,7 +2219,8 @@
           "focus_path": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4096
               },
               {
                 "type": "null"
@@ -1939,11 +2234,16 @@
               {
                 "items": {
                   "items": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1
                   },
-                  "type": "array"
+                  "type": "array",
+                  "maxItems": 100,
+                  "minItems": 1
                 },
-                "type": "array"
+                "type": "array",
+                "maxItems": 100
               },
               {
                 "type": "null"
@@ -1955,7 +2255,8 @@
           "user_guidance": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4000
               },
               {
                 "type": "null"
@@ -1967,7 +2268,8 @@
           "model": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -1979,7 +2281,8 @@
           "llm_backend": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128
               },
               {
                 "type": "null"
@@ -1991,7 +2294,8 @@
           "llm_provider": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128
               },
               {
                 "type": "null"
@@ -2107,6 +2411,19 @@
               }
             ],
             "description": "Operational backend details visible to API consumers."
+          },
+          "storage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage",
+            "description": "Durable job-store integrity, permissions, and retention status."
           }
         },
         "type": "object",
@@ -2120,7 +2437,7 @@
             "jobs": {
               "available_slots": 1,
               "execution_model": "bounded asyncio background tasks in this API process",
-              "job_store": "in_memory",
+              "job_store": "sqlite",
               "known_jobs": 1,
               "max_concurrent_jobs": 1,
               "queued_jobs": 1,
@@ -2154,6 +2471,7 @@
               "async_assessments": true,
               "bounded_async_execution": true,
               "debug_responses": true,
+              "durable_job_store": true,
               "focus_path": true,
               "job_cancellation": true,
               "job_logs": true,
@@ -2196,13 +2514,25 @@
           "known_jobs": {
             "type": "integer",
             "title": "Known Jobs",
-            "description": "Number of jobs known to this API process."
+            "description": "Number of durable jobs loaded by this API process."
           },
           "max_concurrent_jobs": {
             "type": "integer",
             "minimum": 1.0,
             "title": "Max Concurrent Jobs",
             "description": "Maximum number of assessment pipelines this process runs at the same time."
+          },
+          "max_queued_jobs": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Queued Jobs",
+            "description": "Maximum number of accepted jobs waiting for an execution slot."
+          },
+          "max_active_jobs_per_owner": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Max Active Jobs Per Owner",
+            "description": "Maximum pending and running async jobs accepted for one owner."
           },
           "running_jobs": {
             "type": "integer",
@@ -2213,6 +2543,12 @@
             "type": "integer",
             "title": "Queued Jobs",
             "description": "Number of accepted jobs waiting for an execution slot."
+          },
+          "available_queue_slots": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Available Queue Slots",
+            "description": "Number of global async queue admission slots still available."
           },
           "available_slots": {
             "type": "integer",
@@ -2226,7 +2562,7 @@
             },
             "type": "object",
             "title": "Status Counts",
-            "description": "Current in-memory job count by lifecycle status."
+            "description": "Current loaded job count by lifecycle status."
           }
         },
         "type": "object",
@@ -2235,8 +2571,11 @@
           "execution_model",
           "known_jobs",
           "max_concurrent_jobs",
+          "max_queued_jobs",
+          "max_active_jobs_per_owner",
           "running_jobs",
           "queued_jobs",
+          "available_queue_slots",
           "available_slots"
         ],
         "title": "JobBackendInfo",
@@ -2250,7 +2589,7 @@
             },
             "type": "array",
             "title": "Jobs",
-            "description": "Currently known in-memory jobs."
+            "description": "Currently known durable jobs."
           },
           "configuration": {
             "anyOf": [
@@ -2718,7 +3057,7 @@
             "jobs": {
               "available_slots": 1,
               "execution_model": "bounded asyncio background tasks in this API process",
-              "job_store": "in_memory",
+              "job_store": "sqlite",
               "known_jobs": 1,
               "max_concurrent_jobs": 1,
               "queued_jobs": 1,
@@ -2752,6 +3091,7 @@
               "async_assessments": true,
               "bounded_async_execution": true,
               "debug_responses": true,
+              "durable_job_store": true,
               "focus_path": true,
               "job_cancellation": true,
               "job_logs": true,
@@ -3151,7 +3491,7 @@
             "title": "Note",
             "description": "Human-readable explanation of the version match decision.",
             "examples": [
-              "lock file \u2014 version 2.0.0 is in the explicit affected versions list"
+              "lock file — version 2.0.0 is in the explicit affected versions list"
             ]
           },
           "affected_ranges_summary": {
@@ -3185,6 +3525,12 @@
         "type": "object",
         "title": "VersionContext",
         "description": "Concrete version evidence used during CVSS rescoring."
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   },

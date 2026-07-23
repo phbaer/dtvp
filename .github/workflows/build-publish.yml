@@ -110,7 +110,10 @@ jobs:
           command: cd agentyzer && uv sync --frozen
       - name: Run tests
         working-directory: agentyzer
-        run: uv run pytest
+        run: uv run pytest --cov=src --cov-report=term-missing
+      - name: Verify generated OpenAPI contract
+        working-directory: agentyzer
+        run: uv run python ../scripts/generate-agentyzer-openapi.py --check
 
   test-e2e:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

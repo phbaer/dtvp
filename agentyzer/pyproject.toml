@@ -36,4 +36,14 @@ pythonpath = ["."]
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "pytest-cov>=7.0.0",
 ]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 63
+precision = 1
+show_missing = true

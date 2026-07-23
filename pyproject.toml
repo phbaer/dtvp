@@ -18,7 +18,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "agentyzer",
     "httpx>=0.28.1",
     "httpx2>=2.0.0",
     "pytest>=9.0.2",
@@ -32,13 +31,11 @@ dev = [
     "bandit[toml]==1.9.4",
 ]
 
-[tool.uv.sources]
-agentyzer = { path = "agentyzer", editable = true }
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = "."
-addopts = "--cov=dtvp --cov=agentyzer/src --cov-report=term-missing --cov-report=html"
+testpaths = ["tests"]
+addopts = "--cov=dtvp --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
 branch = true
