@@ -91,8 +91,8 @@ branches in this repository; fork pull requests do not run on the project
 runner. Registry credentials and image publishing are limited to trusted
 `main` and version-tag push events. Third-party actions are pinned to immutable
 commit SHAs with their major versions recorded in comments. Coverage, browser,
-and SBOM artifacts use Forgejo's patched v4 upload action because the upstream
-GitHub v4 artifact protocol is not compatible with Forgejo Actions.
+and SBOM artifacts use Forgejo's Node 20 v3 upload action because this Forgejo
+instance does not support GitHub's v4 artifact protocol.
 
 Coverage reports measure production sources even when a module is never
 imported by a test. Python coverage is branch-aware and limited to `dtvp/` and

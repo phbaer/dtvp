@@ -35,11 +35,12 @@ def test_ci_uses_locked_dependencies_and_read_only_default_permissions():
     assert '"$repository_dir/scripts/check-node-tls.sh"' in sbom_script
     assert "@cyclonedx/cyclonedx-npm" not in workflow
     forgejo_upload_artifact = (
-        "https://data.forgejo.org/forgejo/upload-artifact@"
-        "5d5d22a31266ced268874388b861e4b58bb5c2f3"
+        "https://data.forgejo.org/actions/upload-artifact@"
+        "c6a3b2bd78b3985e4b2f15397fec357f0fd808de"
     )
     assert workflow.count(forgejo_upload_artifact) == 4
-    assert "actions/upload-artifact@" not in workflow
+    assert "https://data.forgejo.org/forgejo/upload-artifact@" not in workflow
+    assert "uses: actions/upload-artifact@" not in workflow
     assert "needs: [test-backend, test-frontend, test-agentyzer, test-e2e]" in workflow
     assert workflow.count("needs: [scan-images]") == 2
 
