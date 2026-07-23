@@ -10,6 +10,7 @@ source_paths:
   - agentyzer/src/
   - agentyzer/config/prompts/
   - agentyzer/pyproject.toml
+  - agentyzer/Dockerfile
   - compose.yml
 review_when:
   - Repository acquisition, workspace retention, job ownership, queue recovery, prompt handling, provider credentials, or analysis contracts change.
@@ -56,9 +57,13 @@ only the scoped work that the service needs. LLM and source-control credentials
 are service credentials with the narrowest practical scope and rotation
 independent of DTVP user sessions.
 
+The packaged container uses a checksum-pinned Python 3.14 Alpine runtime,
+copies a separately pinned `uv` binary, installs Git as its only added system
+package, and resolves the locked production environment during the build. It
+runs as the dedicated non-root UID/GID `10001:10001`.
+
 ## Related Concepts
 
 - [Backend architecture](backend.md)
 - [Integration API surface](../integration-api-surface.md)
 - [Threat model](../threat-model.md)
-
