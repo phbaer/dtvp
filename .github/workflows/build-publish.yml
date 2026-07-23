@@ -39,6 +39,8 @@ jobs:
           command: uv run --frozen pip-audit --local --progress-spinner=off --vulnerability-service=osv --timeout=30
       - name: Scan Python source for security issues
         run: uv run --frozen bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src
+      - name: Validate OKF documentation
+        run: uv run --frozen python scripts/validate-okf.py docs
       - name: Prepare .env
         run: cp .env.test .env
       - name: Create dummy frontend assets

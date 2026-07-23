@@ -1,3 +1,19 @@
+---
+type: Reference
+title: DTVP Screen Guide
+description: User-interface workflows covered by the deterministic documentation screenshot set.
+tags:
+  - frontend
+  - screenshots
+  - user-guide
+source_paths:
+  - frontend/src/
+  - frontend/e2e/
+  - frontend/package.json
+review_when:
+  - User-facing screens, navigation, reviewer workflows, or screenshot capture fixtures change.
+---
+
 # DTVP Screen Guide
 
 This guide describes the application screens covered by the documentation screenshot set. Regenerate the images from the repository root with:

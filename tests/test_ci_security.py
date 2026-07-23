@@ -59,6 +59,7 @@ def test_ci_gates_dependencies_and_images_before_publishing():
     assert "pip-audit --local --progress-spinner=off" in workflow
     assert "--vulnerability-service=osv --timeout=30" in workflow
     assert "bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src" in workflow
+    assert "python scripts/validate-okf.py docs" in workflow
     assert workflow.count("npm audit --audit-level=high") == 2
     assert "./scripts/check-node-tls.sh" in workflow
     trivy_ref = (

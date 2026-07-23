@@ -73,6 +73,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Inspect or tail the stack | `pm2 list` / `pm2 logs` |
 | Run all Python tests, including Agentyzer | `uv run pytest` |
 | Run Agentyzer tests only | `cd agentyzer && uv run pytest` |
+| Validate the OKF knowledge bundle | `uv run python scripts/validate-okf.py docs` |
 | Scan Python source for security issues | `uv run bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src` |
 | Audit Python dependencies | `uv run pip-audit --local --vulnerability-service=osv` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
