@@ -1,0 +1,18 @@
+# Override the complete reference only when intentionally updating the pinned base.
+ARG POSTGRES_IMAGE=postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+FROM ${POSTGRES_IMAGE}
+
+# The scheduler uses the PostgreSQL client from the base image and the Docker
+# CLI only to pause and resume this Compose project's writer containers.
+RUN --mount=type=secret,id=ca-certs,target=/tmp/ca-certs.crt \
+    if [ -s /tmp/ca-certs.crt ]; then \
+        cat /tmp/ca-certs.crt >> /etc/ssl/certs/ca-certificates.crt; \
+    fi \
+    && apk add --no-cache docker-cli
+
+COPY --chmod=0555 scripts/backup-compose-state-container.sh /usr/local/bin/dtvp-backup
+COPY --chmod=0555 scripts/run-backup-scheduler.sh /usr/local/bin/dtvp-backup-scheduler
+
+ENV HOME=/tmp
+WORKDIR /app
+ENTRYPOINT ["/usr/local/bin/dtvp-backup-scheduler"]

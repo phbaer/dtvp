@@ -81,6 +81,10 @@ def test_compose_secret_overlays_keep_credentials_out_of_service_environment():
     assert "DTVP_DT_API_KEY_FILE: /run/secrets/dtvp_dt_api_key" in overlay
     assert "DTVP_SESSION_SECRET_KEY_FILE: /run/secrets/dtvp_session_secret_key" in overlay
     assert "AGENTYZER_SERVICE_TOKEN_FILE: /run/secrets/agentyzer_service_token" in overlay
+    assert (
+        "DTVP_BACKUP_DATABASE_PASSWORD_FILE: "
+        "/run/secrets/dtrack_database_password"
+    ) in overlay
     assert "environment: DTRACK_DB_PASSWORD" in overlay
     assert "environment: DTVP_DT_IMPORT_API_KEY" in import_overlay
     assert "AGENTYZER_SERVICE_TOKEN_PREVIOUS_FILE: \"\"" in overlay
@@ -121,5 +125,5 @@ def test_archive_helper_fails_closed_on_remote_errors():
 def test_private_ca_overlay_uses_build_secrets():
     overlay = (ROOT / "compose.ca-certs.yml").read_text()
 
-    assert overlay.count("- ca-certs") == 2
+    assert overlay.count("- ca-certs") == 3
     assert "file: ${DTVP_CA_CERTS_FILE}" in overlay

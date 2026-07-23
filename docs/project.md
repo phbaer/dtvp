@@ -41,6 +41,7 @@ TMRescore and code analysis are optional integrations.
 | `openapi/` | Static OpenAPI specs for optional integrations |
 | `docs/` | OKF project-knowledge bundle, security model, workflows, and screen guide |
 | `skills/` | Project-local AI entry points that route to this bundle |
+| `Dockerfile.backup`, `scripts/backup-compose-state*` | Verified manual and optional Compose-native scheduled backup tooling |
 
 The generic project skill is `skills/project-entrypoint/SKILL.md`;
 `skills/dtvp-project-memory/SKILL.md` is the compatibility entry point.
@@ -60,6 +61,13 @@ The supported deployment uses one DTVP API process per state volume and one
 Agentyzer process per repository volume. Horizontal scaling requires shared
 coordination and task/result storage before multiple API workers use the same
 durable state.
+
+The optional Compose `backup` profile runs a single interval scheduler. It
+briefly pauses this Compose project's writer containers, dumps PostgreSQL,
+archives all application volumes, verifies both artifacts, records checksums,
+and updates the DTVP backup-freshness marker. Because that coordination uses
+the Docker Engine socket, the scheduler is an explicitly privileged operator
+component and is not enabled by default.
 
 ## Knowledge Map
 

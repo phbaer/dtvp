@@ -372,6 +372,53 @@ services:
     pids_limit: 100
     logging: *default-logging
 
+  dtvp-backup-scheduler:
+    image: ${DTVP_BACKUP_IMAGE:-dtvp-backup-scheduler:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    profiles:
+      - backup
+    environment:
+      DTVP_BACKUP_DATABASE_PASSWORD: ${DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD in .env}
+      DTVP_BACKUP_DATABASE_PASSWORD_FILE: ${DTVP_BACKUP_DATABASE_PASSWORD_FILE:-}
+      DTVP_BACKUP_INTERVAL_SECONDS: ${DTVP_BACKUP_INTERVAL_SECONDS:-86400}
+      DTVP_BACKUP_INITIAL_DELAY_SECONDS: ${DTVP_BACKUP_INITIAL_DELAY_SECONDS:-300}
+      DTVP_BACKUP_RETRY_SECONDS: ${DTVP_BACKUP_RETRY_SECONDS:-3600}
+      DTVP_BACKUP_STATUS_PATH: ${DTVP_BACKUP_STATUS_PATH:-data/backup_status.json}
+    volumes:
+      - ${DTVP_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+      - ./data:/state/dtvp:ro
+      - ./data:/app/data
+      - agentyzer-repos:/state/agentyzer:ro
+      - dependency-track-data:/state/dependency-track:ro
+      - ${DTVP_BACKUP_PATH:-./backups}:/backup
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dtvp:
+        condition: service_healthy
+      agentyzer:
+        condition: service_healthy
+      dtrack-apiserver:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
+    pids_limit: 100
+    stop_grace_period: 1m
+    logging: *default-logging
+    restart: unless-stopped
+
   dtvp-archive-git-push:
     image: alpine/git:latest@sha256:77418e6e7c7f434c4a98eaff04ef16840cf03649c881c03948e3e213923e3136
     profiles:

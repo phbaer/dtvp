@@ -87,6 +87,8 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Regenerate CycloneDX SBOMs | `./scripts/generate-sboms.sh` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
 | Back up packaged durable state | `./scripts/backup-compose-state.sh /absolute/backup/root` |
+| Enable scheduled Compose backups | `docker compose --profile backup up -d` |
+| Run the Compose backup immediately | `docker compose --profile backup exec dtvp-backup-scheduler /usr/local/bin/dtvp-backup` |
 
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml` and its Forgejo-native counterpart at
@@ -99,10 +101,11 @@ the image tag in the GitHub workflow and regenerate its Forgejo counterpart.
 CI executes pull-request code only
 for branches in this repository; fork pull requests do not run on the project
 runner. After tests and image scans pass, trusted pull requests publish DTVP
-and Agentyzer images as `pr-<number>` without changing the `dev`, `latest`, or
-version tags. Registry credentials and image publishing otherwise remain
-limited to trusted `main` and version-tag push events. Third-party actions are
-pinned to immutable commit SHAs with their major versions recorded in comments.
+Agentyzer, and backup-scheduler images as `pr-<number>` without changing the
+`dev`, `latest`, or version tags. Registry credentials and image publishing
+otherwise remain limited to trusted `main` and version-tag push events.
+Third-party actions are pinned to immutable commit SHAs with their major
+versions recorded in comments.
 Coverage, browser, and SBOM artifacts use Forgejo's Node 20 v3 upload action
 because this Forgejo instance does not support GitHub's v4 artifact protocol.
 Image scanning downloads the pinned Trivy release archive once, verifies its
@@ -753,6 +756,36 @@ writer even after an error, and only then atomically updates
 its read-only source mounts and narrow DAC capabilities let it read files owned
 by the two different non-root runtime users.
 
+For a deployment managed entirely through Docker Compose, enable the optional
+`backup` profile. The scheduler uses the same pause, dump, archive, validation,
+checksum, and marker sequence without host cron or systemd:
+
+```dotenv
+COMPOSE_PROFILES=backup
+DTVP_BACKUP_PATH=/absolute/path/on-the-docker-host
+DTVP_BACKUP_INTERVAL_SECONDS=86400
+DTVP_BACKUP_INITIAL_DELAY_SECONDS=300
+DTVP_BACKUP_RETRY_SECONDS=3600
+DTVP_BACKUP_MAX_AGE_SECONDS=172800
+```
+
+Recreate the stack with `docker compose up -d`. If no verified marker exists,
+the first backup starts after the initial delay. Later backups are scheduled
+from the last successful marker, and failures retry at the configured
+interval. `docker compose logs dtvp-backup-scheduler` reports each outcome. A
+manual `docker compose --profile backup exec dtvp-backup-scheduler
+/usr/local/bin/dtvp-backup` uses an in-container lock and safely refuses to
+overlap an active scheduled run.
+
+Consistent cross-container snapshots require pausing and resuming writers, so
+this optional profile mounts the Docker Engine socket. Socket access is
+effectively host-administrator access even though the scheduler has no
+published port, only joins the internal database network, uses a read-only
+root, and drops Linux capabilities. Enable the profile only with the trusted
+scheduler image on a dedicated Docker host. If that trust is not acceptable,
+keep the profile disabled and invoke the host script from an external
+scheduler.
+
 Set `DTVP_BACKUP_MAX_AGE_SECONDS` to the recovery policy;
 `/api/security/health` becomes unhealthy when the verified marker is missing,
 invalid, or stale. Freshness enforcement is disabled by default so a new
@@ -763,6 +796,12 @@ volumes while all writers are stopped, restore `dependency-track.pgdump` with
 `pg_restore` into a fresh database, then start the stack and exercise both
 health endpoints plus a representative project and scan. Never restore over a
 running deployment.
+
+Neither backup path prunes snapshots or copies them off-host. Apply encrypted
+storage lifecycle and replication separately. When `DTVP_DT_API_URL` selects
+an external Dependency-Track instance, the included PostgreSQL dump still
+covers only the bundled Compose database; back up the external instance with
+its own database and storage procedure as well.
 
 Archive imports require a dedicated `DTVP_DT_IMPORT_API_KEY` with read, BOM
 upload, project-creation when needed, and vulnerability-analysis update
@@ -800,10 +839,11 @@ The publish workflow is fail-closed around the software supply chain. It audits
 the locked Python graph with `pip-audit`, scans the DTVP and Agentyzer Python
 source with Bandit, audits both npm lockfiles, and rejects Node operations when
 TLS certificate verification has been disabled. Before a tag is created or an
-image is published, separate local DTVP and Agentyzer image candidates are
-scanned for all HIGH and CRITICAL operating-system and library vulnerabilities,
-including vulnerabilities that do not yet have a fix. Every published image
-carries BuildKit SBOM and maximum-mode provenance attestations in the registry.
+image is published, separate local DTVP, Agentyzer, and backup-scheduler image
+candidates are scanned for all HIGH and CRITICAL operating-system and library
+vulnerabilities, including vulnerabilities that do not yet have a fix. Every
+published image carries BuildKit SBOM and maximum-mode provenance attestations
+in the registry.
 
 Release images are signed by immutable digest with cosign. Configure an
 encrypted cosign private key and its password as protected CI secrets named

@@ -12,6 +12,9 @@ source_paths:
   - agentyzer/Dockerfile
   - frontend/src/
   - compose.yml
+  - Dockerfile.backup
+  - scripts/backup-compose-state-container.sh
+  - scripts/run-backup-scheduler.sh
   - .github/workflows/build-publish.yml
   - .forgejo/workflows/build-publish.yml
 review_when:
@@ -83,13 +86,14 @@ flowchart LR
 | DTVP to Agentyzer | Repository target, vulnerability context, guidance, owner identity | Normal service token; separate admin token for `*` scope |
 | Agentyzer to Git/LLM/web | Source, credentials, model prompts/output, researched content | Per-repository Git secret and configured LLM/research policy |
 | Processes to state volumes | Source, SBOMs, findings, queues, jobs, audits, archives | Non-root runtime UID and exclusive process lease |
+| Optional backup scheduler to Docker Engine | Container discovery plus pause/resume operations | Docker socket; host-administrator-equivalent operator trust |
 | CI to registry | Source checkout, build context, signing key, image and attestations | Protected CI/registry/cosign credentials |
 
 ## Assets And Classification
 
 | Asset | Sensitivity | Integrity/availability concern |
 | :--- | :--- | :--- |
-| Session, OIDC, backend, analyzer, Git, LLM, archive, database, and signing secrets | Critical | Theft permits impersonation, data change, code access, or release forgery |
+| Session, OIDC, backend, analyzer, Git, LLM, archive, database, signing secrets, and Docker Engine access | Critical | Theft permits impersonation, data change, code access, release forgery, or host takeover |
 | Private source and persistent Agentyzer clone objects | Confidential | Source may contain proprietary logic or accidentally committed secrets |
 | SBOMs, findings, assessments, CVSS decisions, and team assignments | Confidential / high integrity | Incorrect data can hide exploitable vulnerabilities or create false work |
 | Queues, saved results, proposals, caches, and archive snapshots | Internal / high integrity | Replay, loss, or cross-backend reuse can duplicate or misapply work |
@@ -143,11 +147,11 @@ hard tenant boundary.
 | T9 Tampering / denial | Malicious archive exploits path traversal, encryption, decompression, or huge member counts, then overwrites vendor data. | Reviewer authorization, dedicated import credential, pre-write path/member/size/ratio validation, bounded nginx and route bodies, preview/apply separation. | A structurally valid hostile SBOM can still consume backend resources or create misleading data; review previews and vendor quotas. |
 | T10 Denial of service | Authenticated callers create unbounded scans, tasks, queries, or LLM inputs. | nginx limits, DTVP rate limits, bounded DTVP/Agentyzer queues, per-owner Agentyzer admission, concurrency semaphores, input/list/string limits, retention and record caps. | DTVP quotas are process-local and large legitimate projects remain expensive. Use production-shaped load tests and external rate controls. |
 | T11 Denial / integrity | Multiple API workers race process-local schedulers and duplicate external work. | Owner-only non-following advisory lease file held for process lifetime; startup fails on contention; running work becomes interrupted after restart. | Advisory locking assumes a filesystem with reliable `flock`. Horizontal scale requires a shared queue, leases, and distributed rate limits. |
-| T12 Information disclosure | Preserved workspaces expose private source after scans. | Credentials are scrubbed, per-run worktrees are isolated and pruned, containers are non-root, volumes are narrowly mounted, backup helper has no network. | Clone objects intentionally persist to speed repeated scans. Encrypt and restrict the repository/backup volume and define source-retention policy. |
+| T12 Information disclosure | Preserved workspaces expose private source after scans. | Credentials are scrubbed, per-run worktrees are isolated and pruned, containers are non-root, volumes are narrowly mounted, the manual archive helper has no network, and the scheduler only joins the internal data network. | Clone objects intentionally persist to speed repeated scans. Encrypt and restrict the repository/backup volume and define source-retention policy. |
 | T13 Tampering / disclosure | XSS or unsafe Markdown changes UI behavior or extracts session data. | Vue escaping, shared DOMPurify allowlist, restrictive CSP and other browser headers, no environment-derived inline runtime script. | A sanitizer/browser/frontend dependency defect remains possible; keep npm audit and image scanning gates active. |
-| T14 Denial / data loss | Disk exhaustion, SQLite corruption, stale backups, or unbounded audit logs make state unavailable. | Minimum-free-space and integrity health, readiness probes, owner-only SQLite/audit files, bounded audit rotation, durable queues, backup freshness marker, verified Compose backup workflow. | Backup encryption, off-host replication, scheduling, and restore tests are operator responsibilities. Readiness is not a substitute for restore testing. |
+| T14 Denial / data loss | Disk exhaustion, SQLite corruption, stale backups, or unbounded audit logs make state unavailable. | Minimum-free-space and integrity health, readiness probes, owner-only SQLite/audit files, bounded audit rotation, durable queues, backup freshness marker, verified manual backup, and optional interval-based Compose scheduler with retry and overlap locking. | Enabling the scheduler, retention, encryption, off-host replication, external Dependency-Track backup, monitoring, and restore tests remain operator responsibilities. Readiness is not a substitute for restore testing. |
 | T15 Supply-chain tampering | A dependency, action, builder, runner, or base image injects code into releases. | Lockfiles, immutable action/base/runtime image pins, minimal Alpine application images, a checksum-pinned Trivy binary, parity-tested GitHub/Forgejo workflows, same-repository PR gating with PR-scoped image tags, dependency/Bandit/npm/Trivy gates, BuildKit SBOM/provenance, release digest signing and immediate cosign verification. | A trusted runner or signing-key compromise can still produce a valid malicious artifact. Protect/rotate keys and isolate protected runners. |
-| T16 Elevation / lateral movement | Compromised service pivots to databases, analyzers, other egress zones, or host. | Separate internal/outbound networks, dropped capabilities, read-only roots, non-root users, no-new-privileges, PID/log limits, narrowly writable mounts. | Docker daemon/host compromise defeats container boundaries. Apply host patching, runtime monitoring, and firewall policy. |
+| T16 Elevation / lateral movement | Compromised service pivots to databases, analyzers, other egress zones, or host. | Separate internal/outbound networks, dropped capabilities, read-only roots, non-root users, no-new-privileges, PID/log limits, narrowly writable mounts; the socket-bearing scheduler is profile-gated, has no published port or external network, and runs only repository-owned backup code. | Docker socket access is host-administrator-equivalent and defeats container isolation if the scheduler is compromised. Keep the profile disabled unless that trust is accepted, use a dedicated patched host, and monitor Docker Engine operations. |
 
 ## Dependency-Track Identity Decision
 
@@ -197,6 +201,7 @@ security control, not a missing feature to bypass.
 | Dependency-Track review key has team-wide write scope | Medium-high | Minimize the team/PAC scope, rotate through vendor-side overlap, monitor DTVP and Dependency-Track audits. |
 | Local audit file is mutable by host administrators | Medium-high | Forward to immutable authenticated storage and alert on health/write failures. |
 | Persistent repository source and backups require at-rest protection | Medium-high | Encrypt volumes/backups, restrict host access, define retention, and test secure deletion independently. |
+| Optional backup scheduler holds Docker Engine authority | High when enabled | Keep the profile optional, restrict deployment/image modification, isolate and patch the Docker host, monitor Engine activity, or use an external host scheduler instead. |
 | Single-process coordination is an availability and scaling limit | Medium | Keep one worker per volume; design shared queue/leases/rate limits before horizontal scaling. |
 | Authenticated large-project/model resource exhaustion | Medium | Tune admission/rate/retention limits and add workload-specific monitoring/load tests. |
 | Cybeats/private vendor contract is unverified | Blocked feature | Keep adapter unavailable until the checklist above and a test tenant are provided. |

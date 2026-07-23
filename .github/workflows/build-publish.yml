@@ -209,6 +209,23 @@ jobs:
             --scanners vuln \
             --severity HIGH,CRITICAL \
             agentyzer-security-candidate:${{ github.sha }}
+      - name: Build backup scheduler security candidate
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: ./Dockerfile.backup
+          load: true
+          tags: dtvp-backup-security-candidate:${{ github.sha }}
+      - name: Scan backup scheduler security candidate
+        run: |-
+          trivy image \
+            --format table \
+            --exit-code 1 \
+            --ignore-unfixed=false \
+            --pkg-types os,library \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            dtvp-backup-security-candidate:${{ github.sha }}
 
   check-version:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -353,6 +370,21 @@ jobs:
             ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/agentyzer:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/agentyzer:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
           context: ./agentyzer
+      - name: Build and Push backup scheduler
+        id: build_backup_scheduler
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          push: true
+          platforms: linux/amd64
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp-backup-scheduler:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/dtvp-backup-scheduler:dev', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/dtvp-backup-scheduler:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/dtvp-backup-scheduler:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
+          context: .
+          file: ./Dockerfile.backup
       - name: Install cosign
         if: startsWith(github.ref, 'refs/tags/v')
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -363,6 +395,7 @@ jobs:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           DTVP_IMAGE_DIGEST: ${{ steps.build_dtvp.outputs.digest }}
           AGENTYZER_IMAGE_DIGEST: ${{ steps.build_agentyzer.outputs.digest }}
+          BACKUP_SCHEDULER_IMAGE_DIGEST: ${{ steps.build_backup_scheduler.outputs.digest }}
           PACKAGE_REGISTRY_HOST: ${{ vars.RUNNER_PACKAGE_PUSH_HOST }}
           PACKAGE_REGISTRY_USER: ${{ vars.RUNNER_PACKAGE_PUSH_USER }}
         run: |
@@ -372,11 +405,15 @@ jobs:
             "${PACKAGE_REGISTRY_HOST}/${PACKAGE_REGISTRY_USER}/dtvp@${DTVP_IMAGE_DIGEST}"
           cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
             "${PACKAGE_REGISTRY_HOST}/${PACKAGE_REGISTRY_USER}/agentyzer@${AGENTYZER_IMAGE_DIGEST}"
+          cosign sign --yes --key env://COSIGN_PRIVATE_KEY \
+            "${PACKAGE_REGISTRY_HOST}/${PACKAGE_REGISTRY_USER}/dtvp-backup-scheduler@${BACKUP_SCHEDULER_IMAGE_DIGEST}"
           cosign public-key --key env://COSIGN_PRIVATE_KEY > /tmp/dtvp-cosign.pub
           cosign verify --key /tmp/dtvp-cosign.pub \
             "${PACKAGE_REGISTRY_HOST}/${PACKAGE_REGISTRY_USER}/dtvp@${DTVP_IMAGE_DIGEST}"
           cosign verify --key /tmp/dtvp-cosign.pub \
             "${PACKAGE_REGISTRY_HOST}/${PACKAGE_REGISTRY_USER}/agentyzer@${AGENTYZER_IMAGE_DIGEST}"
+          cosign verify --key /tmp/dtvp-cosign.pub \
+            "${PACKAGE_REGISTRY_HOST}/${PACKAGE_REGISTRY_USER}/dtvp-backup-scheduler@${BACKUP_SCHEDULER_IMAGE_DIGEST}"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

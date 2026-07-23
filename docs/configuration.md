@@ -84,6 +84,11 @@ means the integration or override is disabled.
 | `DTVP_STORAGE_MIN_FREE_BYTES` | Minimum available bytes required for every durable state path | `134217728` (128 MiB) |
 | `DTVP_BACKUP_STATUS_PATH` | Atomic status marker written only after a verified external backup | `data/backup_status.json` |
 | `DTVP_BACKUP_MAX_AGE_SECONDS` | Maximum accepted backup-marker age; `0` disables age enforcement | `0` |
+| `DTVP_BACKUP_PATH` | Host directory receiving Compose-scheduler snapshots; use an absolute encrypted or off-host-mounted path in production | `./backups` |
+| `DTVP_BACKUP_INTERVAL_SECONDS` | Successful-backup interval for the optional `backup` Compose profile; minimum 300 | `86400` |
+| `DTVP_BACKUP_INITIAL_DELAY_SECONDS` | Delay before the scheduler's first due-state check | `300` |
+| `DTVP_BACKUP_RETRY_SECONDS` | Retry delay after a failed scheduled backup; minimum 60 | `3600` |
+| `DTVP_DOCKER_SOCKET_PATH` | Host Docker Engine socket mounted by the optional privileged backup scheduler | `/var/run/docker.sock` |
 | `DTVP_RATE_LIMIT_WINDOW_SECONDS` | Application quota window | `60` |
 | `DTVP_AUTH_RATE_LIMIT` | Login/callback requests per IP and window | `30` |
 | `DTVP_EXPENSIVE_RATE_LIMIT` | Expensive task mutations per session/IP and window | `20` |
@@ -95,6 +100,14 @@ means the integration or override is disabled.
 | `DTVP_DEFAULT_PROJECT_FILTER` | Dashboard default project filter | empty |
 | `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` | Attribution-age presets | `7d,14d,28d` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
+
+Set `COMPOSE_PROFILES=backup` or pass `--profile backup` to enable the
+Compose-native scheduler. It is disabled by default because consistent
+snapshots require Docker Engine socket access, which is equivalent to
+host-administrator privilege. The hardened secret overlay supplies the
+scheduler's PostgreSQL credential through
+`DTVP_BACKUP_DATABASE_PASSWORD_FILE`; base Compose maps `DTRACK_DB_PASSWORD`
+directly.
 
 ## Project Archives
 

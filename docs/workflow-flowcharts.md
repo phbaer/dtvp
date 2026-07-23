@@ -1,7 +1,7 @@
 ---
 type: Workflow
 title: DTVP Workflow Flowcharts
-description: Core vulnerability-review and optional TMRescore data flows.
+description: Core vulnerability-review, optional TMRescore, and scheduled backup data flows.
 tags:
   - workflows
   - diagrams
@@ -9,8 +9,11 @@ tags:
 source_paths:
   - dtvp/
   - frontend/src/
+  - compose.yml
+  - scripts/backup-compose-state-container.sh
+  - scripts/run-backup-scheduler.sh
 review_when:
-  - Core review, assessment, rescoring, TMRescore, or frontend-to-backend workflow changes.
+  - Core review, assessment, rescoring, TMRescore, backup, or frontend-to-backend workflow changes.
 ---
 
 # DTVP Workflow Flowcharts
@@ -130,4 +133,24 @@ flowchart LR
 
     ProjectView -->|Use proposal in rescoring dialog| User
     TMView -->|Return to project view without full reload| ProjectView
+```
+
+## 3. Compose Scheduled Backup Workflow
+
+```mermaid
+flowchart TD
+    Timer[Backup interval becomes due] --> Lock{Acquire in-container lock}
+    Lock -->|Already active| Refuse[Refuse overlapping run]
+    Lock -->|Acquired| Discover[Resolve this Compose project by label]
+    Discover --> Pause[Pause DTVP, Agentyzer, and Dependency-Track API]
+    Pause --> Dump[Create PostgreSQL custom-format dump]
+    Dump --> Archive[Archive DTVP, Agentyzer, and Dependency-Track volumes]
+    Archive --> Verify[Validate dump and gzip; write SHA-256 checksums]
+    Verify --> Marker[Atomically update backup freshness marker]
+    Marker --> Resume[Resume paused writers]
+    Resume --> Wait[Wait until next successful-backup interval]
+    Dump -->|Failure| Cleanup[Resume writers through signal/exit trap]
+    Archive -->|Failure| Cleanup
+    Verify -->|Failure| Cleanup
+    Cleanup --> Retry[Retry after configured failure interval]
 ```
