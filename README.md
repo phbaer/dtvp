@@ -98,11 +98,11 @@ runner. Registry credentials and image publishing are limited to trusted
 `main` and version-tag push events. Third-party actions are pinned to immutable
 commit SHAs with their major versions recorded in comments. Coverage, browser,
 and SBOM artifacts use Forgejo's Node 20 v3 upload action because this Forgejo
-instance does not support GitHub's v4 artifact protocol. Image scanning installs
-Trivy once in a top-level step and disables action-cache integration so the
-Forgejo `act` runner does not depend on nested installer or cache-service
-behavior; both candidate-image scans reuse that pinned installation and local
-database cache.
+instance does not support GitHub's v4 artifact protocol. Image scanning
+downloads the pinned Trivy release archive once, verifies its hard-coded
+SHA-256, and invokes the binary directly so the Forgejo `act` runner does not
+depend on an action mirror, nested installer, or action-cache service. Both
+candidate-image scans reuse that installation and its local database cache.
 
 Coverage reports measure production sources even when a module is never
 imported by a test. Python coverage is branch-aware and limited to `dtvp/` and

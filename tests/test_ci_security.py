@@ -62,20 +62,19 @@ def test_ci_gates_dependencies_and_images_before_publishing():
     assert "python scripts/validate-okf.py docs" in workflow
     assert workflow.count("npm audit --audit-level=high") == 2
     assert "./scripts/check-node-tls.sh" in workflow
-    trivy_ref = (
-        "aquasecurity/trivy-action@"
-        "ed142fd0673e97e23eac54620cfb913e5ce36c25"
-    )
-    setup_trivy_ref = (
-        "aquasecurity/setup-trivy@"
-        "3fb12ec12f41e471780db15c232d5dd185dcb514"
-    )
-    assert workflow.count(trivy_ref) == 2
-    assert workflow.count(setup_trivy_ref) == 1
-    assert workflow.count("ignore-unfixed: false") == 2
-    assert workflow.count("severity: HIGH,CRITICAL") == 2
-    assert workflow.count("skip-setup-trivy: true") == 2
-    assert workflow.count("cache: false") == 3
+    assert "aquasecurity/setup-trivy@" not in workflow
+    assert "aquasecurity/trivy-action@" not in workflow
+    assert "TRIVY_VERSION: 0.70.0" in workflow
+    assert (
+        "TRIVY_SHA256: "
+        "8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9"
+    ) in workflow
+    assert workflow.count("trivy image") == 2
+    assert workflow.count("--exit-code 1") == 2
+    assert workflow.count("--ignore-unfixed=false") == 2
+    assert workflow.count("--pkg-types os,library") == 2
+    assert workflow.count("--scanners vuln") == 2
+    assert workflow.count("--severity HIGH,CRITICAL") == 2
     assert workflow.index("scan-images:") < workflow.index("build-push-images:")
 
 

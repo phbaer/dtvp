@@ -12,13 +12,14 @@ source_paths:
   - frontend/src/
   - compose.yml
   - .github/workflows/build-publish.yml
+  - .forgejo/workflows/build-publish.yml
 review_when:
   - A trust boundary, authentication flow, integration, durable store, exposed route, CI trust assumption, or deployment topology changes.
 ---
 
 # DTVP Threat Model
 
-Last reviewed: 2026-07-21
+Last reviewed: 2026-07-23
 
 This document records DTVP's security boundaries, abuse cases, implemented
 controls, and residual risks. The canonical curated context is in the
@@ -144,7 +145,7 @@ hard tenant boundary.
 | T12 Information disclosure | Preserved workspaces expose private source after scans. | Credentials are scrubbed, per-run worktrees are isolated and pruned, containers are non-root, volumes are narrowly mounted, backup helper has no network. | Clone objects intentionally persist to speed repeated scans. Encrypt and restrict the repository/backup volume and define source-retention policy. |
 | T13 Tampering / disclosure | XSS or unsafe Markdown changes UI behavior or extracts session data. | Vue escaping, shared DOMPurify allowlist, restrictive CSP and other browser headers, no environment-derived inline runtime script. | A sanitizer/browser/frontend dependency defect remains possible; keep npm audit and image scanning gates active. |
 | T14 Denial / data loss | Disk exhaustion, SQLite corruption, stale backups, or unbounded audit logs make state unavailable. | Minimum-free-space and integrity health, readiness probes, owner-only SQLite/audit files, bounded audit rotation, durable queues, backup freshness marker, verified Compose backup workflow. | Backup encryption, off-host replication, scheduling, and restore tests are operator responsibilities. Readiness is not a substitute for restore testing. |
-| T15 Supply-chain tampering | A dependency, action, builder, runner, or base image injects code into releases. | Lockfiles, immutable action/base/runtime image pins, dependency/Bandit/npm/Trivy gates, BuildKit SBOM/provenance, digest signing and immediate cosign verification. | A trusted runner or signing-key compromise can still produce a valid malicious artifact. Protect/rotate keys and isolate protected runners. |
+| T15 Supply-chain tampering | A dependency, action, builder, runner, or base image injects code into releases. | Lockfiles, immutable action/base/runtime image pins, a checksum-pinned Trivy binary, parity-tested GitHub/Forgejo workflows, dependency/Bandit/npm/Trivy gates, BuildKit SBOM/provenance, digest signing and immediate cosign verification. | A trusted runner or signing-key compromise can still produce a valid malicious artifact. Protect/rotate keys and isolate protected runners. |
 | T16 Elevation / lateral movement | Compromised service pivots to databases, analyzers, other egress zones, or host. | Separate internal/outbound networks, dropped capabilities, read-only roots, non-root users, no-new-privileges, PID/log limits, narrowly writable mounts. | Docker daemon/host compromise defeats container boundaries. Apply host patching, runtime monitoring, and firewall policy. |
 
 ## Dependency-Track Identity Decision
