@@ -120,10 +120,12 @@ rewriting project manifests or lockfiles in CI.
 The committed frontend lockfile resolves packages only from the default
 `registry.npmjs.org` registry; do not persist private registry or mirror URLs.
 CI executes pull-request code only for branches in this repository; fork pull
-requests do not run on the project runner. Registry credentials and image
-publishing are limited to trusted `main` and version-tag push events.
-Third-party actions are pinned to immutable commit SHAs with their major
-versions recorded in comments.
+requests do not run on the project runner. After tests and image scans pass,
+trusted pull requests publish DTVP and Agentyzer images as `pr-<number>`
+without changing the `dev`, `latest`, or version tags. Registry credentials and
+image publishing otherwise remain limited to trusted `main` and version-tag
+push events. Third-party actions are pinned to immutable commit SHAs with their
+major versions recorded in comments.
 Coverage, browser, and SBOM artifacts use Forgejo's Node 20 v3 upload action
 because this Forgejo instance does not support GitHub's v4 artifact protocol.
 Image scanning downloads the pinned Trivy release archive once, verifies its
@@ -1236,7 +1238,8 @@ Release images are signed by immutable digest with cosign. Configure an
 encrypted cosign private key and its password as protected CI secrets named
 `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`, and distribute the corresponding
 `cosign.pub` through a trusted channel. Tag builds fail when either signing
-secret is absent; mutable `dev` images from `main` are deliberately not signed.
+secret is absent; mutable `dev` and `pr-<number>` images are deliberately not
+signed.
 Verify a release against its displayed digest, for example:
 
 ```sh
