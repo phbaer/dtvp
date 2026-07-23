@@ -28,12 +28,26 @@ def test_forgejo_workflow_is_generated_from_github_source():
     assert "--check" in generator
 
 
-def test_pull_requests_cannot_publish_or_receive_registry_credentials():
+def test_trusted_pull_requests_publish_only_pr_scoped_images():
     workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert "types: [opened, synchronize, reopened]" in workflow
-    assert workflow.count("head.repo.full_name == github.repository") == 5
-    assert "github.event_name == 'pull_request' && format" not in workflow
+    assert workflow.count("head.repo.full_name == github.repository") == 6
+    assert (
+        "(github.event_name == 'pull_request' && "
+        "github.event.pull_request.head.repo.full_name == github.repository)"
+    ) in workflow
+    assert workflow.count(
+        "github.event_name == 'pull_request' && format"
+    ) == 2
+    assert (
+        "format('{0}/{1}/dtvp:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, "
+        "vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number)"
+    ) in workflow
+    assert (
+        "format('{0}/{1}/agentyzer:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, "
+        "vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number)"
+    ) in workflow
     assert "delete-pr-images:" not in workflow
     assert "GIT_AUTH_TOKEN=" not in workflow
 

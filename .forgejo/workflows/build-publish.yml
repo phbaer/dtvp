@@ -262,7 +262,9 @@ jobs:
           git push origin "refs/tags/$TAG"
 
   build-push-images:
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'))
     needs: [scan-images]
     runs-on: node
     timeout-minutes: 45
@@ -327,6 +329,7 @@ jobs:
           provenance: mode=max
           sbom: true
           tags: |
+            ${{ github.event_name == 'pull_request' && format('{0}/{1}/dtvp:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
             ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/dtvp:dev', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/dtvp:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/dtvp:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
@@ -342,6 +345,7 @@ jobs:
           provenance: mode=max
           sbom: true
           tags: |
+            ${{ github.event_name == 'pull_request' && format('{0}/{1}/agentyzer:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number) || '' }}
             ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/agentyzer:dev', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && format('{0}/{1}/agentyzer:latest', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER) || '' }}
             ${{ startsWith(github.ref, 'refs/tags/v') && steps.get_version.outputs.VERSION && format('{0}/{1}/agentyzer:{2}', vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, steps.get_version.outputs.VERSION) || '' }}
