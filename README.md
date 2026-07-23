@@ -73,8 +73,10 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Install frontend dependencies | `cd frontend && npm ci --include=optional` |
 | Start the full mock stack | `pm2 start ecosystem.config.js --update-env` |
 | Inspect or tail the stack | `pm2 list` / `pm2 logs` |
-| Run all Python tests, including Agentyzer | `uv run pytest` |
-| Run Agentyzer tests only | `cd agentyzer && uv run pytest` |
+| Run backend tests | `uv run pytest` |
+| Run Agentyzer tests | `cd agentyzer && uv run pytest --cov=src` |
+| Regenerate Agentyzer OpenAPI | `cd agentyzer && uv run python ../scripts/generate-agentyzer-openapi.py` |
+| Regenerate the Forgejo workflow | `uv run python scripts/sync-forgejo-workflow.py` |
 | Validate the OKF knowledge bundle | `uv run python scripts/validate-okf.py docs` |
 | Scan Python source for security issues | `uv run bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src` |
 | Audit Python dependencies | `uv run pip-audit --local --vulnerability-service=osv` |
@@ -89,16 +91,13 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Start the GIL-enabled fallback deployment | `docker compose -f compose.yml -f compose.gil.yml up -d --build` |
 | Back up packaged durable state | `./scripts/backup-compose-state.sh /absolute/backup/root` |
 
-The root pytest configuration uses importlib import mode so `uv run pytest`
-can collect the DTVP and nested Agentyzer suites together even when both suites
-contain test modules with the same filename.
-
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml` and its Forgejo-native counterpart at
 `.forgejo/workflows/build-publish.yml`. Forgejo prefers its native directory;
 that copy omits GitHub's unsupported `permissions` field, while the GitHub copy
-retains a read-only default. A security test requires the files to remain
-identical apart from that block. Their image tags must exactly match the
+retains a read-only default. The GitHub file is canonical; regenerate the
+Forgejo file with `scripts/sync-forgejo-workflow.py` after editing it. CI
+rejects drift between the two files. Their image tags must exactly match the
 resolved `@playwright/test` version in `frontend/package-lock.json`; update all
 three in the same change. The regular, manual, and real-stack Playwright
 configurations cover Chromium, Firefox, and WebKit desktop browsers.
@@ -136,12 +135,12 @@ Agentyzer copies a separately pinned `uv` binary and adds Git as its only
 runtime package.
 
 Coverage reports measure production sources even when a module is never
-imported by a test. Python coverage is branch-aware and limited to `dtvp/` and
-`agentyzer/src/`; frontend coverage is limited to runtime TypeScript and Vue
-sources and excludes test helpers and application bootstrap files. CI enforces
-conservative aggregate floors of 70% for Python and, for the frontend, 79%
-statements, 68% branches, 76% functions, and 81% lines. Raise these ratchets as
-targeted tests improve the baseline.
+imported by a test. Backend and Agentyzer coverage are branch-aware and run in
+their respective locked environments. CI enforces independent floors of 70%
+for the backend and 63% for Agentyzer. Frontend coverage is limited to runtime
+TypeScript and Vue sources and excludes test helpers and application bootstrap
+files; CI requires 79% statements, 68% branches, 76% functions, and 81% lines.
+Raise these ratchets as targeted tests improve the baseline.
 
 ## Architecture And Project Knowledge
 

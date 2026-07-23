@@ -18,6 +18,16 @@ def test_forgejo_workflow_omits_only_github_permissions():
     assert github_workflow.replace(github_permissions, "", 1) == forgejo_workflow
 
 
+def test_forgejo_workflow_is_generated_from_github_source():
+    generator = (ROOT / "scripts" / "sync-forgejo-workflow.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'SOURCE_PATH = ROOT / ".github"' in generator
+    assert 'OUTPUT_PATH = ROOT / ".forgejo"' in generator
+    assert "--check" in generator
+
+
 def test_pull_requests_cannot_publish_or_receive_registry_credentials():
     workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
 
@@ -60,6 +70,7 @@ def test_ci_gates_dependencies_and_images_before_publishing():
     assert "--vulnerability-service=osv --timeout=30" in workflow
     assert "bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src" in workflow
     assert "python scripts/validate-okf.py docs" in workflow
+    assert "generate-agentyzer-openapi.py --check" in workflow
     assert workflow.count("npm audit --audit-level=high") == 2
     assert "./scripts/check-node-tls.sh" in workflow
     assert "aquasecurity/setup-trivy@" not in workflow

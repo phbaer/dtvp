@@ -11,6 +11,7 @@ source_paths:
   - agentyzer/config/prompts/
   - agentyzer/pyproject.toml
   - agentyzer/Dockerfile
+  - scripts/generate-agentyzer-openapi.py
   - compose.yml
 review_when:
   - Repository acquisition, workspace retention, job ownership, queue recovery, prompt handling, provider credentials, or analysis contracts change.
@@ -61,6 +62,11 @@ The packaged container uses a checksum-pinned Python 3.14 Alpine runtime,
 copies a separately pinned `uv` binary, installs Git as its only added system
 package, and resolves the locked production environment during the build. It
 runs as the dedicated non-root UID/GID `10001:10001`.
+
+The checked-in code-analysis OpenAPI document is generated from the live
+FastAPI application and verified in the Agentyzer CI job. Agentyzer tests and
+their independent coverage ratchet are owned by that job; the root backend
+suite covers only `dtvp/`.
 
 ## Related Concepts
 
