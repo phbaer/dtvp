@@ -1,4 +1,4 @@
-import type { TaskVulnGroupListQuery } from './api'
+import type { TaskVulnGroupListCounts, TaskVulnGroupListQuery } from './api'
 import type { InconsistencyReason, TMRescoreProposal } from '../types'
 import {
     isMeaningfulTMRescoreProposalCandidate,
@@ -9,6 +9,40 @@ import {
 } from './vulnListIndex'
 
 export const NO_MATCH_FILTER = '__NO_MATCH__'
+
+export const createEmptyTaskVulnGroupListCounts = (): TaskVulnGroupListCounts => ({
+    total: 0,
+    lifecycle: {},
+    inconsistency_reason: {},
+    analysis: {},
+    dependency_relationship: {
+        direct: 0,
+        transitive: 0,
+        unknown: 0,
+    },
+    cvss_version_mismatch: 0,
+    ids: {},
+    versions: {},
+    tags: {},
+    assignees: {},
+    components: {},
+    team_tags: {},
+    tmrescore: {
+        WITH_PROPOSAL: 0,
+        WITHOUT_PROPOSAL: 0,
+    },
+    automatic_assessment: {
+        WITH_AUTOMATIC_ASSESSMENT: 0,
+        WITHOUT_AUTOMATIC_ASSESSMENT: 0,
+    },
+    assessment_restore: {
+        WITH_RESTORE: 0,
+        RECOVERABLE: 0,
+        AMBIGUOUS: 0,
+        NO_HISTORY: 0,
+    },
+    attribution_age: 0,
+})
 
 export interface BuildTaskVulnGroupListQueryInput {
     parsedSearch: ParsedVulnSearchQuery

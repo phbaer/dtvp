@@ -105,42 +105,6 @@ describe('ProjectView Coverage Extras', () => {
         expect(mockGroup.rescored_cvss).not.toBe(1.0)
     })
 
-    it('filters groups by tags', async () => {
-        const mockGroups = [
-            { id: '1', tags: ['TeamA', 'Backend'] },
-            { id: '2', tags: ['Frontend'] },
-            { id: '3', tags: [] }, // No tags
-            { id: '4' } // Undefined tags
-        ]
-        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
-
-        const wrapper = await mountProjectView()
-        await updateProjectViewState(wrapper, {
-            lifecycleFilters: extendedLifecycleFilters,
-            analysisFilters: extendedAnalysisFilters,
-        })
-
-        // Set filter via the smart-search team prefix.
-        const input = wrapper.find('input[placeholder*="Search CVE"]')
-        await input.setValue('team:Team')
-        await new Promise(resolve => setTimeout(resolve, 130))
-        await flushPromises()
-
-        // Should only show group 1
-        // Note: We need to check what is passed to VulnGroupCard components
-        const cards = wrapper.findAllComponents({ name: 'VulnRowCompact' })
-        // With 'Team', only 'TeamA' matches
-        expect(cards.length).toBe(1)
-        if (cards.length > 0) {
-            expect(cards[0]!.props('item').group.id).toBe('1')
-        }
-
-        // Clear filter
-        await input.setValue('')
-        await flushPromises()
-        expect(wrapper.findAllComponents({ name: 'VulnRowCompact' }).length).toBe(4)
-    })
-
     it('updates loading progress via callback', async () => {
         // We Use a controlled promise to keep it in "loading" state
         let resolvePromise: (value: any) => void

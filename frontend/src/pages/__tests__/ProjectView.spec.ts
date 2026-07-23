@@ -168,7 +168,7 @@ describe('ProjectView.vue', () => {
         expect(wrapper.findAll('.vuln-group-card')).toHaveLength(0)
     })
 
-    it('marks and filters vulnerabilities with persisted assessment metadata', async () => {
+    it('marks vulnerabilities with persisted assessment metadata', async () => {
         vi.mocked(getGroupedVulns).mockResolvedValue([
             {
                 id: 'CVE-AUTO',
@@ -189,67 +189,6 @@ describe('ProjectView.vue', () => {
         const autoItem = (wrapper.vm as any).listItems.find((item: any) => item.id === 'CVE-AUTO')
         expect(autoItem.hasAutomaticAssessment).toBe(true)
         expect(autoItem.automaticAssessmentStatus).toBe('auto')
-
-        ;(wrapper.vm as any).automaticAssessmentFilter = ['WITH_AUTOMATIC_ASSESSMENT']
-        await wrapper.vm.$nextTick()
-        expect((wrapper.vm as any).filteredGroups.map((group: any) => group.id)).toEqual(['CVE-AUTO'])
-
-        ;(wrapper.vm as any).automaticAssessmentFilter = ['WITHOUT_AUTOMATIC_ASSESSMENT']
-        await wrapper.vm.$nextTick()
-        expect((wrapper.vm as any).filteredGroups.map((group: any) => group.id)).toEqual(['CVE-MANUAL'])
-    })
-
-    it('filters by direct dependency and versions', async () => {
-        const mockGroups = [
-            {
-                id: '1',
-                title: 'Direct vuln',
-                affected_versions: [
-                    { project_version: '1.0', components: [{ is_direct_dependency: true }] }
-                ]
-            },
-            {
-                id: '2',
-                title: 'Transitive vuln',
-                affected_versions: [
-                    { project_version: '2.0', components: [{ is_direct_dependency: false }] }
-                ]
-            }
-        ]
-        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
-
-        const wrapper = await mountProjectView({ routeName: 'TestProject' })
-
-        expect(wrapper.findAll('.vuln-group-card').length).toBe(2)
-
-        ;(wrapper.vm as any).dependencyFilter = ['DIRECT']
-        await flushPromises()
-        expect(wrapper.findAll('.vuln-group-card').length).toBe(1)
-
-        ;(wrapper.vm as any).dependencyFilter = ['DIRECT', 'TRANSITIVE', 'UNKNOWN']
-        ;(wrapper.vm as any).versionFilterInput = '1.0'
-        await flushPromises()
-        expect(wrapper.findAll('.vuln-group-card').length).toBe(1)
-
-        ;(wrapper.vm as any).versionFilterInput = '2.0'
-        await flushPromises()
-        expect(wrapper.findAll('.vuln-group-card').length).toBe(1)
-
-        ;(wrapper.vm as any).versionFilterInput = '1.0,2.0'
-        await flushPromises()
-        expect(wrapper.findAll('.vuln-group-card').length).toBe(2)
-
-        // Verify dependency relationship badge counts
-        expect(wrapper.text()).toContain('Direct')
-        expect(wrapper.text()).toContain('Transitive')
-
-        // Query update should occur for state-driven filters
-        await new Promise(resolve => setTimeout(resolve, 250))
-        await flushPromises()
-        expect(replaceSpy).toHaveBeenCalled()
-        const lastCall = replaceSpy.mock.calls[replaceSpy.mock.calls.length - 1] as any[] | undefined
-        const latestQuery = lastCall?.[0]?.query
-        expect(latestQuery).toMatchObject({ versions: '1.0,2.0' })
     })
 
     it('copies the current filter URL to clipboard', async () => {

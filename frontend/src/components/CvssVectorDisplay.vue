@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { calculateScoreFromVector } from '../lib/cvss'
+import { calculateScoreFromVector, scoreToSeverity } from '../lib/cvss'
 
 export interface VectorEntry {
   vector: string
@@ -282,14 +282,6 @@ function metricForRow(rowIdx: number, key: string): CvssMetric | undefined {
   return rowMetricMaps.value[rowIdx]?.get(key)
 }
 
-function scoreSeverity(score: number): string {
-  if (score >= 9.0) return 'CRITICAL'
-  if (score >= 7.0) return 'HIGH'
-  if (score >= 4.0) return 'MEDIUM'
-  if (score >= 0.1) return 'LOW'
-  return 'INFO'
-}
-
 const severityClasses: Record<string, string> = {
   CRITICAL: 'border-red-800 bg-red-950 text-red-300',
   HIGH: 'border-orange-800 bg-orange-950 text-orange-300',
@@ -302,7 +294,7 @@ const vectorScores = computed(() => {
   return props.vectors.map(entry => {
     const score = calculateScoreFromVector(entry.vector)
     if (score === null) return null
-    const severity = scoreSeverity(score)
+    const severity = scoreToSeverity(score)
     return { score, severity }
   })
 })

@@ -39,6 +39,7 @@ import {
 import {
     buildMeaningfulTMRescoreProposalIds,
     buildTaskVulnGroupListQuery,
+    createEmptyTaskVulnGroupListCounts,
 } from '../lib/projectVulnTaskQuery'
 import {
     buildActiveFilterChips,
@@ -47,13 +48,6 @@ import {
     type ActiveFilterChipKey,
 } from '../lib/projectVulnFilterChips'
 import { createVulnListItemCache } from '../lib/vulnListItemCache'
-import {
-    deriveVulnListBaseIndex,
-    deriveVulnListGroupLookup,
-    deriveVulnListFilterModel,
-    deriveVulnListResultCounts,
-    sortVulnListItems,
-} from '../lib/vulnListViewModel'
 import { deriveVulnListFacetsFromTaskCounts } from '../lib/vulnListFacets'
 import { INCONSISTENCY_REASON_OPTIONS } from '../lib/inconsistency'
 
@@ -421,6 +415,8 @@ const fetchVulns = async () => {
                 await reloadCompletedTaskWindow(currentVulnTaskId.value)
             }
         } else {
+            // Kept only for compatibility with older API mocks and servers.
+            // Production filtering, counting, and sorting always use task windows.
             groups.value = await processFetchedGroups(rawData)
         }
         if (!isCurrentRequest()) return
@@ -537,13 +533,10 @@ const listItems = computed(() => {
     )
 })
 
-const listBaseIndex = computed(() => deriveVulnListBaseIndex(listItems.value))
-
-const listFacets = computed(() => listBaseIndex.value.facets)
-
-const listStaticStats = computed(() => listBaseIndex.value.staticStats)
-
-const listGroupLookup = computed(() => listBaseIndex.value.groupLookup)
+const listGroupLookup = computed(() => ({
+    groups: listItems.value.map(item => item.group),
+    groupById: new Map(listItems.value.map(item => [item.id, item.group])),
+}))
 
 const showFilterDrawer = ref(false)
 
@@ -628,16 +621,8 @@ const {
 })
 
 const taskWideFacets = computed(() => {
-    if (!currentVulnTaskId.value || !taskListCounts.value) {
-        return listFacets.value
-    }
-
-    const counts = taskListCounts.value.all
-    const facets = deriveVulnListFacetsFromTaskCounts(counts)
-    return {
-        ...facets,
-        ids: counts.ids ? facets.ids : listFacets.value.ids,
-    }
+    const counts = taskListCounts.value?.all ?? createEmptyTaskVulnGroupListCounts()
+    return deriveVulnListFacetsFromTaskCounts(counts)
 })
 
 const availableVersions = computed(() => {
@@ -672,31 +657,11 @@ const {
 
 const isTaskWindowListActive = computed(() => !!currentVulnTaskId.value)
 
-const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
-    smartSearch: parsedSmartSearch.value,
-    tagFilter: tagFilter.value,
-    idFilter: idFilter.value,
-    componentFilter: componentFilter.value,
-    assigneeFilter: assigneeFilter.value,
-    dependencyFilter: selectedDependencyFilters.value,
-    tmrescoreProposalFilter: selectedTMRescoreProposalFilters.value,
-    automaticAssessmentFilter: selectedAutomaticAssessmentFilters.value,
-    inconsistencyReasonFilter: inconsistencyReasonFilters.value,
-    versionFilterList: versionFilterList.value,
-    cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
-    attributionAgeDays: attributionAgeDays.value,
-    attributionAgeMode: attributionAgeMode.value,
-    lifecycleFilters: lifecycleFilters.value,
-    analysisFilters: analysisFilters.value,
-}, listStaticStats.value))
+// Task windows arrive filtered and sorted by the backend. The frontend only
+// indexes the visible window for rendering and detail selection.
+const sortedItems = listItems
 
-const sortedItems = computed(() =>
-    isTaskWindowListActive.value
-        ? listItems.value
-        : sortVulnListItems(listView.value.matchingItems, sortBy.value, sortOrder.value)
-)
-
-const sortedGroupLookup = computed(() => deriveVulnListGroupLookup(sortedItems.value))
+const sortedGroupLookup = listGroupLookup
 
 const filteredGroups = computed(() => sortedGroupLookup.value.groups)
 
@@ -836,14 +801,8 @@ const taskListStatusMessage = computed(() => {
     return ''
 })
 
-const localVisibleResultCounts = computed(() =>
-    deriveVulnListResultCounts(listView.value.matchingItems)
-)
-
 const visibleResultCounts = computed<TaskVulnGroupListCounts>(() =>
-    currentVulnTaskId.value && taskListCounts.value
-        ? taskListCounts.value.filtered
-        : localVisibleResultCounts.value
+    taskListCounts.value?.filtered ?? createEmptyTaskVulnGroupListCounts()
 )
 
 const resultCountsUpdating = computed(() =>

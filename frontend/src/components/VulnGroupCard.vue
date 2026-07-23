@@ -9,14 +9,21 @@ import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, E
 import { parseAssessmentBlocks, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
-import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
+import { buildRescoredVectorForState, normalizeCvssVectorInstance } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
 import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
-import { calculateScoreFromVector } from '../lib/cvss'
+import {
+    calculateScoreFromVector,
+    createCvssInstance,
+    createDefaultCvssInstance,
+    cvssVersionsForVector,
+    detectCvssVersion,
+    scoreToSeverity,
+    type CvssVersion,
+} from '../lib/cvss'
 import { getDerivedGroupTags } from '../lib/dependency-team-selection'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
-import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssVectorDisplay from './CvssVectorDisplay.vue'
 import CustomSelect from './CustomSelect.vue'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
@@ -734,53 +741,22 @@ const approveAssessment = async (e: Event) => {
 
 watch([showCalculatorModal, pendingVector], () => {
     if (showCalculatorModal.value) {
-        let v = pendingVector.value?.trim() || ''
-        try {
-            if (v.startsWith('CVSS:4.0')) {
-                activeVersion.value = '4.0'
-                cvssInstance.value = new Cvss4P0(v)
-            } else if (v.startsWith('CVSS:3.0')) {
-                activeVersion.value = '3.0'
-                cvssInstance.value = new Cvss3P0(v)
-            } else if (v.startsWith('CVSS:3.')) {
-                activeVersion.value = '3.1'
-                cvssInstance.value = new Cvss3P1(v)
-            } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
-                activeVersion.value = '2.0'
-                cvssInstance.value = new Cvss2(v)
-            } else {
-                activeVersion.value = '3.1'
-                cvssInstance.value = new Cvss3P1()
-            }
-        } catch {
-             const fallback = visibleVersions.value[0] || '3.1'
-             activeVersion.value = fallback as any
-             resetToDefault(fallback)
-        }
+        const fallback = visibleVersions.value[0] || '3.1'
+        const created = createCvssInstance(pendingVector.value || '', fallback)
+        activeVersion.value = created.version
+        cvssInstance.value = created.instance
     }
 })
 
-const visibleVersions = computed<Array<'4.0' | '3.1' | '3.0' | '2.0'>>(() => {
-    const v = pendingVector.value || ''
-    if (v.startsWith('CVSS:4.0')) return ['4.0']
-    if (v.startsWith('CVSS:3.1')) return ['3.1']
-    if (v.startsWith('CVSS:3.0')) return ['3.0']
-    if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) return ['2.0']
-    return ['4.0', '3.1', '3.0', '2.0']
-})
+const visibleVersions = computed(() => cvssVersionsForVector(pendingVector.value || ''))
 
-const switchVersion = (ver: '4.0' | '3.1' | '3.0' | '2.0') => {
+const switchVersion = (ver: CvssVersion) => {
     activeVersion.value = ver
     resetToDefault(ver)
 }
 
-const resetToDefault = (ver: string) => {
-    switch(ver) {
-        case '4.0': cvssInstance.value = new Cvss4P0('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N'); break;
-        case '3.1': cvssInstance.value = new Cvss3P1('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
-        case '3.0': cvssInstance.value = new Cvss3P0('CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N'); break;
-        case '2.0': cvssInstance.value = new Cvss2('AV:N/AC:L/Au:N/C:N/I:N/A:N'); break;
-    }
+const resetToDefault = (ver: CvssVersion) => {
+    cvssInstance.value = createDefaultCvssInstance(ver)
     updateVectorString()
 }
 
@@ -795,24 +771,9 @@ const normalizeRescoredVector = () => {
 const setCvssInstanceFromVector = (vector: string) => {
     if (!vector) return
 
-    let v = vector.trim()
-    try {
-        if (v.startsWith('CVSS:4.0')) {
-            cvssInstance.value = new Cvss4P0(v)
-        } else if (v.startsWith('CVSS:3.0')) {
-            cvssInstance.value = new Cvss3P0(v)
-        } else if (v.startsWith('CVSS:3.1')) {
-            cvssInstance.value = new Cvss3P1(v)
-        } else if (v.startsWith('CVSS:2.0') || (v.includes('/') && !v.startsWith('CVSS:'))) {
-            cvssInstance.value = new Cvss2(v)
-        } else {
-            // default to 3.1 fallback when version is missing
-            cvssInstance.value = new Cvss3P1(v)
-            activeVersion.value = '3.1'
-        }
-    } catch (e) {
-        console.error('Failed to parse vector for instance set:', e)
-    }
+    const created = createCvssInstance(vector, activeVersion.value)
+    activeVersion.value = created.version
+    cvssInstance.value = created.instance
 }
 
 const updateVectorString = () => {
@@ -871,21 +832,9 @@ const resetVector = () => {
     const original = props.group.cvss_vector
     if (original) {
         pendingVector.value = original
-        try {
-             if (original.startsWith('CVSS:4.0')) {
-                 activeVersion.value = '4.0'
-                 cvssInstance.value = new Cvss4P0(original)
-             } else if (original.includes('3.0')) {
-                  activeVersion.value = '3.0'
-                  cvssInstance.value = new Cvss3P0(original)
-             } else if (original.startsWith('CVSS:3.')) {
-                  activeVersion.value = '3.1'
-                  cvssInstance.value = new Cvss3P1(original)
-             } else {
-                 activeVersion.value = '2.0'
-                 cvssInstance.value = new Cvss2(original)
-             }
-        } catch {}
+        const created = createCvssInstance(original, activeVersion.value)
+        activeVersion.value = created.version
+        cvssInstance.value = created.instance
         updateVectorString()
     } else {
         resetToDefault(activeVersion.value)
@@ -1010,11 +959,7 @@ const updateFormFromGroup = (force = true) => {
         pendingScore.value = props.group.rescored_cvss ?? props.group.cvss_score ?? props.group.cvss ?? null
         pendingVector.value = props.group.rescored_vector || props.group.cvss_vector || ''
         // Keep activeVersion in sync with the actual vector version
-        const pv = pendingVector.value
-        if (pv.startsWith('CVSS:4.0')) activeVersion.value = '4.0'
-        else if (pv.startsWith('CVSS:3.0')) activeVersion.value = '3.0'
-        else if (pv.startsWith('CVSS:3.')) activeVersion.value = '3.1'
-        else if (pv.startsWith('CVSS:2.0') || (pv.includes('/') && !pv.startsWith('CVSS:'))) activeVersion.value = '2.0'
+        activeVersion.value = detectCvssVersion(pendingVector.value) ?? activeVersion.value
 
         const formValues = resolveAssessmentFormValues({
             selectedTeam: selectedTeam.value,
@@ -1434,27 +1379,19 @@ const handleMappingUpdated = async () => {
 
 const originalSeverity = computed(() => {
     const base = props.group.cvss ?? props.group.cvss_score
-    if (base != null && !Number.isNaN(Number(base))) return scoreSeverity(Number(base))
+    if (base != null && !Number.isNaN(Number(base))) return scoreToSeverity(Number(base))
     return props.group.severity || 'UNKNOWN'
 })
-
-const scoreSeverity = (score: number): string => {
-    if (score >= 9) return 'CRITICAL'
-    if (score >= 7) return 'HIGH'
-    if (score >= 4) return 'MEDIUM'
-    if (score >= 0.1) return 'LOW'
-    return 'INFO'
-}
 
 const rescoredSeverity = computed(() => {
     // Use stable group data first, then fall back to pending edits
     if (hasStableRescore.value) {
-        return scoreSeverity(stableRescoredScore.value!)
+        return scoreToSeverity(stableRescoredScore.value!)
     }
     if (!isRescoredOrModified.value) return null
     const score = Number(currentDisplayScore.value)
     if (Number.isNaN(score)) return null
-    return scoreSeverity(score)
+    return scoreToSeverity(score)
 })
 
 const hexToRgba = (hex: string, alpha: number) => {
@@ -1533,7 +1470,7 @@ const reviewContextRescoredSeverity = computed(() => {
     if (!hasStableRescore.value && !isRescoredOrModified.value) return null
     const score = Number(currentDisplayScore.value)
     if (Number.isNaN(score)) return null
-    return scoreSeverity(score)
+    return scoreToSeverity(score)
 })
 const isTicketReferenceRequired = computed(() => (
     reviewContextRescoredSeverity.value === 'HIGH' ||

@@ -11,7 +11,7 @@ import {
 import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisBenchmarkComparison, CodeAnalysisBenchmarkFinding, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
-import { getRuntimeConfig } from '../lib/env'
+import { stringifyTicketValue, useCodeAnalysisTicketDraft } from '../lib/useCodeAnalysisTicketDraft'
 import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 
 const props = defineProps<{
@@ -65,8 +65,6 @@ const systemPromptOpen = ref(false)
 const systemPromptLoading = ref(false)
 const systemPromptError = ref<string | null>(null)
 const systemPromptPayload = ref<Record<string, any> | null>(null)
-const ticketCopyState = ref<'idle' | 'copied' | 'error'>('idle')
-const jiraCreateUrl = getRuntimeConfig('DTVP_JIRA_CREATE_URL', '').trim()
 const benchmarkComparison = ref<CodeAnalysisBenchmarkComparison | null>(null)
 const benchmarkLoading = ref(false)
 const benchmarkError = ref<string | null>(null)
@@ -497,6 +495,23 @@ const verdictColor = computed(() => {
 const hasAffectedResult = computed(() => {
     if (!result.value) return false
     return result.value.assessment.affected || result.value.assessment.verdict.toLowerCase() === 'affected'
+})
+
+const {
+    jiraCreateUrl,
+    ticketCopyState,
+    ticketText,
+    copyTicketText,
+    createJiraIssue,
+} = useCodeAnalysisTicketDraft({
+    context: props,
+    result,
+    hasAffectedResult,
+    selectedPersistedResult,
+    selectedComponents,
+    analyzedComponents,
+    followUpComponent,
+    error,
 })
 
 const confidenceBadge = computed(() => {
@@ -952,191 +967,6 @@ const formatContextSummary = (record: CodeAnalysisResultRecord) => {
         instanceCount !== null ? `${instanceCount} finding${instanceCount === 1 ? '' : 's'}` : '',
     ].filter(Boolean)
     return parts.join(', ')
-}
-
-const uniqueTextValues = (values: Array<string | null | undefined>) => {
-    const seen = new Set<string>()
-    const result: string[] = []
-    for (const value of values) {
-        const text = String(value || '').trim()
-        if (!text) continue
-        const key = text.toLowerCase()
-        if (seen.has(key)) continue
-        seen.add(key)
-        result.push(text)
-    }
-    return result
-}
-
-const ticketBulletList = (values: string[], fallback = 'Not reported') =>
-    values.length
-        ? values.map(value => `- ${value}`).join('\n')
-        : `- ${fallback}`
-
-const stringifyTicketValue = (value: unknown): string => {
-    if (value == null || value === '') return ''
-    if (typeof value === 'string') return value.trim()
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-    try {
-        return JSON.stringify(value)
-    } catch {
-        return String(value)
-    }
-}
-
-const ticketContextComponents = computed(() => {
-    const context = selectedPersistedResult.value?.context_summary
-    const rows = Array.isArray(context?.components) ? context.components : []
-    return rows
-        .map((row: Record<string, any>) => {
-            const name = stringifyTicketValue(row.component_name)
-            const version = stringifyTicketValue(row.component_version)
-            const projectVersion = stringifyTicketValue(row.project_version)
-            const purl = stringifyTicketValue(row.component_purl)
-            const chains = Array.isArray(row.dependency_chains)
-                ? row.dependency_chains.map(stringifyTicketValue).filter(Boolean).slice(0, 2)
-                : []
-            return [
-                name ? `${name}${version ? ` ${version}` : ''}` : '',
-                projectVersion ? `project version ${projectVersion}` : '',
-                purl ? `purl ${purl}` : '',
-                chains.length ? `dependency path ${chains.join(' | ')}` : '',
-            ].filter(Boolean).join(' - ')
-        })
-        .filter(Boolean)
-        .slice(0, 10)
-})
-
-const ticketComponents = computed(() => {
-    if (!result.value) return []
-    return uniqueTextValues([
-        ...(result.value.component_results || []).map(entry => entry.component),
-        ...analyzedComponents.value,
-        followUpComponent.value,
-        selectedPersistedResult.value?.component_name,
-        ...[...selectedComponents.value],
-    ])
-})
-
-const ticketText = computed(() => {
-    if (!result.value || !hasAffectedResult.value) return ''
-
-    const assessment = result.value.assessment
-    const generatedTicket = stringifyTicketValue(assessment.ticket_text)
-    if (generatedTicket) return generatedTicket
-
-    const projectName = props.projectName || selectedPersistedResult.value?.project_name || 'the product'
-    const components = ticketComponents.value
-    const componentLabel = components.length ? components.join(', ') : 'the affected component'
-    const versionsChecked = uniqueTextValues(result.value.versions_checked || [])
-    const componentResults = (result.value.component_results || [])
-        .map(entry => {
-            const versions = uniqueTextValues(entry.versions_checked || [])
-            return `${entry.component}: ${entry.assessment.verdict} (${entry.assessment.confidence} confidence${versions.length ? `, versions ${versions.join(', ')}` : ''})`
-        })
-    const cvss = assessment.adjusted_cvss
-    const cvssLines = cvss ? [
-        `Original score: ${cvss.original_score}`,
-        `Adjusted score: ${cvss.adjusted_score}`,
-        cvss.original_vector ? `Original vector: ${cvss.original_vector}` : '',
-        cvss.adjusted_vector ? `Adjusted vector: ${cvss.adjusted_vector}` : '',
-        cvss.summary ? `CVSS assessment: ${cvss.summary}` : '',
-    ].filter(Boolean) : []
-    const remediationRecommendations = Array.isArray(assessment.remediation_view?.recommendations)
-        ? assessment.remediation_view.recommendations.map(stringifyTicketValue).filter(Boolean)
-        : []
-    const fallbackRemediation = remediationRecommendations.length ? remediationRecommendations : [
-        `Update the vulnerable dependency to a fixed version or safe range for ${props.vulnId}.`,
-        'If the vulnerable dependency is transitive, update or replace the direct parent/intermediary dependency that resolves it, or add an explicit override/exclusion so the vulnerable version is no longer used.',
-        'Add component-level validation, configuration guards, or wrappers only when a dependency update is not immediately available or additional mitigation is required.',
-    ]
-
-    return [
-        `Title: ${props.vulnId} affects ${projectName} via ${componentLabel}`,
-        '',
-        'Issue',
-        `${projectName} was assessed as affected by ${props.vulnId}. The affected target is ${componentLabel}.`,
-        '',
-        'Analysis',
-        `- Verdict: ${assessment.verdict}`,
-        `- Confidence: ${assessment.confidence}`,
-        `- Exposure: ${assessment.exposure}`,
-        `- Summary: ${assessment.summary}`,
-        `- Reasoning: ${assessment.reasoning}`,
-        `- Versions checked: ${versionsChecked.length ? versionsChecked.join(', ') : 'Not reported'}`,
-        ...(props.cvssVector ? [`- Advisory CVSS vector: ${props.cvssVector}`] : []),
-        '',
-        'Affected Components And Context',
-        ticketBulletList(
-            ticketContextComponents.value.length ? ticketContextComponents.value : components,
-            'No component context was reported',
-        ),
-        ...(componentResults.length ? ['', 'Component Results', ticketBulletList(componentResults)] : []),
-        ...(cvssLines.length ? ['', 'CVSS', ticketBulletList(cvssLines)] : []),
-        '',
-        'Remediation',
-        ticketBulletList(fallbackRemediation),
-        '',
-        'Validation',
-        `- Rerun the dependency scan and confirm ${props.vulnId} no longer appears for ${projectName}.`,
-        '- Rerun the code analysis or equivalent regression tests for the reachable code path described above.',
-        '- Attach the updated SBOM/dependency tree and the validation result to this ticket before closure.',
-    ].join('\n')
-})
-
-const copyTextWithFallback = (text: string) => {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.setAttribute('readonly', 'true')
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.appendChild(textarea)
-    textarea.select()
-    const copied = document.execCommand('copy')
-    document.body.removeChild(textarea)
-    if (!copied) throw new Error('Clipboard copy was not accepted by the browser.')
-}
-
-const copyTicketText = async () => {
-    if (!ticketText.value) return
-    ticketCopyState.value = 'idle'
-    try {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(ticketText.value)
-        } else {
-            copyTextWithFallback(ticketText.value)
-        }
-        ticketCopyState.value = 'copied'
-        window.setTimeout(() => {
-            if (ticketCopyState.value === 'copied') ticketCopyState.value = 'idle'
-        }, 2000)
-    } catch (err: any) {
-        ticketCopyState.value = 'error'
-        error.value = err?.message || 'Unable to copy ticket text.'
-    }
-}
-
-const createJiraIssue = async () => {
-    if (!ticketText.value || !jiraCreateUrl) return
-
-    let target: URL
-    try {
-        const baseUrl = window.location.origin === 'null'
-            ? 'http://localhost/'
-            : `${window.location.origin}/`
-        target = new URL(jiraCreateUrl, baseUrl)
-        if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-            throw new Error('Unsupported Jira URL protocol.')
-        }
-    } catch {
-        error.value = 'The configured Jira create URL is invalid.'
-        return
-    }
-
-    // Open synchronously from the click so popup blockers recognize the user action.
-    // Jira receives its own browser cookies during this top-level navigation.
-    window.open(target.toString(), '_blank', 'noopener,noreferrer')
-    await copyTicketText()
 }
 
 const sourceClass = (source?: string | null) => {

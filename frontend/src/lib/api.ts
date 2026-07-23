@@ -1,4 +1,3 @@
-import axios from 'axios';
 import type { AxiosProgressEvent } from 'axios';
 import type {
     Project,
@@ -12,38 +11,12 @@ import type {
     TMRescoreContext,
     TMRescoreProposalSnapshot,
     TMRescoreSyntheticSbomSummary,
-    ProjectArchiveApplyResult,
-    ProjectArchivePreview,
-    ProjectArchiveSnapshot,
-    ProjectArchiveTask,
     VersionInfo,
 } from '../types';
-import { getRuntimeConfig } from './env';
-
-const envApiUrl = getRuntimeConfig('DTVP_API_URL', '').replace(/\/$/, '');
-const envFrontendUrl = getRuntimeConfig('DTVP_FRONTEND_URL', '').replace(/\/$/, '');
-const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin.replace(/\/$/, '') : '';
-
-const BASE_URL = (envApiUrl || runtimeOrigin || envFrontendUrl).replace(/\/$/, '');
-const CONTEXT_PATH = getRuntimeConfig('DTVP_CONTEXT_PATH', '/').replace(/\/$/, '');
-
-// Ensure CONTEXT_PATH starts with / if not empty
-const NORMALIZED_CONTEXT_PATH = CONTEXT_PATH ? (CONTEXT_PATH.startsWith('/') ? CONTEXT_PATH : '/' + CONTEXT_PATH) : '';
-
-// Avoid double-appending context path if BASE_URL already includes it.
-const BASE_WITH_CONTEXT = NORMALIZED_CONTEXT_PATH && BASE_URL.endsWith(NORMALIZED_CONTEXT_PATH)
-    ? BASE_URL
-    : BASE_URL + NORMALIZED_CONTEXT_PATH;
-
-const API_BASE = BASE_WITH_CONTEXT + '/api';
-const AUTH_BASE = BASE_WITH_CONTEXT + '/auth';
-const api = axios.create({
-    baseURL: API_BASE,
-    withCredentials: true, // For cookies
-    paramsSerializer: {
-        indexes: null,
-    },
-});
+import { API_BASE, apiClient as api } from './api/client';
+export * from './api/auth';
+export * from './api/configuration';
+export * from './api/projectArchives';
 
 export const getProjects = async (name?: string): Promise<Project[]> => {
     // If the caller provides an empty string or only whitespace, avoid sending `?name=`.
@@ -81,142 +54,6 @@ export const getCacheStatus = async (): Promise<CacheStatus> => {
     const res = await api.get('/cache-status');
     return res.data;
 };
-
-export interface ProjectArchiveExportOptions {
-    project_name: string;
-    versions?: string[];
-    refresh?: boolean;
-}
-
-export const startProjectArchiveExport = async (
-    options: ProjectArchiveExportOptions,
-): Promise<{ task_id: string }> => {
-    const res = await api.post('/project-archives/exports', options);
-    return res.data;
-};
-
-export const getProjectArchiveTask = async (
-    taskId: string,
-): Promise<ProjectArchiveTask> => {
-    const res = await api.get(`/project-archives/tasks/${encodeURIComponent(taskId)}`);
-    return res.data;
-};
-
-export const streamProjectArchiveTaskEvents = async (
-    taskId: string,
-    onStatus: (status: ProjectArchiveTask) => void | Promise<void>,
-): Promise<void> => {
-    if (typeof fetch !== 'function' || typeof TextDecoder === 'undefined') {
-        throw new Error('Archive task event stream unavailable');
-    }
-
-    const response = await fetch(`${API_BASE}/project-archives/tasks/${encodeURIComponent(taskId)}/events`, {
-        credentials: 'include',
-    });
-    if (!response.ok || !response.body) {
-        throw new Error('Archive task event stream unavailable');
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const flushLines = async () => {
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            await onStatus(JSON.parse(trimmed));
-        }
-    };
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (value) {
-            buffer += decoder.decode(value, { stream: !done });
-            await flushLines();
-        }
-        if (done) break;
-    }
-    buffer += decoder.decode();
-    if (buffer.trim()) {
-        await onStatus(JSON.parse(buffer));
-    }
-};
-
-export const uploadProjectArchiveImport = async (
-    file: File,
-): Promise<{ task_id: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await api.post('/project-archives/imports', formData);
-    return res.data;
-};
-
-export const applyProjectArchiveImport = async (
-    taskId: string,
-    mode: 'create_missing' | 'update',
-): Promise<{ task_id: string }> => {
-    const res = await api.post(`/project-archives/imports/${encodeURIComponent(taskId)}/apply`, { mode });
-    return res.data;
-};
-
-export const listProjectArchiveSnapshots = async (): Promise<ProjectArchiveSnapshot[]> => {
-    const res = await api.get('/project-archives/snapshots');
-    return res.data;
-};
-
-export const getProjectArchiveTaskDownloadUrl = (taskId: string): string =>
-    `${API_BASE}/project-archives/tasks/${encodeURIComponent(taskId)}/download`;
-
-export const getProjectArchiveSnapshotDownloadUrl = (filename: string): string =>
-    `${API_BASE}/project-archives/snapshots/${encodeURIComponent(filename)}/download`;
-
-export interface ProjectArchiveWaitOptions {
-    useEventStream?: boolean;
-    pollIntervalMs?: number;
-}
-
-export const waitForProjectArchiveTask = async (
-    taskId: string,
-    onProgress?: (status: ProjectArchiveTask) => void | Promise<void>,
-    options: ProjectArchiveWaitOptions = {},
-): Promise<ProjectArchiveTask> => {
-    let latest: ProjectArchiveTask | null = null;
-    const pollIntervalMs = Math.max(250, options.pollIntervalMs ?? 1000);
-    const handleStatus = async (status: ProjectArchiveTask) => {
-        latest = status;
-        await onProgress?.(status);
-        if (status.status === 'failed') {
-            throw new Error(status.error || status.message || 'Archive task failed');
-        }
-    };
-
-    if (options.useEventStream) {
-        try {
-            await streamProjectArchiveTaskEvents(taskId, handleStatus);
-            const streamed = latest as ProjectArchiveTask | null;
-            if (streamed?.status === 'completed') return streamed;
-            if (streamed?.status === 'failed') throw new Error(streamed.error || streamed.message || 'Archive task failed');
-            if (streamed?.status === 'not_found') throw new Error('Archive task not found');
-        } catch (err: any) {
-            const streamed = latest as ProjectArchiveTask | null;
-            if (streamed?.status === 'failed') throw err;
-            if (streamed?.status === 'not_found') throw err;
-            console.warn('Archive task event stream failed; falling back to polling.', err);
-        }
-    }
-
-    while (true) {
-        const status = await getProjectArchiveTask(taskId);
-        await handleStatus(status);
-        if (status.status === 'completed') return status;
-        if (status.status === 'not_found') throw new Error('Archive task not found');
-        await delay(pollIntervalMs);
-    }
-};
-
-export type { ProjectArchiveApplyResult, ProjectArchivePreview };
 
 export interface TaskResponse {
     task_id: string;
@@ -985,101 +822,6 @@ export const getAssessmentDetails = async (instances: any[]) => {
 
 export const getKnownUsers = async (): Promise<string[]> => {
     const res = await api.get('/known-users');
-    return res.data;
-};
-
-export const login = (username?: string) => {
-    let url = AUTH_BASE + '/login';
-    if (username) {
-        url += '?username=' + encodeURIComponent(username);
-    }
-    window.location.href = url;
-};
-
-export const logout = async () => {
-    await axios.post(AUTH_BASE + '/logout', undefined, { withCredentials: true });
-    window.location.href = BASE_WITH_CONTEXT + '/login';
-};
-
-export const checkSession = async () => {
-    try {
-        await axios.get(AUTH_BASE + '/me', { withCredentials: true });
-        return true;
-    } catch {
-        return false;
-    }
-};
-
-export const getUserInfo = async (): Promise<{ username: string; role?: string }> => {
-    const res = await axios.get(AUTH_BASE + '/me', { withCredentials: true });
-    return res.data;
-};
-
-export const getRoles = async (): Promise<Record<string, string>> => {
-    const res = await api.get('/settings/roles');
-    return res.data;
-};
-
-export const uploadRoles = async (file: File): Promise<{ status: string; message: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await api.post('/settings/roles', formData);
-    return res.data;
-};
-
-export const getTeamMapping = async (): Promise<Record<string, string | string[]>> => {
-    const res = await api.get('/settings/mapping');
-    return res.data;
-};
-
-export const uploadTeamMapping = async (file: File): Promise<{ status: string; message: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await api.post('/settings/mapping', formData);
-    return res.data;
-};
-
-export const updateTeamMapping = async (mapping: Record<string, string | string[]>): Promise<{ status: string; message: string }> => {
-    const res = await api.put('/settings/mapping', mapping);
-    return res.data;
-};
-
-export const updateRoles = async (roles: Record<string, string>): Promise<{ status: string; message: string }> => {
-    const res = await api.put('/settings/roles', roles);
-    return res.data;
-};
-
-export const getRescoreRules = async (): Promise<any> => {
-    const res = await api.get('/settings/rescore-rules');
-    return res.data;
-};
-
-export const uploadRescoreRules = async (file: File): Promise<{ status: string; message: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await api.post('/settings/rescore-rules', formData);
-    return res.data;
-};
-
-export const updateRescoreRules = async (rules: Record<string, any>): Promise<{ status: string; message: string }> => {
-    const res = await api.put('/settings/rescore-rules', rules);
-    return res.data;
-};
-
-export const getAutoAnalysisGuidance = async (): Promise<Record<string, any>> => {
-    const res = await api.get('/settings/auto-analysis-guidance');
-    return res.data;
-};
-
-export const uploadAutoAnalysisGuidance = async (file: File): Promise<{ status: string; message: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await api.post('/settings/auto-analysis-guidance', formData);
-    return res.data;
-};
-
-export const updateAutoAnalysisGuidance = async (guidance: Record<string, any>): Promise<{ status: string; message: string }> => {
-    const res = await api.put('/settings/auto-analysis-guidance', guidance);
     return res.data;
 };
 

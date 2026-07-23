@@ -1,6 +1,11 @@
-import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
+import {
+    createCvssInstance,
+    detectCvssVersion,
+    type CvssInstanceLike,
+    type CvssVersion,
+} from './cvss'
 
-export type CvssVersion = '4.0' | '3.1' | '3.0' | '2.0'
+export type { CvssVersion } from './cvss'
 
 export interface CvssMetricRelationship {
     base: string
@@ -16,59 +21,6 @@ export interface CvssMetricRule {
 }
 
 export type CvssMetricRules = Partial<Record<CvssVersion, CvssMetricRule>>
-
-interface CvssComponentLike {
-    shortName: string
-}
-
-interface CvssInstanceLike {
-    applyComponentString: (key: string, value: string) => void
-    getComponentByStringOpt?: (name: string) => CvssComponentLike | null
-    getComponent?: (name: any) => CvssComponentLike | null
-    toString: () => string
-}
-
-const DEFAULT_VECTOR_BY_VERSION: Record<CvssVersion, string> = {
-    '4.0': 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N',
-    '3.1': 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N',
-    '3.0': 'CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N',
-    '2.0': 'AV:N/AC:L/Au:N/C:N/I:N/A:N',
-}
-
-const detectCvssVersion = (vector: string, fallbackVersion: CvssVersion): CvssVersion => {
-    const trimmed = vector.trim()
-    if (trimmed.startsWith('CVSS:4.0')) return '4.0'
-    if (trimmed.startsWith('CVSS:3.0')) return '3.0'
-    if (trimmed.startsWith('CVSS:3.')) return '3.1'
-    if (trimmed.startsWith('CVSS:2.0') || (trimmed.includes('/') && !trimmed.startsWith('CVSS:'))) return '2.0'
-    return fallbackVersion
-}
-
-const createCvssInstance = (vector: string, fallbackVersion: CvssVersion) => {
-    const version = detectCvssVersion(vector, fallbackVersion)
-    const normalizedVector = vector.trim()
-    const hasRecognizedVector = normalizedVector.startsWith('CVSS:4.0') ||
-        normalizedVector.startsWith('CVSS:3.') ||
-        normalizedVector.startsWith('CVSS:2.0') ||
-        (normalizedVector.includes('/') && !normalizedVector.startsWith('CVSS:'))
-
-    if (hasRecognizedVector) {
-        try {
-            if (version === '4.0') return { version, instance: new Cvss4P0(normalizedVector) }
-            if (version === '3.1') return { version, instance: new Cvss3P1(normalizedVector) }
-            if (version === '3.0') return { version, instance: new Cvss3P0(normalizedVector) }
-            if (version === '2.0') return { version, instance: new Cvss2(normalizedVector) }
-        } catch {
-            // fall through to default vector
-        }
-    }
-
-    const defaultVector = DEFAULT_VECTOR_BY_VERSION[version]
-    if (version === '4.0') return { version, instance: new Cvss4P0(defaultVector) }
-    if (version === '3.1') return { version, instance: new Cvss3P1(defaultVector) }
-    if (version === '3.0') return { version, instance: new Cvss3P0(defaultVector) }
-    return { version, instance: new Cvss2(defaultVector) }
-}
 
 const getComponentSafe = (instance: CvssInstanceLike, name: string) => {
     if (typeof instance.getComponentByStringOpt === 'function') {
@@ -186,7 +138,7 @@ export const buildRescoredVectorForState = ({
     currentVector: string
     fallbackVersion: CvssVersion
 }): { vector: string; version: CvssVersion } | null => {
-    const vectorVersion = detectCvssVersion(currentVector, fallbackVersion)
+    const vectorVersion = detectCvssVersion(currentVector) ?? fallbackVersion
     const actions = getTransitionActions(rules, targetState, vectorVersion)
 
     if (!actions || Object.keys(actions).length === 0) {

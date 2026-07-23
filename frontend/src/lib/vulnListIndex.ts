@@ -10,6 +10,7 @@ import {
 } from './assessment-helpers'
 import { classifyGroup } from './group-classifier'
 import type { FilterCounts, TeamCounts } from './group-classifier'
+import { scoreToSeverity } from './cvss'
 
 export type DependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
 export type TMRescoreProposalFilter = 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'
@@ -165,14 +166,6 @@ const metadataDependencyRelationship = (value: unknown): DependencyRelationship 
     return relationship === 'DIRECT' || relationship === 'TRANSITIVE' || relationship === 'UNKNOWN'
         ? relationship
         : null
-}
-
-const scoreSeverity = (score: number): string => {
-    if (score >= 9) return 'CRITICAL'
-    if (score >= 7) return 'HIGH'
-    if (score >= 4) return 'MEDIUM'
-    if (score >= 0.1) return 'LOW'
-    return 'INFO'
 }
 
 const scoreSeverityRank = (score: number | undefined | null): number => {
@@ -704,9 +697,9 @@ export function buildVulnListItem(
         && baseScoreValue !== null
         && Math.abs(Number(currentDisplayScore) - Number(baseScoreValue)) > 0.05
     const rescoredSeverity = stableRescoredScore != null && hasStableRescore
-        ? scoreSeverity(stableRescoredScore)
+        ? scoreToSeverity(stableRescoredScore)
         : isRescoredOrModified
-            ? scoreSeverity(Number(currentDisplayScore))
+            ? scoreToSeverity(Number(currentDisplayScore))
             : null
     const baseScore = group.cvss_score ?? group.cvss ?? 0
     const rescoredScore = group.rescored_cvss ?? group.cvss_score ?? group.cvss ?? 0
@@ -773,7 +766,7 @@ export function buildVulnListItem(
         hasStableRescore,
         isRescoredOrModified,
         originalSeverity: baseScoreValue != null && !Number.isNaN(Number(baseScoreValue))
-            ? scoreSeverity(Number(baseScoreValue))
+            ? scoreToSeverity(Number(baseScoreValue))
             : 'UNKNOWN',
         rescoredSeverity,
     }
