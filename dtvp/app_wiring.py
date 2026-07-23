@@ -17,7 +17,7 @@ from .assessment_services import (
 from .code_analysis_routes import CodeAnalysisRouteDeps
 from .dt_client import DTClient
 from .frontend_routes import FrontendRouteDeps
-from .general_api_routes import GeneralApiRouteDeps
+from .general_api_models import GeneralApiRouteDeps
 from .grouped_vuln_services import GroupedVulnServiceDeps
 from .grouped_vuln_services import (
     collect_version_snapshots as collect_grouped_vuln_version_snapshots,

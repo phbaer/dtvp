@@ -28,8 +28,9 @@ TMRescore and code-analysis clients.
 | :--- | :--- |
 | `dtvp/boot.py` | Binds early, serves startup status, then loads the real ASGI app |
 | `dtvp/main.py`, `app_wiring.py`, and `runtime_state.py` | Composition root, lifecycle, dependency construction, routers, and explicit process-state ownership |
+| `dtvp/configuration.py` and integration settings classes | Typed cross-cutting defaults plus focused credential/provider configuration |
 | `dtvp/auth.py` and `authorization.py` | OIDC/session principals, role normalization, and reusable reviewer/owner policies |
-| `dtvp/general_api_routes.py` | Projects, grouped tasks, task windows, statistics, assessments, and dependency chains |
+| `dtvp/general_api_routes.py` and `general_api_models.py` | Projects, grouped tasks, task windows, statistics, assessments, dependency chains, request models, and router dependency contract |
 | `dtvp/grouped_vuln_services.py` | Concurrent finding, vulnerability, and BOM collection before grouping |
 | `dtvp/task_group_query_services.py` | Backend filtering, sorting, facets, pagination, and task-window queries |
 | `dtvp/logic.py` | Grouping, ownership, assessment parsing, CVSS, statistics, and dependency analysis |
@@ -43,7 +44,15 @@ TMRescore and code-analysis clients.
 `dtvp.code_analysis_integration` is the maintained analyzer HTTP client. The
 former misspelled `dtvp.agentizer_integration` import is a compatibility facade
 for downstream callers and legacy `DTVP_AGENYZER_*` settings; new code uses the
-provider-neutral `DTVP_CODE_ANALYSIS_*` names.
+provider-neutral `DTVP_CODE_ANALYSIS_*` names. Importing the legacy facade now
+emits `DeprecationWarning`; it is scheduled for removal in DTVP 2.0.
+
+Cross-cutting rate-limit, task-retention, archive, local-storage, and
+frontend-runtime defaults are parsed in `dtvp.configuration`. Settings are
+resolved when requested so tests and controlled runtime reloads can change the
+environment without stale global configuration. Authentication,
+Dependency-Track, TMRescore, and analyzer credentials remain in their focused
+Pydantic settings classes.
 
 ## Runtime And Data Flow
 
@@ -149,5 +158,6 @@ jobs wait in the shared queue.
 - [Frontend architecture](frontend.md)
 - [Agentyzer architecture](agentyzer.md)
 - [Integration API surface](../integration-api-surface.md)
+- [Runtime configuration](../configuration.md)
 - [Threat model](../threat-model.md)
 - [Workflow diagrams](../workflow-flowcharts.md)

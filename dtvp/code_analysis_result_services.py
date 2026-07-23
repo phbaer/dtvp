@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .configuration import CodeAnalysisStoreSettings
 from .sqlite_migration_services import run_sqlite_migrations
 from .vulnerability_backend import backend_scoped_file
 
@@ -19,7 +20,7 @@ FOLLOW_UP_CONTEXT_PROMPT_LIMIT = 12_000
 
 
 def get_code_analysis_results_path() -> str:
-    configured_path = os.getenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", "").strip()
+    configured_path = CodeAnalysisStoreSettings.from_env().results_path
     if configured_path:
         return backend_scoped_file(configured_path)
     return backend_scoped_file(
@@ -36,32 +37,19 @@ def get_code_analysis_result_migrations_path() -> Path:
 
 
 def get_code_analysis_results_max_records() -> int:
-    raw_value = os.getenv("DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS", "2000")
-    try:
-        return max(1, int(raw_value))
-    except (TypeError, ValueError):
-        return 2000
+    return CodeAnalysisStoreSettings.from_env().max_records
 
 
 def get_code_analysis_results_retention_days() -> int:
-    raw_value = os.getenv("DTVP_CODE_ANALYSIS_RESULTS_RETENTION_DAYS", "0")
-    try:
-        return max(0, int(raw_value))
-    except (TypeError, ValueError):
-        return 0
+    return CodeAnalysisStoreSettings.from_env().retention_days
 
 
 def get_code_analysis_results_store_guidance() -> bool:
-    raw_value = os.getenv("DTVP_CODE_ANALYSIS_RESULTS_STORE_GUIDANCE", "true")
-    return raw_value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+    return CodeAnalysisStoreSettings.from_env().store_guidance
 
 
 def get_code_analysis_result_freshness_days() -> int:
-    raw_value = os.getenv("DTVP_CODE_ANALYSIS_RESULT_FRESHNESS_DAYS", "0")
-    try:
-        return max(0, int(raw_value))
-    except (TypeError, ValueError):
-        return 0
+    return CodeAnalysisStoreSettings.from_env().freshness_days
 
 
 def _utc_now_iso() -> str:

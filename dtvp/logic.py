@@ -11,6 +11,7 @@ from .assessment_restore_services import (
     build_missing_rescoring_vector_restore_candidate,
     refresh_group_restore_metadata,
 )
+from .configuration import DurableStorageSettings
 from .team_mapping import compile_team_mapping, get_team_mapping_tags
 
 logger = logging.getLogger(__name__)
@@ -131,14 +132,11 @@ def sanitize_rescored_vector(
 
 
 def get_team_mapping_path() -> str:
-    return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
+    return DurableStorageSettings.from_env().team_mapping_path
 
 
 def get_auto_analysis_guidance_path() -> str:
-    return os.getenv(
-        "DTVP_AUTO_ANALYSIS_GUIDANCE_PATH",
-        "data/auto_analysis_guidance.json",
-    )
+    return DurableStorageSettings.from_env().auto_analysis_guidance_path
 
 
 STATE_PRIORITY = {
@@ -181,7 +179,7 @@ def load_auto_analysis_guidance(path: str = None) -> Dict[str, Any]:
 
 
 def get_user_roles_path() -> str:
-    return os.getenv("USER_ROLES_PATH", "data/user_roles.json")
+    return DurableStorageSettings.from_env().user_roles_path
 
 
 def score_to_severity(score: float) -> str:
@@ -212,7 +210,7 @@ def load_user_roles(path: str = None) -> Dict[str, str]:
 
 
 def get_rescore_rules_path() -> str:
-    return os.getenv("RESCORE_RULES_PATH", "data/rescore_rules.json")
+    return DurableStorageSettings.from_env().rescore_rules_path
 
 
 def load_rescore_rules(path: str = None) -> Optional[Dict[str, Any]]:

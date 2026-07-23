@@ -97,6 +97,13 @@ from .code_analysis_integration import (
 )
 from .code_analysis_result_services import CodeAnalysisResultStore
 from .code_analysis_routes import create_code_analysis_router
+from .configuration import (
+    AutoAnalysisRuntimeSettings,
+    DurableStorageSettings,
+    RateLimitSettings,
+    TaskRuntimeSettings,
+    UiRuntimeSettings,
+)
 from .dt_cache import CacheManager, cache_manager
 from .dt_client import (
     DTClient,
@@ -147,7 +154,6 @@ from .project_archive_services import (
     run_project_archive_snapshot_once,
 )
 from .runtime_state import DTVPRuntimeState
-from .runtime_value_services import get_env_int_with_floor
 from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
 )
@@ -554,14 +560,15 @@ async def security_health(user: str = Depends(get_current_user)):
             resource_type="security_status",
         )
         raise
+    rate_limits = RateLimitSettings.from_env()
     return {
         "security_audit": audit_health(),
         "durable_storage": durable_storage_health(),
         "rate_limits": {
-            "window_seconds": int(os.getenv("DTVP_RATE_LIMIT_WINDOW_SECONDS", "60")),
-            "authentication": int(os.getenv("DTVP_AUTH_RATE_LIMIT", "30")),
-            "expensive": int(os.getenv("DTVP_EXPENSIVE_RATE_LIMIT", "20")),
-            "mutation": int(os.getenv("DTVP_MUTATION_RATE_LIMIT", "120")),
+            "window_seconds": rate_limits.window_seconds,
+            "authentication": rate_limits.authentication,
+            "expensive": rate_limits.expensive,
+            "mutation": rate_limits.mutation,
         },
     }
 
@@ -617,12 +624,7 @@ def _is_auto_code_analysis_active() -> bool:
 
 grouped_vuln_summary_index = GroupedVulnSummaryIndex(
     path_provider=get_grouped_vuln_summary_index_path,
-    max_entries_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES",
-        default=64,
-        minimum=1,
-        logger=logger,
-    ),
+    max_entries_provider=lambda: DurableStorageSettings.from_env().grouped_summary_index_max_entries,
     logger=logger,
 )
 
@@ -665,12 +667,7 @@ tmrescore_cache_service_deps = build_tmrescore_cache_service_deps(
 
 tmrescore_task_service_deps = build_tmrescore_task_service_deps(
     tmrescore_analysis_tasks=tmrescore_analysis_tasks,
-    get_tmrescore_task_ttl_seconds=lambda: get_env_int_with_floor(
-        "DTVP_TMRESCORE_TASK_TTL_SECONDS",
-        default=3600,
-        minimum=60,
-        logger=logger,
-    ),
+    get_tmrescore_task_ttl_seconds=lambda: TaskRuntimeSettings.from_env().tmrescore_ttl_seconds,
     context_path=context_path,
 )
 
@@ -793,12 +790,7 @@ api_router.include_router(
             default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
             service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
             not_found_response=NOT_FOUND_RESPONSE,
-            get_grouped_vuln_task_ttl_seconds=lambda: get_env_int_with_floor(
-                "DTVP_GROUPED_VULN_TASK_TTL_SECONDS",
-                default=3600,
-                minimum=60,
-                logger=logger,
-            ),
+            get_grouped_vuln_task_ttl_seconds=lambda: TaskRuntimeSettings.from_env().grouped_vuln_ttl_seconds,
         ),
         current_user_dependency=get_current_user,
         client_dependency=get_client,
@@ -883,18 +875,8 @@ analysis_queue_service_deps = build_analysis_queue_service_deps(
 analysis_queue = build_analysis_queue(
     runtime_deps=analysis_queue_runtime_deps,
     service_deps=analysis_queue_service_deps,
-    get_analysis_queue_ttl_seconds=lambda: get_env_int_with_floor(
-        "DTVP_ANALYSIS_QUEUE_TTL_SECONDS",
-        default=3600,
-        minimum=60,
-        logger=logger,
-    ),
-    get_analysis_queue_capacity=lambda: get_env_int_with_floor(
-        "DTVP_ANALYSIS_QUEUE_CAPACITY",
-        default=1,
-        minimum=1,
-        logger=logger,
-    ),
+    get_analysis_queue_ttl_seconds=lambda: TaskRuntimeSettings.from_env().analysis_queue_ttl_seconds,
+    get_analysis_queue_capacity=lambda: TaskRuntimeSettings.from_env().analysis_queue_capacity,
     parse_iso_timestamp=parse_iso_timestamp_impl,
     utc_now=lambda: datetime.now(UTC),
     reindex_queue_items=reindex_queue_items,
@@ -1011,12 +993,7 @@ auto_analysis_sweep_lock = asyncio.Lock()
 
 
 def _get_auto_analysis_sweep_interval_seconds() -> int:
-    return get_env_int_with_floor(
-        "DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS",
-        default=900,
-        minimum=60,
-        logger=logger,
-    )
+    return AutoAnalysisRuntimeSettings.from_env().sweep_seconds
 
 
 def _utc_now_iso() -> str:
@@ -1203,12 +1180,9 @@ register_frontend_routes(
         get_context_path=lambda: context_path,
         get_frontend_url=lambda: auth_settings.FRONTEND_URL or "",
         get_dev_disable_auth=lambda: auth_settings.DEV_DISABLE_AUTH,
-        get_default_project_filter=lambda: os.getenv("DTVP_DEFAULT_PROJECT_FILTER", ""),
-        get_attribution_age_filter_days=lambda: os.getenv(
-            "DTVP_ATTRIBUTION_AGE_FILTER_DAYS",
-            "7d,14d,28d",
-        ),
-        get_jira_create_url=lambda: os.getenv("DTVP_JIRA_CREATE_URL", ""),
+        get_default_project_filter=lambda: UiRuntimeSettings.from_env().default_project_filter,
+        get_attribution_age_filter_days=lambda: UiRuntimeSettings.from_env().attribution_age_filter_days,
+        get_jira_create_url=lambda: UiRuntimeSettings.from_env().jira_create_url,
         read_text=read_text_impl,
     ),
 )

@@ -6,6 +6,7 @@ second HTTP client implementation.
 """
 
 import os
+import warnings
 from typing import Optional
 
 from pydantic import Field
@@ -17,6 +18,13 @@ from .integration_auth import read_secret, validate_service_token
 # Some external tests and callers patched this module-level dependency.  It is
 # the same module object used by the canonical client.
 httpx = _canonical.httpx
+
+warnings.warn(
+    "dtvp.agentizer_integration is deprecated and will be removed in DTVP 2.0; "
+    "use dtvp.code_analysis_integration and DTVP_CODE_ANALYSIS_* settings",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class AgenyzerSettings(BaseSettings):

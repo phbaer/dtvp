@@ -11,6 +11,8 @@ from typing import Annotated
 from fastapi import Header, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from src.configuration import AgentyzerRuntimeSettings
+
 
 MINIMUM_SERVICE_TOKEN_LENGTH = 32
 _bearer = HTTPBearer(auto_error=False)
@@ -24,10 +26,6 @@ class ServiceCaller:
     @property
     def can_access_all_jobs(self) -> bool:
         return self.is_admin and self.owner == "*"
-
-
-def _truthy(value: str | None) -> bool:
-    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _read_token(direct_setting: str, file_setting: str) -> str:
@@ -134,11 +132,12 @@ def _validated_auth_tokens() -> tuple[tuple[str, ...], tuple[str, ...]]:
 
 
 def _allow_unauthenticated() -> bool:
-    return _truthy(os.environ.get("AGENTYZER_ALLOW_UNAUTHENTICATED"))
+    return AgentyzerRuntimeSettings.from_env().allow_unauthenticated
 
 
 def validate_service_auth_configuration() -> None:
-    environment = os.environ.get("AGENTYZER_ENVIRONMENT", "production").strip().lower()
+    settings = AgentyzerRuntimeSettings.from_env()
+    environment = settings.environment
     if environment not in {"development", "production", "test"}:
         raise RuntimeError(
             "AGENTYZER_ENVIRONMENT must be development, production, or test"
@@ -150,9 +149,7 @@ def validate_service_auth_configuration() -> None:
             )
         return
 
-    if environment == "production" and _truthy(
-        os.environ.get("AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH")
-    ):
+    if environment == "production" and settings.allow_external_focus_path:
         raise RuntimeError(
             "AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH cannot be enabled in production"
         )
@@ -174,13 +171,12 @@ def validate_focus_path(value: str | None) -> str | None:
     if not path.is_dir():
         raise HTTPException(status_code=400, detail="Focus path must be a directory")
 
-    environment = os.environ.get("AGENTYZER_ENVIRONMENT", "production").strip().lower()
-    allow_external = environment in {"development", "test"} and _truthy(
-        os.environ.get("AGENTYZER_ALLOW_EXTERNAL_FOCUS_PATH")
+    settings = AgentyzerRuntimeSettings.from_env()
+    allow_external = (
+        settings.environment in {"development", "test"}
+        and settings.allow_external_focus_path
     )
-    repo_root = Path(os.environ.get("AGENTYZER_REPOS_DIR", "repos")).resolve(
-        strict=False
-    )
+    repo_root = Path(settings.repos_dir).resolve(strict=False)
     if not allow_external and not path.is_relative_to(repo_root):
         raise HTTPException(
             status_code=400,

@@ -51,6 +51,7 @@ from src.api.models import (
     StepFindings,
 )
 from src.benchmark import compare_benchmark_with_llm, deterministic_benchmark_fallback
+from src.configuration import AgentyzerRuntimeSettings
 from src.job_runtime import JobCapacityExceeded, JobRuntime, JobStoreUnavailable
 from src.job_store import JobStore
 from src.llm import OllamaClient, OpenWebUIClient, create_llm_client
@@ -70,7 +71,7 @@ from src.security import (
 )
 
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    level=AgentyzerRuntimeSettings.from_env().log_level,
     format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -85,15 +86,7 @@ _repos_config_mtime: float = 0.0
 
 
 def _get_max_concurrent_jobs() -> int:
-    raw_value = os.environ.get("AGENTYZER_MAX_CONCURRENT_JOBS", "1")
-    try:
-        return max(1, int(raw_value))
-    except (TypeError, ValueError):
-        logger.warning(
-            "Invalid AGENTYZER_MAX_CONCURRENT_JOBS=%r, falling back to 1",
-            raw_value,
-        )
-        return 1
+    return AgentyzerRuntimeSettings.from_env().max_concurrent_jobs
 
 
 def _positive_int_setting(name: str, default: int) -> int:

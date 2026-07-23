@@ -9,11 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
 
+from src.configuration import AgentyzerRuntimeSettings
 from src.job_store import get_job_store_path
 
 
 def get_instance_lock_path() -> str:
-    configured = os.environ.get("AGENTYZER_INSTANCE_LOCK_PATH", "").strip()
+    configured = AgentyzerRuntimeSettings.from_env().instance_lock_path
     if configured:
         return configured
     return str(Path(get_job_store_path()).parent / ".agentyzer-runtime.lock")

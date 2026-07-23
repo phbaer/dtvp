@@ -67,7 +67,7 @@ durable state.
 - [Frontend architecture](architecture/frontend.md)
 - [Agentyzer architecture](architecture/agentyzer.md)
 - [External integration contracts](integration-api-surface.md)
+- [Runtime configuration reference](configuration.md)
 - [Threat model and residual risks](threat-model.md)
 - [Runtime workflow diagrams](workflow-flowcharts.md)
 - [Human quick start and command reference](../README.md)
-

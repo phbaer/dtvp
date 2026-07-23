@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 from fastapi import Request
 
+from .configuration import RateLimitSettings
+
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -153,9 +155,10 @@ class SlidingWindowRateLimiter:
 def rate_limit_for_request(request: Request) -> tuple[str, int, int] | None:
     path = request.url.path
     method = request.method.upper()
-    window = max(1, int(os.getenv("DTVP_RATE_LIMIT_WINDOW_SECONDS", "60")))
+    settings = RateLimitSettings.from_env()
+    window = settings.window_seconds
     if path.endswith("/auth/login") or path.endswith("/auth/callback"):
-        return "authentication", max(1, int(os.getenv("DTVP_AUTH_RATE_LIMIT", "30"))), window
+        return "authentication", settings.authentication, window
     expensive_markers = (
         "/tasks/group-vulns",
         "/code-analysis/requests",
@@ -164,7 +167,7 @@ def rate_limit_for_request(request: Request) -> tuple[str, int, int] | None:
         "/bulk-workflows/",
     )
     if method in UNSAFE_METHODS and any(marker in path for marker in expensive_markers):
-        return "expensive", max(1, int(os.getenv("DTVP_EXPENSIVE_RATE_LIMIT", "20"))), window
+        return "expensive", settings.expensive, window
     if method in UNSAFE_METHODS:
-        return "mutation", max(1, int(os.getenv("DTVP_MUTATION_RATE_LIMIT", "120"))), window
+        return "mutation", settings.mutation, window
     return None

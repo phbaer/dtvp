@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
+from .configuration import DurableStorageSettings
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
 from .vulnerability_backend import (
@@ -26,7 +27,7 @@ class PendingUpdateExistsError(Exception):
 
 def get_dt_cache_path() -> str:
     return backend_scoped_directory(
-        os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
+        DurableStorageSettings.from_env().dt_cache_path
     )
 
 
@@ -216,7 +217,7 @@ class CacheManager:
         )
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
-            int(os.getenv("DTVP_DT_CACHE_REFRESH_SECONDS", "60"))
+            DurableStorageSettings.from_env().dt_cache_refresh_seconds
             if refresh_interval_seconds is None
             else refresh_interval_seconds
         )

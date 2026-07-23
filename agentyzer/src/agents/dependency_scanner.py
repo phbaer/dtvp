@@ -16,10 +16,12 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from git import GitCommandError, Repo
 
+from src.configuration import AgentyzerRuntimeSettings
+
 logger = logging.getLogger(__name__)
 
 # Persistent directory for cloned repos.
-_REPOS_DIR = os.environ.get("AGENTYZER_REPOS_DIR", "repos")
+_REPOS_DIR = AgentyzerRuntimeSettings.from_env().repos_dir
 
 # Pattern to strip embedded credentials from URLs and error messages.
 _CREDENTIAL_RE = re.compile(r"://[^@/]+@")
@@ -368,10 +370,7 @@ def _remove_scan_worktree(dest: str, path: str) -> None:
 
 
 def _prune_stale_worktrees(repo: Repo, dest: str) -> None:
-    retention = max(
-        300,
-        int(os.environ.get("AGENTYZER_WORKTREE_RETENTION_SECONDS", "86400")),
-    )
+    retention = AgentyzerRuntimeSettings.from_env().worktree_retention_seconds
     root = Path(_worktree_root(dest))
     if not root.is_dir():
         return
