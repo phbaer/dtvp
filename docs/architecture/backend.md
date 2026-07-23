@@ -98,6 +98,12 @@ authorization, attribution, and policy enforcement. Future adapters such as
 Cybeats implement the same capability contract without exposing vendor
 credentials or identifiers to frontend policy.
 
+Project dependency-chain reads require an authenticated DTVP session like
+other project and finding endpoints. Startup status is available at `/startup`
+and `/api/startup`; minimal unauthenticated `/livez` and `/readyz` probes
+distinguish process liveness from runtime and durable-storage readiness. Normal
+host validation still applies.
+
 ## Process Model And Capacity
 
 Grouping, archive, and live TMRescore task registries remain process-local. The
@@ -128,11 +134,15 @@ one second. An identical cached search took about 0.07 ms. A synthetic
 20,000-group summary and query index retained about 78 MB of live Python
 allocations and increased initial process RSS by about 175 MB. Real tasks also
 retain full vulnerability, component, dependency, and BOM details, so budget
-roughly 150–300 MB or more for each large retained task.
+roughly 150–300 MB or more for each large retained task. The default one-hour
+`DTVP_GROUPED_VULN_TASK_TTL_SECONDS` makes memory the likely limit when many
+users retain large tasks.
 
 Before increasing these ranges, use production-shaped load tests. Initial
 scaling steps are reducing grouped-task retention, increasing frontend search
-debounce, and introducing a shared task/result store.
+debounce, and introducing a shared task/result store. Code analysis runs one
+job concurrently by default through `DTVP_ANALYSIS_QUEUE_CAPACITY`; additional
+jobs wait in the shared queue.
 
 ## Related Concepts
 
@@ -141,4 +151,3 @@ debounce, and introducing a shared task/result store.
 - [Integration API surface](../integration-api-surface.md)
 - [Threat model](../threat-model.md)
 - [Workflow diagrams](../workflow-flowcharts.md)
-

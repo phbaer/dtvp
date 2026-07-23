@@ -7,6 +7,8 @@ tags:
   - agents
   - okf
 source_paths:
+  - AGENTS.md
+  - skills/*/SKILL.md
   - scripts/validate-okf.py
   - tests/test_okf_bundle.py
 review_when:
@@ -61,4 +63,3 @@ implementation diary. Add a focused concept only when it gives a durable
 boundary, contract, or workflow a clear home. When adding, moving, or deleting
 a concept, update the nearest index. Update `source_paths` and `review_when`
 when ownership or maintenance triggers change.
-

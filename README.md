@@ -8,10 +8,11 @@ changes without repeating the same work for every release.
 - [Main repository](https://git.baer.one/phbaer/dtvp/)
 - [GitHub mirror](https://github.com/phbaer/dtvp/)
 
-This README is the canonical project overview for humans and AI agents. If it
-conflicts with source, tests, package metadata, lockfiles, or runtime
-configuration, trust those sources and update this file. Keep `AGENTS.md`,
-Copilot instructions, and `skills/*/SKILL.md` as short entry points back here.
+This README is the concise human entry point. The canonical curated project
+model for humans and AI agents is the [OKF knowledge bundle](docs/index.md).
+Source, tests, package metadata, lockfiles, and runtime configuration remain
+operational truth; update the relevant OKF concept and this summary when they
+change. `AGENTS.md` and `skills/*/SKILL.md` are short routing entry points.
 
 ## What DTVP Does
 
@@ -111,180 +112,29 @@ conservative aggregate floors of 70% for Python and, for the frontend, 79%
 statements, 68% branches, 76% functions, and 81% lines. Raise these ratchets as
 targeted tests improve the baseline.
 
-## Repository And Architecture
+## Architecture And Project Knowledge
 
-### Repository Map
+The [OKF knowledge bundle](docs/index.md) provides progressive, typed project
+context without turning this README into a second detailed architecture model:
 
-| Path | Purpose |
-| :--- | :--- |
-| `dtvp/` | FastAPI routes, services, domain logic, runtime wiring, and integrations |
-| `agentyzer/` | Bundled code-analysis service and assessment pipeline |
-| `frontend/` | Vue 3, Vite, and Tailwind single-page application |
-| `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
-| `tests/` | Backend pytest suite |
-| `data/` | Local configuration, cache data, mappings, rules, and archives |
-| `dtvp/migrations/` | Numbered SQLite migrations for local stores |
-| `openapi/` | Static OpenAPI specs for optional integrations |
-| `docs/` | Integration notes, diagrams, screen guide, and generated screenshots |
-| `skills/` | Project-local AI entry points that route back to this README |
+- [Project purpose, repository map, and runtime shape](docs/project.md)
+- [Backend architecture](docs/architecture/backend.md)
+- [Frontend architecture](docs/architecture/frontend.md)
+- [Agentyzer architecture and persistent-workspace policy](docs/architecture/agentyzer.md)
+- [Security boundaries and residual risks](docs/threat-model.md)
+- [External integration contracts](docs/integration-api-surface.md)
 
-The generic project skill is `skills/project-entrypoint/SKILL.md`;
-`skills/dtvp-project-memory/SKILL.md` is the compatibility entry point.
+At a glance, the browser uses the Vue SPA, which calls the FastAPI backend. The
+backend authorizes user actions and accesses Dependency-Track through a
+capability-based vulnerability-backend adapter and backend-scoped cache.
+Cybeats and other vendors can implement that contract. TMRescore and code
+analysis are optional services. The supported deployment uses one DTVP API
+process per state volume and one Agentyzer process per repository volume;
+horizontal scaling requires shared coordination and durable task/result stores.
 
-### Runtime Shape
-
-```text
-Browser
-  -> Vue SPA (Vite in development, FastAPI/nginx in production)
-  -> FastAPI backend
-  -> vulnerability-backend adapter + backend-scoped local cache
-     -> Dependency-Track today; capability contract for Cybeats/other vendors
-  -> optional tmrescore and code-analysis services
-```
-
-Important backend components:
-
-| Component | Role |
-| :--- | :--- |
-| `dtvp/boot.py` | Binds early, serves startup status, then loads the real ASGI app |
-| `dtvp/main.py`, `app_wiring.py`, and `runtime_state.py` | Composition root, lifecycle, dependency construction, routers, and explicit process-state ownership |
-| `dtvp/auth.py` and `authorization.py` | OIDC/session principals, role normalization, and reusable reviewer/owner policies |
-| `dtvp/general_api_routes.py` | Projects, grouped tasks, task windows, statistics, assessments, and dependency chains |
-| `dtvp/grouped_vuln_services.py` | Concurrent finding, vulnerability, and BOM collection before grouping |
-| `dtvp/task_group_query_services.py` | Backend filtering, sorting, facets, pagination, and task-window queries |
-| `dtvp/logic.py` | Grouping, ownership, assessment parsing, CVSS, statistics, and dependency analysis |
-| `dtvp/assessment_*` and `rescore_rule_services.py` | Assessment writes, conflict handling, metadata recovery, and CVSS rules |
-| `dtvp/bulk_workflows/` | Registry-backed bulk-change plug-ins |
-| `dtvp/vulnerability_backend.py`, `dt_client.py`, and `dt_cache.py` | Vendor-neutral capabilities/resource references, Dependency-Track adapter, cached data, overlays, and pending writes |
-| `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
-| `dtvp/tmrescore_*` | Threat-model integration, inventory, cache, execution, and task state |
-| `dtvp/code_analysis_*` and `analysis_queue_*` | Analyzer integration, result store, queue, and automatic scans |
-
-`dtvp.code_analysis_integration` is the only maintained analyzer HTTP client.
-The former misspelled `dtvp.agentizer_integration` import remains a thin
-compatibility facade for downstream callers and legacy `DTVP_AGENYZER_*`
-settings; new code must use the provider-neutral `DTVP_CODE_ANALYSIS_*` names.
-
-Important frontend components:
-
-| Component | Role |
-| :--- | :--- |
-| `frontend/src/main.ts`, `App.vue`, `router.ts` | App shell, routing, authentication, and startup handling |
-| `frontend/src/lib/api.ts` and `types.ts` | Backend client and shared integration/domain types |
-| `frontend/src/pages/` | Dashboard, project review, statistics, settings, tmrescore, and code analysis |
-| `frontend/src/components/` | Vulnerability rows/details, filters, dialogs, queue UI, CVSS, and dependency paths |
-| `frontend/src/lib/` | Filter/task-window models, composables, caching, updates, and project state |
-
-### Runtime Behavior
-
-- Grouped-vulnerability tasks use `response_mode=summary` for compact list
-  rows. `/api/tasks/{task_id}/events` streams progress,
-  `/api/tasks/{task_id}/groups` serves filtered windows and facets, and
-  `/api/tasks/{task_id}/groups/{group_id}` hydrates full details.
-- Partial version results appear while grouping continues. CPU-heavy grouping,
-  indexing, and filtering run outside the async event loop. When the final
-  partial publish already contains every version, it becomes the completed
-  snapshot without repeating grouping and index construction.
-- Grouped-task searches use thread-safe per-task query caches, share identical
-  in-flight queries, and reuse sort orders across filter changes. Lightweight
-  code-assessment metadata is cached and invalidated when analyzer results
-  change.
-- The frontend viewport-windows list rows, coalesces partial refreshes, and
-  hydrates dependency paths and full assessment details only when needed.
-- The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
-  vulnerability details, BOMs, local overlays, and pending writes. Stale cached
-  data remains readable while Dependency-Track is unavailable. Concurrent
-  misses for the same resource share one Dependency-Track request, while each
-  caller receives an isolated mutable snapshot. Non-default backend instance
-  IDs place caches, queues, archives, tmrescore proposals, and analyzer results
-  in separate `backends/<id>` namespaces. Cache markers reject accidental reuse
-  by a different instance.
-- Grouped-vulnerability tasks, their bulk-workflow operations, uploaded or
-  generated archive tasks, live tmrescore sessions, analyzer queue entries,
-  and saved analysis results are private to the authenticated user who created
-  them. Reviewers can inspect and manage analyzer work across users. Shared
-  Dependency-Track assessments and cached project proposal snapshots remain
-  shared domain data. Analyzer queue snapshots are persisted in SQLite; queued
-  work resumes after a restart, while work that was running is marked failed as
-  interrupted so DTVP cannot accidentally submit a duplicate external scan.
-- Agentyzer stores owner-scoped async jobs in bounded SQLite storage on its
-  repository volume. Pending jobs resume after restart; running jobs are marked
-  interrupted. Terminal jobs default to seven-day retention and a 1,000-record
-  cap, and the database is created with owner-only permissions.
-- Authorization fails closed: a missing, unreadable, invalid, or incomplete
-  `USER_ROLES_PATH` mapping assigns `ANALYST`. Only an explicit `REVIEWER`
-  value grants reviewer permissions. Role-file uploads reject unknown roles.
-  TMRescore, archive management, global code-analysis controls, bulk queue
-  controls, and settings changes enforce reviewer permissions in the backend;
-  frontend visibility is not treated as an authorization boundary.
-- Assessment writes are authorized and reconciled by the backend. A normal
-  write must include the current snapshot for every unique finding UUID; DTVP
-  refreshes those findings from Dependency-Track and returns `409` on a stale
-  snapshot or `503` when it cannot verify current state. Analysts can update
-  only a named, non-General team block and cannot alter suppression, review,
-  rescoring, shared text, or another team's block. The backend reconstructs an
-  analyst replacement from the fresh server document. Only reviewers can use
-  force-overwrite, and force requires `REPLACE` mode. The conflict dialog does
-  not expose force-overwrite to analysts.
-- Project dependency-chain reads require an authenticated DTVP session, like
-  the other project and finding endpoints.
-- Grouping, archive, and live tmrescore task registries remain process-local;
-  the supplied Uvicorn/PM2 launch uses one backend worker. DTVP takes an
-  owner-only exclusive lease on its state volume and fails startup if a second
-  process targets it; Agentyzer does the same on its repository volume. This
-  prevents duplicate schedulers from racing over durable queue data. A
-  horizontally scaled deployment needs shared coordination and must replace
-  those leases before enabling multiple API workers.
-- Startup status exists at `/startup` and `/api/startup`, in the static first
-  paint, and in the Vue initialization view. Minimal unauthenticated `/livez`
-  and `/readyz` probes distinguish process liveness from runtime and durable-
-  storage readiness; normal host validation still applies.
-
-### Capacity Planning
-
-The current single-process deployment should be planned for roughly 8-12
-simultaneously active users on very large projects, or 30-50 active users on
-medium projects. Mostly idle or dashboard users are substantially cheaper;
-100-300 concurrent sessions is a reasonable starting estimate when they are
-not all retaining large grouped-vulnerability tasks.
-
-These are sizing estimates, not production guarantees. A synthetic benchmark
-on a 20-CPU, 15 GiB host with the Python GIL enabled measured eight concurrent
-cold searches as follows:
-
-| Grouped vulnerabilities | Throughput | p95 search latency |
-| :--- | ---: | ---: |
-| 1,000 | about 730 queries/second | 1.3 ms |
-| 5,000 | about 176 queries/second | 50 ms |
-| 10,000 | about 99 queries/second | 96 ms |
-| 20,000 | about 25-40 queries/second | 260-470 ms |
-
-At 16 simultaneous cold searches over 20,000 groups, p95 latency approached
-one second. An identical cached search took about 0.07 ms, so new search terms
-and filter combinations are the limiting case rather than pagination or repeat
-requests.
-
-A synthetic 20,000-group summary and query index retained about 78 MB of live
-Python allocations and increased initial process RSS by about 175 MB. Real
-tasks also retain full vulnerability, component, dependency, and BOM details;
-budget roughly 150-300 MB or more for each large retained task. The default
-one-hour `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` therefore makes memory, rather
-than request throughput, the likely limit when many users open large projects.
-
-For conservative per-instance planning:
-
-- large projects with active searching: 8-12 users comfortably; around 20 is
-  likely to show latency or memory pressure;
-- medium projects: 30-50 active users;
-- mostly browsing or dashboard use: 100-300 sessions, assuming few retained
-  large tasks;
-- code-analysis jobs: one runs concurrently by default through
-  `DTVP_ANALYSIS_QUEUE_CAPACITY`; additional jobs wait in the shared queue.
-
-Before increasing those ranges, use production-shaped load tests. The first
-scaling steps are reducing grouped-task retention (for example, to 900
-seconds), increasing the frontend search debounce, and introducing a shared
-task/result store so multiple backend processes can use additional CPU cores.
+Use [bundle conventions](docs/conventions.md) when changing project knowledge.
+The validator requires indexed concepts, source ownership, maintenance
+triggers, and working local links.
 
 ## Domain Model
 
@@ -1117,7 +967,8 @@ cosign verify --key cosign.pub registry.example/owner/dtvp@sha256:<digest>
 cosign verify --key cosign.pub registry.example/owner/agentyzer@sha256:<digest>
 ```
 
-Documentation entry points:
+The [OKF knowledge bundle](docs/index.md) is the canonical curated project
+model. Its main specialized references are:
 
 - [Security threat model and residual-risk register](docs/threat-model.md)
 - [Screen guide](docs/screens.md) and generated images under `docs/screenshots/`

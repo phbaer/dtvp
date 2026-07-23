@@ -1,12 +1,14 @@
 # Agent Onboarding
 
-This repository uses a generic AI agent entry framework:
+This repository uses an Open Knowledge Format (OKF) project entry framework:
 
-- Read `README.md` first. It is the canonical project overview for architecture, structure, commands, workflows, and update policy.
-- Use the README as the first source of context, then inspect only the code and configuration needed for the current task.
-- If the README conflicts with source code, configuration, tests, package metadata, or lockfiles, trust the source and update the README.
-- After implementing meaningful behavior, architecture, API, integration, configuration, workflow, command, or repository-structure changes, update `README.md` in the same change.
-- Do not maintain a second architecture overview in agent-specific files. `AGENTS.md` and `skills/*/SKILL.md` are routing hints that point agents back to the README.
+- Read `docs/index.md` first for broad scans, planning, architecture review, or changes. It routes to focused concepts with their authoritative source paths and review triggers.
+- Use `README.md` for the human quick start, command reference, and concise product summary.
+- Inspect only the concepts, source files, tests, and configuration needed for the current task.
+- Source code, configuration, tests, package metadata, and lockfiles are operational truth. If they conflict with the OKF bundle or README, trust the source and update the affected documentation.
+- After meaningful behavior, architecture, API, integration, configuration, workflow, command, security-boundary, or repository-structure changes, update the relevant `docs/` concept and its index in the same change. Update the README when its concise summary or commands are affected.
+- Validate documentation with `uv run python scripts/validate-okf.py docs`.
+- Do not maintain another architecture overview in agent-specific files. `AGENTS.md` and `skills/*/SKILL.md` are routing hints that point agents to the OKF bundle.
 - The generic project skill entry point is `skills/project-entrypoint/SKILL.md`; `skills/dtvp-project-memory/SKILL.md` remains as a DTVP-named compatibility entry point.
 - Use `uv` for Python/backend work from the repository root. Use `npm` for the Node/frontend part from `frontend/`.
 
