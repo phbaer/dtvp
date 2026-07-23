@@ -79,6 +79,9 @@ def test_ci_uses_locked_dependencies_and_read_only_default_permissions():
 
 def test_ci_gates_dependencies_and_images_before_publishing():
     workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
+    playwright_config = (ROOT / "frontend" / "playwright.config.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "pip-audit --local --progress-spinner=off" in workflow
     assert "--vulnerability-service=osv --timeout=30" in workflow
@@ -87,6 +90,10 @@ def test_ci_gates_dependencies_and_images_before_publishing():
     assert "generate-agentyzer-openapi.py --check" in workflow
     assert workflow.count("npm audit --audit-level=high") == 2
     assert "./scripts/check-node-tls.sh" in workflow
+    assert "run: npx playwright test\n" in workflow
+    assert "npx playwright test --reporter=line" not in workflow
+    assert "['html', { open: 'never' }]" in playwright_config
+    assert "reuseExistingServer: !process.env.CI" in playwright_config
     assert "aquasecurity/setup-trivy@" not in workflow
     assert "aquasecurity/trivy-action@" not in workflow
     assert 'TRIVY_DISABLE_VEX_NOTICE: "true"' in workflow

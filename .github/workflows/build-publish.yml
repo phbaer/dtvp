@@ -131,7 +131,7 @@ jobs:
           command: cd frontend && npm ci --include=optional
       - name: Run E2E tests
         working-directory: frontend
-        run: npx playwright test --reporter=line
+        run: npx playwright test
       - name: Upload Playwright Report
         uses: https://data.forgejo.org/actions/upload-artifact@c6a3b2bd78b3985e4b2f15397fec357f0fd808de # v3.2.2-node20
         if: always()
