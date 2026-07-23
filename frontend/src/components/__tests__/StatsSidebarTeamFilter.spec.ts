@@ -96,6 +96,12 @@ describe('StatsSidebar team filter', () => {
         const zeroResultTeam = Array.from(menu.querySelectorAll('button'))
             .find(button => button.textContent?.includes('Team 9'))
         expect(zeroResultTeam?.textContent).toContain('0 vulnerabilities')
+        const platformOption = Array.from(menu.querySelectorAll('button'))
+            .find(button => button.textContent?.includes('Platform Security'))
+        const optionText = platformOption?.querySelector(':scope > span')
+        expect(optionText?.children[0]?.textContent).toBe('Platform Security')
+        expect(optionText?.children[1]?.textContent?.trim())
+            .toBe('3 vulnerabilities · 2 open · 1 assessed')
 
         const search = menu.querySelector('input[placeholder="Search teams..."]') as HTMLInputElement
         search.value = 'platform'
@@ -116,7 +122,7 @@ describe('StatsSidebar team filter', () => {
         await nextTick()
 
         const option = Array.from(document.body.querySelectorAll('[data-testid="custom-select-menu"] button'))
-            .find(button => button.querySelector('span')?.textContent?.trim() === 'Platform') as HTMLElement
+            .find(button => button.querySelector(':scope > span > span:first-child')?.textContent?.trim() === 'Platform') as HTMLElement
         option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
         await nextTick()
 
