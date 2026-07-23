@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { mockUnmatchedBackendRequests } from './helpers/backend-routes';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
 
 test.describe('Integration Tests (Real Backend)', () => {
@@ -8,16 +9,7 @@ test.describe('Integration Tests (Real Backend)', () => {
             window.localStorage.setItem('dtvp_last_seen_version', '1.0.4');
         });
 
-        // Catch-all for any unmocked API/auth requests to prevent proxy errors
-        // when running without a backend (e.g. in a container).
-        // Registered FIRST so specific mocks (registered later) take priority
-        // (Playwright checks routes in reverse registration order).
-        await page.route('**/api/**', async (route) => {
-            await route.fulfill({ status: 200, body: '{}' });
-        });
-        await page.route('**/auth/**', async (route) => {
-            await route.fulfill({ status: 200, body: '{}' });
-        });
+        await mockUnmatchedBackendRequests(page);
 
         // Mock backend endpoints so tests don't depend on a real DT instance.
         await page.route('**/auth/me', async (route) => {
@@ -247,6 +239,7 @@ test.describe('Integration Tests (Real Backend)', () => {
 
         await page.goto('/');
         await page.waitForLoadState('networkidle');
+        await expect(page.getByPlaceholder('Filter projects...')).toBeVisible();
     });
 
 
