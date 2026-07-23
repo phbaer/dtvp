@@ -1,10 +1,15 @@
 **
 !.dockerignore
 !Dockerfile
+!Dockerfile.backup
 !pyproject.toml
 !uv.lock
 !start.sh
 !CHANGELOG.md
+!scripts/
+scripts/**
+!scripts/backup-compose-state-container.sh
+!scripts/run-backup-scheduler.sh
 !dtvp/
 !dtvp/**
 dtvp/**/__pycache__/

@@ -9,6 +9,11 @@ services:
       secrets:
         - ca-certs
 
+  dtvp-backup-scheduler:
+    build:
+      secrets:
+        - ca-certs
+
 secrets:
   ca-certs:
     file: ${DTVP_CA_CERTS_FILE}

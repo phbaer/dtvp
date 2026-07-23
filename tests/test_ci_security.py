@@ -39,7 +39,7 @@ def test_trusted_pull_requests_publish_only_pr_scoped_images():
     ) in workflow
     assert workflow.count(
         "github.event_name == 'pull_request' && format"
-    ) == 2
+    ) == 3
     assert (
         "format('{0}/{1}/dtvp:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, "
         "vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number)"
@@ -47,6 +47,11 @@ def test_trusted_pull_requests_publish_only_pr_scoped_images():
     assert (
         "format('{0}/{1}/agentyzer:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, "
         "vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number)"
+    ) in workflow
+    assert (
+        "format('{0}/{1}/dtvp-backup-scheduler:pr-{2}', "
+        "vars.RUNNER_PACKAGE_PUSH_HOST, vars.RUNNER_PACKAGE_PUSH_USER, "
+        "github.event.pull_request.number)"
     ) in workflow
     assert "delete-pr-images:" not in workflow
     assert "GIT_AUTH_TOKEN=" not in workflow
@@ -102,23 +107,24 @@ def test_ci_gates_dependencies_and_images_before_publishing():
         "TRIVY_SHA256: "
         "bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea"
     ) in workflow
-    assert workflow.count("trivy image") == 3
-    assert workflow.count("--exit-code 1") == 3
-    assert workflow.count("--ignore-unfixed=false") == 3
-    assert workflow.count("--pkg-types os,library") == 3
-    assert workflow.count("--scanners vuln") == 3
-    assert workflow.count("--severity HIGH,CRITICAL") == 3
+    assert workflow.count("trivy image") == 4
+    assert workflow.count("--exit-code 1") == 4
+    assert workflow.count("--ignore-unfixed=false") == 4
+    assert workflow.count("--pkg-types os,library") == 4
+    assert workflow.count("--scanners vuln") == 4
+    assert workflow.count("--severity HIGH,CRITICAL") == 4
     assert workflow.index("scan-images:") < workflow.index("build-push-images:")
 
 
 def test_ci_attaches_build_evidence_and_signs_release_digests():
     workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert workflow.count("provenance: mode=max") == 3
-    assert workflow.count("sbom: true") == 3
+    assert workflow.count("provenance: mode=max") == 4
+    assert workflow.count("sbom: true") == 4
     assert "id: build_dtvp" in workflow
     assert "id: build_dtvp_gil" in workflow
     assert "id: build_agentyzer" in workflow
+    assert "id: build_backup_scheduler" in workflow
     assert (
         "sigstore/cosign-installer@"
         "6f9f17788090df1f26f669e9d70d6ae9567deba6"
@@ -129,7 +135,10 @@ def test_ci_attaches_build_evidence_and_signs_release_digests():
     assert "dtvp@${DTVP_IMAGE_DIGEST}" in workflow
     assert "dtvp@${DTVP_GIL_IMAGE_DIGEST}" in workflow
     assert "agentyzer@${AGENTYZER_IMAGE_DIGEST}" in workflow
-    assert workflow.count("cosign verify --key /tmp/dtvp-cosign.pub") == 3
+    assert (
+        "dtvp-backup-scheduler@${BACKUP_SCHEDULER_IMAGE_DIGEST}"
+    ) in workflow
+    assert workflow.count("cosign verify --key /tmp/dtvp-cosign.pub") == 4
     assert "--key ${{ secrets.COSIGN_PRIVATE_KEY }}" not in workflow
 
 
