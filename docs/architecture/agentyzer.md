@@ -1,0 +1,64 @@
+---
+type: Component
+title: Agentyzer Architecture
+description: Isolated repository analysis service, persistent workspaces, asynchronous jobs, and credential hygiene.
+tags:
+  - agentyzer
+  - code-analysis
+  - architecture
+source_paths:
+  - agentyzer/src/
+  - agentyzer/config/prompts/
+  - agentyzer/pyproject.toml
+  - compose.yml
+review_when:
+  - Repository acquisition, workspace retention, job ownership, queue recovery, prompt handling, provider credentials, or analysis contracts change.
+---
+
+# Agentyzer Architecture
+
+Agentyzer is the bundled first-party code-analysis service. DTVP talks to it
+through the provider-neutral code-analysis integration rather than importing
+its internals. The service clones or updates source repositories, runs
+assessment jobs, and returns structured reachability and exploitability
+evidence.
+
+## Workspaces And Jobs
+
+Repository workspaces persist on the Agentyzer volume by design. Keeping them
+across scans avoids cloning the same repository for every project version and
+supports repeated analysis efficiently. Workspace cleanup is therefore not a
+normal post-scan action.
+
+Credentials are transient even though workspaces persist. Repository URLs and
+Git configuration must be sanitized after authenticated operations so tokens
+are not left in remotes, credential helpers, logs, prompts, or generated
+artifacts. A retained checkout must be safe to reuse without retaining the
+credential used to acquire it.
+
+Owner-scoped asynchronous jobs live in bounded SQLite storage on the repository
+volume. Pending jobs resume after restart; jobs that were running are marked
+interrupted. Terminal jobs default to seven-day retention and a 1,000-record
+cap. The database and service lease use owner-only permissions. One job runs at
+a time by default; DTVP queues additional work.
+
+## Trust Boundary
+
+Repositories, dependency metadata, advisories, web research, and model output
+are untrusted inputs. Repository content can provide evidence to an analysis
+but cannot override the service's task or security policy. Prompts and output
+must not contain source-control credentials, provider API keys, DTVP sessions,
+or unrelated tenant data.
+
+The service has its own API authentication and process/storage boundary. It
+does not become the DTVP identity provider: DTVP authorizes end users and sends
+only the scoped work that the service needs. LLM and source-control credentials
+are service credentials with the narrowest practical scope and rotation
+independent of DTVP user sessions.
+
+## Related Concepts
+
+- [Backend architecture](backend.md)
+- [Integration API surface](../integration-api-surface.md)
+- [Threat model](../threat-model.md)
+

@@ -1,3 +1,18 @@
+---
+type: Workflow
+title: DTVP Workflow Flowcharts
+description: Core vulnerability-review and optional TMRescore data flows.
+tags:
+  - workflows
+  - diagrams
+  - tmrescore
+source_paths:
+  - dtvp/
+  - frontend/src/
+review_when:
+  - Core review, assessment, rescoring, TMRescore, or frontend-to-backend workflow changes.
+---
+
 # DTVP Workflow Flowcharts
 
 This document summarizes the overall DTVP workflow and the optional TMRescore integration.

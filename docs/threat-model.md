@@ -1,12 +1,30 @@
+---
+type: Security Model
+title: DTVP Threat Model
+description: Security boundaries, abuse cases, implemented controls, and residual risks across the DTVP system.
+tags:
+  - security
+  - threat-model
+  - risk
+source_paths:
+  - dtvp/
+  - agentyzer/src/
+  - frontend/src/
+  - compose.yml
+  - .github/workflows/build-publish.yml
+review_when:
+  - A trust boundary, authentication flow, integration, durable store, exposed route, CI trust assumption, or deployment topology changes.
+---
+
 # DTVP Threat Model
 
 Last reviewed: 2026-07-21
 
 This document records DTVP's security boundaries, abuse cases, implemented
-controls, and residual risks. The canonical architecture and deployment model
-remain in the repository [README](../README.md); update this model whenever a
-trust boundary, authentication flow, integration, durable store, exposed route,
-or deployment topology changes.
+controls, and residual risks. The canonical curated context is in the
+[project overview](project.md) and [architecture index](architecture/). Update
+this model whenever a trust boundary, authentication flow, integration, durable
+store, exposed route, or deployment topology changes.
 
 ## Scope And Security Objectives
 

@@ -1,3 +1,20 @@
+---
+type: Integration
+title: External Integration API Surface
+description: HTTP contracts DTVP expects from optional TMRescore and code-analysis providers.
+tags:
+  - integrations
+  - api
+  - tmrescore
+  - code-analysis
+source_paths:
+  - dtvp/tmrescore_integration.py
+  - dtvp/code_analysis_integration.py
+  - openapi/
+review_when:
+  - Optional integration endpoints, authentication, request schemas, result schemas, or provider capabilities change.
+---
+
 # External Integration API Surface
 
 This document defines the external HTTP APIs expected by DTVP for the optional integrations.
