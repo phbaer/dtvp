@@ -1,9 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { mockUnmatchedBackendRequests } from './helpers/backend-routes';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
 
 test.describe('Per-Team Assessment UI Flow', () => {
     test.beforeEach(async ({ page }) => {
         page.on('dialog', dialog => dialog.accept());
+        await mockUnmatchedBackendRequests(page);
+
         // Mock Session
         await page.route('**/auth/me', async (route) => {
             await route.fulfill({
