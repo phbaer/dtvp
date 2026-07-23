@@ -59,9 +59,16 @@ def test_ci_gates_dependencies_and_images_before_publishing():
         "aquasecurity/trivy-action@"
         "ed142fd0673e97e23eac54620cfb913e5ce36c25"
     )
+    setup_trivy_ref = (
+        "aquasecurity/setup-trivy@"
+        "3fb12ec12f41e471780db15c232d5dd185dcb514"
+    )
     assert workflow.count(trivy_ref) == 2
+    assert workflow.count(setup_trivy_ref) == 1
     assert workflow.count("ignore-unfixed: false") == 2
     assert workflow.count("severity: HIGH,CRITICAL") == 2
+    assert workflow.count("skip-setup-trivy: true") == 2
+    assert workflow.count("cache: false") == 3
     assert workflow.index("scan-images:") < workflow.index("build-push-images:")
 
 
