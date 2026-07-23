@@ -15,10 +15,12 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from git import GitCommandError, Repo
 
+from src.configuration import AgentyzerRuntimeSettings
+
 logger = logging.getLogger(__name__)
 
 # Persistent directory for cloned repos.
-_REPOS_DIR = os.environ.get("AGENTYZER_REPOS_DIR", "repos")
+_REPOS_DIR = AgentyzerRuntimeSettings.from_env().repos_dir
 
 _LOCKS_DIRNAME = ".locks"
 _WORKTREES_DIRNAME = ".worktrees"

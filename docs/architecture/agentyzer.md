@@ -44,6 +44,11 @@ interrupted. Terminal jobs default to seven-day retention and a 1,000-record
 cap. The database and service lease use owner-only permissions. One job runs at
 a time by default; DTVP queues additional work.
 
+`agentyzer/src/configuration.py` owns service, workspace, concurrency,
+retention, and job-store defaults. Advisory prompt construction and manifest
+discovery live in `pipeline/advisory_context.py`, leaving `pipeline/nodes.py`
+focused on graph-state orchestration.
+
 ## Trust Boundary
 
 Repositories, dependency metadata, advisories, web research, and model output
@@ -72,4 +77,5 @@ suite covers only `dtvp/`.
 
 - [Backend architecture](backend.md)
 - [Integration API surface](../integration-api-surface.md)
+- [Runtime configuration](../configuration.md)
 - [Threat model](../threat-model.md)

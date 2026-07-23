@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .configuration import DurableStorageSettings
 from .vulnerability_backend import backend_scoped_file
 
 
@@ -14,11 +15,12 @@ GROUPED_VULN_SUMMARY_INDEX_SCHEMA_VERSION = 3
 
 
 def get_grouped_vuln_summary_index_path() -> str:
-    configured_path = os.getenv("DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH", "").strip()
+    settings = DurableStorageSettings.from_env()
+    configured_path = settings.grouped_summary_index_path
     if configured_path:
         return backend_scoped_file(configured_path)
 
-    dt_cache_path = Path(os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache"))
+    dt_cache_path = Path(settings.dt_cache_path)
     return backend_scoped_file(
         str(dt_cache_path.parent / "grouped_vuln_summary_index.sqlite")
     )

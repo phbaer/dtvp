@@ -13,16 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from .configuration import ProjectArchiveSettings
 from .dt_client import DTClient
 from .vulnerability_backend import backend_scoped_directory
 
 
 ARCHIVE_SCHEMA_VERSION = "dtvp.project-archive/v1"
 ARCHIVE_FILE_SUFFIX = ".dtvp-project-archive.zip"
-DEFAULT_ARCHIVE_MAX_FILES = 10_000
-DEFAULT_ARCHIVE_MAX_MEMBER_BYTES = 100 * 1024 * 1024
-DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
-DEFAULT_ARCHIVE_MAX_COMPRESSION_RATIO = 200
 _ALLOWED_ZIP_COMPRESSION = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
 
 
@@ -56,60 +53,34 @@ class ProjectArchiveServiceDeps:
 
 def get_project_archive_path() -> str:
     return backend_scoped_directory(
-        os.getenv("DTVP_PROJECT_ARCHIVE_PATH", "data/project_archives")
+        ProjectArchiveSettings.from_env().path
     )
 
 
 def project_archive_expanded_exports_enabled() -> bool:
-    return os.getenv("DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return ProjectArchiveSettings.from_env().expanded_enabled
 
 
 def get_project_archive_expanded_path() -> str:
     return backend_scoped_directory(
-        os.getenv("DTVP_PROJECT_ARCHIVE_EXPANDED_PATH", "data/project_archives_git")
+        ProjectArchiveSettings.from_env().expanded_path
     )
 
 
 def project_archive_snapshots_enabled() -> bool:
-    return os.getenv("DTVP_PROJECT_ARCHIVE_SNAPSHOT_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return ProjectArchiveSettings.from_env().snapshot_enabled
 
 
 def get_project_archive_interval_seconds() -> int:
-    value = os.getenv("DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS", "86400")
-    try:
-        return max(60, int(value))
-    except ValueError:
-        return 86400
+    return ProjectArchiveSettings.from_env().interval_seconds
 
 
 def get_project_archive_retention_count() -> int:
-    value = os.getenv("DTVP_PROJECT_ARCHIVE_RETENTION_COUNT", "30")
-    try:
-        return max(1, int(value))
-    except ValueError:
-        return 30
+    return ProjectArchiveSettings.from_env().retention_count
 
 
 def get_project_archive_include_names() -> list[str]:
-    raw = os.getenv("DTVP_PROJECT_ARCHIVE_INCLUDE", "")
-    return [item.strip() for item in raw.split(",") if item.strip()]
-
-
-def _archive_limit(setting: str, default: int) -> int:
-    try:
-        return max(1, int(os.getenv(setting, str(default))))
-    except (TypeError, ValueError):
-        return default
+    return list(ProjectArchiveSettings.from_env().include_names)
 
 
 def _utc_now_iso(now_provider: Callable[[], datetime]) -> str:
@@ -228,10 +199,8 @@ def _assert_safe_zip_name(name: str) -> None:
 
 def _validate_zip_limits(zip_file: zipfile.ZipFile) -> None:
     members = zip_file.infolist()
-    max_files = _archive_limit(
-        "DTVP_PROJECT_ARCHIVE_MAX_FILES",
-        DEFAULT_ARCHIVE_MAX_FILES,
-    )
+    settings = ProjectArchiveSettings.from_env()
+    max_files = settings.max_files
     if len(members) > max_files:
         raise ProjectArchiveValidationError(
             f"Archive contains more than {max_files} members"
@@ -239,18 +208,9 @@ def _validate_zip_limits(zip_file: zipfile.ZipFile) -> None:
 
     names: set[str] = set()
     total_size = 0
-    max_member_size = _archive_limit(
-        "DTVP_PROJECT_ARCHIVE_MAX_MEMBER_BYTES",
-        DEFAULT_ARCHIVE_MAX_MEMBER_BYTES,
-    )
-    max_total_size = _archive_limit(
-        "DTVP_PROJECT_ARCHIVE_MAX_UNCOMPRESSED_BYTES",
-        DEFAULT_ARCHIVE_MAX_UNCOMPRESSED_BYTES,
-    )
-    max_ratio = _archive_limit(
-        "DTVP_PROJECT_ARCHIVE_MAX_COMPRESSION_RATIO",
-        DEFAULT_ARCHIVE_MAX_COMPRESSION_RATIO,
-    )
+    max_member_size = settings.max_member_bytes
+    max_total_size = settings.max_uncompressed_bytes
+    max_ratio = settings.max_compression_ratio
 
     for member in members:
         _assert_safe_zip_name(member.filename.rstrip("/"))

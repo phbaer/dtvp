@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 import httpx
 
 from .dt_client import DTClient
-from .general_api_routes import AssessmentRequest
+from .general_api_models import AssessmentRequest
 
 
 ASSESSMENT_WRITE_RETRY_STATUS_CODES = frozenset(

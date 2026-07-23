@@ -99,6 +99,14 @@ from .code_analysis_integration import (
 )
 from .code_analysis_result_services import CodeAnalysisResultStore
 from .code_analysis_routes import create_code_analysis_router
+from .configuration import (
+    AutoAnalysisRuntimeSettings,
+    CodeAnalysisStoreSettings,
+    DurableStorageSettings,
+    RateLimitSettings,
+    TaskRuntimeSettings,
+    UiRuntimeSettings,
+)
 from .dt_cache import CacheManager, cache_manager
 from .dt_client import (
     DTClient,
@@ -160,7 +168,6 @@ from .python_runtime_services import (
 )
 from .query_execution_services import BoundedQueryExecutor, BoundedWorkExecutor
 from .runtime_state import DTVPRuntimeState
-from .runtime_value_services import get_env_int_with_floor
 from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
 )
@@ -259,63 +266,25 @@ project_archive_tasks = runtime_state.archive_tasks
 tmrescore_project_cache = runtime_state.tmrescore_project_cache
 tmrescore_analysis_tasks = runtime_state.tmrescore_analysis_tasks
 group_query_executor = BoundedQueryExecutor(
-    workers_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_QUERY_WORKERS",
-        default=4,
-        minimum=1,
-        logger=logger,
-    ),
-    max_pending_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_QUERY_MAX_PENDING",
-        default=8,
-        minimum=0,
-        logger=logger,
-    ),
+    workers_provider=lambda: TaskRuntimeSettings.from_env().group_query_workers,
+    max_pending_provider=lambda: TaskRuntimeSettings.from_env().group_query_max_pending,
 )
 group_build_executor = BoundedWorkExecutor(
     name="dtvp-group-build",
-    workers_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_BUILD_WORKERS",
-        default=2,
-        minimum=1,
-        logger=logger,
-    ),
-    max_pending_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_BUILD_MAX_PENDING",
-        default=4,
-        minimum=0,
-        logger=logger,
-    ),
+    workers_provider=lambda: TaskRuntimeSettings.from_env().group_build_workers,
+    max_pending_provider=lambda: TaskRuntimeSettings.from_env().group_build_max_pending,
 )
 group_postprocess_executor = BoundedWorkExecutor(
     name="dtvp-group-postprocess",
-    workers_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_POSTPROCESS_WORKERS",
-        default=1,
-        minimum=1,
-        logger=logger,
-    ),
-    max_pending_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_POSTPROCESS_MAX_PENDING",
-        default=2,
-        minimum=0,
-        logger=logger,
+    workers_provider=lambda: TaskRuntimeSettings.from_env().group_postprocess_workers,
+    max_pending_provider=lambda: (
+        TaskRuntimeSettings.from_env().group_postprocess_max_pending
     ),
 )
 detail_executor = BoundedWorkExecutor(
     name="dtvp-group-detail",
-    workers_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_DETAIL_WORKERS",
-        default=2,
-        minimum=1,
-        logger=logger,
-    ),
-    max_pending_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUP_DETAIL_MAX_PENDING",
-        default=8,
-        minimum=0,
-        logger=logger,
-    ),
+    workers_provider=lambda: TaskRuntimeSettings.from_env().group_detail_workers,
+    max_pending_provider=lambda: TaskRuntimeSettings.from_env().group_detail_max_pending,
 )
 _runtime_tasks: StartupRuntimeTasks | None = None
 _startup_task: asyncio.Task[Any] | None = None
@@ -668,14 +637,15 @@ async def security_health(user: str = Depends(get_current_user)):
             resource_type="security_status",
         )
         raise
+    rate_limits = RateLimitSettings.from_env()
     return {
         "security_audit": audit_health(),
         "durable_storage": durable_storage_health(),
         "rate_limits": {
-            "window_seconds": int(os.getenv("DTVP_RATE_LIMIT_WINDOW_SECONDS", "60")),
-            "authentication": int(os.getenv("DTVP_AUTH_RATE_LIMIT", "30")),
-            "expensive": int(os.getenv("DTVP_EXPENSIVE_RATE_LIMIT", "20")),
-            "mutation": int(os.getenv("DTVP_MUTATION_RATE_LIMIT", "120")),
+            "window_seconds": rate_limits.window_seconds,
+            "authentication": rate_limits.authentication,
+            "expensive": rate_limits.expensive,
+            "mutation": rate_limits.mutation,
         },
     }
 
@@ -727,21 +697,11 @@ task_event_hub = TaskEventHub()
 
 
 def _get_grouped_vuln_task_ttl_seconds() -> int:
-    return get_env_int_with_floor(
-        "DTVP_GROUPED_VULN_TASK_TTL_SECONDS",
-        default=900,
-        minimum=60,
-        logger=logger,
-    )
+    return TaskRuntimeSettings.from_env().grouped_vuln_ttl_seconds
 
 
 def _get_grouped_vuln_task_max_retained() -> int:
-    return get_env_int_with_floor(
-        "DTVP_GROUPED_VULN_TASK_MAX_RETAINED",
-        default=24,
-        minimum=1,
-        logger=logger,
-    )
+    return TaskRuntimeSettings.from_env().grouped_vuln_max_retained
 
 
 def _is_auto_code_analysis_active() -> bool:
@@ -752,12 +712,7 @@ def _is_auto_code_analysis_active() -> bool:
 
 grouped_vuln_summary_index = GroupedVulnSummaryIndex(
     path_provider=get_grouped_vuln_summary_index_path,
-    max_entries_provider=lambda: get_env_int_with_floor(
-        "DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES",
-        default=64,
-        minimum=1,
-        logger=logger,
-    ),
+    max_entries_provider=lambda: DurableStorageSettings.from_env().grouped_summary_index_max_entries,
     logger=logger,
 )
 
@@ -801,12 +756,7 @@ tmrescore_cache_service_deps = build_tmrescore_cache_service_deps(
 
 tmrescore_task_service_deps = build_tmrescore_task_service_deps(
     tmrescore_analysis_tasks=tmrescore_analysis_tasks,
-    get_tmrescore_task_ttl_seconds=lambda: get_env_int_with_floor(
-        "DTVP_TMRESCORE_TASK_TTL_SECONDS",
-        default=3600,
-        minimum=60,
-        logger=logger,
-    ),
+    get_tmrescore_task_ttl_seconds=lambda: TaskRuntimeSettings.from_env().tmrescore_ttl_seconds,
     context_path=context_path,
 )
 
@@ -1041,24 +991,9 @@ analysis_queue_service_deps = build_analysis_queue_service_deps(
 analysis_queue = build_analysis_queue(
     runtime_deps=analysis_queue_runtime_deps,
     service_deps=analysis_queue_service_deps,
-    get_analysis_queue_ttl_seconds=lambda: get_env_int_with_floor(
-        "DTVP_ANALYSIS_QUEUE_TTL_SECONDS",
-        default=3600,
-        minimum=60,
-        logger=logger,
-    ),
-    get_analysis_queue_capacity=lambda: get_env_int_with_floor(
-        "DTVP_ANALYSIS_QUEUE_CAPACITY",
-        default=1,
-        minimum=1,
-        logger=logger,
-    ),
-    get_analysis_queue_max_pending=lambda: get_env_int_with_floor(
-        "DTVP_ANALYSIS_QUEUE_MAX_PENDING",
-        default=1000,
-        minimum=1,
-        logger=logger,
-    ),
+    get_analysis_queue_ttl_seconds=lambda: TaskRuntimeSettings.from_env().analysis_queue_ttl_seconds,
+    get_analysis_queue_capacity=lambda: TaskRuntimeSettings.from_env().analysis_queue_capacity,
+    get_analysis_queue_max_pending=lambda: TaskRuntimeSettings.from_env().analysis_queue_max_pending,
     parse_iso_timestamp=parse_iso_timestamp_impl,
     utc_now=lambda: datetime.now(UTC),
     reindex_queue_items=reindex_queue_items,
@@ -1175,12 +1110,7 @@ auto_analysis_sweep_lock = asyncio.Lock()
 
 
 def _get_auto_analysis_sweep_interval_seconds() -> int:
-    return get_env_int_with_floor(
-        "DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS",
-        default=900,
-        minimum=60,
-        logger=logger,
-    )
+    return AutoAnalysisRuntimeSettings.from_env().sweep_seconds
 
 
 def _utc_now_iso() -> str:
@@ -1369,11 +1299,8 @@ api_router.include_router(
             code_analysis_disabled_detail="Code analysis integration is not configured. Set DTVP_CODE_ANALYSIS_URL to enable code analysis.",
             not_found_response=NOT_FOUND_RESPONSE,
             service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
-            get_dashboard_status_cache_seconds=lambda: get_env_int_with_floor(
-                "DTVP_CODE_ANALYSIS_DASHBOARD_CACHE_SECONDS",
-                default=3,
-                minimum=1,
-                logger=logger,
+            get_dashboard_status_cache_seconds=lambda: (
+                CodeAnalysisStoreSettings.from_env().dashboard_cache_seconds
             ),
         ),
         current_user_dependency=get_current_user,
@@ -1390,12 +1317,9 @@ register_frontend_routes(
         get_context_path=lambda: context_path,
         get_frontend_url=lambda: auth_settings.FRONTEND_URL or "",
         get_dev_disable_auth=lambda: auth_settings.DEV_DISABLE_AUTH,
-        get_default_project_filter=lambda: os.getenv("DTVP_DEFAULT_PROJECT_FILTER", ""),
-        get_attribution_age_filter_days=lambda: os.getenv(
-            "DTVP_ATTRIBUTION_AGE_FILTER_DAYS",
-            "7d,14d,28d",
-        ),
-        get_jira_create_url=lambda: os.getenv("DTVP_JIRA_CREATE_URL", ""),
+        get_default_project_filter=lambda: UiRuntimeSettings.from_env().default_project_filter,
+        get_attribution_age_filter_days=lambda: UiRuntimeSettings.from_env().attribution_age_filter_days,
+        get_jira_create_url=lambda: UiRuntimeSettings.from_env().jira_create_url,
         read_text=read_text_impl,
     ),
 )

@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .configuration import DurableStorageSettings
 from .vulnerability_backend import backend_scoped_file
 
 
@@ -14,7 +15,7 @@ class TMRescoreCacheServiceDeps:
 
 
 def get_tmrescore_cache_path() -> str:
-    configured_path = os.getenv("DTVP_TMRESCORE_CACHE_PATH", "").strip()
+    configured_path = DurableStorageSettings.from_env().tmrescore_cache_path
     if configured_path:
         return backend_scoped_file(configured_path)
     return backend_scoped_file(

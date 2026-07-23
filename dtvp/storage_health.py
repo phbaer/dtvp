@@ -13,11 +13,13 @@ from typing import Any, Iterable
 
 from .analysis_queue_state_services import get_analysis_queue_state_path
 from .code_analysis_result_services import get_code_analysis_results_sqlite_path
+from .configuration import DurableStorageSettings
 from .dt_cache import get_dt_cache_path
 from .grouped_vuln_summary_index_services import get_grouped_vuln_summary_index_path
 from .project_archive_services import (
     get_project_archive_expanded_path,
     get_project_archive_path,
+    project_archive_expanded_exports_enabled,
 )
 from .security_audit import get_security_audit_path
 from .tmrescore_cache_services import get_tmrescore_cache_path
@@ -31,26 +33,19 @@ class StatePath:
 
 
 def get_backup_status_path() -> str:
-    return os.getenv("DTVP_BACKUP_STATUS_PATH", "data/backup_status.json").strip()
+    return DurableStorageSettings.from_env().backup_status_path
 
 
 def get_backup_max_age_seconds() -> int:
-    raw = os.getenv("DTVP_BACKUP_MAX_AGE_SECONDS", "0")
-    try:
-        return max(0, int(raw))
-    except (TypeError, ValueError):
-        return 0
+    return DurableStorageSettings.from_env().backup_max_age_seconds
 
 
 def get_storage_min_free_bytes() -> int:
-    raw = os.getenv("DTVP_STORAGE_MIN_FREE_BYTES", str(128 * 1024 * 1024))
-    try:
-        return max(0, int(raw))
-    except (TypeError, ValueError):
-        return 128 * 1024 * 1024
+    return DurableStorageSettings.from_env().minimum_free_bytes
 
 
 def durable_state_paths() -> list[StatePath]:
+    settings = DurableStorageSettings.from_env()
     paths = [
         StatePath("vulnerability_cache", get_dt_cache_path(), "directory"),
         StatePath(
@@ -69,34 +64,26 @@ def durable_state_paths() -> list[StatePath]:
         StatePath("security_audit", get_security_audit_path(), "append_log"),
         StatePath(
             "team_mapping",
-            os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json"),
+            settings.team_mapping_path,
             "json",
         ),
         StatePath(
             "user_roles",
-            os.getenv("USER_ROLES_PATH", "data/user_roles.json"),
+            settings.user_roles_path,
             "json",
         ),
         StatePath(
             "rescore_rules",
-            os.getenv("RESCORE_RULES_PATH", "data/rescore_rules.json"),
+            settings.rescore_rules_path,
             "json",
         ),
         StatePath(
             "auto_analysis_guidance",
-            os.getenv(
-                "DTVP_AUTO_ANALYSIS_GUIDANCE_PATH",
-                "data/auto_analysis_guidance.json",
-            ),
+            settings.auto_analysis_guidance_path,
             "json",
         ),
     ]
-    if os.getenv("DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }:
+    if project_archive_expanded_exports_enabled():
         paths.append(
             StatePath(
                 "expanded_project_archives",

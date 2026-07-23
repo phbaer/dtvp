@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
 from src.api.jobs import Job
+from src.configuration import AgentyzerRuntimeSettings, JobStoreSettings
 
 
 JOB_STORE_SCHEMA_VERSION = 1
@@ -19,38 +20,25 @@ TERMINAL_JOB_STATUSES = ("completed", "failed", "cancelled")
 
 
 def get_job_store_path() -> str:
-    configured_path = os.environ.get("AGENTYZER_JOB_STORE_PATH", "").strip()
-    if configured_path:
-        return configured_path
-    repos_dir = os.environ.get("AGENTYZER_REPOS_DIR", "repos")
-    return os.path.join(repos_dir, "agentyzer_jobs.sqlite")
+    settings = JobStoreSettings.from_env()
+    if settings.path:
+        return settings.path
+    return os.path.join(
+        AgentyzerRuntimeSettings.from_env().repos_dir,
+        "agentyzer_jobs.sqlite",
+    )
 
 
 def get_job_retention_seconds() -> int:
-    raw_value = os.environ.get("AGENTYZER_JOB_RETENTION_SECONDS", "604800")
-    try:
-        return max(0, int(raw_value))
-    except (TypeError, ValueError):
-        return 604800
+    return JobStoreSettings.from_env().retention_seconds
 
 
 def get_job_max_records() -> int:
-    raw_value = os.environ.get("AGENTYZER_JOB_MAX_RECORDS", "1000")
-    try:
-        return max(1, int(raw_value))
-    except (TypeError, ValueError):
-        return 1000
+    return JobStoreSettings.from_env().max_records
 
 
 def get_storage_min_free_bytes() -> int:
-    raw_value = os.environ.get(
-        "AGENTYZER_STORAGE_MIN_FREE_BYTES",
-        str(128 * 1024 * 1024),
-    )
-    try:
-        return max(0, int(raw_value))
-    except (TypeError, ValueError):
-        return 128 * 1024 * 1024
+    return JobStoreSettings.from_env().minimum_free_bytes
 
 
 def _utc_now() -> datetime:

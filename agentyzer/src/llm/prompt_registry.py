@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
 
 import yaml
 
+from src.configuration import AgentyzerRuntimeSettings
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BUNDLED_CONFIG_DIR = _REPO_ROOT / "config"
 _BUNDLED_PROMPTS_DIR = _BUNDLED_CONFIG_DIR / "prompts"
 
 # Test hooks and optional runtime overrides.
-_CONFIG_DIR: str | Path | None = os.environ.get("AGENTYZER_CONFIG_DIR")
+_CONFIG_DIR: str | Path | None = AgentyzerRuntimeSettings.from_env().config_dir or None
 _PROMPTS_DIR: str | Path | None = None
 
 _REQUIRED_PROMPT_KEYS: Dict[str, tuple[str, ...]] = {
