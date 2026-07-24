@@ -24,6 +24,6 @@ source and update the affected concept in the same change.
 
 - [Vendor-neutral runtime configuration, Arcane deployment, demo boundary, and Compose backup reference](configuration.md)
 - [External integration API surface](integration-api-surface.md)
-- [Threat model](threat-model.md)
+- [Threat model, CI toolchain pinning, and supply-chain controls](threat-model.md)
 - [Workflow flowcharts](workflow-flowcharts.md)
 - [Screen guide](screens.md)

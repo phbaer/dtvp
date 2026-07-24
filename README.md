@@ -82,8 +82,9 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Regenerate Agentyzer OpenAPI | `cd agentyzer && uv run python ../scripts/generate-agentyzer-openapi.py` |
 | Regenerate the Forgejo workflow | `uv run python scripts/sync-forgejo-workflow.py` |
 | Validate the OKF knowledge bundle | `uv run python scripts/validate-okf.py docs` |
-| Scan Python source for security issues | `uv run bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src` |
+| Scan Python source for security issues | `uv run bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src threatmodel` |
 | Audit Python dependencies | `uv run pip-audit --local --vulnerability-service=osv` |
+| Generate the OWASP pytm analysis | `./scripts/generate-threat-model.sh` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |
@@ -102,21 +103,24 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml` and its Forgejo-native counterpart at
 `.forgejo/workflows/build-publish.yml`. Forgejo prefers its native directory;
-that copy omits GitHub's unsupported `permissions` field, while the GitHub copy
-retains a read-only default. The GitHub file is canonical; regenerate the
-Forgejo file with `scripts/sync-forgejo-workflow.py` after editing it. CI
-rejects drift between the two files. Their image tags must exactly match the
-resolved `@playwright/test` version in `frontend/package-lock.json`; update all
-three in the same change. The regular, manual, and real-stack Playwright
-configurations cover Chromium, Firefox, and WebKit desktop browsers.
+that copy omits GitHub's unsupported `permissions` field and translates
+GitHub's artifact uploader to Forgejo's compatible action, while the GitHub
+copy retains a read-only default and GitHub's native artifact protocol. The
+GitHub file is canonical; regenerate the Forgejo file with
+`scripts/sync-forgejo-workflow.py` after editing it. CI rejects drift between
+the two files. Their image tags must exactly match the resolved
+`@playwright/test` version in `frontend/package-lock.json`; update all three and
+regenerate the Forgejo counterpart in the same change. The regular, manual,
+and real-stack Playwright configurations cover Chromium, Firefox, and WebKit
+desktop browsers.
 The Vitest configuration keeps local TypeScript config imports explicit so it
 also loads with Vite's native config loader. It caps the process pool at four
 workers so jsdom-heavy component tests do not contend past their per-test
 timeouts; validate config changes with
 `cd frontend && npx vitest --run --configLoader native`.
-CI uses `setup-uv`'s direct latest-release path, which avoids the remote version
-manifest that range resolution requires. `Dockerfile.free-threaded` likewise
-uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
+CI installs the same exact uv release pinned in the application images, avoiding
+mutable latest-version discovery. `Dockerfile.free-threaded` likewise uses
+Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
 argument to a versioned tag or digest when a reproducible external build needs
 an explicit override. Pull-request runs cancel superseded workflow executions,
 and image publication waits for Python (including Agentyzer), frontend, and
@@ -133,9 +137,10 @@ trusted pull requests publish DTVP, Agentyzer, and backup-scheduler images as
 `pr-<number>` without changing the `dev`, `latest`, or version tags. Registry
 credentials and image publishing otherwise remain limited to trusted `main`
 and version-tag push events. Third-party actions are pinned to immutable commit
-SHAs with their major versions recorded in comments.
-Coverage, browser, and SBOM artifacts use Forgejo's Node 20 v3 upload action
-because this Forgejo instance does not support GitHub's v4 artifact protocol.
+SHAs with their major versions recorded in comments. GitHub artifact uploads
+use its native v7 action. The generated Forgejo workflow substitutes Forgejo's
+Node 20 v3 upload action because this Forgejo instance does not support
+GitHub's v4+ artifact protocol.
 Image scanning downloads the pinned Trivy release archive once, verifies its
 hard-coded SHA-256, and invokes the binary directly so the Forgejo `act` runner
 does not depend on an action mirror, nested installer, or action-cache service.
@@ -1278,13 +1283,16 @@ history changes.
 
 The publish workflow is fail-closed around the software supply chain. It audits
 the locked Python graph with `pip-audit`, scans the DTVP and Agentyzer Python
-source with Bandit, audits both npm lockfiles, and rejects Node operations when
-TLS certificate verification has been disabled. Before a tag is created or an
-image is published, separate local DTVP, Agentyzer, and backup-scheduler image
-candidates are scanned for all HIGH and CRITICAL operating-system and library
-vulnerabilities, including vulnerabilities that do not yet have a fix. Every
-published image carries BuildKit SBOM and maximum-mode provenance attestations
-in the registry.
+source with Bandit, executes the combined DTVP/Agentyzer
+[OWASP pytm model](threatmodel/dtvp.py), audits both npm lockfiles, and rejects
+Node operations when TLS certificate verification has been disabled. The pytm
+run includes DTVP's vscorer, vulnerability-backend, identity, and Agentyzer
+connections and publishes its Markdown findings, JSON model, and Graphviz DFD
+as a CI artifact. Before a tag is created or an image is published, separate
+local DTVP, Agentyzer, and backup-scheduler image candidates are scanned for all
+HIGH and CRITICAL operating-system and library vulnerabilities, including
+vulnerabilities that do not yet have a fix. Every published image carries
+BuildKit SBOM and maximum-mode provenance attestations in the registry.
 
 Release images are signed by immutable digest with cosign. Configure an
 encrypted cosign private key and its password as protected CI secrets named

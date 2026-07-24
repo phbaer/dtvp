@@ -18,6 +18,7 @@ data/dt_cache/
 data/backend_cache/
 data/backends/
 backups/
+threat-model-results/
 data/backup_status.json
 data/dtvp-runtime.lock
 

@@ -13,12 +13,16 @@ source_paths:
   - frontend/src/
   - compose.yml
   - deploy/arcane/compose.yml
+  - threatmodel/dtvp.py
+  - threatmodel/report-template.md
+  - scripts/generate-threat-model.sh
   - demo/dependency-track/compose.yml
   - Dockerfile.backup
   - scripts/backup-compose-state-container.sh
   - scripts/run-backup-scheduler.sh
   - .github/workflows/build-publish.yml
   - .forgejo/workflows/build-publish.yml
+  - scripts/sync-forgejo-workflow.py
 review_when:
   - A trust boundary, authentication flow, integration, durable store, exposed route, CI trust assumption, or deployment topology changes.
 ---
@@ -72,6 +76,7 @@ flowchart LR
     Gateway -->|Host-checked HTTP| DTVP[DTVP API]
     DTVP -->|OIDC code + PKCE| IdP[External IdP]
     DTVP -->|adapter service credential| Backend[Vulnerability backend]
+    DTVP -->|threat model + SBOM; task polling| Vscorer[External vscorer]
     Backend --> DT[External Dependency-Track]
     Backend -. disabled until verified .-> Cybeats[Cybeats scaffold]
     DTVP -->|owner + service/admin token| Analyzer[Agentyzer]
@@ -89,12 +94,31 @@ flowchart LR
 | Browser to nginx/DTVP | Cookies, headers, Markdown, filters, uploads, assessment changes | DTVP OIDC session |
 | DTVP to IdP | Discovery/JWKS documents, authorization response, ID token | OIDC client and PKCE transaction |
 | DTVP to vulnerability backend | Vendor JSON, paging, findings, SBOMs, assessment writes | Least-privilege review service credential |
+| DTVP to vscorer | Threat model, analysis SBOM, optional item/config inputs, task status, generated assessment | Configured HTTPS service endpoint; no browser credential forwarding |
 | Archive workflow to backend | Uploaded archive and potentially project/BOM creation | Separate import service credential |
 | DTVP to Agentyzer | Repository target, vulnerability context, guidance, owner identity | Normal service token; separate admin token for `*` scope |
 | Agentyzer to Git/LLM/web | Source, credentials, model prompts/output, researched content | Per-repository Git secret and configured LLM/research policy |
 | Processes to state volumes | Source, SBOMs, findings, queues, jobs, audits, archives | Non-root runtime UID and exclusive process lease |
 | Optional backup scheduler to Docker Engine | Container discovery plus pause/resume operations | Docker socket; host-administrator-equivalent operator trust |
 | CI to registry | Source checkout, build context, signing key, image and attestations | Protected CI/registry/cosign credentials |
+
+### Executable OWASP pytm Analysis
+
+`threatmodel/dtvp.py` is the model-as-code companion to this curated security
+model. It covers DTVP, Agentyzer, their separate state volumes, the configured
+LLM, Git and research access, the vulnerability backend, the IdP, and the
+multipart/asynchronous vscorer flows. Run:
+
+```sh
+./scripts/generate-threat-model.sh
+```
+
+The command writes a Markdown findings report, serialized model JSON, and a
+colorized Graphviz DFD source under `threat-model-results/`. CI runs the same
+analysis and uploads those files. Model or template execution failures block
+the workflow. Generated pytm findings are candidates for security review; they
+do not automatically supersede the implemented-control decisions and residual
+risk acceptances recorded below.
 
 ## Assets And Classification
 
@@ -161,8 +185,9 @@ hard tenant boundary.
 | T12 Information disclosure | Preserved workspaces expose private source after scans. | Credentials are scrubbed, per-run worktrees are isolated and pruned, containers are non-root, volumes are narrowly mounted, backup helpers have no network, and the disposable repository volume is excluded from backups. | Clone objects intentionally persist to speed repeated scans. Restrict the repository volume, define source-retention policy, and discard/re-clone it when needed. |
 | T13 Tampering / disclosure | XSS or unsafe Markdown changes UI behavior or extracts session data. | Vue escaping, shared DOMPurify allowlist, restrictive CSP and other browser headers, no environment-derived inline runtime script. | A sanitizer/browser/frontend dependency defect remains possible; keep npm audit and image scanning gates active. |
 | T14 Denial / data loss | Disk exhaustion, SQLite corruption, stale backups, or unbounded audit logs make state unavailable. | Minimum-free-space and integrity health, readiness probes, owner-only SQLite/audit files, bounded audit rotation, durable queues, backup freshness marker, verified manual backup, and optional interval-based Compose scheduler with retry and overlap locking. | Enabling the scheduler, retention, encryption, off-host replication, external backend backup, monitoring, and restore tests remain operator responsibilities. Readiness is not a substitute for restore testing. |
-| T15 Supply-chain tampering | A dependency, action, builder, runner, or base image injects code into releases. | Lockfiles, immutable action/base/runtime image pins, minimal Alpine application images, a checksum-pinned Trivy binary, parity-tested GitHub/Forgejo workflows, same-repository PR gating with PR-scoped image tags, dependency/Bandit/npm/Trivy gates, BuildKit SBOM/provenance, release digest signing and immediate cosign verification. | A trusted runner or signing-key compromise can still produce a valid malicious artifact. Protect/rotate keys and isolate protected runners. |
+| T15 Supply-chain tampering | A dependency, action, builder, runner, or base image injects code into releases. | Lockfiles, immutable action/base/runtime image pins, an exact shared uv version across CI and application images, minimal Alpine application images, a checksum-pinned Trivy binary, parity-tested GitHub/Forgejo workflows with provider-native pinned artifact actions, same-repository PR gating with PR-scoped image tags, dependency/Bandit/npm/Trivy gates, BuildKit SBOM/provenance, release digest signing and immediate cosign verification. | A trusted runner or signing-key compromise can still produce a valid malicious artifact. Protect/rotate keys and isolate protected runners. |
 | T16 Elevation / lateral movement | Compromised service pivots to databases, analyzers, other egress zones, or host. | Separate internal/outbound networks, dropped capabilities, read-only roots, non-root users, no-new-privileges, PID/log limits, narrowly writable mounts; the socket-bearing scheduler is profile-gated, has no published port or external network, and runs only repository-owned backup code. | Docker socket access is host-administrator-equivalent and defeats container isolation if the scheduler is compromised. Keep the profile disabled unless that trust is accepted, use a dedicated patched host, and monitor Docker Engine operations. |
+| T17 Tampering / disclosure | A malicious or compromised vscorer endpoint returns forged assessments, sustains polling, or retains uploaded threat models and SBOMs. | Exact operator-configured URL, normal TLS validation, bounded upload sizes, request timeouts, finite task retention, structured result validation, and no forwarding of browser credentials. | vscorer is an independently operated trusted integration that receives security design and inventory data. Approve its data handling, restrict network egress to the intended service, and require human review before applying generated assessments. |
 
 ## Dependency-Track Adapter Credential Decision
 
