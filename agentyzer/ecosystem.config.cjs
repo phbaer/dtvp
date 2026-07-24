@@ -59,7 +59,7 @@ module.exports = {
         ...dotEnv,
         PYTHONUNBUFFERED: "1",
         AGENTYZER_CONFIG_DIR: "config",
-        LOG_LEVEL: "INFO",
+        AGENTYZER_LOG_LEVEL: "INFO",
         PORT: String(port),
       },
     },

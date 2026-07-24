@@ -15,8 +15,22 @@ def _source(environment: Environment | None) -> Environment:
     return os.environ if environment is None else environment
 
 
+def environment_text(
+    environment: Environment,
+    name: str,
+    default: str = "",
+    *,
+    legacy_name: str | None = None,
+) -> str:
+    """Read a canonical setting, falling back to a deprecated alias."""
+    value = environment.get(name)
+    if value is None and legacy_name is not None:
+        value = environment.get(legacy_name)
+    return (default if value is None else value).strip()
+
+
 def _text(environment: Environment, name: str, default: str = "") -> str:
-    return environment.get(name, default).strip()
+    return environment_text(environment, name, default)
 
 
 def _integer(
@@ -60,7 +74,12 @@ class AgentyzerRuntimeSettings:
             ).lower(),
             repos_dir=_text(source, "AGENTYZER_REPOS_DIR", "repos"),
             config_dir=_text(source, "AGENTYZER_CONFIG_DIR"),
-            log_level=_text(source, "LOG_LEVEL", "INFO").upper(),
+            log_level=environment_text(
+                source,
+                "AGENTYZER_LOG_LEVEL",
+                "INFO",
+                legacy_name="LOG_LEVEL",
+            ).upper(),
             max_concurrent_jobs=_integer(
                 source,
                 "AGENTYZER_MAX_CONCURRENT_JOBS",

@@ -12,6 +12,7 @@ source_paths:
   - agentyzer/Dockerfile
   - frontend/src/
   - compose.yml
+  - deploy/arcane/compose.yml
   - demo/dependency-track/compose.yml
   - Dockerfile.backup
   - scripts/backup-compose-state-container.sh
@@ -42,6 +43,9 @@ systems whose internal security and backup lifecycle are outside DTVP's
 control. Their interfaces and the data DTVP sends to them are in scope. The
 optional Dependency-Track demo is an explicitly non-production adapter
 exercise environment, not part of the DTVP deployment boundary.
+The optional Arcane topology publishes DTVP directly and delegates project
+environment storage, image pulls, deployment control, and volume backup access
+to the privileged Arcane operator boundary.
 
 The primary objectives are:
 
@@ -134,6 +138,10 @@ hard tenant boundary.
   state volume. Multiple workers require an external coordinator.
 - Security failures do not enable authentication bypasses, wildcard host
   access, cross-origin mutation, insecure TLS, or silent adapter fallback.
+- Arcane project configuration uses separate non-secret environment files per
+  service and explicit Compose secret files. Arcane administrators and the
+  Docker host remain privileged and can still read the source project
+  environment.
 
 ## Threat Analysis
 
@@ -204,6 +212,7 @@ security control, not a missing feature to bypass.
 | LLM prompt injection and approved-provider source disclosure | High | Deploy only with an approved private/data-governed model; require human review and retain deterministic claim checks. |
 | Backend review credential may have vendor-wide write scope | Medium-high | Minimize vendor-side scope, rotate through supported overlap, and monitor both DTVP and backend audits. |
 | Local audit file is mutable by host administrators | Medium-high | Forward to immutable authenticated storage and alert on health/write failures. |
+| Arcane project environment and volume backups are operator-controlled | Medium-high | Restrict Arcane project/volume permissions, protect its data and backup mounts, stop DTVP before volume snapshots, and keep secrets out of Git. |
 | Cached repository source and DTVP backups require separate protection | Medium-high | Restrict and securely discard the disposable repository cache; encrypt DTVP backups, define retention, and test secure deletion independently. |
 | Optional backup scheduler holds Docker Engine authority | High when enabled | Keep the profile optional, restrict deployment/image modification, isolate and patch the Docker host, monitor Engine activity, or use an external host scheduler instead. |
 | Single-process coordination is an availability and scaling limit | Medium | Keep one worker per volume; design shared queue/leases/rate limits before horizontal scaling. |

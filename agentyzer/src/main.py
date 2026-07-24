@@ -51,7 +51,7 @@ from src.api.models import (
     StepFindings,
 )
 from src.benchmark import compare_benchmark_with_llm, deterministic_benchmark_fallback
-from src.configuration import AgentyzerRuntimeSettings
+from src.configuration import AgentyzerRuntimeSettings, environment_text
 from src.job_runtime import JobCapacityExceeded, JobRuntime, JobStoreUnavailable
 from src.job_store import JobStore
 from src.llm import OllamaClient, OpenWebUIClient, create_llm_client
@@ -107,7 +107,11 @@ def _describe_llm_backend(client: object) -> str:
 
 
 def _llm_provider_for_client(client: object) -> str:
-    configured = os.environ.get("LLM_BACKEND")
+    configured = environment_text(
+        os.environ,
+        "AGENTYZER_LLM_BACKEND",
+        legacy_name="LLM_BACKEND",
+    )
     if configured:
         return configured.lower()
     if isinstance(client, OpenWebUIClient):

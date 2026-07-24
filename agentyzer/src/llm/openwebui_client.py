@@ -5,10 +5,8 @@ This client streams the response using SSE (Server-Sent Events) and
 concatenates the delta tokens, matching the ``LLMClient`` interface used
 by the rest of the pipeline.
 
-Required environment variables (see ``main.py``):
-    OPENWEBUI_HOST   — base URL, e.g. ``http://localhost:3000``
-    OPENWEBUI_MODEL  — model identifier served by OpenWebUI
-    OPENWEBUI_API_KEY — Bearer token for authentication
+Runtime configuration uses the ``AGENTYZER_OPENWEBUI_*`` namespace. Historical
+``OPENWEBUI_*`` names remain compatibility aliases.
 """
 
 from __future__ import annotations
@@ -22,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from src.configuration import environment_text
 from src.http import async_client
 from src.llm.base import LLMClient
 
@@ -80,7 +79,8 @@ def _normalize_tool_call_mode(value: str | None) -> str:
     if normalized in _TOOL_CALL_MODES:
         return normalized
     logger.warning(
-        "Unknown OPENWEBUI_TOOL_CALLS=%r; falling back to auto", value
+        "Unknown AGENTYZER_OPENWEBUI_TOOL_CALLS=%r; falling back to auto",
+        value,
     )
     return "auto"
 
@@ -106,11 +106,21 @@ def _nonnegative_int(value: Any, *, default: int | None = None) -> int | None:
 
 
 def _int_env(name: str, *, default: int | None = None) -> int | None:
-    return _positive_int(os.environ.get(name), default=default)
+    value = environment_text(
+        os.environ,
+        f"AGENTYZER_{name}",
+        legacy_name=name,
+    )
+    return _positive_int(value, default=default)
 
 
 def _nonnegative_int_env(name: str, *, default: int | None = None) -> int | None:
-    return _nonnegative_int(os.environ.get(name), default=default)
+    value = environment_text(
+        os.environ,
+        f"AGENTYZER_{name}",
+        legacy_name=name,
+    )
+    return _nonnegative_int(value, default=default)
 
 
 def _estimate_text_tokens(value: Any) -> int:

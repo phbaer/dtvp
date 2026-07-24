@@ -90,6 +90,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
 | Regenerate CycloneDX SBOMs | `./scripts/generate-sboms.sh` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
+| Deploy with Arcane | See [`deploy/arcane/`](deploy/arcane/README.md) |
 | Start the optional Dependency-Track demo | `docker compose --env-file .env --env-file demo/dependency-track/.env -f compose.yml -f demo/dependency-track/compose.yml up -d` |
 | Back up packaged durable state | `./scripts/backup-compose-state.sh /absolute/backup/root` |
 | Enable scheduled Compose backups | `docker compose --profile backup up -d` |
@@ -565,6 +566,13 @@ Dependency-Track adapter, use the isolated setup in
 [`demo/dependency-track/`](demo/dependency-track/README.md); its services,
 credentials, networks, volumes, and nginx routes are not part of the default
 stack.
+
+For image-only deployment through Arcane, use the self-contained
+[`deploy/arcane/`](deploy/arcane/README.md) project. The same Compose file can
+be pasted into a manually managed Arcane project or selected at
+`deploy/arcane/compose.yml` for Git sync. Arcane retains an editable project
+environment outside the read-only Git workspace for secrets, while
+service-specific non-secret settings remain separately versioned.
 
 To rotate the DTVP session-signing key without immediately logging out every
 user, move the old value to `DTVP_SESSION_PREVIOUS_SECRET_KEY`, generate a new

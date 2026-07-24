@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.
   backups to DTVP-owned state while excluding disposable Agentyzer clones.
 - Replace the PostgreSQL-derived backup scheduler with a minimal Alpine image
   containing only the Docker CLI needed to pause DTVP during snapshots.
+- Add an image-only Arcane deployment project for both manual and Git-managed
+  operation, with durable DTVP state separated from disposable Agentyzer data.
+- Separate Arcane runtime settings into per-service non-secret env files and
+  make `AGENTYZER_*` the canonical LLM/logging namespace while retaining the
+  historical unprefixed names as compatibility aliases.
 
 ## [1.0.15] — 2026-07-20
 

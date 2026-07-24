@@ -13,7 +13,7 @@ def test_agentyzer_runtime_settings_normalize_values():
         {
             "AGENTYZER_ENVIRONMENT": " TEST ",
             "AGENTYZER_REPOS_DIR": " /srv/repos ",
-            "LOG_LEVEL": "debug",
+            "AGENTYZER_LOG_LEVEL": "debug",
             "AGENTYZER_MAX_CONCURRENT_JOBS": "0",
             "AGENTYZER_WORKTREE_RETENTION_SECONDS": "5",
             "AGENTYZER_ALLOW_UNAUTHENTICATED": "yes",
@@ -28,6 +28,22 @@ def test_agentyzer_runtime_settings_normalize_values():
     assert settings.worktree_retention_seconds == 300
     assert settings.allow_unauthenticated is True
     assert settings.allow_external_focus_path is True
+
+
+def test_agentyzer_log_level_prefers_prefix_and_accepts_legacy_alias():
+    assert (
+        AgentyzerRuntimeSettings.from_env(
+            {
+                "AGENTYZER_LOG_LEVEL": "warning",
+                "LOG_LEVEL": "debug",
+            }
+        ).log_level
+        == "WARNING"
+    )
+    assert (
+        AgentyzerRuntimeSettings.from_env({"LOG_LEVEL": "debug"}).log_level
+        == "DEBUG"
+    )
 
 
 def test_agentyzer_invalid_storage_numbers_use_defaults():
