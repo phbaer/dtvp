@@ -110,7 +110,7 @@ from .dt_client import (
     DTSettings,
     get_configured_backend_descriptor,
     get_client,
-    validate_dependency_track_configuration,
+    validate_vulnerability_backend_configuration,
 )
 from .file_io_services import read_text as read_text_impl
 from .file_io_services import (
@@ -318,7 +318,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         validate_auth_configuration()
         validate_code_analysis_configuration()
-        validate_dependency_track_configuration()
+        validate_vulnerability_backend_configuration()
         validate_security_audit_configuration()
         validate_durable_storage()
         _runtime_tasks = None

@@ -22,7 +22,7 @@ source and update the affected concept in the same change.
 
 ## Specialized References
 
-- [Runtime configuration and Compose backup scheduling reference](configuration.md)
+- [Vendor-neutral runtime configuration, demo boundary, and Compose backup reference](configuration.md)
 - [External integration API surface](integration-api-surface.md)
 - [Threat model](threat-model.md)
 - [Workflow flowcharts](workflow-flowcharts.md)

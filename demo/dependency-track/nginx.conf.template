@@ -20,7 +20,6 @@ server {
     limit_req_status 429;
     proxy_hide_header Server;
 
-    # Proxy DTVP backend and SPA under the configured context path.
     location = ${DTVP_CONTEXT_PATH} {
         return 301 ${DTVP_CONTEXT_PATH}/;
     }
@@ -51,7 +50,29 @@ server {
         proxy_set_header X-Request-ID $request_id;
     }
 
+    location /api/ {
+        limit_req zone=dtvp_general burst=60 nodelay;
+        proxy_pass http://demo-dependency-track-api:8080/api/;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+    }
+
     location / {
-        return 302 ${DTVP_CONTEXT_PATH}/;
+        limit_req zone=dtvp_general burst=60 nodelay;
+        proxy_pass http://demo-dependency-track-frontend:8080;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
     }
 }

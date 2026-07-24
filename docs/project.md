@@ -11,20 +11,23 @@ source_paths:
   - pyproject.toml
   - frontend/package.json
   - compose.yml
+  - demo/dependency-track/compose.yml
+  - demo/dependency-track/ecosystem.config.js
 review_when:
   - The project purpose, top-level repository structure, runtime services, or documentation hierarchy changes.
 ---
 
 # DTVP Project Overview
 
-DTVP is a FastAPI and Vue application for reviewing Dependency-Track findings
+DTVP is a FastAPI and Vue application for reviewing vulnerability findings
 across every version of a project. It groups findings by vulnerability, exposes
 version-by-version assessment state, and lets reviewers apply consistent
 changes without repeating the same work for every release.
 
 The vulnerability-backend boundary is capability-based: Dependency-Track is
-the current provider, while Cybeats and other vendors can be added without
-making their resource identifiers or credentials part of the domain model.
+the first adapter, while Cybeats and other vendors can be added without making
+their resource identifiers or credentials part of the domain model. Backends
+are independently operated source systems; they are not DTVP services or state.
 TMRescore and code analysis are optional integrations.
 
 ## Repository Map
@@ -35,6 +38,7 @@ TMRescore and code analysis are optional integrations.
 | `agentyzer/` | Bundled code-analysis service and assessment pipeline |
 | `frontend/` | Vue 3, Vite, and Tailwind single-page application |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
+| `demo/dependency-track/` | Optional, isolated Dependency-Track demonstration deployment and local mock runtime |
 | `tests/` | Backend pytest suite |
 | `data/` | Local configuration, cache data, mappings, rules, and archives |
 | `dtvp/migrations/` | Numbered SQLite migrations for local stores |
@@ -60,14 +64,15 @@ Browser
 The supported deployment uses one DTVP API process per state volume and one
 Agentyzer process per repository volume. Horizontal scaling requires shared
 coordination and task/result storage before multiple API workers use the same
-durable state.
+durable state. Default Compose deploys no vulnerability backend or backend
+database; operators select an adapter and connect DTVP to an external source.
 
 The optional Compose `backup` profile runs a single interval scheduler. It
-briefly pauses this Compose project's writer containers, dumps PostgreSQL,
-archives all application volumes, verifies both artifacts, records checksums,
-and updates the DTVP backup-freshness marker. Because that coordination uses
-the Docker Engine socket, the scheduler is an explicitly privileged operator
-component and is not enabled by default.
+briefly pauses DTVP, archives `./data`, verifies the archive, records checksums,
+and updates the DTVP backup-freshness marker. Backend state is outside this
+boundary, and the Agentyzer repository/job volume is a disposable cache.
+Because that coordination uses the Docker Engine socket, the scheduler is an
+explicitly privileged operator component and is not enabled by default.
 
 ## Knowledge Map
 

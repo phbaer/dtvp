@@ -55,8 +55,9 @@ def build_startup_runtime_details() -> dict[str, dict[str, Any]]:
             "context_path": os.getenv("DTVP_CONTEXT_PATH", "/"),
             "frontend_url": os.getenv("DTVP_FRONTEND_URL", "http://localhost:8000"),
             "cors_origins": _configured(os.getenv("DTVP_CORS_ORIGINS")),
-            "dependency_track": _configured(
-                os.getenv("DTVP_DT_API_URL")
+            "vulnerability_backend": _configured(
+                os.getenv("DTVP_VULNERABILITY_BACKEND_API_URL")
+                or os.getenv("DTVP_DT_API_URL")
                 or os.getenv("DEPENDENCY_TRACK_URL")
             ),
             "oidc": _configured(
@@ -181,7 +182,7 @@ async def start_application_runtime(
     dt_cache_started_at = time.perf_counter()
     await deps.initialize_cache_manager()
     dt_cache_line = (
-        "DTVP startup step completed: Dependency-Track cache initialized "
+        "DTVP startup step completed: vulnerability backend cache initialized "
         f"in {(time.perf_counter() - dt_cache_started_at) * 1000:.1f} ms"
     )
     deps.console_writer(dt_cache_line)

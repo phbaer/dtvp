@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### 🚀 Features
 - Add complete team filter dropdown
+- Separate vulnerability backends from the DTVP deployment, move the bundled
+  Dependency-Track stack and mock runtime to an optional demo, and limit
+  backups to DTVP-owned state while excluding disposable Agentyzer clones.
+- Replace the PostgreSQL-derived backup scheduler with a minimal Alpine image
+  containing only the Docker CLI needed to pause DTVP during snapshots.
 
 ## [1.0.15] — 2026-07-20
 
@@ -191,5 +196,3 @@ All notable changes to this project will be documented in this file.
 - Merge pull request 'Improve the processing logic' (#5) from improve-efficiencs-and-reduce-complexity-of-vuln-processing into main
 - Merge pull request 'Add tag support' (#4) from add-tag-support into main
 - Merge pull request 'improve responsiveness and test coverage' (#1) from improve-test-coverage into main
-
-

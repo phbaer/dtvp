@@ -8,9 +8,6 @@ state_root=${DTVP_BACKUP_STATE_ROOT:-/state}
 dtvp_data_root=${DTVP_BACKUP_DTVP_DATA_ROOT:-/app/data}
 status_path=${DTVP_BACKUP_STATUS_PATH:-data/backup_status.json}
 lock_dir=${DTVP_BACKUP_LOCK_DIR:-/tmp/dtvp-compose-backup.lock}
-database_host=${DTVP_BACKUP_DATABASE_HOST:-postgres}
-database_name=${DTVP_BACKUP_DATABASE_NAME:-dtrack}
-database_user=${DTVP_BACKUP_DATABASE_USER:-dtrack}
 
 require_absolute_directory() {
     variable_name=$1
@@ -43,7 +40,7 @@ case "$backup_root/" in
         ;;
 esac
 
-for state_directory in dtvp agentyzer dependency-track; do
+for state_directory in dtvp; do
     if [ ! -d "$state_root/$state_directory" ]; then
         echo "Required state directory is unavailable: $state_root/$state_directory" >&2
         exit 1
@@ -65,16 +62,6 @@ case "$status_path" in
         exit 2
         ;;
 esac
-
-database_password=${DTVP_BACKUP_DATABASE_PASSWORD:-}
-database_password_file=${DTVP_BACKUP_DATABASE_PASSWORD_FILE:-}
-if [ -z "$database_password" ] && [ -n "$database_password_file" ]; then
-    database_password=$(sed -n '1p' "$database_password_file")
-fi
-if [ -z "$database_password" ]; then
-    echo "A backup database password or password file is required." >&2
-    exit 2
-fi
 
 if ! mkdir "$lock_dir" 2>/dev/null; then
     echo "Another DTVP Compose backup is already running." >&2
@@ -103,7 +90,7 @@ if [ -z "$project_name" ] || [ "$project_name" = "<no value>" ]; then
     exit 1
 fi
 
-for service in dtvp agentyzer dtrack-apiserver; do
+for service in dtvp; do
     container_ids=$(docker ps \
         --filter "label=com.docker.compose.project=$project_name" \
         --filter "label=com.docker.compose.service=$service" \
@@ -124,25 +111,14 @@ if [ -e "$snapshot_dir" ]; then
 fi
 mkdir -m 0700 "$snapshot_dir"
 
-export PGPASSWORD=$database_password
-pg_dump \
-    --host="$database_host" \
-    --username="$database_user" \
-    --dbname="$database_name" \
-    --format=custom \
-    > "$snapshot_dir/dependency-track.pgdump"
-unset PGPASSWORD
-database_password=
-
 tar -czf "$snapshot_dir/persistent-files.tar.gz" \
-    -C "$state_root" dtvp agentyzer dependency-track
+    -C "$state_root" dtvp
 
-pg_restore --list < "$snapshot_dir/dependency-track.pgdump" >/dev/null
 gzip -t "$snapshot_dir/persistent-files.tar.gz"
 
 (
     cd "$snapshot_dir"
-    sha256sum dependency-track.pgdump persistent-files.tar.gz > SHA256SUMS
+    sha256sum persistent-files.tar.gz > SHA256SUMS
 )
 
 completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)

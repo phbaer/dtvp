@@ -55,7 +55,7 @@ async def test_start_application_runtime_logs_runtime_and_environment_details():
             },
             "environment": {
                 "context_path": "/dtvp",
-                "dependency_track": "configured",
+                "vulnerability_backend": "configured",
             },
         },
         initialize_cache_manager=lambda: asyncio.sleep(0),
@@ -72,7 +72,7 @@ async def test_start_application_runtime_logs_runtime_and_environment_details():
         assert console_lines[:3] == [
             "DTVP startup: name=DTVP, version=1.2.3, build=abc123",
             "DTVP runtime: python=3.14.0, hostname=dtvp-test, container=docker",
-            "DTVP environment: context_path=/dtvp, dependency_track=configured",
+            "DTVP environment: context_path=/dtvp, vulnerability_backend=configured",
         ]
         assert any(
             line.startswith("DTVP startup step completed: tmrescore cache loaded")
@@ -80,7 +80,7 @@ async def test_start_application_runtime_logs_runtime_and_environment_details():
         )
         assert any(
             line.startswith(
-                "DTVP startup step completed: Dependency-Track cache initialized"
+                "DTVP startup step completed: vulnerability backend cache initialized"
             )
             for line in console_lines
         )
@@ -91,9 +91,15 @@ async def test_start_application_runtime_logs_runtime_and_environment_details():
         joined_logs = "\n".join(logger.messages)
         assert "Starting DTVP version 1.2.3 (build abc123)" in joined_logs
         assert "DTVP runtime: python=3.14.0, hostname=dtvp-test, container=docker" in joined_logs
-        assert "DTVP environment: context_path=/dtvp, dependency_track=configured" in joined_logs
+        assert (
+            "DTVP environment: context_path=/dtvp, vulnerability_backend=configured"
+            in joined_logs
+        )
         assert "DTVP startup step completed: tmrescore cache loaded" in joined_logs
-        assert "DTVP startup step completed: Dependency-Track cache initialized" in joined_logs
+        assert (
+            "DTVP startup step completed: vulnerability backend cache initialized"
+            in joined_logs
+        )
         assert "DTVP startup ready: runtime tasks starting" in joined_logs
         assert analysis_queue.reset is True
         assert cache == {"Project": {"session": "fresh"}}

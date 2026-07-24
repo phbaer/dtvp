@@ -389,33 +389,49 @@ class DTClient:
 class DTSettings(BaseSettings):
     DTVP_VULNERABILITY_BACKEND_ID: str = Field(
         alias="DTVP_VULNERABILITY_BACKEND_ID",
-        default="dependency-track",
+        default="",
     )
     DTVP_VULNERABILITY_BACKEND_TYPE: str = Field(
         alias="DTVP_VULNERABILITY_BACKEND_TYPE",
-        default="dependency-track",
+        default="",
     )
     DTVP_VULNERABILITY_BACKEND_LABEL: str = Field(
         alias="DTVP_VULNERABILITY_BACKEND_LABEL",
-        default="Dependency-Track",
-    )
-    DTVP_DT_API_URL: str = Field(
-        alias="DTVP_DT_API_URL", default="http://localhost:8081"
-    )
-    DTVP_DT_API_KEY: str = Field(alias="DTVP_DT_API_KEY", default="")
-    DTVP_DT_API_KEY_FILE: Optional[str] = Field(
-        alias="DTVP_DT_API_KEY_FILE", default=None
-    )
-    DTVP_DT_IMPORT_API_KEY: str = Field(
-        alias="DTVP_DT_IMPORT_API_KEY",
         default="",
     )
-    DTVP_DT_IMPORT_API_KEY_FILE: Optional[str] = Field(
-        alias="DTVP_DT_IMPORT_API_KEY_FILE",
+    DTVP_VULNERABILITY_BACKEND_API_URL: str = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_API_URL",
+        default="",
+    )
+    DTVP_VULNERABILITY_BACKEND_API_KEY: str = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_API_KEY",
+        default="",
+    )
+    DTVP_VULNERABILITY_BACKEND_API_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_API_KEY_FILE",
+        default=None,
+    )
+    DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY: str = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY",
+        default="",
+    )
+    DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY_FILE",
         default=None,
     )
 
-    # Support aliases from the deployment compose file
+    # Legacy aliases remain readable for existing non-Compose deployments.
+    DTVP_DT_API_URL: Optional[str] = Field(alias="DTVP_DT_API_URL", default=None)
+    DTVP_DT_API_KEY: Optional[str] = Field(alias="DTVP_DT_API_KEY", default=None)
+    DTVP_DT_API_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_DT_API_KEY_FILE", default=None
+    )
+    DTVP_DT_IMPORT_API_KEY: Optional[str] = Field(
+        alias="DTVP_DT_IMPORT_API_KEY", default=None
+    )
+    DTVP_DT_IMPORT_API_KEY_FILE: Optional[str] = Field(
+        alias="DTVP_DT_IMPORT_API_KEY_FILE", default=None
+    )
     DEPENDENCY_TRACK_URL: Optional[str] = Field(default=None)
     DEPENDENCY_TRACK_API_KEY: Optional[str] = Field(default=None)
 
@@ -425,27 +441,38 @@ class DTSettings(BaseSettings):
 
     @property
     def api_url(self) -> str:
-        # Priority: DTVP_DT_API_URL > DEPENDENCY_TRACK_URL > default
         return (
-            self.DTVP_DT_API_URL or self.DEPENDENCY_TRACK_URL or "http://localhost:8081"
+            self.DTVP_VULNERABILITY_BACKEND_API_URL
+            or self.DTVP_DT_API_URL
+            or self.DEPENDENCY_TRACK_URL
+            or ""
         )
 
     @property
     def api_key(self) -> str:
-        # Direct values remain supported for local use; production Compose
-        # mounts secret files so credentials are absent from container metadata.
-        direct = str(self.DTVP_DT_API_KEY or "").strip()
+        direct = str(
+            self.DTVP_VULNERABILITY_BACKEND_API_KEY
+            or self.DTVP_DT_API_KEY
+            or ""
+        ).strip()
         if direct.lower() in {"change_me", "changeme", "changeit"}:
             direct = ""
-        return read_secret(direct, self.DTVP_DT_API_KEY_FILE) or str(
+        secret_file = (
+            self.DTVP_VULNERABILITY_BACKEND_API_KEY_FILE
+            or self.DTVP_DT_API_KEY_FILE
+        )
+        return read_secret(direct, secret_file) or str(
             self.DEPENDENCY_TRACK_API_KEY or ""
         ).strip()
 
     @property
     def import_api_key(self) -> str:
         return read_secret(
-            self.DTVP_DT_IMPORT_API_KEY,
-            self.DTVP_DT_IMPORT_API_KEY_FILE,
+            self.DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY
+            or self.DTVP_DT_IMPORT_API_KEY
+            or "",
+            self.DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY_FILE
+            or self.DTVP_DT_IMPORT_API_KEY_FILE,
         )
 
     @property
@@ -478,25 +505,44 @@ def get_configured_backend_descriptor(
     )
 
 
-def validate_dependency_track_configuration(
+def validate_vulnerability_backend_configuration(
     settings: DTSettings | None = None,
     *,
     environment: str | None = None,
 ) -> None:
     active = settings or DTSettings()
     validate_backend_selection(active.backend_selection)
+    if not active.api_url:
+        raise RuntimeError(
+            "DTVP_VULNERABILITY_BACKEND_API_URL is required for the selected "
+            "vulnerability backend"
+        )
     profile = (environment or os.getenv("DTVP_ENVIRONMENT", "production")).lower()
     if profile != "production":
         return
     key = active.api_key
     if not key or key.lower() in {"change_me", "changeme", "changeit"}:
         raise RuntimeError(
-            "DTVP_DT_API_KEY or DTVP_DT_API_KEY_FILE is required in production"
+            "DTVP_VULNERABILITY_BACKEND_API_KEY or "
+            "DTVP_VULNERABILITY_BACKEND_API_KEY_FILE is required in production"
         )
     if len(key) < 16:
         raise RuntimeError(
-            "The production Dependency-Track service API key is unexpectedly short"
+            "The production vulnerability-backend API key is unexpectedly short"
         )
+
+
+def validate_dependency_track_configuration(
+    settings: DTSettings | None = None,
+    *,
+    environment: str | None = None,
+) -> None:
+    """Compatibility alias for the vendor-neutral startup validator."""
+
+    validate_vulnerability_backend_configuration(
+        settings,
+        environment=environment,
+    )
 
 
 async def get_client() -> AsyncGenerator[DTClient, None]:

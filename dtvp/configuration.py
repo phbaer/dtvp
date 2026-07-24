@@ -230,7 +230,7 @@ class DurableStorageSettings:
     backup_status_path: str = "data/backup_status.json"
     backup_max_age_seconds: int = 0
     minimum_free_bytes: int = 128 * 1024 * 1024
-    dt_cache_path: str = "data/dt_cache"
+    dt_cache_path: str = "data/backend_cache"
     dt_cache_refresh_seconds: int = 60
     grouped_summary_index_path: str = ""
     grouped_summary_index_max_entries: int = 64
@@ -259,9 +259,21 @@ class DurableStorageSettings:
                 128 * 1024 * 1024,
                 minimum=0,
             ),
-            dt_cache_path=_text(source, "DTVP_DT_CACHE_PATH", "data/dt_cache"),
+            dt_cache_path=_text(
+                source,
+                "DTVP_VULNERABILITY_BACKEND_CACHE_PATH",
+                _text(source, "DTVP_DT_CACHE_PATH", "data/backend_cache"),
+            ),
             dt_cache_refresh_seconds=_integer(
-                source, "DTVP_DT_CACHE_REFRESH_SECONDS", 60, minimum=1
+                source,
+                "DTVP_VULNERABILITY_BACKEND_CACHE_REFRESH_SECONDS",
+                _integer(
+                    source,
+                    "DTVP_DT_CACHE_REFRESH_SECONDS",
+                    60,
+                    minimum=1,
+                ),
+                minimum=1,
             ),
             grouped_summary_index_path=_text(
                 source, "DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH"

@@ -224,8 +224,18 @@ async def test_upload_bom_auto_creates_project_version(dt_client, respx_mock):
 
 
 def test_settings_properties():
-    # Test fallbacks
+    generic = DTSettings(
+        DTVP_VULNERABILITY_BACKEND_API_URL="https://backend.example",
+        DTVP_VULNERABILITY_BACKEND_API_KEY="generic-key",
+        DTVP_DT_API_URL="https://legacy.example",
+        DTVP_DT_API_KEY="legacy-key",
+    )
+    assert generic.api_url == "https://backend.example"
+    assert generic.api_key == "generic-key"
+
+    # Legacy settings remain readable for existing adapter deployments.
     s = DTSettings(
+        DTVP_VULNERABILITY_BACKEND_API_URL="",
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL="http://fallback",
         DTVP_DT_API_KEY="change_me",
@@ -236,12 +246,13 @@ def test_settings_properties():
     assert s.api_key == "key"
 
     s2 = DTSettings(
+        DTVP_VULNERABILITY_BACKEND_API_URL="",
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL=None,
         DTVP_DT_API_KEY="change_me",
         DEPENDENCY_TRACK_API_KEY=None,
     )
-    assert s2.api_url == "http://localhost:8081"
+    assert s2.api_url == ""
     assert s2.api_key == ""
 
 
@@ -274,23 +285,8 @@ async def test_get_client_does_not_forward_request_credentials():
 @respx.mock
 @pytest.mark.asyncio
 async def test_get_bom_error():
-    settings = DTSettings()
-    # DTSettings determines URL.
-    # If using DTSettings constructor, we set api_url explicitly.
-    # However, DTClient logic might modify it or environment variables might interfere?
-    # Wait, the failure says <Request('GET', 'http://localhost:8081/api/v1/bom/cyclonedx/project/uuid-error')>
-    # This means api_url in settings was ignored or defaulted?
-    # Ah, in test_settings_properties we saw fallbacks.
-    # With `DTSettings(api_url="...")` passed to DTClient constructor, it checks arguments.
-    # `def __init__(self, base_url: str, ...)`
-    # The fixture failure implies base_url was 'http://localhost:8081'.
-    # In my test:
-    # settings = DTSettings(api_url=..., api_key=...)
-    # But DTSettings is a Pydantic model. fields are DTVP_DT_API_URL etc.
-    # 'api_url' is a computed property! I cannot pass it to constructor unless it's an alias?
-    # No, I should pass DTVP_DT_API_URL="http://dependency-track"
-
     settings = DTSettings(
+        DTVP_VULNERABILITY_BACKEND_API_URL="",
         DTVP_DT_API_URL="http://dependency-track",
         DTVP_DT_API_KEY="test_key",
     )

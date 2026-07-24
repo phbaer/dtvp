@@ -17,10 +17,6 @@ services:
     depends_on:
       dtvp:
         condition: service_healthy
-      dtrack-frontend:
-        condition: service_started
-      dtrack-apiserver:
-        condition: service_started
     networks:
       - gateway
       - application
@@ -40,88 +36,6 @@ services:
     logging: *default-logging
     restart: unless-stopped
 
-  dtrack-apiserver:
-    image: dependencytrack/apiserver:4.14.2@sha256:1ba4f004e1ec4800ec0e0175b0f1cf361a68f6ac3db9274a32d0a47cd4038f51
-    environment:
-      ALPINE_DATABASE_MODE: external
-      ALPINE_DATABASE_URL: jdbc:postgresql://postgres:5432/dtrack
-      ALPINE_DATABASE_DRIVER: org.postgresql.Driver
-      ALPINE_DATABASE_USERNAME: dtrack
-      ALPINE_DATABASE_PASSWORD: ${DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD in .env}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - dependency-track-data:/data
-    networks:
-      - application
-      - data
-      - dtrack-outbound
-    read_only: true
-    tmpfs:
-      - /tmp:size=256m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    pids_limit: 512
-    logging: *default-logging
-    restart: unless-stopped
-
-  dtrack-frontend:
-    image: dependencytrack/frontend:4.14.2@sha256:00560b57a6cfdec3c02a6e02be80fce97029241a9c653e8b83c0b670dff1f3ca
-    environment:
-      - API_BASE_URL=/api
-    networks:
-      - application
-    read_only: true
-    tmpfs:
-      - /etc/nginx/conf.d:size=1m,mode=1777
-      - /var/cache/nginx:size=16m,mode=1777
-      - /var/run:size=1m,mode=1777
-      - /tmp:size=16m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    pids_limit: 200
-    logging: *default-logging
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
-    environment:
-      POSTGRES_USER: dtrack
-      POSTGRES_PASSWORD: ${DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD in .env}
-      POSTGRES_DB: dtrack
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    networks:
-      - data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dtrack -d dtrack"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    read_only: true
-    tmpfs:
-      - /run/postgresql:size=16m,mode=1777
-      - /tmp:size=64m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETGID
-      - SETUID
-    pids_limit: 200
-    logging: *default-logging
-    restart: unless-stopped
-
   dtvp:
     build:
       context: .
@@ -129,15 +43,15 @@ services:
         DTVP_CONTEXT_PATH: /dtvp
     environment:
       DTVP_ENVIRONMENT: ${DTVP_ENVIRONMENT:-production}
-      DTVP_VULNERABILITY_BACKEND_ID: ${DTVP_VULNERABILITY_BACKEND_ID:-dependency-track}
-      DTVP_VULNERABILITY_BACKEND_TYPE: ${DTVP_VULNERABILITY_BACKEND_TYPE:-dependency-track}
-      DTVP_VULNERABILITY_BACKEND_LABEL: ${DTVP_VULNERABILITY_BACKEND_LABEL:-Dependency-Track}
-      DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}
-      DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-}
-      DTVP_DT_API_KEY_FILE: ${DTVP_DT_API_KEY_FILE:-}
-      DTVP_DT_IMPORT_API_KEY: ${DTVP_DT_IMPORT_API_KEY:-}
-      DTVP_DT_IMPORT_API_KEY_FILE: ${DTVP_DT_IMPORT_API_KEY_FILE:-}
-      DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
+      DTVP_VULNERABILITY_BACKEND_ID: ${DTVP_VULNERABILITY_BACKEND_ID:-}
+      DTVP_VULNERABILITY_BACKEND_TYPE: ${DTVP_VULNERABILITY_BACKEND_TYPE:-}
+      DTVP_VULNERABILITY_BACKEND_LABEL: ${DTVP_VULNERABILITY_BACKEND_LABEL:-}
+      DTVP_VULNERABILITY_BACKEND_API_URL: ${DTVP_VULNERABILITY_BACKEND_API_URL:-}
+      DTVP_VULNERABILITY_BACKEND_API_KEY: ${DTVP_VULNERABILITY_BACKEND_API_KEY:-}
+      DTVP_VULNERABILITY_BACKEND_API_KEY_FILE: ${DTVP_VULNERABILITY_BACKEND_API_KEY_FILE:-}
+      DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY: ${DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY:-}
+      DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY_FILE: ${DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY_FILE:-}
+      DTVP_VULNERABILITY_BACKEND_CACHE_PATH: ${DTVP_VULNERABILITY_BACKEND_CACHE_PATH:-data/backend_cache}
       DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
       DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}
       DTVP_CORS_ORIGINS: ${DTVP_CORS_ORIGINS:-}
@@ -175,7 +89,7 @@ services:
       DTVP_VERSION_FETCH_CONCURRENCY: ${DTVP_VERSION_FETCH_CONCURRENCY:-4}
       DTVP_ASSESSMENT_IO_CONCURRENCY: ${DTVP_ASSESSMENT_IO_CONCURRENCY:-4}
       DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS: ${DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS:-3}
-      DTVP_DT_CACHE_REFRESH_SECONDS: ${DTVP_DT_CACHE_REFRESH_SECONDS:-60}
+      DTVP_VULNERABILITY_BACKEND_CACHE_REFRESH_SECONDS: ${DTVP_VULNERABILITY_BACKEND_CACHE_REFRESH_SECONDS:-60}
       DTVP_GROUPED_VULN_TASK_TTL_SECONDS: ${DTVP_GROUPED_VULN_TASK_TTL_SECONDS:-3600}
       DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH: ${DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH:-}
       DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES: ${DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES:-64}
@@ -260,8 +174,6 @@ services:
     pids_limit: 256
     logging: *default-logging
     depends_on:
-      dtrack-apiserver:
-        condition: service_started
       agentyzer:
         condition: service_healthy
     restart: unless-stopped
@@ -352,11 +264,9 @@ services:
       - /bin/sh
       - -ec
     command:
-      - tar -czf /backup/persistent-files.tar.gz -C /state dtvp agentyzer dependency-track
+      - tar -czf /backup/persistent-files.tar.gz -C /state dtvp
     volumes:
       - ./data:/state/dtvp:ro
-      - agentyzer-repos:/state/agentyzer:ro
-      - dependency-track-data:/state/dependency-track:ro
       - ${DTVP_BACKUP_PATH:-./backups}:/backup
     network_mode: none
     read_only: true
@@ -380,8 +290,6 @@ services:
     profiles:
       - backup
     environment:
-      DTVP_BACKUP_DATABASE_PASSWORD: ${DTRACK_DB_PASSWORD:?Set DTRACK_DB_PASSWORD in .env}
-      DTVP_BACKUP_DATABASE_PASSWORD_FILE: ${DTVP_BACKUP_DATABASE_PASSWORD_FILE:-}
       DTVP_BACKUP_INTERVAL_SECONDS: ${DTVP_BACKUP_INTERVAL_SECONDS:-86400}
       DTVP_BACKUP_INITIAL_DELAY_SECONDS: ${DTVP_BACKUP_INITIAL_DELAY_SECONDS:-300}
       DTVP_BACKUP_RETRY_SECONDS: ${DTVP_BACKUP_RETRY_SECONDS:-3600}
@@ -390,20 +298,11 @@ services:
       - ${DTVP_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
       - ./data:/state/dtvp:ro
       - ./data:/app/data
-      - agentyzer-repos:/state/agentyzer:ro
-      - dependency-track-data:/state/dependency-track:ro
       - ${DTVP_BACKUP_PATH:-./backups}:/backup
-    networks:
-      - data
+    network_mode: none
     depends_on:
-      postgres:
-        condition: service_healthy
       dtvp:
         condition: service_healthy
-      agentyzer:
-        condition: service_healthy
-      dtrack-apiserver:
-        condition: service_started
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -516,8 +415,6 @@ services:
         git push origin "$${DTVP_ARCHIVE_GIT_BRANCH}"
 
 volumes:
-  postgres-data:
-  dependency-track-data:
   archive-git-repo:
   agentyzer-repos:
 
@@ -534,9 +431,6 @@ networks:
     internal: true
   analysis:
     internal: true
-  data:
-    internal: true
   dtvp-outbound:
-  dtrack-outbound:
   agentyzer-outbound:
   archive-outbound:

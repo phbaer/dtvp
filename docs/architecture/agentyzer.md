@@ -30,7 +30,10 @@ evidence.
 Repository workspaces persist on the Agentyzer volume by design. Keeping them
 across scans avoids cloning the same repository for every project version and
 supports repeated analysis efficiently. Workspace cleanup is therefore not a
-normal post-scan action.
+normal post-scan action. This persistence is a performance cache, not a
+durability boundary: the entire repository/job volume is excluded from DTVP
+backups and may be discarded and reconstructed from configured Git sources.
+Saved DTVP assessment results remain in DTVP-owned storage.
 
 Credentials are transient even though workspaces persist. Repository URLs and
 Git configuration must be sanitized after authenticated operations so tokens

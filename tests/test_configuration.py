@@ -69,3 +69,24 @@ def test_boolean_csv_and_path_settings_are_normalized():
     assert archive.include_names == ("Alpha", "Beta")
     assert store.store_guidance is False
     assert store.results_path == "/tmp/results.sqlite"
+
+
+def test_backend_cache_uses_vendor_neutral_configuration_with_legacy_fallback():
+    generic = DurableStorageSettings.from_env(
+        {
+            "DTVP_VULNERABILITY_BACKEND_CACHE_PATH": "/state/backend-cache",
+            "DTVP_VULNERABILITY_BACKEND_CACHE_REFRESH_SECONDS": "75",
+            "DTVP_DT_CACHE_PATH": "/legacy/cache",
+        }
+    )
+    legacy = DurableStorageSettings.from_env(
+        {
+            "DTVP_DT_CACHE_PATH": "/legacy/cache",
+            "DTVP_DT_CACHE_REFRESH_SECONDS": "45",
+        }
+    )
+
+    assert generic.dt_cache_path == "/state/backend-cache"
+    assert generic.dt_cache_refresh_seconds == 75
+    assert legacy.dt_cache_path == "/legacy/cache"
+    assert legacy.dt_cache_refresh_seconds == 45

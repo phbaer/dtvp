@@ -51,7 +51,7 @@ Cross-cutting rate-limit, task-retention, archive, local-storage, and
 frontend-runtime defaults are parsed in `dtvp.configuration`. Settings are
 resolved when requested so tests and controlled runtime reloads can change the
 environment without stale global configuration. Authentication,
-Dependency-Track, TMRescore, and analyzer credentials remain in their focused
+backend-adapter, TMRescore, and analyzer credentials remain in their focused
 Pydantic settings classes.
 
 ## Runtime And Data Flow
@@ -68,7 +68,7 @@ Pydantic settings classes.
   in-flight queries, and reuse sort orders across filter changes. Lightweight
   code-assessment metadata is cached and invalidated when analyzer results
   change.
-- The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
+- The local cache under `DTVP_VULNERABILITY_BACKEND_CACHE_PATH` stores projects, findings,
   vulnerability details, BOMs, local overlays, and pending writes. Stale cached
   data remains readable while the provider is unavailable. Concurrent misses
   for one resource share one provider request, while each caller receives an

@@ -12,6 +12,7 @@ source_paths:
   - agentyzer/Dockerfile
   - frontend/src/
   - compose.yml
+  - demo/dependency-track/compose.yml
   - Dockerfile.backup
   - scripts/backup-compose-state-container.sh
   - scripts/run-backup-scheduler.sh
@@ -23,7 +24,7 @@ review_when:
 
 # DTVP Threat Model
 
-Last reviewed: 2026-07-23
+Last reviewed: 2026-07-24
 
 This document records DTVP's security boundaries, abuse cases, implemented
 controls, and residual risks. The canonical curated context is in the
@@ -34,11 +35,13 @@ store, exposed route, or deployment topology changes.
 ## Scope And Security Objectives
 
 The model covers the Vue frontend, nginx gateway, DTVP API, vulnerability-
-backend adapters, Dependency-Track deployment, Agentyzer, local durable state,
-archive workflows, CI, and published images. The external IdP, Git hosts, LLM
-provider, public research sites, container host, and vulnerability-management
-vendor are separate systems whose internal security is outside DTVP's control.
-Their interfaces and the data DTVP sends to them are in scope.
+backend adapters, Agentyzer, local durable state, archive workflows, CI, and
+published images. The external IdP, Git hosts, LLM provider, public research
+sites, container host, and vulnerability-management backends are separate
+systems whose internal security and backup lifecycle are outside DTVP's
+control. Their interfaces and the data DTVP sends to them are in scope. The
+optional Dependency-Track demo is an explicitly non-production adapter
+exercise environment, not part of the DTVP deployment boundary.
 
 The primary objectives are:
 
@@ -65,7 +68,7 @@ flowchart LR
     Gateway -->|Host-checked HTTP| DTVP[DTVP API]
     DTVP -->|OIDC code + PKCE| IdP[External IdP]
     DTVP -->|adapter service credential| Backend[Vulnerability backend]
-    Backend --> DT[Dependency-Track]
+    Backend --> DT[External Dependency-Track]
     Backend -. disabled until verified .-> Cybeats[Cybeats scaffold]
     DTVP -->|owner + service/admin token| Analyzer[Agentyzer]
     Analyzer -->|ephemeral Git credential| Git[Approved Git hosts]
@@ -93,8 +96,8 @@ flowchart LR
 
 | Asset | Sensitivity | Integrity/availability concern |
 | :--- | :--- | :--- |
-| Session, OIDC, backend, analyzer, Git, LLM, archive, database, signing secrets, and Docker Engine access | Critical | Theft permits impersonation, data change, code access, release forgery, or host takeover |
-| Private source and persistent Agentyzer clone objects | Confidential | Source may contain proprietary logic or accidentally committed secrets |
+| Session, OIDC, backend, analyzer, Git, LLM, archive, signing secrets, and Docker Engine access | Critical | Theft permits impersonation, data change, code access, release forgery, or host takeover |
+| Private source and disposable Agentyzer clone objects | Confidential | Source may contain proprietary logic or accidentally committed secrets; the cache may be destroyed and re-cloned |
 | SBOMs, findings, assessments, CVSS decisions, and team assignments | Confidential / high integrity | Incorrect data can hide exploitable vulnerabilities or create false work |
 | Queues, saved results, proposals, caches, and archive snapshots | Internal / high integrity | Replay, loss, or cross-backend reuse can duplicate or misapply work |
 | Audit events and backup markers | High integrity | Tampering can erase attribution or create false recovery confidence |
@@ -147,17 +150,18 @@ hard tenant boundary.
 | T9 Tampering / denial | Malicious archive exploits path traversal, encryption, decompression, or huge member counts, then overwrites vendor data. | Reviewer authorization, dedicated import credential, pre-write path/member/size/ratio validation, bounded nginx and route bodies, preview/apply separation. | A structurally valid hostile SBOM can still consume backend resources or create misleading data; review previews and vendor quotas. |
 | T10 Denial of service | Authenticated callers create unbounded scans, tasks, queries, or LLM inputs. | nginx limits, DTVP rate limits, bounded DTVP/Agentyzer queues, per-owner Agentyzer admission, concurrency semaphores, input/list/string limits, retention and record caps. | DTVP quotas are process-local and large legitimate projects remain expensive. Use production-shaped load tests and external rate controls. |
 | T11 Denial / integrity | Multiple API workers race process-local schedulers and duplicate external work. | Owner-only non-following advisory lease file held for process lifetime; startup fails on contention; running work becomes interrupted after restart. | Advisory locking assumes a filesystem with reliable `flock`. Horizontal scale requires a shared queue, leases, and distributed rate limits. |
-| T12 Information disclosure | Preserved workspaces expose private source after scans. | Credentials are scrubbed, per-run worktrees are isolated and pruned, containers are non-root, volumes are narrowly mounted, the manual archive helper has no network, and the scheduler only joins the internal data network. | Clone objects intentionally persist to speed repeated scans. Encrypt and restrict the repository/backup volume and define source-retention policy. |
+| T12 Information disclosure | Preserved workspaces expose private source after scans. | Credentials are scrubbed, per-run worktrees are isolated and pruned, containers are non-root, volumes are narrowly mounted, backup helpers have no network, and the disposable repository volume is excluded from backups. | Clone objects intentionally persist to speed repeated scans. Restrict the repository volume, define source-retention policy, and discard/re-clone it when needed. |
 | T13 Tampering / disclosure | XSS or unsafe Markdown changes UI behavior or extracts session data. | Vue escaping, shared DOMPurify allowlist, restrictive CSP and other browser headers, no environment-derived inline runtime script. | A sanitizer/browser/frontend dependency defect remains possible; keep npm audit and image scanning gates active. |
-| T14 Denial / data loss | Disk exhaustion, SQLite corruption, stale backups, or unbounded audit logs make state unavailable. | Minimum-free-space and integrity health, readiness probes, owner-only SQLite/audit files, bounded audit rotation, durable queues, backup freshness marker, verified manual backup, and optional interval-based Compose scheduler with retry and overlap locking. | Enabling the scheduler, retention, encryption, off-host replication, external Dependency-Track backup, monitoring, and restore tests remain operator responsibilities. Readiness is not a substitute for restore testing. |
+| T14 Denial / data loss | Disk exhaustion, SQLite corruption, stale backups, or unbounded audit logs make state unavailable. | Minimum-free-space and integrity health, readiness probes, owner-only SQLite/audit files, bounded audit rotation, durable queues, backup freshness marker, verified manual backup, and optional interval-based Compose scheduler with retry and overlap locking. | Enabling the scheduler, retention, encryption, off-host replication, external backend backup, monitoring, and restore tests remain operator responsibilities. Readiness is not a substitute for restore testing. |
 | T15 Supply-chain tampering | A dependency, action, builder, runner, or base image injects code into releases. | Lockfiles, immutable action/base/runtime image pins, minimal Alpine application images, a checksum-pinned Trivy binary, parity-tested GitHub/Forgejo workflows, same-repository PR gating with PR-scoped image tags, dependency/Bandit/npm/Trivy gates, BuildKit SBOM/provenance, release digest signing and immediate cosign verification. | A trusted runner or signing-key compromise can still produce a valid malicious artifact. Protect/rotate keys and isolate protected runners. |
 | T16 Elevation / lateral movement | Compromised service pivots to databases, analyzers, other egress zones, or host. | Separate internal/outbound networks, dropped capabilities, read-only roots, non-root users, no-new-privileges, PID/log limits, narrowly writable mounts; the socket-bearing scheduler is profile-gated, has no published port or external network, and runs only repository-owned backup code. | Docker socket access is host-administrator-equivalent and defeats container isolation if the scheduler is compromised. Keep the profile disabled unless that trust is accepted, use a dedicated patched host, and monitor Docker Engine operations. |
 
-## Dependency-Track Identity Decision
+## Dependency-Track Adapter Credential Decision
 
 The service-key approach is intentional. Dependency-Track API keys represent
 teams and are suitable for workload authorization; Dependency-Track users are
-not an identity provider for DTVP. Dependency-Track documents that
+not an identity provider for DTVP, and its service is operated outside DTVP.
+Dependency-Track documents that
 [API keys belong to teams and a team may have multiple keys](https://docs.dependencytrack.org/integrations/rest-api/),
 which permits overlap-safe key rotation. Using a human API key or browser
 session for background scans would couple jobs to one person's privileges,
@@ -198,9 +202,9 @@ security control, not a missing feature to bypass.
 | Risk | Priority | Treatment |
 | :--- | :--- | :--- |
 | LLM prompt injection and approved-provider source disclosure | High | Deploy only with an approved private/data-governed model; require human review and retain deterministic claim checks. |
-| Dependency-Track review key has team-wide write scope | Medium-high | Minimize the team/PAC scope, rotate through vendor-side overlap, monitor DTVP and Dependency-Track audits. |
+| Backend review credential may have vendor-wide write scope | Medium-high | Minimize vendor-side scope, rotate through supported overlap, and monitor both DTVP and backend audits. |
 | Local audit file is mutable by host administrators | Medium-high | Forward to immutable authenticated storage and alert on health/write failures. |
-| Persistent repository source and backups require at-rest protection | Medium-high | Encrypt volumes/backups, restrict host access, define retention, and test secure deletion independently. |
+| Cached repository source and DTVP backups require separate protection | Medium-high | Restrict and securely discard the disposable repository cache; encrypt DTVP backups, define retention, and test secure deletion independently. |
 | Optional backup scheduler holds Docker Engine authority | High when enabled | Keep the profile optional, restrict deployment/image modification, isolate and patch the Docker host, monitor Engine activity, or use an external host scheduler instead. |
 | Single-process coordination is an availability and scaling limit | Medium | Keep one worker per volume; design shared queue/leases/rate limits before horizontal scaling. |
 | Authenticated large-project/model resource exhaustion | Medium | Tune admission/rate/retention limits and add workload-specific monitoring/load tests. |

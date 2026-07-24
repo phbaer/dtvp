@@ -15,6 +15,9 @@ source_paths:
   - dtvp/tmrescore_integration.py
   - compose.yml
   - .env.dist
+  - demo/dependency-track/compose.yml
+  - demo/dependency-track/.env.dist
+  - demo/dependency-track/ecosystem.config.js
 review_when:
   - A runtime variable, default, secret, path, capacity, timeout, or integration setting changes.
 ---
@@ -24,24 +27,22 @@ review_when:
 Set values in `.env` for Compose or in the shell for local `uv` runs. `unset`
 means the integration or override is disabled.
 
-## Dependency-Track, Cache, And Rules
+## Vulnerability Backend, Cache, And Rules
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
-| `DTVP_VULNERABILITY_BACKEND_ID` | Stable backend-instance namespace used for local state and resource identity | `dependency-track` |
-| `DTVP_VULNERABILITY_BACKEND_TYPE` | Adapter implementation; currently only `dependency-track` is runnable | `dependency-track` |
-| `DTVP_VULNERABILITY_BACKEND_LABEL` | Non-secret display label returned by backend discovery | `Dependency-Track` |
-| `DTRACK_DB_PASSWORD` | Required random password shared only by the bundled Dependency-Track API and PostgreSQL; mounted as a secret with `compose.secrets.yml` | unset |
-| `DTVP_DT_API_URL` | Dependency-Track API base URL | `http://localhost:8081`; Compose: `http://dtrack-apiserver:8080` |
-| `DTVP_DT_API_KEY` | Least-privilege Dependency-Track review service-team API key; required in production | unset |
-| `DTVP_DT_API_KEY_FILE` | API-key file used when the direct value is unset | unset |
-| `DTVP_DT_IMPORT_API_KEY` | Separate Dependency-Track archive-import team key | unset; archive apply unavailable |
-| `DTVP_DT_IMPORT_API_KEY_FILE` | Archive-import key file used when the direct value is unset | unset |
-| `DEPENDENCY_TRACK_URL` / `DEPENDENCY_TRACK_API_KEY` | Deployment aliases | unset |
-| `DTVP_DT_CACHE_PATH` | Dependency-Track cache and pending update queue | `data/dt_cache` |
-| `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
+| `DTVP_VULNERABILITY_BACKEND_ID` | Stable backend-instance namespace used for local state and resource identity | unset; required |
+| `DTVP_VULNERABILITY_BACKEND_TYPE` | Selected adapter implementation; currently only `dependency-track` is runnable | unset; required |
+| `DTVP_VULNERABILITY_BACKEND_LABEL` | Non-secret display label returned by backend discovery | unset; required |
+| `DTVP_VULNERABILITY_BACKEND_API_URL` | Selected backend API base URL | unset; required |
+| `DTVP_VULNERABILITY_BACKEND_API_KEY` | Least-privilege review workload credential | unset; required in production |
+| `DTVP_VULNERABILITY_BACKEND_API_KEY_FILE` | API-key file used when the direct value is unset | unset |
+| `DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY` | Separate credential for archive import/apply operations | unset; archive apply unavailable |
+| `DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY_FILE` | Import-key file used when the direct value is unset | unset |
+| `DTVP_VULNERABILITY_BACKEND_CACHE_PATH` | Backend-scoped cache and pending update queue | `data/backend_cache` |
+| `DTVP_VULNERABILITY_BACKEND_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |
-| `DTVP_ASSESSMENT_IO_CONCURRENCY` | Concurrent Dependency-Track assessment reads or writes per operation | `4` |
+| `DTVP_ASSESSMENT_IO_CONCURRENCY` | Concurrent backend assessment reads or writes per operation | `4` |
 | `DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS` | Attempts for transient assessment-write timeouts, rate limits, and HTTP 5xx responses | `3` |
 | `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` | Completed/failed grouped-task retention | `3600` |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH` | Persisted summary-index SQLite path | sibling of cache path |
@@ -104,10 +105,24 @@ means the integration or override is disabled.
 Set `COMPOSE_PROFILES=backup` or pass `--profile backup` to enable the
 Compose-native scheduler. It is disabled by default because consistent
 snapshots require Docker Engine socket access, which is equivalent to
-host-administrator privilege. The hardened secret overlay supplies the
-scheduler's PostgreSQL credential through
-`DTVP_BACKUP_DATABASE_PASSWORD_FILE`; base Compose maps `DTRACK_DB_PASSWORD`
-directly.
+host-administrator privilege. The scheduler has no network and archives only
+DTVP-owned `./data`. The selected vulnerability backend is external and must be
+backed up by its operator. The `agentyzer-repos` volume is a disposable cache
+and is intentionally excluded.
+
+## Dependency-Track Demo
+
+Dependency-Track, its PostgreSQL database, frontend, nginx routes, and
+vendor-specific credentials exist only under `demo/dependency-track/`. They are
+not DTVP runtime configuration and are not merged into default Compose.
+
+| Variable | Purpose | Default |
+| :--- | :--- | :--- |
+| `DTVP_DEMO_DEPENDENCY_TRACK_DATABASE_PASSWORD` | Demo PostgreSQL credential | unset; required |
+| `DTVP_DEMO_DEPENDENCY_TRACK_API_KEY` | Demo review-team API key supplied to the generic adapter credential | unset |
+| `DTVP_DEMO_DEPENDENCY_TRACK_IMPORT_API_KEY` | Optional demo archive-import key | unset |
+| `DTVP_DEMO_DEPENDENCY_TRACK_ID` | Demo backend-instance namespace | `dependency-track-demo` |
+| `DTVP_DEMO_DEPENDENCY_TRACK_LABEL` | Demo backend display name | `Dependency-Track Demo` |
 
 ## Project Archives
 

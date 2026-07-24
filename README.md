@@ -1,9 +1,11 @@
 # Dependency Track Vulnerability Processor (DTVP)
 
-DTVP is a FastAPI and Vue application for reviewing Dependency-Track findings
+DTVP is a FastAPI and Vue application for reviewing vulnerability findings
 across every version of a project. It groups findings by vulnerability, exposes
 version-by-version assessment state, and lets reviewers apply consistent
-changes without repeating the same work for every release.
+changes without repeating the same work for every release. Vulnerability data
+comes from a selected backend adapter; Dependency-Track is the first supported
+adapter, not a service owned or deployed by DTVP.
 
 - [Main repository](https://git.baer.one/phbaer/dtvp/)
 - [GitHub mirror](https://github.com/phbaer/dtvp/)
@@ -33,13 +35,15 @@ change. `AGENTS.md` and `skills/*/SKILL.md` are short routing entry points.
 
 Requirements: Python 3.14+, Node.js 22+, `uv`, `npm`, and `pm2`. Docker and
 Docker Compose are needed only for the packaged deployment.
+The ready-to-run local stack below is an explicitly isolated Dependency-Track
+adapter demo; it does not make Dependency-Track a DTVP service.
 
 ```bash
 uv sync --dev
 cd frontend
 npm ci --include=optional
 cd ..
-pm2 start ecosystem.config.js --update-env
+pm2 start demo/dependency-track/ecosystem.config.js --update-env
 ```
 
 | Service | URL |
@@ -70,7 +74,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | :--- | :--- |
 | Install backend dependencies | `uv sync --dev` |
 | Install frontend dependencies | `cd frontend && npm ci --include=optional` |
-| Start the full mock stack | `pm2 start ecosystem.config.js --update-env` |
+| Start the Dependency-Track mock demo | `pm2 start demo/dependency-track/ecosystem.config.js --update-env` |
 | Inspect or tail the stack | `pm2 list` / `pm2 logs` |
 | Run backend tests | `uv run pytest` |
 | Run Agentyzer tests | `cd agentyzer && uv run pytest --cov=src` |
@@ -86,6 +90,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
 | Regenerate CycloneDX SBOMs | `./scripts/generate-sboms.sh` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
+| Start the optional Dependency-Track demo | `docker compose --env-file .env --env-file demo/dependency-track/.env -f compose.yml -f demo/dependency-track/compose.yml up -d` |
 | Back up packaged durable state | `./scripts/backup-compose-state.sh /absolute/backup/root` |
 | Enable scheduled Compose backups | `docker compose --profile backup up -d` |
 | Run the Compose backup immediately | `docker compose --profile backup exec dtvp-backup-scheduler /usr/local/bin/dtvp-backup` |
@@ -111,7 +116,8 @@ because this Forgejo instance does not support GitHub's v4 artifact protocol.
 Image scanning downloads the pinned Trivy release archive once, verifies its
 hard-coded SHA-256, and invokes the binary directly so the Forgejo `act` runner
 does not depend on an action mirror, nested installer, or action-cache service.
-Both candidate-image scans reuse that installation and its local database cache.
+All three candidate-image scans reuse that installation and its local database
+cache.
 The application containers use checksum-pinned minimal Alpine runtimes;
 Agentyzer copies a separately pinned `uv` binary and adds Git as its only
 runtime package.
@@ -497,14 +503,17 @@ The quick start is preferred for normal work. To run processes separately,
 start only the mocks:
 
 ```bash
-pm2 start ecosystem.config.js --only mock-dt,mock-tmrescore,mock-code-analysis
+pm2 start demo/dependency-track/ecosystem.config.js --only mock-dt,mock-tmrescore,mock-code-analysis
 ```
 
 Then start the backend:
 
 ```bash
-export DTVP_DT_API_URL=http://127.0.0.1:8081
-export DTVP_DT_API_KEY=mock_key
+export DTVP_VULNERABILITY_BACKEND_ID=dependency-track-mock
+export DTVP_VULNERABILITY_BACKEND_TYPE=dependency-track
+export DTVP_VULNERABILITY_BACKEND_LABEL="Dependency-Track Mock"
+export DTVP_VULNERABILITY_BACKEND_API_URL=http://127.0.0.1:8081
+export DTVP_VULNERABILITY_BACKEND_API_KEY=mock_key
 export DTVP_ENVIRONMENT=development
 export DTVP_OIDC_AUTHORITY=http://127.0.0.1:8081
 export DTVP_OIDC_CLIENT_ID=mock_id
@@ -536,19 +545,26 @@ in `docs/screenshots/conflict-resolution.png`.
 
 ```bash
 cp .env.dist .env
-# Fill every required value in .env, including DTRACK_DB_PASSWORD.
+# Select a backend adapter and fill every required backend/authentication value.
 docker compose -f compose.yml -f compose.secrets.yml up -d
 ```
 
 The base file keeps direct environment-value support for local compatibility.
 Production deployments should include `compose.secrets.yml`; it converts the
-database password, Dependency-Track API key, session key, OIDC client secret,
-both analyzer credentials, and the optional OpenWebUI API key into
-`/run/secrets` mounts and clears their direct environment entries. The
-Dependency-Track adapter uses its documented database password-file setting,
-so the overlay does not replace the vendor image entrypoint. Compose no longer
-injects the entire `.env` file into application containers: only the explicit
+selected backend API key, session key, OIDC client secret, both analyzer
+credentials, and the optional OpenWebUI API key into `/run/secrets` mounts and
+clears their direct environment entries. Compose does not inject the entire
+`.env` file into application containers: only the explicit, vendor-neutral
 configuration allowlist in `compose.yml` crosses the container boundary.
+
+The default deployment contains DTVP, its gateway, and the first-party
+Agentyzer integration. It does not deploy a vulnerability-management product
+or database. Configure an independently operated backend through
+`DTVP_VULNERABILITY_BACKEND_*`. For local evaluation of the current
+Dependency-Track adapter, use the isolated setup in
+[`demo/dependency-track/`](demo/dependency-track/README.md); its services,
+credentials, networks, volumes, and nginx routes are not part of the default
+stack.
 
 To rotate the DTVP session-signing key without immediately logging out every
 user, move the old value to `DTVP_SESSION_PREVIOUS_SECRET_KEY`, generate a new
@@ -624,10 +640,11 @@ runtime trust stores so HTTPS OIDC and internal integration endpoints can be
 verified normally; do not set `NODE_TLS_REJECT_UNAUTHORIZED=0` or disable
 certificate checks.
 
-Set the Dependency-Track API key, complete OIDC settings, an HTTPS public URL,
-and random session, Agentyzer service, and Agentyzer admin secrets before
-starting the production profile. Generate each secret with `openssl rand -hex
-32`. Production startup rejects missing, short, or known placeholder session
+Select an available backend adapter, set its URL and least-privilege API key,
+complete OIDC settings, and configure an HTTPS public URL plus random session,
+Agentyzer service, and Agentyzer admin secrets before starting the production
+profile. Generate each secret with `openssl rand -hex 32`. Production startup
+rejects missing backend selection/credentials, missing or placeholder session
 secrets, insecure OIDC callbacks, the development authentication bypass, and an
 enabled code-analysis integration without distinct service and admin tokens.
 For a non-default gateway:
@@ -643,19 +660,17 @@ AGENTYZER_ADMIN_TOKEN=<a third random value from openssl rand -hex 32>
 Deployment rules:
 
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
-  archives survive container restarts. Dependency-Track also has a dedicated
-  `/data` volume. Application and third-party containers use immutable image
-  digests, read-only root filesystems where supported, bounded process counts,
-  rotated local logs, and reduced Linux capabilities. DTVP and Agentyzer run as
-  non-root users with writable mounts only for data, cloned repositories, and
-  temporary files. Set
+  archives survive container restarts. Application containers use immutable
+  image digests, read-only root filesystems where supported, bounded process
+  counts, rotated local logs, and reduced Linux capabilities. DTVP and
+  Agentyzer run as non-root users with writable mounts only for data, cloned
+  repositories, and temporary files. Set
   `DTVP_RUNTIME_UID` and `DTVP_RUNTIME_GID` to the numeric owner of `./data`
   (for example, `id -u` and `id -g`) when it is not `1000:1000`.
-- Compose separates gateway, application, analyzer, and database traffic on
-  distinct networks. Internal networks cannot reach the internet. DTVP,
-  Dependency-Track, Agentyzer, and the archive helper each receive a separate
-  outbound bridge so an egress-capable service does not create a lateral path
-  between trust zones.
+- Compose separates gateway, application, and analyzer traffic on distinct
+  networks. Internal networks cannot reach the internet. DTVP, Agentyzer, and
+  the archive helper each receive a separate outbound bridge so an
+  egress-capable service does not create a lateral path between trust zones.
 - Compose starts Agentyzer and persists credential-free cached Git repositories plus its bounded
   async-job SQLite store in the `agentyzer-repos` volume. Populate or override the sanitized
   `agentyzer/config/repos.yaml` before enabling automatic scans; never commit
@@ -674,31 +689,26 @@ Deployment rules:
   stale crash leftovers are pruned after the configured retention window. The
   source scanner reads only bounded, non-symlink regular files whose resolved
   paths remain inside that worktree, preventing a malicious checkout from
-  exposing host files through source-like symlinks.
+  exposing host files through source-like symlinks. The entire volume is a
+  disposable runtime cache: it is excluded from DTVP backups and may be deleted
+  and reconstructed from the configured Git sources.
 - The archive Git helper uses a digest-pinned image, read-only root filesystem,
   dropped capabilities, strict SSH host-key checking, and a dedicated outbound
   network. Remote lookup/fetch failures abort the job; they are never treated
   as an empty branch, and an initialized volume refuses a changed remote.
 - Internal services use Compose names and container ports. DTVP reaches
-  Dependency-Track at `http://dtrack-apiserver:8080` and Agentyzer at
-  `http://agentyzer:8000` unless overridden.
+  Agentyzer at `http://agentyzer:8000` unless overridden. Vulnerability
+  backends are external and use the configured adapter URL.
 - If proxies are configured, list exact internal hostnames/IPs in `NO_PROXY`;
   do not rely only on CIDR entries.
-- DTVP OIDC is independent of Dependency-Track browser sessions. Backend calls
-  use `DTVP_DT_API_KEY` and never forward browser credentials, authorization
-  headers, or session cookies. Use a single-purpose Dependency-Track team with
-  only portfolio/finding read and vulnerability-analysis permissions, plus
-  Portfolio Access Control where available. Archive apply uses a separate
-  importer team credential so normal review traffic does not carry BOM-upload
-  or project-creation privilege. Dependency-Track may share DTVP's external
-  OIDC provider, but DTVP intentionally uses service credentials for durable
-  background work and records the human actor in its own authorization/audit
-  boundary.
-  Rotate the review credential by creating a new key on the same restricted
-  team, updating `DTVP_DT_API_KEY`, recreating DTVP, and checking a project read
-  plus an assessment write before revoking the old key. Dependency-Track keeps
-  both keys valid during this handover, so DTVP does not retain a fallback key.
-  Rotate the archive-import team key independently with the same sequence.
+- DTVP OIDC is independent of backend browser sessions. Adapter calls use
+  `DTVP_VULNERABILITY_BACKEND_API_KEY` and never forward browser credentials,
+  authorization headers, or session cookies. Use a least-privilege workload
+  identity for normal review and a separate
+  `DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY` when archive apply requires
+  broader project/BOM creation rights. Rotate credentials according to the
+  selected backend's overlap procedure, recreate DTVP, and verify a read plus
+  an authorized write before revoking the previous credential.
 - `/api/vulnerability-backend` publishes the active non-secret adapter
   descriptor, capabilities, and adapter catalog. Dependency-Track is the active
   implementation. Cybeats is registered as a fail-closed scaffold until its
@@ -747,17 +757,15 @@ Deployment rules:
   free-space threshold.
 
 `./scripts/backup-compose-state.sh /absolute/backup/root` provides a consistent
-Compose backup. It briefly pauses DTVP, Agentyzer, and the Dependency-Track API,
-takes a PostgreSQL custom-format dump, and archives `./data`, the preserved
-Agentyzer repository/worktree volume, and Dependency-Track's data volume. It
-validates the dump and gzip stream, writes SHA-256 checksums, resumes every
-writer even after an error, and only then atomically updates
+Compose backup of DTVP-owned state. It briefly pauses DTVP and archives only
+`./data`. It validates the gzip stream, writes SHA-256 checksums, resumes DTVP
+even after an error, and only then atomically updates
 `DTVP_BACKUP_STATUS_PATH`. The isolated maintenance container has no network;
 its read-only source mounts and narrow DAC capabilities let it read files owned
 by the two different non-root runtime users.
 
 For a deployment managed entirely through Docker Compose, enable the optional
-`backup` profile. The scheduler uses the same pause, dump, archive, validation,
+`backup` profile. The scheduler uses the same pause, archive, validation,
 checksum, and marker sequence without host cron or systemd:
 
 ```dotenv
@@ -780,11 +788,10 @@ overlap an active scheduled run.
 Consistent cross-container snapshots require pausing and resuming writers, so
 this optional profile mounts the Docker Engine socket. Socket access is
 effectively host-administrator access even though the scheduler has no
-published port, only joins the internal database network, uses a read-only
-root, and drops Linux capabilities. Enable the profile only with the trusted
-scheduler image on a dedicated Docker host. If that trust is not acceptable,
-keep the profile disabled and invoke the host script from an external
-scheduler.
+published port or network, uses a read-only root, and drops Linux capabilities.
+Enable the profile only with the trusted scheduler image on a dedicated Docker
+host. If that trust is not acceptable, keep the profile disabled and invoke the
+host script from an external scheduler.
 
 Set `DTVP_BACKUP_MAX_AGE_SECONDS` to the recovery policy;
 `/api/security/health` becomes unhealthy when the verified marker is missing,
@@ -792,21 +799,21 @@ invalid, or stale. Freshness enforcement is disabled by default so a new
 deployment can start before its first backup. Store backup directories
 encrypted and outside the checkout. To test recovery, first verify
 `sha256sum -c SHA256SUMS`, restore `persistent-files.tar.gz` into fresh matching
-volumes while all writers are stopped, restore `dependency-track.pgdump` with
-`pg_restore` into a fresh database, then start the stack and exercise both
-health endpoints plus a representative project and scan. Never restore over a
-running deployment.
+storage while DTVP is stopped, then start the stack and exercise both health
+endpoints plus a representative project and scan. Never restore over a running
+deployment. Agentyzer clones, worktrees, and local jobs are disposable and are
+recreated rather than restored.
 
 Neither backup path prunes snapshots or copies them off-host. Apply encrypted
-storage lifecycle and replication separately. When `DTVP_DT_API_URL` selects
-an external Dependency-Track instance, the included PostgreSQL dump still
-covers only the bundled Compose database; back up the external instance with
-its own database and storage procedure as well.
+storage lifecycle and replication separately. Vulnerability backends are
+external systems and remain outside DTVP backups; their operators own their
+database, object-storage, retention, and restore procedures.
 
-Archive imports require a dedicated `DTVP_DT_IMPORT_API_KEY` with read, BOM
-upload, project-creation when needed, and vulnerability-analysis update
-permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
-are controlled by the archive variables below. The optional
+Archive imports may require a dedicated
+`DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY` with read, upload,
+project-creation, and assessment-update permissions supported by the selected
+adapter. Scheduled snapshots and expanded Git trees are controlled by the
+archive variables below. The optional
 `dtvp-archive-git-push` Compose job pushes an expanded tree; schedule it with
 cron, systemd, or CI when required.
 

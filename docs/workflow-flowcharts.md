@@ -142,14 +142,12 @@ flowchart TD
     Timer[Backup interval becomes due] --> Lock{Acquire in-container lock}
     Lock -->|Already active| Refuse[Refuse overlapping run]
     Lock -->|Acquired| Discover[Resolve this Compose project by label]
-    Discover --> Pause[Pause DTVP, Agentyzer, and Dependency-Track API]
-    Pause --> Dump[Create PostgreSQL custom-format dump]
-    Dump --> Archive[Archive DTVP, Agentyzer, and Dependency-Track volumes]
-    Archive --> Verify[Validate dump and gzip; write SHA-256 checksums]
+    Discover --> Pause[Pause DTVP]
+    Pause --> Archive[Archive DTVP data]
+    Archive --> Verify[Validate gzip; write SHA-256 checksums]
     Verify --> Marker[Atomically update backup freshness marker]
     Marker --> Resume[Resume paused writers]
     Resume --> Wait[Wait until next successful-backup interval]
-    Dump -->|Failure| Cleanup[Resume writers through signal/exit trap]
     Archive -->|Failure| Cleanup
     Verify -->|Failure| Cleanup
     Cleanup --> Retry[Retry after configured failure interval]

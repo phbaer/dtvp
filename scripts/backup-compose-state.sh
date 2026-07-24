@@ -37,10 +37,6 @@ fi
 mkdir -m 0700 "$snapshot_dir"
 
 running_services=$(docker compose ps --status running --services)
-if ! printf '%s\n' "$running_services" | grep -Fx postgres >/dev/null; then
-    echo "The Compose postgres service must be running." >&2
-    exit 1
-fi
 
 paused_services=""
 resume_writers() {
@@ -50,27 +46,21 @@ resume_writers() {
 }
 trap resume_writers EXIT HUP INT TERM
 
-for service in dtvp agentyzer dtrack-apiserver; do
+for service in dtvp; do
     if printf '%s\n' "$running_services" | grep -Fx "$service" >/dev/null; then
         docker compose pause "$service" >/dev/null
         paused_services="$service $paused_services"
     fi
 done
 
-docker compose exec -T postgres \
-    pg_dump --username=dtrack --dbname=dtrack --format=custom \
-    > "$snapshot_dir/dependency-track.pgdump"
-
 DTVP_BACKUP_PATH="$snapshot_dir" \
     docker compose --profile maintenance run --rm --no-deps dtvp-state-backup
 
-docker compose exec -T postgres pg_restore --list \
-    < "$snapshot_dir/dependency-track.pgdump" >/dev/null
 gzip -t "$snapshot_dir/persistent-files.tar.gz"
 
 (
     cd "$snapshot_dir"
-    sha256sum dependency-track.pgdump persistent-files.tar.gz > SHA256SUMS
+    sha256sum persistent-files.tar.gz > SHA256SUMS
 )
 
 completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
