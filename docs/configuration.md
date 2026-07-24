@@ -15,6 +15,10 @@ source_paths:
   - dtvp/tmrescore_integration.py
   - compose.yml
   - .env.dist
+  - deploy/arcane/compose.yml
+  - deploy/arcane/.env.dist
+  - deploy/arcane/dtvp.env
+  - deploy/arcane/agentyzer.env
   - demo/dependency-track/compose.yml
   - demo/dependency-track/.env.dist
   - demo/dependency-track/ecosystem.config.js
@@ -132,6 +136,32 @@ host-administrator privilege. The scheduler has no network and archives only
 DTVP-owned `./data`. The selected vulnerability backend is external and must be
 backed up by its operator. The `agentyzer-repos` volume is a disposable cache
 and is intentionally excluded.
+
+## Arcane Deployment
+
+`deploy/arcane/compose.yml` is an image-only Compose project suitable for both
+Arcane's manual editor and repository sync. It deliberately avoids build
+contexts, nginx companion files, and Docker-socket access.
+
+| Variable | Purpose | Default |
+| :--- | :--- | :--- |
+| `DTVP_IMAGE` | Published DTVP image; use a release tag or digest for reproducible Git management | `git.baer.one/phbaer/dtvp:latest` |
+| `AGENTYZER_IMAGE` | Published Agentyzer image; use a matching release tag or digest | `git.baer.one/phbaer/agentyzer:latest` |
+| `DTVP_HTTP_BIND_ADDRESS` | Host address publishing DTVP directly | `127.0.0.1` |
+| `DTVP_HTTP_PORT` | Direct DTVP host port in the Arcane topology | `8000` |
+
+Arcane's project `.env` supplies image/port interpolation and
+environment-backed Compose secrets, but it is not injected wholesale into
+either application container. Non-secret settings live in the service-specific
+`dtvp.env` and `agentyzer.env` files. Git-managed installations customize those
+files on their deployment branch; manual projects add them to the Arcane
+workspace. Secret values are explicitly replaced with Compose secret-file
+paths at the container boundary.
+
+`dtvp-data` is the only durable application volume. `agentyzer-repos` remains
+disposable. Arcane volume backups require stopping the project for a consistent
+DTVP snapshot and do not update DTVP's backup-status marker, so the Arcane
+template defaults `DTVP_BACKUP_MAX_AGE_SECONDS` to `0`.
 
 ## Dependency-Track Demo
 
@@ -252,3 +282,7 @@ in DTVP 2.0.
 | `AGENTYZER_RESEARCH_CLONE_MAX_REPOSITORY_MB` | Maximum cached research-clone disk use | `256` |
 | `AGENTYZER_RESEARCH_CLONE_MAX_FILE_BYTES` | Maximum committed file size inspected | `256000` |
 | `AGENTYZER_RESEARCH_CLONE_CACHE_TTL_SECONDS` | Freshness window before a research repository is cloned again | `3600` |
+
+Agentyzer accepts the historical unprefixed `LLM_BACKEND`, `OLLAMA_*`,
+`OPENWEBUI_*`, and `LOG_LEVEL` variables as compatibility aliases. The
+`AGENTYZER_*` names are canonical and take precedence when both are present.

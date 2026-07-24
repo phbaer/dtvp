@@ -11,6 +11,7 @@ source_paths:
   - pyproject.toml
   - frontend/package.json
   - compose.yml
+  - deploy/arcane/compose.yml
   - demo/dependency-track/compose.yml
   - demo/dependency-track/ecosystem.config.js
 review_when:
@@ -39,6 +40,7 @@ TMRescore and code analysis are optional integrations.
 | `frontend/` | Vue 3, Vite, and Tailwind single-page application |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `demo/dependency-track/` | Optional, isolated Dependency-Track demonstration deployment and local mock runtime |
+| `deploy/arcane/` | Image-only Arcane project for manual or Git-managed deployment |
 | `tests/` | Backend pytest suite |
 | `data/` | Local configuration, cache data, mappings, rules, and archives |
 | `dtvp/migrations/` | Numbered SQLite migrations for local stores |
@@ -73,6 +75,12 @@ and updates the DTVP backup-freshness marker. Backend state is outside this
 boundary, and the Agentyzer repository/job volume is a disposable cache.
 Because that coordination uses the Docker Engine socket, the scheduler is an
 explicitly privileged operator component and is not enabled by default.
+
+The Arcane deployment is a separate image-only topology. It publishes DTVP
+directly, stores DTVP state in an Arcane-managed named volume, and keeps
+Agentyzer clones/jobs in a second disposable volume. Its Compose project can be
+pasted manually or synced from Git; Arcane owns the deployment `.env`, while
+the repository owns the explicit configuration allowlist.
 
 ## Knowledge Map
 

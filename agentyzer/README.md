@@ -297,18 +297,19 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_BACKEND` | `ollama` | Selects the LLM backend: `ollama` or `openwebui`. |
-| `OLLAMA_HOST` | `http://localhost:11434` | Base URL for Ollama. |
-| `OLLAMA_MODEL` | `mistral` | Model name used with Ollama. |
-| `OPENWEBUI_HOST` | `http://localhost:3000` | Base URL for OpenWebUI. |
-| `OPENWEBUI_MODEL` | `mistral` | Model identifier served by OpenWebUI. |
-| `OPENWEBUI_API_KEY` | empty | Bearer token for OpenWebUI when required. |
-| `OPENWEBUI_TOOL_CALLS` | `auto` | Native OpenAI-style research tool calls for OpenWebUI, or `off` to use text research directives. |
-| `OPENWEBUI_CONTEXT_WINDOW` | `0` | Optional model context window in tokens. When set, Agentyzer pre-trims oversized OpenWebUI prompts before sending them. |
-| `OPENWEBUI_CONTEXT_SAFETY_MARGIN` | `256` | Token margin reserved below the configured or reported context limit. |
-| `OPENWEBUI_CONTEXT_RETRIES` | `2` | Number of retries after OpenWebUI rejects a request for exceeding context length. |
-| `OPENWEBUI_MIN_COMPLETION_TOKENS` | `256` | Minimum completion budget to preserve when truncating input context. |
-| `LOG_LEVEL` | `INFO` | Standard Python logging level. |
+| `AGENTYZER_LLM_BACKEND` | `ollama` | Selects the LLM backend: `ollama` or `openwebui`. |
+| `AGENTYZER_OLLAMA_HOST` | `http://localhost:11434` | Base URL for Ollama. |
+| `AGENTYZER_OLLAMA_MODEL` | `mistral` | Model name used with Ollama. |
+| `AGENTYZER_OPENWEBUI_HOST` | `http://localhost:3000` | Base URL for OpenWebUI. |
+| `AGENTYZER_OPENWEBUI_MODEL` | `mistral` | Model identifier served by OpenWebUI. |
+| `AGENTYZER_OPENWEBUI_API_KEY` | empty | Bearer token for OpenWebUI when required. |
+| `AGENTYZER_OPENWEBUI_API_KEY_FILE` | empty | File containing the OpenWebUI bearer token when the direct value is empty. |
+| `AGENTYZER_OPENWEBUI_TOOL_CALLS` | `auto` | Native OpenAI-style research tool calls for OpenWebUI, or `off` to use text `FETCH_*` and `CLONE_REPOSITORY` directives. |
+| `AGENTYZER_OPENWEBUI_CONTEXT_WINDOW` | `0` | Optional model context window in tokens. When set, Agentyzer pre-trims oversized OpenWebUI prompts before sending them. |
+| `AGENTYZER_OPENWEBUI_CONTEXT_SAFETY_MARGIN` | `256` | Token margin reserved below the configured or reported context limit. |
+| `AGENTYZER_OPENWEBUI_CONTEXT_RETRIES` | `2` | Number of retries after OpenWebUI rejects a request for exceeding context length. |
+| `AGENTYZER_OPENWEBUI_MIN_COMPLETION_TOKENS` | `256` | Minimum completion budget to preserve when truncating input context. |
+| `AGENTYZER_LOG_LEVEL` | `INFO` | Standard Python logging level. |
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | `1` | Maximum number of async or sync assessment pipelines allowed to execute at the same time. Extra async jobs remain `pending` until a slot opens. |
@@ -344,6 +345,10 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_MAX_QUEUED_JOBS` | `100` | Maximum accepted async jobs waiting for an execution slot. |
 | `AGENTYZER_MAX_ACTIVE_JOBS_PER_OWNER` | `10` | Maximum pending/running async jobs accepted for one owner. |
 | `AGENTYZER_CALLER_OWNER` | `cli` | Owner header used by the CLI to isolate its jobs. |
+
+The historical unprefixed `LLM_BACKEND`, `OLLAMA_*`, `OPENWEBUI_*`, and
+`LOG_LEVEL` names remain compatibility aliases. New deployments should use the
+`AGENTYZER_*` names; when both forms are set, the prefixed value wins.
 
 ### Component registry
 
@@ -741,7 +746,7 @@ The pipeline state contract lives in `src/pipeline/state.py` and carries:
 - Final output in `result`.
 - Structured `step_reports` and append-only `evidence` for auditing.
 
-The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. Each stage retains only its latest heartbeat log entry while its current activity continues to update. Persisted `llm_conversation` turns include request/response timestamps and directional token usage when the provider reports it; Ollama also retains its native evaluation-duration metrics. With OpenWebUI and `OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`, `clone_repository`); Agentyzer executes them locally through allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` and `CLONE_REPOSITORY` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
+The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. Persisted `llm_conversation` turns include request/response timestamps and directional token usage when the provider reports it; Ollama also retains its native evaluation-duration metrics. With OpenWebUI and `AGENTYZER_OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`, `clone_repository`); Agentyzer executes them locally through allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` and `CLONE_REPOSITORY` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
 
 `clone_repository` fills the gap between a dependency-chain name and the
 implementation evidence needed to judge reachability. The model supplies a
@@ -792,12 +797,12 @@ or request token count, then retries with a lower completion budget or a
 compacted prompt. The reported limit is retained for later calls, including the
 `request (…) exceeds the available context size (…)` response emitted by some
 OpenWebUI model backends.
-For models with a known window, set `OPENWEBUI_CONTEXT_WINDOW` to enable
-preflight prompt compaction before the request is sent. The estimate is
+For models with a known window, set `AGENTYZER_OPENWEBUI_CONTEXT_WINDOW` to
+enable preflight prompt compaction before the request is sent. The estimate is
 conservative for code, reserves the requested completion budget, and generated
 AST evidence is independently capped with an explicit omission marker. Full AST
 scan counts remain in pipeline evidence. For example, a model with a
-131072-token context can use `OPENWEBUI_CONTEXT_WINDOW=131072`.
+131072-token context can use `AGENTYZER_OPENWEBUI_CONTEXT_WINDOW=131072`.
 
 ## Parallel Project Runs And Workspace Reuse
 
@@ -879,7 +884,8 @@ docker run --rm -p 127.0.0.1:8000:8000 \
 - Builds from the local Dockerfile.
 - Publishes container port `8000` on host loopback port `8000`.
 - Mounts `./config` into `/app/config` as read-only.
-- Points the containerized service at an Ollama instance via `OLLAMA_HOST=http://host.docker.internal:11434`.
+- Points the containerized service at an Ollama instance via
+  `AGENTYZER_OLLAMA_HOST=http://host.docker.internal:11434`.
 - Defaults to one assessment execution slot through `AGENTYZER_MAX_CONCURRENT_JOBS=1`.
 
 Run it with:
@@ -890,7 +896,9 @@ export AGENTYZER_ADMIN_TOKEN="$(openssl rand -hex 32)"
 docker compose up --build
 ```
 
-If `host.docker.internal` is not available on your Linux setup, adjust `OLLAMA_HOST` to a reachable address for your host or model container.
+If `host.docker.internal` is not available on your Linux setup, adjust
+`AGENTYZER_OLLAMA_HOST` to a reachable address for your host or model
+container.
 
 ## Jenkins Pipeline Setup
 

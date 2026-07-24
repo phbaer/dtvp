@@ -1,0 +1,3 @@
+# Sanitized Agentyzer repository mappings for this deployment.
+# Never commit credentials or authenticated clone URLs.
+components: {}
