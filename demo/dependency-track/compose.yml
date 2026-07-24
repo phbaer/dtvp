@@ -1,0 +1,120 @@
+x-demo-logging: &demo-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  nginx:
+    volumes:
+      - ./demo/dependency-track/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      demo-dependency-track-frontend:
+        condition: service_started
+      demo-dependency-track-api:
+        condition: service_started
+
+  dtvp:
+    environment:
+      DTVP_ENVIRONMENT: development
+      DTVP_DEV_DISABLE_AUTH: "true"
+      DTVP_VULNERABILITY_BACKEND_ID: ${DTVP_DEMO_DEPENDENCY_TRACK_ID:-dependency-track-demo}
+      DTVP_VULNERABILITY_BACKEND_TYPE: dependency-track
+      DTVP_VULNERABILITY_BACKEND_LABEL: ${DTVP_DEMO_DEPENDENCY_TRACK_LABEL:-Dependency-Track Demo}
+      DTVP_VULNERABILITY_BACKEND_API_URL: http://demo-dependency-track-api:8080
+      DTVP_VULNERABILITY_BACKEND_API_KEY: ${DTVP_DEMO_DEPENDENCY_TRACK_API_KEY:-}
+      DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY: ${DTVP_DEMO_DEPENDENCY_TRACK_IMPORT_API_KEY:-}
+    depends_on:
+      demo-dependency-track-api:
+        condition: service_started
+
+  demo-dependency-track-api:
+    image: dependencytrack/apiserver:4.14.2@sha256:1ba4f004e1ec4800ec0e0175b0f1cf361a68f6ac3db9274a32d0a47cd4038f51
+    environment:
+      ALPINE_DATABASE_MODE: external
+      ALPINE_DATABASE_URL: jdbc:postgresql://demo-dependency-track-database:5432/dtrack
+      ALPINE_DATABASE_DRIVER: org.postgresql.Driver
+      ALPINE_DATABASE_USERNAME: dtrack
+      ALPINE_DATABASE_PASSWORD: ${DTVP_DEMO_DEPENDENCY_TRACK_DATABASE_PASSWORD:?Set DTVP_DEMO_DEPENDENCY_TRACK_DATABASE_PASSWORD}
+    depends_on:
+      demo-dependency-track-database:
+        condition: service_healthy
+    volumes:
+      - demo-dependency-track-data:/data
+    networks:
+      - application
+      - demo-dependency-track-data
+      - demo-dependency-track-outbound
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    logging: *demo-logging
+    restart: unless-stopped
+
+  demo-dependency-track-frontend:
+    image: dependencytrack/frontend:4.14.2@sha256:00560b57a6cfdec3c02a6e02be80fce97029241a9c653e8b83c0b670dff1f3ca
+    environment:
+      API_BASE_URL: /api
+    networks:
+      - application
+    read_only: true
+    tmpfs:
+      - /etc/nginx/conf.d:size=1m,mode=1777
+      - /var/cache/nginx:size=16m,mode=1777
+      - /var/run:size=1m,mode=1777
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 200
+    logging: *demo-logging
+    restart: unless-stopped
+
+  demo-dependency-track-database:
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_USER: dtrack
+      POSTGRES_PASSWORD: ${DTVP_DEMO_DEPENDENCY_TRACK_DATABASE_PASSWORD:?Set DTVP_DEMO_DEPENDENCY_TRACK_DATABASE_PASSWORD}
+      POSTGRES_DB: dtrack
+    volumes:
+      - demo-dependency-track-database:/var/lib/postgresql/data
+    networks:
+      - demo-dependency-track-data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dtrack -d dtrack"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /run/postgresql:size=16m,mode=1777
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    pids_limit: 200
+    logging: *demo-logging
+    restart: unless-stopped
+
+volumes:
+  demo-dependency-track-database:
+  demo-dependency-track-data:
+
+networks:
+  demo-dependency-track-data:
+    internal: true
+  demo-dependency-track-outbound:

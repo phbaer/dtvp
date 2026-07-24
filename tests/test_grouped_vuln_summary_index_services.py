@@ -64,8 +64,11 @@ def test_grouped_vuln_summary_cache_key_tracks_team_and_cache_revision():
     assert first != changed_revision
 
 
-def test_grouped_vuln_summary_index_default_sits_next_to_dt_cache(monkeypatch):
-    monkeypatch.setenv("DTVP_DT_CACHE_PATH", "/tmp/dtvp-cache/dt_cache")
+def test_grouped_vuln_summary_index_default_sits_next_to_backend_cache(monkeypatch):
+    monkeypatch.setenv(
+        "DTVP_VULNERABILITY_BACKEND_CACHE_PATH",
+        "/tmp/dtvp-cache/backend_cache",
+    )
 
     assert get_grouped_vuln_summary_index_path() == str(
         Path("/tmp/dtvp-cache/grouped_vuln_summary_index.sqlite")

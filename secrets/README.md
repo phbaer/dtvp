@@ -8,4 +8,6 @@ host paths with `DTVP_ARCHIVE_GIT_SSH_KEY_HOST_FILE` and
 
 The hardened Compose overlay creates application secret mounts directly from
 values in the local `.env` file, so those values do not appear in container
-environment metadata.
+environment metadata. Backend credentials use vendor-neutral
+`DTVP_VULNERABILITY_BACKEND_*` names. Demo-only backend infrastructure and its
+database credentials live under `demo/`, outside the DTVP deployment.

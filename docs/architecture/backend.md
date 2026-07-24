@@ -52,7 +52,7 @@ Cross-cutting rate-limit, task-retention, archive, local-storage, and
 frontend-runtime defaults are parsed in `dtvp.configuration`. Settings are
 resolved when requested so tests and controlled runtime reloads can change the
 environment without stale global configuration. Authentication,
-Dependency-Track, TMRescore, and analyzer credentials remain in their focused
+backend-adapter, TMRescore, and analyzer credentials remain in their focused
 Pydantic settings classes.
 
 ## Runtime And Data Flow
@@ -81,13 +81,13 @@ Pydantic settings classes.
   independent users can progress on free-threaded Python. Automatic-analysis
   planning runs in a separate post-processing pool after clients are notified
   that the snapshot is complete. Detail hydration has its own reserved pool.
-- The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
-  vulnerability details, BOMs, local overlays, and pending writes. Stale cached
-  data remains readable while the provider is unavailable. Concurrent misses
-  for one resource share one provider request, while each caller receives an
-  isolated mutable snapshot. Unchanged JSON refreshes are skipped. Grouped
-  snapshots use project-scoped revisions and selected-version metadata, so
-  unrelated project activity does not invalidate a reusable result.
+- The local cache under `DTVP_VULNERABILITY_BACKEND_CACHE_PATH` stores projects,
+  findings, vulnerability details, BOMs, local overlays, and pending writes.
+  Stale cached data remains readable while the provider is unavailable.
+  Concurrent misses for one resource share one provider request, while each
+  caller receives an isolated mutable snapshot. Unchanged JSON refreshes are
+  skipped. Grouped snapshots use project-scoped revisions and selected-version
+  metadata, so unrelated project activity does not invalidate a reusable result.
 - Non-default backend instance IDs place caches, queues, archives, TMRescore
   proposals, and analyzer results in separate `backends/<id>` namespaces.
   Cache markers reject accidental reuse by a different instance.

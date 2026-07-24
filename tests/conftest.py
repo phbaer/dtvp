@@ -7,6 +7,10 @@ from fastapi.testclient import TestClient
 # Authentication settings are instantiated while the application modules are
 # imported, so establish a complete, non-production test configuration first.
 os.environ["DTVP_ENVIRONMENT"] = "test"
+os.environ["DTVP_VULNERABILITY_BACKEND_ID"] = "dependency-track"
+os.environ["DTVP_VULNERABILITY_BACKEND_TYPE"] = "dependency-track"
+os.environ["DTVP_VULNERABILITY_BACKEND_LABEL"] = "Dependency-Track Test"
+os.environ["DTVP_VULNERABILITY_BACKEND_API_URL"] = "http://127.0.0.1:8081"
 os.environ["DTVP_OIDC_AUTHORITY"] = "https://auth.example.com"
 os.environ["DTVP_OIDC_CLIENT_ID"] = "test-client"
 os.environ["DTVP_OIDC_CLIENT_SECRET"] = "test-client-secret"
@@ -15,7 +19,7 @@ os.environ["DTVP_FRONTEND_URL"] = "http://localhost:8000"
 os.environ["DTVP_SESSION_SECRET_KEY"] = (
     "test-only-session-secret-that-is-long-enough-1234567890"
 )
-os.environ["DTVP_DT_IMPORT_API_KEY"] = "test-import-key"
+os.environ["DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY"] = "test-import-key"
 
 from dtvp import dt_cache, main
 from dtvp.dt_client import DTClient
@@ -23,10 +27,10 @@ from dtvp.dt_client import DTClient
 
 @pytest.fixture(autouse=True)
 def reset_cache_manager(tmp_path, monkeypatch):
-    cache_dir = tmp_path / "dt_cache"
+    cache_dir = tmp_path / "backend_cache"
     analysis_results_path = tmp_path / "code_analysis_results.json"
     analysis_queue_path = tmp_path / "analysis_queue.sqlite"
-    monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
+    monkeypatch.setenv("DTVP_VULNERABILITY_BACKEND_CACHE_PATH", str(cache_dir))
     monkeypatch.setenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", str(analysis_results_path))
     monkeypatch.setenv("DTVP_ANALYSIS_QUEUE_STATE_PATH", str(analysis_queue_path))
     monkeypatch.setenv(

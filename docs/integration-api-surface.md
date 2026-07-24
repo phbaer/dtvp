@@ -1,7 +1,7 @@
 ---
 type: Integration
 title: External Integration API Surface
-description: HTTP contracts DTVP expects from optional TMRescore and code-analysis providers.
+description: Backend-adapter, TMRescore, and code-analysis contracts consumed by DTVP.
 tags:
   - integrations
   - api
@@ -10,16 +10,35 @@ tags:
 source_paths:
   - dtvp/tmrescore_integration.py
   - dtvp/code_analysis_integration.py
+  - dtvp/vulnerability_backend.py
+  - dtvp/dt_client.py
   - agentyzer/src/
   - openapi/
   - scripts/generate-agentyzer-openapi.py
 review_when:
-  - Optional integration endpoints, authentication, request schemas, result schemas, or provider capabilities change.
+  - Backend-adapter or optional integration endpoints, authentication, request schemas, result schemas, or provider capabilities change.
 ---
 
 # External Integration API Surface
 
-This document defines the external HTTP APIs expected by DTVP for the optional integrations.
+This document defines the external provider boundaries consumed by DTVP.
+
+## Vulnerability-Management Backends
+
+DTVP does not deploy or own a vulnerability-management product. Operators
+select an adapter with `DTVP_VULNERABILITY_BACKEND_TYPE`, give the backend
+instance a stable `DTVP_VULNERABILITY_BACKEND_ID`, and supply the URL and
+workload credential through the vendor-neutral
+`DTVP_VULNERABILITY_BACKEND_API_*` settings. The ID namespaces cached and
+derived state so two backend instances cannot share resource identities.
+
+Adapters implement the protocol in `dtvp/vulnerability_backend.py`, advertise
+capabilities, and fail closed when a workflow is unsupported. The protocol
+covers project and finding discovery, SBOM and dependency-graph reads,
+assessment reads/writes, audit history, and optional project/SBOM creation.
+Dependency-Track is the first available adapter. Its API-specific client stays
+inside `dtvp/dt_client.py`; the optional deployment under
+`demo/dependency-track/` exists only for evaluation and is not a DTVP service.
 
 ## TMRescore Service
 

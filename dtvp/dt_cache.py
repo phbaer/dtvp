@@ -255,7 +255,7 @@ class CacheManager:
             else refresh_interval_seconds
         )
         self.project_list_ttl_seconds = (
-            _positive_int_env("DTVP_DT_PROJECT_LIST_TTL_SECONDS", 30, minimum=0)
+            DurableStorageSettings.from_env().project_list_ttl_seconds
             if project_list_ttl_seconds is None
             else max(0, project_list_ttl_seconds)
         )

@@ -1,10 +1,14 @@
+const path = require("path");
+
+const root = path.resolve(__dirname, "../..");
+
 module.exports = {
     apps: [
         {
             name: "mock-dt",
             script: "uv",
             args: "run uvicorn mock_dt:app --host 127.0.0.1 --port 8081",
-            cwd: "test_setup",
+            cwd: path.join(root, "test_setup"),
             interpreter: "none",
             env: {
                 PYTHONUNBUFFERED: "1"
@@ -14,7 +18,7 @@ module.exports = {
             name: "mock-tmrescore",
             script: "uv",
             args: "run uvicorn mock_tmrescore:app --host 127.0.0.1 --port 8090",
-            cwd: "test_setup",
+            cwd: path.join(root, "test_setup"),
             interpreter: "none",
             env: {
                 PYTHONUNBUFFERED: "1"
@@ -24,7 +28,7 @@ module.exports = {
             name: "mock-code-analysis",
             script: "uv",
             args: "run uvicorn mock_code_analysis:app --host 127.0.0.1 --port 8095",
-            cwd: "test_setup",
+            cwd: path.join(root, "test_setup"),
             interpreter: "none",
             env: {
                 PYTHONUNBUFFERED: "1"
@@ -34,11 +38,15 @@ module.exports = {
             name: "dtvp-backend",
             script: "uv",
             args: "run uvicorn dtvp.boot:app --host 0.0.0.0 --port 8000",
+            cwd: root,
             interpreter: "none",
             env: {
                 DTVP_ENVIRONMENT: "development",
-                DTVP_DT_API_URL: "http://127.0.0.1:8081",
-                DTVP_DT_API_KEY: "mock_key",
+                DTVP_VULNERABILITY_BACKEND_ID: "dependency-track-mock",
+                DTVP_VULNERABILITY_BACKEND_TYPE: "dependency-track",
+                DTVP_VULNERABILITY_BACKEND_LABEL: "Dependency-Track Mock",
+                DTVP_VULNERABILITY_BACKEND_API_URL: "http://127.0.0.1:8081",
+                DTVP_VULNERABILITY_BACKEND_API_KEY: "mock_key",
                 DTVP_OIDC_AUTHORITY: "http://127.0.0.1:8081",
                 DTVP_OIDC_CLIENT_ID: "mock_id",
                 DTVP_OIDC_CLIENT_SECRET: "mock_secret",
@@ -54,7 +62,7 @@ module.exports = {
             name: "dtvp-frontend",
             script: "npm",
             args: "run dev -- --host 0.0.0.0",
-            cwd: "frontend",
+            cwd: path.join(root, "frontend"),
             interpreter: "none"
         }
     ]
