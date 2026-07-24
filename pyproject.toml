@@ -29,6 +29,7 @@ dev = [
     "cyclonedx-bom>=7.2.2",
     "pip-audit==2.10.0",
     "bandit[toml]==1.9.4",
+    "pytm==1.4.0",
 ]
 
 [tool.pytest.ini_options]

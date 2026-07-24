@@ -225,6 +225,7 @@ async def test_upload_bom_auto_creates_project_version(dt_client, respx_mock):
 
 def test_settings_properties():
     generic = DTSettings(
+        _env_file=None,
         DTVP_VULNERABILITY_BACKEND_API_URL="https://backend.example",
         DTVP_VULNERABILITY_BACKEND_API_KEY="generic-key",
         DTVP_DT_API_URL="https://legacy.example",
@@ -235,7 +236,9 @@ def test_settings_properties():
 
     # Legacy settings remain readable for existing adapter deployments.
     s = DTSettings(
+        _env_file=None,
         DTVP_VULNERABILITY_BACKEND_API_URL="",
+        DTVP_VULNERABILITY_BACKEND_API_KEY="",
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL="http://fallback",
         DTVP_DT_API_KEY="change_me",
@@ -246,7 +249,9 @@ def test_settings_properties():
     assert s.api_key == "key"
 
     s2 = DTSettings(
+        _env_file=None,
         DTVP_VULNERABILITY_BACKEND_API_URL="",
+        DTVP_VULNERABILITY_BACKEND_API_KEY="",
         DTVP_DT_API_URL="",
         DEPENDENCY_TRACK_URL=None,
         DTVP_DT_API_KEY="change_me",

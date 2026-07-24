@@ -6,16 +6,27 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parents[1]
 GITHUB_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "build-publish.yml"
 FORGEJO_WORKFLOW_PATH = ROOT / ".forgejo" / "workflows" / "build-publish.yml"
+GITHUB_UPLOAD_ARTIFACT = (
+    "uses: actions/upload-artifact@"
+    "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+)
+FORGEJO_UPLOAD_ARTIFACT = (
+    "uses: https://data.forgejo.org/actions/upload-artifact@"
+    "c6a3b2bd78b3985e4b2f15397fec357f0fd808de # v3.2.2-node20"
+)
 
 
-def test_forgejo_workflow_omits_only_github_permissions():
+def test_forgejo_workflow_has_only_expected_provider_specific_differences():
     github_workflow = GITHUB_WORKFLOW_PATH.read_text(encoding="utf-8")
     forgejo_workflow = FORGEJO_WORKFLOW_PATH.read_text(encoding="utf-8")
     github_permissions = "permissions:\n  contents: read\n\n"
 
     assert github_permissions in github_workflow
     assert "permissions:" not in forgejo_workflow
-    assert github_workflow.replace(github_permissions, "", 1) == forgejo_workflow
+    expected_forgejo_workflow = github_workflow.replace(
+        github_permissions, "", 1
+    ).replace(GITHUB_UPLOAD_ARTIFACT, FORGEJO_UPLOAD_ARTIFACT)
+    assert expected_forgejo_workflow == forgejo_workflow
 
 
 def test_forgejo_workflow_is_generated_from_github_source():
@@ -65,19 +76,25 @@ def test_ci_uses_locked_dependencies_and_read_only_default_permissions():
 
     assert "permissions:\n  contents: read" in workflow
     assert "uv add " not in workflow + sbom_script
+    pinned_setup_uv = (
+        "uses: astral-sh/setup-uv@"
+        "37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7\n"
+        "        with:\n"
+        '          version: "0.11.31"'
+    )
+    assert workflow.count(pinned_setup_uv) == 6
     assert "npm install --save-dev" not in workflow + sbom_script
     assert "./scripts/generate-sboms.sh" in workflow
     assert "npm ci --ignore-scripts" in sbom_script
     assert "npm run generate --" in sbom_script
     assert '"$repository_dir/scripts/check-node-tls.sh"' in sbom_script
     assert "@cyclonedx/cyclonedx-npm" not in workflow
-    forgejo_upload_artifact = (
-        "https://data.forgejo.org/actions/upload-artifact@"
-        "c6a3b2bd78b3985e4b2f15397fec357f0fd808de"
-    )
-    assert workflow.count(forgejo_upload_artifact) == 4
+    forgejo_workflow = FORGEJO_WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert workflow.count(GITHUB_UPLOAD_ARTIFACT) == 5
+    assert FORGEJO_UPLOAD_ARTIFACT not in workflow
+    assert forgejo_workflow.count(FORGEJO_UPLOAD_ARTIFACT) == 5
+    assert GITHUB_UPLOAD_ARTIFACT not in forgejo_workflow
     assert "https://data.forgejo.org/forgejo/upload-artifact@" not in workflow
-    assert "uses: actions/upload-artifact@" not in workflow
     assert "needs: [test-backend, test-frontend, test-agentyzer, test-e2e]" in workflow
     assert workflow.count("needs: [scan-images]") == 2
 
@@ -90,7 +107,13 @@ def test_ci_gates_dependencies_and_images_before_publishing():
 
     assert "pip-audit --local --progress-spinner=off" in workflow
     assert "--vulnerability-service=osv --timeout=30" in workflow
-    assert "bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src" in workflow
+    assert (
+        "bandit -ll -ii -c pyproject.toml -r dtvp agentyzer/src threatmodel"
+        in workflow
+    )
+    assert "./scripts/generate-threat-model.sh" in workflow
+    assert "name: dtvp-agentyzer-threat-model" in workflow
+    assert "path: threat-model-results/" in workflow
     assert "python scripts/validate-okf.py docs" in workflow
     assert "generate-agentyzer-openapi.py --check" in workflow
     assert workflow.count("npm audit --audit-level=high") == 2

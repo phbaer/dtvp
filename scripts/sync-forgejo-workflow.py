@@ -12,6 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PATH = ROOT / ".github" / "workflows" / "build-publish.yml"
 OUTPUT_PATH = ROOT / ".forgejo" / "workflows" / "build-publish.yml"
 GITHUB_ONLY_PERMISSIONS = "permissions:\n  contents: read\n\n"
+GITHUB_UPLOAD_ARTIFACT = (
+    "uses: actions/upload-artifact@"
+    "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+)
+FORGEJO_UPLOAD_ARTIFACT = (
+    "uses: https://data.forgejo.org/actions/upload-artifact@"
+    "c6a3b2bd78b3985e4b2f15397fec357f0fd808de # v3.2.2-node20"
+)
+EXPECTED_UPLOAD_ARTIFACT_USES = 5
 
 
 def render_forgejo_workflow(source: str) -> str:
@@ -19,7 +28,16 @@ def render_forgejo_workflow(source: str) -> str:
         raise ValueError(
             "canonical workflow must contain exactly one read-only permissions block"
         )
-    return source.replace(GITHUB_ONLY_PERMISSIONS, "", 1)
+    if source.count(GITHUB_UPLOAD_ARTIFACT) != EXPECTED_UPLOAD_ARTIFACT_USES:
+        raise ValueError(
+            "canonical workflow must contain exactly "
+            f"{EXPECTED_UPLOAD_ARTIFACT_USES} pinned GitHub artifact uploads"
+        )
+    if FORGEJO_UPLOAD_ARTIFACT in source:
+        raise ValueError("canonical workflow must not contain Forgejo artifact actions")
+
+    rendered = source.replace(GITHUB_ONLY_PERMISSIONS, "", 1)
+    return rendered.replace(GITHUB_UPLOAD_ARTIFACT, FORGEJO_UPLOAD_ARTIFACT)
 
 
 def main() -> int:

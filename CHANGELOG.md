@@ -16,6 +16,14 @@ All notable changes to this project will be documented in this file.
 - Separate Arcane runtime settings into per-service non-secret env files and
   make `AGENTYZER_*` the canonical LLM/logging namespace while retaining the
   historical unprefixed names as compatibility aliases.
+- Add an executable OWASP pytm model for DTVP, Agentyzer, and vscorer flows,
+  with CI-generated findings, JSON, and Graphviz DFD artifacts.
+
+### 🐛 Bug Fixes
+- Use GitHub's native artifact action in its workflow while generating the
+  Forgejo workflow with that provider's compatible artifact action.
+- Pin CI's uv release so self-hosted runners do not depend on external
+  latest-version discovery.
 
 ## [1.0.15] — 2026-07-20
 
