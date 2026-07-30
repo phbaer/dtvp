@@ -36,7 +36,8 @@ const error = ref('')
 const message = ref('')
 const expandedLogQueueIds = ref<Set<string>>(new Set())
 const queueLogScrollElements = new Map<string, HTMLElement>()
-let pollTimer: ReturnType<typeof setInterval> | null = null
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let statusRequest: Promise<void> | null = null
 
 const queueItems = computed(() => status.value?.queue.items || [])
 const externalJobs = computed(() => status.value?.external.jobs || [])
@@ -149,17 +150,68 @@ const resultVulnRoute = (record: CodeAnalysisResultRecord) => ({
     query: { vuln: record.vuln_id },
 })
 
-const loadStatus = async () => {
-    loading.value = true
-    try {
-        status.value = await codeAnalysisGetDashboardStatus()
-        error.value = ''
-        scrollQueueLogsToLatest()
-    } catch (err: any) {
-        error.value = err?.message || 'Unable to load code analysis status.'
-    } finally {
-        loading.value = false
+const loadStatus = async (refresh = false): Promise<void> => {
+    while (statusRequest) {
+        const pendingRequest = statusRequest
+        await pendingRequest
+        if (statusRequest === pendingRequest) statusRequest = null
+        if (!refresh) return
     }
+
+    statusRequest = (async () => {
+        loading.value = true
+        try {
+            status.value = await codeAnalysisGetDashboardStatus(refresh)
+            error.value = ''
+            scrollQueueLogsToLatest()
+        } catch (err: any) {
+            error.value = err?.message || 'Unable to load code analysis status.'
+        } finally {
+            loading.value = false
+        }
+    })()
+    try {
+        await statusRequest
+    } finally {
+        statusRequest = null
+    }
+}
+
+const clearPollTimer = () => {
+    if (pollTimer) {
+        clearTimeout(pollTimer)
+        pollTimer = null
+    }
+}
+
+const scheduleNextPoll = () => {
+    clearPollTimer()
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return
+    }
+    const active = status.value?.overall_state === 'running'
+        || status.value?.overall_state === 'queued'
+    const baseDelay = active ? 5000 : 15000
+    const delay = Math.round(baseDelay * (0.9 + Math.random() * 0.2))
+    pollTimer = setTimeout(async () => {
+        await loadStatus()
+        scheduleNextPoll()
+    }, delay)
+}
+
+const refreshStatus = async () => {
+    clearPollTimer()
+    await loadStatus(true)
+    scheduleNextPoll()
+}
+
+const handleVisibilityChange = async () => {
+    if (document.visibilityState !== 'visible') {
+        clearPollTimer()
+        return
+    }
+    await loadStatus()
+    scheduleNextPoll()
 }
 
 const runAction = async (name: string, fn: () => Promise<unknown>, success: string) => {
@@ -173,7 +225,8 @@ const runAction = async (name: string, fn: () => Promise<unknown>, success: stri
         error.value = err?.response?.data?.detail || err?.message || 'Action failed.'
     } finally {
         actionBusy.value = ''
-        await loadStatus()
+        await loadStatus(true)
+        scheduleNextPoll()
     }
 }
 
@@ -400,15 +453,13 @@ const statusIcon = (state?: string) => {
 }
 
 onMounted(() => {
-    loadStatus()
-    pollTimer = setInterval(loadStatus, 5000)
+    void loadStatus().finally(scheduleNextPoll)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
-    if (pollTimer) {
-        clearInterval(pollTimer)
-        pollTimer = null
-    }
+    clearPollTimer()
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
@@ -426,7 +477,7 @@ onBeforeUnmount(() => {
                     type="button"
                     class="inline-flex h-8 items-center gap-2 rounded border border-gray-700 bg-gray-900 px-3 text-xs font-bold uppercase text-gray-200 transition-colors hover:bg-gray-800 disabled:cursor-wait disabled:opacity-50"
                     :disabled="loading"
-                    @click="loadStatus"
+                    @click="refreshStatus"
                 >
                     <RefreshCw :size="13" :class="{ 'animate-spin': loading }" />
                     Refresh

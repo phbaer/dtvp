@@ -1,4 +1,11 @@
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import {
+    computed,
+    onActivated,
+    onDeactivated,
+    onMounted,
+    onUnmounted,
+    ref,
+} from 'vue'
 import { getCacheStatus } from './api'
 import type { CacheStatus } from '../types'
 
@@ -13,6 +20,7 @@ export function useCacheStatus({ pollIntervalMs = 30_000 }: UseCacheStatusOption
     const now = ref(Date.now())
     const cacheStatusTimer = ref<ReturnType<typeof setInterval> | null>(null)
     const cacheStatusRefreshInProgress = ref(false)
+    let visibilityListenerAttached = false
 
     const cacheLastRefreshedDate = computed(() => {
         if (!cacheStatus.value?.last_refreshed_at) return null
@@ -95,7 +103,8 @@ export function useCacheStatus({ pollIntervalMs = 30_000 }: UseCacheStatusOption
         }
     }
 
-    onMounted(() => {
+    const startCacheStatusPolling = () => {
+        if (cacheStatusTimer.value !== null) return
         void refreshCacheStatus()
 
         cacheStatusTimer.value = globalThis.setInterval(() => {
@@ -105,19 +114,27 @@ export function useCacheStatus({ pollIntervalMs = 30_000 }: UseCacheStatusOption
             }
         }, pollIntervalMs)
 
-        if (typeof document !== 'undefined') {
+        if (typeof document !== 'undefined' && !visibilityListenerAttached) {
             document.addEventListener('visibilitychange', handleVisibilityChange)
+            visibilityListenerAttached = true
         }
-    })
+    }
 
-    onUnmounted(() => {
+    const stopCacheStatusPolling = () => {
         if (cacheStatusTimer.value !== null) {
             globalThis.clearInterval(cacheStatusTimer.value)
+            cacheStatusTimer.value = null
         }
-        if (typeof document !== 'undefined') {
+        if (typeof document !== 'undefined' && visibilityListenerAttached) {
             document.removeEventListener('visibilitychange', handleVisibilityChange)
+            visibilityListenerAttached = false
         }
-    })
+    }
+
+    onMounted(startCacheStatusPolling)
+    onActivated(startCacheStatusPolling)
+    onDeactivated(stopCacheStatusPolling)
+    onUnmounted(stopCacheStatusPolling)
 
     return {
         cacheStatus,

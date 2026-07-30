@@ -21,6 +21,9 @@ DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
 # Default dev-disable-auth flag if not set (used by frontend bootstrap)
 DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH:-false}
 
+# Keep nginx-to-Uvicorn connections alive across normal polling intervals.
+DTVP_UVICORN_KEEP_ALIVE_SECONDS=${DTVP_UVICORN_KEEP_ALIVE_SECONDS:-30}
+
 echo "Configuring frontend with DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH}, DTVP_FRONTEND_URL=${DTVP_FRONTEND_URL}, DTVP_DEFAULT_PROJECT_FILTER=${DTVP_DEFAULT_PROJECT_FILTER}, DTVP_ATTRIBUTION_AGE_FILTER_DAYS=${DTVP_ATTRIBUTION_AGE_FILTER_DAYS}, DTVP_DEV_DISABLE_AUTH=${DTVP_DEV_DISABLE_AUTH}"
 
 # Render frontend runtime config from the immutable build template on every
@@ -51,4 +54,8 @@ else
 fi
 
 # Run the boot wrapper so Uvicorn can bind before the full DTVP app imports.
-exec /app/.venv/bin/uvicorn dtvp.boot:app --host 0.0.0.0 --port 8000
+exec /app/.venv/bin/uvicorn dtvp.boot:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --timeout-keep-alive "${DTVP_UVICORN_KEEP_ALIVE_SECONDS}" \
+    --backlog 2048

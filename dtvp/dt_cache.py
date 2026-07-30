@@ -4,15 +4,25 @@ import json
 import os
 import re
 import tempfile
-import uuid
+import threading
+import time
 import logging
-from datetime import datetime, timezone
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
+from .assessment_outbox_services import (
+    AssessmentOutboxConflictError,
+    AssessmentOutboxStore,
+    AssessmentKey,
+    assessment_key,
+    get_assessment_outbox_path,
+)
 from .dt_client import DTClient, DTSettings
 from .logic import RE_SCORE
 
 logger = logging.getLogger(__name__)
+CACHE_STATUS_TTL_SECONDS = 5.0
 
 
 class PendingUpdateExistsError(Exception):
@@ -21,6 +31,13 @@ class PendingUpdateExistsError(Exception):
 
 def get_dt_cache_path() -> str:
     return os.getenv("DTVP_DT_CACHE_PATH", "data/dt_cache")
+
+
+def _positive_int_env(name: str, default: int, *, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
 
 
 def _safe_filename(value: str) -> str:
@@ -37,7 +54,7 @@ def _atomic_write(path: str, data: Any) -> None:
     try:
         fd, tmp_file = tempfile.mkstemp(dir=directory or ".", prefix=".tmp-", text=True)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
             f.write("\n")
         os.replace(tmp_file, path)
     finally:
@@ -197,21 +214,53 @@ def _vulnerability_cache_identity(vulnerability: Dict[str, Any]) -> Optional[Tup
 
 
 class CacheManager:
-    def __init__(self, base_path: str = None, refresh_interval_seconds: int = None):
+    def __init__(
+        self,
+        base_path: str = None,
+        refresh_interval_seconds: int = None,
+        project_list_ttl_seconds: int = None,
+    ):
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
             int(os.getenv("DTVP_DT_CACHE_REFRESH_SECONDS", "60"))
             if refresh_interval_seconds is None
             else refresh_interval_seconds
         )
+        self.project_list_ttl_seconds = (
+            _positive_int_env("DTVP_DT_PROJECT_LIST_TTL_SECONDS", 30, minimum=0)
+            if project_list_ttl_seconds is None
+            else max(0, project_list_ttl_seconds)
+        )
         self.lock = asyncio.Lock()
         self.pending_updates: List[Dict[str, Any]] = []
         self.active_project_uuids: Set[str] = set()
         self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
-        self.cache_meta: Dict[str, Any] = {"fully_cached": False, "last_refreshed_at": None}
+        self.cache_meta: Dict[str, Any] = {
+            "fully_cached": False,
+            "last_refreshed_at": None,
+            "projects_refreshed_at": None,
+            "revision": 0,
+        }
         self._memory_cache: Dict[str, Any] = {}
         self._inflight_fetches: Dict[Tuple[str, ...], asyncio.Task[Any]] = {}
+        self._write_state_lock = threading.RLock()
+        self._write_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="dtvp-cache-writer",
+        )
+        self._last_write_future: Future[Any] | None = None
+        self._write_errors: List[BaseException] = []
+        self._cache_status_lock = threading.RLock()
+        self._cache_status_snapshot: Optional[Dict[str, Any]] = None
+        self._cache_status_expires_at = 0.0
+        self._assessment_sync_lock = asyncio.Lock()
+        self._assessment_sync_wakeup = asyncio.Event()
         self._ensure_directories()
+        self.assessment_outbox = AssessmentOutboxStore(
+            get_assessment_outbox_path(self.base_path),
+            logger=logger,
+        )
+        self._import_legacy_pending_updates()
 
     def _ensure_directories(self) -> None:
         os.makedirs(self.base_path, exist_ok=True)
@@ -238,14 +287,29 @@ class CacheManager:
     def _load_projects_meta(self) -> Dict[str, Any]:
         return self._load_cache_file(
             self._projects_meta_path(),
-            {"fully_cached": False, "last_refreshed_at": None},
-        ) or {"fully_cached": False, "last_refreshed_at": None}
+            {
+                "fully_cached": False,
+                "last_refreshed_at": None,
+                "projects_refreshed_at": None,
+                "revision": 0,
+            },
+        ) or {
+            "fully_cached": False,
+            "last_refreshed_at": None,
+            "projects_refreshed_at": None,
+            "revision": 0,
+        }
 
     def _read_startup_cache_state(
         self,
     ) -> tuple[List[Dict[str, Any]], List[str], Dict[str, Any]]:
-        meta_default = {"fully_cached": False, "last_refreshed_at": None}
-        pending = _read_json(self._pending_path(), []) or []
+        meta_default = {
+            "fully_cached": False,
+            "last_refreshed_at": None,
+            "projects_refreshed_at": None,
+            "revision": 0,
+        }
+        pending = self._load_pending_updates()
         active = _read_json(self._active_projects_path(), []) or []
         meta = _read_json(self._projects_meta_path(), meta_default) or meta_default
         return pending, active, meta
@@ -256,7 +320,6 @@ class CacheManager:
         active: List[str],
         meta: Dict[str, Any],
     ) -> None:
-        self._memory_cache[self._pending_path()] = pending
         self._memory_cache[self._active_projects_path()] = active
         self._memory_cache[self._projects_meta_path()] = meta
 
@@ -264,28 +327,51 @@ class CacheManager:
         self._save_cache_file(self._projects_meta_path(), meta, touch_meta=False)
 
     def get_cache_status(self) -> Dict[str, Any]:
-        projects = self._load_project_cache(self._projects_path(), []) or []
-        pending = self._load_pending_updates()
-        active = list(self.active_project_uuids)
+        with self._cache_status_lock:
+            now = time.monotonic()
+            if (
+                self._cache_status_snapshot is not None
+                and now < self._cache_status_expires_at
+            ):
+                return copy.deepcopy(self._cache_status_snapshot)
 
-        findings_dir = os.path.join(self.base_path, "findings")
-        boms_dir = os.path.join(self.base_path, "boms")
-        analysis_dir = os.path.join(self.base_path, "analysis")
+            projects = self._load_project_cache(self._projects_path(), []) or []
+            pending = self._load_pending_updates()
+            active = list(self.active_project_uuids)
 
-        cached_findings = len([f for f in os.listdir(findings_dir) if f.endswith(".json")]) if os.path.isdir(findings_dir) else 0
-        cached_boms = len([f for f in os.listdir(boms_dir) if f.endswith(".json")]) if os.path.isdir(boms_dir) else 0
-        cached_analyses = len([f for f in os.listdir(analysis_dir) if f.endswith(".json")]) if os.path.isdir(analysis_dir) else 0
+            findings_dir = os.path.join(self.base_path, "findings")
+            boms_dir = os.path.join(self.base_path, "boms")
+            analysis_dir = os.path.join(self.base_path, "analysis")
 
-        return {
-            "fully_cached": self.cache_meta.get("fully_cached", False),
-            "last_refreshed_at": self.cache_meta.get("last_refreshed_at"),
-            "projects": len(projects),
-            "active_projects": len(active),
-            "cached_findings": cached_findings,
-            "cached_boms": cached_boms,
-            "cached_analyses": cached_analyses,
-            "pending_updates": len(pending),
-        }
+            cached_findings = (
+                len([f for f in os.listdir(findings_dir) if f.endswith(".json")])
+                if os.path.isdir(findings_dir)
+                else 0
+            )
+            cached_boms = (
+                len([f for f in os.listdir(boms_dir) if f.endswith(".json")])
+                if os.path.isdir(boms_dir)
+                else 0
+            )
+            cached_analyses = (
+                len([f for f in os.listdir(analysis_dir) if f.endswith(".json")])
+                if os.path.isdir(analysis_dir)
+                else 0
+            )
+
+            snapshot = {
+                "fully_cached": self.cache_meta.get("fully_cached", False),
+                "last_refreshed_at": self.cache_meta.get("last_refreshed_at"),
+                "projects": len(projects),
+                "active_projects": len(active),
+                "cached_findings": cached_findings,
+                "cached_boms": cached_boms,
+                "cached_analyses": cached_analyses,
+                "pending_updates": len(pending),
+            }
+            self._cache_status_snapshot = snapshot
+            self._cache_status_expires_at = now + CACHE_STATUS_TTL_SECONDS
+            return copy.deepcopy(snapshot)
 
     def get_cached_project_versions(self) -> List[Dict[str, Any]]:
         projects = self._load_project_cache(self._projects_path(), []) or []
@@ -343,8 +429,43 @@ class CacheManager:
         return findings, project_vulnerabilities, bom
 
     def _touch_cache_meta(self) -> None:
+        self._invalidate_cache_status()
         self.cache_meta["last_refreshed_at"] = datetime.now(timezone.utc).isoformat()
+        self.cache_meta["revision"] = int(self.cache_meta.get("revision") or 0) + 1
         self._save_projects_meta(self.cache_meta)
+
+    def get_cache_revision(self) -> int:
+        return int(self.cache_meta.get("revision") or 0)
+
+    def _project_list_is_fresh(self) -> bool:
+        if (
+            not self.cache_meta.get("fully_cached")
+            or self.project_list_ttl_seconds <= 0
+        ):
+            return False
+        refreshed_value = self.cache_meta.get("projects_refreshed_at")
+        if not refreshed_value:
+            return False
+        try:
+            refreshed_at = datetime.fromisoformat(str(refreshed_value))
+            if refreshed_at.tzinfo is None:
+                refreshed_at = refreshed_at.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return False
+        return datetime.now(timezone.utc) - refreshed_at <= timedelta(
+            seconds=self.project_list_ttl_seconds
+        )
+
+    def _mark_project_list_refreshed(self) -> None:
+        self.cache_meta["fully_cached"] = True
+        self.cache_meta["projects_refreshed_at"] = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+    def _invalidate_cache_status(self) -> None:
+        with self._cache_status_lock:
+            self._cache_status_snapshot = None
+            self._cache_status_expires_at = 0.0
 
     def _project_vulns_path(self, project_uuid: str) -> str:
         return os.path.join(
@@ -368,28 +489,16 @@ class CacheManager:
         return os.path.join(self.base_path, "analysis", f"{key}.json")
 
     def _load_pending_updates(self) -> List[Dict[str, Any]]:
-        return self._load_cache_file(self._pending_path(), []) or []
+        return self.assessment_outbox.list_pending()
 
-    def _save_pending_updates(self, pending: List[Dict[str, Any]]) -> None:
-        self._save_cache_file(self._pending_path(), pending, touch_meta=False)
-
-    def _pending_update_key(self, payload: Dict[str, Any]) -> Optional[tuple[str, str, str]]:
-        project_uuid = payload.get("project_uuid")
-        component_uuid = payload.get("component_uuid")
-        vulnerability_uuid = payload.get("vulnerability_uuid")
-        if not (project_uuid and component_uuid and vulnerability_uuid):
-            return None
-        return (project_uuid, component_uuid, vulnerability_uuid)
-
-    def _has_pending_update(self, payload: Dict[str, Any]) -> bool:
-        key = self._pending_update_key(payload)
-        if not key:
-            return False
-        for entry in self._load_pending_updates():
-            pending_key = self._pending_update_key(entry.get("payload", {}))
-            if pending_key == key:
-                return True
-        return False
+    def _import_legacy_pending_updates(self) -> None:
+        legacy_pending = _read_json(self._pending_path(), []) or []
+        imported = self.assessment_outbox.import_legacy(legacy_pending)
+        if imported:
+            logger.info(
+                "Imported %d legacy pending assessment update(s) into SQLite",
+                imported,
+            )
 
     def _load_active_projects(self) -> List[str]:
         return self._load_cache_file(self._active_projects_path(), []) or []
@@ -400,16 +509,39 @@ class CacheManager:
         )
 
     def reset(self, base_path: str = None) -> None:
+        self._write_executor.shutdown(wait=True, cancel_futures=False)
         if base_path:
             self.base_path = base_path
         self.lock = asyncio.Lock()
         self.pending_updates = []
         self.active_project_uuids = set()
         self.project_query_cache = {}
-        self.cache_meta = {"fully_cached": False, "last_refreshed_at": None}
+        self.cache_meta = {
+            "fully_cached": False,
+            "last_refreshed_at": None,
+            "projects_refreshed_at": None,
+            "revision": 0,
+        }
         self._memory_cache = {}
         self._inflight_fetches = {}
+        self._write_state_lock = threading.RLock()
+        self._write_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="dtvp-cache-writer",
+        )
+        self._last_write_future = None
+        self._write_errors = []
+        self._cache_status_lock = threading.RLock()
+        self._cache_status_snapshot = None
+        self._cache_status_expires_at = 0.0
+        self._assessment_sync_lock = asyncio.Lock()
+        self._assessment_sync_wakeup = asyncio.Event()
         self._ensure_directories()
+        self.assessment_outbox = AssessmentOutboxStore(
+            get_assessment_outbox_path(self.base_path),
+            logger=logger,
+        )
+        self._import_legacy_pending_updates()
 
     async def _singleflight_fetch(
         self,
@@ -453,6 +585,7 @@ class CacheManager:
         self.pending_updates = pending_updates
         self.active_project_uuids = set(active_project_uuids)
         self.cache_meta = cache_meta
+        self._invalidate_cache_status()
         self._remember_startup_cache_state(
             pending_updates,
             active_project_uuids,
@@ -468,10 +601,51 @@ class CacheManager:
         return data
 
     def _save_cache_file(self, path: str, data: Any, touch_meta: bool = True) -> None:
-        _atomic_write(path, data)
         self._memory_cache[path] = data
+        write = self._submit_atomic_write(path, data)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            write.result()
         if touch_meta:
             self._touch_cache_meta()
+
+    def _submit_atomic_write(self, path: str, data: Any) -> Future[Any]:
+        with self._write_state_lock:
+            future = self._write_executor.submit(_atomic_write, path, data)
+            self._last_write_future = future
+
+        def remember_error(completed: Future[Any]) -> None:
+            try:
+                error = completed.exception()
+            except BaseException as exc:
+                error = exc
+            if error is not None:
+                with self._write_state_lock:
+                    self._write_errors.append(error)
+
+        future.add_done_callback(remember_error)
+        return future
+
+    async def flush_cache_writes(self) -> None:
+        with self._write_state_lock:
+            last_write = self._last_write_future
+        write_error: BaseException | None = None
+        if last_write is not None:
+            try:
+                await asyncio.wrap_future(last_write)
+            except BaseException as exc:
+                write_error = exc
+        with self._write_state_lock:
+            if self._write_errors:
+                write_error = write_error or self._write_errors[0]
+                self._write_errors.clear()
+        if write_error is not None:
+            raise write_error
+
+    async def close(self) -> None:
+        await self.flush_cache_writes()
+        self._write_executor.shutdown(wait=True, cancel_futures=False)
 
     def _save_project_cache(self, path: str, data: Any) -> None:
         self._save_cache_file(path, data)
@@ -487,40 +661,49 @@ class CacheManager:
             self.pending_updates = pending_updates
             self.active_project_uuids = set(active_project_uuids)
             self.cache_meta = cache_meta
+            self._invalidate_cache_status()
             self._remember_startup_cache_state(
                 pending_updates,
                 active_project_uuids,
                 cache_meta,
             )
 
-        settings = DTSettings()
-        try:
-            async with DTClient(settings.api_url, api_key=settings.api_key) as client:
-                await self.flush_pending_updates(client)
-        except Exception as exc:
-            logger.warning("Dependency-Track cache initialization failed: %s", exc)
-
     async def background_sync_loop(self) -> None:
         settings = DTSettings()
-        while True:
-            try:
-                async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+        async with DTClient(settings.api_url, api_key=settings.api_key) as client:
+            next_cache_refresh = 0.0
+            while True:
+                try:
                     await self.flush_pending_updates(client)
-                    await self._refresh_project_list(client)
-                    await self._refresh_active_projects(client)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("Cache background sync failed: %s", exc)
-            await asyncio.sleep(self.refresh_interval_seconds)
+                    now = time.monotonic()
+                    if now >= next_cache_refresh:
+                        await self._refresh_project_list(client)
+                        await self._refresh_active_projects(client)
+                        next_cache_refresh = now + self.refresh_interval_seconds
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning("Cache background sync failed: %s", exc)
+                self._assessment_sync_wakeup.clear()
+                timeout = max(
+                    0.1,
+                    min(1.0, next_cache_refresh - time.monotonic()),
+                )
+                try:
+                    await asyncio.wait_for(
+                        self._assessment_sync_wakeup.wait(),
+                        timeout=timeout,
+                    )
+                except TimeoutError:
+                    pass
 
     async def _refresh_project_list(self, client: DTClient) -> None:
         try:
             projects = await client.get_projects("")
             async with self.lock:
+                self._mark_project_list_refreshed()
                 self._save_project_cache(self._projects_path(), projects)
-                self.cache_meta["fully_cached"] = True
-                self._touch_cache_meta()
+            await self.flush_cache_writes()
         except Exception as exc:
             logger.debug("Failed to refresh project list: %s", exc)
 
@@ -536,15 +719,18 @@ class CacheManager:
         await self.get_vulnerabilities(client, project_uuid, refresh=True)
         await self.get_project_vulnerabilities(client, project_uuid, refresh=True)
         await self.get_bom(client, project_uuid, refresh=True)
-        async with self.lock:
-            self._touch_cache_meta()
 
     async def record_project_access(self, project_uuid: str) -> None:
+        changed = False
         async with self.lock:
             if project_uuid in self.active_project_uuids:
                 return
             self.active_project_uuids.add(project_uuid)
+            self._invalidate_cache_status()
             self._save_active_projects(list(self.active_project_uuids))
+            changed = True
+        if changed:
+            await self.flush_cache_writes()
 
     async def get_projects(
         self, client: DTClient, name: Optional[str] = None
@@ -552,18 +738,21 @@ class CacheManager:
         async with self.lock:
             projects = self._load_project_cache(self._projects_path(), []) or []
             projects_meta = self.cache_meta
+            full_list_is_fresh = self._project_list_is_fresh()
 
         if not name:
+            if full_list_is_fresh:
+                return copy.deepcopy(projects)
             try:
 
                 async def fetch_all_projects() -> List[Dict[str, Any]]:
                     fresh_projects = await client.get_projects("")
                     async with self.lock:
+                        self._mark_project_list_refreshed()
                         self._save_project_cache(
                             self._projects_path(), fresh_projects
                         )
-                        self.cache_meta["fully_cached"] = True
-                        self._touch_cache_meta()
+                    await self.flush_cache_writes()
                     return fresh_projects
 
                 projects = await self._singleflight_fetch(
@@ -613,6 +802,7 @@ class CacheManager:
                             if project.get("uuid") not in existing_uuids:
                                 merged.append(project)
                         self._save_project_cache(self._projects_path(), merged)
+                await self.flush_cache_writes()
                 return fresh_results
 
             results = await self._singleflight_fetch(
@@ -671,6 +861,7 @@ class CacheManager:
                 )
                 async with self.lock:
                     self._save_project_cache(path, fresh_findings)
+                await self.flush_cache_writes()
                 return fresh_findings
 
             findings = await self._singleflight_fetch(
@@ -718,6 +909,7 @@ class CacheManager:
                 fresh_vulns = await client.get_project_vulnerabilities(project_uuid)
                 async with self.lock:
                     self._save_project_cache(path, fresh_vulns)
+                await self.flush_cache_writes()
                 return fresh_vulns
 
             return await self._singleflight_fetch(
@@ -744,6 +936,7 @@ class CacheManager:
                 fresh_bom = await client.get_bom(project_uuid)
                 async with self.lock:
                     self._save_project_cache(path, fresh_bom)
+                await self.flush_cache_writes()
                 return fresh_bom
 
             return await self._singleflight_fetch(
@@ -763,6 +956,13 @@ class CacheManager:
         path = self._analysis_path(project_uuid, component_uuid, vulnerability_uuid)
         analysis = None
         if not refresh:
+            overlay = self.get_assessment_overlay(
+                project_uuid,
+                component_uuid,
+                vulnerability_uuid,
+            )
+            if overlay is not None:
+                return overlay
             async with self.lock:
                 analysis = self._load_project_cache(path, None)
         if analysis is None:
@@ -781,6 +981,18 @@ class CacheManager:
                 )
                 async with self.lock:
                     self._save_project_cache(path, fresh_analysis)
+                await self.flush_cache_writes()
+                overlay = self.get_assessment_overlay(
+                    project_uuid,
+                    component_uuid,
+                    vulnerability_uuid,
+                )
+                if overlay is not None:
+                    return overlay
+                if isinstance(fresh_analysis, dict):
+                    fresh_analysis = dict(fresh_analysis)
+                    fresh_analysis["dtvpRevision"] = 0
+                    fresh_analysis["dtvpSyncStatus"] = "synced"
                 return fresh_analysis
 
             return await self._singleflight_fetch(
@@ -793,6 +1005,27 @@ class CacheManager:
                 fetch_analysis,
             )
         return copy.deepcopy(analysis)
+
+    def get_assessment_overlay(
+        self,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> Optional[Dict[str, Any]]:
+        overlay = self.assessment_outbox.get_overlay(
+            (project_uuid, component_uuid, vulnerability_uuid)
+        )
+        if overlay is None:
+            return None
+        return {
+            "analysisState": overlay.get("analysisState") or "NOT_SET",
+            "analysisDetails": overlay.get("analysisDetails") or "",
+            "isSuppressed": bool(overlay.get("isSuppressed", False)),
+            "dtvpRevision": int(overlay.get("revision") or 0),
+            "dtvpSyncStatus": overlay.get("sync_status") or "synced",
+            "dtvpUpdateId": overlay.get("update_id"),
+            "dtvpSyncError": overlay.get("last_error"),
+        }
 
     def _finding_cache_identity(
         self, finding: Dict[str, Any]
@@ -929,6 +1162,13 @@ class CacheManager:
                 analysis = self._load_project_cache(
                     self._analysis_path(project_uuid, comp_uuid, vuln_uuid), None
                 )
+                overlay = self.get_assessment_overlay(
+                    project_uuid,
+                    comp_uuid,
+                    vuln_uuid,
+                )
+                if overlay is not None:
+                    analysis = overlay
                 if analysis is None:
                     for pending_update in pending:
                         payload = pending_update.get("payload", {})
@@ -950,127 +1190,123 @@ class CacheManager:
     async def queue_analysis_update(
         self, payload: Dict[str, Any], replace: bool = False
     ) -> str:
-        update_id = str(uuid.uuid4())
-        entry = {
-            "id": update_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "payload": payload,
-        }
+        entries = await self.persist_assessment_updates(
+            [payload],
+            replace=replace,
+        )
+        return str(entries[0]["id"])
+
+    async def persist_assessment_updates(
+        self,
+        payloads: List[Dict[str, Any]],
+        *,
+        replace: bool = True,
+        expected_revisions: dict[AssessmentKey, int] | None = None,
+    ) -> List[Dict[str, Any]]:
+        if not payloads:
+            return []
+        try:
+            entries = await asyncio.to_thread(
+                self.assessment_outbox.enqueue_many,
+                payloads,
+                replace=replace,
+                expected_revisions=expected_revisions,
+            )
+        except AssessmentOutboxConflictError as exc:
+            raise PendingUpdateExistsError(str(exc)) from exc
         async with self.lock:
-            pending = self._load_pending_updates()
-            if self._has_pending_update(payload):
-                if not replace:
-                    raise PendingUpdateExistsError(
-                        "A pending update already exists for this finding."
-                    )
-                # Remove old pending entry for the same key
-                key = self._pending_update_key(payload)
-                pending = [
-                    e
-                    for e in pending
-                    if self._pending_update_key(e.get("payload", {})) != key
-                ]
-            pending.append(entry)
-            self._save_pending_updates(pending)
-            self._save_local_analysis(payload)
-        return update_id
+            self.pending_updates = self._load_pending_updates()
+            self._invalidate_cache_status()
+            self._touch_cache_meta()
+        self._assessment_sync_wakeup.set()
+        return entries
 
     async def queue_analysis_updates(
         self,
         payloads: List[Dict[str, Any]],
         replace: bool = False,
     ) -> List[str]:
-        """Persist several failed writes with one pending-queue rewrite."""
-        if not payloads:
-            return []
-
-        entries = [
-            {
-                "id": str(uuid.uuid4()),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "payload": payload,
-            }
-            for payload in payloads
-        ]
-        async with self.lock:
-            pending = list(self._load_pending_updates())
-            pending_keys = {
-                key
-                for queued in pending
-                if (
-                    key := self._pending_update_key(queued.get("payload", {}))
-                )
-                is not None
-            }
-            entry_keys = [
-                self._pending_update_key(entry["payload"])
-                for entry in entries
-            ]
-            if not replace:
-                seen_keys: Set[tuple[str, str, str]] = set()
-                for key in entry_keys:
-                    if key is None:
-                        continue
-                    if key in pending_keys or key in seen_keys:
-                        raise PendingUpdateExistsError(
-                            "A pending update already exists for this finding."
-                        )
-                    seen_keys.add(key)
-                persisted_entries = entries
-                pending.extend(persisted_entries)
-            else:
-                replacement_keys = {key for key in entry_keys if key is not None}
-                pending = [
-                    queued
-                    for queued in pending
-                    if self._pending_update_key(queued.get("payload", {}))
-                    not in replacement_keys
-                ]
-                deduplicated_reversed = []
-                seen_keys: Set[tuple[str, str, str]] = set()
-                for entry, key in reversed(list(zip(entries, entry_keys))):
-                    if key is not None and key in seen_keys:
-                        continue
-                    if key is not None:
-                        seen_keys.add(key)
-                    deduplicated_reversed.append(entry)
-                persisted_entries = list(reversed(deduplicated_reversed))
-                pending.extend(persisted_entries)
-
-            self._save_pending_updates(pending)
-            self._save_local_analyses(payloads)
+        """Persist and coalesce several writes in one SQLite transaction."""
+        persisted_entries = await self.persist_assessment_updates(
+            payloads,
+            replace=replace,
+        )
         return [str(entry["id"]) for entry in persisted_entries]
 
     async def remove_pending_update(self, update_id: str) -> None:
-        async with self.lock:
-            pending = self._load_pending_updates()
-            pending = [entry for entry in pending if entry.get("id") != update_id]
-            self._save_pending_updates(pending)
+        await asyncio.to_thread(self.assessment_outbox.discard, update_id)
+        self.pending_updates = self._load_pending_updates()
+        self._invalidate_cache_status()
 
     async def flush_pending_updates(self, client: DTClient) -> None:
-        async with self.lock:
-            pending = self._load_pending_updates()
+        async with self._assessment_sync_lock:
+            pending = await asyncio.to_thread(self.assessment_outbox.list_due)
+            if not pending:
+                return
 
-        if not pending:
-            return
+            next_index = 0
+            saved_local = False
+            state_lock = asyncio.Lock()
 
-        remaining = []
-        for entry in pending:
-            payload = entry.get("payload", {})
-            update_id = entry.get("id")
-            try:
-                await client.update_analysis(**payload)
-                self._save_local_analysis(payload)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to flush pending DT update %s: %s",
-                    update_id,
-                    exc,
-                )
-                remaining.append(entry)
+            async def worker() -> None:
+                nonlocal next_index, saved_local
+                while True:
+                    async with state_lock:
+                        if next_index >= len(pending):
+                            return
+                        entry = pending[next_index]
+                        next_index += 1
+                    payload = entry.get("payload", {})
+                    key = assessment_key(payload)
+                    revision = int(entry.get("revision") or 0)
+                    if key is None:
+                        continue
+                    try:
+                        await client.update_analysis(**payload)
+                        marked = await asyncio.to_thread(
+                            self.assessment_outbox.mark_synced,
+                            key,
+                            revision,
+                        )
+                        if marked:
+                            async with self.lock:
+                                self._save_local_analysis(payload)
+                                saved_local = True
+                    except Exception as exc:
+                        attempts = int(entry.get("attempts") or 0) + 1
+                        retry_delay = min(60, 2 ** min(attempts - 1, 6))
+                        next_attempt_at = (
+                            datetime.now(timezone.utc)
+                            + timedelta(seconds=retry_delay)
+                        ).isoformat()
+                        await asyncio.to_thread(
+                            self.assessment_outbox.mark_failed,
+                            key,
+                            revision,
+                            str(exc),
+                            next_attempt_at=next_attempt_at,
+                        )
+                        logger.warning(
+                            "Failed to flush pending DT update %s; retrying in "
+                            "%d seconds: %s",
+                            entry.get("id"),
+                            retry_delay,
+                            exc,
+                        )
 
-        async with self.lock:
-            self._save_pending_updates(remaining)
+            concurrency = _positive_int_env(
+                "DTVP_ASSESSMENT_SYNC_CONCURRENCY",
+                4,
+            )
+            workers = [
+                asyncio.create_task(worker())
+                for _ in range(min(concurrency, len(pending)))
+            ]
+            await asyncio.gather(*workers)
+            self.pending_updates = self._load_pending_updates()
+            self._invalidate_cache_status()
+            if saved_local:
+                await self.flush_cache_writes()
 
     def _save_local_analysis(self, payload: Dict[str, Any]) -> None:
         project_uuid = payload.get("project_uuid")

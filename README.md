@@ -123,6 +123,7 @@ Important backend components:
 | `dtvp/task_group_query_services.py` | Backend filtering, sorting, facets, pagination, and task-window queries |
 | `dtvp/logic.py` | Grouping, ownership, assessment parsing, CVSS, statistics, and dependency analysis |
 | `dtvp/assessment_*` and `rescore_rule_services.py` | Assessment writes, conflict handling, metadata recovery, and CVSS rules |
+| `dtvp/assessment_outbox_services.py` | Transactional assessment overlays, revisions, and pending Dependency-Track synchronization |
 | `dtvp/bulk_workflows/` | Registry-backed bulk-change plug-ins |
 | `dtvp/dt_client.py` and `dt_cache.py` | Dependency-Track access, cached data, overlays, and pending writes |
 | `dtvp/project_archive_*` | Project archive export/import and scheduled snapshots |
@@ -144,27 +145,74 @@ Important frontend components:
 - Grouped-vulnerability tasks use `response_mode=summary` for compact list
   rows. `/api/tasks/{task_id}/events` streams progress,
   `/api/tasks/{task_id}/groups` serves filtered windows and facets, and
-  `/api/tasks/{task_id}/groups/{group_id}` hydrates full details.
-- Partial version results appear while grouping continues. CPU-heavy grouping,
-  indexing, and filtering run outside the async event loop. When the final
-  partial publish already contains every version, it becomes the completed
-  snapshot without repeating grouping and index construction.
+  `/api/tasks/{task_id}/groups/{group_id}` hydrates full details. Task
+  mutations wake all event-stream clients through one shared event hub instead
+  of one polling loop per client. Serialized status is reused across clients,
+  progress streams carry only the latest 20 log entries, and a 15-second blank
+  heartbeat keeps idle streams open.
+- Partial version results appear while grouping continues. Summary tasks
+  publish at the first version, roughly one-third milestones, and completion
+  instead of rebuilding cumulative snapshots after every tenth of the project.
+  CPU-heavy grouping, indexing, and filtering run outside the async event loop.
+  When the final partial publish already contains every version, it becomes the
+  completed snapshot without repeating grouping and index construction.
 - Grouped-task searches use thread-safe per-task query caches, share identical
-  in-flight queries, and reuse sort orders across filter changes. Lightweight
-  code-assessment metadata is cached and invalidated when analyzer results
-  change.
+  in-flight queries, and reuse sort orders across filter changes. They run in a
+  dedicated bounded executor so cold searches cannot exhaust the default
+  application thread pool; queued browser searches are discarded when a newer
+  generation supersedes them. Cached result indexes use packed integers and
+  are evicted against both entry-count and approximate byte budgets.
+  Lightweight code-assessment metadata is cached and invalidated when analyzer
+  results change.
+- The global analysis indicator polls one compact queue-and-sweep status
+  response: every five seconds while work is active and every 30 seconds while
+  idle, with per-client jitter. Hidden browser tabs pause polling, and detailed
+  queue payloads load only while the queue panel is opened.
+- Project smart search waits 400 ms for continued typing and aborts superseded
+  result-window requests. Deactivated keep-alive project views stop their cache
+  freshness timers. Cache-status filesystem counts are reused for up to five
+  seconds and invalidated when DTVP changes cached content.
+- Queue submission and deduplication use in-memory FIFO and target indexes
+  rather than rescanning and reindexing the complete queue. Detailed queue
+  reads are newest-first and limited to 100 items by default (200 maximum);
+  automatic and manual submissions share a configurable pending-item limit.
 - The frontend viewport-windows list rows, coalesces partial refreshes, and
   hydrates dependency paths and full assessment details only when needed.
 - The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
   vulnerability details, BOMs, local overlays, and pending writes. Stale cached
   data remains readable while Dependency-Track is unavailable. Concurrent
-  misses for the same resource share one Dependency-Track request, while each
-  caller receives an isolated mutable snapshot.
-- Grouped-vulnerability tasks, their bulk-workflow operations, uploaded or
-  generated archive tasks, and live tmrescore sessions are private to the
-  authenticated user who created them. Shared Dependency-Track assessments,
-  the workspace-wide analyzer queue and saved analysis results, and cached
-  project proposal snapshots remain collaborative application data.
+  misses for the same resource share one Dependency-Track request, the complete
+  project list has a short freshness TTL across clients, and API-key requests
+  reuse one application-lifetime HTTP connection pool. The background cache
+  sync also retains its client between refreshes. Each caller still receives an
+  isolated mutable snapshot. Cold finding loads use
+  Dependency-Track's Finding Packaging Format export so assessment state and
+  details arrive in one request instead of issuing one analysis request per
+  finding. Older Dependency-Track versions fall back to the legacy endpoint.
+  Cache JSON is encoded and atomically replaced by one ordered writer thread;
+  async operations await durability without holding the event loop or cache
+  lock. A monotonic cache generation keys grouped snapshots, and summaries
+  created during a cold fill are saved against the generation after that fill.
+  Pending assessment writes and their local overlays live in a transactional
+  SQLite outbox. Newer changes to the same finding replace older pending
+  values, and one application-wide bounded dispatcher retries Dependency-Track
+  synchronization without multiplying write concurrency per client. Legacy
+  `pending_updates.json` entries import once on first use. Interactive and bulk
+  assessment requests return after the outbox transaction commits instead of
+  waiting for Dependency-Track. Per-finding local revisions reject stale DTVP
+  edits atomically; optional strict conflict mode additionally performs live
+  Dependency-Track reads before accepting a save. Grouped-task artifacts carry
+  reverse finding indexes, so accepted changes copy and re-summarize only
+  affected groups; their list-query index is rebuilt lazily on the next read
+  instead of delaying the save.
+- Grouped-vulnerability tasks are access-controlled to users who independently
+  requested the exact project/CVE/mode/cache/mapping snapshot; those matching
+  requests share one task and result allocation. Their bulk-workflow
+  operations, uploaded or generated archive tasks, and live tmrescore sessions
+  remain private to the authenticated user who created them. Shared
+  Dependency-Track assessments, the workspace-wide analyzer queue and saved
+  analysis results, and cached project proposal snapshots remain collaborative
+  application data.
 - Live task registries are process-local; the supplied Uvicorn/PM2 launch uses
   one backend worker. A horizontally scaled deployment needs a shared task and
   result store before enabling multiple backend workers.
@@ -198,9 +246,10 @@ requests.
 A synthetic 20,000-group summary and query index retained about 78 MB of live
 Python allocations and increased initial process RSS by about 175 MB. Real
 tasks also retain full vulnerability, component, dependency, and BOM details;
-budget roughly 150-300 MB or more for each large retained task. The default
-one-hour `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` therefore makes memory, rather
-than request throughput, the likely limit when many users open large projects.
+budget roughly 150-300 MB or more for each large retained task. Matching
+project/CVE/mode/cache/mapping requests share one access-controlled task, and
+completed tasks are retained for 15 minutes by default. Memory remains the
+likely limit when many users open distinct large projects.
 
 For conservative per-instance planning:
 
@@ -363,9 +412,13 @@ The detail workspace provides:
 Local drafts survive tab changes. Closing or switching a vulnerability prompts
 the reviewer to apply, discard, or keep editing. Assessment writes refresh the
 active task window, and route state preserves filters when navigating to
-statistics or code analysis. Each vulnerability card can reload its current
-assessment directly from Dependency-Track; the refreshed task snapshot updates
-the card, lifecycle filters, and counts together.
+statistics or code analysis. Once the transactional local save succeeds, the
+card reports that it is saved locally while Dependency-Track synchronization
+continues in the background; retry failures remain visible without blocking
+another edit. Per-finding local revisions are retained across list updates so
+subsequent edits keep conflict protection. Each vulnerability card can reload
+its current assessment directly from Dependency-Track; the refreshed task
+snapshot updates the card, lifecycle filters, and counts together.
 Vulnerability headers use compact status icons to show both available and
 unavailable states for tmrescore/vscorer and code-analysis assessments. In the
 compact list, the Dependency-Track reload action stays at the bottom-right of
@@ -412,12 +465,11 @@ visible filtered list.
 The UI starts preview, apply, and document work as background operations and
 polls their short status endpoint. The operation survives the initiating HTTP
 request, so reverse-proxy request timeouts do not cancel long bulk changes.
-Apply operations use a bounded worker pool for Dependency-Track writes, retry
-transient timeouts, rate limits, and gateway/server errors, and expose
-item-level progress through the task status. Failed writes are persisted to the
-local pending-update queue in one batch and retried by the cache synchronizer;
-local cache overlays are also written in small yielding batches so large
-updates do not stall status polling or unrelated API requests.
+Apply operations commit all selected changes to the transactional local outbox
+and expose item-level progress through the task status. Dependency-Track writes
+then use the shared bounded background dispatcher with coalescing and retry
+backoff, so large applies do not hold an HTTP request open or multiply upstream
+write concurrency.
 Endpoints are:
 
 - `POST /api/bulk-workflows/summary`
@@ -528,6 +580,12 @@ matching result.
 Follow-ups use `source=follow-up`, retain `parent_run_id`, and prefer the
 analyzer's `/jobs/{job_id}/follow-up` endpoint. Otherwise DTVP sends a normal
 request with bounded persisted parent context.
+
+The code-analysis dashboard polls every five seconds while work is active and
+every 15 seconds while idle, pauses in hidden tabs, and applies per-client
+jitter. DTVP shares a short-lived dashboard snapshot across clients so one
+polling wave causes one analyzer health/jobs lookup and one recent-result
+query.
 
 Result APIs:
 
@@ -671,6 +729,10 @@ Deployment rules:
 - nginx proxies `DTVP_CONTEXT_PATH` to DTVP and defaults it to `/dtvp`.
   `DTVP_HTTP_PORT` changes the host gateway port. Direct-container deployments
   must publish port `8000` and include the context path in the URL.
+- The Compose nginx gateway keeps upstream HTTP/1.1 connections open,
+  compresses JSON/static text responses, and disables buffering for grouped
+  task event streams. Uvicorn keeps those upstream connections for 30 seconds
+  and uses a 2048-connection accept backlog.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
   logs time cache and integration initialization.
 - The frontend image renders `index.html` from its immutable template on every
@@ -697,12 +759,20 @@ means the integration or override is disabled.
 | `DEPENDENCY_TRACK_URL` / `DEPENDENCY_TRACK_API_KEY` | Deployment aliases | unset |
 | `DTVP_DT_CACHE_PATH` | Dependency-Track cache and pending update queue | `data/dt_cache` |
 | `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
+| `DTVP_DT_PROJECT_LIST_TTL_SECONDS` | Freshness window for serving the complete cached project list without an upstream request | `30` |
+| `DTVP_ASSESSMENT_OUTBOX_PATH` | Transactional assessment overlay and synchronization outbox | `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` |
+| `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
+| `DTVP_ASSESSMENT_STRICT_DT_CONFLICTS` | Perform live Dependency-Track conflict reads before accepting assessment saves | `false` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |
 | `DTVP_ASSESSMENT_IO_CONCURRENCY` | Concurrent Dependency-Track assessment reads or writes per operation | `4` |
 | `DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS` | Attempts for transient assessment-write timeouts, rate limits, and HTTP 5xx responses | `3` |
-| `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` | Completed/failed grouped-task retention | `3600` |
+| `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` | Completed/failed grouped-task retention | `900` |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH` | Persisted summary-index SQLite path | sibling of cache path |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES` | Maximum persisted summary indexes | `64` |
+| `DTVP_GROUP_QUERY_WORKERS` | Dedicated grouped-search worker threads | `4` |
+| `DTVP_GROUP_QUERY_MAX_PENDING` | Maximum grouped searches queued behind active workers | `8` |
+| `DTVP_GROUP_QUERY_CACHE_ENTRIES` | Maximum cached filter combinations per grouped task | `32` |
+| `DTVP_GROUP_QUERY_CACHE_BYTES` | Approximate per-task filtered-index and facet-cache budget | `8388608` |
 | `TEAM_MAPPING_PATH` | Component ownership mapping | `data/team_mapping.json` |
 | `TEAM_GROUPS_PATH` | Nested team-group definitions | `data/team_groups.json` |
 | `USER_ROLES_PATH` | User-to-role mapping | `data/user_roles.json` |
@@ -721,6 +791,7 @@ means the integration or override is disabled.
 | `DTVP_FRONTEND_URL` | Public frontend base URL | `http://localhost:8000` |
 | `DTVP_CONTEXT_PATH` | Application mount path | app `/`; Compose `/dtvp` |
 | `DTVP_HTTP_PORT` | Compose nginx host port | `80` |
+| `DTVP_UVICORN_KEEP_ALIVE_SECONDS` | Backend upstream keep-alive timeout | `30` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
 | `DTVP_CORS_ORIGINS` | Additional comma-separated CORS origins | unset |
 | `DTVP_API_URL` | Frontend API base override; Vite alias `VITE_DTVP_API_URL` | empty |
@@ -757,11 +828,13 @@ means the integration or override is disabled.
 | `DTVP_CODE_ANALYSIS_URL` | Analyzer base URL | unset; Compose: `http://agentyzer:8000` |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | Analyzer HTTP timeout | `300` |
 | `DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS` | Dashboard health/jobs timeout | `5` |
+| `DTVP_CODE_ANALYSIS_DASHBOARD_CACHE_SECONDS` | Shared dashboard status snapshot lifetime | `3` |
 | `DTVP_CODE_ANALYSIS_MODEL` | Analyzer model hint | unset |
 | `DTVP_CODE_ANALYSIS_LLM_BACKEND` | LLM backend hint | unset |
 | `DTVP_CODE_ANALYSIS_LLM_PROVIDER` | LLM provider hint | unset |
 | `DTVP_JIRA_CREATE_URL` | Jira create-screen URL | unset |
 | `DTVP_ANALYSIS_QUEUE_CAPACITY` | Concurrent DTVP queue items | `1` |
+| `DTVP_ANALYSIS_QUEUE_MAX_PENDING` | Maximum pending DTVP queue items before new submissions receive HTTP 429 | `1000` |
 | `DTVP_ANALYSIS_QUEUE_TTL_SECONDS` | Completed/failed queue retention | `3600` |
 | `DTVP_CODE_ANALYSIS_RESULTS_PATH` | Result/application SQLite store | `data/code_analysis_results.sqlite` |
 | `DTVP_CODE_ANALYSIS_RESULTS_MAX_RECORDS` | Maximum stored results | `2000` |

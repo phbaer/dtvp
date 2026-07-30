@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from .dt_client import DTClient
 from .assessment_restore_services import refresh_group_restore_metadata
+from .assessment_snapshot_services import build_assessment_group_index
+from .dt_client import DTClient
 from .inconsistency import (
     INCONSISTENCY_REASON_ANALYSIS_STATE_MISMATCH,
     INCONSISTENCY_REASON_ASSESSMENT_DETAILS_MISMATCH,
@@ -43,6 +44,17 @@ class GroupedVulnServiceDeps:
     ] = None
     summary_index: Any = None
     summary_index_cache_revision: Callable[[], Any] = lambda: None
+    notify_task_update: Callable[[str], None] = lambda _task_id: None
+
+
+GROUPED_TASK_LOG_LIMIT = 100
+
+
+def _append_task_log(task: Dict[str, Any], message: str) -> None:
+    log = task.setdefault("log", [])
+    log.append(message)
+    if len(log) > GROUPED_TASK_LOG_LIMIT:
+        del log[: len(log) - GROUPED_TASK_LOG_LIMIT]
 
 
 def _instance_state(instance: Dict[str, Any]) -> str:
@@ -634,6 +646,7 @@ def _build_grouped_vuln_task_artifacts(
         "full_result": grouped_result,
         "visible_result": visible_result,
         "query_index": build_task_group_query_index(visible_result),
+        "assessment_group_index": build_assessment_group_index(grouped_result),
         "statistics_rollup": build_grouped_vuln_statistics_rollup(
             versions_for_rollup,
             combined_data,
@@ -735,7 +748,7 @@ async def collect_version_snapshots(
 
     completed = 0
     last_partial_publish_completed = 0
-    partial_publish_step = max(1, math.ceil(len(versions) / 10)) if versions else 1
+    partial_publish_step = max(1, math.ceil(len(versions) / 3)) if versions else 1
     try:
         for pending_task in asyncio.as_completed(pending):
             (
@@ -820,7 +833,8 @@ async def process_grouped_vulns_task(
         deps.tasks[task_id]["versions_completed"] = 0
         deps.tasks[task_id]["versions_total"] = 0
         deps.tasks[task_id]["partial_publish_in_progress"] = False
-        deps.tasks[task_id].setdefault("log", []).append("Fetching projects...")
+        _append_task_log(deps.tasks[task_id], "Fetching projects...")
+        deps.notify_task_update(task_id)
         deps.logger.info("Task %s started for grouped vulnerabilities", task_id)
 
         projects = await deps.cache_manager.get_projects(client, name)
@@ -841,15 +855,21 @@ async def process_grouped_vulns_task(
             deps.tasks[task_id]["completed_at"] = now
             deps.tasks[task_id]["versions_completed"] = 0
             deps.tasks[task_id]["versions_total"] = 0
-            deps.tasks[task_id]["_full_result"] = []
+            empty_result: list[dict[str, Any]] = []
+            deps.tasks[task_id]["_full_result"] = empty_result
             deps.tasks[task_id]["_full_result_by_id"] = {}
+            deps.tasks[task_id]["_assessment_full_group_index"] = (
+                build_assessment_group_index(empty_result)
+            )
             deps.tasks[task_id]["_group_query_index"] = build_task_group_query_index([])
+            deps.notify_task_update(task_id)
             return
 
         found_msg = f"Found {len(versions)} versions. Fetching vulnerabilities..."
         deps.tasks[task_id]["message"] = found_msg
         deps.tasks[task_id]["versions_total"] = len(versions)
-        deps.tasks[task_id].setdefault("log", []).append(found_msg)
+        _append_task_log(deps.tasks[task_id], found_msg)
+        deps.notify_task_update(task_id)
 
         team_mapping = deps.load_team_mapping()
         summary_cache_key = None
@@ -895,9 +915,11 @@ async def process_grouped_vulns_task(
                 deps.tasks[task_id]["_statistics_rollup"] = (
                     cached_summary.get("statistics_rollup") or {}
                 )
-                deps.tasks[task_id].setdefault("log", []).append(
+                _append_task_log(
+                    deps.tasks[task_id],
                     "Loaded cached vulnerability summary index."
                 )
+                deps.notify_task_update(task_id)
 
         def update_progress(
             completed: int, total: int, version_info: Dict[str, Any]
@@ -911,7 +933,8 @@ async def process_grouped_vulns_task(
                 f"{version_info.get('version')} ({completed}/{total})..."
             )
             deps.tasks[task_id]["message"] = msg
-            deps.tasks[task_id].setdefault("log", []).append(msg)
+            _append_task_log(deps.tasks[task_id], msg)
+            deps.notify_task_update(task_id)
 
         complete_partial_artifacts: Dict[str, Any] | None = None
 
@@ -933,6 +956,7 @@ async def process_grouped_vulns_task(
             )
             deps.tasks[task_id]["updated_at"] = now
             deps.tasks[task_id]["partial_publish_in_progress"] = True
+            deps.notify_task_update(task_id)
 
             artifacts = await asyncio.to_thread(
                 _build_grouped_vuln_task_artifacts,
@@ -959,10 +983,14 @@ async def process_grouped_vulns_task(
                 f"for {partial_completed}/{len(versions)} project versions."
             )
             deps.tasks[task_id]["_partial_full_result"] = artifacts["full_result"]
+            deps.tasks[task_id]["_assessment_partial_group_index"] = artifacts[
+                "assessment_group_index"
+            ]
             deps.tasks[task_id]["_group_query_index"] = artifacts["query_index"]
             deps.tasks[task_id]["_statistics_rollup"] = artifacts["statistics_rollup"]
             if partial_completed == len(versions):
                 complete_partial_artifacts = artifacts
+            deps.notify_task_update(task_id)
 
         (
             combined_data,
@@ -986,9 +1014,11 @@ async def process_grouped_vulns_task(
             92,
         )
         deps.tasks[task_id]["updated_at"] = now
-        deps.tasks[task_id].setdefault("log", []).append(
+        _append_task_log(
+            deps.tasks[task_id],
             "Grouping vulnerabilities and preparing filtered result windows..."
         )
+        deps.notify_task_update(task_id)
 
         artifacts = complete_partial_artifacts
         if artifacts is None:
@@ -1014,20 +1044,33 @@ async def process_grouped_vulns_task(
         deps.tasks[task_id]["completed_at"] = now
         deps.tasks[task_id]["partial_result_available"] = False
         deps.tasks[task_id]["partial_publish_in_progress"] = False
+        deps.tasks[task_id].pop("_partial_full_result", None)
+        deps.tasks[task_id].pop("_assessment_partial_group_index", None)
         deps.tasks[task_id]["_statistics_rollup"] = artifacts["statistics_rollup"]
         deps.tasks[task_id]["_full_result"] = result
         deps.tasks[task_id]["_full_result_by_id"] = {
             item.get("id"): item for item in result if item.get("id")
         }
+        deps.tasks[task_id]["_assessment_full_group_index"] = artifacts[
+            "assessment_group_index"
+        ]
         deps.tasks[task_id]["_bom_cache_map"] = bom_cache_map
         deps.tasks[task_id]["result"] = artifacts["visible_result"]
         deps.tasks[task_id]["_group_query_index"] = artifacts["query_index"]
         if (
             response_mode == "summary"
             and deps.summary_index is not None
-            and summary_cache_key
             and summary_cache_scope is not None
         ):
+            final_cache_revision = deps.summary_index_cache_revision()
+            summary_cache_key = build_grouped_vuln_summary_cache_key(
+                name=name,
+                cve=cve,
+                versions=versions,
+                team_mapping=team_mapping,
+                cache_revision=final_cache_revision,
+            )
+            summary_cache_scope["cache_revision"] = final_cache_revision
             deps.summary_index.save(
                 summary_cache_key,
                 scope=summary_cache_scope,
@@ -1052,12 +1095,13 @@ async def process_grouped_vulns_task(
                         f"Queued {queued_count} automatic code analysis "
                         f"scan{'s' if queued_count != 1 else ''}."
                     )
-                    deps.tasks[task_id].setdefault("log", []).append(msg)
+                    _append_task_log(deps.tasks[task_id], msg)
             except Exception:
                 deps.logger.exception(
                     "Task %s failed to queue automatic code analysis scans",
                     task_id,
                 )
+        deps.notify_task_update(task_id)
     except Exception as exc:
         now = datetime.now(timezone.utc)
         deps.tasks[task_id]["status"] = "failed"
@@ -1065,4 +1109,5 @@ async def process_grouped_vulns_task(
         deps.tasks[task_id]["updated_at"] = now
         deps.tasks[task_id]["completed_at"] = now
         deps.tasks[task_id]["partial_publish_in_progress"] = False
+        deps.notify_task_update(task_id)
         deps.logger.exception("Task %s failed", task_id)

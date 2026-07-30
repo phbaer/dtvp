@@ -71,9 +71,7 @@ def test_collect_version_snapshots_throttles_partial_publications():
     )
 
     assert sorted(progress_updates) == list(range(1, 26))
-    assert partial_sizes[0] == 1
-    assert partial_sizes[-1] == 25
-    assert len(partial_sizes) < len(versions)
+    assert partial_sizes == [1, 10, 19, 25]
 
 
 def test_summary_artifact_build_skips_dependency_chain_expansion():

@@ -21,6 +21,20 @@ def test_compose_uses_dependency_track_internal_api_port():
     template = (ROOT / "nginx.conf.template").read_text()
 
     assert "DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}" in compose
-    assert "proxy_pass http://dtrack-apiserver:8080/api/;" in template
+    assert "server dtrack-apiserver:8080;" in template
+    assert "proxy_pass http://dependency_track_api/api/;" in template
     assert "dtrack-apiserver:8081" not in compose
     assert "dtrack-apiserver:8081" not in template
+
+
+def test_nginx_reuses_upstreams_compresses_json_and_preserves_event_streaming():
+    template = (ROOT / "nginx.conf.template").read_text()
+
+    assert "upstream dtvp_backend" in template
+    assert "keepalive 64;" in template
+    assert "proxy_http_version 1.1;" in template
+    assert 'proxy_set_header Connection "";' in template
+    assert "gzip_types application/json" in template
+    assert "location ~ ^${DTVP_CONTEXT_PATH}/api/tasks/[^/]+/events$" in template
+    assert "proxy_buffering off;" in template
+    assert "add_header X-Accel-Buffering no always;" in template

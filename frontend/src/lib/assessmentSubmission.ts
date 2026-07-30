@@ -56,8 +56,13 @@ export interface PreparedAssessmentSubmission {
 }
 
 export interface AssessmentUpdateSuccessResult {
+    uuid?: string
     new_state: string
     new_details: string
+    queued?: boolean
+    sync_status?: string
+    update_id?: string
+    revision?: number
 }
 
 export interface EmittedAssessmentUpdate {
@@ -349,21 +354,48 @@ export const buildSavedOriginalAnalysis = ({
     finalState,
     finalText,
     suppressed,
+    results = [],
 }: {
     allInstances: Instance[]
     finalState: string
     finalText: string
     suppressed: boolean
-}): Record<string, { analysisState: string; analysisDetails: string; isSuppressed: boolean }> => {
-    const nextOriginalAnalysis: Record<string, { analysisState: string; analysisDetails: string; isSuppressed: boolean }> = {}
+    results?: AssessmentUpdateSuccessResult[]
+}): Record<string, {
+    analysisState: string
+    analysisDetails: string
+    isSuppressed: boolean
+    dtvpRevision?: number
+    dtvpSyncStatus?: string
+    dtvpUpdateId?: string
+}> => {
+    const resultsByFinding = new Map(
+        results
+            .filter(result => result.uuid)
+            .map(result => [result.uuid as string, result]),
+    )
+    const nextOriginalAnalysis: Record<string, {
+        analysisState: string
+        analysisDetails: string
+        isSuppressed: boolean
+        dtvpRevision?: number
+        dtvpSyncStatus?: string
+        dtvpUpdateId?: string
+    }> = {}
 
     for (const instance of allInstances) {
         if (!instance.finding_uuid) continue
 
+        const result = resultsByFinding.get(instance.finding_uuid)
         nextOriginalAnalysis[instance.finding_uuid] = {
-            analysisState: finalState,
-            analysisDetails: finalText,
+            analysisState: result?.new_state || finalState,
+            analysisDetails: result?.new_details || finalText,
             isSuppressed: suppressed,
+            ...(result?.revision !== undefined ? { dtvpRevision: result.revision } : {}),
+            ...((result?.sync_status || result?.queued) ? {
+                dtvpSyncStatus: result.sync_status || 'pending',
+            } : {}),
+            ...(result?.update_id ? { dtvpUpdateId: result.update_id } : {}),
         }
     }
 

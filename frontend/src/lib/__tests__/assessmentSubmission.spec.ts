@@ -185,11 +185,23 @@ describe('assessmentSubmission', () => {
             finalState: 'EXPLOITABLE',
             finalText: 'Merged final text',
             suppressed: false,
+            results: [{
+                uuid: 'finding-1',
+                new_state: 'EXPLOITABLE',
+                new_details: 'Merged final text',
+                queued: true,
+                sync_status: 'pending',
+                update_id: 'update-1',
+                revision: 3,
+            }],
         })).toEqual({
             'finding-1': {
                 analysisState: 'EXPLOITABLE',
                 analysisDetails: 'Merged final text',
                 isSuppressed: false,
+                dtvpRevision: 3,
+                dtvpSyncStatus: 'pending',
+                dtvpUpdateId: 'update-1',
             },
         })
     })

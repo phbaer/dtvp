@@ -150,6 +150,44 @@ def test_code_analysis_result_store_lists_assessments_from_dedicated_metadata(
     assert "result" not in record
 
 
+def test_code_analysis_result_metadata_applies_unfiltered_limit_in_sql(
+    tmp_path,
+    monkeypatch,
+):
+    store = CodeAnalysisResultStore(
+        path_provider=lambda: str(tmp_path / "code_analysis_results.sqlite")
+    )
+    for index in range(5):
+        store.record_queue_item_result(
+            SimpleNamespace(
+                queue_id=f"run-{index}",
+                project_name="ExampleApp",
+                vuln_id=f"CVE-2026-{index}",
+                component_name="owned-api",
+                source="automatic",
+                submitted_at=f"2026-01-03T03:0{index}:00+00:00",
+                finished_at=f"2026-01-03T03:0{index}:30+00:00",
+                result=None,
+            ),
+            {"assessment": {"verdict": "Not Affected"}},
+        )
+
+    original_decode = result_services._decode_json_strings
+    decode_calls = 0
+
+    def counted_decode(value):
+        nonlocal decode_calls
+        decode_calls += 1
+        return original_decode(value)
+
+    monkeypatch.setattr(result_services, "_decode_json_strings", counted_decode)
+
+    records = store.list_result_metadata(limit=2)
+
+    assert len(records) == 2
+    assert decode_calls == 4
+
+
 def test_code_analysis_result_store_backfills_rescore_metadata_version(tmp_path):
     database_path = tmp_path / "code_analysis_results.sqlite"
     store = CodeAnalysisResultStore(path_provider=lambda: str(database_path))

@@ -1,5 +1,10 @@
 import pytest
-from dtvp.dt_client import DTClient, DTSettings, get_client
+from dtvp.dt_client import (
+    DTClient,
+    DTSettings,
+    close_shared_dt_client,
+    get_client,
+)
 from unittest.mock import patch
 import respx
 import httpx
@@ -60,6 +65,9 @@ async def test_get_projects_boundary(dt_client, respx_mock):
 
 @pytest.mark.asyncio
 async def test_get_vulnerabilities(dt_client, respx_mock):
+    respx_mock.get(
+        "http://dt.example.com/api/v1/finding/project/u1/export"
+    ).respond(status_code=404)
     respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
         json=[{"vulnerability": {"vulnId": "CVE-1"}}]
     )
@@ -67,6 +75,42 @@ async def test_get_vulnerabilities(dt_client, respx_mock):
     vulns = await dt_client.get_vulnerabilities("u1")
     assert len(vulns) == 1
     assert vulns[0]["vulnerability"]["vulnId"] == "CVE-1"
+
+
+@pytest.mark.asyncio
+async def test_get_vulnerabilities_uses_single_export_request(dt_client, respx_mock):
+    export_route = respx_mock.get(
+        "http://dt.example.com/api/v1/finding/project/u1/export"
+    ).respond(
+        json={
+            "version": "1.4",
+            "findings": [
+                {
+                    "vulnerability": {
+                        "vulnId": "CVE-1",
+                        "uuid": "v1",
+                        "aliases": [{"ghsaId": "GHSA-1"}],
+                    },
+                    "component": {"uuid": "c1"},
+                    "analysis": {
+                        "state": "NOT_AFFECTED",
+                        "detail": "Not reachable",
+                        "isSuppressed": False,
+                    },
+                }
+            ],
+        }
+    )
+    analysis_route = respx_mock.get("http://dt.example.com/api/v1/analysis").respond(
+        json={"state": "EXPLOITABLE"}
+    )
+
+    vulns = await dt_client.get_vulnerabilities("u1", cve="cve-1")
+
+    assert export_route.call_count == 1
+    assert analysis_route.call_count == 0
+    assert vulns[0]["analysis"]["analysisState"] == "NOT_AFFECTED"
+    assert vulns[0]["analysis"]["analysisDetails"] == "Not reachable"
 
 
 @pytest.mark.asyncio
@@ -120,6 +164,9 @@ async def test_get_analysis_404(dt_client, respx_mock):
 
 @pytest.mark.asyncio
 async def test_get_vulnerabilities_with_enrichment(dt_client, respx_mock):
+    respx_mock.get(
+        "http://dt.example.com/api/v1/finding/project/u1/export"
+    ).respond(status_code=404)
     # Mock findings response
     respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
         json=[
@@ -142,6 +189,9 @@ async def test_get_vulnerabilities_with_enrichment(dt_client, respx_mock):
 
 @pytest.mark.asyncio
 async def test_get_vulnerabilities_enrichment_failure(dt_client, respx_mock):
+    respx_mock.get(
+        "http://dt.example.com/api/v1/finding/project/u1/export"
+    ).respond(status_code=404)
     # Mock findings response
     respx_mock.get("http://dt.example.com/api/v1/finding/project/u1").respond(
         json=[
@@ -249,6 +299,7 @@ def test_settings_properties():
 async def test_get_client():
     from unittest.mock import MagicMock
 
+    await close_shared_dt_client()
     with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         mock_instance.api_url = "http://mock"
@@ -258,16 +309,20 @@ async def test_get_client():
         mock_request.headers = {}
         mock_request.cookies = {}
 
-        async for c in get_client(mock_request):
-            assert c.base_url == "http://mock"
-            assert c.headers["X-Api-Key"] == "mock_key"
-            break
+        try:
+            async for c in get_client(mock_request):
+                assert c.base_url == "http://mock"
+                assert c.headers["X-Api-Key"] == "mock_key"
+                break
+        finally:
+            await close_shared_dt_client()
 
 
 @pytest.mark.asyncio
 async def test_get_client_does_not_forward_request_credentials():
     from unittest.mock import MagicMock
 
+    await close_shared_dt_client()
     with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
         mock_instance = mock_settings_cls.return_value
         mock_instance.api_url = "http://mock"
@@ -277,10 +332,36 @@ async def test_get_client_does_not_forward_request_credentials():
         mock_request.headers = {"Authorization": "Bearer test_token"}
         mock_request.cookies = {"test_cookie": "test_val"}
 
-        async for c in get_client(mock_request):
-            assert "Authorization" not in c.headers
-            assert "test_cookie" not in c.client.cookies
-            break
+        try:
+            async for c in get_client(mock_request):
+                assert "Authorization" not in c.headers
+                assert "test_cookie" not in c.client.cookies
+                break
+        finally:
+            await close_shared_dt_client()
+
+
+@pytest.mark.asyncio
+async def test_get_client_reuses_api_key_connection_pool():
+    from unittest.mock import MagicMock
+
+    await close_shared_dt_client()
+    with patch("dtvp.dt_client.DTSettings") as mock_settings_cls:
+        mock_instance = mock_settings_cls.return_value
+        mock_instance.api_url = "http://mock"
+        mock_instance.api_key = "mock_key"
+        mock_request = MagicMock()
+
+        clients = []
+        try:
+            for _ in range(2):
+                async for client in get_client(mock_request):
+                    clients.append(client)
+                    break
+        finally:
+            await close_shared_dt_client()
+
+    assert clients[0] is clients[1]
 
 
 @respx.mock

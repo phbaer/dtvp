@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../api', () => ({
     analysisQueueList: vi.fn(),
+    analysisQueueStatus: vi.fn(),
     analysisQueueSubmit: vi.fn(),
     analysisQueueSubmitFollowUp: vi.fn(),
     analysisQueueGet: vi.fn(),
@@ -9,6 +10,26 @@ vi.mock('../api', () => ({
     analysisQueueClear: vi.fn(),
     analysisQueueCancelQueued: vi.fn(),
 }))
+
+const autoSweepStatus = {
+    enabled: false,
+    code_analysis_configured: false,
+    active: false,
+    interval_seconds: 900,
+    running: false,
+}
+
+const queueStatus = (items: any[]) => ({
+    updated_at: '2026-07-30T12:00:00Z',
+    counts_by_status: items.reduce((counts, item) => ({
+        ...counts,
+        [item.status]: (counts[item.status] ?? 0) + 1,
+    }), {} as Record<string, number>),
+    active_count: items.filter(item => item.status === 'queued' || item.status === 'running').length,
+    running_count: items.filter(item => item.status === 'running').length,
+    items,
+    auto_sweep: autoSweepStatus,
+})
 
 describe('analysisQueueStore', () => {
     beforeEach(() => {
@@ -49,12 +70,12 @@ describe('analysisQueueStore', () => {
         vi.useFakeTimers()
 
         const api = await import('../api')
-        const listMock = vi.mocked(api.analysisQueueList)
+        const statusMock = vi.mocked(api.analysisQueueStatus)
         const submitMock = vi.mocked(api.analysisQueueSubmit)
         const getMock = vi.mocked(api.analysisQueueGet)
 
-        listMock
-            .mockResolvedValueOnce([
+        statusMock
+            .mockResolvedValueOnce(queueStatus([
                 {
                     queue_id: 'queue-1',
                     vuln_id: 'CVE-1',
@@ -64,8 +85,8 @@ describe('analysisQueueStore', () => {
                     status: 'queued',
                     position: 1,
                 },
-            ] as any)
-            .mockResolvedValueOnce([
+            ] as any))
+            .mockResolvedValueOnce(queueStatus([
                 {
                     queue_id: 'queue-1',
                     vuln_id: 'CVE-1',
@@ -75,8 +96,8 @@ describe('analysisQueueStore', () => {
                     status: 'queued',
                     position: 1,
                 },
-            ] as any)
-            .mockResolvedValueOnce([
+            ] as any))
+            .mockResolvedValueOnce(queueStatus([
                 {
                     queue_id: 'queue-1',
                     vuln_id: 'CVE-1',
@@ -86,7 +107,7 @@ describe('analysisQueueStore', () => {
                     status: 'completed',
                     position: 0,
                 },
-            ] as any)
+            ] as any))
 
         submitMock.mockResolvedValue({
             queue_id: 'queue-1',
@@ -114,9 +135,8 @@ describe('analysisQueueStore', () => {
 
         await analysisQueueStore.submit('CVE-1', 'component', undefined, undefined, undefined, onComplete)
 
-        await vi.advanceTimersByTimeAsync(3000)
-        vi.runAllTicks()
-        await vi.advanceTimersByTimeAsync(3000)
+        vi.spyOn(Math, 'random').mockReturnValue(0.5)
+        await vi.advanceTimersByTimeAsync(5000)
         vi.runAllTicks()
 
         expect(onComplete).toHaveBeenCalledWith(
@@ -130,7 +150,7 @@ describe('analysisQueueStore', () => {
 
     it('notifies completion callbacks when an item is already completed on the first post-submit refresh', async () => {
         const api = await import('../api')
-        const listMock = vi.mocked(api.analysisQueueList)
+        const statusMock = vi.mocked(api.analysisQueueStatus)
         const submitMock = vi.mocked(api.analysisQueueSubmit)
         const getMock = vi.mocked(api.analysisQueueGet)
 
@@ -143,7 +163,7 @@ describe('analysisQueueStore', () => {
             status: 'queued',
             position: 1,
         } as any)
-        listMock.mockResolvedValue([
+        statusMock.mockResolvedValue(queueStatus([
             {
                 queue_id: 'queue-fast',
                 vuln_id: 'CVE-1',
@@ -153,7 +173,7 @@ describe('analysisQueueStore', () => {
                 status: 'completed',
                 position: 0,
             },
-        ] as any)
+        ] as any))
         getMock.mockResolvedValue({
             queue_id: 'queue-fast',
             vuln_id: 'CVE-1',
@@ -181,10 +201,10 @@ describe('analysisQueueStore', () => {
 
     it('submits follow-up queue items with parent context', async () => {
         const api = await import('../api')
-        const listMock = vi.mocked(api.analysisQueueList)
+        const statusMock = vi.mocked(api.analysisQueueStatus)
         const followUpMock = vi.mocked(api.analysisQueueSubmitFollowUp)
 
-        listMock.mockResolvedValue([])
+        statusMock.mockResolvedValue(queueStatus([]))
         followUpMock.mockResolvedValue({
             queue_id: 'queue-follow',
             vuln_id: 'CVE-1',
@@ -257,5 +277,27 @@ describe('analysisQueueStore', () => {
         await analysisQueueStore.refresh()
 
         expect(analysisQueueStore.items.value.map(item => item.queue_id)).toEqual(['newer', 'middle', 'older'])
+    })
+
+    it('uses compact status polling and backs off to 30 seconds while idle', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+        const api = await import('../api')
+        const statusMock = vi.mocked(api.analysisQueueStatus)
+        statusMock.mockResolvedValue(queueStatus([]))
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+
+        await analysisQueueStore.startPolling()
+        expect(statusMock).toHaveBeenCalledTimes(1)
+
+        await vi.advanceTimersByTimeAsync(29999)
+        expect(statusMock).toHaveBeenCalledTimes(1)
+
+        await vi.advanceTimersByTimeAsync(1)
+        expect(statusMock).toHaveBeenCalledTimes(2)
+        expect(analysisQueueStore.sweepStatus.value).toEqual(autoSweepStatus)
+
+        analysisQueueStore.stopPolling()
     })
 })

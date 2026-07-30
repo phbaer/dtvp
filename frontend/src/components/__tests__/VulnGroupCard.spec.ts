@@ -12,7 +12,11 @@ vi.mock('../../lib/api', () => ({
             status: 'success',
             uuid: inst.finding_uuid,
             new_state: payload.state, // In real backend this would be aggregated
-            new_details: `-- - [Team: ${payload.team || 'General'}][State: ${payload.state}][Assessed By: test - mock][Justification: ${payload.justification || 'NOT_SET'}]---\n${payload.details}`
+            new_details: `-- - [Team: ${payload.team || 'General'}][State: ${payload.state}][Assessed By: test - mock][Justification: ${payload.justification || 'NOT_SET'}]---\n${payload.details}`,
+            queued: true,
+            sync_status: 'pending',
+            update_id: `update-${inst.finding_uuid}`,
+            revision: 1,
         }))
         return Promise.resolve(results)
     }),
@@ -331,6 +335,13 @@ describe('VulnGroupCard', () => {
 
         // Should emit update:assessment
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
+        expect(wrapper.get('[data-testid="assessment-persistence-status"]').text())
+            .toContain('Saved locally — syncing to Dependency-Track')
+        expect((wrapper.vm as any).originalAnalysis.f1).toEqual(expect.objectContaining({
+            dtvpRevision: 1,
+            dtvpSyncStatus: 'pending',
+            dtvpUpdateId: 'update-f1',
+        }))
     })
 
     it('keeps analysis run provenance with a code-analysis assessment draft', async () => {

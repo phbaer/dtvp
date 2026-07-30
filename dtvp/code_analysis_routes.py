@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Awaitable, Callable, Optional
@@ -6,6 +7,7 @@ from typing import Annotated, Any, Awaitable, Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from .analysis_queue_runtime import AnalysisQueueFullError
 from .auto_analysis_services import (
     AutoAnalysisTarget,
     build_component_auto_analysis_guidance_block,
@@ -32,6 +34,65 @@ class CodeAnalysisRouteDeps:
     code_analysis_disabled_detail: str
     not_found_response: dict[int | str, dict[str, Any]]
     service_unavailable_response: dict[int | str, dict[str, Any]]
+    get_dashboard_status_cache_seconds: Callable[[], int] = lambda: 3
+
+
+class _DashboardStatusCache:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._value: dict[str, Any] | None = None
+        self._expires_at = 0.0
+        self._inflight: tuple[asyncio.AbstractEventLoop, asyncio.Task[Any]] | None = (
+            None
+        )
+
+    async def get(
+        self,
+        deps: CodeAnalysisRouteDeps,
+        *,
+        refresh: bool,
+    ) -> dict[str, Any]:
+        loop = asyncio.get_running_loop()
+        created = False
+        with self._lock:
+            if (
+                not refresh
+                and self._value is not None
+                and loop.time() < self._expires_at
+            ):
+                return self._value
+
+            inflight = self._inflight
+            if (
+                inflight is not None
+                and inflight[0] is loop
+                and not inflight[1].done()
+            ):
+                task = inflight[1]
+            else:
+                task = loop.create_task(build_code_analysis_dashboard_status(deps))
+                self._inflight = (loop, task)
+                created = True
+
+        try:
+            value = await asyncio.shield(task)
+        except BaseException:
+            if created:
+                with self._lock:
+                    if self._inflight == (loop, task):
+                        self._inflight = None
+            raise
+
+        if created:
+            with self._lock:
+                if self._inflight == (loop, task):
+                    self._value = value
+                    self._expires_at = loop.time() + max(
+                        1,
+                        int(deps.get_dashboard_status_cache_seconds()),
+                    )
+                    self._inflight = None
+        return value
 
 
 class CodeAnalysisAssessRequest(BaseModel):
@@ -148,6 +209,30 @@ def _dump_queue_item(item: Any, *, include_result: bool = False) -> dict[str, An
     if not include_result:
         data.pop("result", None)
     return data
+
+
+def _dump_queue_item_summary(item: Any) -> dict[str, Any]:
+    """Serialize only the fields needed by queue badges and status polling."""
+    fields = (
+        "queue_id",
+        "vuln_id",
+        "component_name",
+        "project_name",
+        "parent_run_id",
+        "source",
+        "submitted_by",
+        "submitted_at",
+        "started_at",
+        "status",
+        "position",
+        "job_id",
+        "error",
+        "finished_at",
+        "progress",
+        "abort_requested",
+        "abort_error",
+    )
+    return {field: getattr(item, field, None) for field in fields}
 
 
 def _count_by(items: list[Any], attr: str) -> dict[str, int]:
@@ -575,13 +660,15 @@ def _register_code_analysis_routes(
     router: APIRouter,
     deps: CodeAnalysisRouteDeps,
     current_user_dependency: Callable[..., Any],
+    dashboard_status_cache: _DashboardStatusCache,
 ) -> None:
     @router.get("/code-analysis/status")
     async def code_analysis_dashboard_status(
+        refresh: bool = Query(False),
         *,
         user: Annotated[str, Depends(current_user_dependency)],
     ):
-        return await build_code_analysis_dashboard_status(deps)
+        return await dashboard_status_cache.get(deps, refresh=refresh)
 
     @router.get("/code-analysis/results")
     async def code_analysis_list_results(
@@ -894,19 +981,22 @@ def _register_analysis_queue_routes(
             component_name=req.component_name,
             user_guidance=req.user_guidance,
         )
-        item = deps.analysis_queue.submit(
-            vuln_id=req.vuln_id,
-            component_name=req.component_name,
-            project_name=req.project_name,
-            submitted_by=user,
-            cvss_vector=req.cvss_vector,
-            user_guidance=user_guidance,
-            affected_product_versions=req.affected_product_versions,
-            model=req.model,
-            llm_backend=req.llm_backend,
-            llm_provider=req.llm_provider,
-            source=source,
-        )
+        try:
+            item = deps.analysis_queue.submit(
+                vuln_id=req.vuln_id,
+                component_name=req.component_name,
+                project_name=req.project_name,
+                submitted_by=user,
+                cvss_vector=req.cvss_vector,
+                user_guidance=user_guidance,
+                affected_product_versions=req.affected_product_versions,
+                model=req.model,
+                llm_backend=req.llm_backend,
+                llm_provider=req.llm_provider,
+                source=source,
+            )
+        except AnalysisQueueFullError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         return item.model_dump(exclude={"result"})
 
     @router.post(
@@ -937,35 +1027,73 @@ def _register_analysis_queue_routes(
             extra_guidance=req.user_guidance,
         )
 
-        item = deps.analysis_queue.submit(
-            vuln_id=str(parent.get("vuln_id") or ""),
-            component_name=req.component_name
-            or str(parent.get("component_name") or ""),
-            project_name=req.project_name
-            if req.project_name is not None
-            else parent.get("project_name"),
-            submitted_by=user,
-            cvss_vector=req.cvss_vector or parent.get("cvss_vector"),
-            user_guidance=user_guidance,
-            model=req.model,
-            llm_backend=req.llm_backend,
-            llm_provider=req.llm_provider,
-            parent_run_id=parent.get("analysis_run_id"),
-            parent_job_id=parent.get("job_id"),
-            follow_up_question=question,
-            follow_up_user_guidance=req.user_guidance,
-            context_mode=req.context_mode or "compact",
-            source="follow-up",
-        )
+        try:
+            item = deps.analysis_queue.submit(
+                vuln_id=str(parent.get("vuln_id") or ""),
+                component_name=req.component_name
+                or str(parent.get("component_name") or ""),
+                project_name=req.project_name
+                if req.project_name is not None
+                else parent.get("project_name"),
+                submitted_by=user,
+                cvss_vector=req.cvss_vector or parent.get("cvss_vector"),
+                user_guidance=user_guidance,
+                model=req.model,
+                llm_backend=req.llm_backend,
+                llm_provider=req.llm_provider,
+                parent_run_id=parent.get("analysis_run_id"),
+                parent_job_id=parent.get("job_id"),
+                follow_up_question=question,
+                follow_up_user_guidance=req.user_guidance,
+                context_mode=req.context_mode or "compact",
+                source="follow-up",
+            )
+        except AnalysisQueueFullError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
         return item.model_dump(exclude={"result"})
 
     @router.get("/analysis-queue")
     async def queue_list(
         *,
         user: Annotated[str, Depends(current_user_dependency)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    ):
+        items = deps.analysis_queue.list_page(offset=offset, limit=limit)
+        return [item.model_dump(exclude={"result"}) for item in items]
+
+    @router.get("/analysis-queue/status")
+    async def queue_status(
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+        recent_limit: Annotated[int, Query(ge=0, le=100)] = 20,
     ):
         items = deps.analysis_queue.list_all()
-        return [item.model_dump(exclude={"result"}) for item in items]
+        active_items = [
+            item
+            for item in items
+            if getattr(item, "status", "") in {"queued", "running"}
+        ]
+        terminal_items = [
+            item
+            for item in reversed(items)
+            if getattr(item, "status", "")
+            in {"completed", "failed", "cancelled"}
+        ][:recent_limit]
+        counts_by_status = _count_by(items, "status")
+        return {
+            "updated_at": _utc_now_iso(),
+            "counts_by_status": counts_by_status,
+            "active_count": sum(
+                counts_by_status.get(status, 0) for status in ("queued", "running")
+            ),
+            "running_count": counts_by_status.get("running", 0),
+            "items": [
+                _dump_queue_item_summary(item)
+                for item in (*active_items, *terminal_items)
+            ],
+            "auto_sweep": deps.get_auto_analysis_sweep_status(),
+        }
 
     @router.post("/analysis-queue/clear")
     async def queue_clear(
@@ -1054,6 +1182,11 @@ def create_code_analysis_router(
     current_user_dependency: Callable[..., Any],
 ) -> APIRouter:
     router = APIRouter()
-    _register_code_analysis_routes(router, deps, current_user_dependency)
+    _register_code_analysis_routes(
+        router,
+        deps,
+        current_user_dependency,
+        _DashboardStatusCache(),
+    )
     _register_analysis_queue_routes(router, deps, current_user_dependency)
     return router

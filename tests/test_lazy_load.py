@@ -172,7 +172,8 @@ def test_get_assessment_details_refreshes_grouped_task_snapshot(api_client, mock
         main.tasks.pop(task_id, None)
 
 
-def test_update_assessment_conflict(api_client, mock_client):
+def test_update_assessment_conflict(api_client, mock_client, monkeypatch):
+    monkeypatch.setenv("DTVP_ASSESSMENT_STRICT_DT_CONFLICTS", "true")
     mock_client.get_analysis.return_value = {
         "analysisState": "EXPLOITABLE",
         "analysisDetails": "Server changed this",
@@ -369,4 +370,5 @@ def test_update_assessment_force(api_client, mock_client):
     assert isinstance(results, list)
     assert len(results) == 1
     assert results[0]["status"] == "success"
-    mock_client.update_analysis.assert_called_once()
+    assert results[0]["queued"] is True
+    mock_client.update_analysis.assert_not_called()

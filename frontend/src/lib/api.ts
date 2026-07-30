@@ -274,11 +274,12 @@ export interface TaskVulnGroupListQuery {
     offset?: number;
     cursor?: string | null;
     limit?: number;
+    generation?: number;
 }
 
 export type BulkWorkflowFilters = Omit<
     TaskVulnGroupListQuery,
-    'sort' | 'order' | 'offset' | 'cursor' | 'limit'
+    'sort' | 'order' | 'offset' | 'cursor' | 'limit' | 'generation'
 >;
 
 export interface BulkWorkflowMetadata {
@@ -423,7 +424,7 @@ export const startGroupVulnTask = async (
     name: string,
     cve?: string,
     responseMode: 'full' | 'summary' = 'full',
-): Promise<{ task_id: string }> => {
+): Promise<{ task_id: string; reused: boolean }> => {
     const params: any = { name, response_mode: responseMode };
     if (cve) {
         params.cve = cve;
@@ -505,9 +506,12 @@ const taskGroupListParams = (query: TaskVulnGroupListQuery = {}) => {
 export const getTaskVulnGroups = async (
     taskId: string,
     query: TaskVulnGroupListQuery = {},
+    options: { signal?: AbortSignal } = {},
 ): Promise<TaskVulnGroupListResponse> => {
     const params = taskGroupListParams(query);
-    const res = await api.get(`/tasks/${encodeURIComponent(taskId)}/groups`, { params });
+    const config: { params: Record<string, any>; signal?: AbortSignal } = { params };
+    if (options.signal) config.signal = options.signal;
+    const res = await api.get(`/tasks/${encodeURIComponent(taskId)}/groups`, config);
     return res.data;
 };
 
@@ -1761,8 +1765,12 @@ export const codeAnalysisGetAutoSweepStatus = async (): Promise<CodeAnalysisAuto
     return res.data;
 };
 
-export const codeAnalysisGetDashboardStatus = async (): Promise<CodeAnalysisDashboardStatus> => {
-    const res = await api.get('/code-analysis/status');
+export const codeAnalysisGetDashboardStatus = async (
+    refresh = false,
+): Promise<CodeAnalysisDashboardStatus> => {
+    const res = refresh
+        ? await api.get('/code-analysis/status', { params: { refresh: true } })
+        : await api.get('/code-analysis/status');
     return res.data;
 };
 
@@ -1899,6 +1907,15 @@ export interface AnalysisQueueItem {
     abort_error?: string;
 }
 
+export interface AnalysisQueueStatus {
+    updated_at: string;
+    counts_by_status: Record<string, number>;
+    active_count: number;
+    running_count: number;
+    items: AnalysisQueueItem[];
+    auto_sweep: CodeAnalysisAutoSweepStatus;
+}
+
 export const analysisQueueSubmit = async (req: {
     vuln_id: string;
     component_name: string;
@@ -1931,8 +1948,15 @@ export const analysisQueueSubmitFollowUp = async (req: {
     return res.data;
 };
 
-export const analysisQueueList = async (): Promise<AnalysisQueueItem[]> => {
-    const res = await api.get('/analysis-queue');
+export const analysisQueueList = async (
+    params: { offset?: number; limit?: number } = {},
+): Promise<AnalysisQueueItem[]> => {
+    const res = await api.get('/analysis-queue', { params });
+    return res.data;
+};
+
+export const analysisQueueStatus = async (): Promise<AnalysisQueueStatus> => {
+    const res = await api.get('/analysis-queue/status');
     return res.data;
 };
 

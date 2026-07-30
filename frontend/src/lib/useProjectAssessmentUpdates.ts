@@ -26,13 +26,23 @@ export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): Group
     assignees: data.assignees !== undefined ? data.assignees : group.assignees,
     affected_versions: group.affected_versions.map((version: any) => ({
         ...version,
-        components: version.components.map((instance: any) => ({
-            ...instance,
-            analysis_state: data.analysis_state,
-            analysis_details: data.analysis_details,
-            is_suppressed: data.is_suppressed,
-            justification: data.justification,
-        })),
+        components: version.components.map((instance: any) => {
+            const persistenceResult = data.dtvp_results?.find(
+                (result: any) => result.uuid === instance.finding_uuid,
+            )
+            return {
+                ...instance,
+                analysis_state: data.analysis_state,
+                analysis_details: data.analysis_details,
+                is_suppressed: data.is_suppressed,
+                justification: data.justification,
+                dtvp_revision: persistenceResult?.revision ?? instance.dtvp_revision,
+                dtvp_sync_status: persistenceResult?.sync_status
+                    || (persistenceResult?.queued ? 'pending' : instance.dtvp_sync_status),
+                dtvp_update_id: persistenceResult?.update_id ?? instance.dtvp_update_id,
+                dtvp_sync_error: persistenceResult ? null : instance.dtvp_sync_error,
+            }
+        }),
     })),
 })
 
