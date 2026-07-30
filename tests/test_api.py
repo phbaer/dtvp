@@ -1,10 +1,12 @@
 import asyncio
 import json
 import os
-from datetime import datetime, timedelta, timezone
+import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -43,15 +45,15 @@ def test_search_projects_no_name(client, mock_dt_client):
     assert len(data) == 1
 
 
-def test_grouped_vuln_task_status_prunes_expired_terminal_tasks(client, monkeypatch):
-    monkeypatch.setenv("DTVP_GROUPED_VULN_TASK_TTL_SECONDS", "60")
-    task_id = "expired-grouped-vuln-task"
+def test_grouped_vuln_task_status_hides_shared_access_metadata(client):
+    task_id = "shared-access-metadata-task"
     main.tasks[task_id] = {
         "_owner": "testuser",
+        "_owners": {"testuser", "second-user"},
         "id": task_id,
         "status": "completed",
         "result": [],
-        "completed_at": datetime.now(timezone.utc) - timedelta(seconds=120),
+        "completed_at": datetime.now(timezone.utc),
     }
 
     try:
@@ -60,7 +62,8 @@ def test_grouped_vuln_task_status_prunes_expired_terminal_tasks(client, monkeypa
         main.tasks.pop(task_id, None)
 
     assert response.status_code == 200
-    assert response.json() == {"status": "not_found"}
+    assert response.json()["status"] == "completed"
+    assert "_owners" not in response.json()
 
 
 def test_grouped_vuln_task_events_stream_status_without_result(client):
@@ -73,6 +76,7 @@ def test_grouped_vuln_task_events_stream_status_without_result(client):
         "progress": 100,
         "result": [{"id": "CVE-heavy"}],
         "partial_result_available": False,
+        "log": [f"Update {index}" for index in range(50)],
     }
 
     try:
@@ -88,6 +92,8 @@ def test_grouped_vuln_task_events_stream_status_without_result(client):
     assert event["status"] == "completed"
     assert event["progress"] == 100
     assert "result" not in event
+    assert event["log"] == [f"Update {index}" for index in range(30, 50)]
+    assert event["log_offset"] == 30
 
 
 def test_grouped_vuln_tasks_are_private_to_the_creating_user(client):
@@ -113,6 +119,62 @@ def test_grouped_vuln_tasks_are_private_to_the_creating_user(client):
     assert groups.status_code == 404
     assert detail.status_code == 404
     assert statistics.status_code == 404
+
+
+def test_grouped_vuln_task_start_reuses_matching_access_controlled_snapshot(
+    client,
+):
+    current_user = ["first-user"]
+    release = threading.Event()
+    original_revision = main.cache_manager.cache_meta.get("last_refreshed_at")
+
+    async def blocked_projects(*_args, **_kwargs):
+        while not release.is_set():
+            await asyncio.sleep(0.01)
+        return []
+
+    main.app.dependency_overrides[main.get_current_user] = lambda: current_user[0]
+    task_id = None
+    try:
+        main.cache_manager.cache_meta["last_refreshed_at"] = "before-load"
+        with patch.object(
+            main.cache_manager,
+            "get_projects",
+            new=AsyncMock(side_effect=blocked_projects),
+        ):
+            first = client.post(
+                "/api/tasks/group-vulns?name=SharedProject&response_mode=summary"
+            )
+            task_id = first.json()["task_id"]
+            main.cache_manager.cache_meta["last_refreshed_at"] = "during-load"
+            current_user[0] = "second-user"
+            second = client.post(
+                "/api/tasks/group-vulns?name=SharedProject&response_mode=summary"
+            )
+            owners = set(main.tasks[task_id]["_owners"])
+            release.set()
+            for _ in range(50):
+                if main.tasks[task_id].get("_task_key_finalized") is True:
+                    break
+                time.sleep(0.01)
+            third = client.post(
+                "/api/tasks/group-vulns?name=SharedProject&response_mode=summary"
+            )
+        shared_status = client.get(f"/api/tasks/{task_id}")
+    finally:
+        release.set()
+        main.cache_manager.cache_meta["last_refreshed_at"] = original_revision
+        if task_id:
+            main.tasks.pop(task_id, None)
+        main.app.dependency_overrides[main.get_current_user] = lambda: "testuser"
+
+    assert first.status_code == 200
+    assert first.json() == {"task_id": task_id, "reused": False}
+    assert second.json() == {"task_id": task_id, "reused": True}
+    assert third.json() == {"task_id": task_id, "reused": True}
+    assert owners == {"first-user", "second-user"}
+    assert shared_status.status_code == 200
+    assert shared_status.json()["status"] == "completed"
 
 
 def test_cache_status_endpoint(client):
@@ -230,8 +292,8 @@ def test_assessment_restore_preview_and_apply(client, mock_dt_client):
             assert apply_response.status_code == 200
             assert apply_response.json()["summary"]["attempted"] == 1
 
-        mock_dt_client.update_analysis.assert_called_once()
-        _, kwargs = mock_dt_client.update_analysis.call_args
+        mock_dt_client.update_analysis.assert_not_called()
+        kwargs = main.cache_manager._load_pending_updates()[0]["payload"]
         assert kwargs["project_uuid"] == "project-1"
         assert kwargs["component_uuid"] == "component-1"
         assert kwargs["vulnerability_uuid"] == "vuln-1"
@@ -418,7 +480,7 @@ def test_bulk_workflow_apply_runs_as_polled_background_task(client, mock_dt_clie
             "Submitted 1 of 1 assessment updates" in entry
             for entry in status["log"]
         )
-        mock_dt_client.update_analysis.assert_called_once()
+        mock_dt_client.update_analysis.assert_not_called()
     finally:
         main.tasks.pop(task_id, None)
         if operation_id:
@@ -746,8 +808,8 @@ def test_rescore_rule_sync_preview_and_apply(client, mock_dt_client):
             assert apply_response.status_code == 200
             assert apply_response.json()["summary"]["attempted"] == 1
 
-        mock_dt_client.update_analysis.assert_called_once()
-        _, kwargs = mock_dt_client.update_analysis.call_args
+        mock_dt_client.update_analysis.assert_not_called()
+        kwargs = main.cache_manager._load_pending_updates()[0]["payload"]
         assert "CR:L/IR:L/AR:L" in kwargs["details"]
         assert "Preserve the assessment explanation." in kwargs["details"]
         assert kwargs["justification"] == "CODE_NOT_REACHABLE"
@@ -2019,9 +2081,9 @@ def test_assessment_update(client, mock_dt_client):
         assert len(results) == 1
         assert results[0]["status"] == "success"
 
-    # Verify client call
-    mock_dt_client.update_analysis.assert_called_once()
-    call_kwargs = mock_dt_client.update_analysis.call_args.kwargs
+    # The request returns after the durable local outbox commit.
+    mock_dt_client.update_analysis.assert_not_called()
+    call_kwargs = main.cache_manager._load_pending_updates()[0]["payload"]
     assert call_kwargs["project_uuid"] == "puuid"
     assert call_kwargs["state"] == "NOT_AFFECTED"
     # Details now includes the appended user tag
@@ -2114,7 +2176,7 @@ def test_assessment_update_refreshes_grouped_task_windows(client, mock_dt_client
     assert assessed_data["filtered"] == 1
     assert assessed_data["items"][0]["id"] == "CVE-2026-REFRESH"
     assert assessed_data["items"][0]["list_metadata"]["lifecycle"] == "ASSESSED"
-    mock_dt_client.update_analysis.assert_called_once()
+    mock_dt_client.update_analysis.assert_not_called()
 
 
 def test_assessment_update_failure(client, mock_dt_client):
@@ -2137,8 +2199,9 @@ def test_assessment_update_failure(client, mock_dt_client):
     assert response.status_code == 200
     results = response.json()
     assert len(results) == 1
-    assert results[0]["status"] == "error"
-    assert "Analysis update failed" in results[0]["error"]
+    assert results[0]["status"] == "success"
+    assert results[0]["queued"] is True
+    mock_dt_client.update_analysis.assert_not_called()
 
 
 def test_spa_routing(client):

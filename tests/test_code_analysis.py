@@ -43,15 +43,9 @@ def override_auth():
 
 @pytest.fixture(autouse=True)
 def reset_analysis_queue():
-    main.analysis_queue._items.clear()
-    main.analysis_queue._order.clear()
-    main.analysis_queue._event.clear()
-    main.analysis_queue._running = True
+    main.analysis_queue.reset_contents()
     yield
-    main.analysis_queue._items.clear()
-    main.analysis_queue._order.clear()
-    main.analysis_queue._event.clear()
-    main.analysis_queue._running = True
+    main.analysis_queue.reset_contents()
 
 
 @pytest.fixture(autouse=True)
@@ -423,7 +417,7 @@ def test_auto_sweep_executor_shutdown_allows_recreation():
 
 def test_code_analysis_dashboard_status_disabled(client):
     with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": ""}):
-        response = client.get("/api/code-analysis/status")
+        response = client.get("/api/code-analysis/status?refresh=true")
 
     assert response.status_code == 200
     payload = response.json()
@@ -431,6 +425,25 @@ def test_code_analysis_dashboard_status_disabled(client):
     assert payload["overall_state"] == "disabled"
     assert payload["external"]["jobs"] == []
     assert payload["model_source"] == "not_reported"
+
+
+def test_code_analysis_dashboard_status_reuses_short_lived_snapshot(client):
+    health = AsyncMock(return_value={"status": "ok"})
+    list_jobs = AsyncMock(return_value={"jobs": []})
+
+    with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": "http://example.com"}):
+        with patch("dtvp.main.CodeAnalysisClient.health", new=health), patch(
+            "dtvp.main.CodeAnalysisClient.list_jobs",
+            new=list_jobs,
+        ):
+            first = client.get("/api/code-analysis/status?refresh=true")
+            second = client.get("/api/code-analysis/status")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert health.await_count == 1
+    assert list_jobs.await_count == 1
 
 
 def test_code_analysis_dashboard_status_reports_queue_and_external_state(client):
@@ -521,7 +534,7 @@ def test_code_analysis_dashboard_status_reports_queue_and_external_state(client)
                 }
             ),
         ):
-            response = client.get("/api/code-analysis/status")
+            response = client.get("/api/code-analysis/status?refresh=true")
 
     assert response.status_code == 200
     payload = response.json()
@@ -576,7 +589,7 @@ def test_code_analysis_dashboard_status_uses_configured_queue_capacity(client):
             "DTVP_ANALYSIS_QUEUE_CAPACITY": "2",
         },
     ):
-        response = client.get("/api/code-analysis/status")
+        response = client.get("/api/code-analysis/status?refresh=true")
 
     assert response.status_code == 200
     payload = response.json()
@@ -597,7 +610,7 @@ def test_code_analysis_dashboard_status_keeps_external_job_errors(client):
             "dtvp.main.CodeAnalysisClient.list_jobs",
             new=AsyncMock(side_effect=RuntimeError("jobs unavailable")),
         ):
-            response = client.get("/api/code-analysis/status")
+            response = client.get("/api/code-analysis/status?refresh=true")
 
     assert response.status_code == 200
     payload = response.json()
@@ -625,7 +638,7 @@ def test_code_analysis_dashboard_status_times_out_slow_external_health(client):
             "dtvp.main.CodeAnalysisClient.list_jobs",
             new=AsyncMock(return_value={"jobs": []}),
         ):
-            response = client.get("/api/code-analysis/status")
+            response = client.get("/api/code-analysis/status?refresh=true")
 
     assert response.status_code == 200
     payload = response.json()
@@ -667,6 +680,97 @@ def test_analysis_queue_submit_list_get_cancel(client):
 
     list_after_cancel = client.get("/api/analysis-queue")
     assert all(item["queue_id"] != queue_id for item in list_after_cancel.json())
+
+
+def test_analysis_queue_list_is_bounded_and_paginated_newest_first(client):
+    queue_ids = [
+        main.analysis_queue.submit(
+            vuln_id=f"CVE-2026-PAGE-{index}",
+            component_name=f"component-{index}",
+            submitted_by="testuser",
+        ).queue_id
+        for index in range(4)
+    ]
+
+    first_page = client.get("/api/analysis-queue?limit=2").json()
+    second_page = client.get("/api/analysis-queue?offset=2&limit=2").json()
+
+    assert [item["queue_id"] for item in first_page] == list(
+        reversed(queue_ids[2:])
+    )
+    assert [item["queue_id"] for item in second_page] == list(
+        reversed(queue_ids[:2])
+    )
+
+
+def test_analysis_queue_rejects_submissions_beyond_pending_limit(client):
+    with patch.dict(
+        os.environ,
+        {"DTVP_ANALYSIS_QUEUE_MAX_PENDING": "1"},
+        clear=False,
+    ):
+        accepted = client.post(
+            "/api/analysis-queue/submit",
+            json={
+                "vuln_id": "CVE-2026-LIMIT-1",
+                "component_name": "component-1",
+            },
+        )
+        rejected = client.post(
+            "/api/analysis-queue/submit",
+            json={
+                "vuln_id": "CVE-2026-LIMIT-2",
+                "component_name": "component-2",
+            },
+        )
+
+    assert accepted.status_code == 200
+    assert rejected.status_code == 429
+    assert "pending-item limit" in rejected.json()["detail"]
+
+
+def test_analysis_queue_status_is_compact_and_includes_sweep_state(client):
+    running = main.analysis_queue.submit(
+        vuln_id="CVE-2026-COMPACT",
+        component_name="large-component",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+        user_guidance="large guidance",
+        affected_product_versions=["1.0", "2.0"],
+        context_summary={"large": "context"},
+    )
+    running.status = "running"
+    running.logs = ["large log entry"]
+    running.progress = {"percent": 25, "current_activity": "Inspecting"}
+
+    completed = main.analysis_queue.submit(
+        vuln_id="CVE-2026-DONE",
+        component_name="finished-component",
+        submitted_by="testuser",
+    )
+    main.analysis_queue._finish_item(
+        completed,
+        status="completed",
+        result={"large": "result"},
+    )
+
+    response = client.get("/api/analysis-queue/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["active_count"] == 1
+    assert payload["running_count"] == 1
+    assert payload["counts_by_status"] == {"running": 1, "completed": 1}
+    assert "auto_sweep" in payload
+    summary = next(
+        item for item in payload["items"] if item["queue_id"] == running.queue_id
+    )
+    assert summary["progress"]["percent"] == 25
+    assert "user_guidance" not in summary
+    assert "affected_product_versions" not in summary
+    assert "context_summary" not in summary
+    assert "logs" not in summary
+    assert "result" not in summary
 
 
 def test_analysis_queue_submit_accepts_benchmark_source(client):
@@ -1031,7 +1135,7 @@ def test_code_analysis_result_store_can_redact_guidance(client, monkeypatch):
 
 def test_code_analysis_dashboard_status_reports_result_cache_policy(client):
     with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": ""}):
-        response = client.get("/api/code-analysis/status")
+        response = client.get("/api/code-analysis/status?refresh=true")
 
     assert response.status_code == 200
     cache_status = response.json()["result_cache"]
@@ -1585,7 +1689,7 @@ def test_analysis_queue_prune_finished_removes_expired_terminal_items():
     assert main.analysis_queue._items[running.queue_id] is running
 
 
-def test_analysis_queue_list_prunes_expired_finished_items(client):
+def test_analysis_queue_cleanup_prunes_expired_finished_items(client):
     item = main.analysis_queue.submit(
         vuln_id="CVE-2024-3004",
         component_name="libPruned",
@@ -1600,8 +1704,10 @@ def test_analysis_queue_list_prunes_expired_finished_items(client):
         with patch("dtvp.main.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime.fromtimestamp(5000, UTC)
             mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
-            response = client.get("/api/analysis-queue")
+            list_response = client.get("/api/analysis-queue")
+            removed = main.analysis_queue.prune_finished(now=5000)
 
-    assert response.status_code == 200
-    assert response.json() == []
+    assert list_response.status_code == 200
+    assert [entry["queue_id"] for entry in list_response.json()] == [item.queue_id]
+    assert removed == 1
     assert main.analysis_queue.get(item.queue_id) is None

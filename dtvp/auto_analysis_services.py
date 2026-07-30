@@ -987,6 +987,12 @@ def apply_auto_analysis_queue_plan(
 
     queued_count = 0
     for candidate in plan.candidates:
+        if hasattr(analysis_queue, "can_accept") and not analysis_queue.can_accept():
+            if logger:
+                logger.warning(
+                    "Analysis queue pending-item limit reached; skipped remaining automatic scans"
+                )
+            break
         _item, created = analysis_queue.submit_once(
             vuln_id=candidate.vuln_id,
             component_name=candidate.component_name,

@@ -3,18 +3,15 @@ import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { Zap, X, Loader2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, AlertTriangle, Activity, RefreshCw } from 'lucide-vue-next'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import {
-    codeAnalysisGetAutoSweepStatus,
     codeAnalysisRunAutoSweep,
     type CodeAnalysisAssessResponse,
-    type CodeAnalysisAutoSweepStatus,
 } from '../lib/api'
 
 const open = ref(false)
 const expandedItem = ref<string | null>(null)
 const expandedResult = ref<CodeAnalysisAssessResponse | null>(null)
 const loadingResult = ref(false)
-const sweepStatus = ref<CodeAnalysisAutoSweepStatus | null>(null)
-const sweepStatusLoading = ref(false)
+const sweepStatus = analysisQueueStore.sweepStatus
 const sweepRunLoading = ref(false)
 const sweepError = ref<string | null>(null)
 const triggerRef = ref<HTMLElement | null>(null)
@@ -24,7 +21,6 @@ const PANEL_WIDTH = 384
 const PANEL_MARGIN = 8
 const PANEL_GAP = 8
 const PANEL_Z_INDEX = '12000'
-let sweepStatusTimer: ReturnType<typeof setInterval> | null = null
 
 const updatePanelPosition = () => {
     const trigger = triggerRef.value
@@ -147,7 +143,7 @@ const formatRelativeTimestamp = (value?: string | null) => {
 }
 
 const sweepStatusLabel = computed(() => {
-    if (!sweepStatus.value) return sweepStatusLoading.value ? 'Loading' : 'Unknown'
+    if (!sweepStatus.value) return 'Loading'
     if (sweepStatus.value.running) return 'Running'
     if (sweepStatus.value.active) return 'Active'
     if (!sweepStatus.value.enabled) return 'Disabled'
@@ -165,18 +161,6 @@ const canRunSweepNow = computed(() =>
     Boolean(sweepStatus.value?.active && !sweepStatus.value.running && !sweepRunLoading.value)
 )
 
-const refreshSweepStatus = async () => {
-    sweepStatusLoading.value = true
-    try {
-        sweepStatus.value = await codeAnalysisGetAutoSweepStatus()
-        sweepError.value = sweepStatus.value.last_error || null
-    } catch (error: any) {
-        sweepError.value = error?.message || 'Unable to load automatic sweep status.'
-    } finally {
-        sweepStatusLoading.value = false
-    }
-}
-
 const runSweepNow = async () => {
     if (!canRunSweepNow.value) return
     sweepRunLoading.value = true
@@ -184,7 +168,7 @@ const runSweepNow = async () => {
     try {
         sweepStatus.value = await codeAnalysisRunAutoSweep()
         sweepError.value = sweepStatus.value.last_error || null
-        await analysisQueueStore.refresh()
+        await analysisQueueStore.refreshStatus()
     } catch (error: any) {
         sweepError.value = error?.message || 'Unable to run automatic sweep.'
     } finally {
@@ -200,8 +184,6 @@ const handleDocumentPointerdown = (event: PointerEvent) => {
 
 onMounted(() => {
     analysisQueueStore.startPolling()
-    refreshSweepStatus()
-    sweepStatusTimer = setInterval(refreshSweepStatus, 10000)
     window.addEventListener('resize', updatePanelPosition)
     window.addEventListener('scroll', updatePanelPosition, true)
     window.visualViewport?.addEventListener('resize', updatePanelPosition)
@@ -210,19 +192,15 @@ onMounted(() => {
 
 onUnmounted(() => {
     analysisQueueStore.stopPolling()
-    if (sweepStatusTimer) {
-        clearInterval(sweepStatusTimer)
-        sweepStatusTimer = null
-    }
     window.removeEventListener('resize', updatePanelPosition)
     window.removeEventListener('scroll', updatePanelPosition, true)
     window.visualViewport?.removeEventListener('resize', updatePanelPosition)
     document.removeEventListener('pointerdown', handleDocumentPointerdown)
 })
 
-watch(open, (isOpen) => {
+watch(open, async (isOpen) => {
     if (isOpen) {
-        refreshSweepStatus()
+        await analysisQueueStore.refresh()
         nextTick(updatePanelPosition)
     }
 })

@@ -120,6 +120,28 @@ describe('useProjectAssessmentUpdates', () => {
         })
     })
 
+    it('retains per-finding local revisions and synchronization state', () => {
+        const updated = applyAssessmentDataToGroup(makeGroup(), {
+            analysis_state: 'NOT_AFFECTED',
+            analysis_details: 'Reviewed',
+            is_suppressed: false,
+            dtvp_results: [{
+                uuid: 'finding-1',
+                revision: 4,
+                sync_status: 'pending',
+                update_id: 'update-4',
+                queued: true,
+            }],
+        })
+
+        expect(updated.affected_versions[0].components[0]).toMatchObject({
+            dtvp_revision: 4,
+            dtvp_sync_status: 'pending',
+            dtvp_update_id: 'update-4',
+            dtvp_sync_error: null,
+        })
+    })
+
     it('updates the lightweight list summary from cached full details', async () => {
         const fullGroup = makeGroup()
         const summaryGroup = {

@@ -549,7 +549,9 @@ describe('ProjectView.vue', () => {
             limit: 250,
             sort: 'rescored-severity',
             order: 'desc',
-        }))
+        }), {
+            signal: expect.any(AbortSignal),
+        })
         expect(wrapper.findAll('.vuln-group-card')).toHaveLength(1)
         expect(wrapper.text()).toContain('300')
     })
@@ -853,7 +855,9 @@ describe('ProjectView.vue', () => {
             q: 'backend-only',
             offset: 0,
             limit: 250,
-        }))
+        }), {
+            signal: expect.any(AbortSignal),
+        })
         expect((wrapper.vm as any).filteredGroups.map((group: any) => group.id)).toEqual(['CVE-WINDOW-NONLOCAL'])
         expect(wrapper.findAll('.vuln-group-card')).toHaveLength(1)
     })

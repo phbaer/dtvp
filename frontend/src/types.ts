@@ -36,6 +36,10 @@ export interface Instance {
     justification?: string;
     tags?: string[];
     assessment_restore?: AssessmentRestoreCandidate;
+    dtvp_revision?: number;
+    dtvp_sync_status?: string;
+    dtvp_update_id?: string | null;
+    dtvp_sync_error?: string | null;
 }
 
 

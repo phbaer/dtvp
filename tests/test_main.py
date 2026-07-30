@@ -335,6 +335,7 @@ def test_summary_task_seeds_from_persistent_summary_index():
             }
         ]
 
+    cache_revisions = iter(["rev-1", "rev-2"])
     deps = GroupedVulnServiceDeps(
         cache_manager=FakeCacheManager(),
         logger=main.logger,
@@ -348,7 +349,7 @@ def test_summary_task_seeds_from_persistent_summary_index():
         load_team_mapping=lambda: {"*": "Team"},
         group_vulnerabilities=group_vulnerabilities,
         summary_index=summary_index,
-        summary_index_cache_revision=lambda: "rev-1",
+        summary_index_cache_revision=lambda: next(cache_revisions),
     )
 
     asyncio.run(
@@ -368,6 +369,7 @@ def test_summary_task_seeds_from_persistent_summary_index():
     assert group_calls == 1
     assert summary_index.saved[0]["summaries"][0]["id"] == "CVE-LIVE"
     assert summary_index.saved[0]["total_versions"] == 1
+    assert summary_index.saved[0]["scope"]["cache_revision"] == "rev-2"
 
 
 def test_spa_traversal_logic():

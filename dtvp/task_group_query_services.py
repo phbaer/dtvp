@@ -1,7 +1,9 @@
 import base64
 import hashlib
 import json
+import os
 import threading
+from array import array
 from concurrent.futures import Future
 from datetime import datetime
 from typing import Any
@@ -11,7 +13,8 @@ from .inconsistency import INCONSISTENCY_REASONS
 
 DAY_MS = 24 * 60 * 60 * 1000
 TASK_GROUP_QUERY_INDEX_VERSION = 6
-TASK_GROUP_QUERY_CACHE_LIMIT = 64
+TASK_GROUP_QUERY_CACHE_LIMIT = 32
+TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
 ANALYSIS_STATE_ORDER = {
     "EXPLOITABLE": 0,
@@ -1101,8 +1104,9 @@ def _reserve_query_cache_entry(
     lock = _get_cache_lock(index)
     with lock:
         cache = _get_query_cache(index)
-        cached = cache.get(key)
+        cached = cache.pop(key, None)
         if cached is not None:
+            cache[key] = cached
             completed: Future[dict[str, Any]] = Future()
             completed.set_result(cached)
             return cached, completed, False
@@ -1147,7 +1151,7 @@ def _sorted_row_indices(
     index: dict[str, Any],
     sort_by: str,
     sort_order: str,
-) -> list[int]:
+) -> array:
     key = (sort_by, sort_order)
     lock = _get_cache_lock(index)
     with lock:
@@ -1167,10 +1171,13 @@ def _sorted_row_indices(
 
     try:
         rows = index["rows"]
-        sorted_indices = sorted(
-            range(len(rows)),
-            key=lambda row_index: _task_group_sort_key(rows[row_index], sort_by),
-            reverse=sort_order != "asc",
+        sorted_indices = array(
+            "I",
+            sorted(
+                range(len(rows)),
+                key=lambda row_index: _task_group_sort_key(rows[row_index], sort_by),
+                reverse=sort_order != "asc",
+            ),
         )
         with lock:
             existing = sort_cache.setdefault(key, sorted_indices)
@@ -1189,11 +1196,55 @@ def _remember_query_cache_entry(
     key: tuple[Any, ...],
     entry: dict[str, Any],
 ) -> None:
+    indices = entry.get("indices")
+    if not isinstance(indices, array):
+        indices = array("I", indices or [])
+        entry["indices"] = indices
+    entry["_weight"] = (
+        len(indices) * indices.itemsize
+        + len(
+            json.dumps(
+                entry.get("counts") or {},
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        )
+    )
     if key in cache:
         cache.pop(key, None)
     cache[key] = entry
-    while len(cache) > TASK_GROUP_QUERY_CACHE_LIMIT:
-        cache.pop(next(iter(cache)))
+
+    try:
+        entry_limit = max(
+            1,
+            int(
+                os.getenv(
+                    "DTVP_GROUP_QUERY_CACHE_ENTRIES",
+                    str(TASK_GROUP_QUERY_CACHE_LIMIT),
+                )
+            ),
+        )
+    except (TypeError, ValueError):
+        entry_limit = TASK_GROUP_QUERY_CACHE_LIMIT
+    try:
+        byte_limit = max(
+            1,
+            int(
+                os.getenv(
+                    "DTVP_GROUP_QUERY_CACHE_BYTES",
+                    str(TASK_GROUP_QUERY_CACHE_MAX_BYTES),
+                )
+            ),
+        )
+    except (TypeError, ValueError):
+        byte_limit = TASK_GROUP_QUERY_CACHE_MAX_BYTES
+
+    total_weight = sum(int(value.get("_weight") or 0) for value in cache.values())
+    while len(cache) > 1 and (
+        len(cache) > entry_limit or total_weight > byte_limit
+    ):
+        oldest = cache.pop(next(iter(cache)))
+        total_weight -= int(oldest.get("_weight") or 0)
 
 
 def query_task_groups(
@@ -1378,9 +1429,10 @@ def query_task_groups(
                     key=lambda item: _task_group_sort_key(item[1], sort_by),
                     reverse=sort_order != "asc",
                 )
-                filtered_indices = [
-                    row_index for row_index, _ in filtered_with_indices
-                ]
+                filtered_indices = array(
+                    "I",
+                    (row_index for row_index, _ in filtered_with_indices),
+                )
                 filtered = [row for _, row in filtered_with_indices]
             else:
                 filtered_indices = _sorted_row_indices(

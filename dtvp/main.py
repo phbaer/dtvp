@@ -83,7 +83,12 @@ from .code_analysis_integration import CodeAnalysisClient, CodeAnalysisSettings
 from .code_analysis_result_services import CodeAnalysisResultStore
 from .code_analysis_routes import create_code_analysis_router
 from .dt_cache import CacheManager, cache_manager
-from .dt_client import DTClient, DTSettings, get_client
+from .dt_client import (
+    DTClient,
+    DTSettings,
+    close_shared_dt_client,
+    get_client,
+)
 from .file_io_services import read_text as read_text_impl
 from .file_io_services import (
     write_and_validate_json_bytes as write_and_validate_json_bytes_impl,
@@ -96,6 +101,9 @@ from .general_api_routes import (
 )
 from .grouped_vuln_services import (
     collect_version_snapshots as collect_grouped_vuln_version_snapshots,
+)
+from .grouped_vuln_task_services import (
+    prune_grouped_vuln_tasks as prune_grouped_vuln_tasks_impl,
 )
 from .grouped_vuln_summary_index_services import (
     GroupedVulnSummaryIndex,
@@ -126,6 +134,7 @@ from .project_archive_services import (
     project_archive_snapshots_enabled,
     run_project_archive_snapshot_once,
 )
+from .query_execution_services import BoundedQueryExecutor
 from .runtime_value_services import get_env_int_with_floor
 from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
@@ -141,6 +150,7 @@ from .startup_page_services import (
     build_startup_status_payload,
     contextual_path,
 )
+from .task_event_services import TaskEventHub
 from .tmrescore_cache_services import (
     load_tmrescore_project_cache as load_tmrescore_project_cache_impl,
 )
@@ -184,6 +194,20 @@ logger = logging.getLogger("dtvp")
 logger.setLevel(logging.INFO)
 
 background_tasks: set[asyncio.Task[Any]] = set()
+group_query_executor = BoundedQueryExecutor(
+    workers_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_QUERY_WORKERS",
+        default=4,
+        minimum=1,
+        logger=logger,
+    ),
+    max_pending_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_QUERY_MAX_PENDING",
+        default=8,
+        minimum=0,
+        logger=logger,
+    ),
+)
 app_runtime_state: Dict[str, Any] = {
     "status": "ready",
     "message": "DTVP is ready.",
@@ -237,6 +261,11 @@ async def _initialize_application_runtime() -> None:
         snapshot_task = asyncio.create_task(run_project_archive_snapshot_loop())
         background_tasks.add(snapshot_task)
         snapshot_task.add_done_callback(background_tasks.discard)
+        grouped_task_cleanup = asyncio.create_task(
+            run_grouped_vuln_task_cleanup_loop()
+        )
+        background_tasks.add(grouped_task_cleanup)
+        grouped_task_cleanup.add_done_callback(background_tasks.discard)
         _set_runtime_state("ready", "DTVP is ready.")
     except asyncio.CancelledError:
         _set_runtime_state("stopped", "DTVP startup was stopped.")
@@ -274,6 +303,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 analysis_queue,
                 background_tasks,
             )
+        await close_shared_dt_client()
+        await cache_manager.flush_cache_writes()
+        group_query_executor.shutdown()
         _set_runtime_state("ready", "DTVP is ready.")
 
 
@@ -348,9 +380,19 @@ async def startup_status():
 
 
 tasks = {}
+task_event_hub = TaskEventHub()
 project_archive_tasks: Dict[str, Dict[str, Any]] = {}
 tmrescore_project_cache: Dict[str, Dict[str, Any]] = {}
 tmrescore_analysis_tasks: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_grouped_vuln_task_ttl_seconds() -> int:
+    return get_env_int_with_floor(
+        "DTVP_GROUPED_VULN_TASK_TTL_SECONDS",
+        default=900,
+        minimum=60,
+        logger=logger,
+    )
 
 
 def _is_auto_code_analysis_active() -> bool:
@@ -394,9 +436,8 @@ grouped_vuln_service_deps = build_grouped_vuln_service_deps(
         )
     ),
     summary_index=grouped_vuln_summary_index,
-    summary_index_cache_revision=lambda: cache_manager.get_cache_status().get(
-        "last_refreshed_at"
-    ),
+    summary_index_cache_revision=cache_manager.get_cache_revision,
+    notify_task_update=task_event_hub.notify,
 )
 
 
@@ -529,12 +570,9 @@ api_router.include_router(
             default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
             service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
             not_found_response=NOT_FOUND_RESPONSE,
-            get_grouped_vuln_task_ttl_seconds=lambda: get_env_int_with_floor(
-                "DTVP_GROUPED_VULN_TASK_TTL_SECONDS",
-                default=3600,
-                minimum=60,
-                logger=logger,
-            ),
+            get_grouped_vuln_cache_revision=cache_manager.get_cache_revision,
+            group_query_executor=group_query_executor,
+            task_event_hub=task_event_hub,
         ),
         current_user_dependency=get_current_user,
         client_dependency=get_client,
@@ -629,6 +667,12 @@ analysis_queue = build_analysis_queue(
     get_analysis_queue_capacity=lambda: get_env_int_with_floor(
         "DTVP_ANALYSIS_QUEUE_CAPACITY",
         default=1,
+        minimum=1,
+        logger=logger,
+    ),
+    get_analysis_queue_max_pending=lambda: get_env_int_with_floor(
+        "DTVP_ANALYSIS_QUEUE_MAX_PENDING",
+        default=1000,
         minimum=1,
         logger=logger,
     ),
@@ -857,6 +901,22 @@ async def run_auto_analysis_sweep_loop() -> None:
         shutdown_auto_analysis_sweep_executor()
 
 
+async def run_grouped_vuln_task_cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(60)
+        removed = prune_grouped_vuln_tasks_impl(
+            tasks,
+            ttl_seconds=_get_grouped_vuln_task_ttl_seconds(),
+        )
+        for task_id in removed:
+            task_event_hub.forget(task_id)
+        if removed:
+            logger.info(
+                "Removed %d expired grouped-vulnerability task(s)",
+                len(removed),
+            )
+
+
 async def run_project_archive_snapshot_loop() -> None:
     while True:
         interval_seconds = get_project_archive_interval_seconds()
@@ -912,6 +972,12 @@ api_router.include_router(
             code_analysis_disabled_detail="Code analysis integration is not configured. Set DTVP_CODE_ANALYSIS_URL to enable code analysis.",
             not_found_response=NOT_FOUND_RESPONSE,
             service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
+            get_dashboard_status_cache_seconds=lambda: get_env_int_with_floor(
+                "DTVP_CODE_ANALYSIS_DASHBOARD_CACHE_SECONDS",
+                default=3,
+                minimum=1,
+                logger=logger,
+            ),
         ),
         current_user_dependency=get_current_user,
     )

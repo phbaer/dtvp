@@ -802,6 +802,10 @@ async def _restore_version_assessments(
                     }
                 )
 
+    flush_writes = getattr(deps.cache_manager, "flush_cache_writes", None)
+    if callable(flush_writes):
+        await flush_writes()
+
     return {
         "restored": restored,
         "queued": queued,

@@ -162,6 +162,34 @@ const showCalculatorModal = ref(false)
 const showConflictModal = ref(false)
 const conflictData = ref<any>(null)
 const originalAnalysis = ref<Record<string, any>>({}) // Map finding_uuid -> Analysis Object
+const assessmentPersistenceStatus = computed(() => {
+    const analyses = Object.values(originalAnalysis.value)
+    const failed = analyses.find(analysis =>
+        ['error', 'failed'].includes(
+            String(analysis?.dtvpSyncStatus || analysis?.dtvp_sync_status || '').toLowerCase(),
+        ),
+    )
+    if (failed) {
+        return {
+            kind: 'error',
+            label: 'Saved locally — Dependency-Track sync is retrying',
+            detail: failed.dtvpSyncError || failed.dtvp_sync_error || '',
+        }
+    }
+
+    const queued = analyses.some(analysis =>
+        ['pending', 'syncing'].includes(
+            String(analysis?.dtvpSyncStatus || analysis?.dtvp_sync_status || '').toLowerCase(),
+        ),
+    )
+    return queued
+        ? {
+            kind: 'pending',
+            label: 'Saved locally — syncing to Dependency-Track',
+            detail: '',
+        }
+        : null
+})
 type AssessmentDraftState = {
     state: string
     details: string
@@ -1299,6 +1327,10 @@ const refreshDetails = async () => {
                              c.analysis_details = item.analysis.analysisDetails || item.analysis.analysis_details
                              c.is_suppressed = item.analysis.isSuppressed || item.analysis.is_suppressed
                              c.justification = item.analysis.analysisJustification || item.analysis.justification || parseJustificationFromText(item.analysis.analysisDetails || item.analysis.analysis_details || '') || 'NOT_SET'
+                             c.dtvp_revision = item.analysis.dtvpRevision ?? item.analysis.dtvp_revision
+                             c.dtvp_sync_status = item.analysis.dtvpSyncStatus || item.analysis.dtvp_sync_status
+                             c.dtvp_update_id = item.analysis.dtvpUpdateId || item.analysis.dtvp_update_id
+                             c.dtvp_sync_error = item.analysis.dtvpSyncError || item.analysis.dtvp_sync_error
                              const comments = item.analysis.analysisComments || item.analysis.analysis_comments
                              if (comments) {
                                   c.analysis_comments = comments
@@ -1637,7 +1669,7 @@ const assessedTeams = computed(() => {
     return matchedTeams
 })
 
-const applySuccessfulAssessmentUpdate = (success: any, finalState: string, finalText: string) => {
+const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalState: string, finalText: string) => {
     const savedResult = buildSavedAssessmentResultState({
         success,
         isReviewer: isReviewer.value,
@@ -1649,7 +1681,10 @@ const applySuccessfulAssessmentUpdate = (success: any, finalState: string, final
         suppressed: suppressed.value,
         currentAssigned: currentAssigned.value,
     })
-    emit('update:assessment', savedResult.emittedAssessment)
+    emit('update:assessment', {
+        ...savedResult.emittedAssessment,
+        dtvp_results: results.filter(result => result.status === 'success'),
+    })
 
     pendingScore.value = null
     pendingVector.value = savedResult.nextPendingVector
@@ -1664,6 +1699,7 @@ const applySuccessfulAssessmentUpdate = (success: any, finalState: string, final
         finalState,
         finalText,
         suppressed: suppressed.value,
+        results,
     }))
     teamDrafts.value.clear()
     formTouched.value = false
@@ -1682,7 +1718,7 @@ const handleAssessmentUpdateResults = async (results: any[], finalState: string,
 
     const success = results.find((r: any) => r.status === 'success')
     if (success) {
-        applySuccessfulAssessmentUpdate(success, finalState, finalText)
+        applySuccessfulAssessmentUpdate(success, results, finalState, finalText)
     }
 }
 
@@ -1843,6 +1879,20 @@ const teamBlockStateColor = (state?: string): string => {
                         <component :is="tab.icon" :size="13" aria-hidden="true" />
                         {{ tab.label }}
                     </button>
+                </div>
+                <div
+                    v-if="assessmentPersistenceStatus"
+                    data-testid="assessment-persistence-status"
+                    class="my-1.5 inline-flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 text-[10px] font-semibold"
+                    :class="assessmentPersistenceStatus.kind === 'error'
+                        ? 'border-red-800/70 bg-red-950/50 text-red-300'
+                        : 'border-amber-700/70 bg-amber-950/40 text-amber-200'"
+                    :title="assessmentPersistenceStatus.detail || assessmentPersistenceStatus.label"
+                    role="status"
+                >
+                    <AlertTriangle v-if="assessmentPersistenceStatus.kind === 'error'" :size="12" />
+                    <Loader2 v-else :size="12" class="animate-spin" />
+                    {{ assessmentPersistenceStatus.label }}
                 </div>
                 <button
                     @click="() => handleUpdate(false)"

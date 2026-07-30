@@ -698,6 +698,23 @@ def get_findings(project_uuid: str):
     return current_findings
 
 
+@app.get("/api/v1/finding/project/{project_uuid}/export")
+def export_findings(project_uuid: str):
+    return {
+        "version": "1.4",
+        "meta": {"application": "Dependency-Track", "version": "4.14.1"},
+        "project": next(
+            (
+                project.model_dump()
+                for project in mock_projects
+                if project.uuid == project_uuid
+            ),
+            {"uuid": project_uuid},
+        ),
+        "findings": get_findings(project_uuid),
+    }
+
+
 @app.get("/api/v1/vulnerability/project/{project_uuid}")
 def get_vulns(project_uuid: str):
     # Return vulnerabilities present in the project

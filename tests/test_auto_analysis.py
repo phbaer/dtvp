@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import dtvp.auto_analysis_services as auto_analysis_services
 from dtvp.auto_analysis_services import (
+    AutoAnalysisQueueCandidate,
+    AutoAnalysisQueuePlan,
     AutoAnalysisSweepDeps,
     apply_auto_analysis_sweep_plan,
     build_auto_analysis_context_fingerprint,
@@ -66,6 +68,31 @@ class FakeAnalysisQueue:
             del self.items[key]
             return True
         return False
+
+
+def test_auto_analysis_queue_plan_stops_at_pending_limit():
+    class LimitedQueue(FakeAnalysisQueue):
+        def can_accept(self):
+            return len(self.submissions) < 2
+
+    queue = LimitedQueue()
+    plan = AutoAnalysisQueuePlan(
+        candidates=tuple(
+            AutoAnalysisQueueCandidate(
+                vuln_id=f"CVE-2026-LIMIT-{index}",
+                component_name=f"component-{index}",
+            )
+            for index in range(3)
+        )
+    )
+
+    queued = auto_analysis_services.apply_auto_analysis_queue_plan(
+        analysis_queue=queue,
+        plan=plan,
+    )
+
+    assert queued == 2
+    assert len(queue.submissions) == 2
 
 
 class FakeCacheManager:

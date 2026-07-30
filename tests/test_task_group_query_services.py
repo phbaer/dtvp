@@ -1,5 +1,6 @@
 import threading
 import time
+from array import array
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -131,6 +132,42 @@ def test_unfiltered_queries_reuse_the_same_sort_order(monkeypatch):
     assert [item["id"] for item in first["items"]] == [
         item["id"] for item in second["items"]
     ]
+
+
+def test_query_cache_uses_packed_indices_and_entry_budget(monkeypatch):
+    monkeypatch.setenv("DTVP_GROUP_QUERY_CACHE_ENTRIES", "2")
+    monkeypatch.setenv("DTVP_GROUP_QUERY_CACHE_BYTES", "1000000")
+    query_index = query_services.build_task_group_query_index(
+        [_group(index) for index in range(10)]
+    )
+
+    _query(query_index, q="library-0")
+    _query(query_index, q="library-1")
+    _query(query_index, q="library-0")
+    _query(query_index, q="library-2")
+
+    assert len(query_index["query_cache"]) == 2
+    assert {key[0] for key in query_index["query_cache"]} == {
+        "library-0",
+        "library-2",
+    }
+    assert all(
+        isinstance(entry["indices"], array)
+        for entry in query_index["query_cache"].values()
+    )
+
+
+def test_query_cache_evicts_old_entries_over_byte_budget(monkeypatch):
+    monkeypatch.setenv("DTVP_GROUP_QUERY_CACHE_ENTRIES", "32")
+    monkeypatch.setenv("DTVP_GROUP_QUERY_CACHE_BYTES", "1")
+    query_index = query_services.build_task_group_query_index(
+        [_group(index) for index in range(10)]
+    )
+
+    _query(query_index, q="library-1")
+    _query(query_index, q="library-2")
+
+    assert len(query_index["query_cache"]) == 1
 
 
 def test_automatic_assessment_outcome_and_rescore_facets_filter_and_count():

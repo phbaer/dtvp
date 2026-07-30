@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, onScopeDispose, ref, type ComputedRef, type Ref } from 'vue'
 import { getTaskVulnGroups } from './api'
 import type { TaskResponse, TaskVulnGroupListQuery, TaskVulnGroupListResponse } from './api'
 import type { GroupedVuln } from '../types'
@@ -36,6 +36,12 @@ export function useTaskGroupWindows({
     const appendLoading = ref(false)
     const windowError = ref('')
     let requestId = 0
+    let activeRequestController: AbortController | null = null
+
+    const cancelActiveRequest = () => {
+        activeRequestController?.abort()
+        activeRequestController = null
+    }
 
     const hasMoreGroups = computed(() =>
         !!currentTaskId.value &&
@@ -58,6 +64,7 @@ export function useTaskGroupWindows({
     }
 
     const reset = () => {
+        cancelActiveRequest()
         currentTaskId.value = null
         clearWindowMetadata()
         windowLoading.value = false
@@ -67,6 +74,7 @@ export function useTaskGroupWindows({
 
     const setTaskId = (taskId: string | null) => {
         if (currentTaskId.value === taskId) return
+        cancelActiveRequest()
         currentTaskId.value = taskId
         clearWindowMetadata()
         requestId++
@@ -107,10 +115,14 @@ export function useTaskGroupWindows({
             appendLoading.value = true
         }
 
+        cancelActiveRequest()
+        const requestController = new AbortController()
+        activeRequestController = requestController
         const activeRequestId = ++requestId
         const pageQuery: TaskVulnGroupListQuery = {
             ...query.value,
             limit,
+            generation: activeRequestId,
         }
         if (shouldReset) {
             pageQuery.offset = 0
@@ -124,6 +136,8 @@ export function useTaskGroupWindows({
         try {
             const window = await getTaskVulnGroups(taskId, {
                 ...pageQuery,
+            }, {
+                signal: requestController.signal,
             })
             if (activeRequestId !== requestId) return
 
@@ -144,6 +158,11 @@ export function useTaskGroupWindows({
             if (shouldReset) onResetVisibleItems?.()
         } catch (err: any) {
             if (activeRequestId !== requestId) return
+            if (
+                requestController.signal.aborted
+                || err?.name === 'CanceledError'
+                || err?.code === 'ERR_CANCELED'
+            ) return
             windowError.value = 'Failed to load vulnerability window: ' + (err.message || err)
             console.error(err)
         } finally {
@@ -151,8 +170,13 @@ export function useTaskGroupWindows({
                 windowLoading.value = false
                 appendLoading.value = false
             }
+            if (activeRequestController === requestController) {
+                activeRequestController = null
+            }
         }
     }
+
+    onScopeDispose(cancelActiveRequest)
 
     return {
         currentTaskId,

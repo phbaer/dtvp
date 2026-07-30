@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
@@ -24,9 +25,6 @@ from .grouped_vuln_services import (
 )
 from .grouped_vuln_services import (
     process_grouped_vulns_task as process_grouped_vulns_task_impl,
-)
-from .grouped_vuln_task_services import (
-    prune_grouped_vuln_tasks as prune_grouped_vuln_tasks_impl,
 )
 from .logic import calculate_statistics, group_vulnerabilities, load_team_mapping
 from .project_archive_routes import ProjectArchiveRouteDeps
@@ -84,6 +82,7 @@ def build_grouped_vuln_service_deps(
     ) = None,
     summary_index: Any = None,
     summary_index_cache_revision: Callable[[], Any] | None = None,
+    notify_task_update: Callable[[str], None] | None = None,
 ) -> GroupedVulnServiceDeps:
     return GroupedVulnServiceDeps(
         cache_manager=cache_manager,
@@ -100,6 +99,7 @@ def build_grouped_vuln_service_deps(
         ),
         summary_index=summary_index,
         summary_index_cache_revision=summary_index_cache_revision or (lambda: None),
+        notify_task_update=notify_task_update or (lambda _task_id: None),
     )
 
 
@@ -233,9 +233,11 @@ def build_general_api_route_deps(
     default_dependency_chain_limit: int,
     service_unavailable_response: dict[int | str, dict[str, Any]],
     not_found_response: dict[int | str, dict[str, Any]],
-    get_grouped_vuln_task_ttl_seconds: Callable[[], int] | None = None,
     code_analysis_result_store: Any = None,
     load_team_groups: Callable[[], dict[str, Any]] | None = None,
+    get_grouped_vuln_cache_revision: Callable[[], Any] | None = None,
+    group_query_executor: Any = None,
+    task_event_hub: Any = None,
 ) -> GeneralApiRouteDeps:
     return GeneralApiRouteDeps(
         cache_manager=cache_manager,
@@ -274,14 +276,6 @@ def build_general_api_route_deps(
         ),
         group_vulnerabilities=group_vulnerabilities,
         calculate_statistics=calculate_statistics,
-        prune_grouped_vuln_tasks=lambda: prune_grouped_vuln_tasks_impl(
-            tasks,
-            ttl_seconds=(
-                get_grouped_vuln_task_ttl_seconds()
-                if get_grouped_vuln_task_ttl_seconds
-                else 3600
-            ),
-        ),
         get_user_role=get_user_role,
         fetch_current_assessment_analyses=lambda req, client: (
             fetch_current_assessment_analyses(assessment_service_deps, req, client)
@@ -312,6 +306,11 @@ def build_general_api_route_deps(
         service_unavailable_response=service_unavailable_response,
         not_found_response=not_found_response,
         code_analysis_result_store=code_analysis_result_store,
+        get_grouped_vuln_cache_revision=(
+            get_grouped_vuln_cache_revision or (lambda: None)
+        ),
+        group_query_executor=group_query_executor,
+        task_event_hub=task_event_hub,
     )
 
 
@@ -405,6 +404,7 @@ def build_code_analysis_route_deps(
     code_analysis_disabled_detail: str,
     not_found_response: dict[int | str, dict[str, Any]],
     service_unavailable_response: dict[int | str, dict[str, Any]],
+    get_dashboard_status_cache_seconds: Callable[[], int] | None = None,
 ) -> CodeAnalysisRouteDeps:
     return CodeAnalysisRouteDeps(
         code_analysis_settings_cls=code_analysis_settings_cls,
@@ -418,6 +418,9 @@ def build_code_analysis_route_deps(
         code_analysis_disabled_detail=code_analysis_disabled_detail,
         not_found_response=not_found_response,
         service_unavailable_response=service_unavailable_response,
+        get_dashboard_status_cache_seconds=(
+            get_dashboard_status_cache_seconds or (lambda: 3)
+        ),
     )
 
 
@@ -589,6 +592,7 @@ def build_analysis_queue(
     service_deps: AnalysisQueueServiceDeps,
     get_analysis_queue_ttl_seconds: Callable[[], int],
     get_analysis_queue_capacity: Callable[[], int],
+    get_analysis_queue_max_pending: Callable[[], int],
     parse_iso_timestamp: Callable[[str | None], float | None],
     utc_now: Callable[[], Any],
     reindex_queue_items: Callable[..., None],
@@ -606,6 +610,7 @@ def build_analysis_queue(
             service_deps=service_deps,
             get_analysis_queue_ttl_seconds=get_analysis_queue_ttl_seconds,
             get_analysis_queue_capacity=get_analysis_queue_capacity,
+            get_analysis_queue_max_pending=get_analysis_queue_max_pending,
             parse_iso_timestamp=parse_iso_timestamp,
             utc_now=utc_now,
             reindex_queue_items=reindex_queue_items,
@@ -616,7 +621,7 @@ def build_analysis_queue(
             run_analysis_queue_cleanup_loop=run_analysis_queue_cleanup_loop,
             run_analysis_queue_worker=run_analysis_queue_worker,
             create_event=asyncio.Event,
-            create_lock=asyncio.Lock,
+            create_lock=threading.RLock,
             record_completed_result=record_completed_result or (lambda _item: None),
         )
     )

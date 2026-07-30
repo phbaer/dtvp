@@ -123,7 +123,7 @@ describe('ProjectView Coverage Extras', () => {
         // Set filter via the smart-search team prefix.
         const input = wrapper.find('input[placeholder*="Search CVE"]')
         await input.setValue('team:Team')
-        await new Promise(resolve => setTimeout(resolve, 130))
+        await new Promise(resolve => setTimeout(resolve, 410))
         await flushPromises()
 
         // Should only show group 1

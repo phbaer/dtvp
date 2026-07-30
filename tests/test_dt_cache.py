@@ -1,8 +1,64 @@
 import asyncio
+import os
+import threading
 
 import pytest
 from unittest.mock import AsyncMock, patch
 from dtvp.dt_cache import CacheManager, PendingUpdateExistsError
+
+
+def test_cache_status_reuses_snapshot_until_cache_changes(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+
+    with patch("dtvp.dt_cache.os.listdir", wraps=os.listdir) as listdir:
+        first = manager.get_cache_status()
+        first["cached_findings"] = 999
+        first_scan_calls = listdir.call_count
+
+        second = manager.get_cache_status()
+        assert listdir.call_count == first_scan_calls
+        assert second["cached_findings"] == 0
+
+        manager._touch_cache_meta()
+        third = manager.get_cache_status()
+
+    assert listdir.call_count > first_scan_calls
+    assert third["last_refreshed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_cache_file_encoding_does_not_block_event_loop(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.get_projects.return_value = [
+        {"name": "TestApp", "uuid": "uuid1", "version": "1.0"},
+    ]
+    writer_started = threading.Event()
+    release_writer = threading.Event()
+
+    def delayed_write(path, data):
+        writer_started.set()
+        assert release_writer.wait(timeout=1)
+
+    with patch("dtvp.dt_cache._atomic_write", side_effect=delayed_write):
+        load_task = asyncio.create_task(manager.get_projects(client, name="Test"))
+        for _ in range(100):
+            if writer_started.is_set():
+                break
+            await asyncio.sleep(0.005)
+        assert writer_started.is_set()
+
+        event_loop_progressed = False
+
+        async def mark_progress():
+            nonlocal event_loop_progressed
+            await asyncio.sleep(0)
+            event_loop_progressed = True
+
+        await asyncio.wait_for(mark_progress(), timeout=0.1)
+        assert event_loop_progressed is True
+        release_writer.set()
+        assert await load_task == client.get_projects.return_value
 
 
 @pytest.mark.asyncio
@@ -24,6 +80,46 @@ async def test_get_projects_caches_results(tmp_path):
     loaded = manager._load_project_cache(manager._projects_path(), [])
     assert len(loaded) == 1
     assert loaded[0]["name"] == "TestApp"
+
+
+@pytest.mark.asyncio
+async def test_get_all_projects_reuses_fresh_complete_list(tmp_path):
+    manager = CacheManager(
+        base_path=str(tmp_path),
+        project_list_ttl_seconds=30,
+    )
+    client = AsyncMock()
+    client.get_projects.return_value = [
+        {"name": "TestApp", "uuid": "uuid1", "version": "1.0"},
+    ]
+
+    first = await manager.get_projects(client, name="")
+    second = await manager.get_projects(client, name="")
+
+    assert second == first
+    assert second is not first
+    assert client.get_projects.call_count == 1
+    assert manager.cache_meta["projects_refreshed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_get_all_projects_refreshes_expired_complete_list(tmp_path):
+    manager = CacheManager(
+        base_path=str(tmp_path),
+        project_list_ttl_seconds=30,
+    )
+    client = AsyncMock()
+    client.get_projects.side_effect = [
+        [{"name": "First", "uuid": "uuid1", "version": "1.0"}],
+        [{"name": "Second", "uuid": "uuid2", "version": "2.0"}],
+    ]
+
+    await manager.get_projects(client, name="")
+    manager.cache_meta["projects_refreshed_at"] = "2000-01-01T00:00:00+00:00"
+    refreshed = await manager.get_projects(client, name="")
+
+    assert [project["name"] for project in refreshed] == ["Second"]
+    assert client.get_projects.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -246,6 +342,74 @@ async def test_queue_and_flush_pending_updates(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_pending_update_flush_uses_global_bounded_concurrency(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("DTVP_ASSESSMENT_SYNC_CONCURRENCY", "2")
+    manager = CacheManager(base_path=str(tmp_path))
+    active = 0
+    max_active = 0
+    active_lock = asyncio.Lock()
+
+    async def update_analysis(**_payload):
+        nonlocal active, max_active
+        async with active_lock:
+            active += 1
+            max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        async with active_lock:
+            active -= 1
+
+    client = AsyncMock()
+    client.update_analysis.side_effect = update_analysis
+    await manager.queue_analysis_updates(
+        [
+            {
+                "project_uuid": "project",
+                "component_uuid": f"component-{index}",
+                "vulnerability_uuid": f"vulnerability-{index}",
+                "state": "NOT_AFFECTED",
+                "details": "Safe",
+                "suppressed": False,
+            }
+            for index in range(8)
+        ],
+        replace=True,
+    )
+
+    await manager.flush_pending_updates(client)
+
+    assert max_active == 2
+    assert manager._load_pending_updates() == []
+
+
+@pytest.mark.asyncio
+async def test_pending_update_flush_records_retry_without_blocking(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    client = AsyncMock()
+    client.update_analysis.side_effect = RuntimeError("DT unavailable")
+    payload = {
+        "project_uuid": "project",
+        "component_uuid": "component",
+        "vulnerability_uuid": "vulnerability",
+        "state": "IN_TRIAGE",
+        "details": "Reviewing",
+        "suppressed": False,
+    }
+    await manager.queue_analysis_update(payload)
+
+    await manager.flush_pending_updates(client)
+
+    pending = manager._load_pending_updates()
+    assert len(pending) == 1
+    assert pending[0]["attempts"] == 1
+    assert pending[0]["last_error"] == "DT unavailable"
+    assert pending[0]["next_attempt_at"] is not None
+    assert manager.assessment_outbox.list_due() == []
+
+
+@pytest.mark.asyncio
 async def test_save_local_analysis_updates_cache_metadata(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))
     assert manager.cache_meta.get("last_refreshed_at") is None
@@ -291,7 +455,7 @@ async def test_queue_duplicate_pending_update_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_queue_analysis_updates_rewrites_pending_file_once(tmp_path):
+async def test_queue_analysis_updates_uses_one_outbox_transaction(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))
     original = {
         "project_uuid": "project",
@@ -316,10 +480,10 @@ async def test_queue_analysis_updates_rewrites_pending_file_once(tmp_path):
 
     with (
         patch.object(
-            manager,
-            "_save_pending_updates",
-            wraps=manager._save_pending_updates,
-        ) as save_pending,
+            manager.assessment_outbox,
+            "enqueue_many",
+            wraps=manager.assessment_outbox.enqueue_many,
+        ) as enqueue_many,
         patch.object(
             manager,
             "_save_local_analyses",
@@ -332,16 +496,18 @@ async def test_queue_analysis_updates_rewrites_pending_file_once(tmp_path):
         )
 
     assert len(update_ids) == 100
-    assert save_pending.call_count == 1
-    assert save_local.call_count == 1
+    assert enqueue_many.call_count == 1
+    assert save_local.call_count == 0
     pending = manager._load_pending_updates()
     assert len(pending) == 100
     assert pending[0]["payload"]["details"] == "Replacement 0"
-    stored = manager._load_project_cache(
-        manager._analysis_path("project", "component-99", "vulnerability-99"),
-        None,
+    stored = manager.get_assessment_overlay(
+        "project",
+        "component-99",
+        "vulnerability-99",
     )
     assert stored["analysisDetails"] == "Replacement 99"
+    assert stored["dtvpSyncStatus"] == "pending"
 
 
 @pytest.mark.asyncio

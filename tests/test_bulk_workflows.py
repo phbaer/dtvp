@@ -20,6 +20,7 @@ from dtvp.bulk_workflows.automatic_assessments import (
 )
 from dtvp.bulk_workflows.rescore_rule_sync import create_rescore_rule_sync_workflow
 from dtvp.code_analysis_assessment_services import assessment_status_for_group
+from dtvp.assessment_snapshot_services import build_assessment_group_index
 from dtvp.general_api_routes import (
     BulkWorkflowFilters,
     _filter_bulk_workflow_groups,
@@ -28,7 +29,10 @@ from dtvp.general_api_routes import (
     _refresh_grouped_vuln_task_snapshots,
 )
 from dtvp.grouped_vuln_services import summarize_grouped_vulnerabilities
-from dtvp.task_group_query_services import build_task_group_query_index
+from dtvp.task_group_query_services import (
+    build_task_group_query_index,
+    get_or_build_task_group_query_index,
+)
 
 
 def _group(group_id: str, lifecycle: str, state: str = "NOT_SET"):
@@ -106,10 +110,87 @@ def test_task_snapshot_refresh_is_copy_on_write():
     ] == "NOT_SET"
     assert old_index["rows"][0]["fields"]["lifecycle"] == "OPEN"
     assert task["_full_result"][0] is not full_group
+    assert "_group_query_index" not in task
     assert (
-        task["_group_query_index"]["rows"][0]["fields"]["lifecycle"]
+        get_or_build_task_group_query_index(task)["rows"][0]["fields"]["lifecycle"]
         == "ASSESSED_LEGACY"
     )
+
+
+def test_task_snapshot_refresh_does_not_scan_unrelated_indexed_groups():
+    class UnscannableVersions(list):
+        def __iter__(self):
+            raise AssertionError("unrelated group was scanned")
+
+    target = {
+        "id": "CVE-TARGET",
+        "aliases": [],
+        "affected_versions": [{
+            "components": [{
+                "project_uuid": "project-1",
+                "component_uuid": "component-1",
+                "vulnerability_uuid": "vulnerability-1",
+                "finding_uuid": "finding-1",
+                "analysis_state": "NOT_SET",
+                "analysis_details": "",
+            }],
+        }],
+    }
+    unrelated = {
+        "id": "CVE-UNRELATED",
+        "aliases": [],
+        "affected_versions": [{
+            "components": [{
+                "project_uuid": "project-2",
+                "component_uuid": "component-2",
+                "vulnerability_uuid": "vulnerability-2",
+                "finding_uuid": "finding-2",
+                "analysis_state": "NOT_SET",
+                "analysis_details": "",
+            }],
+        }],
+    }
+    full_result = [target, unrelated]
+    assessment_index = build_assessment_group_index(full_result)
+    summary = summarize_grouped_vulnerabilities(full_result, {})
+    unrelated["affected_versions"] = UnscannableVersions(
+        unrelated["affected_versions"]
+    )
+    task = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": summary,
+        "_full_result": full_result,
+        "_full_result_by_id": {
+            target["id"]: target,
+            unrelated["id"]: unrelated,
+        },
+        "_assessment_full_group_index": assessment_index,
+        "_group_query_index": build_task_group_query_index(summary),
+    }
+
+    refreshed = _refresh_grouped_vuln_task_snapshots(
+        {"task-1": task},
+        [(
+            {
+                "project_uuid": "project-1",
+                "component_uuid": "component-1",
+                "vulnerability_uuid": "vulnerability-1",
+                "finding_uuid": "finding-1",
+            },
+            {
+                "state": "NOT_AFFECTED",
+                "details": "Reviewed",
+                "suppressed": False,
+            },
+        )],
+        {},
+    )
+
+    assert refreshed == 1
+    assert task["_full_result"][1] is unrelated
+    assert task["_full_result"][0] is not target
+    assert "_group_query_index" not in task
 
 
 def test_bulk_workflow_registry_and_preview_token_are_deterministic():

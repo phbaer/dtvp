@@ -253,7 +253,6 @@ def start_analysis_queue_item(
         item.started_at = datetime.now(UTC).isoformat()
     item.abort_requested = False
     item.abort_error = None
-    reindex_queue_items(items, order)
     runtime_deps.logger.info(
         "Analysis queue: running %s (vuln=%s, component=%s)",
         item.queue_id,
@@ -301,7 +300,6 @@ async def run_analysis_queue_worker(
 
     try:
         while is_running():
-            prune_finished()
             capacity = max(1, int(get_capacity() or 1))
 
             while len(active_tasks) < capacity:

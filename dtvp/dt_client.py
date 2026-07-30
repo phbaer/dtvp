@@ -3,12 +3,42 @@ import asyncio
 import os
 import logging
 import json
+import threading
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from fastapi import Request
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_finding_analysis(finding: Dict[str, Any]) -> Dict[str, Any]:
+    analysis = finding.get("analysis")
+    if not isinstance(analysis, dict):
+        return finding
+
+    normalized = dict(analysis)
+    if "analysisState" not in normalized and normalized.get("state") is not None:
+        normalized["analysisState"] = normalized["state"]
+    if "analysisDetails" not in normalized and normalized.get("detail") is not None:
+        normalized["analysisDetails"] = normalized["detail"]
+    finding["analysis"] = normalized
+    return finding
+
+
+def _finding_matches_cve(finding: Dict[str, Any], cve_upper: str) -> bool:
+    vulnerability = finding.get("vulnerability", {})
+    if cve_upper in (vulnerability.get("vulnId") or "").upper():
+        return True
+    if cve_upper in (vulnerability.get("name") or "").upper():
+        return True
+    return any(
+        isinstance(alias, str) and cve_upper in alias.upper()
+        for alias_obj in vulnerability.get("aliases", [])
+        if isinstance(alias_obj, dict)
+        for alias in alias_obj.values()
+    )
+
 
 class DTClient:
     def __init__(
@@ -191,56 +221,93 @@ class DTClient:
         self, project_uuid: str, cve: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        Get all vulnerabilities for a specific project version.
-        Enriches findings with analysis data from the analysis endpoint.
+        Get all findings for a project version, including analysis data.
+
+        Current Dependency-Track releases expose the complete audit snapshot as
+        one Finding Packaging Format response. Older releases fall back to the
+        list endpoint and enrich only findings whose assessment may have
+        additional details.
         """
+        export_url = f"{self.base_url}/api/v1/finding/project/{project_uuid}/export"
+        try:
+            export_response = await self.client.get(export_url)
+            export_response.raise_for_status()
+            export_payload = export_response.json()
+            if not isinstance(export_payload, dict) or not isinstance(
+                export_payload.get("findings"), list
+            ):
+                raise ValueError("Unexpected Dependency-Track findings export")
+            findings = [
+                _normalize_finding_analysis(finding)
+                for finding in export_payload["findings"]
+                if isinstance(finding, dict)
+            ]
+            if any(
+                (
+                    finding.get("analysis", {}).get("analysisState")
+                    not in (None, "NOT_SET")
+                )
+                and "analysisDetails" not in finding.get("analysis", {})
+                for finding in findings
+                if isinstance(finding.get("analysis"), dict)
+            ):
+                raise ValueError(
+                    "Dependency-Track findings export omits assessed finding details"
+                )
+            if cve:
+                cve_upper = cve.upper()
+                findings = [
+                    finding
+                    for finding in findings
+                    if _finding_matches_cve(finding, cve_upper)
+                ]
+            return findings
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            logger.debug(
+                "Dependency-Track findings export unavailable for %s; "
+                "falling back to legacy findings API: %s",
+                project_uuid,
+                exc,
+            )
+
         response = await self.client.get(
             f"{self.base_url}/api/v1/finding/project/{project_uuid}",
             params={"suppressed": "true"},
         )
         response.raise_for_status()
-        findings = response.json()
+        payload = response.json()
+        findings = payload if isinstance(payload, list) else []
 
-        # Gather analysis tasks to run in parallel
-        # Use a list of tuples (finding, task) to map results back
         analysis_tasks = []
         findings_to_enrich = []
         filtered_findings = []
 
         for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            finding = _normalize_finding_analysis(finding)
             vulnerability = finding.get("vulnerability", {})
-
-            # Apply CVE filter if provided
-            if cve:
-                cve_upper = cve.upper()
-                vuln_id = (vulnerability.get("vulnId") or "").upper()
-                vuln_name = (vulnerability.get("name") or "").upper()
-
-                # Check main aliases
-                aliases = vulnerability.get("aliases", [])
-                alias_match = False
-                if aliases:
-                    for a in aliases:
-                        for v in a.values():
-                            if isinstance(v, str) and cve_upper in v.upper():
-                                alias_match = True
-                                break
-                        if alias_match:
-                            break
-
-                if (
-                    cve_upper not in vuln_id
-                    and cve_upper not in vuln_name
-                    and not alias_match
-                ):
-                    continue  # Skip this finding as it doesn't match the CVE filter
+            if cve and not _finding_matches_cve(finding, cve.upper()):
+                continue
 
             filtered_findings.append(finding)
 
             component_uuid = finding.get("component", {}).get("uuid")
             vulnerability_uuid = vulnerability.get("uuid")
+            analysis = finding.get("analysis")
+            analysis_state = (
+                analysis.get("analysisState") or analysis.get("state")
+                if isinstance(analysis, dict)
+                else None
+            )
+            analysis_details_present = isinstance(analysis, dict) and any(
+                key in analysis for key in ("analysisDetails", "detail")
+            )
+            needs_enrichment = not isinstance(analysis, dict) or (
+                analysis_state not in (None, "NOT_SET") and not analysis_details_present
+            )
 
-            if component_uuid and vulnerability_uuid:
+            if component_uuid and vulnerability_uuid and needs_enrichment:
                 findings_to_enrich.append(finding)
                 analysis_tasks.append(
                     self.get_analysis(project_uuid, component_uuid, vulnerability_uuid)
@@ -394,8 +461,47 @@ class DTSettings(BaseSettings):
         return key
 
 
+class SharedDTClientProvider:
+    """Own the API-key client used by request dependencies for one app lifetime."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._client: DTClient | None = None
+        self._settings_key: tuple[str, str] | None = None
+
+    async def get(self, base_url: str, api_key: str) -> DTClient:
+        settings_key = (base_url.rstrip("/"), api_key)
+        previous: DTClient | None = None
+        with self._lock:
+            if self._client is not None and self._settings_key == settings_key:
+                return self._client
+            previous = self._client
+            self._client = DTClient(base_url, api_key=api_key)
+            self._settings_key = settings_key
+            client = self._client
+        if previous is not None:
+            await previous.close()
+        return client
+
+    async def close(self) -> None:
+        with self._lock:
+            client = self._client
+            self._client = None
+            self._settings_key = None
+        if client is not None:
+            await client.close()
+
+
+_shared_dt_client_provider = SharedDTClientProvider()
+
+
 async def get_client(request: Request) -> AsyncGenerator[DTClient, None]:
     settings = DTSettings()
+    yield await _shared_dt_client_provider.get(
+        settings.api_url,
+        settings.api_key,
+    )
 
-    async with DTClient(settings.api_url, api_key=settings.api_key) as client:
-        yield client
+
+async def close_shared_dt_client() -> None:
+    await _shared_dt_client_provider.close()

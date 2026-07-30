@@ -101,7 +101,7 @@ export function useProjectVulnFilters({
         value: appliedSmartSearchInput,
         flush: flushSmartSearchFilter,
     } = useDebouncedValue(smartSearchInput, {
-        delayMs: 120,
+        delayMs: 400,
         immediateWhen: value => !value.trim(),
     })
     const parsedSmartSearch = computed(() => parseVulnSearchQuery(appliedSmartSearchInput.value))

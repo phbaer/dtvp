@@ -92,6 +92,9 @@ describe('useTaskGroupWindows', () => {
             order: 'asc',
             offset: 0,
             limit: 2,
+            generation: 1,
+        }, {
+            signal: expect.any(AbortSignal),
         })
         expect(processGroups).toHaveBeenCalledWith([group('CVE-1')])
         expect(groups.value).toEqual([{ ...group('CVE-1'), title: 'processed' }])
@@ -213,6 +216,9 @@ describe('useTaskGroupWindows', () => {
             order: 'desc',
             cursor: 'cursor-1',
             limit: 1,
+            generation: 2,
+        }, {
+            signal: expect.any(AbortSignal),
         })
         expect(groups.value.map(item => item.id)).toEqual(['CVE-1', 'CVE-2'])
         expect(taskWindows.hasMoreGroups.value).toBe(true)
@@ -246,6 +252,8 @@ describe('useTaskGroupWindows', () => {
 
         const firstRequest = taskWindows.loadWindow({ reset: true })
         await taskWindows.loadWindow({ reset: true })
+        const firstSignal = vi.mocked(api.getTaskVulnGroups).mock.calls[0]?.[2]?.signal
+        expect(firstSignal?.aborted).toBe(true)
         resolveFirst({
             items: [group('CVE-old')],
             total: 1,

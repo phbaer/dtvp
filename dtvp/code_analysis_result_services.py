@@ -1081,6 +1081,10 @@ class CodeAnalysisResultStore:
             if assessments_only:
                 where.append("metadata.has_assessment = 1")
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            sql_limit = ""
+            if not project_filter and not component_filter and not source_filter:
+                sql_limit = "LIMIT ?"
+                params.append(max_results)
             with closing(self._connect()) as connection:
                 rows = connection.execute(
                     f"""
@@ -1109,6 +1113,7 @@ class CodeAnalysisResultStore:
                     ORDER BY results.finished_at DESC,
                              results.submitted_at DESC,
                              results.analysis_run_id DESC
+                    {sql_limit}
                     """,
                     params,
                 ).fetchall()

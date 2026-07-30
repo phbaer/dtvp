@@ -1,6 +1,7 @@
 import { shallowRef, computed } from 'vue'
 import {
     analysisQueueList,
+    analysisQueueStatus,
     analysisQueueSubmit,
     analysisQueueSubmitFollowUp,
     analysisQueueGet,
@@ -8,13 +9,21 @@ import {
     analysisQueueClear,
     analysisQueueCancelQueued,
 } from './api'
-import type { AnalysisQueueItem, CodeAnalysisAssessResponse } from './api'
+import type {
+    AnalysisQueueItem,
+    CodeAnalysisAssessResponse,
+    CodeAnalysisAutoSweepStatus,
+} from './api'
 
 const items = shallowRef<AnalysisQueueItem[]>([])
+const countsByStatus = shallowRef<Record<string, number>>({})
+const sweepStatus = shallowRef<CodeAnalysisAutoSweepStatus | null>(null)
 const polling = shallowRef(false)
 let pollTimer: ReturnType<typeof setTimeout> | null = null
-const ACTIVE_POLL_INTERVAL = 3000
-const IDLE_POLL_INTERVAL = 10000
+let statusRefreshInFlight: Promise<void> | null = null
+const ACTIVE_POLL_INTERVAL = 5000
+const IDLE_POLL_INTERVAL = 30000
+const POLL_JITTER_RATIO = 0.1
 const MAX_RESULT_CACHE_ENTRIES = 50
 
 // Callbacks keyed by queue_id for when items complete
@@ -62,9 +71,9 @@ function cacheResult(queueId: string, result: CodeAnalysisAssessResponse) {
     }
 }
 
-const activeCount = computed(() =>
-    items.value.filter(i => i.status === 'queued' || i.status === 'running').length
-)
+const activeCount = computed(() => (
+    (countsByStatus.value.queued ?? 0) + (countsByStatus.value.running ?? 0)
+))
 
 const runningItem = computed(() =>
     items.value.find(i => i.status === 'running') ?? null
@@ -79,22 +88,84 @@ const hasActivity = computed(() => activeCount.value > 0)
 async function refresh() {
     try {
         items.value = sortQueueItemsLatestFirst(await analysisQueueList())
+        countsByStatus.value = countQueueItems(items.value)
     } catch {
-        // Silently ignore polling errors
+        // Detailed queue loading is best-effort.
     }
+}
+
+function countQueueItems(queueItems: AnalysisQueueItem[]): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const item of queueItems) {
+        counts[item.status] = (counts[item.status] ?? 0) + 1
+    }
+    return counts
+}
+
+function isDocumentVisible(): boolean {
+    return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+}
+
+async function loadTrackedItemsMissingFromStatus(statusItems: AnalysisQueueItem[]) {
+    const presentIds = new Set(statusItems.map(item => item.queue_id))
+    const trackedIds = new Set([
+        ...completionCallbacks.keys(),
+        ...failureCallbacks.keys(),
+    ])
+    const missingIds = [...trackedIds].filter(queueId => !presentIds.has(queueId))
+    if (missingIds.length === 0) return statusItems
+
+    const trackedItems = await Promise.all(missingIds.map(async queueId => {
+        try {
+            return await analysisQueueGet(queueId)
+        } catch {
+            return null
+        }
+    }))
+    return [
+        ...statusItems,
+        ...trackedItems.filter((item): item is AnalysisQueueItem => item !== null),
+    ]
+}
+
+async function refreshStatus() {
+    if (statusRefreshInFlight) return statusRefreshInFlight
+    statusRefreshInFlight = (async () => {
+        try {
+            const status = await analysisQueueStatus()
+            const statusItems = await loadTrackedItemsMissingFromStatus(status.items)
+            items.value = sortQueueItemsLatestFirst(statusItems)
+            countsByStatus.value = status.counts_by_status
+            sweepStatus.value = status.auto_sweep
+        } catch {
+            // Global status polling is best-effort.
+        } finally {
+            statusRefreshInFlight = null
+        }
+    })()
+    return statusRefreshInFlight
 }
 
 async function startPolling() {
     if (polling.value) return
     polling.value = true
-    await refresh()
-    scheduleNext(getPollInterval(items.value))
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    if (isDocumentVisible()) {
+        await pollStatus()
+    } else {
+        scheduleNext(IDLE_POLL_INTERVAL)
+    }
 }
 
-function getPollInterval(queueItems: AnalysisQueueItem[]): number {
-    return queueItems.some(item => item.status === 'queued' || item.status === 'running')
+function getPollInterval(): number {
+    return activeCount.value > 0
         ? ACTIVE_POLL_INTERVAL
         : IDLE_POLL_INTERVAL
+}
+
+function jitteredDelay(delay: number): number {
+    const jitter = delay * POLL_JITTER_RATIO
+    return Math.round(delay - jitter + Math.random() * jitter * 2)
 }
 
 async function handleCompletedItem(item: AnalysisQueueItem) {
@@ -139,21 +210,35 @@ async function processStatusTransitions(previousStatuses: Map<string, AnalysisQu
     }
 }
 
+async function pollStatus() {
+    const previousItems = new Map(items.value.map(item => [item.queue_id, item.status]))
+    if (isDocumentVisible()) {
+        await refreshStatus()
+        await processStatusTransitions(previousItems)
+    }
+    if (polling.value) {
+        scheduleNext(getPollInterval())
+    }
+}
+
 function scheduleNext(delay: number) {
     if (!polling.value) return
-    pollTimer = setTimeout(async () => {
-        const previousItems = new Map(items.value.map(item => [item.queue_id, item.status]))
-        await refresh()
-        await processStatusTransitions(previousItems)
+    if (pollTimer) clearTimeout(pollTimer)
+    pollTimer = setTimeout(pollStatus, jitteredDelay(delay))
+}
 
-        if (polling.value) {
-            scheduleNext(getPollInterval(items.value))
-        }
-    }, delay)
+function handleVisibilityChange() {
+    if (!polling.value || !isDocumentVisible()) return
+    if (pollTimer) {
+        clearTimeout(pollTimer)
+        pollTimer = null
+    }
+    void pollStatus()
 }
 
 function stopPolling() {
     polling.value = false
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
     if (pollTimer) {
         clearTimeout(pollTimer)
         pollTimer = null
@@ -184,7 +269,11 @@ async function submit(
     if (onError) failureCallbacks.set(item.queue_id, onError)
     const previousStatuses = new Map(items.value.map(existing => [existing.queue_id, existing.status]))
     previousStatuses.set(item.queue_id, item.status)
-    await refresh()
+    items.value = sortQueueItemsLatestFirst([
+        item,
+        ...items.value.filter(existing => existing.queue_id !== item.queue_id),
+    ])
+    await refreshStatus()
     await processStatusTransitions(previousStatuses)
     if (!polling.value) startPolling()
     return item
@@ -212,7 +301,11 @@ async function submitFollowUp(
     if (onError) failureCallbacks.set(item.queue_id, onError)
     const previousStatuses = new Map(items.value.map(existing => [existing.queue_id, existing.status]))
     previousStatuses.set(item.queue_id, item.status)
-    await refresh()
+    items.value = sortQueueItemsLatestFirst([
+        item,
+        ...items.value.filter(existing => existing.queue_id !== item.queue_id),
+    ])
+    await refreshStatus()
     await processStatusTransitions(previousStatuses)
     if (!polling.value) startPolling()
     return item
@@ -222,7 +315,7 @@ async function cancel(queueId: string) {
     await analysisQueueCancel(queueId)
     completionCallbacks.delete(queueId)
     failureCallbacks.delete(queueId)
-    await refresh()
+    await refreshStatus()
 }
 
 async function dismiss(queueId: string) {
@@ -232,17 +325,17 @@ async function dismiss(queueId: string) {
     completionCallbacks.delete(queueId)
     failureCallbacks.delete(queueId)
     resultCache.delete(queueId)
-    await refresh()
+    await refreshStatus()
 }
 
 async function clearFinished(statuses?: string[]) {
     await analysisQueueClear(statuses)
-    await refresh()
+    await refreshStatus()
 }
 
 async function cancelQueued() {
     await analysisQueueCancelQueued()
-    await refresh()
+    await refreshStatus()
 }
 
 function getItemForVuln(vulnId: string, componentName: string): AnalysisQueueItem | undefined {
@@ -288,11 +381,14 @@ async function fetchResult(queueId: string): Promise<CodeAnalysisAssessResponse 
 
 export const analysisQueueStore = {
     items,
+    countsByStatus,
+    sweepStatus,
     activeCount,
     runningItem,
     queuedItems,
     hasActivity,
     refresh,
+    refreshStatus,
     startPolling,
     stopPolling,
     submit,
