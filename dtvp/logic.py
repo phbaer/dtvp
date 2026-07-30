@@ -131,6 +131,10 @@ def get_team_mapping_path() -> str:
     return os.getenv("TEAM_MAPPING_PATH", "data/team_mapping.json")
 
 
+def get_team_groups_path() -> str:
+    return os.getenv("TEAM_GROUPS_PATH", "data/team_groups.json")
+
+
 def get_auto_analysis_guidance_path() -> str:
     return os.getenv(
         "DTVP_AUTO_ANALYSIS_GUIDANCE_PATH",
@@ -159,6 +163,21 @@ def load_team_mapping(path: str = None) -> Dict[str, str]:
             return json.load(f)
     except Exception as e:
         logger.warning(f"Failed to load team mapping from {path}: {e}")
+        return {}
+
+
+def load_team_groups(path: str = None) -> Dict[str, Any]:
+    if path is None:
+        path = get_team_groups_path()
+
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            payload = json.load(f)
+            return payload if isinstance(payload, dict) else {}
+    except Exception as e:
+        logger.warning(f"Failed to load team groups from {path}: {e}")
         return {}
 
 

@@ -17,6 +17,7 @@ from ..code_analysis_assessment_services import (
     record_vulnerability_id as _record_vulnerability_id,
     text as _text,
 )
+from ..logic import score_to_severity
 from .assessment_restore import selected_groups
 from .base import BulkWorkflowContext, BulkWorkflowPlugin
 
@@ -67,6 +68,115 @@ def verdict_state(verdict: str) -> str:
     if verdict == "NOT_AFFECTED":
         return "NOT_AFFECTED"
     return "IN_TRIAGE"
+
+
+def _score(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _vulnerability_rescore(
+    group: dict[str, Any],
+    assessment_entries: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    candidates: list[dict[str, Any]] = []
+    for entry in assessment_entries:
+        adjusted_cvss = entry["assessment"].get("adjusted_cvss")
+        if not isinstance(adjusted_cvss, dict):
+            continue
+        proposed_score = _score(adjusted_cvss.get("adjusted_score"))
+        proposed_vector = _text(adjusted_cvss.get("adjusted_vector"))
+        if proposed_score is None and not proposed_vector:
+            continue
+        candidates.append(
+            {
+                "source_run_id": _record_run_id(entry["record"]),
+                "original_score": _score(adjusted_cvss.get("original_score")),
+                "original_vector": _text(adjusted_cvss.get("original_vector")),
+                "proposed_score": proposed_score,
+                "proposed_vector": proposed_vector,
+            }
+        )
+    if not candidates:
+        return None
+
+    # A grouped vulnerability uses the highest available adjusted score, matching
+    # the existing aggregate CVSS behavior and the inline code-analysis result.
+    selected = max(
+        candidates,
+        key=lambda candidate: (
+            candidate["proposed_score"] is not None,
+            candidate["proposed_score"]
+            if candidate["proposed_score"] is not None
+            else -1.0,
+            bool(candidate["proposed_vector"]),
+            candidate["source_run_id"],
+        ),
+    )
+    current_score = _score(
+        group.get("rescored_cvss")
+        if group.get("rescored_cvss") is not None
+        else group.get("cvss_score", group.get("cvss"))
+    )
+    current_vector = _text(
+        group.get("rescored_vector") or group.get("cvss_vector")
+    )
+    original_score = selected["original_score"]
+    original_vector = selected["original_vector"]
+    proposed_score = selected["proposed_score"]
+    return {
+        **selected,
+        "current_score": current_score,
+        "current_vector": current_vector,
+        "original_score": (
+            original_score if original_score is not None else current_score
+        ),
+        "original_vector": original_vector or current_vector,
+        "proposed_severity": (
+            score_to_severity(proposed_score) if proposed_score is not None else None
+        ),
+    }
+
+
+def automatic_assessment_filter_facets(
+    group: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, str] | None:
+    """Classify a group's saved analyses using the bulk-apply aggregation rules."""
+    assessment_entries: list[dict[str, Any]] = []
+    for record in records:
+        assessment = _record_assessment(record)
+        if assessment is None:
+            continue
+        assessment_entries.append(
+            {
+                "record": record,
+                "assessment": assessment,
+                "verdict_bucket": normalize_verdict(assessment),
+            }
+        )
+    if not assessment_entries:
+        return None
+
+    outcome = max(
+        assessment_entries,
+        key=lambda entry: VERDICT_PRIORITY[entry["verdict_bucket"]],
+    )["verdict_bucket"]
+    rescore = _vulnerability_rescore(group, assessment_entries)
+    if rescore is None:
+        rescore_state = "NO_RESCORE"
+    elif rescore.get("proposed_severity"):
+        rescore_state = str(rescore["proposed_severity"]).upper()
+    else:
+        rescore_state = "UNSCORED"
+    return {
+        "outcome": outcome,
+        "rescore": rescore_state,
+    }
 
 
 def _group_project_names(group: dict[str, Any]) -> set[str]:
@@ -498,10 +608,13 @@ def _assessment_record_lines(
     adjusted_cvss = assessment.get("adjusted_cvss")
     if isinstance(adjusted_cvss, dict):
         if adjusted_cvss.get("adjusted_score") is not None:
-            lines.append(f"[Rescored: {float(adjusted_cvss['adjusted_score']):.1f}]")
+            lines.append(
+                f"Adjusted CVSS score: {float(adjusted_cvss['adjusted_score']):.1f}"
+            )
         if _text(adjusted_cvss.get("adjusted_vector")):
             lines.append(
-                f"[Rescored Vector: {_text(adjusted_cvss.get('adjusted_vector'))}]"
+                "Adjusted CVSS vector: "
+                f"{_text(adjusted_cvss.get('adjusted_vector'))}"
             )
         original_score = adjusted_cvss.get("original_score")
         adjusted_score = adjusted_cvss.get("adjusted_score")
@@ -573,6 +686,7 @@ def _assessment_details(
     verdict: str,
     state: str,
     justification: str,
+    rescore: dict[str, Any] | None,
 ) -> str:
     run_ids = sorted(
         {
@@ -586,13 +700,24 @@ def _assessment_details(
         f"[Assessed By: Automated Code Analysis] [Justification: {justification}] "
         f"[Evidence Reviewed: yes] [Analysis Runs: {', '.join(run_ids)}] ---"
     )
-    lines = [
+    lines: list[str] = []
+    if rescore:
+        rescore_tags: list[str] = []
+        if rescore["proposed_score"] is not None:
+            rescore_tags.append(f"[Rescored: {rescore['proposed_score']:.1f}]")
+        if rescore["proposed_vector"]:
+            rescore_tags.append(
+                f"[Rescored Vector: {rescore['proposed_vector']}]"
+            )
+        if rescore_tags:
+            lines.append(" ".join(rescore_tags))
+    lines.extend([
         header,
         "[Code Analysis]",
         f"Overall Verdict: {verdict.replace('_', ' ').title()}",
         f"Overall Assessment State: {state}",
         f"Automatic Assessment Count: {len(entries)}",
-    ]
+    ])
     for entry in entries:
         lines.extend(["", *_assessment_record_lines(entry["record"], entry["assessment"])])
     return "\n".join(lines)
@@ -697,11 +822,13 @@ def _build_group_item(
             if _record_run_id(entry["record"])
         }
     )
+    rescore = _vulnerability_rescore(group, assessment_entries)
     target_details = _assessment_details(
         assessment_entries,
         verdict=overall_verdict,
         state=target_state,
         justification=justification,
+        rescore=rescore,
     )
 
     eligible_instances: list[dict[str, Any]] = []
@@ -760,6 +887,7 @@ def _build_group_item(
         ).hexdigest(),
         "ticket_text": ticket_text,
         "ticket_required": bool(ticket_text),
+        "rescore": rescore,
         "target_details": target_details,
         "instances": eligible_instances,
     }
@@ -806,6 +934,12 @@ def build_automatic_assessment_preview(context: BulkWorkflowContext) -> dict[str
             ),
             "inconclusive_groups": sum(
                 item["verdict_bucket"] == "INCONCLUSIVE" for item in items
+            ),
+            "rescored_groups": sum(item["rescore"] is not None for item in items),
+            "low_rescored_affected_groups": sum(
+                item["verdict_bucket"] in {"AFFECTED", "PROBABLY_AFFECTED"}
+                and (item["rescore"] or {}).get("proposed_severity") == "LOW"
+                for item in items
             ),
             **diagnostics,
             "matched_analysis_results": len(_unique_records(group_records)),
@@ -905,11 +1039,11 @@ def create_automatic_assessment_workflow() -> BulkWorkflowPlugin:
         label="Apply Automatic Assessments",
         description=(
             "Apply each vulnerability's overall completed code-analysis verdict "
-            "when it has not been applied yet."
+            "and proposed CVSS rescore when it has not been applied yet."
         ),
         preview_builder=build_automatic_assessment_preview,
         payload_builder=build_automatic_assessment_payloads,
         document_builder=build_automatic_assessment_document,
         selection_predicate=lambda item: int(item.get("eligible_finding_count") or 0) > 0,
-        version=7,
+        version=8,
     )

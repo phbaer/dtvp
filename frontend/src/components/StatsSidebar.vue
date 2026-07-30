@@ -5,11 +5,22 @@ import CustomSelect from './CustomSelect.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
 import type { CacheStatus, InconsistencyReason } from '../types'
 import type { TaskVulnGroupListCounts } from '../lib/api'
+import type {
+    AutomaticAssessmentOutcome,
+    AutomaticAssessmentRescoreState,
+} from '../lib/automaticAssessmentFilters'
 
 export interface TeamEntry {
     team: string
     open: number
     assessed: number
+    aliases?: string[]
+}
+
+interface TeamGroupTreeEntry extends TeamEntry {
+    key: string
+    kind: 'group' | 'team'
+    depth: number
 }
 
 export interface FilterOption {
@@ -25,6 +36,8 @@ export interface FilterState {
     dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
     tmrescoreFilter: Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>
     automaticAssessmentFilter: Array<'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'>
+    automaticAssessmentOutcomeFilter: AutomaticAssessmentOutcome[]
+    automaticAssessmentRescoreFilter: AutomaticAssessmentRescoreState[]
     idFilter: string
     tagFilter: string
     componentFilter: string
@@ -48,6 +61,7 @@ const props = defineProps<{
     resultCounts: TaskVulnGroupListCounts
     countsUpdating: boolean
     teamOptions: string[]
+    teamAliases: Readonly<Record<string, readonly string[]>>
     cacheStatusState: 'cached' | 'partial' | 'unknown' | 'loading'
     cacheStatusLabel: string
     cacheStatusAge: string
@@ -57,6 +71,8 @@ const props = defineProps<{
     dependencyOptions: ReadonlyArray<{ value: string; label: string }>
     tmrescoreOptions: ReadonlyArray<{ value: string; label: string }>
     automaticAssessmentOptions: ReadonlyArray<{ value: string; label: string }>
+    automaticAssessmentOutcomeOptions: ReadonlyArray<{ value: string; label: string }>
+    automaticAssessmentRescoreOptions: ReadonlyArray<{ value: string; label: string }>
 }>()
 
 const emit = defineEmits<{
@@ -93,6 +109,22 @@ const toggleAutomaticAssessmentFilter = (value: 'WITH_AUTOMATIC_ASSESSMENT' | 'W
     if (idx >= 0) current.splice(idx, 1)
     else current.push(value)
     updateFilter('automaticAssessmentFilter', current as FilterState['automaticAssessmentFilter'])
+}
+
+const toggleAutomaticAssessmentOutcomeFilter = (value: AutomaticAssessmentOutcome) => {
+    const current = [...props.filters.automaticAssessmentOutcomeFilter]
+    const idx = current.indexOf(value)
+    if (idx >= 0) current.splice(idx, 1)
+    else current.push(value)
+    updateFilter('automaticAssessmentOutcomeFilter', current)
+}
+
+const toggleAutomaticAssessmentRescoreFilter = (value: AutomaticAssessmentRescoreState) => {
+    const current = [...props.filters.automaticAssessmentRescoreFilter]
+    const idx = current.indexOf(value)
+    if (idx >= 0) current.splice(idx, 1)
+    else current.push(value)
+    updateFilter('automaticAssessmentRescoreFilter', current)
 }
 
 const toggleLifecycleFilter = (val: string) => {
@@ -136,12 +168,51 @@ const toggleAnalysisFilter = (val: string) => {
 
 const countLabel = (count: number | undefined) => props.countsUpdating ? '…' : String(count || 0)
 
-const teamCountEntries = computed<TeamEntry[]>(() => props.teamOptions
+const teamFilterCountEntries = computed<TeamEntry[]>(() => props.teamOptions
     .map(team => ({
         team,
         open: props.resultCounts.team_tags?.[team]?.open || 0,
         assessed: props.resultCounts.team_tags?.[team]?.assessed || 0,
     })))
+
+const teamAliasIndex = computed(() => {
+    const canonicalByName = new Map<string, string>()
+    const aliasesByCanonical = new Map<string, string[]>()
+    Object.entries(props.teamAliases || {}).forEach(([canonical, aliases]) => {
+        if (!canonicalByName.has(canonical.toLowerCase())) {
+            canonicalByName.set(canonical.toLowerCase(), canonical)
+        }
+        aliasesByCanonical.set(canonical.toLowerCase(), [...aliases])
+        aliases.forEach((alias) => {
+            if (!canonicalByName.has(alias.toLowerCase())) {
+                canonicalByName.set(alias.toLowerCase(), canonical)
+            }
+        })
+    })
+    return { canonicalByName, aliasesByCanonical }
+})
+
+const teamCountEntries = computed<TeamEntry[]>(() => {
+    const source = props.resultCounts.canonical_team_tags
+        || props.resultCounts.team_tags
+        || {}
+    const entries = new Map<string, TeamEntry>()
+    Object.entries(source).forEach(([rawTeam, counts]) => {
+        const canonical = teamAliasIndex.value.canonicalByName.get(rawTeam.toLowerCase())
+            || rawTeam
+        const key = canonical.toLowerCase()
+        const entry = entries.get(key) || {
+            team: canonical,
+            open: 0,
+            assessed: 0,
+            aliases: teamAliasIndex.value.aliasesByCanonical.get(key) || [],
+        }
+        entry.open += Number(counts?.open || 0)
+        entry.assessed += Number(counts?.assessed || 0)
+        entries.set(key, entry)
+    })
+    return [...entries.values()]
+})
 
 const filteredTeamTagList = computed(() => teamCountEntries.value
     .filter(entry => entry.open + entry.assessed > 0)
@@ -151,9 +222,128 @@ const filteredTeamTagList = computed(() => teamCountEntries.value
         { numeric: true, sensitivity: 'base' },
     )))
 
+const compareNames = (left: string, right: string) => left.localeCompare(
+    right,
+    undefined,
+    { numeric: true, sensitivity: 'base' },
+)
+
+const hasConfiguredTeamGroups = computed(() =>
+    Object.keys(props.resultCounts.team_group_structure || {}).length > 0
+)
+
+const teamGroupTreeEntries = computed<TeamGroupTreeEntry[]>(() => {
+    const groupCounts = props.resultCounts.team_groups || {}
+    const structure = props.resultCounts.team_group_structure || {}
+    const structureNames = Object.keys(structure)
+    if (structureNames.length === 0) {
+        return Object.entries(groupCounts)
+            .map(([team, counts]) => ({
+                key: `group:${team}`,
+                kind: 'group' as const,
+                depth: 0,
+                team,
+                open: Number(counts?.open || 0),
+                assessed: Number(counts?.assessed || 0),
+            }))
+            .filter(entry => entry.open + entry.assessed > 0)
+            .sort((left, right) => compareNames(left.team, right.team))
+    }
+
+    const groupNameByLower = new Map(
+        structureNames.map(name => [name.toLowerCase(), name]),
+    )
+    const groupCountsByLower = new Map(
+        Object.entries(groupCounts).map(([name, counts]) => [
+            name.toLowerCase(),
+            counts,
+        ]),
+    )
+    const teamCountsByLower = new Map(
+        teamCountEntries.value.map(entry => [entry.team.toLowerCase(), entry]),
+    )
+    const referencedGroups = new Set(
+        Object.values(structure)
+            .flatMap(definition => definition.groups || [])
+            .map(name => name.toLowerCase()),
+    )
+    const groupedTeams = new Set(
+        Object.values(structure)
+            .flatMap(definition => definition.teams || [])
+            .map(name => name.toLowerCase()),
+    )
+    const roots = structureNames
+        .filter(name => !referencedGroups.has(name.toLowerCase()))
+        .sort(compareNames)
+    const entries: TeamGroupTreeEntry[] = []
+
+    const appendGroup = (
+        requestedName: string,
+        depth: number,
+        path: string,
+        ancestors: Set<string>,
+    ) => {
+        const groupName = groupNameByLower.get(requestedName.toLowerCase())
+        if (!groupName || ancestors.has(groupName.toLowerCase())) return
+        const counts = groupCountsByLower.get(groupName.toLowerCase())
+        entries.push({
+            key: `${path}:group:${groupName}`,
+            kind: 'group',
+            depth,
+            team: groupName,
+            open: Number(counts?.open || 0),
+            assessed: Number(counts?.assessed || 0),
+        })
+
+        const nextAncestors = new Set(ancestors)
+        nextAncestors.add(groupName.toLowerCase())
+        const definition = structure[groupName]
+        const childGroups = [...(definition?.groups || [])].sort(compareNames)
+        childGroups.forEach((child) => {
+            appendGroup(
+                child,
+                depth + 1,
+                `${path}:group:${groupName}`,
+                nextAncestors,
+            )
+        })
+        const directTeams = [...(definition?.teams || [])].sort(compareNames)
+        directTeams.forEach((team) => {
+            const countsForTeam = teamCountsByLower.get(team.toLowerCase())
+            entries.push({
+                key: `${path}:group:${groupName}:team:${team}`,
+                kind: 'team',
+                depth: depth + 1,
+                team,
+                open: Number(countsForTeam?.open || 0),
+                assessed: Number(countsForTeam?.assessed || 0),
+            })
+        })
+    }
+
+    roots.forEach(root => appendGroup(root, 0, 'root', new Set()))
+    teamCountEntries.value
+        .filter(entry =>
+            entry.open + entry.assessed > 0
+            && !groupedTeams.has(entry.team.toLowerCase())
+        )
+        .sort((left, right) => compareNames(left.team, right.team))
+        .forEach((entry) => {
+            entries.push({
+                key: `ungrouped:team:${entry.team}`,
+                kind: 'team',
+                depth: 0,
+                team: entry.team,
+                open: entry.open,
+                assessed: entry.assessed,
+            })
+        })
+    return entries
+})
+
 const teamFilterOptions = computed(() => [
     { value: '', label: 'All teams' },
-    ...teamCountEntries.value
+    ...teamFilterCountEntries.value
         .filter(entry => entry.team.trim().length > 0)
         .slice()
         .sort((left, right) => left.team.localeCompare(
@@ -185,10 +375,22 @@ const statsText = computed(() => {
         `Unknown: ${props.resultCounts.dependency_relationship.unknown}`
     ]
 
-    if (filteredTeamTagList.value.length) {
+    if (teamGroupTreeEntries.value.length) {
+        lines.push('Per Group:')
+        teamGroupTreeEntries.value.forEach(entry => {
+            const indent = '  '.repeat(entry.depth + 1)
+            const type = entry.kind === 'group' ? 'Group' : 'Team'
+            lines.push(`${indent}${entry.team} (${type}): Open ${entry.open}, Assessed ${entry.assessed}`)
+        })
+    }
+
+    if (!hasConfiguredTeamGroups.value && filteredTeamTagList.value.length) {
         lines.push('Per Team:')
         filteredTeamTagList.value.forEach(entry => {
-            lines.push(`  ${entry.team}: Open ${entry.open}, Assessed ${entry.assessed}`)
+            const aliasText = entry.aliases?.length
+                ? ` (aliases: ${entry.aliases.join(', ')})`
+                : ''
+            lines.push(`  ${entry.team}${aliasText}: Open ${entry.open}, Assessed ${entry.assessed}`)
         })
     }
 
@@ -434,6 +636,53 @@ const handleCopy = () => {
                                 </div>
 
                                 <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Auto Analysis Outcome</label>
+                                    <div class="flex flex-wrap gap-2" data-testid="automatic-assessment-outcome-filters">
+                                        <button
+                                            v-for="opt in props.automaticAssessmentOutcomeOptions"
+                                            :key="opt.value"
+                                            @click="toggleAutomaticAssessmentOutcomeFilter(opt.value as AutomaticAssessmentOutcome)"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                props.filters.automaticAssessmentOutcomeFilter.includes(opt.value as AutomaticAssessmentOutcome)
+                                                    ? opt.value === 'AFFECTED' ? 'bg-red-600/80 text-white border-red-500'
+                                                        : opt.value === 'PROBABLY_AFFECTED' ? 'bg-orange-500/80 text-white border-orange-400'
+                                                            : opt.value === 'NOT_AFFECTED' ? 'bg-emerald-600/80 text-white border-emerald-500'
+                                                                : 'bg-amber-600/70 text-white border-amber-500'
+                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+                                            ]"
+                                        >
+                                            {{ opt.label }}
+                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentOutcomeFilter.includes(opt.value as AutomaticAssessmentOutcome) ? 'text-white' : 'text-gray-500'">
+                                                {{ countLabel(props.resultCounts.automatic_assessment_outcome?.[opt.value as AutomaticAssessmentOutcome]) }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-0.5">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Auto Analysis Rescore</label>
+                                    <div class="flex flex-wrap gap-2" data-testid="automatic-assessment-rescore-filters">
+                                        <button
+                                            v-for="opt in props.automaticAssessmentRescoreOptions"
+                                            :key="opt.value"
+                                            @click="toggleAutomaticAssessmentRescoreFilter(opt.value as AutomaticAssessmentRescoreState)"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState)
+                                                    ? 'bg-blue-600/80 text-white border-blue-500'
+                                                    : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+                                            ]"
+                                        >
+                                            {{ opt.label }}
+                                            <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState) ? 'text-white' : 'text-gray-500'">
+                                                {{ countLabel(props.resultCounts.automatic_assessment_rescore?.[opt.value as AutomaticAssessmentRescoreState]) }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">CVSS Version</label>
                                     <div class="flex flex-wrap gap-2">
                                         <button
@@ -506,7 +755,66 @@ const handleCopy = () => {
                         </div>
                     </div>
 
-                    <div v-if="filteredTeamTagList.length > 0" class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
+                    <div
+                        v-if="teamGroupTreeEntries.length > 0"
+                        class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm"
+                        data-testid="per-group-statistics"
+                    >
+                        <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Per Group</div>
+                        <div class="overflow-y-auto max-h-[20rem]">
+                            <table class="min-w-full table-auto text-left text-[10px] text-gray-300 border-separate border-spacing-0">
+                                <thead class="border-b border-white/10 sticky top-0 bg-white/5">
+                                    <tr class="text-gray-400 uppercase text-[9px] tracking-widest">
+                                        <th class="px-2 py-1">Group / member</th>
+                                        <th class="px-2 py-1 text-right">Open</th>
+                                        <th class="px-2 py-1 text-right">Assessed</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr
+                                        v-for="entry in teamGroupTreeEntries"
+                                        :key="entry.key"
+                                        :class="[
+                                            'border-t border-white/5',
+                                            entry.kind === 'group' ? 'bg-white/[0.025]' : ''
+                                        ]"
+                                        data-testid="team-group-stat-row"
+                                        :data-entry-kind="entry.kind"
+                                        :data-entry-name="entry.team"
+                                        :data-entry-depth="entry.depth"
+                                    >
+                                        <td
+                                            class="py-1 pr-2 text-[10px] text-gray-200"
+                                            :style="{ paddingLeft: `${8 + entry.depth * 14}px` }"
+                                        >
+                                            <div class="flex min-w-0 items-center gap-1.5">
+                                                <span
+                                                    :class="[
+                                                        'h-1.5 w-1.5 shrink-0 rounded-full',
+                                                        entry.kind === 'group' ? 'bg-violet-400' : 'bg-slate-500'
+                                                    ]"
+                                                ></span>
+                                                <span :class="entry.kind === 'group' ? 'font-semibold text-violet-200' : 'text-gray-300'">
+                                                    {{ entry.team }}
+                                                </span>
+                                                <span class="text-[8px] uppercase tracking-wider text-gray-600">
+                                                    {{ entry.kind }}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td class="px-2 py-0.5 text-right text-[10px] tabular-nums text-orange-200">{{ entry.open }}</td>
+                                        <td class="px-2 py-0.5 text-right text-[10px] tabular-nums text-cyan-200">{{ entry.assessed }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="!hasConfiguredTeamGroups && filteredTeamTagList.length > 0"
+                        class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm"
+                        data-testid="per-team-statistics"
+                    >
                         <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Per Team</div>
                         <div class="overflow-y-auto max-h-[20rem]">
                             <table class="min-w-full table-auto text-left text-[10px] text-gray-300 border-separate border-spacing-0">
@@ -523,7 +831,16 @@ const handleCopy = () => {
                                         :key="entry.team"
                                         class="border-t border-white/5"
                                     >
-                                        <td class="px-2 py-0.5 text-[10px] text-gray-200">{{ entry.team }}</td>
+                                        <td class="px-2 py-1 text-[10px] text-gray-200">
+                                            <div>{{ entry.team }}</div>
+                                            <div
+                                                v-if="entry.aliases?.length"
+                                                class="mt-0.5 text-[9px] leading-tight text-gray-600"
+                                                :data-testid="`team-aliases-${entry.team}`"
+                                            >
+                                                {{ entry.aliases.join(' · ') }}
+                                            </div>
+                                        </td>
                                         <td class="px-2 py-0.5 text-right text-[10px] text-orange-200">{{ entry.open }}</td>
                                         <td class="px-2 py-0.5 text-right text-[10px] text-cyan-200">{{ entry.assessed }}</td>
                                     </tr>

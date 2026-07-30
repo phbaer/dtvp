@@ -14,8 +14,11 @@ def create_rescore_rule_sync_workflow(
 ) -> BulkWorkflowPlugin:
     return BulkWorkflowPlugin(
         id="rescore-rule-sync",
-        label="Sync CVSS Rules",
-        description="Repair stored CVSS vectors that no longer follow configured rules.",
+        label="Repair Rescoring Definitions",
+        description=(
+            "List and repair findings where a configured state-based CVSS rescore "
+            "is missing, incomplete, or incorrect."
+        ),
         preview_builder=lambda context: build_rescore_rule_sync_preview(
             context.groups, load_rules()
         ),
@@ -23,4 +26,5 @@ def create_rescore_rule_sync_workflow(
             context.groups, load_rules(), ids
         ),
         selection_predicate=lambda item: int(item.get("syncable_finding_count") or 0) > 0,
+        version=2,
     )

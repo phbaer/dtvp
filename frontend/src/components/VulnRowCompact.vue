@@ -120,7 +120,10 @@ const handleReload = () => emit('reload', group.value)
         </div>
 
         <!-- Header row -->
-        <div class="pl-[62px] pr-3 py-2 flex items-center gap-2 relative overflow-hidden">
+        <div
+            class="relative flex min-h-[5rem] items-start gap-2 overflow-hidden py-2 pl-[62px] pr-12"
+            data-testid="compact-vulnerability-header"
+        >
             <div class="min-w-0 flex-1">
                 <VulnGroupCardHeader
                     :group="group"
@@ -152,7 +155,7 @@ const handleReload = () => emit('reload', group.value)
             <button
                 type="button"
                 data-testid="reload-vulnerability"
-                class="relative z-30 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-gray-950/50 transition-colors disabled:cursor-wait disabled:opacity-70"
+                class="absolute bottom-2 right-3 z-30 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-gray-950/50 transition-colors disabled:cursor-wait disabled:opacity-70"
                 :class="reloadError
                     ? 'border-red-500/50 text-red-300 hover:bg-red-950/40'
                     : 'border-gray-600/70 text-gray-400 hover:border-blue-400/50 hover:bg-blue-950/40 hover:text-blue-200'"

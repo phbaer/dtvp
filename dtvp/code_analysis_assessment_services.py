@@ -13,7 +13,7 @@ NON_FINAL_ASSESSMENT_STATUSES = {
     "canceled",
     "aborted",
 }
-ASSESSMENT_METADATA_VERSION = 1
+ASSESSMENT_METADATA_VERSION = 2
 
 
 def text(value: Any) -> str:
@@ -407,6 +407,21 @@ def build_record_assessment_metadata(record: dict[str, Any]) -> dict[str, Any]:
         if assessment is not None
         and assessment.get(key) not in (None, "", [], {})
     }
+    adjusted_cvss = mapping(
+        assessment.get("adjusted_cvss") if assessment is not None else None
+    )
+    compact_adjusted_cvss = {
+        key: adjusted_cvss.get(key)
+        for key in (
+            "original_score",
+            "original_vector",
+            "adjusted_score",
+            "adjusted_vector",
+        )
+        if adjusted_cvss.get(key) not in (None, "", [], {})
+    }
+    if compact_adjusted_cvss:
+        assessment_data["adjusted_cvss"] = compact_adjusted_cvss
     context_summary = record_context_summary(record)
     record_data = {
         key: record.get(key)

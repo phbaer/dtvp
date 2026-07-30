@@ -267,6 +267,8 @@ export interface TaskVulnGroupListQuery {
     tmrescore_proposal_ids?: string[];
     automatic_assessment?: string[];
     automatic_assessment_ids?: string[];
+    automatic_assessment_outcome?: string[];
+    automatic_assessment_rescore?: string[];
     sort?: string;
     order?: 'asc' | 'desc';
     offset?: number;
@@ -354,6 +356,12 @@ export interface TaskVulnGroupListCounts {
     assignees: Record<string, number>;
     components: Record<string, number>;
     team_tags?: Record<string, { open: number; assessed: number }>;
+    canonical_team_tags?: Record<string, { open: number; assessed: number }>;
+    team_groups?: Record<string, { open: number; assessed: number }>;
+    team_group_structure?: Record<string, {
+        teams: string[];
+        groups: string[];
+    }>;
     tmrescore?: {
         WITH_PROPOSAL: number;
         WITHOUT_PROPOSAL: number;
@@ -361,6 +369,21 @@ export interface TaskVulnGroupListCounts {
     automatic_assessment?: {
         WITH_AUTOMATIC_ASSESSMENT: number;
         WITHOUT_AUTOMATIC_ASSESSMENT: number;
+    };
+    automatic_assessment_outcome?: {
+        AFFECTED: number;
+        PROBABLY_AFFECTED: number;
+        NOT_AFFECTED: number;
+        INCONCLUSIVE: number;
+    };
+    automatic_assessment_rescore?: {
+        CRITICAL: number;
+        HIGH: number;
+        MEDIUM: number;
+        LOW: number;
+        INFO: number;
+        NO_RESCORE: number;
+        UNSCORED: number;
     };
     assessment_restore?: {
         WITH_RESTORE: number;
@@ -802,8 +825,9 @@ export interface RescoreRuleSyncPreviewFinding {
     component_version?: string;
     vulnerability_uuid?: string;
     state: string;
-    cvss_version: string;
+    cvss_version?: string | null;
     status: 'ready' | 'review';
+    issue_type?: 'missing_rescore' | 'incomplete_rescore' | 'incorrect_rescore' | 'manual_review';
     reasons: string[];
     current_vector?: string | null;
     current_score?: number | null;
@@ -818,6 +842,9 @@ export interface RescoreRuleSyncPreviewGroup {
     finding_count: number;
     syncable_finding_count: number;
     review_finding_count: number;
+    missing_rescore_finding_count?: number;
+    incomplete_rescore_finding_count?: number;
+    incorrect_rescore_finding_count?: number;
     findings: RescoreRuleSyncPreviewFinding[];
 }
 
@@ -828,6 +855,9 @@ export interface RescoreRuleSyncSummary {
     syncable_findings?: number;
     review_findings?: number;
     compliant_findings?: number;
+    missing_rescore_findings?: number;
+    incomplete_rescore_findings?: number;
+    incorrect_rescore_findings?: number;
     attempted?: number;
     succeeded?: number;
     queued?: number;
@@ -1027,6 +1057,25 @@ export const uploadRoles = async (file: File): Promise<{ status: string; message
 
 export const getTeamMapping = async (): Promise<Record<string, string | string[]>> => {
     const res = await api.get('/settings/mapping');
+    return res.data;
+};
+
+export interface TeamGroupDefinition {
+    teams: string[];
+    groups: string[];
+}
+
+export type TeamGroupConfig = Record<string, TeamGroupDefinition>;
+
+export const getTeamGroups = async (): Promise<TeamGroupConfig> => {
+    const res = await api.get('/settings/team-groups');
+    return res.data;
+};
+
+export const updateTeamGroups = async (
+    groups: TeamGroupConfig,
+): Promise<{ status: string; message: string }> => {
+    const res = await api.put('/settings/team-groups', groups);
     return res.data;
 };
 

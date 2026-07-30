@@ -272,6 +272,30 @@ not otherwise match BOM refs, Dependency-Track UUIDs, or component versions.
 Values are either a primary team string or an array whose first entry is the
 primary label and remaining entries are historical aliases.
 
+`TEAM_GROUPS_PATH` defaults to `data/team_groups.json` and is also editable in
+Settings. Each group has explicit direct `teams` and nested `groups`, so an
+abstract group can be composed from existing teams and groups while a group
+such as `Core-MUC` can also include the existing `Core-MUC` team:
+
+```json
+{
+  "Core-MUC": {
+    "teams": ["Core-MUC", "3rd Party"],
+    "groups": []
+  },
+  "Product Engineering": {
+    "teams": ["Runtime"],
+    "groups": ["Core-MUC"]
+  }
+}
+```
+
+Team references accept configured aliases and are normalized to their primary
+team. Unknown teams or groups, empty groups, duplicate members, and cycles are
+rejected when the configuration is saved. Group statistics expand nested
+membership and count each vulnerability once per group, even when it carries
+both parent-team and subteam tags.
+
 Analyzer guidance comes from `DTVP_AUTO_ANALYSIS_GUIDANCE_PATH` (default
 `data/auto_analysis_guidance.json`) and uses the same selectors:
 
@@ -296,9 +320,14 @@ A changed guidance fingerprint makes an automatic result eligible for rescanning
 The project view searches and filters grouped vulnerabilities by lifecycle,
 inconsistency reason, analysis state, dependency relationship, component,
 version, team, assignee, attribution age, tmrescore proposal, CVSS mismatch,
-and code-assessment availability. The Open selection matches the displayed
-`OPEN` lifecycle category, and vulnerability-ID searches are combined with all
-active filters.
+code-assessment availability, automatic-analysis outcome, and proposed
+automatic CVSS severity. Outcome choices (`Affected`, `Probably affected`,
+`Not affected`, and `Uncertain`) and rescore choices (`Critical` through
+`Info`, `No rescore`, and `Unscored`) use OR semantics within each facet and
+AND semantics across facets. They are server-side task-window filters, so URL
+state, counts, pagination, and Bulk Changes all operate on the same candidate
+set. The Open selection matches the displayed `OPEN` lifecycle category, and
+vulnerability-ID searches are combined with all active filters.
 
 The Filters sidebar provides a searchable, alphabetically sorted Team dropdown
 from the complete task facet list. Selecting a team uses a case-insensitive
@@ -311,6 +340,14 @@ breakdown is calculated from that same final filtered result. Complete
 task-wide facets remain available as filter choices even when their current
 filtered count is zero. Overlapping properties such as teams and inconsistency
 reasons can therefore have counts whose sum exceeds the final result count.
+When groups are configured, the Results tab renders one Per Group table with
+indented nested groups, direct team members, and non-grouped teams at the root,
+so each parent total can be compared with its subgroup and team totals without
+a duplicate Per Team box. Group totals expand the hierarchy and deduplicate
+vulnerabilities across member teams. Without group configuration, the existing
+Per Team table remains as the fallback; it groups configured aliases into their
+canonical team and shows aliases beneath the primary team. A vulnerability
+carrying both canonical and alias names is counted only once there.
 
 The detail workspace provides:
 
@@ -329,8 +366,10 @@ active task window, and route state preserves filters when navigating to
 statistics or code analysis. Each vulnerability card can reload its current
 assessment directly from Dependency-Track; the refreshed task snapshot updates
 the card, lifecycle filters, and counts together.
-Vulnerability headers always show whether a tmrescore/vscorer analysis is
-available for that vulnerability.
+Vulnerability headers use compact status icons to show both available and
+unavailable states for tmrescore/vscorer and code-analysis assessments. In the
+compact list, the Dependency-Track reload action stays at the bottom-right of
+the header so it does not overlap the assessed corner marker.
 
 ### Bulk Changes
 
@@ -338,13 +377,28 @@ The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time:
 
 | Workflow | Candidates and action |
 | :--- | :--- |
-| Apply Automatic Assessments | Usable, unapplied analyzer assessments; applies the vulnerability-level overall verdict |
+| Apply Automatic Assessments | Usable, unapplied analyzer assessments; applies the vulnerability-level overall verdict and proposed CVSS rescore |
 | Sync Incomplete Assessments | Groups whose otherwise consistent assessment is missing from some findings |
 | Restore Rescored CVSS | Assessed findings with one unambiguous current vector recoverable from audit comments |
-| Sync CVSS Rules | Findings whose rescored vector does not comply with configured transition rules |
+| Repair Rescoring Definitions | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect; repairs every safely actionable finding |
 
-`Sync CVSS Rules` preview rows show the original stored vector and score beside
-the fixed vector and score that will be written.
+`Repair Rescoring Definitions` includes cases where a transition such as
+`NOT_AFFECTED` should produce a `0.0` score but no rescore was stored. Preview
+rows show why each finding is a mismatch and place the stored vector and score
+beside the fixed values that will be written. Findings with a matching
+transition but a missing or unsupported original CVSS vector remain listed for
+manual review instead of being silently omitted.
+`Apply Automatic Assessments` rows likewise show the current vulnerability
+CVSS and the automatic rescore that will be written to every eligible finding.
+Its composable selection filters cover every automatic-analysis outcome and
+every proposed CVSS severity, plus candidates with no rescore or a vector-only
+unscored proposal. Multiple choices within a facet use OR semantics, while the
+outcome and rescore facets combine with AND semantics. They filter the visible
+rows and reset the apply selection to those rows. Their labels, values, and
+rescore-band classification are shared with the main Filters sidebar.
+Lightweight saved-result metadata retains the proposed score and vector for
+this preview; older metadata rows are rebuilt automatically from their stored
+full results.
 
 Every candidate set is the intersection of all active project-list filters and
 the selected workflow's applicability rules. The dialog loads plug-in metadata
@@ -650,6 +704,7 @@ means the integration or override is disabled.
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH` | Persisted summary-index SQLite path | sibling of cache path |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES` | Maximum persisted summary indexes | `64` |
 | `TEAM_MAPPING_PATH` | Component ownership mapping | `data/team_mapping.json` |
+| `TEAM_GROUPS_PATH` | Nested team-group definitions | `data/team_groups.json` |
 | `USER_ROLES_PATH` | User-to-role mapping | `data/user_roles.json` |
 | `RESCORE_RULES_PATH` | CVSS transition rules | `data/rescore_rules.json` |
 

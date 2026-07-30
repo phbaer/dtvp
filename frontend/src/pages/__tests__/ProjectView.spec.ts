@@ -590,6 +590,14 @@ describe('ProjectView.vue', () => {
             assignees: {},
             components: {},
             team_tags: { Platform: { open, assessed } },
+            canonical_team_tags: { Platform: { open, assessed } },
+            team_groups: { Engineering: { open, assessed } },
+            team_group_structure: {
+                Engineering: {
+                    teams: ['Platform'],
+                    groups: [],
+                },
+            },
             tmrescore: { WITH_PROPOSAL: mismatch, WITHOUT_PROPOSAL: total - mismatch },
             automatic_assessment: {
                 WITH_AUTOMATIC_ASSESSMENT: mismatch,
@@ -634,6 +642,21 @@ describe('ProjectView.vue', () => {
         expect(buttonText('Mismatch')).toMatch(/Mismatch\s+0/)
         expect(buttonText('Direct')).toMatch(/Direct\s+1/)
         expect(buttonText('Transitive')).toMatch(/Transitive\s+0/)
+
+        const resultsTab = wrapper.findAll('button')
+            .find(button => button.text().trim() === 'Results')
+        await resultsTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        const hierarchy = wrapper.get('[data-testid="per-group-statistics"]')
+        expect(hierarchy.get('[data-entry-kind="group"][data-entry-name="Engineering"]')
+            .findAll('td').map(cell => cell.text())).toEqual([
+            'Engineeringgroup',
+            '1',
+            '0',
+        ])
+        expect(hierarchy.get('[data-entry-kind="team"][data-entry-name="Platform"]')
+            .attributes('data-entry-depth')).toBe('1')
     })
 
     it('refreshes backend task windows as partial grouping progress advances', async () => {

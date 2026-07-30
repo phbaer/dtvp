@@ -314,12 +314,7 @@ def test_visible_filtered_cvss_rule_candidate_is_included_in_preview():
                         "component_uuid": "component-1",
                         "vulnerability_uuid": "vulnerability-1",
                         "analysis_state": "NOT_AFFECTED",
-                        "analysis_details": (
-                            "[Rescored: 0.0] "
-                            "[Rescored Vector: "
-                            "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/"
-                            "MC:N/MI:N/MA:N]"
-                        ),
+                        "analysis_details": "",
                     }
                 ]
             }
@@ -358,7 +353,13 @@ def test_visible_filtered_cvss_rule_candidate_is_included_in_preview():
     )
 
     assert plugin.selectable_ids(preview) == ["CVE-RULE-SYNC"]
+    assert plugin.metadata()["label"] == "Repair Rescoring Definitions"
+    assert plugin.metadata()["version"] == 2
     assert preview["items"][0]["syncable_finding_count"] == 1
+    finding = preview["items"][0]["findings"][0]
+    assert finding["issue_type"] == "missing_rescore"
+    assert finding["current_vector"] is None
+    assert finding["proposed_score"] == 0.0
 
 
 def test_incomplete_sync_builds_backend_preview_and_payloads():
@@ -599,6 +600,108 @@ def test_automatic_assessment_workflow_aggregates_verdicts_and_builds_payloads()
     assert "run-api, run-worker" in document
 
 
+def test_automatic_assessment_workflow_applies_selected_rescore_to_vulnerability():
+    group = _automatic_group()
+    group.update(
+        {
+            "cvss_score": 8.1,
+            "cvss_vector": (
+                "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+            ),
+            "rescored_cvss": None,
+            "rescored_vector": None,
+        }
+    )
+    affected = _automatic_record(
+        "run-affected",
+        "owned-api",
+        "Affected",
+    )
+    affected["result"]["assessment"]["adjusted_cvss"] = {
+        "original_score": 8.1,
+        "adjusted_score": 3.7,
+        "original_vector": group["cvss_vector"],
+        "adjusted_vector": (
+            f"{group['cvss_vector']}/CR:L/IR:L/AR:L"
+        ),
+        "summary": "Runtime controls reduce the environmental impact.",
+    }
+    probable = _automatic_record(
+        "run-probable",
+        "owned-worker",
+        "Probably Affected",
+    )
+    probable["result"]["assessment"]["adjusted_cvss"] = {
+        "original_score": 8.1,
+        "adjusted_score": 2.1,
+        "original_vector": group["cvss_vector"],
+        "adjusted_vector": (
+            f"{group['cvss_vector']}/CR:L/IR:L/AR:L/MAV:L"
+        ),
+    }
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        result_store=_AutomaticResultStore([affected, probable]),
+    )
+
+    preview = build_automatic_assessment_preview(context)
+    item = preview["items"][0]
+
+    assert item["rescore"] == {
+        "source_run_id": "run-affected",
+        "current_score": 8.1,
+        "current_vector": group["cvss_vector"],
+        "original_score": 8.1,
+        "original_vector": group["cvss_vector"],
+        "proposed_score": 3.7,
+        "proposed_vector": f"{group['cvss_vector']}/CR:L/IR:L/AR:L",
+        "proposed_severity": "LOW",
+    }
+    assert preview["summary"]["rescored_groups"] == 1
+    assert preview["summary"]["low_rescored_affected_groups"] == 1
+
+    payloads, _skipped = build_automatic_assessment_payloads(
+        context,
+        [group["id"]],
+    )
+    details = payloads[0][1]["details"]
+    assert details.startswith(
+        "[Rescored: 3.7] "
+        f"[Rescored Vector: {group['cvss_vector']}/CR:L/IR:L/AR:L]"
+    )
+    assert details.count("[Rescored:") == 1
+    assert details.count("[Rescored Vector:") == 1
+    assert all(payload["details"] == details for _instance, payload in payloads)
+
+    summary = summarize_grouped_vulnerabilities([group], {})
+    task = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": summary,
+        "_full_result": [group],
+        "_full_result_by_id": {group["id"]: group},
+        "_group_query_index": build_task_group_query_index(summary),
+    }
+    assert _refresh_grouped_vuln_task_snapshots(
+        {"task-1": task},
+        payloads,
+        {},
+    ) == 1
+    refreshed = task["_full_result"][0]
+    assert refreshed["rescored_cvss"] == 3.7
+    assert (
+        refreshed["rescored_vector"]
+        == f"{group['cvss_vector']}/CR:L/IR:L/AR:L"
+    )
+    assert all(
+        component["analysis_details"].startswith("[Rescored: 3.7]")
+        for version in refreshed["affected_versions"]
+        for component in version["components"]
+    )
+
+
 def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationales():
     records = []
     for index in range(1, 6):
@@ -745,6 +848,12 @@ def test_automatic_assessment_workflow_uses_composite_identity_without_finding_u
 
 
 def test_automatic_assessment_workflow_hydrates_only_selected_full_results():
+    adjusted_cvss = {
+        "original_score": 8.1,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",
+        "adjusted_score": 3.2,
+        "adjusted_vector": "CVSS:3.1/AV:N/AC:L/C:H/CR:L",
+    }
     metadata_record = {
         "analysis_run_id": "run-auto",
         "vuln_id": "cve-2026-auto",
@@ -752,10 +861,15 @@ def test_automatic_assessment_workflow_hydrates_only_selected_full_results():
         "component_names": ["owned-api", "owned-worker"],
         "source_kind": "auto",
         "has_assessment": True,
-        "assessment": {"affected": True, "verdict": "Affected"},
+        "assessment": {
+            "affected": True,
+            "verdict": "Affected",
+            "adjusted_cvss": adjusted_cvss,
+        },
     }
     full_record = _automatic_record("run-auto", "owned-api", "Affected")
     full_record["result"]["assessment"]["details"] = "Full selected evidence"
+    full_record["result"]["assessment"]["adjusted_cvss"] = adjusted_cvss
 
     class MetadataStore:
         get_many_calls: list[list[str]] = []
@@ -784,6 +898,16 @@ def test_automatic_assessment_workflow_hydrates_only_selected_full_results():
 
     preview = build_automatic_assessment_preview(context)
     assert preview["items"][0]["verdict_bucket"] == "AFFECTED"
+    assert preview["items"][0]["rescore"] == {
+        "source_run_id": "run-auto",
+        "current_score": None,
+        "current_vector": "",
+        "original_score": 8.1,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",
+        "proposed_score": 3.2,
+        "proposed_vector": "CVSS:3.1/AV:N/AC:L/C:H/CR:L",
+        "proposed_severity": "LOW",
+    }
     assert store.get_many_calls == []
 
     payloads, _skipped = build_automatic_assessment_payloads(

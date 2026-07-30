@@ -9,6 +9,8 @@ const filters = (): FilterState => ({
     dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'],
     tmrescoreFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
     automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+    automaticAssessmentOutcomeFilter: ['AFFECTED', 'PROBABLY_AFFECTED', 'NOT_AFFECTED', 'INCONCLUSIVE'],
+    automaticAssessmentRescoreFilter: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'],
     idFilter: '',
     tagFilter: '',
     componentFilter: '',
@@ -59,6 +61,7 @@ const mountSidebar = () => mount(StatsSidebar, {
         resultCounts,
         countsUpdating: false,
         teamOptions: [],
+        teamAliases: {},
         cacheStatusState: 'unknown',
         cacheStatusLabel: 'Unknown',
         cacheStatusAge: '',
@@ -68,6 +71,8 @@ const mountSidebar = () => mount(StatsSidebar, {
         dependencyOptions: [],
         tmrescoreOptions: [],
         automaticAssessmentOptions: [],
+        automaticAssessmentOutcomeOptions: [],
+        automaticAssessmentRescoreOptions: [],
     },
 })
 

@@ -7,16 +7,19 @@ from typing import Annotated, Any, Callable
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from .rescore_rule_services import validate_rescore_rule_config
+from .team_group_services import validate_team_group_config
 
 
 @dataclass(frozen=True)
 class SettingsRouteDeps:
     get_user_role: Callable[[str], str]
     load_team_mapping: Callable[[], dict[str, Any]]
+    load_team_groups: Callable[[], dict[str, Any]]
     load_auto_analysis_guidance: Callable[[], dict[str, Any]]
     load_user_roles: Callable[[], dict[str, Any] | None]
     load_rescore_rules: Callable[[], dict[str, Any] | None]
     get_team_mapping_path: Callable[[], str]
+    get_team_groups_path: Callable[[], str]
     get_auto_analysis_guidance_path: Callable[[], str]
     get_user_roles_path: Callable[[], str]
     get_rescore_rules_path: Callable[[], str]
@@ -88,6 +91,48 @@ def _register_mapping_routes(
             return {
                 "status": "success",
                 "message": f"Team mapping updated at {target_path}",
+            }
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
+
+def _register_team_group_routes(
+    router: APIRouter,
+    deps: SettingsRouteDeps,
+    forbidden_response: dict[int | str, dict[str, Any]],
+    current_user_dependency: Callable[..., Any],
+) -> None:
+    CurrentUser = Annotated[str, Depends(current_user_dependency)]
+
+    @router.get("/settings/team-groups", responses=forbidden_response)
+    async def get_team_groups(user: CurrentUser):
+        _require_reviewer(deps, user, "Only reviewers can view team groups")
+        return deps.load_team_groups()
+
+    @router.put("/settings/team-groups", responses=forbidden_response)
+    async def update_team_groups(
+        groups: dict[str, Any],
+        *,
+        user: CurrentUser,
+    ):
+        _require_reviewer(deps, user, "Only reviewers can modify team groups")
+        validation_errors = validate_team_group_config(
+            groups,
+            deps.load_team_mapping(),
+        )
+        if validation_errors:
+            return {
+                "status": "error",
+                "message": "; ".join(validation_errors),
+            }
+
+        target_path = deps.get_team_groups_path()
+        _ensure_parent_dir(target_path)
+        try:
+            await asyncio.to_thread(deps.write_json, target_path, groups)
+            return {
+                "status": "success",
+                "message": f"Team groups updated at {target_path}",
             }
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
@@ -314,6 +359,12 @@ def create_settings_router(
     router = APIRouter()
 
     _register_mapping_routes(router, deps, forbidden_response, current_user_dependency)
+    _register_team_group_routes(
+        router,
+        deps,
+        forbidden_response,
+        current_user_dependency,
+    )
     _register_role_routes(router, deps, forbidden_response, current_user_dependency)
     _register_auto_analysis_guidance_routes(
         router,

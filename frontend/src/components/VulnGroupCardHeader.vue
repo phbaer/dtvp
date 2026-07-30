@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, toRefs } from 'vue'
-import { Bot, CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
+import { CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
 import type { GroupedVuln } from '../types'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 import { getGroupInconsistencyReasons } from '../lib/assessment-helpers'
@@ -39,18 +39,25 @@ const props = defineProps<{
 const codeAssessmentStatus = computed<AutomaticAssessmentStatus | null>(() =>
   props.automaticAssessmentStatus || (props.hasAutomaticAssessment ? 'auto' : null)
 )
-const codeAssessmentTitle = computed(() => ({
-  auto: 'Automatic code-analysis assessment is available',
-  manual: 'Reviewer-started code-analysis assessment is available',
-  mixed: 'Automatic and reviewer-started code-analysis assessments are available',
-  partial: 'A code-analysis assessment is available with partial coverage or metadata',
-}[codeAssessmentStatus.value || 'auto']))
-const codeAssessmentClass = computed(() => ({
-  auto: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-300',
-  manual: 'border-blue-500/25 bg-blue-500/10 text-blue-300',
-  mixed: 'border-purple-500/25 bg-purple-500/10 text-purple-300',
-  partial: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
-}[codeAssessmentStatus.value || 'auto']))
+const codeAssessmentAvailable = computed(() => codeAssessmentStatus.value !== null)
+const codeAssessmentTitle = computed(() => {
+  switch (codeAssessmentStatus.value) {
+    case 'auto': return 'Automatic code-analysis assessment is available'
+    case 'manual': return 'Reviewer-started code-analysis assessment is available'
+    case 'mixed': return 'Automatic and reviewer-started code-analysis assessments are available'
+    case 'partial': return 'A code-analysis assessment is available with partial coverage or metadata'
+    default: return 'No code-analysis assessment is available'
+  }
+})
+const codeAssessmentClass = computed(() => {
+  switch (codeAssessmentStatus.value) {
+    case 'auto': return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
+    case 'manual': return 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+    case 'mixed': return 'border-purple-500/30 bg-purple-500/10 text-purple-300'
+    case 'partial': return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+    default: return 'border-gray-600/40 bg-gray-950/30 text-gray-500'
+  }
+})
 
 const {
   group,
@@ -330,34 +337,74 @@ const componentSummary = computed(() => {
         </span>
 
         <span
-          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide shrink-0"
+          class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border"
           :class="props.hasTmrescoreAnalysis
             ? 'border-teal-500/25 bg-teal-500/10 text-teal-300'
             : 'border-gray-600/40 bg-gray-950/30 text-gray-500'"
           data-testid="tmrescore-analysis-badge"
+          :data-availability="props.hasTmrescoreAnalysis ? 'available' : 'unavailable'"
+          role="img"
           :title="props.hasTmrescoreAnalysis
             ? 'TMRescore/vscorer analysis is available'
             : 'No TMRescore/vscorer analysis is available'"
+          :aria-label="props.hasTmrescoreAnalysis
+            ? 'TMRescore analysis available'
+            : 'TMRescore analysis unavailable'"
         >
-          <ShieldCheck v-if="props.hasTmrescoreAnalysis" :size="9" />
-          <ShieldOff v-else :size="9" />
-          TMRescore {{ props.hasTmrescoreAnalysis ? 'available' : 'unavailable' }}
+          <ShieldCheck
+            v-if="props.hasTmrescoreAnalysis"
+            :size="12"
+            class="block h-3 w-3 shrink-0"
+            aria-hidden="true"
+          />
+          <ShieldOff
+            v-else
+            :size="12"
+            class="block h-3 w-3 shrink-0"
+            aria-hidden="true"
+          />
+          <span class="sr-only">TMRescore {{ props.hasTmrescoreAnalysis ? 'available' : 'unavailable' }}</span>
+        </span>
+
+        <span
+          class="relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border"
+          :class="codeAssessmentClass"
+          data-testid="automatic-assessment-badge"
+          :data-availability="codeAssessmentAvailable ? 'available' : 'unavailable'"
+          :data-assessment-status="codeAssessmentStatus || 'none'"
+          role="img"
+          :title="codeAssessmentTitle"
+          :aria-label="codeAssessmentAvailable
+            ? `Code assessment available: ${codeAssessmentStatus}`
+            : 'Code assessment unavailable'"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="12"
+            height="12"
+            class="block h-3 w-3 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3v3" />
+            <rect x="4" y="7" width="16" height="12" rx="3" />
+            <path d="M8 12h.01M16 12h.01M8 16h8" />
+          </svg>
+          <span
+            v-if="!codeAssessmentAvailable"
+            class="absolute h-px w-3 rotate-45 bg-current"
+            aria-hidden="true"
+          ></span>
+          <span class="sr-only">Code assessment {{ codeAssessmentAvailable ? 'available' : 'unavailable' }}</span>
         </span>
 
         <span v-if="isPendingReview && !canApprove" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-900/50 text-yellow-300 border border-yellow-700/50 uppercase tracking-wide shrink-0" title="Assessment submitted by an analyst, awaiting reviewer approval">
           <Eye :size="9" />
           Review
-        </span>
-
-        <span
-          v-if="codeAssessmentStatus"
-          class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide shrink-0"
-          :class="codeAssessmentClass"
-          data-testid="automatic-assessment-badge"
-          :title="codeAssessmentTitle"
-        >
-          <Bot :size="9" />
-          {{ codeAssessmentStatus }}
         </span>
 
         <span

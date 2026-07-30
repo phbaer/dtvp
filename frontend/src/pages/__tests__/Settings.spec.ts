@@ -10,9 +10,11 @@ vi.mock('../../lib/api', () => ({
     getProjectArchiveTaskDownloadUrl: vi.fn(),
     getRoles: vi.fn(),
     getAutoAnalysisGuidance: vi.fn(),
+    getTeamGroups: vi.fn(),
     listProjectArchiveSnapshots: vi.fn(),
     startProjectArchiveExport: vi.fn(),
     updateAutoAnalysisGuidance: vi.fn(),
+    updateTeamGroups: vi.fn(),
     uploadProjectArchiveImport: vi.fn(),
     uploadAutoAnalysisGuidance: vi.fn(),
     uploadRoles: vi.fn(),
@@ -31,6 +33,7 @@ describe('Settings.vue', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.mocked(api.getTeamMapping).mockResolvedValue({ 'comp': 'team' })
+        vi.mocked(api.getTeamGroups).mockResolvedValue({})
         vi.mocked(api.getRoles).mockResolvedValue({ 'user': 'REVIEWER' })
         vi.mocked(api.getRescoreRules).mockResolvedValue({ transitions: [] })
         vi.mocked(api.getAutoAnalysisGuidance).mockResolvedValue({ components: {} })
@@ -73,6 +76,89 @@ describe('Settings.vue', () => {
         expect(wrapper.text()).toContain('cs::name')
         expect(wrapper.text()).toContain('nogroup::name')
         expect(wrapper.text()).toContain('cs:name and nogroup:name are normal group:name selectors')
+    })
+
+    it('configures nested groups from canonical mapped teams', async () => {
+        vi.mocked(api.getTeamMapping).mockResolvedValue({
+            core: ['Core-MUC', 'Core Legacy'],
+            vendor: '3rd Party',
+            runtime: 'Runtime',
+        })
+        vi.mocked(api.getTeamGroups).mockResolvedValue({
+            'Core-MUC': {
+                teams: ['Core-MUC', '3rd Party'],
+                groups: [],
+            },
+            Engineering: {
+                teams: ['Runtime'],
+                groups: ['Core-MUC'],
+            },
+        })
+
+        const wrapper = mount(Settings, {
+            global: {
+                provide: {
+                    user: mockUser,
+                    realRole: computed(() => mockUser.value.role)
+                },
+                stubs: ['router-link']
+            }
+        })
+
+        await flushPromises()
+        const teamGroupsTab = wrapper.findAll('button')
+            .find(button => button.text().includes('Team Groups'))
+        await teamGroupsTab?.trigger('click')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="team-group-editor"]').text()).toContain('Core-MUC')
+        const directTeamOptions = wrapper.findAll(
+            '[data-testid^="team-group-teams-"] option',
+        ).map(option => option.text())
+        expect(directTeamOptions).toContain('Core-MUC')
+        expect(directTeamOptions).toContain('3rd Party')
+        expect(directTeamOptions).not.toContain('Core Legacy')
+        expect((wrapper.get('[data-testid="team-groups-json"]').element as HTMLTextAreaElement).value)
+            .toContain('"groups": [')
+    })
+
+    it('saves explicit team and nested-group membership', async () => {
+        vi.mocked(api.updateTeamGroups).mockResolvedValue({
+            status: 'success',
+            message: 'Saved',
+        })
+        const wrapper = mount(Settings, {
+            global: {
+                provide: {
+                    user: mockUser,
+                    realRole: computed(() => mockUser.value.role)
+                },
+                stubs: ['router-link']
+            }
+        })
+
+        await flushPromises()
+        const teamGroupsTab = wrapper.findAll('button')
+            .find(button => button.text().includes('Team Groups'))
+        await teamGroupsTab?.trigger('click')
+        await flushPromises()
+
+        const config = {
+            'Core-MUC': {
+                teams: ['Core-MUC', '3rd Party'],
+                groups: [],
+            },
+            Engineering: {
+                teams: [],
+                groups: ['Core-MUC'],
+            },
+        }
+        await wrapper.get('[data-testid="team-groups-json"]')
+            .setValue(JSON.stringify(config))
+        await wrapper.get('[data-testid="save-team-groups"]').trigger('click')
+        await flushPromises()
+
+        expect(api.updateTeamGroups).toHaveBeenCalledWith(config)
     })
 
     it('keeps focus while editing a structured mapping component key', async () => {

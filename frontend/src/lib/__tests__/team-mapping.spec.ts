@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+    buildTeamAliasGroups,
     findTeamMappingMatch,
     getPrimaryTeamForComponent,
     getTeamMappingTags,
@@ -7,6 +8,17 @@ import {
 } from '../team-mapping'
 
 describe('team mapping selectors', () => {
+    it('groups configured aliases under their canonical team', () => {
+        expect(buildTeamAliasGroups({
+            componentA: ['Platform Security', 'Platform', 'Platform Sec'],
+            componentB: ['Platform Security', 'Platform'],
+            componentC: 'Runtime',
+        })).toEqual({
+            'Platform Security': ['Platform', 'Platform Sec'],
+            Runtime: [],
+        })
+    })
+
     it('parses case-sensitive and no-group selector prefixes', () => {
         expect(parseTeamMappingKey('cs,nogroup::Core')).toMatchObject({
             name: 'Core',

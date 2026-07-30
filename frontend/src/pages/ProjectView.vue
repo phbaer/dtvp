@@ -56,6 +56,11 @@ import {
 } from '../lib/vulnListViewModel'
 import { deriveVulnListFacetsFromTaskCounts } from '../lib/vulnListFacets'
 import { INCONSISTENCY_REASON_OPTIONS } from '../lib/inconsistency'
+import { buildTeamAliasGroups } from '../lib/team-mapping'
+import {
+    AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
+    AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
+} from '../lib/automaticAssessmentFilters'
 
 import VulnRowCompact from '../components/VulnRowCompact.vue'
 import VulnDetailInspector from '../components/VulnDetailInspector.vue'
@@ -141,6 +146,7 @@ const {
 } = useCacheStatus()
 
 const teamMapping = ref<Record<string, string | string[]>>({})
+const teamAliasGroups = computed(() => buildTeamAliasGroups(teamMapping.value))
 provide('teamMapping', teamMapping)
 
 const rescoreRules = ref<any>(null)
@@ -496,6 +502,8 @@ const {
     selectedDependencyFilters,
     selectedTMRescoreProposalFilters,
     selectedAutomaticAssessmentFilters,
+    selectedAutomaticAssessmentOutcomeFilters,
+    selectedAutomaticAssessmentRescoreFilters,
     copiedUrl,
     copyFilterUrl,
     resetFilters,
@@ -504,6 +512,8 @@ const {
     defaultLifecycleFilters,
     defaultAnalysisFilters,
     automaticAssessmentFilter,
+    automaticAssessmentOutcomeFilter,
+    automaticAssessmentRescoreFilter,
 } = useProjectVulnFilters({
     route,
     router,
@@ -555,6 +565,12 @@ const allAnalysisFilterValues = computed(() => ANALYSIS_OPTIONS.map(option => op
 const allDependencyFilterValues = computed(() => DEPENDENCY_OPTIONS.map(option => option.value as DependencyRelationship))
 const allTMRescoreFilterValues = computed(() => TMRESCORE_FILTER_OPTIONS.map(option => option.value as TMRescoreProposalFilter))
 const allAutomaticAssessmentFilterValues = computed(() => AUTOMATIC_ASSESSMENT_FILTER_OPTIONS.map(option => option.value))
+const allAutomaticAssessmentOutcomeFilterValues = computed(() =>
+    AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS.map(option => option.value)
+)
+const allAutomaticAssessmentRescoreFilterValues = computed(() =>
+    AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS.map(option => option.value)
+)
 
 const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnGroupListQuery({
     parsedSearch: parsedSmartSearch.value,
@@ -579,6 +595,10 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     automaticAssessmentFilters: selectedAutomaticAssessmentFilters.value,
     allAutomaticAssessmentFilterValues: allAutomaticAssessmentFilterValues.value,
     automaticAssessmentIds: [],
+    automaticAssessmentOutcomeFilters: selectedAutomaticAssessmentOutcomeFilters.value,
+    allAutomaticAssessmentOutcomeFilterValues: allAutomaticAssessmentOutcomeFilterValues.value,
+    automaticAssessmentRescoreFilters: selectedAutomaticAssessmentRescoreFilters.value,
+    allAutomaticAssessmentRescoreFilterValues: allAutomaticAssessmentRescoreFilterValues.value,
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
 }))
@@ -666,6 +686,8 @@ const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
     dependencyFilter: selectedDependencyFilters.value,
     tmrescoreProposalFilter: selectedTMRescoreProposalFilters.value,
     automaticAssessmentFilter: selectedAutomaticAssessmentFilters.value,
+    automaticAssessmentOutcomeFilter: selectedAutomaticAssessmentOutcomeFilters.value,
+    automaticAssessmentRescoreFilter: selectedAutomaticAssessmentRescoreFilters.value,
     inconsistencyReasonFilter: inconsistencyReasonFilters.value,
     versionFilterList: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
@@ -1133,6 +1155,10 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     tmrescoreOptions: TMRESCORE_FILTER_OPTIONS,
     automaticAssessmentFilters: selectedAutomaticAssessmentFilters.value,
     automaticAssessmentOptions: AUTOMATIC_ASSESSMENT_FILTER_OPTIONS,
+    automaticAssessmentOutcomeFilters: selectedAutomaticAssessmentOutcomeFilters.value,
+    automaticAssessmentOutcomeOptions: AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
+    automaticAssessmentRescoreFilters: selectedAutomaticAssessmentRescoreFilters.value,
+    automaticAssessmentRescoreOptions: AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     attributionAgeDays: attributionAgeDays.value,
     attributionAgeMode: attributionAgeMode.value,
@@ -1173,6 +1199,12 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'automaticAssessment':
             automaticAssessmentFilter.value = allAutomaticAssessmentFilterValues.value
             break
+        case 'automaticAssessmentOutcome':
+            automaticAssessmentOutcomeFilter.value = allAutomaticAssessmentOutcomeFilterValues.value
+            break
+        case 'automaticAssessmentRescore':
+            automaticAssessmentRescoreFilter.value = allAutomaticAssessmentRescoreFilterValues.value
+            break
         case 'cvss':
             cvssVersionMismatchOnly.value = false
             break
@@ -1205,6 +1237,10 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     defaultTMRescoreFilters: allTMRescoreFilterValues.value,
     automaticAssessmentFilters: selectedAutomaticAssessmentFilters.value,
     defaultAutomaticAssessmentFilters: allAutomaticAssessmentFilterValues.value,
+    automaticAssessmentOutcomeFilters: selectedAutomaticAssessmentOutcomeFilters.value,
+    defaultAutomaticAssessmentOutcomeFilters: allAutomaticAssessmentOutcomeFilterValues.value,
+    automaticAssessmentRescoreFilters: selectedAutomaticAssessmentRescoreFilters.value,
+    defaultAutomaticAssessmentRescoreFilters: allAutomaticAssessmentRescoreFilterValues.value,
 }))
 
 const filterSidebarProps = computed(() => ({
@@ -1217,6 +1253,7 @@ const filterSidebarProps = computed(() => ({
     resultCounts: visibleResultCounts.value,
     countsUpdating: resultCountsUpdating.value,
     teamOptions: taskWideFacets.value.teams,
+    teamAliases: teamAliasGroups.value,
     cacheStatusState: cacheStatusState.value,
     cacheStatusLabel: cacheStatusLabel.value,
     cacheStatusAge: cacheStatusAge.value,
@@ -1226,6 +1263,8 @@ const filterSidebarProps = computed(() => ({
     dependencyOptions: DEPENDENCY_OPTIONS,
     tmrescoreOptions: TMRESCORE_FILTER_OPTIONS,
     automaticAssessmentOptions: AUTOMATIC_ASSESSMENT_FILTER_OPTIONS,
+    automaticAssessmentOutcomeOptions: AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
+    automaticAssessmentRescoreOptions: AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
 }))
 
 const syncProjectHeaderState = () => {
