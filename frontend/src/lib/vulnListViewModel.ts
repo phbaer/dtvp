@@ -22,9 +22,14 @@ import {
     matchesCompiledLifecycleFilter,
     matchesCompiledListFilters,
     matchesCompiledAutomaticAssessmentSelection,
+    matchesCompiledAutomaticAssessmentFacetSelection,
     matchesCompiledStateFilters,
     matchesCompiledTMRescoreSelection,
 } from './vulnListIndex'
+import type {
+    AutomaticAssessmentOutcome,
+    AutomaticAssessmentRescoreState,
+} from './automaticAssessmentFilters'
 
 export interface VulnListViewFilters {
     smartSearch?: ParsedVulnSearchQuery | string
@@ -35,6 +40,8 @@ export interface VulnListViewFilters {
     dependencyFilter: DependencyRelationship[]
     tmrescoreProposalFilter: TMRescoreProposalFilter[]
     automaticAssessmentFilter: AutomaticAssessmentFilter[]
+    automaticAssessmentOutcomeFilter: AutomaticAssessmentOutcome[]
+    automaticAssessmentRescoreFilter: AutomaticAssessmentRescoreState[]
     inconsistencyReasonFilter?: InconsistencyReason[]
     versionFilterList: readonly string[]
     cvssVersionMismatchOnly: boolean
@@ -139,8 +146,11 @@ export const deriveVulnListResultCounts = (
         assignees: {},
         components: {},
         team_tags: {},
+        canonical_team_tags: {},
         tmrescore: createTMRescoreCounts(),
         automatic_assessment: createAutomaticAssessmentCounts(),
+        automatic_assessment_outcome: createAutomaticAssessmentOutcomeCounts(),
+        automatic_assessment_rescore: createAutomaticAssessmentRescoreCounts(),
         assessment_restore: {
             WITH_RESTORE: 0,
             RECOVERABLE: 0,
@@ -169,8 +179,11 @@ export const deriveVulnListResultCounts = (
 
         for (const team of new Set(item.normalizedTags)) {
             const teamCounts = counts.team_tags![team] ||= { open: 0, assessed: 0 }
+            const canonicalTeamCounts = counts.canonical_team_tags![team] ||= { open: 0, assessed: 0 }
             if (item.isOpen) teamCounts.open++
             else teamCounts.assessed++
+            if (item.isOpen) canonicalTeamCounts.open++
+            else canonicalTeamCounts.assessed++
         }
         for (const reason of item.inconsistencyReasons) {
             incrementResultCount(counts.inconsistency_reason!, reason)
@@ -182,6 +195,12 @@ export const deriveVulnListResultCounts = (
             counts.automatic_assessment!.WITH_AUTOMATIC_ASSESSMENT++
         } else {
             counts.automatic_assessment!.WITHOUT_AUTOMATIC_ASSESSMENT++
+        }
+        if (item.automaticAssessmentOutcome) {
+            counts.automatic_assessment_outcome![item.automaticAssessmentOutcome]++
+        }
+        if (item.automaticAssessmentRescore) {
+            counts.automatic_assessment_rescore![item.automaticAssessmentRescore]++
         }
 
         if (item.assessmentRestoreCount > 0) {
@@ -251,6 +270,23 @@ const createTMRescoreCounts = (): Record<TMRescoreProposalFilter, number> => ({
 const createAutomaticAssessmentCounts = (): Record<AutomaticAssessmentFilter, number> => ({
     WITH_AUTOMATIC_ASSESSMENT: 0,
     WITHOUT_AUTOMATIC_ASSESSMENT: 0,
+})
+
+const createAutomaticAssessmentOutcomeCounts = (): Record<AutomaticAssessmentOutcome, number> => ({
+    AFFECTED: 0,
+    PROBABLY_AFFECTED: 0,
+    NOT_AFFECTED: 0,
+    INCONCLUSIVE: 0,
+})
+
+const createAutomaticAssessmentRescoreCounts = (): Record<AutomaticAssessmentRescoreState, number> => ({
+    CRITICAL: 0,
+    HIGH: 0,
+    MEDIUM: 0,
+    LOW: 0,
+    INFO: 0,
+    NO_RESCORE: 0,
+    UNSCORED: 0,
 })
 
 const createInconsistencyReasonCounts = (): Record<InconsistencyReason, number> => ({
@@ -479,6 +515,8 @@ export const deriveVulnListFilterModel = (
         dependencyFilter: filters.dependencyFilter,
         tmrescoreProposalFilter: filters.tmrescoreProposalFilter,
         automaticAssessmentFilter: filters.automaticAssessmentFilter,
+        automaticAssessmentOutcomeFilter: filters.automaticAssessmentOutcomeFilter,
+        automaticAssessmentRescoreFilter: filters.automaticAssessmentRescoreFilter,
         inconsistencyReasonFilter: filters.inconsistencyReasonFilter,
         versionFilterList: filters.versionFilterList,
         cvssVersionMismatchOnly: filters.cvssVersionMismatchOnly,
@@ -509,6 +547,9 @@ export const deriveVulnListFilterModel = (
                     else automaticAssessmentCounts.WITHOUT_AUTOMATIC_ASSESSMENT++
 
                     if (!matchesCompiledAutomaticAssessmentSelection(item, listFilterInput, true)) {
+                        continue
+                    }
+                    if (!matchesCompiledAutomaticAssessmentFacetSelection(item, listFilterInput, true)) {
                         continue
                     }
 

@@ -10,6 +10,8 @@ describe('FilterSidebar.vue', () => {
         dependencyFilter: ['DIRECT'],
         tmrescoreFilter: ['WITH_PROPOSAL'],
         automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+        automaticAssessmentOutcomeFilter: ['AFFECTED', 'PROBABLY_AFFECTED', 'NOT_AFFECTED', 'INCONCLUSIVE'],
+        automaticAssessmentRescoreFilter: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'],
         idFilter: 'CVE-2024-0001',
         tagFilter: 'team-a',
         componentFilter: 'auth-service',

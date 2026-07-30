@@ -1,4 +1,6 @@
 import json
+import sqlite3
+from contextlib import closing
 from types import SimpleNamespace
 
 import dtvp.code_analysis_result_services as result_services
@@ -103,6 +105,14 @@ def test_code_analysis_result_store_lists_assessments_from_dedicated_metadata(
                 "verdict": "Affected",
                 "analysis": "Reachable vulnerable call",
                 "confidence": "high",
+                "adjusted_cvss": {
+                    "original_score": 8.1,
+                    "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",
+                    "adjusted_score": 3.2,
+                    "adjusted_vector": "CVSS:3.1/AV:N/AC:L/C:H/CR:L",
+                    "summary": "Detailed rationale stays in the full result.",
+                    "reasons": ["Runtime controls"],
+                },
             },
             "llm_conversation": [{"role": "assistant", "content": "large trace"}],
         },
@@ -130,8 +140,69 @@ def test_code_analysis_result_store_lists_assessments_from_dedicated_metadata(
         "analysis": "Reachable vulnerable call",
         "confidence": "high",
         "verdict": "Affected",
+        "adjusted_cvss": {
+            "original_score": 8.1,
+            "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",
+            "adjusted_score": 3.2,
+            "adjusted_vector": "CVSS:3.1/AV:N/AC:L/C:H/CR:L",
+        },
     }
     assert "result" not in record
+
+
+def test_code_analysis_result_store_backfills_rescore_metadata_version(tmp_path):
+    database_path = tmp_path / "code_analysis_results.sqlite"
+    store = CodeAnalysisResultStore(path_provider=lambda: str(database_path))
+    store.record_queue_item_result(
+        SimpleNamespace(
+            queue_id="automatic-rescore-run",
+            project_name="ExampleApp",
+            vuln_id="CVE-2026-RESCORE",
+            component_name="owned-api",
+            source="automatic",
+            submitted_at="2026-01-03T03:00:00+00:00",
+            finished_at="2026-01-03T03:04:05+00:00",
+            result=None,
+        ),
+        {
+            "assessment": {
+                "affected": True,
+                "verdict": "Affected",
+                "adjusted_cvss": {
+                    "original_score": 8.1,
+                    "adjusted_score": 3.2,
+                    "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",
+                    "adjusted_vector": "CVSS:3.1/AV:N/AC:L/C:H/CR:L",
+                },
+            },
+            "steps": [],
+        },
+    )
+
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            connection.execute(
+                """
+                UPDATE code_analysis_assessment_metadata
+                SET metadata_version = 1,
+                    assessment_data_json = ?
+                WHERE analysis_run_id = ?
+                """,
+                (
+                    json.dumps({"affected": True, "verdict": "Affected"}),
+                    "automatic-rescore-run",
+                ),
+            )
+
+    reloaded = CodeAnalysisResultStore(path_provider=lambda: str(database_path))
+    metadata = reloaded.list_assessment_metadata(project_name="ExampleApp")
+
+    assert metadata["records"][0]["assessment"]["adjusted_cvss"] == {
+        "original_score": 8.1,
+        "adjusted_score": 3.2,
+        "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",
+        "adjusted_vector": "CVSS:3.1/AV:N/AC:L/C:H/CR:L",
+    }
 
 
 def test_code_analysis_result_store_tracks_application_provenance(tmp_path):

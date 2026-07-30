@@ -58,6 +58,8 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
     dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'],
     tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'],
     automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
+    automaticAssessmentOutcomeFilter: ['AFFECTED', 'PROBABLY_AFFECTED', 'NOT_AFFECTED', 'INCONCLUSIVE'],
+    automaticAssessmentRescoreFilter: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'],
     inconsistencyReasonFilter: [],
     versionFilterList: [],
     cvssVersionMismatchOnly: false,
@@ -78,6 +80,31 @@ describe('vulnListViewModel', () => {
 
     afterEach(() => {
         vi.useRealTimers()
+    })
+
+    it('filters automatic outcomes and proposed rescore states with AND semantics', () => {
+        const items = buildVulnListItems([
+            makeGroup({
+                id: 'CVE-AFFECTED-LOW',
+                code_assessment_status: 'auto',
+                automatic_assessment_outcome: 'AFFECTED',
+                automatic_assessment_rescore: 'LOW',
+            }),
+            makeGroup({
+                id: 'CVE-PROBABLE-HIGH',
+                code_assessment_status: 'auto',
+                automatic_assessment_outcome: 'PROBABLY_AFFECTED',
+                automatic_assessment_rescore: 'HIGH',
+            }),
+            makeGroup({ id: 'CVE-NO-AUTO' }),
+        ], {}, {})
+
+        const model = deriveVulnListViewModel(items, baseFilters({
+            automaticAssessmentOutcomeFilter: ['AFFECTED', 'PROBABLY_AFFECTED'],
+            automaticAssessmentRescoreFilter: ['LOW'],
+        }))
+
+        expect(model.sortedItems.map(item => item.id)).toEqual(['CVE-AFFECTED-LOW'])
     })
 
     it('counts ambiguous restoration gaps for the restore preview entry point', () => {

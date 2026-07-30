@@ -1,5 +1,9 @@
 import type { AutomaticAssessmentFilter, DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
 import type { InconsistencyReason } from '../types'
+import type {
+    AutomaticAssessmentOutcome,
+    AutomaticAssessmentRescoreState,
+} from './automaticAssessmentFilters'
 
 export type ActiveFilterChipKey =
     | 'lifecycle'
@@ -13,6 +17,8 @@ export type ActiveFilterChipKey =
     | 'versions'
     | 'tmrescore'
     | 'automaticAssessment'
+    | 'automaticAssessmentOutcome'
+    | 'automaticAssessmentRescore'
     | 'cvss'
     | 'attributionAge'
 
@@ -44,6 +50,10 @@ export interface BuildActiveFilterChipsInput {
     tmrescoreOptions: readonly ProjectVulnFilterOption[]
     automaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
     automaticAssessmentOptions: readonly ProjectVulnFilterOption[]
+    automaticAssessmentOutcomeFilters: readonly AutomaticAssessmentOutcome[]
+    automaticAssessmentOutcomeOptions: readonly ProjectVulnFilterOption[]
+    automaticAssessmentRescoreFilters: readonly AutomaticAssessmentRescoreState[]
+    automaticAssessmentRescoreOptions: readonly ProjectVulnFilterOption[]
     cvssVersionMismatchOnly: boolean
     attributionAgeDays: number | null
     attributionAgeMode: 'older' | 'younger'
@@ -71,6 +81,10 @@ export interface HasCustomProjectVulnFilterStateInput {
     defaultTMRescoreFilters: readonly TMRescoreProposalFilter[]
     automaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
     defaultAutomaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
+    automaticAssessmentOutcomeFilters: readonly AutomaticAssessmentOutcome[]
+    defaultAutomaticAssessmentOutcomeFilters: readonly AutomaticAssessmentOutcome[]
+    automaticAssessmentRescoreFilters: readonly AutomaticAssessmentRescoreState[]
+    defaultAutomaticAssessmentRescoreFilters: readonly AutomaticAssessmentRescoreState[]
 }
 
 export const optionLabel = (
@@ -121,6 +135,10 @@ export function buildActiveFilterChips({
     tmrescoreOptions,
     automaticAssessmentFilters,
     automaticAssessmentOptions,
+    automaticAssessmentOutcomeFilters,
+    automaticAssessmentOutcomeOptions,
+    automaticAssessmentRescoreFilters,
+    automaticAssessmentRescoreOptions,
     cvssVersionMismatchOnly,
     attributionAgeDays,
     attributionAgeMode,
@@ -154,6 +172,18 @@ export function buildActiveFilterChips({
     if (automaticAssessmentFilters.length !== automaticAssessmentOptions.length) {
         chips.push({ key: 'automaticAssessment', label: `Auto: ${summarizedSelection(automaticAssessmentFilters, automaticAssessmentOptions, 'All automatic assessments')}` })
     }
+    if (automaticAssessmentOutcomeFilters.length !== automaticAssessmentOutcomeOptions.length) {
+        chips.push({
+            key: 'automaticAssessmentOutcome',
+            label: `Auto outcome: ${summarizedSelection(automaticAssessmentOutcomeFilters, automaticAssessmentOutcomeOptions, 'All outcomes')}`,
+        })
+    }
+    if (automaticAssessmentRescoreFilters.length !== automaticAssessmentRescoreOptions.length) {
+        chips.push({
+            key: 'automaticAssessmentRescore',
+            label: `Auto rescore: ${summarizedSelection(automaticAssessmentRescoreFilters, automaticAssessmentRescoreOptions, 'All rescores')}`,
+        })
+    }
     if (cvssVersionMismatchOnly) chips.push({ key: 'cvss', label: 'CVSS mismatch' })
     if (attributionAgeDays != null) {
         const verb = attributionAgeMode === 'younger' ? 'younger' : 'older'
@@ -185,6 +215,10 @@ export function hasCustomProjectVulnFilterState({
     defaultTMRescoreFilters,
     automaticAssessmentFilters,
     defaultAutomaticAssessmentFilters,
+    automaticAssessmentOutcomeFilters,
+    defaultAutomaticAssessmentOutcomeFilters,
+    automaticAssessmentRescoreFilters,
+    defaultAutomaticAssessmentRescoreFilters,
 }: HasCustomProjectVulnFilterStateInput): boolean {
     return !!smartSearchInput.trim()
         || !!idFilter
@@ -202,4 +236,6 @@ export function hasCustomProjectVulnFilterState({
         || !sameStringSet(dependencyFilters, defaultDependencyFilters)
         || !sameStringSet(tmrescoreFilters, defaultTMRescoreFilters)
         || !sameStringSet(automaticAssessmentFilters, defaultAutomaticAssessmentFilters)
+        || !sameStringSet(automaticAssessmentOutcomeFilters, defaultAutomaticAssessmentOutcomeFilters)
+        || !sameStringSet(automaticAssessmentRescoreFilters, defaultAutomaticAssessmentRescoreFilters)
 }

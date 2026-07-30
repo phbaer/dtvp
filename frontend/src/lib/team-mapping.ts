@@ -38,6 +38,49 @@ export const normalizeTeamValues = (value: TeamMappingValue): string[] => {
     return result
 }
 
+export const buildTeamAliasGroups = (
+    teamMapping: TeamMapping | undefined,
+): Record<string, string[]> => {
+    const groups = new Map<string, {
+        primary: string
+        aliases: Map<string, string>
+    }>()
+    Object.values(teamMapping || {}).forEach((value) => {
+        const [primary, ...aliases] = normalizeTeamValues(value)
+        if (!primary) return
+        const key = primary.toLowerCase()
+        const group = groups.get(key) || {
+            primary,
+            aliases: new Map<string, string>(),
+        }
+        aliases.forEach((alias) => {
+            const aliasKey = alias.toLowerCase()
+            if (aliasKey !== key && !group.aliases.has(aliasKey)) {
+                group.aliases.set(aliasKey, alias)
+            }
+        })
+        groups.set(key, group)
+    })
+    return Object.fromEntries(
+        [...groups.values()]
+            .sort((left, right) => left.primary.localeCompare(
+                right.primary,
+                undefined,
+                { numeric: true, sensitivity: 'base' },
+            ))
+            .map(group => [
+                group.primary,
+                [...group.aliases.values()].sort((left, right) =>
+                    left.localeCompare(
+                        right,
+                        undefined,
+                        { numeric: true, sensitivity: 'base' },
+                    )
+                ),
+            ]),
+    )
+}
+
 export const parseTeamMappingKey = (key: string): TeamMappingSelector => {
     const rawKey = String(key || '').trim()
     if (rawKey === '*') {

@@ -10,6 +10,12 @@ import {
 } from './assessment-helpers'
 import { classifyGroup } from './group-classifier'
 import type { FilterCounts, TeamCounts } from './group-classifier'
+import {
+    AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
+    AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
+    type AutomaticAssessmentOutcome,
+    type AutomaticAssessmentRescoreState,
+} from './automaticAssessmentFilters'
 
 export type DependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
 export type TMRescoreProposalFilter = 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'
@@ -52,6 +58,8 @@ export interface VulnListItem {
     hasTmrescoreProposal: boolean
     hasAutomaticAssessment: boolean
     automaticAssessmentStatus: AutomaticAssessmentStatus | null
+    automaticAssessmentOutcome: AutomaticAssessmentOutcome | null
+    automaticAssessmentRescore: AutomaticAssessmentRescoreState | null
     cvssVersionMismatch: boolean
     assessmentRestoreCount: number
     assessmentRestoreRecoverableCount: number
@@ -86,6 +94,8 @@ export interface VulnListFilterInput {
     dependencyFilter?: FilterSelection<DependencyRelationship>
     tmrescoreProposalFilter?: FilterSelection<TMRescoreProposalFilter>
     automaticAssessmentFilter?: FilterSelection<AutomaticAssessmentFilter>
+    automaticAssessmentOutcomeFilter?: FilterSelection<AutomaticAssessmentOutcome>
+    automaticAssessmentRescoreFilter?: FilterSelection<AutomaticAssessmentRescoreState>
     inconsistencyReasonFilter?: FilterSelection<InconsistencyReason>
     versionFilterList?: readonly string[]
     cvssVersionMismatchOnly?: boolean
@@ -105,6 +115,8 @@ export interface CompiledVulnListFilters {
     automaticAssessmentFilterSet: Set<AutomaticAssessmentFilter>
     includesAutomaticAssessment: boolean
     includesNoAutomaticAssessment: boolean
+    automaticAssessmentOutcomeFilterSet: Set<AutomaticAssessmentOutcome>
+    automaticAssessmentRescoreFilterSet: Set<AutomaticAssessmentRescoreState>
     inconsistencyReasonFilterSet: Set<InconsistencyReason>
     tagFilterLower: string
     idFilterLower: string
@@ -745,6 +757,8 @@ export function buildVulnListItem(
         hasTmrescoreProposal: hasTMRescoreProposalForGroup(group, proposals),
         hasAutomaticAssessment: hasAutomaticAssessmentForGroup(group, automaticAssessments),
         automaticAssessmentStatus: automaticAssessmentStatusForGroup(group, automaticAssessments),
+        automaticAssessmentOutcome: group.automatic_assessment_outcome || null,
+        automaticAssessmentRescore: group.automatic_assessment_rescore || null,
         cvssVersionMismatch: typeof metadata?.cvss_version_mismatch === 'boolean'
             ? metadata.cvss_version_mismatch
             : hasCvssVersionMismatch(group),
@@ -830,6 +844,12 @@ export function compileVulnListFilters(
         ? [...DEFAULT_AUTOMATIC_ASSESSMENT_FILTER]
         : normalizeFilterSelection(filters.automaticAssessmentFilter)
     const automaticAssessmentFilterSet = new Set(automaticAssessmentFilter)
+    const automaticAssessmentOutcomeFilter = filters.automaticAssessmentOutcomeFilter == null
+        ? AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS.map(option => option.value)
+        : normalizeFilterSelection(filters.automaticAssessmentOutcomeFilter)
+    const automaticAssessmentRescoreFilter = filters.automaticAssessmentRescoreFilter == null
+        ? AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS.map(option => option.value)
+        : normalizeFilterSelection(filters.automaticAssessmentRescoreFilter)
     const inconsistencyReasonFilterSet = new Set(
         normalizeFilterSelection(filters.inconsistencyReasonFilter),
     )
@@ -846,6 +866,8 @@ export function compileVulnListFilters(
         automaticAssessmentFilterSet,
         includesAutomaticAssessment: automaticAssessmentFilterSet.has('WITH_AUTOMATIC_ASSESSMENT'),
         includesNoAutomaticAssessment: automaticAssessmentFilterSet.has('WITHOUT_AUTOMATIC_ASSESSMENT'),
+        automaticAssessmentOutcomeFilterSet: new Set(automaticAssessmentOutcomeFilter),
+        automaticAssessmentRescoreFilterSet: new Set(automaticAssessmentRescoreFilter),
         inconsistencyReasonFilterSet,
         tagFilterLower: lower(filters.tagFilter),
         idFilterLower: lower(filters.idFilter),
@@ -898,6 +920,35 @@ export function matchesCompiledAutomaticAssessmentSelection(
     if (filters.automaticAssessmentFilterSet.size === 0) return emptyMatches
     return (filters.includesAutomaticAssessment && item.hasAutomaticAssessment) ||
         (filters.includesNoAutomaticAssessment && !item.hasAutomaticAssessment)
+}
+
+export function matchesCompiledAutomaticAssessmentFacetSelection(
+    item: VulnListItem,
+    filters: CompiledVulnListFilters,
+    emptyMatches = false,
+): boolean {
+    const outcomeRestricted = filters.automaticAssessmentOutcomeFilterSet.size
+        !== AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS.length
+    const rescoreRestricted = filters.automaticAssessmentRescoreFilterSet.size
+        !== AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS.length
+    if (!outcomeRestricted && !rescoreRestricted) return true
+    if (
+        (outcomeRestricted && filters.automaticAssessmentOutcomeFilterSet.size === 0)
+        || (rescoreRestricted && filters.automaticAssessmentRescoreFilterSet.size === 0)
+    ) return emptyMatches
+    return (
+        !outcomeRestricted
+        || (
+            item.automaticAssessmentOutcome != null
+            && filters.automaticAssessmentOutcomeFilterSet.has(item.automaticAssessmentOutcome)
+        )
+    ) && (
+        !rescoreRestricted
+        || (
+            item.automaticAssessmentRescore != null
+            && filters.automaticAssessmentRescoreFilterSet.has(item.automaticAssessmentRescore)
+        )
+    )
 }
 
 export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQuery | string | undefined): boolean {
@@ -963,6 +1014,10 @@ export function matchesCompiledListFilters(
     }
 
     if (!matchesCompiledAutomaticAssessmentSelection(item, filters)) {
+        return false
+    }
+
+    if (!matchesCompiledAutomaticAssessmentFacetSelection(item, filters)) {
         return false
     }
 

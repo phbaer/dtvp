@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import threading
 from concurrent.futures import Future
@@ -358,6 +359,37 @@ def _matches_automatic_assessment(
     )
 
 
+def _automatic_assessment_facets_for_fields(
+    fields: dict[str, Any],
+    automatic_assessment_facets: dict[str, dict[str, str]],
+) -> dict[str, str] | None:
+    value = automatic_assessment_facets.get(fields["id_lower"])
+    return value if isinstance(value, dict) else None
+
+
+def _matches_automatic_assessment_facets(
+    fields: dict[str, Any],
+    outcome_filters: set[str],
+    rescore_filters: set[str],
+    automatic_assessment_facets: dict[str, dict[str, str]],
+) -> bool:
+    if not outcome_filters and not rescore_filters:
+        return True
+    facets = _automatic_assessment_facets_for_fields(
+        fields,
+        automatic_assessment_facets,
+    )
+    if facets is None:
+        return False
+    return (
+        not outcome_filters
+        or str(facets.get("outcome") or "").upper() in outcome_filters
+    ) and (
+        not rescore_filters
+        or str(facets.get("rescore") or "").upper() in rescore_filters
+    )
+
+
 def _matches_task_group_fields(
     fields: dict[str, Any],
     *,
@@ -379,6 +411,9 @@ def _matches_task_group_fields(
     tmrescore_proposal_id_set: set[str],
     automatic_assessment: set[str],
     automatic_assessment_id_set: set[str],
+    automatic_assessment_outcome: set[str],
+    automatic_assessment_rescore: set[str],
+    automatic_assessment_facets: dict[str, dict[str, str]],
     now_ms: int,
 ) -> bool:
     if q_terms and not all(term in fields["searchable_text"] for term in q_terms):
@@ -425,6 +460,13 @@ def _matches_task_group_fields(
         fields,
         automatic_assessment,
         automatic_assessment_id_set,
+    ):
+        return False
+    if not _matches_automatic_assessment_facets(
+        fields,
+        automatic_assessment_outcome,
+        automatic_assessment_rescore,
+        automatic_assessment_facets,
     ):
         return False
     return True
@@ -488,6 +530,27 @@ def _empty_automatic_assessment_counts() -> dict[str, int]:
     }
 
 
+def _empty_automatic_assessment_outcome_counts() -> dict[str, int]:
+    return {
+        "AFFECTED": 0,
+        "PROBABLY_AFFECTED": 0,
+        "NOT_AFFECTED": 0,
+        "INCONCLUSIVE": 0,
+    }
+
+
+def _empty_automatic_assessment_rescore_counts() -> dict[str, int]:
+    return {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "INFO": 0,
+        "NO_RESCORE": 0,
+        "UNSCORED": 0,
+    }
+
+
 def _empty_assessment_restore_counts() -> dict[str, int]:
     return {
         "WITH_RESTORE": 0,
@@ -529,6 +592,102 @@ def _normalized_upper_set(values: list[str]) -> set[str]:
 
 def _normalized_lower_set(values: list[str]) -> set[str]:
     return {_lower(value) for value in values if _lower(value)}
+
+
+def _normalized_automatic_assessment_facets(
+    values: dict[str, dict[str, str]] | None,
+) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for raw_id, raw_facets in (values or {}).items():
+        normalized_id = _lower(raw_id)
+        if not normalized_id or not isinstance(raw_facets, dict):
+            continue
+        result[normalized_id] = {
+            "outcome": str(raw_facets.get("outcome") or "").strip().upper(),
+            "rescore": str(raw_facets.get("rescore") or "").strip().upper(),
+        }
+    return result
+
+
+def _normalized_team_aliases(
+    values: dict[str, str] | None,
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for alias, raw_primary in (values or {}).items():
+        normalized_alias = _lower(alias)
+        primary = str(raw_primary or "").strip()
+        if normalized_alias and primary:
+            result[normalized_alias] = primary
+    return result
+
+
+def _normalized_team_groups(
+    values: dict[str, list[str]] | None,
+) -> dict[str, tuple[str, ...]]:
+    result: dict[str, tuple[str, ...]] = {}
+    for raw_group, raw_members in (values or {}).items():
+        group = str(raw_group or "").strip()
+        if not group or not isinstance(raw_members, list):
+            continue
+        members = tuple(
+            sorted({_lower(member) for member in raw_members if _lower(member)})
+        )
+        if members:
+            result[group] = members
+    return result
+
+
+def _normalized_team_group_structure(
+    values: dict[str, dict[str, list[str]]] | None,
+) -> dict[str, dict[str, tuple[str, ...]]]:
+    result: dict[str, dict[str, tuple[str, ...]]] = {}
+    for raw_group, raw_definition in (values or {}).items():
+        group = str(raw_group or "").strip()
+        if not group or not isinstance(raw_definition, dict):
+            continue
+        result[group] = {
+            "teams": tuple(
+                str(team or "").strip()
+                for team in raw_definition.get("teams") or []
+                if str(team or "").strip()
+            ),
+            "groups": tuple(
+                str(child or "").strip()
+                for child in raw_definition.get("groups") or []
+                if str(child or "").strip()
+            ),
+        }
+    return result
+
+
+def _team_group_structure_cache_key(
+    values: dict[str, dict[str, list[str]]] | None,
+) -> tuple[Any, ...]:
+    normalized = _normalized_team_group_structure(values)
+    return tuple(
+        sorted(
+            (
+                group,
+                definition["teams"],
+                definition["groups"],
+            )
+            for group, definition in normalized.items()
+        )
+    )
+
+
+def _automatic_assessment_facets_cache_key(
+    values: dict[str, dict[str, str]] | None,
+) -> str:
+    normalized = _normalized_automatic_assessment_facets(values)
+    payload = json.dumps(
+        sorted(
+            (vulnerability_id, facets["outcome"], facets["rescore"])
+            for vulnerability_id, facets in normalized.items()
+        ),
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -615,6 +774,69 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _canonical_team_tag_counts(
+    rows: list[dict[str, Any]],
+    team_aliases: dict[str, str],
+) -> dict[str, dict[str, int]]:
+    if not team_aliases:
+        return {
+            team: dict(values)
+            for team, values in _build_counts(rows)["team_tags"].items()
+        }
+
+    counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        fields = row["fields"]
+        seen: set[str] = set()
+        for team in fields["tags"]:
+            canonical = team_aliases.get(_lower(team), team)
+            normalized = _lower(canonical)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            team_counts = counts.setdefault(
+                canonical,
+                {"open": 0, "assessed": 0},
+            )
+            if fields["is_open"]:
+                team_counts["open"] += 1
+            else:
+                team_counts["assessed"] += 1
+    return counts
+
+
+def _team_group_counts(
+    rows: list[dict[str, Any]],
+    team_aliases: dict[str, str],
+    team_groups: dict[str, tuple[str, ...]],
+) -> dict[str, dict[str, int]]:
+    counts = {
+        group: {"open": 0, "assessed": 0}
+        for group in team_groups
+    }
+    if not counts:
+        return counts
+
+    member_sets = {
+        group: set(members)
+        for group, members in team_groups.items()
+    }
+    for row in rows:
+        fields = row["fields"]
+        canonical_teams = {
+            _lower(team_aliases.get(_lower(team), team))
+            for team in fields["tags"]
+            if _lower(team_aliases.get(_lower(team), team))
+        }
+        if not canonical_teams:
+            continue
+        count_key = "open" if fields["is_open"] else "assessed"
+        for group, members in member_sets.items():
+            if not canonical_teams.isdisjoint(members):
+                counts[group][count_key] += 1
+    return counts
+
+
 def _copy_counts(counts: dict[str, Any]) -> dict[str, Any]:
     return {
         **counts,
@@ -660,6 +882,10 @@ def _add_dynamic_counts(
     *,
     tmrescore_proposal_id_set: set[str],
     automatic_assessment_id_set: set[str],
+    automatic_assessment_facets: dict[str, dict[str, str]],
+    team_aliases: dict[str, str],
+    team_groups: dict[str, tuple[str, ...]],
+    team_group_structure: dict[str, dict[str, tuple[str, ...]]],
     attributed_before_days: int | None,
     attribution_mode: str,
     now_ms: int,
@@ -667,17 +893,50 @@ def _add_dynamic_counts(
     result = _copy_counts(counts)
     tmrescore_counts = _empty_tmrescore_counts()
     automatic_assessment_counts = _empty_automatic_assessment_counts()
+    automatic_assessment_outcome_counts = (
+        _empty_automatic_assessment_outcome_counts()
+    )
+    automatic_assessment_rescore_counts = (
+        _empty_automatic_assessment_rescore_counts()
+    )
     attribution_age_count = 0
+    result["canonical_team_tags"] = (
+        {
+            team: dict(values)
+            for team, values in (result.get("team_tags") or {}).items()
+        }
+        if not team_aliases
+        else _canonical_team_tag_counts(rows, team_aliases)
+    )
+    result["team_groups"] = _team_group_counts(
+        rows,
+        team_aliases,
+        team_groups,
+    )
+    result["team_group_structure"] = {
+        group: {
+            "teams": list(definition["teams"]),
+            "groups": list(definition["groups"]),
+        }
+        for group, definition in team_group_structure.items()
+    }
 
     if (
         not tmrescore_proposal_id_set
         and not automatic_assessment_id_set
+        and not automatic_assessment_facets
         and attributed_before_days is None
     ):
         tmrescore_counts["WITHOUT_PROPOSAL"] = len(rows)
         automatic_assessment_counts["WITHOUT_AUTOMATIC_ASSESSMENT"] = len(rows)
         result["tmrescore"] = tmrescore_counts
         result["automatic_assessment"] = automatic_assessment_counts
+        result["automatic_assessment_outcome"] = (
+            automatic_assessment_outcome_counts
+        )
+        result["automatic_assessment_rescore"] = (
+            automatic_assessment_rescore_counts
+        )
         result["attribution_age"] = attribution_age_count
         return result
 
@@ -691,6 +950,17 @@ def _add_dynamic_counts(
             automatic_assessment_counts["WITH_AUTOMATIC_ASSESSMENT"] += 1
         else:
             automatic_assessment_counts["WITHOUT_AUTOMATIC_ASSESSMENT"] += 1
+        facets = _automatic_assessment_facets_for_fields(
+            fields,
+            automatic_assessment_facets,
+        )
+        if facets is not None:
+            outcome = str(facets.get("outcome") or "").upper()
+            rescore = str(facets.get("rescore") or "").upper()
+            if outcome in automatic_assessment_outcome_counts:
+                automatic_assessment_outcome_counts[outcome] += 1
+            if rescore in automatic_assessment_rescore_counts:
+                automatic_assessment_rescore_counts[rescore] += 1
         if attributed_before_days is not None and _matches_attribution_age(
             fields,
             attributed_before_days,
@@ -701,6 +971,8 @@ def _add_dynamic_counts(
 
     result["tmrescore"] = tmrescore_counts
     result["automatic_assessment"] = automatic_assessment_counts
+    result["automatic_assessment_outcome"] = automatic_assessment_outcome_counts
+    result["automatic_assessment_rescore"] = automatic_assessment_rescore_counts
     result["attribution_age"] = attribution_age_count
     return result
 
@@ -764,6 +1036,12 @@ def _query_cache_key(
     tmrescore_proposal_ids: list[str],
     automatic_assessment: list[str],
     automatic_assessment_ids: list[str],
+    automatic_assessment_outcome: list[str],
+    automatic_assessment_rescore: list[str],
+    automatic_assessment_facets: dict[str, dict[str, str]],
+    team_aliases: dict[str, str],
+    team_groups: dict[str, list[str]],
+    team_group_structure: dict[str, dict[str, list[str]]],
     sort_by: str,
     sort_order: str,
     now_ms: int,
@@ -793,6 +1071,12 @@ def _query_cache_key(
         _normalized_lower_tuple(tmrescore_proposal_ids),
         _normalized_upper_tuple(automatic_assessment),
         _normalized_lower_tuple(automatic_assessment_ids),
+        _normalized_upper_tuple(automatic_assessment_outcome),
+        _normalized_upper_tuple(automatic_assessment_rescore),
+        _automatic_assessment_facets_cache_key(automatic_assessment_facets),
+        tuple(sorted(_normalized_team_aliases(team_aliases).items())),
+        tuple(sorted(_normalized_team_groups(team_groups).items())),
+        _team_group_structure_cache_key(team_group_structure),
         sort_by,
         sort_order,
     )
@@ -936,6 +1220,12 @@ def query_task_groups(
     cursor: str = "",
     automatic_assessment: list[str] | None = None,
     automatic_assessment_ids: list[str] | None = None,
+    automatic_assessment_outcome: list[str] | None = None,
+    automatic_assessment_rescore: list[str] | None = None,
+    automatic_assessment_facets: dict[str, dict[str, str]] | None = None,
+    team_aliases: dict[str, str] | None = None,
+    team_groups: dict[str, list[str]] | None = None,
+    team_group_structure: dict[str, dict[str, list[str]]] | None = None,
     inconsistency_reason: list[str] | None = None,
     team: str = "",
 ) -> dict[str, Any]:
@@ -967,6 +1257,12 @@ def query_task_groups(
         tmrescore_proposal_ids=tmrescore_proposal_ids,
         automatic_assessment=automatic_assessment or [],
         automatic_assessment_ids=automatic_assessment_ids or [],
+        automatic_assessment_outcome=automatic_assessment_outcome or [],
+        automatic_assessment_rescore=automatic_assessment_rescore or [],
+        automatic_assessment_facets=automatic_assessment_facets or {},
+        team_aliases=team_aliases or {},
+        team_groups=team_groups or {},
+        team_group_structure=team_group_structure or {},
         sort_by=sort_by,
         sort_order=sort_order,
         now_ms=now_ms,
@@ -1007,6 +1303,22 @@ def query_task_groups(
             automatic_assessment_id_set = _normalized_lower_set(
                 automatic_assessment_ids or []
             )
+            automatic_assessment_outcome_set = _normalized_upper_set(
+                automatic_assessment_outcome or []
+            )
+            automatic_assessment_rescore_set = _normalized_upper_set(
+                automatic_assessment_rescore or []
+            )
+            normalized_automatic_assessment_facets = (
+                _normalized_automatic_assessment_facets(
+                    automatic_assessment_facets
+                )
+            )
+            normalized_team_aliases = _normalized_team_aliases(team_aliases)
+            normalized_team_groups = _normalized_team_groups(team_groups)
+            normalized_team_group_structure = (
+                _normalized_team_group_structure(team_group_structure)
+            )
             has_filter_predicates = bool(
                 q_terms
                 or lifecycle_set
@@ -1023,6 +1335,8 @@ def query_task_groups(
                 or attributed_before_days is not None
                 or tmrescore_set
                 or automatic_assessment_set
+                or automatic_assessment_outcome_set
+                or automatic_assessment_rescore_set
             )
             if has_filter_predicates:
                 filtered_with_indices = [
@@ -1048,6 +1362,15 @@ def query_task_groups(
                         tmrescore_proposal_id_set=tmrescore_proposal_id_set,
                         automatic_assessment=automatic_assessment_set,
                         automatic_assessment_id_set=automatic_assessment_id_set,
+                        automatic_assessment_outcome=(
+                            automatic_assessment_outcome_set
+                        ),
+                        automatic_assessment_rescore=(
+                            automatic_assessment_rescore_set
+                        ),
+                        automatic_assessment_facets=(
+                            normalized_automatic_assessment_facets
+                        ),
                         now_ms=now_ms,
                     )
                 ]
@@ -1072,6 +1395,12 @@ def query_task_groups(
                 rows,
                 tmrescore_proposal_id_set=tmrescore_proposal_id_set,
                 automatic_assessment_id_set=automatic_assessment_id_set,
+                automatic_assessment_facets=(
+                    normalized_automatic_assessment_facets
+                ),
+                team_aliases=normalized_team_aliases,
+                team_groups=normalized_team_groups,
+                team_group_structure=normalized_team_group_structure,
                 attributed_before_days=attributed_before_days,
                 attribution_mode=normalized_mode,
                 now_ms=now_ms,
@@ -1084,6 +1413,12 @@ def query_task_groups(
                     filtered,
                     tmrescore_proposal_id_set=tmrescore_proposal_id_set,
                     automatic_assessment_id_set=automatic_assessment_id_set,
+                    automatic_assessment_facets=(
+                        normalized_automatic_assessment_facets
+                    ),
+                    team_aliases=normalized_team_aliases,
+                    team_groups=normalized_team_groups,
+                    team_group_structure=normalized_team_group_structure,
                     attributed_before_days=attributed_before_days,
                     attribution_mode=normalized_mode,
                     now_ms=now_ms,

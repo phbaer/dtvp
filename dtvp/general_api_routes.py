@@ -21,7 +21,10 @@ from .bulk_workflows.assessment_restore import (
     build_assessment_restore_preview as workflow_assessment_restore_preview,
     create_assessment_restore_workflow,
 )
-from .bulk_workflows.automatic_assessments import create_automatic_assessment_workflow
+from .bulk_workflows.automatic_assessments import (
+    automatic_assessment_filter_facets,
+    create_automatic_assessment_workflow,
+)
 from .bulk_workflows.base import (
     BulkWorkflowContext,
     BulkWorkflowRegistry,
@@ -33,6 +36,7 @@ from .code_analysis_assessment_services import (
     assessment_status_for_group,
     build_assessment_match_index,
     discover_assessment_metadata,
+    records_for_group,
     record_vulnerability_id,
 )
 from .dt_client import DTClient
@@ -57,6 +61,10 @@ from .task_group_query_services import (
     get_or_build_task_group_query_index,
     query_task_groups,
     split_query_values,
+)
+from .team_group_services import (
+    canonical_team_group_structure,
+    resolve_team_groups,
 )
 
 
@@ -103,6 +111,8 @@ class BulkWorkflowFilters(BaseModel):
     tmrescore_proposal_ids: list[str] = Field(default_factory=list)
     automatic_assessment: list[str] = Field(default_factory=list)
     automatic_assessment_ids: list[str] = Field(default_factory=list)
+    automatic_assessment_outcome: list[str] = Field(default_factory=list)
+    automatic_assessment_rescore: list[str] = Field(default_factory=list)
 
 
 class BulkWorkflowRequest(BaseModel):
@@ -128,6 +138,7 @@ class GeneralApiRouteDeps:
     ]
     sort_projects_by_version: Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
     load_team_mapping: Callable[[], dict[str, Any]]
+    load_team_groups: Callable[[], dict[str, Any]]
     load_rescore_rules: Callable[[], dict[str, Any] | None]
     collect_version_snapshots: Callable[
         ...,
@@ -614,6 +625,8 @@ def _register_task_routes(
         tmrescore_proposal_ids: list[str] | None = Query(default=None),
         automatic_assessment: list[str] | None = Query(default=None),
         automatic_assessment_ids: list[str] | None = Query(default=None),
+        automatic_assessment_outcome: list[str] | None = Query(default=None),
+        automatic_assessment_rescore: list[str] | None = Query(default=None),
         sort: str = Query("rescored-severity"),
         order: str = Query("desc", pattern="^(asc|desc)$"),
         offset: int = Query(0, ge=0),
@@ -666,6 +679,12 @@ def _register_task_routes(
                     "automatic_assessment_ids": split_query_values(
                         automatic_assessment_ids
                     ),
+                    "automatic_assessment_outcome": split_query_values(
+                        automatic_assessment_outcome
+                    ),
+                    "automatic_assessment_rescore": split_query_values(
+                        automatic_assessment_rescore
+                    ),
                     "sort_by": sort,
                     "sort_order": order,
                     "offset": offset,
@@ -707,6 +726,8 @@ def _register_task_routes(
         tmrescore_proposal_ids: list[str] | None = Query(default=None),
         automatic_assessment: list[str] | None = Query(default=None),
         automatic_assessment_ids: list[str] | None = Query(default=None),
+        automatic_assessment_outcome: list[str] | None = Query(default=None),
+        automatic_assessment_rescore: list[str] | None = Query(default=None),
         sort: str = Query("rescored-severity"),
         order: str = Query("desc", pattern="^(asc|desc)$"),
         offset: int = Query(0, ge=0),
@@ -753,6 +774,12 @@ def _register_task_routes(
                     ),
                     "automatic_assessment_ids": split_query_values(
                         automatic_assessment_ids
+                    ),
+                    "automatic_assessment_outcome": split_query_values(
+                        automatic_assessment_outcome
+                    ),
+                    "automatic_assessment_rescore": split_query_values(
+                        automatic_assessment_rescore
                     ),
                     "sort_by": sort,
                     "sort_order": order,
@@ -925,6 +952,46 @@ def _assessment_filter_ids(
     )
 
 
+def _team_alias_map(team_mapping: dict[str, Any]) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for raw_value in team_mapping.values():
+        values = raw_value if isinstance(raw_value, list) else [raw_value]
+        teams = [
+            str(value or "").strip()
+            for value in values
+            if str(value or "").strip()
+        ]
+        if not teams:
+            continue
+        primary = teams[0]
+        for team in teams:
+            aliases.setdefault(team.lower(), primary)
+    return aliases
+
+
+def _automatic_assessment_filter_facets(
+    group_index: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, dict[str, str]]:
+    record_index = build_assessment_match_index(records)
+    facets: dict[str, dict[str, str]] = {}
+    for row in group_index.get("rows") or []:
+        group = row.get("group") if isinstance(row, dict) else None
+        if not isinstance(group, dict):
+            continue
+        group_id = str(group.get("id") or "").strip().lower()
+        if not group_id:
+            continue
+        matched_records = records_for_group(group, records, record_index)
+        classification = automatic_assessment_filter_facets(
+            group,
+            matched_records,
+        )
+        if classification is not None:
+            facets[group_id] = classification
+    return facets
+
+
 def _annotate_code_assessment_status(
     groups: list[dict[str, Any]],
     records: list[dict[str, Any]],
@@ -957,8 +1024,34 @@ def _query_task_group_window(
         assessment_records,
         requested_assessment_ids,
     )
+    group_index = get_or_build_task_group_query_index(task)
+    assessment_facets = _automatic_assessment_filter_facets(
+        group_index,
+        assessment_records,
+    )
+    options["automatic_assessment_facets"] = assessment_facets
+    load_team_mapping = getattr(deps, "load_team_mapping", None)
+    team_mapping = load_team_mapping() if callable(load_team_mapping) else {}
+    options["team_aliases"] = _team_alias_map(team_mapping)
+    load_team_groups = getattr(deps, "load_team_groups", None)
+    try:
+        team_group_config = (
+            load_team_groups() if callable(load_team_groups) else {}
+        )
+        options["team_groups"] = resolve_team_groups(
+            team_group_config,
+            team_mapping,
+        )
+        options["team_group_structure"] = canonical_team_group_structure(
+            team_group_config,
+            team_mapping,
+        )
+    except ValueError as exc:
+        deps.logger.warning("Ignoring invalid team group configuration: %s", exc)
+        options["team_groups"] = {}
+        options["team_group_structure"] = {}
     response = query_task_groups(
-        get_or_build_task_group_query_index(task),
+        group_index,
         **options,
     )
     if hydrate_full:
@@ -975,6 +1068,18 @@ def _query_task_group_window(
             for item in response["items"]
         ]
     _annotate_code_assessment_status(response["items"], assessment_records)
+    for item in response["items"]:
+        if not isinstance(item, dict):
+            continue
+        facets = assessment_facets.get(
+            str(item.get("id") or "").strip().lower()
+        )
+        item["automatic_assessment_outcome"] = (
+            facets.get("outcome") if facets else None
+        )
+        item["automatic_assessment_rescore"] = (
+            facets.get("rescore") if facets else None
+        )
     return response
 
 
@@ -1002,6 +1107,8 @@ def _filter_bulk_workflow_groups(
         tmrescore_proposal_ids=filters.tmrescore_proposal_ids,
         automatic_assessment=filters.automatic_assessment,
         automatic_assessment_ids=filters.automatic_assessment_ids,
+        automatic_assessment_outcome=filters.automatic_assessment_outcome,
+        automatic_assessment_rescore=filters.automatic_assessment_rescore,
         sort_by="id",
         sort_order="asc",
         offset=0,
@@ -1032,10 +1139,22 @@ def _filter_bulk_workflow_task_groups(
         for value in filters.automatic_assessment
         if str(value or "").strip()
     }
+    assessment_outcome_filter = {
+        str(value or "").strip().upper()
+        for value in filters.automatic_assessment_outcome
+        if str(value or "").strip()
+    }
+    assessment_rescore_filter = {
+        str(value or "").strip().upper()
+        for value in filters.automatic_assessment_rescore
+        if str(value or "").strip()
+    }
     base_filters = filters.model_copy(
         update={
             "automatic_assessment": [],
             "automatic_assessment_ids": [],
+            "automatic_assessment_outcome": [],
+            "automatic_assessment_rescore": [],
         }
     )
     filtered_summaries = _filter_bulk_workflow_groups(summary_index, base_filters)
@@ -1062,36 +1181,48 @@ def _filter_bulk_workflow_task_groups(
                 ),
             }
         )
-    if not assessment_filter or assessment_filter == {
-        "WITH_AUTOMATIC_ASSESSMENT",
-        "WITHOUT_AUTOMATIC_ASSESSMENT",
-    }:
+    if (
+        not assessment_filter
+        and not assessment_outcome_filter
+        and not assessment_rescore_filter
+    ):
         return filtered_groups
-    if assessment_filter == {"WITH_AUTOMATIC_ASSESSMENT"}:
-        record_index = build_assessment_match_index(assessment_records or [])
-        return [
-            group
-            for group in filtered_groups
-            if assessment_status_for_group(
-                group,
-                assessment_records or [],
-                record_index,
+    records = assessment_records or []
+    record_index = build_assessment_match_index(records)
+    result: list[dict[str, Any]] = []
+    for group in filtered_groups:
+        matched_records = records_for_group(group, records, record_index)
+        facets = automatic_assessment_filter_facets(group, matched_records)
+        has_assessment = facets is not None
+        if assessment_filter and not (
+            (
+                "WITH_AUTOMATIC_ASSESSMENT" in assessment_filter
+                and has_assessment
             )
-            is not None
-        ]
-    if assessment_filter == {"WITHOUT_AUTOMATIC_ASSESSMENT"}:
-        record_index = build_assessment_match_index(assessment_records or [])
-        return [
-            group
-            for group in filtered_groups
-            if assessment_status_for_group(
-                group,
-                assessment_records or [],
-                record_index,
+            or (
+                "WITHOUT_AUTOMATIC_ASSESSMENT" in assessment_filter
+                and not has_assessment
             )
-            is None
-        ]
-    return []
+        ):
+            continue
+        if (
+            assessment_outcome_filter
+            and (
+                facets is None
+                or facets["outcome"] not in assessment_outcome_filter
+            )
+        ):
+            continue
+        if (
+            assessment_rescore_filter
+            and (
+                facets is None
+                or facets["rescore"] not in assessment_rescore_filter
+            )
+        ):
+            continue
+        result.append(group)
+    return result
 
 
 def _bulk_workflow_registry(
@@ -1116,6 +1247,8 @@ def _bulk_workflow_context(
     needs_assessment_records = (
         workflow_id == "automatic-assessments"
         or bool(req.filters.automatic_assessment)
+        or bool(req.filters.automatic_assessment_outcome)
+        or bool(req.filters.automatic_assessment_rescore)
     )
     assessment_diagnostics: dict[str, int] = {}
     assessment_records = (

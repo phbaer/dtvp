@@ -430,6 +430,8 @@ def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(clie
         "id": "CVE-2026-MANUAL-RUN",
         "title": "Reviewer-started analyzer result",
         "severity": "HIGH",
+        "cvss_score": 8.1,
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/C:H",
         "tags": [],
         "assignees": [],
         "aliases": [],
@@ -492,6 +494,12 @@ def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(clie
                 "exposure": "reachable",
                 "summary": "The vulnerable path may be reachable.",
                 "reasoning": "Reviewer-started analysis found a possible path.",
+                "adjusted_cvss": {
+                    "original_score": 8.1,
+                    "original_vector": group["cvss_vector"],
+                    "adjusted_score": 3.2,
+                    "adjusted_vector": f"{group['cvss_vector']}/CR:L",
+                },
             },
             "versions_checked": ["1.0.0"],
             "steps": [],
@@ -511,6 +519,8 @@ def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(clie
                     "filters": {
                         "automatic_assessment": ["WITH_AUTOMATIC_ASSESSMENT"],
                         "automatic_assessment_ids": ["incorrect-client-id"],
+                        "automatic_assessment_outcome": ["PROBABLY_AFFECTED"],
+                        "automatic_assessment_rescore": ["LOW"],
                     },
                 },
             )
@@ -535,6 +545,11 @@ def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(clie
     assert preview["items"][0]["run_ids"] == ["reviewer-started-run"]
     assert preview["items"][0]["verdict_bucket"] == "PROBABLY_AFFECTED"
     assert preview["items"][0]["target_state"] == "IN_TRIAGE"
+    assert preview["items"][0]["rescore"]["proposed_score"] == 3.2
+    assert preview["items"][0]["rescore"]["proposed_vector"] == (
+        f"{group['cvss_vector']}/CR:L"
+    )
+    assert preview["items"][0]["rescore"]["proposed_severity"] == "LOW"
 
 
 def test_bulk_automatic_assessment_preview_imports_source_less_legacy_result(client):
@@ -1529,6 +1544,11 @@ def test_get_task_groups_filters_and_annotates_from_persisted_assessment_metadat
                 "affected": False,
                 "verdict": "Not Affected",
                 "analysis": "No reachable path",
+                "adjusted_cvss": {
+                    "original_score": 8.1,
+                    "adjusted_score": 3.2,
+                    "adjusted_vector": "CVSS:3.1/AV:N/AC:H/C:L",
+                },
             }
         },
     )
@@ -1538,6 +1558,8 @@ def test_get_task_groups_filters_and_annotates_from_persisted_assessment_metadat
             f"/api/tasks/{task_id}/groups",
             params={
                 "automatic_assessment": "WITH_AUTOMATIC_ASSESSMENT",
+                "automatic_assessment_outcome": "NOT_AFFECTED",
+                "automatic_assessment_rescore": "LOW",
                 "sort": "id",
                 "order": "asc",
             },
@@ -1550,10 +1572,14 @@ def test_get_task_groups_filters_and_annotates_from_persisted_assessment_metadat
     data = response.json()
     assert [item["id"] for item in data["items"]] == [assessed_group["id"]]
     assert data["items"][0]["code_assessment_status"] == "auto"
+    assert data["items"][0]["automatic_assessment_outcome"] == "NOT_AFFECTED"
+    assert data["items"][0]["automatic_assessment_rescore"] == "LOW"
     assert data["counts"]["all"]["automatic_assessment"] == {
         "WITH_AUTOMATIC_ASSESSMENT": 1,
         "WITHOUT_AUTOMATIC_ASSESSMENT": 1,
     }
+    assert data["counts"]["all"]["automatic_assessment_outcome"]["NOT_AFFECTED"] == 1
+    assert data["counts"]["all"]["automatic_assessment_rescore"]["LOW"] == 1
 
 
 def test_get_task_groups_rejects_incomplete_task(client):

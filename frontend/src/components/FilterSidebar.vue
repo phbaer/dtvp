@@ -4,6 +4,10 @@ import CustomSelect from './CustomSelect.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
 import { Copy } from 'lucide-vue-next'
 import type { InconsistencyReason } from '../types'
+import type {
+    AutomaticAssessmentOutcome,
+    AutomaticAssessmentRescoreState,
+} from '../lib/automaticAssessmentFilters'
 
 export interface FilterState {
     sortBy: string
@@ -11,6 +15,8 @@ export interface FilterState {
     dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
     tmrescoreFilter: Array<'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL'>
     automaticAssessmentFilter: Array<'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT'>
+    automaticAssessmentOutcomeFilter: AutomaticAssessmentOutcome[]
+    automaticAssessmentRescoreFilter: AutomaticAssessmentRescoreState[]
     idFilter: string
     tagFilter: string
     componentFilter: string

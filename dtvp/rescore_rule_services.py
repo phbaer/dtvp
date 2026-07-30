@@ -138,14 +138,24 @@ def _serialize_vector(
     return "/".join(parts)
 
 
+def _transition_for_state(
+    config: dict[str, Any], state: str
+) -> dict[str, Any] | None:
+    normalized_state = str(state or "").strip().upper()
+    for transition in config.get("transitions") or []:
+        trigger_state = (transition.get("trigger") or {}).get("state") or transition.get("from")
+        if str(trigger_state or "").strip().upper() == normalized_state:
+            return transition
+    return None
+
+
 def _transition_actions(
     config: dict[str, Any], state: str, version: str
 ) -> dict[str, str] | None:
-    for transition in config.get("transitions") or []:
-        trigger_state = (transition.get("trigger") or {}).get("state") or transition.get("from")
-        if trigger_state == state:
-            actions = (transition.get("actions") or {}).get(version)
-            return actions if isinstance(actions, dict) else None
+    transition = _transition_for_state(config, state)
+    if transition:
+        actions = (transition.get("actions") or {}).get(version)
+        return actions if isinstance(actions, dict) else None
     return None
 
 
@@ -337,21 +347,51 @@ def _finding_identity(component: dict[str, Any]) -> dict[str, Any]:
 def _evaluate_component(
     config: dict[str, Any], group: dict[str, Any], component: dict[str, Any]
 ) -> dict[str, Any] | None:
-    state = component.get("analysis_state") or component.get("analysisState") or "NOT_SET"
-    base_vector = group.get("cvss_vector")
-    if not base_vector:
-        return None
-    try:
-        version = _detect_version(str(base_vector))
-    except RescoreRuleError:
-        return None
-    if not _transition_actions(config, state, version):
+    state = str(
+        component.get("analysis_state")
+        or component.get("analysisState")
+        or "NOT_SET"
+    ).strip().upper()
+    if not _transition_for_state(config, state):
         return None
 
     details = component.get("analysis_details") or component.get("analysisDetails") or ""
     current_vector = _extract_vector(details)
     current_score = _extract_score(details)
-    finding = {**_finding_identity(component), "state": state, "cvss_version": version}
+    finding = {
+        **_finding_identity(component),
+        "state": state,
+        "cvss_version": None,
+    }
+    base_vector = group.get("cvss_vector")
+    if not base_vector:
+        return {
+            **finding,
+            "status": "review",
+            "issue_type": "manual_review",
+            "reasons": ["Original CVSS vector is missing"],
+            "current_vector": current_vector,
+            "current_score": current_score,
+            "proposed_vector": None,
+            "proposed_score": None,
+        }
+    try:
+        version = _detect_version(str(base_vector))
+    except RescoreRuleError as exc:
+        return {
+            **finding,
+            "status": "review",
+            "issue_type": "manual_review",
+            "reasons": [str(exc)],
+            "current_vector": current_vector,
+            "current_score": current_score,
+            "proposed_vector": None,
+            "proposed_score": None,
+        }
+    if not _transition_actions(config, state, version):
+        return None
+
+    finding["cvss_version"] = version
     try:
         result = build_rescored_vector_for_state(
             config,
@@ -368,6 +408,7 @@ def _evaluate_component(
         return {
             **finding,
             "status": "review",
+            "issue_type": "manual_review",
             "reasons": [str(exc)],
             "current_vector": current_vector,
             "current_score": current_score,
@@ -407,11 +448,18 @@ def _evaluate_component(
         component.get(key)
         for key in ("project_uuid", "component_uuid", "vulnerability_uuid")
     )
+    if current_vector is None and current_score is None:
+        issue_type = "missing_rescore"
+    elif current_vector is None or current_score is None:
+        issue_type = "incomplete_rescore"
+    else:
+        issue_type = "incorrect_rescore"
     return {
         **finding,
         "status": "ready" if has_identity else "review",
+        "issue_type": issue_type if has_identity else "manual_review",
         "reasons": reasons if has_identity else [*reasons, "Finding identity is incomplete"],
-        "current_vector": current_vector or str(base_vector),
+        "current_vector": current_vector,
         "current_score": current_score,
         "proposed_vector": proposed_vector,
         "proposed_score": proposed_score,
@@ -441,6 +489,9 @@ def build_rescore_rule_sync_preview(
         "syncable_findings": 0,
         "review_findings": 0,
         "compliant_findings": 0,
+        "missing_rescore_findings": 0,
+        "incomplete_rescore_findings": 0,
+        "incorrect_rescore_findings": 0,
     }
     for group, component in _iter_group_components(selected):
         finding = _evaluate_component(config, group, component)
@@ -462,6 +513,9 @@ def build_rescore_rule_sync_preview(
                 "finding_count": 0,
                 "syncable_finding_count": 0,
                 "review_finding_count": 0,
+                "missing_rescore_finding_count": 0,
+                "incomplete_rescore_finding_count": 0,
+                "incorrect_rescore_finding_count": 0,
                 "findings": [],
             },
         )
@@ -471,6 +525,16 @@ def build_rescore_rule_sync_preview(
         if finding["status"] == "ready":
             item["syncable_finding_count"] += 1
             summary["syncable_findings"] += 1
+            issue_type = finding.get("issue_type")
+            if issue_type == "missing_rescore":
+                item["missing_rescore_finding_count"] += 1
+                summary["missing_rescore_findings"] += 1
+            elif issue_type == "incomplete_rescore":
+                item["incomplete_rescore_finding_count"] += 1
+                summary["incomplete_rescore_findings"] += 1
+            elif issue_type == "incorrect_rescore":
+                item["incorrect_rescore_finding_count"] += 1
+                summary["incorrect_rescore_findings"] += 1
         else:
             item["review_finding_count"] += 1
             summary["review_findings"] += 1
@@ -522,7 +586,7 @@ def build_rescore_rule_sync_payloads(
                     "project_uuid": component["project_uuid"],
                     "component_uuid": component["component_uuid"],
                     "vulnerability_uuid": component["vulnerability_uuid"],
-                    "state": component.get("analysis_state") or "NOT_SET",
+                    "state": finding["state"],
                     "details": updated_details,
                     "justification": component.get("justification"),
                     "suppressed": bool(component.get("is_suppressed", False)),

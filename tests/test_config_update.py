@@ -49,6 +49,69 @@ def test_update_team_mapping_failure(client):
             assert "Write error" in data["message"]
 
 
+def test_update_team_groups_reviewer(client):
+    groups = {
+        "Core-MUC": {
+            "teams": ["Core-MUC", "3rd Party"],
+            "groups": [],
+        }
+    }
+    team_mapping = {
+        "core": "Core-MUC",
+        "vendor": "3rd Party",
+    }
+
+    with (
+        patch("dtvp.main.get_user_role", return_value="REVIEWER"),
+        patch("dtvp.main.load_team_mapping", return_value=team_mapping),
+        patch(
+            "dtvp.main.get_team_groups_path",
+            return_value="/tmp/test_team_groups.json",
+        ),
+        patch("builtins.open", mock_open()) as mocked_file,
+    ):
+        response = client.put("/api/settings/team-groups", json=groups)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    mocked_file.assert_called_with("/tmp/test_team_groups.json", "w")
+
+
+def test_update_team_groups_rejects_unknown_team(client):
+    groups = {
+        "Core-MUC": {
+            "teams": ["Unknown"],
+            "groups": [],
+        }
+    }
+
+    with (
+        patch("dtvp.main.get_user_role", return_value="REVIEWER"),
+        patch(
+            "dtvp.main.load_team_mapping",
+            return_value={"core": "Core-MUC"},
+        ),
+        patch("builtins.open", mock_open()) as mocked_file,
+    ):
+        response = client.put("/api/settings/team-groups", json=groups)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+    assert "unknown configured team Unknown" in response.json()["message"]
+    mocked_file.assert_not_called()
+
+
+def test_update_team_groups_analyst_forbidden(client):
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        response = client.put(
+            "/api/settings/team-groups",
+            json={"Core-MUC": {"teams": ["Core-MUC"], "groups": []}},
+        )
+
+    assert response.status_code == 403
+    assert "Only reviewers" in response.json()["detail"]
+
+
 def test_update_roles_reviewer(client):
     new_roles = {"alice": "REVIEWER", "bob": "ANALYST"}
 

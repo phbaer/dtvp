@@ -128,7 +128,7 @@ describe('BulkWorkflowModal', () => {
         expect(wrapper.get('[data-testid="bulk-workflow-apply"]').attributes('disabled')).toBeDefined()
     })
 
-    it('supports verdict selections, ticket copy, Jira, and Markdown export', async () => {
+    it('supports outcome and rescore filters, ticket copy, Jira, and Markdown export', async () => {
         const automaticWorkflow = {
             ...workflow,
             id: 'automatic-assessments',
@@ -137,18 +137,43 @@ describe('BulkWorkflowModal', () => {
         }
         mocks.getBulkWorkflowSummary.mockResolvedValue({
             task_id: 'task-1',
-            workflows: [{ ...automaticWorkflow, candidate_count: 2, summary: { groups: 2 } }],
+            workflows: [{ ...automaticWorkflow, candidate_count: 3, summary: { groups: 3 } }],
         })
         mocks.previewBulkWorkflow.mockResolvedValue({
             task_id: 'task-1',
             workflow: automaticWorkflow,
             preview_token: 'preview-auto',
-            selectable_group_ids: ['CVE-AFFECTED', 'CVE-SAFE'],
+            selectable_group_ids: ['CVE-AFFECTED', 'CVE-PROBABLE', 'CVE-SAFE'],
             items: [
-                { group_id: 'CVE-AFFECTED', verdict_bucket: 'AFFECTED', eligible_finding_count: 1, run_ids: ['run-1'], ticket_text: 'Title: fix it' },
+                {
+                    group_id: 'CVE-AFFECTED',
+                    verdict_bucket: 'AFFECTED',
+                    eligible_finding_count: 1,
+                    run_ids: ['run-1'],
+                    ticket_text: 'Title: fix it',
+                    rescore: {
+                        current_score: 8.1,
+                        current_vector: 'CVSS:3.1/AV:N/AC:L/C:H',
+                        proposed_score: 3.2,
+                        proposed_vector: 'CVSS:3.1/AV:N/AC:L/C:H/CR:L',
+                        proposed_severity: 'LOW',
+                    },
+                },
+                {
+                    group_id: 'CVE-PROBABLE',
+                    verdict_bucket: 'PROBABLY_AFFECTED',
+                    eligible_finding_count: 1,
+                    run_ids: ['run-3'],
+                    ticket_text: 'Title: investigate it',
+                    rescore: {
+                        current_score: 8.1,
+                        proposed_score: 6.1,
+                        proposed_severity: 'MEDIUM',
+                    },
+                },
                 { group_id: 'CVE-SAFE', verdict_bucket: 'NOT_AFFECTED', eligible_finding_count: 1, run_ids: ['run-2'], ticket_text: '' },
             ],
-            summary: { groups: 2 },
+            summary: { groups: 3, rescored_groups: 2, low_rescored_affected_groups: 1 },
         })
         const clipboard = vi.fn().mockResolvedValue(undefined)
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } })
@@ -168,7 +193,40 @@ describe('BulkWorkflowModal', () => {
         await wrapper.get('[data-testid="bulk-workflow-automatic-assessments"]').trigger('click')
         await flushPromises()
 
-        await wrapper.findAll('[data-testid="automatic-assessment-actions"] button')[2].trigger('click')
+        expect(wrapper.get('[data-testid="automatic-assessment-rescore-notice"]').text())
+            .toContain('writes its shown vulnerability-level CVSS rescore')
+        const rescore = wrapper.get('[data-testid="automatic-assessment-rescore-CVE-AFFECTED"]')
+        expect(rescore.text()).toContain('Current')
+        expect(rescore.text()).toContain('Score 8.1')
+        expect(rescore.text()).toContain('Will apply')
+        expect(rescore.text()).toContain('Score 3.2 · LOW')
+        expect(rescore.text()).toContain('CVSS:3.1/AV:N/AC:L/C:H/CR:L')
+
+        expect(
+            wrapper.findAll('[data-testid="automatic-assessment-outcome-filters"] button')
+                .map(button => button.text())
+        ).toEqual(['All', 'Affected', 'Probably affected', 'Not affected', 'Uncertain'])
+        expect(
+            wrapper.findAll('[data-testid="automatic-assessment-rescore-filters"] button')
+                .map(button => button.text())
+        ).toEqual(['All', 'Critical', 'High', 'Medium', 'Low', 'Info', 'No rescore', 'Unscored'])
+        expect(wrapper.get('[data-testid="automatic-assessment-filter-count"]').text())
+            .toContain('Showing 3 of 3 candidates')
+
+        await wrapper.get('[data-testid="automatic-outcome-filter-probably_affected"]').trigger('click')
+        expect(wrapper.find('[data-testid="bulk-workflow-item-CVE-AFFECTED"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="bulk-workflow-item-CVE-PROBABLE"]').exists()).toBe(true)
+        expect(wrapper.get('[data-testid="bulk-workflow-apply"]').text()).toContain('(1)')
+
+        await wrapper.get('[data-testid="automatic-rescore-filter-low"]').trigger('click')
+        expect(wrapper.find('[data-testid="automatic-assessment-filter-empty"]').exists()).toBe(true)
+        expect(wrapper.get('[data-testid="bulk-workflow-apply"]').attributes('disabled')).toBeDefined()
+
+        await wrapper.get('[data-testid="automatic-outcome-filter-affected"]').trigger('click')
+        expect(wrapper.get('[data-testid="automatic-outcome-filter-affected"]').attributes('aria-pressed')).toBe('true')
+        expect(wrapper.get('[data-testid="automatic-outcome-filter-probably_affected"]').attributes('aria-pressed')).toBe('true')
+        expect(wrapper.find('[data-testid="bulk-workflow-item-CVE-AFFECTED"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="bulk-workflow-item-CVE-PROBABLE"]').exists()).toBe(false)
         expect(wrapper.get('[data-testid="bulk-workflow-apply"]').text()).toContain('(1)')
 
         await wrapper.get('[data-testid="copy-ticket-CVE-AFFECTED"]').trigger('click')
@@ -232,7 +290,7 @@ describe('BulkWorkflowModal', () => {
         const rescoreWorkflow = {
             ...workflow,
             id: 'rescore-rule-sync',
-            label: 'Sync CVSS Rules',
+            label: 'Repair Rescoring Definitions',
         }
         mocks.getBulkWorkflowSummary.mockResolvedValue({
             task_id: 'task-1',
@@ -276,6 +334,8 @@ describe('BulkWorkflowModal', () => {
         expect(change.text()).toContain('Fixed')
         expect(change.text()).toContain('Score 0.0')
         expect(change.text()).toContain('CVSS:3.1/AV:N/CR:L/IR:L/AR:L/MC:N')
+        expect(wrapper.get('[data-testid="rescore-rule-reasons-CVE-2026-RULE"]').text())
+            .toContain('Missing requirements: AR, CR, IR')
     })
 
     it('reuses a prepared preview when returning to a workflow', async () => {

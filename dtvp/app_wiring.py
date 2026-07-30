@@ -235,6 +235,7 @@ def build_general_api_route_deps(
     not_found_response: dict[int | str, dict[str, Any]],
     get_grouped_vuln_task_ttl_seconds: Callable[[], int] | None = None,
     code_analysis_result_store: Any = None,
+    load_team_groups: Callable[[], dict[str, Any]] | None = None,
 ) -> GeneralApiRouteDeps:
     return GeneralApiRouteDeps(
         cache_manager=cache_manager,
@@ -259,6 +260,7 @@ def build_general_api_route_deps(
         ),
         sort_projects_by_version=sort_projects_by_version,
         load_team_mapping=lambda: load_team_mapping(),
+        load_team_groups=load_team_groups or (lambda: {}),
         load_rescore_rules=load_rescore_rules,
         collect_version_snapshots=lambda versions, client, cve, team_mapping, progress_callback=None: (
             collect_grouped_vuln_version_snapshots(
@@ -477,10 +479,12 @@ def build_settings_route_deps(
     *,
     get_user_role: Callable[[str], str],
     load_team_mapping: Callable[[], dict[str, Any]],
+    load_team_groups: Callable[[], dict[str, Any]],
     load_auto_analysis_guidance: Callable[[], dict[str, Any]],
     load_user_roles: Callable[[], dict[str, Any] | None],
     load_rescore_rules: Callable[[], dict[str, Any] | None],
     get_team_mapping_path: Callable[[], str],
+    get_team_groups_path: Callable[[], str],
     get_auto_analysis_guidance_path: Callable[[], str],
     get_user_roles_path: Callable[[], str],
     get_rescore_rules_path: Callable[[], str],
@@ -491,10 +495,12 @@ def build_settings_route_deps(
     return SettingsRouteDeps(
         get_user_role=get_user_role,
         load_team_mapping=load_team_mapping,
+        load_team_groups=load_team_groups,
         load_auto_analysis_guidance=load_auto_analysis_guidance,
         load_user_roles=load_user_roles,
         load_rescore_rules=load_rescore_rules,
         get_team_mapping_path=get_team_mapping_path,
+        get_team_groups_path=get_team_groups_path,
         get_auto_analysis_guidance_path=get_auto_analysis_guidance_path,
         get_user_roles_path=get_user_roles_path,
         get_rescore_rules_path=get_rescore_rules_path,

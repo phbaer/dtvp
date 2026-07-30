@@ -44,6 +44,21 @@ const automaticAssessmentOptions = [
     { value: 'WITH_AUTOMATIC_ASSESSMENT', label: 'available' },
     { value: 'WITHOUT_AUTOMATIC_ASSESSMENT', label: 'missing' },
 ]
+const automaticAssessmentOutcomeOptions = [
+    { value: 'AFFECTED', label: 'Affected' },
+    { value: 'PROBABLY_AFFECTED', label: 'Probably affected' },
+    { value: 'NOT_AFFECTED', label: 'Not affected' },
+    { value: 'INCONCLUSIVE', label: 'Uncertain' },
+]
+const automaticAssessmentRescoreOptions = [
+    { value: 'CRITICAL', label: 'Critical' },
+    { value: 'HIGH', label: 'High' },
+    { value: 'MEDIUM', label: 'Medium' },
+    { value: 'LOW', label: 'Low' },
+    { value: 'INFO', label: 'Info' },
+    { value: 'NO_RESCORE', label: 'No rescore' },
+    { value: 'UNSCORED', label: 'Unscored' },
+]
 
 describe('projectVulnFilterChips', () => {
     it('builds labels for only the active non-default filters', () => {
@@ -65,6 +80,10 @@ describe('projectVulnFilterChips', () => {
             tmrescoreOptions,
             automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT'],
             automaticAssessmentOptions,
+            automaticAssessmentOutcomeFilters: ['AFFECTED', 'PROBABLY_AFFECTED'],
+            automaticAssessmentOutcomeOptions,
+            automaticAssessmentRescoreFilters: ['LOW'],
+            automaticAssessmentRescoreOptions,
             cvssVersionMismatchOnly: true,
             attributionAgeDays: 14,
             attributionAgeMode: 'younger',
@@ -80,6 +99,8 @@ describe('projectVulnFilterChips', () => {
             { key: 'versions', label: 'Versions: 1.0.0, 2.0.0' },
             { key: 'tmrescore', label: 'TM: with' },
             { key: 'automaticAssessment', label: 'Auto: available' },
+            { key: 'automaticAssessmentOutcome', label: 'Auto outcome: Affected, Probably affected' },
+            { key: 'automaticAssessmentRescore', label: 'Auto rescore: Low' },
             { key: 'cvss', label: 'CVSS mismatch' },
             { key: 'attributionAge', label: 'Attributed younger than 14d' },
         ])
@@ -108,6 +129,10 @@ describe('projectVulnFilterChips', () => {
             defaultTMRescoreFilters: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'] as const,
             automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'] as const,
             defaultAutomaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'] as const,
+            automaticAssessmentOutcomeFilters: ['AFFECTED', 'PROBABLY_AFFECTED', 'NOT_AFFECTED', 'INCONCLUSIVE'] as const,
+            defaultAutomaticAssessmentOutcomeFilters: ['AFFECTED', 'PROBABLY_AFFECTED', 'NOT_AFFECTED', 'INCONCLUSIVE'] as const,
+            automaticAssessmentRescoreFilters: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'] as const,
+            defaultAutomaticAssessmentRescoreFilters: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'] as const,
         }
 
         expect(hasCustomProjectVulnFilterState(defaultInput)).toBe(false)
@@ -126,6 +151,11 @@ describe('projectVulnFilterChips', () => {
         expect(hasCustomProjectVulnFilterState({
             ...defaultInput,
             automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT'],
+        })).toBe(true)
+        expect(hasCustomProjectVulnFilterState({
+            ...defaultInput,
+            automaticAssessmentOutcomeFilters: ['AFFECTED', 'PROBABLY_AFFECTED'],
+            automaticAssessmentRescoreFilters: ['LOW'],
         })).toBe(true)
     })
 

@@ -34,6 +34,10 @@ describe('useTaskGroupWindows', () => {
                     tags: {},
                     assignees: {},
                     components: {},
+                    team_groups: { Engineering: { open: 3, assessed: 2 } },
+                    team_group_structure: {
+                        Engineering: { teams: ['Platform'], groups: [] },
+                    },
                 },
                 filtered: {
                     total: 1,
@@ -45,6 +49,10 @@ describe('useTaskGroupWindows', () => {
                     tags: {},
                     assignees: {},
                     components: {},
+                    team_groups: { Engineering: { open: 1, assessed: 0 } },
+                    team_group_structure: {
+                        Engineering: { teams: ['Platform'], groups: [] },
+                    },
                 },
             },
             offset: 0,
@@ -90,6 +98,13 @@ describe('useTaskGroupWindows', () => {
         expect(taskWindows.total.value).toBe(5)
         expect(taskWindows.filtered.value).toBe(1)
         expect(taskWindows.counts.value?.all.lifecycle.OPEN).toBe(5)
+        expect(taskWindows.counts.value?.filtered.team_groups?.Engineering).toEqual({
+            open: 1,
+            assessed: 0,
+        })
+        expect(taskWindows.counts.value?.filtered.team_group_structure).toEqual({
+            Engineering: { teams: ['Platform'], groups: [] },
+        })
         expect(taskWindows.partial.value).toBe(true)
         expect(taskWindows.partialVersionsCompleted.value).toBe(2)
         expect(taskWindows.partialVersionsTotal.value).toBe(5)

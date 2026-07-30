@@ -451,7 +451,9 @@ describe('VulnGroupCard', () => {
 
         const unavailableBadge = withoutAnalysis.get('[data-testid="tmrescore-analysis-badge"]')
         expect(unavailableBadge.text()).toContain('TMRescore unavailable')
+        expect(unavailableBadge.attributes('data-availability')).toBe('unavailable')
         expect(unavailableBadge.attributes('title')).toBe('No TMRescore/vscorer analysis is available')
+        expect(withoutAnalysis.get('[data-testid="automatic-assessment-badge"]').attributes('data-availability')).toBe('unavailable')
 
         const withAnalysis = mount(VulnGroupCard, {
             props: { group: mockGroup },
@@ -471,6 +473,7 @@ describe('VulnGroupCard', () => {
 
         const availableBadge = withAnalysis.get('[data-testid="tmrescore-analysis-badge"]')
         expect(availableBadge.text()).toContain('TMRescore available')
+        expect(availableBadge.attributes('data-availability')).toBe('available')
         expect(availableBadge.attributes('title')).toBe('TMRescore/vscorer analysis is available')
     })
 

@@ -7,6 +7,10 @@ import {
     type ParsedVulnSearchQuery,
     type TMRescoreProposalFilter,
 } from './vulnListIndex'
+import type {
+    AutomaticAssessmentOutcome,
+    AutomaticAssessmentRescoreState,
+} from './automaticAssessmentFilters'
 
 export const NO_MATCH_FILTER = '__NO_MATCH__'
 
@@ -33,6 +37,10 @@ export interface BuildTaskVulnGroupListQueryInput {
     automaticAssessmentFilters: readonly AutomaticAssessmentFilter[]
     allAutomaticAssessmentFilterValues: readonly AutomaticAssessmentFilter[]
     automaticAssessmentIds: readonly string[]
+    automaticAssessmentOutcomeFilters: readonly AutomaticAssessmentOutcome[]
+    allAutomaticAssessmentOutcomeFilterValues: readonly AutomaticAssessmentOutcome[]
+    automaticAssessmentRescoreFilters: readonly AutomaticAssessmentRescoreState[]
+    allAutomaticAssessmentRescoreFilterValues: readonly AutomaticAssessmentRescoreState[]
     sortBy: string
     sortOrder: 'asc' | 'desc'
 }
@@ -111,6 +119,10 @@ export function buildTaskVulnGroupListQuery({
     automaticAssessmentFilters,
     allAutomaticAssessmentFilterValues,
     automaticAssessmentIds,
+    automaticAssessmentOutcomeFilters,
+    allAutomaticAssessmentOutcomeFilterValues,
+    automaticAssessmentRescoreFilters,
+    allAutomaticAssessmentRescoreFilterValues,
     sortBy,
     sortOrder,
 }: BuildTaskVulnGroupListQueryInput): TaskVulnGroupListQuery {
@@ -127,6 +139,16 @@ export function buildTaskVulnGroupListQuery({
     const isTMRescoreRestricted = !hasSameStringSet(tmrescore, allTMRescoreFilterValues)
     const automaticAssessment = noMatchWhenEmpty(automaticAssessmentFilters)
     const isAutomaticAssessmentRestricted = !hasSameStringSet(automaticAssessment, allAutomaticAssessmentFilterValues)
+    const automaticAssessmentOutcome = noMatchWhenEmpty(automaticAssessmentOutcomeFilters)
+    const isAutomaticAssessmentOutcomeRestricted = !hasSameStringSet(
+        automaticAssessmentOutcome,
+        allAutomaticAssessmentOutcomeFilterValues,
+    )
+    const automaticAssessmentRescore = noMatchWhenEmpty(automaticAssessmentRescoreFilters)
+    const isAutomaticAssessmentRescoreRestricted = !hasSameStringSet(
+        automaticAssessmentRescore,
+        allAutomaticAssessmentRescoreFilterValues,
+    )
 
     return {
         q: parsedSearch.textTerms.join(' '),
@@ -149,6 +171,12 @@ export function buildTaskVulnGroupListQuery({
         tmrescore_proposal_ids: [...meaningfulTMRescoreProposalIds],
         automatic_assessment: isAutomaticAssessmentRestricted ? automaticAssessment : [],
         automatic_assessment_ids: [...automaticAssessmentIds],
+        automatic_assessment_outcome: isAutomaticAssessmentOutcomeRestricted
+            ? automaticAssessmentOutcome
+            : [],
+        automatic_assessment_rescore: isAutomaticAssessmentRescoreRestricted
+            ? automaticAssessmentRescore
+            : [],
         sort: sortBy,
         order: sortOrder,
     }

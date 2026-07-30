@@ -91,6 +91,8 @@ export interface AssessmentRestoreCandidate {
 export interface GroupedVuln {
     id: string; // CVE/VulnID
     code_assessment_status?: 'auto' | 'manual' | 'mixed' | 'partial' | null;
+    automatic_assessment_outcome?: 'AFFECTED' | 'PROBABLY_AFFECTED' | 'NOT_AFFECTED' | 'INCONCLUSIVE' | null;
+    automatic_assessment_rescore?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO' | 'NO_RESCORE' | 'UNSCORED' | null;
     title?: string;
     description?: string;
     severity?: string;

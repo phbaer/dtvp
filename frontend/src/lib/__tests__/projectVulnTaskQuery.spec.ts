@@ -35,6 +35,10 @@ const baseInput = (overrides: Partial<BuildTaskVulnGroupListQueryInput> = {}): B
     automaticAssessmentFilters: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
     allAutomaticAssessmentFilterValues: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'],
     automaticAssessmentIds: ['cve-2026-auto'],
+    automaticAssessmentOutcomeFilters: ['AFFECTED', 'PROBABLY_AFFECTED', 'NOT_AFFECTED', 'INCONCLUSIVE'],
+    allAutomaticAssessmentOutcomeFilterValues: ['AFFECTED', 'PROBABLY_AFFECTED', 'NOT_AFFECTED', 'INCONCLUSIVE'],
+    automaticAssessmentRescoreFilters: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'],
+    allAutomaticAssessmentRescoreFilterValues: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'NO_RESCORE', 'UNSCORED'],
     sortBy: 'rescored-severity',
     sortOrder: 'desc',
     ...overrides,
@@ -145,6 +149,13 @@ describe('projectVulnTaskQuery', () => {
         }))
         expect(restricted.automatic_assessment).toEqual(['WITH_AUTOMATIC_ASSESSMENT'])
         expect(restricted.automatic_assessment_ids).toEqual(['cve-2026-auto'])
+
+        const facets = buildTaskVulnGroupListQuery(baseInput({
+            automaticAssessmentOutcomeFilters: ['AFFECTED', 'PROBABLY_AFFECTED'],
+            automaticAssessmentRescoreFilters: ['LOW'],
+        }))
+        expect(facets.automatic_assessment_outcome).toEqual(['AFFECTED', 'PROBABLY_AFFECTED'])
+        expect(facets.automatic_assessment_rescore).toEqual(['LOW'])
     })
 
     it('deduplicates meaningful proposal IDs and ignores no-op proposals', () => {

@@ -133,8 +133,136 @@ def test_unfiltered_queries_reuse_the_same_sort_order(monkeypatch):
     ]
 
 
+def test_automatic_assessment_outcome_and_rescore_facets_filter_and_count():
+    groups = [_group(index) for index in range(1, 5)]
+    query_index = query_services.build_task_group_query_index(groups)
+    facets = {
+        "cve-2026-0001": {"outcome": "AFFECTED", "rescore": "LOW"},
+        "cve-2026-0002": {"outcome": "PROBABLY_AFFECTED", "rescore": "HIGH"},
+        "cve-2026-0003": {"outcome": "NOT_AFFECTED", "rescore": "NO_RESCORE"},
+    }
+
+    response = _query(
+        query_index,
+        q="",
+        automatic_assessment_ids=list(facets),
+        automatic_assessment_outcome=["AFFECTED", "PROBABLY_AFFECTED"],
+        automatic_assessment_rescore=["LOW"],
+        automatic_assessment_facets=facets,
+    )
+
+    assert [item["id"] for item in response["items"]] == ["CVE-2026-0001"]
+    assert response["counts"]["all"]["automatic_assessment_outcome"] == {
+        "AFFECTED": 1,
+        "PROBABLY_AFFECTED": 1,
+        "NOT_AFFECTED": 1,
+        "INCONCLUSIVE": 0,
+    }
+    assert response["counts"]["all"]["automatic_assessment_rescore"] == {
+        "CRITICAL": 0,
+        "HIGH": 1,
+        "MEDIUM": 0,
+        "LOW": 1,
+        "INFO": 0,
+        "NO_RESCORE": 1,
+        "UNSCORED": 0,
+    }
+
+
+def test_team_alias_counts_are_grouped_without_duplicate_vulnerabilities():
+    canonical_and_alias = _group(1)
+    canonical_and_alias["tags"] = ["Platform Security", "Platform"]
+    alias_only_assessed = _group(2)
+    alias_only_assessed["tags"] = ["Platform"]
+    alias_only_assessed["list_metadata"]["is_open"] = False
+    other_team = _group(3)
+    other_team["tags"] = ["Runtime"]
+    query_index = query_services.build_task_group_query_index(
+        [canonical_and_alias, alias_only_assessed, other_team]
+    )
+
+    response = _query(
+        query_index,
+        q="",
+        team_aliases={
+            "platform security": "Platform Security",
+            "platform": "Platform Security",
+            "runtime": "Runtime",
+        },
+    )
+
+    assert response["counts"]["all"]["team_tags"] == {
+        "Platform Security": {"open": 1, "assessed": 0},
+        "Platform": {"open": 1, "assessed": 1},
+        "Runtime": {"open": 1, "assessed": 0},
+    }
+    assert response["counts"]["all"]["canonical_team_tags"] == {
+        "Platform Security": {"open": 1, "assessed": 1},
+        "Runtime": {"open": 1, "assessed": 0},
+    }
+
+
+def test_team_group_counts_include_subteams_without_duplicate_vulnerabilities():
+    parent_and_subteam = _group(1)
+    parent_and_subteam["tags"] = ["Core-MUC", "Third Party Legacy"]
+    subteam_assessed = _group(2)
+    subteam_assessed["tags"] = ["3rd Party"]
+    subteam_assessed["list_metadata"]["is_open"] = False
+    runtime = _group(3)
+    runtime["tags"] = ["Runtime"]
+    query_index = query_services.build_task_group_query_index(
+        [parent_and_subteam, subteam_assessed, runtime]
+    )
+
+    response = _query(
+        query_index,
+        q="",
+        team_aliases={
+            "core-muc": "Core-MUC",
+            "3rd party": "3rd Party",
+            "third party legacy": "3rd Party",
+            "runtime": "Runtime",
+        },
+        team_groups={
+            "Core-MUC": ["Core-MUC", "3rd Party"],
+            "Product Engineering": ["Core-MUC", "3rd Party", "Runtime"],
+        },
+        team_group_structure={
+            "Core-MUC": {
+                "teams": ["Core-MUC", "3rd Party"],
+                "groups": [],
+            },
+            "Product Engineering": {
+                "teams": ["Runtime"],
+                "groups": ["Core-MUC"],
+            },
+        },
+    )
+
+    assert response["counts"]["all"]["team_groups"] == {
+        "Core-MUC": {"open": 1, "assessed": 1},
+        "Product Engineering": {"open": 2, "assessed": 1},
+    }
+    assert response["counts"]["all"]["team_group_structure"] == {
+        "Core-MUC": {
+            "teams": ["Core-MUC", "3rd Party"],
+            "groups": [],
+        },
+        "Product Engineering": {
+            "teams": ["Runtime"],
+            "groups": ["Core-MUC"],
+        },
+    }
+    assert response["counts"]["all"]["canonical_team_tags"] == {
+        "Core-MUC": {"open": 1, "assessed": 0},
+        "3rd Party": {"open": 1, "assessed": 1},
+        "Runtime": {"open": 1, "assessed": 0},
+    }
+
+
 def test_group_window_query_enforces_task_ownership_and_returns_local_items():
     groups = [_group(1)]
+    groups[0]["tags"] = ["Core-MUC"]
     task = {
         "_owner": "alice",
         "status": "completed",
@@ -144,6 +272,17 @@ def test_group_window_query_enforces_task_ownership_and_returns_local_items():
     deps = SimpleNamespace(
         tasks={"task-1": task},
         code_analysis_result_store=None,
+        logger=SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+        load_team_mapping=lambda: {
+            "core-component": "Core-MUC",
+            "vendor-component": "3rd Party",
+        },
+        load_team_groups=lambda: {
+            "Core-MUC": {
+                "teams": ["Core-MUC", "3rd Party"],
+                "groups": [],
+            },
+        },
     )
 
     assert _task_for_user(deps, "task-1", "alice") is task
@@ -180,5 +319,15 @@ def test_group_window_query_enforces_task_ownership_and_returns_local_items():
     )
 
     assert response["items"][0] is not groups[0]
+    assert response["counts"]["filtered"]["team_groups"]["Core-MUC"] == {
+        "open": 1,
+        "assessed": 0,
+    }
+    assert response["counts"]["filtered"]["team_group_structure"] == {
+        "Core-MUC": {
+            "teams": ["Core-MUC", "3rd Party"],
+            "groups": [],
+        },
+    }
     response["items"][0]["title"] = "request-local change"
     assert groups[0]["title"] == "Concurrent finding 1"

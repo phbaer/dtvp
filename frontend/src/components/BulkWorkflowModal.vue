@@ -16,6 +16,13 @@ import {
     type RescoreRuleSyncPreviewFinding,
     type TaskVulnGroupListQuery,
 } from '../lib/api'
+import {
+    AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
+    AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
+    automaticAssessmentRescoreState,
+    type AutomaticAssessmentOutcome,
+    type AutomaticAssessmentRescoreState,
+} from '../lib/automaticAssessmentFilters'
 import { getRuntimeConfig } from '../lib/env'
 
 const props = withDefaults(defineProps<{
@@ -48,14 +55,24 @@ const jiraCreateUrl = getRuntimeConfig('DTVP_JIRA_CREATE_URL', '').trim()
 const previewCache = new Map<string, BulkWorkflowPreviewResponse>()
 let previewRequestId = 0
 
+type AutomaticOutcomeFilter = 'ALL' | AutomaticAssessmentOutcome
+type AutomaticRescoreFilter = 'ALL' | AutomaticAssessmentRescoreState
+
+const automaticOutcomeOptions: Array<{ value: AutomaticOutcomeFilter; label: string }> = [
+    { value: 'ALL', label: 'All' },
+    ...AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
+]
+const automaticRescoreOptions: Array<{ value: AutomaticRescoreFilter; label: string }> = [
+    { value: 'ALL', label: 'All' },
+    ...AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS,
+]
+const automaticOutcomeFilters = ref<Set<AutomaticAssessmentOutcome>>(new Set())
+const automaticRescoreFilters = ref<Set<AutomaticAssessmentRescoreState>>(new Set())
+
 const selectedWorkflow = computed(() =>
     workflows.value.find(workflow => workflow.id === selectedWorkflowId.value) || null
 )
 const selectableIds = computed(() => preview.value?.selectable_group_ids || [])
-const allSelected = computed(() =>
-    selectableIds.value.length > 0
-    && selectableIds.value.every(groupId => selectedIds.value.has(groupId))
-)
 const selectedFindingCount = computed(() =>
     (preview.value?.items || [])
         .filter(item => selectedIds.value.has(item.group_id))
@@ -74,11 +91,39 @@ const activeFilterCount = computed(() => Object.values(activeFilters.value).filt
 const itemSelectable = (item: BulkWorkflowPreviewItem) =>
     selectableIds.value.includes(item.group_id)
 
+const automaticItemMatchesFilters = (item: BulkWorkflowPreviewItem) =>
+    (automaticOutcomeFilters.value.size === 0
+        || automaticOutcomeFilters.value.has(item.verdict_bucket as AutomaticAssessmentOutcome))
+    && (automaticRescoreFilters.value.size === 0
+        || automaticRescoreFilters.value.has(automaticAssessmentRescoreState(item.rescore)))
+
+const visiblePreviewItems = computed(() => {
+    const items = preview.value?.items || []
+    if (selectedWorkflowId.value !== 'automatic-assessments') return items
+    return items.filter(automaticItemMatchesFilters)
+})
+const visibleSelectableIds = computed(() =>
+    visiblePreviewItems.value
+        .filter(itemSelectable)
+        .map(item => item.group_id)
+)
+const allSelected = computed(() =>
+    visibleSelectableIds.value.length > 0
+    && visibleSelectableIds.value.every(groupId => selectedIds.value.has(groupId))
+)
+
 const firstRescoreRuleFinding = (item: BulkWorkflowPreviewItem) => {
     const findings = Array.isArray(item.findings)
         ? item.findings as RescoreRuleSyncPreviewFinding[]
         : []
     return findings.find(finding => finding.status === 'ready') || findings[0]
+}
+
+const rescoreRuleReasons = (item: BulkWorkflowPreviewItem) => {
+    const findings = Array.isArray(item.findings)
+        ? item.findings as RescoreRuleSyncPreviewFinding[]
+        : []
+    return [...new Set(findings.flatMap(finding => finding.reasons || []))]
 }
 
 const formatCvssScore = (score: number | null | undefined) =>
@@ -117,9 +162,29 @@ const itemDetail = (item: BulkWorkflowPreviewItem) => {
         return `${item.recoverable_finding_count || 0} recoverable of ${item.finding_count || 0} findings`
     }
     if (selectedWorkflowId.value === 'rescore-rule-sync') {
-        return `${item.syncable_finding_count || 0} ready · ${item.review_finding_count || 0} manual review`
+        const issueCounts = [
+            Number(item.missing_rescore_finding_count || 0)
+                ? `${item.missing_rescore_finding_count} missing`
+                : '',
+            Number(item.incomplete_rescore_finding_count || 0)
+                ? `${item.incomplete_rescore_finding_count} incomplete`
+                : '',
+            Number(item.incorrect_rescore_finding_count || 0)
+                ? `${item.incorrect_rescore_finding_count} incorrect`
+                : '',
+        ].filter(Boolean)
+        return [
+            `${item.syncable_finding_count || 0} ready`,
+            `${item.review_finding_count || 0} manual review`,
+            ...issueCounts,
+        ].join(' · ')
     }
     return `${item.finding_count || 0} findings`
+}
+
+const resetAutomaticAssessmentFilters = () => {
+    automaticOutcomeFilters.value = new Set()
+    automaticRescoreFilters.value = new Set()
 }
 
 const loadPreview = async (workflowId: string) => {
@@ -133,6 +198,7 @@ const loadPreview = async (workflowId: string) => {
     error.value = ''
     operationMessage.value = ''
     operationProgress.value = 0
+    resetAutomaticAssessmentFilters()
     const cached = previewCache.get(workflowId)
     if (cached) {
         loading.value = false
@@ -182,6 +248,7 @@ const loadWorkflows = async () => {
     appliedResult.value = null
     operationMessage.value = ''
     operationProgress.value = 0
+    resetAutomaticAssessmentFilters()
     previewCache.clear()
     previewRequestId += 1
     try {
@@ -203,16 +270,49 @@ const toggleItem = (item: BulkWorkflowPreviewItem) => {
 }
 
 const toggleAll = () => {
-    selectedIds.value = allSelected.value ? new Set() : new Set(selectableIds.value)
+    const next = new Set(selectedIds.value)
+    for (const groupId of visibleSelectableIds.value) {
+        if (allSelected.value) next.delete(groupId)
+        else next.add(groupId)
+    }
+    selectedIds.value = next
 }
 
-const selectVerdictBuckets = (buckets?: string[]) => {
-    if (!preview.value) return
-    selectedIds.value = new Set(
-        preview.value.items
-            .filter(item => itemSelectable(item) && (!buckets || buckets.includes(item.verdict_bucket)))
-            .map(item => item.group_id)
-    )
+const selectFilteredAutomaticAssessments = () => {
+    selectedIds.value = new Set(visibleSelectableIds.value)
+}
+
+const automaticOutcomeFilterSelected = (value: AutomaticOutcomeFilter) =>
+    value === 'ALL'
+        ? automaticOutcomeFilters.value.size === 0
+        : automaticOutcomeFilters.value.has(value)
+
+const automaticRescoreFilterSelected = (value: AutomaticRescoreFilter) =>
+    value === 'ALL'
+        ? automaticRescoreFilters.value.size === 0
+        : automaticRescoreFilters.value.has(value)
+
+const toggleAutomaticOutcomeFilter = (value: AutomaticOutcomeFilter) => {
+    const next = new Set(automaticOutcomeFilters.value)
+    if (value === 'ALL') next.clear()
+    else if (next.has(value)) next.delete(value)
+    else next.add(value)
+    automaticOutcomeFilters.value = next
+    selectFilteredAutomaticAssessments()
+}
+
+const toggleAutomaticRescoreFilter = (value: AutomaticRescoreFilter) => {
+    const next = new Set(automaticRescoreFilters.value)
+    if (value === 'ALL') next.clear()
+    else if (next.has(value)) next.delete(value)
+    else next.add(value)
+    automaticRescoreFilters.value = next
+    selectFilteredAutomaticAssessments()
+}
+
+const clearAutomaticAssessmentFilters = () => {
+    resetAutomaticAssessmentFilters()
+    selectFilteredAutomaticAssessments()
 }
 
 const copyTicket = async (item: BulkWorkflowPreviewItem) => {
@@ -363,12 +463,53 @@ watch(() => props.show, show => {
                             </button>
                         </div>
 
-                        <div v-if="selectedWorkflowId === 'automatic-assessments'" class="flex flex-wrap items-center gap-2" data-testid="automatic-assessment-actions">
-                            <span class="mr-1 text-[10px] font-black uppercase tracking-wider text-slate-500">Quick selection</span>
-                            <button type="button" class="rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold text-slate-300 hover:bg-white/5" @click="selectVerdictBuckets()">All</button>
-                            <button type="button" class="rounded-lg border border-emerald-400/20 px-3 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-500/10" @click="selectVerdictBuckets(['NOT_AFFECTED'])">Not affected</button>
-                            <button type="button" class="rounded-lg border border-red-400/20 px-3 py-1.5 text-[10px] font-bold text-red-200 hover:bg-red-500/10" @click="selectVerdictBuckets(['AFFECTED', 'PROBABLY_AFFECTED'])">Affected + probable</button>
-                            <button type="button" class="rounded-lg border border-amber-400/20 px-3 py-1.5 text-[10px] font-bold text-amber-200 hover:bg-amber-500/10" @click="selectVerdictBuckets(['INCONCLUSIVE'])">Uncertain</button>
+                        <div v-if="selectedWorkflowId === 'automatic-assessments'" class="space-y-3" data-testid="automatic-assessment-actions">
+                            <div class="space-y-2 rounded-xl border border-white/5 bg-black/20 p-3">
+                                <div class="flex flex-wrap items-center gap-2" data-testid="automatic-assessment-outcome-filters">
+                                    <span class="w-24 shrink-0 text-[10px] font-black uppercase tracking-wider text-slate-500">Outcome</span>
+                                    <button
+                                        v-for="option in automaticOutcomeOptions"
+                                        :key="option.value"
+                                        type="button"
+                                        class="rounded-lg border px-3 py-1.5 text-[10px] font-bold transition-colors"
+                                        :class="automaticOutcomeFilterSelected(option.value)
+                                            ? 'border-blue-300/50 bg-blue-500/20 text-blue-100'
+                                            : 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-slate-200'"
+                                        :aria-pressed="automaticOutcomeFilterSelected(option.value)"
+                                        :data-testid="`automatic-outcome-filter-${option.value.toLowerCase()}`"
+                                        @click="toggleAutomaticOutcomeFilter(option.value)"
+                                    >
+                                        {{ option.label }}
+                                    </button>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-2" data-testid="automatic-assessment-rescore-filters">
+                                    <span class="w-24 shrink-0 text-[10px] font-black uppercase tracking-wider text-slate-500">Proposed rescore</span>
+                                    <button
+                                        v-for="option in automaticRescoreOptions"
+                                        :key="option.value"
+                                        type="button"
+                                        class="rounded-lg border px-3 py-1.5 text-[10px] font-bold transition-colors"
+                                        :class="automaticRescoreFilterSelected(option.value)
+                                            ? 'border-blue-300/50 bg-blue-500/20 text-blue-100'
+                                            : 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-slate-200'"
+                                        :aria-pressed="automaticRescoreFilterSelected(option.value)"
+                                        :data-testid="`automatic-rescore-filter-${option.value.toLowerCase()}`"
+                                        @click="toggleAutomaticRescoreFilter(option.value)"
+                                    >
+                                        {{ option.label }}
+                                    </button>
+                                </div>
+                                <div class="flex items-center justify-between gap-3 pt-1 text-[10px] text-slate-500">
+                                    <span data-testid="automatic-assessment-filter-count">
+                                        Showing {{ visiblePreviewItems.length }} of {{ preview.items.length }} candidate{{ preview.items.length === 1 ? '' : 's' }}
+                                    </span>
+                                    <span>Filters also set the selection for apply.</span>
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-2 rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-[10px] leading-relaxed text-blue-100" data-testid="automatic-assessment-rescore-notice">
+                                <AlertTriangle :size="14" class="mt-0.5 shrink-0" />
+                                Applying an automatic assessment writes its shown vulnerability-level CVSS rescore to every eligible finding. Items without a proposed rescore leave CVSS unchanged.
+                            </div>
                         </div>
 
                         <div v-if="preview.items.length === 0" class="flex flex-1 flex-col items-center justify-center text-center">
@@ -386,9 +527,26 @@ watch(() => props.show, show => {
                                 {{ preview.summary.already_applied_findings || 0 }} already-applied finding(s)
                             </p>
                         </div>
+                        <div
+                            v-else-if="visiblePreviewItems.length === 0"
+                            class="flex flex-1 flex-col items-center justify-center text-center"
+                            data-testid="automatic-assessment-filter-empty"
+                        >
+                            <Layers :size="40" class="text-blue-300" />
+                            <h4 class="mt-3 font-bold text-white">No candidates match these filters</h4>
+                            <p class="mt-1 text-xs text-slate-500">Choose another outcome or proposed rescore severity.</p>
+                            <button
+                                type="button"
+                                class="mt-4 rounded-lg border border-blue-400/20 bg-blue-500/5 px-3 py-2 text-[10px] font-black uppercase tracking-wider text-blue-200"
+                                data-testid="automatic-assessment-clear-filters"
+                                @click="clearAutomaticAssessmentFilters"
+                            >
+                                Clear filters
+                            </button>
+                        </div>
                         <div v-else class="min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/5 bg-black/20">
                             <div
-                                v-for="item in preview.items"
+                                v-for="item in visiblePreviewItems"
                                 :key="item.group_id"
                                 role="button"
                                 tabindex="0"
@@ -428,6 +586,42 @@ watch(() => props.show, show => {
                                                 <span class="mt-0.5 block break-all font-mono text-[10px] leading-relaxed text-blue-200/80">{{ firstRescoreRuleFinding(item)?.proposed_vector || 'Manual review required' }}</span>
                                             </span>
                                         </span>
+                                        <span
+                                            v-if="rescoreRuleReasons(item).length"
+                                            class="block border-t border-white/5 pt-2 text-[10px] leading-relaxed text-amber-200"
+                                            :data-testid="`rescore-rule-reasons-${item.group_id}`"
+                                        >
+                                            {{ rescoreRuleReasons(item).join(' · ') }}
+                                        </span>
+                                    </span>
+                                    <span
+                                        v-else-if="selectedWorkflowId === 'automatic-assessments' && item.rescore"
+                                        class="mt-3 block space-y-2 rounded-lg border border-blue-400/15 bg-blue-500/5 p-3"
+                                        :data-testid="`automatic-assessment-rescore-${item.group_id}`"
+                                    >
+                                        <span class="grid grid-cols-[72px_minmax(0,1fr)] gap-3">
+                                            <span class="text-[9px] font-black uppercase tracking-wider text-slate-500">Current</span>
+                                            <span class="min-w-0">
+                                                <span class="block font-mono text-[10px] font-bold text-slate-300">Score {{ formatCvssScore(item.rescore.current_score ?? item.rescore.original_score) }}</span>
+                                                <span class="mt-0.5 block break-all font-mono text-[10px] leading-relaxed text-slate-500">{{ item.rescore.current_vector || item.rescore.original_vector || 'No stored vector' }}</span>
+                                            </span>
+                                        </span>
+                                        <span class="grid grid-cols-[72px_minmax(0,1fr)] gap-3">
+                                            <span class="text-[9px] font-black uppercase tracking-wider text-blue-300">Will apply</span>
+                                            <span class="min-w-0">
+                                                <span class="block font-mono text-[10px] font-bold text-blue-100">
+                                                    Score {{ formatCvssScore(item.rescore.proposed_score) }}
+                                                    <span v-if="item.rescore.proposed_severity" class="ml-1 text-green-300">· {{ item.rescore.proposed_severity }}</span>
+                                                </span>
+                                                <span class="mt-0.5 block break-all font-mono text-[10px] leading-relaxed text-blue-200/80">{{ item.rescore.proposed_vector || 'Score-only rescore' }}</span>
+                                            </span>
+                                        </span>
+                                    </span>
+                                    <span
+                                        v-else-if="selectedWorkflowId === 'automatic-assessments'"
+                                        class="mt-2 block text-[10px] text-slate-500"
+                                    >
+                                        CVSS rescore: no change proposed
                                     </span>
                                 </span>
                                 <span class="flex flex-col items-end gap-2 text-right">
@@ -456,7 +650,12 @@ watch(() => props.show, show => {
 
                         <div class="flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-[11px] text-amber-100">
                             <AlertTriangle :size="18" class="shrink-0" />
-                            This applies {{ selectedIds.size }} vulnerability group{{ selectedIds.size === 1 ? '' : 's' }} and approximately {{ selectedFindingCount }} findings. The preview is revalidated before writing.
+                            <span v-if="selectedWorkflowId === 'automatic-assessments'">
+                                This applies the shown states, assessment details, and CVSS rescores for {{ selectedIds.size }} vulnerability group{{ selectedIds.size === 1 ? '' : 's' }} to approximately {{ selectedFindingCount }} findings. The preview is revalidated before writing.
+                            </span>
+                            <span v-else>
+                                This applies {{ selectedIds.size }} vulnerability group{{ selectedIds.size === 1 ? '' : 's' }} and approximately {{ selectedFindingCount }} findings. The preview is revalidated before writing.
+                            </span>
                         </div>
                     </template>
                 </main>

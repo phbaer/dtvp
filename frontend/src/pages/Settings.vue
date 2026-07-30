@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, inject, watch } from 'vue'
+import { computed, ref, onMounted, inject, watch } from 'vue'
 import { Archive, Download, RefreshCw, Upload, X } from 'lucide-vue-next'
 import {
     applyProjectArchiveImport,
@@ -7,11 +7,13 @@ import {
     getProjectArchiveTaskDownloadUrl,
     getRoles,
     getAutoAnalysisGuidance,
+    getTeamGroups,
     listProjectArchiveSnapshots,
     startProjectArchiveExport,
     updateAutoAnalysisGuidance,
     updateRescoreRules,
     updateRoles,
+    updateTeamGroups,
     updateTeamMapping,
     uploadAutoAnalysisGuidance,
     uploadProjectArchiveImport,
@@ -22,6 +24,7 @@ import {
     getTeamMapping,
     getRescoreRules,
 } from '../lib/api'
+import type { TeamGroupConfig } from '../lib/api'
 import type { ProjectArchiveApplyResult, ProjectArchivePreview, ProjectArchiveSnapshot, ProjectArchiveTask } from '../types'
 
 const user = inject<any>('user', { role: 'ANALYST' })
@@ -113,6 +116,113 @@ const removeMappingRow = (index: number) => {
     updateMappingJsonFromRows()
 }
 
+// Team groups state
+interface TeamGroupRow {
+    id: string
+    name: string
+    teams: string[]
+    groups: string[]
+}
+
+let nextTeamGroupRowId = 1
+let lastTeamGroupsJsonFromRows = ''
+let skipNextTeamGroupRowsSync = false
+const teamGroupRows = ref<TeamGroupRow[]>([])
+const teamGroupsJson = ref('')
+const teamGroupsRawJsonError = ref('')
+const teamGroupsMessage = ref('')
+const teamGroupsError = ref('')
+const savingTeamGroups = ref(false)
+
+const createTeamGroupRow = (
+    values: Omit<TeamGroupRow, 'id'>,
+): TeamGroupRow => ({
+    id: `team-group-row-${nextTeamGroupRowId++}`,
+    ...values,
+})
+
+const teamGroupsToRows = (config: TeamGroupConfig | null): TeamGroupRow[] =>
+    Object.entries(config || {})
+        .sort(([left], [right]) => left.localeCompare(
+            right,
+            undefined,
+            { sensitivity: 'base' },
+        ))
+        .map(([name, definition]) => createTeamGroupRow({
+            name,
+            teams: Array.isArray(definition?.teams) ? [...definition.teams] : [],
+            groups: Array.isArray(definition?.groups) ? [...definition.groups] : [],
+        }))
+
+const uniqueTrimmed = (values: string[]): string[] => {
+    const seen = new Set<string>()
+    return values
+        .map(value => value.trim())
+        .filter((value) => {
+            const normalized = value.toLowerCase()
+            if (!value || seen.has(normalized)) return false
+            seen.add(normalized)
+            return true
+        })
+}
+
+const rowsToTeamGroups = (): TeamGroupConfig => {
+    const groups: TeamGroupConfig = {}
+    teamGroupRows.value.forEach((row) => {
+        const name = row.name.trim()
+        if (!name) return
+        groups[name] = {
+            teams: uniqueTrimmed(row.teams),
+            groups: uniqueTrimmed(row.groups),
+        }
+    })
+    return groups
+}
+
+const updateTeamGroupsJsonFromRows = () => {
+    lastTeamGroupsJsonFromRows = JSON.stringify(rowsToTeamGroups(), null, 2)
+    teamGroupsJson.value = lastTeamGroupsJsonFromRows
+    teamGroupsRawJsonError.value = ''
+}
+
+const addTeamGroupRow = () => {
+    teamGroupRows.value.push(createTeamGroupRow({
+        name: '',
+        teams: [],
+        groups: [],
+    }))
+}
+
+const removeTeamGroupRow = (index: number) => {
+    teamGroupRows.value.splice(index, 1)
+    updateTeamGroupsJsonFromRows()
+}
+
+const canonicalTeams = computed(() => {
+    const teams = new Map<string, string>()
+    Object.values(currentMapping.value || {}).forEach((value) => {
+        const primary = (Array.isArray(value) ? value[0] : value)?.trim()
+        if (primary && !teams.has(primary.toLowerCase())) {
+            teams.set(primary.toLowerCase(), primary)
+        }
+    })
+    return [...teams.values()].sort((left, right) => left.localeCompare(
+        right,
+        undefined,
+        { numeric: true, sensitivity: 'base' },
+    ))
+})
+
+const nestedGroupOptions = (row: TeamGroupRow): string[] =>
+    teamGroupRows.value
+        .filter(candidate => candidate.id !== row.id && candidate.name.trim())
+        .map(candidate => candidate.name.trim())
+        .sort((left, right) => left.localeCompare(
+            right,
+            undefined,
+            { numeric: true, sensitivity: 'base' },
+        ))
+
 // Roles state
 const rolesFileInput = ref<HTMLInputElement | null>(null)
 const uploadingRoles = ref(false)
@@ -189,6 +299,62 @@ watch(mappingJson, (value) => {
         rawJsonError.value = e.message || 'Invalid JSON format'
     }
 })
+
+watch(teamGroupRows, () => {
+    if (skipNextTeamGroupRowsSync) {
+        skipNextTeamGroupRowsSync = false
+        return
+    }
+    updateTeamGroupsJsonFromRows()
+}, { deep: true })
+
+watch(teamGroupsJson, (value) => {
+    if (value === lastTeamGroupsJsonFromRows) return
+    try {
+        const parsed = JSON.parse(value)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            skipNextTeamGroupRowsSync = true
+            teamGroupRows.value = teamGroupsToRows(parsed as TeamGroupConfig)
+            teamGroupsRawJsonError.value = ''
+        } else {
+            teamGroupsRawJsonError.value = 'Team groups JSON must be an object.'
+        }
+    } catch (e: any) {
+        teamGroupsRawJsonError.value = e.message || 'Invalid JSON format'
+    }
+})
+
+const loadTeamGroups = async () => {
+    if (realRole?.value !== 'REVIEWER') return
+    try {
+        const config = await getTeamGroups()
+        teamGroupRows.value = teamGroupsToRows(config)
+        lastTeamGroupsJsonFromRows = JSON.stringify(config, null, 2)
+        teamGroupsJson.value = lastTeamGroupsJsonFromRows
+    } catch (e) {
+        console.error('Failed to load team groups', e)
+    }
+}
+
+const saveTeamGroups = async () => {
+    savingTeamGroups.value = true
+    teamGroupsMessage.value = ''
+    teamGroupsError.value = ''
+    try {
+        const parsed = JSON.parse(teamGroupsJson.value)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('Team groups JSON must be an object')
+        }
+        const res = await updateTeamGroups(parsed as TeamGroupConfig)
+        if (res.status !== 'success') throw new Error(res.message)
+        teamGroupsMessage.value = res.message || 'Team groups saved successfully!'
+        await loadTeamGroups()
+    } catch (err: any) {
+        teamGroupsError.value = err.message || 'Failed to save team groups'
+    } finally {
+        savingTeamGroups.value = false
+    }
+}
 
 const loadRoles = async () => {
     if (realRole?.value !== 'REVIEWER') return
@@ -524,6 +690,7 @@ onMounted(() => {
     // Load data once we know the real permission of the user
     if (realRole?.value === 'REVIEWER') {
         loadMapping()
+        loadTeamGroups()
         loadRoles()
         loadRescoreRules()
         loadAutoGuidance()
@@ -535,6 +702,7 @@ onMounted(() => {
 watch(realRole, (role) => {
     if (role === 'REVIEWER') {
         loadMapping()
+        loadTeamGroups()
         loadRoles()
         loadRescoreRules()
         loadAutoGuidance()
@@ -546,6 +714,9 @@ watch(realRole, (role) => {
 watch(() => activeTab.value, (newTab) => {
     if (newTab === 'roles' && realRole?.value === 'REVIEWER') {
         loadRoles()
+    } else if (newTab === 'team-groups' && realRole?.value === 'REVIEWER') {
+        loadMapping()
+        loadTeamGroups()
     } else if (newTab === 'rescore' && realRole?.value === 'REVIEWER') {
         loadRescoreRules()
     } else if (newTab === 'config' && realRole?.value === 'REVIEWER') {
@@ -572,6 +743,13 @@ watch(() => activeTab.value, (newTab) => {
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'mapping' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
         >
             Team Mapping
+        </button>
+        <button
+            v-if="user?.role === 'REVIEWER'"
+            @click="activeTab = 'team-groups'"
+            :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'team-groups' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
+        >
+            Team Groups
         </button>
         <button 
             v-if="user?.role === 'REVIEWER'"
@@ -714,6 +892,126 @@ watch(() => activeTab.value, (newTab) => {
             <div v-if="error" class="p-3 bg-red-900/30 border border-red-800 text-red-400 rounded">
                 {{ error }}
             </div>
+        </div>
+    </div>
+
+    <div
+        v-if="activeTab === 'team-groups' && user?.role === 'REVIEWER'"
+        class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg"
+    >
+        <h3 class="text-xl font-bold mb-2 text-gray-200">Team Group Configuration</h3>
+        <p class="text-gray-400 mb-6 text-xs">
+            Build reporting groups from canonical teams in Team Mapping. A group can share a team's name:
+            for example, group <code>Core-MUC</code> can contain teams <code>Core-MUC</code> and
+            <code>3rd Party</code>. Nested groups are expanded for statistics, and each vulnerability is
+            counted only once per group.
+        </p>
+
+        <div class="space-y-4 mb-6" data-testid="team-group-editor">
+            <div
+                v-for="(row, index) in teamGroupRows"
+                :key="row.id"
+                class="grid gap-3 rounded-lg border border-gray-700 bg-gray-900/40 p-4 lg:grid-cols-[1fr_1.2fr_1.2fr_auto]"
+            >
+                <div>
+                    <label class="mb-1 block text-xs text-gray-400">Group name</label>
+                    <input
+                        v-model="row.name"
+                        :data-testid="`team-group-name-${row.id}`"
+                        placeholder="Core-MUC"
+                        class="w-full rounded border border-gray-700 bg-gray-900 px-3 py-2 text-xs text-gray-100"
+                    />
+                </div>
+                <div>
+                    <label class="mb-1 block text-xs text-gray-400">Direct teams</label>
+                    <select
+                        v-model="row.teams"
+                        multiple
+                        :data-testid="`team-group-teams-${row.id}`"
+                        class="h-28 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-100"
+                    >
+                        <option v-for="team in canonicalTeams" :key="team" :value="team">
+                            {{ team }}
+                        </option>
+                    </select>
+                    <p class="mt-1 text-[10px] text-gray-500">Use Ctrl/⌘ to select multiple teams.</p>
+                </div>
+                <div>
+                    <label class="mb-1 block text-xs text-gray-400">Nested groups</label>
+                    <select
+                        v-model="row.groups"
+                        multiple
+                        :data-testid="`team-group-groups-${row.id}`"
+                        class="h-28 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-100"
+                    >
+                        <option
+                            v-for="group in nestedGroupOptions(row)"
+                            :key="group"
+                            :value="group"
+                        >
+                            {{ group }}
+                        </option>
+                    </select>
+                    <p class="mt-1 text-[10px] text-gray-500">Groups may contain other groups.</p>
+                </div>
+                <button
+                    type="button"
+                    @click="removeTeamGroupRow(index)"
+                    class="flex h-10 min-w-[2.5rem] items-center justify-center self-start rounded bg-red-600 text-white transition-colors hover:bg-red-700"
+                    title="Remove team group"
+                >
+                    <X :size="14" />
+                </button>
+            </div>
+            <button
+                type="button"
+                @click="addTeamGroupRow"
+                class="rounded bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+            >
+                Add team group
+            </button>
+        </div>
+
+        <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Raw JSON Editor</h4>
+        <p class="text-gray-400 mb-2 text-xs">
+            Use explicit <code>teams</code> and <code>groups</code> arrays to distinguish a team from
+            a nested group with the same name.
+        </p>
+        <div class="relative">
+            <textarea
+                v-model="teamGroupsJson"
+                data-testid="team-groups-json"
+                class="w-full h-64 bg-gray-900 p-4 rounded border border-gray-700 font-mono text-blue-300 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                spellcheck="false"
+            ></textarea>
+            <div class="absolute bottom-4 right-4 flex gap-2">
+                <button
+                    @click="saveTeamGroups"
+                    :disabled="savingTeamGroups || Boolean(teamGroupsRawJsonError)"
+                    data-testid="save-team-groups"
+                    class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-4 rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                >
+                    {{ savingTeamGroups ? 'Saving...' : 'Save Changes' }}
+                </button>
+            </div>
+        </div>
+        <div
+            v-if="teamGroupsRawJsonError"
+            class="mt-2 p-3 bg-red-900/30 border border-red-800 text-red-400 rounded text-xs"
+        >
+            {{ teamGroupsRawJsonError }}
+        </div>
+        <div
+            v-if="teamGroupsMessage"
+            class="mt-3 p-3 bg-green-900/30 border border-green-800 text-green-400 rounded"
+        >
+            {{ teamGroupsMessage }}
+        </div>
+        <div
+            v-if="teamGroupsError"
+            class="mt-3 p-3 bg-red-900/30 border border-red-800 text-red-400 rounded"
+        >
+            {{ teamGroupsError }}
         </div>
     </div>
 

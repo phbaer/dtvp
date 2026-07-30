@@ -199,11 +199,49 @@ def test_bulk_sync_writes_zero_score_for_every_shipped_transition(
     preview = build_rescore_rule_sync_preview([group], rules)
     finding = preview["items"][0]["findings"][0]
     assert finding["status"] == "ready"
+    assert finding["issue_type"] == "missing_rescore"
+    assert finding["current_vector"] is None
     assert finding["proposed_score"] == 0.0
+    assert preview["summary"]["missing_rescore_findings"] == 1
+    assert preview["items"][0]["missing_rescore_finding_count"] == 1
 
     payloads, skipped = build_rescore_rule_sync_payloads([group], rules)
     assert skipped == {"review_required": 0, "unchanged": 0}
     assert "[Rescored: 0.0]" in payloads[0][1]["details"]
+
+
+def test_sync_preview_lists_matching_state_with_missing_base_vector_for_review(rules):
+    group = {
+        "id": "CVE-2026-NO-BASE",
+        "affected_versions": [
+            {
+                "components": [
+                    {
+                        "finding_uuid": "finding-1",
+                        "project_uuid": "project-1",
+                        "component_uuid": "component-1",
+                        "vulnerability_uuid": "vulnerability-1",
+                        "analysis_state": "not_affected",
+                        "analysis_details": "Keep this text.",
+                    }
+                ]
+            }
+        ],
+    }
+
+    preview = build_rescore_rule_sync_preview([group], rules)
+
+    assert preview["summary"]["groups"] == 1
+    assert preview["summary"]["review_findings"] == 1
+    finding = preview["items"][0]["findings"][0]
+    assert finding["state"] == "NOT_AFFECTED"
+    assert finding["status"] == "review"
+    assert finding["issue_type"] == "manual_review"
+    assert finding["reasons"] == ["Original CVSS vector is missing"]
+
+    payloads, skipped = build_rescore_rule_sync_payloads([group], rules)
+    assert payloads == []
+    assert skipped == {"review_required": 1, "unchanged": 0}
 
 
 def test_sync_preview_marks_cross_version_vectors_for_review(rules):
