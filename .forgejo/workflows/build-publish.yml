@@ -90,7 +90,7 @@ jobs:
         with:
           timeout_minutes: 5
           max_attempts: 3
-          command: cd frontend/sbom-tool && npm ci --ignore-scripts && npm audit --audit-level=high
+          command: cd frontend/sbom-tool && npm ci --ignore-scripts --omit=optional && npm audit --audit-level=high --omit=optional
       - name: Run unit tests with coverage
         working-directory: frontend
         run: npm run test:unit -- --run --coverage

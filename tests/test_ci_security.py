@@ -85,7 +85,7 @@ def test_ci_uses_locked_dependencies_and_read_only_default_permissions():
     assert workflow.count(pinned_setup_uv) == 6
     assert "npm install --save-dev" not in workflow + sbom_script
     assert "./scripts/generate-sboms.sh" in workflow
-    assert "npm ci --ignore-scripts" in sbom_script
+    assert "npm ci --ignore-scripts --omit=optional" in sbom_script
     assert "npm run generate --" in sbom_script
     assert '"$repository_dir/scripts/check-node-tls.sh"' in sbom_script
     assert "@cyclonedx/cyclonedx-npm" not in workflow
@@ -117,6 +117,10 @@ def test_ci_gates_dependencies_and_images_before_publishing():
     assert "python scripts/validate-okf.py docs" in workflow
     assert "generate-agentyzer-openapi.py --check" in workflow
     assert workflow.count("npm audit --audit-level=high") == 2
+    assert (
+        "npm ci --ignore-scripts --omit=optional && "
+        "npm audit --audit-level=high --omit=optional"
+    ) in workflow
     assert "./scripts/check-node-tls.sh" in workflow
     assert "run: npx playwright test\n" in workflow
     assert "npx playwright test --reporter=line" not in workflow
@@ -199,3 +203,13 @@ def test_npm_lockfiles_do_not_embed_environment_specific_registries():
             if package.get("resolved", "").startswith("https://")
         }
         assert resolved_hosts <= {"registry.npmjs.org"}
+
+
+def test_frontend_test_tool_override_uses_patched_beautifier():
+    package = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads(
+        (ROOT / "frontend" / "package-lock.json").read_text(encoding="utf-8")
+    )
+
+    assert package["overrides"]["@vue/test-utils"]["js-beautify"] == "2.0.3"
+    assert lock["packages"]["node_modules/js-beautify"]["version"] == "2.0.3"

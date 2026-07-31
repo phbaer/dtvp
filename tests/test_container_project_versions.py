@@ -57,7 +57,7 @@ def test_agentyzer_container_prints_packaged_project_version_before_server_start
 
     version_lookup = 'version("agentyzer")'
     version_output = "printf 'Agentyzer version: %s (build number: %s)\\n'"
-    server_start = "exec uv run --no-sync uvicorn"
+    server_start = "exec /app/.venv/bin/uvicorn"
 
     assert "COPY start.sh ./start.sh" in dockerfile
     assert "RUN chmod +x ./start.sh" in dockerfile

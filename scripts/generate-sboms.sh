@@ -20,7 +20,7 @@ uv run --frozen cyclonedx-py environment \
     --pyproject pyproject.toml
 
 cd "$repository_dir/frontend/sbom-tool"
-npm ci --ignore-scripts
+npm ci --ignore-scripts --omit=optional
 npm run generate -- \
     --omit dev \
     --mc-type application \
