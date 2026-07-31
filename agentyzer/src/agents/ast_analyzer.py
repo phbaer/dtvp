@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Tuple
 
+from src.repository_files import RepositoryReadBudget, read_repository_text
+
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ #
@@ -289,6 +291,8 @@ def analyze_repository(
     SymbolGraph
         Aggregated import + call information across all source files.
     """
+    budget = RepositoryReadBudget()
+
     def source_documents() -> Iterable[tuple[str, str]]:
         for root, dirs, files in os.walk(repo_path):
             dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
@@ -298,11 +302,9 @@ def analyze_repository(
                     continue
                 fpath = os.path.join(root, fname)
                 rel = os.path.relpath(fpath, repo_path)
-                try:
-                    with open(fpath, "r", errors="ignore") as fh:
-                        yield rel, fh.read()
-                except Exception:
-                    continue
+                source = read_repository_text(repo_path, fpath, budget=budget)
+                if source is not None:
+                    yield rel, source
 
     return analyze_source_documents(source_documents(), component_name, known_symbols)
 

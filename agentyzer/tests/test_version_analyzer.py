@@ -67,6 +67,37 @@ def test_gather_component_versions_and_inventory(tmp_path):
     ]
 
 
+def test_worktree_version_reads_reject_symlinks_and_oversized_files(tmp_path):
+    (tmp_path / "requirements.txt").symlink_to("/dev/zero")
+    (tmp_path / "package-lock.json").write_text("example-lib" * 100_001)
+
+    gathered = va.gather_component_versions(str(tmp_path), "example-lib")
+
+    assert gathered == [
+        {
+            "ref": "WORKTREE",
+            "ref_type": "worktree",
+            "versions": [],
+            "source": "manifest",
+        }
+    ]
+
+
+def test_worktree_version_analysis_rejects_untrusted_manifest_link(tmp_path):
+    (tmp_path / "pyproject.toml").symlink_to("/dev/zero")
+
+    gathered = va.gather_component_versions(str(tmp_path), "example-lib")
+
+    assert gathered == [
+        {
+            "ref": "WORKTREE",
+            "ref_type": "worktree",
+            "versions": [],
+            "source": "manifest",
+        }
+    ]
+
+
 def test_inventory_versions_keeps_explicit_inputs_and_trace(tmp_path):
     tmpdir = str(tmp_path)
     _init_repo_with_tags(tmpdir)

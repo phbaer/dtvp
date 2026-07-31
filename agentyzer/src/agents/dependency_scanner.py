@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from git import GitCommandError, Repo
 
 from src.configuration import AgentyzerRuntimeSettings
+from src.repository_files import RepositoryReadBudget, read_repository_text
 
 logger = logging.getLogger(__name__)
 
@@ -621,6 +622,7 @@ def find_component(
     _MANIFESTS = _lang_registry.all_manifest_filenames()
     # --- lock / resolved files (transitive deps) ---
     _LOCK_FILES = _lang_registry.all_lockfile_filenames()
+    budget = RepositoryReadBudget()
 
     for root, dirs, files in os.walk(repo_path):
         # Skip hidden / VCS dirs
@@ -632,10 +634,8 @@ def find_component(
                 continue
 
             fpath = os.path.join(root, fname)
-            try:
-                with open(fpath, "r", errors="ignore") as f:
-                    txt = f.read()
-            except Exception:
+            txt = read_repository_text(repo_path, fpath, budget=budget)
+            if txt is None:
                 continue
 
             plugin = (
@@ -749,6 +749,7 @@ def find_reverse_dependencies(
     from src.languages import registry as _lang_registry
 
     _LOCK_FILES = _lang_registry.all_lockfile_filenames()
+    budget = RepositoryReadBudget()
 
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
@@ -757,10 +758,8 @@ def find_reverse_dependencies(
                 continue
             fpath = os.path.join(root, fname)
             rel = os.path.relpath(fpath, repo_path)
-            try:
-                with open(fpath, "r", errors="ignore") as f:
-                    txt = f.read()
-            except Exception:
+            txt = read_repository_text(repo_path, fpath, budget=budget)
+            if txt is None:
                 continue
 
             plugin = _lang_registry.for_lockfile(fname)
@@ -826,6 +825,7 @@ def build_dependency_chains(
     _LOCK_FILES = _lang_registry.all_lockfile_filenames()
 
     all_chains: List[Dict[str, Any]] = []
+    budget = RepositoryReadBudget()
 
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
@@ -834,10 +834,8 @@ def build_dependency_chains(
                 continue
             fpath = os.path.join(root, fname)
             rel = os.path.relpath(fpath, repo_path)
-            try:
-                with open(fpath, "r", errors="ignore") as f:
-                    txt = f.read()
-            except Exception:
+            txt = read_repository_text(repo_path, fpath, budget=budget)
+            if txt is None:
                 continue
 
             plugin = _lang_registry.for_lockfile(fname)

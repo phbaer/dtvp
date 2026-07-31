@@ -418,3 +418,29 @@ def test_next_prepare_reclaims_worktree_with_abandoned_process_lease(
             )
 
     asyncio.run(scenario())
+
+
+def test_dependency_discovery_rejects_symlinked_and_oversized_inputs(tmp_path):
+    (tmp_path / "package.json").symlink_to("/dev/zero")
+    (tmp_path / "package-lock.json").write_text("left-pad" * 150_000)
+
+    result = dependency_scanner.find_component(str(tmp_path), "left-pad")
+
+    assert result["found"] is False
+    assert dependency_scanner.find_reverse_dependencies(
+        str(tmp_path), "left-pad"
+    ) == []
+    assert dependency_scanner.build_dependency_chains(str(tmp_path), "left-pad") == []
+
+
+def test_dependency_analysis_rejects_untrusted_manifest_and_lockfile_links(tmp_path):
+    (tmp_path / "package.json").symlink_to("/dev/zero")
+    (tmp_path / "package-lock.json").symlink_to("/dev/zero")
+
+    result = dependency_scanner.find_component(str(tmp_path), "left-pad")
+
+    assert result["found"] is False
+    assert dependency_scanner.find_reverse_dependencies(
+        str(tmp_path), "left-pad"
+    ) == []
+    assert dependency_scanner.build_dependency_chains(str(tmp_path), "left-pad") == []

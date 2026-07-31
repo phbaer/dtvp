@@ -21,6 +21,11 @@ from typing import Any, Dict, List
 
 from src.agents.web_research import generate_with_research
 from src.llm.prompt_registry import get_prompt_value
+from src.repository_files import (
+    RepositoryReadBudget,
+    read_repository_text,
+    repository_file_is_safe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,16 +168,25 @@ def _is_safe_repo_file(file_path: str, repo_path: str) -> bool:
     make the scanner copy host files into an LLM prompt, and cap source size to
     prevent a single generated file from consuming excessive resources.
     """
-    try:
-        if os.path.islink(file_path) or not os.path.isfile(file_path):
-            return False
-        repo_real = os.path.realpath(repo_path)
-        file_real = os.path.realpath(file_path)
-        if os.path.commonpath((repo_real, file_real)) != repo_real:
-            return False
-        return os.path.getsize(file_path) <= _MAX_SOURCE_FILE_BYTES
-    except (OSError, ValueError):
-        return False
+    return repository_file_is_safe(
+        repo_path,
+        file_path,
+        max_bytes=_MAX_SOURCE_FILE_BYTES,
+    )
+
+
+def _read_repo_source(
+    file_path: str,
+    repo_path: str,
+    *,
+    budget: RepositoryReadBudget | None = None,
+) -> str | None:
+    return read_repository_text(
+        repo_path,
+        file_path,
+        max_bytes=_MAX_SOURCE_FILE_BYTES,
+        budget=budget,
+    )
 
 
 def extract_structure_from_source(source: str, rel_path: str) -> str | None:
@@ -204,12 +218,8 @@ def _extract_structure(file_path: str, repo_path: str) -> str | None:
     works across languages.  The LLM receives the compact output and does
     the real semantic analysis.
     """
-    if not _is_safe_repo_file(file_path, repo_path):
-        return None
-    try:
-        with open(file_path, "r", errors="ignore") as f:
-            source = f.read()
-    except Exception:
+    source = _read_repo_source(file_path, repo_path)
+    if source is None:
         return None
 
     return extract_structure_from_source(source, os.path.relpath(file_path, repo_path))
@@ -233,23 +243,21 @@ def search_usage(repo_path: str, component_name: str, symbols: List[str]) -> Lis
         component_name,
         len(symbols),
     )
+    budget = RepositoryReadBudget()
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         for fname in files:
             if not _is_source_file(fname):
                 continue
             fpath = os.path.join(root, fname)
-            if not _is_safe_repo_file(fpath, repo_path):
+            source = _read_repo_source(fpath, repo_path, budget=budget)
+            if source is None:
                 continue
-            try:
-                with open(fpath, "r", errors="ignore") as f:
-                    for i, line in enumerate(f, start=1):
-                        for term in search_terms:
-                            if term in line:
-                                hits.append(f"{fpath}:{i}: {line.strip()}")
-                                break  # one hit per line is enough
-            except Exception:
-                pass
+            for i, line in enumerate(source.splitlines(), start=1):
+                for term in search_terms:
+                    if term in line:
+                        hits.append(f"{fpath}:{i}: {line.strip()}")
+                        break  # one hit per line is enough
     if not hits:
         return ["No direct usage found"]
     return hits
@@ -281,18 +289,15 @@ def collect_snippets(
         if len(parts) < 2:
             continue
         fpath, lineno_s = parts[0], parts[1]
-        if not _is_safe_repo_file(fpath, repo_path):
-            continue
         try:
             lineno = int(lineno_s.strip())
         except ValueError:
             continue
 
-        try:
-            with open(fpath, "r", errors="ignore") as f:
-                all_lines = f.readlines()
-        except Exception:
+        source = _read_repo_source(fpath, repo_path)
+        if source is None:
             continue
+        all_lines = source.splitlines(keepends=True)
 
         start = max(0, lineno - 1 - _CONTEXT_LINES)
         end = min(len(all_lines), lineno + _CONTEXT_LINES)
@@ -329,6 +334,7 @@ def collect_structure(
 
     structures: List[str] = []
     total_chars = 0
+    budget = RepositoryReadBudget()
 
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
@@ -336,18 +342,17 @@ def collect_structure(
             if not _is_source_file(fname):
                 continue
             fpath = os.path.join(root, fname)
-            if not _is_safe_repo_file(fpath, repo_path):
-                continue
-            try:
-                with open(fpath, "r", errors="ignore") as f:
-                    source = f.read()
-            except Exception:
+            source = _read_repo_source(fpath, repo_path, budget=budget)
+            if source is None:
                 continue
 
             if not any(term in source for term in search_terms):
                 continue
 
-            struct = _extract_structure(fpath, repo_path)
+            struct = extract_structure_from_source(
+                source,
+                os.path.relpath(fpath, repo_path),
+            )
             if struct and total_chars + len(struct) <= _MAX_STRUCTURE_CHARS:
                 structures.append(struct)
                 total_chars += len(struct)
@@ -715,12 +720,8 @@ def extract_path_context(
 
     for rel_path in ordered:
         abs_path = os.path.join(repo_path, rel_path)
-        if not _is_safe_repo_file(abs_path, repo_path):
-            continue
-        try:
-            with open(abs_path, "r", errors="ignore") as f:
-                content = f.read()
-        except Exception:
+        content = _read_repo_source(abs_path, repo_path)
+        if content is None:
             continue
 
         if total_chars + len(content) > _MAX_DEEP_CONTEXT_CHARS:

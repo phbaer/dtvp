@@ -5,11 +5,16 @@ from typing import Any, Dict, List, Tuple
 
 import toml
 from defusedxml import ElementTree as ET
-from git import GitCommandError, Repo
+from git import Repo
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from src.agents.dependency_scanner import _extract_locked_version
+from src.repository_files import (
+    RepositoryReadBudget,
+    read_repository_blob_text,
+    read_repository_text,
+)
 
 
 def _common_manifests() -> list[str]:
@@ -402,11 +407,10 @@ def list_release_refs(
 
 
 def _read_file_at_tag(repo: Repo, tag: str, path: str) -> str:
-    try:
-        # git show tag:path
-        return repo.git.show(f"{tag}:{path}")
-    except GitCommandError:
-        raise
+    text = read_repository_blob_text(repo, tag, path)
+    if text is None:
+        raise ValueError(f"Git blob is missing or exceeds repository read limits: {path}")
+    return text
 
 
 def gather_component_versions(
@@ -585,10 +589,10 @@ def _component_versions_at_ref(
 ) -> List[str]:
     """Extract component versions from files at a specific git ref."""
     versions: List[str] = []
+    budget = RepositoryReadBudget()
     for path in paths:
-        try:
-            txt = repo.git.show(f"{ref}:{path}")
-        except Exception:
+        txt = read_repository_blob_text(repo, ref, path, budget=budget)
+        if txt is None:
             continue
         if lock:
             ver = _extract_locked_version(txt, component_name, os.path.basename(path))
@@ -630,13 +634,12 @@ def _read_matching_files_from_fs(
     repo_path: str, filenames: List[str]
 ) -> Dict[str, str]:
     texts: Dict[str, str] = {}
+    budget = RepositoryReadBudget()
     for rel_path in _walk_repo_files(repo_path, filenames):
         path = os.path.join(repo_path, rel_path)
-        try:
-            with open(path, "r", errors="ignore") as f:
-                texts[rel_path] = f.read()
-        except Exception:
-            continue
+        text = read_repository_text(repo_path, path, budget=budget)
+        if text is not None:
+            texts[rel_path] = text
     return texts
 
 
@@ -682,10 +685,10 @@ def _lock_paths_with_component_at_ref(
     lock_paths: List[str],
 ) -> List[str]:
     processed: List[str] = []
+    budget = RepositoryReadBudget()
     for path in lock_paths:
-        try:
-            txt = repo.git.show(f"{ref}:{path}")
-        except Exception:
+        txt = read_repository_blob_text(repo, ref, path, budget=budget)
+        if txt is None:
             continue
         if _lock_text_mentions_component(path, txt, component_name):
             processed.append(path)

@@ -60,6 +60,18 @@ but cannot override the service's task or security policy. Prompts and output
 must not contain source-control credentials, provider API keys, DTVP sessions,
 or unrelated tenant data.
 
+All filesystem and historical Git-tree inputs used by dependency, version,
+AST, and source analysis pass through the same bounded reader. It refuses
+symlinks, non-regular files, paths outside the active worktree, individual
+files over 1 MB, and repository-analysis reads beyond a 24 MB aggregate
+budget. Reads remain byte-bounded if a file changes after it is opened.
+
+All source, manifest, lockfile, and historical Git-blob reads go through the
+same repository-input boundary. It rejects symlinks and non-regular files,
+rechecks that opened files remain inside the checkout, and applies per-file and
+per-operation byte limits before parsing or prompt construction. Files outside
+those limits are ignored as unavailable evidence.
+
 The service has its own API authentication and process/storage boundary. It
 does not become the DTVP identity provider: DTVP authorizes end users and sends
 only the scoped work that the service needs. LLM and source-control credentials

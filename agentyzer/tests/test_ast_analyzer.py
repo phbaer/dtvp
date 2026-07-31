@@ -174,6 +174,26 @@ def test_python_no_match():
     assert len(graph.resolved_symbols) == 0
 
 
+def test_analyzer_rejects_symlinked_and_oversized_sources(tmp_path):
+    (tmp_path / "linked.py").symlink_to("/dev/zero")
+    (tmp_path / "large.py").write_text("import vulnerable_package\n" * 50_000)
+
+    graph = analyze_repository(str(tmp_path), "vulnerable-package")
+
+    assert graph.files_analyzed == 0
+    assert graph.imports == []
+
+
+def test_ast_analysis_rejects_untrusted_source_link(tmp_path):
+    (tmp_path / "leak.py").symlink_to("/dev/zero")
+
+    graph = analyze_repository(str(tmp_path), "path-to-regexp")
+
+    assert graph.files_analyzed == 0
+    assert graph.imports == []
+    assert graph.calls == []
+
+
 # ------------------------------------------------------------------ #
 # JavaScript / TypeScript analysis
 # ------------------------------------------------------------------ #
