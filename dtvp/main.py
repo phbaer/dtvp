@@ -880,8 +880,8 @@ api_router.include_router(
             media_type_json=MEDIA_TYPE_JSON,
             get_performance_status=get_performance_status,
             get_runtime_status=get_python_runtime_status,
-            additional_health=lambda: {"security_audit": audit_health()},
         ),
+        current_user_dependency=get_current_user,
         not_found_response=NOT_FOUND_RESPONSE,
     )
 )

@@ -481,13 +481,9 @@ def build_app_info_route_deps(
     media_type_json: str,
     get_performance_status: Callable[[], dict[str, Any]] | None = None,
     get_runtime_status: Callable[[], dict[str, Any]] | None = None,
-    additional_health: Callable[[], dict[str, Any]] | None = None,
 ) -> AppInfoRouteDeps:
     def get_cache_status() -> dict[str, Any]:
-        status = dict(cache_manager.get_cache_status())
-        if additional_health is not None:
-            status.update(additional_health())
-        return status
+        return dict(cache_manager.get_cache_status())
 
     return AppInfoRouteDeps(
         version=version,

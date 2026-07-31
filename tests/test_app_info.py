@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from dtvp.app_info_routes import AppInfoRouteDeps, create_app_info_router
@@ -11,6 +11,10 @@ from dtvp.app_info_services import (
     load_changelog_content,
     load_pyproject_metadata,
 )
+
+
+def _current_user():
+    return "test-user"
 
 
 def test_load_pyproject_metadata_reads_supported_project_fields(tmp_path):
@@ -56,7 +60,14 @@ def test_build_sbom_html_embeds_content_and_download_link():
 
     assert "DTVP CycloneDX SBOM" in html
     assert "href='/api/sbom'" in html
-    assert '<pre>{"bomFormat":"CycloneDX"}</pre>' in html
+    assert "<pre>{&quot;bomFormat&quot;:&quot;CycloneDX&quot;}</pre>" in html
+
+
+def test_build_sbom_html_escapes_untrusted_markup():
+    html = build_sbom_html('</pre><script>alert("injected")</script><pre>')
+
+    assert "<script>" not in html
+    assert "&lt;/pre&gt;&lt;script&gt;" in html
 
 
 @pytest.fixture
@@ -112,7 +123,12 @@ def app_info_client(tmp_path):
     )
     app = FastAPI(title="DTVP test", version="2.3.4", description="test API")
     app.include_router(
-        create_app_info_router(app, deps, not_found_response={}),
+        create_app_info_router(
+            app,
+            deps,
+            current_user_dependency=_current_user,
+            not_found_response={},
+        ),
         prefix="/api",
     )
     return TestClient(app), deps, paths
@@ -147,6 +163,8 @@ def test_app_info_routes_return_metadata_and_generated_openapi(app_info_client):
     assert client.get("/api/performance-status").json() == {
         "group_queries": {"active": 0}
     }
+    assert client.get("/api/cache-status").headers["cache-control"] == "no-store"
+    assert client.get("/api/performance-status").headers["cache-control"] == "no-store"
     assert client.get("/api/changelog").json() == {"content": "changes"}
 
     openapi = client.get("/api/openapi.json").json()
@@ -183,7 +201,23 @@ def test_app_info_html_sbom_route_renders_file(app_info_client):
 
     assert response.status_code == 200
     assert "DTVP CycloneDX SBOM" in response.text
-    assert '{"component":"html"}' in response.text
+    assert "{&quot;component&quot;:&quot;html&quot;}" in response.text
+
+
+@pytest.mark.parametrize("endpoint", ["/api/cache-status", "/api/performance-status"])
+def test_app_info_diagnostic_status_requires_authentication(app_info_client, endpoint):
+    client, _deps, _paths = app_info_client
+
+    def reject_user():
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    client.app.dependency_overrides[_current_user] = reject_user
+    try:
+        response = client.get(endpoint)
+    finally:
+        client.app.dependency_overrides.clear()
+
+    assert response.status_code == 401
 
 
 @pytest.mark.parametrize(

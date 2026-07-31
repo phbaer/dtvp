@@ -1,9 +1,9 @@
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Annotated, Any, Callable, Optional
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ def create_app_info_router(
     app: FastAPI,
     deps: AppInfoRouteDeps,
     *,
+    current_user_dependency: Callable[..., Any],
     not_found_response: dict[int | str, dict[str, Any]],
 ) -> APIRouter:
     router = APIRouter()
@@ -60,12 +61,24 @@ def create_app_info_router(
         return metadata
 
     @router.get("/cache-status")
-    def get_cache_status():
-        return deps.get_cache_status()
+    def get_cache_status(
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        del user
+        return JSONResponse(
+            deps.get_cache_status(),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @router.get("/performance-status")
-    def get_performance_status():
-        return deps.get_performance_status()
+    def get_performance_status(
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        del user
+        return JSONResponse(
+            deps.get_performance_status(),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @router.get("/changelog")
     def get_changelog():

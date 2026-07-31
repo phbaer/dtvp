@@ -126,7 +126,10 @@ Project dependency-chain reads require an authenticated DTVP session like
 other project and finding endpoints. Startup status is available at `/startup`
 and `/api/startup`; minimal unauthenticated `/livez` and `/readyz` probes
 distinguish process liveness from runtime and durable-storage readiness. Normal
-host validation still applies.
+host validation still applies. `/api/cache-status` and `/api/performance-status`
+are also authenticated and non-cacheable; they expose cache synchronization and
+runtime saturation state. Detailed audit and durable-storage health remains
+reviewer-only at `/api/security/health`.
 
 ## Process Model And Capacity
 

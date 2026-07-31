@@ -1,3 +1,4 @@
+import html
 import os
 import tomllib
 from typing import Any, Optional
@@ -38,9 +39,10 @@ def get_sbom_path(filename: str, cwd: Optional[str] = None) -> Optional[str]:
 
 
 def build_sbom_html(content: str) -> str:
+    escaped_content = html.escape(content)
     return (
         "<html><head><title>DTVP SBOM</title></head>"
         "<body><h1>DTVP CycloneDX SBOM</h1>"
         "<p><a href='/api/sbom'>Download JSON</a></p>"
-        f"<pre>{content}</pre></body></html>"
+        f"<pre>{escaped_content}</pre></body></html>"
     )
