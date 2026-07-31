@@ -532,7 +532,12 @@ async def security_request_boundary(request: Request, call_next):
         limit = rate_limit_for_request(request)
         if limit:
             scope, count, window = limit
-            identity = request_identity(request, remote_ip, SESSION_COOKIE_NAME)
+            identity = request_identity(
+                remote_ip,
+                authenticated_actor=actor if role != "UNAUTHENTICATED" else "",
+            )
+            if scope == "authentication":
+                identity = request_identity(remote_ip)
             decision = request_rate_limiter.check(
                 scope,
                 identity,

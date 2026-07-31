@@ -378,6 +378,30 @@ def test_async_submission_returns_retryable_429_at_owner_capacity(client, monkey
         app.state.jobs.pop(existing.id, None)
 
 
+def test_inline_assessment_and_benchmark_reject_excess_waiters(client, monkeypatch):
+    runtime = app.state.job_runtime
+    monkeypatch.setattr(runtime, "max_concurrent_jobs", 1)
+    monkeypatch.setattr(app.state, "llm_healthy", True)
+    runtime.admit_inline_request("other-owner")
+    try:
+        assessment = client.post(
+            "/assess",
+            params={"sync": True},
+            json={"vuln_id": "CVE-2026-SYNC", "component_name": "component"},
+        )
+        benchmark = client.post(
+            "/benchmark/compare",
+            json={"benchmark": {}},
+        )
+    finally:
+        runtime.release_inline_request("other-owner")
+
+    assert assessment.status_code == 429
+    assert assessment.headers["retry-after"] == "30"
+    assert benchmark.status_code == 429
+    assert benchmark.headers["retry-after"] == "30"
+
+
 @pytest.mark.parametrize(
     "payload",
     [

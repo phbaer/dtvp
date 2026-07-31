@@ -1,6 +1,8 @@
 import json
 import stat
 
+from starlette.requests import Request
+
 from dtvp import main
 from dtvp.auth import SESSION_COOKIE_NAME
 from dtvp.request_security import (
@@ -9,6 +11,8 @@ from dtvp.request_security import (
     host_is_allowed,
     normalized_origin,
     origin_is_allowed,
+    rate_limit_for_request,
+    request_identity,
     trusted_request_id,
 )
 from dtvp.security_audit import (
@@ -62,6 +66,64 @@ def test_sliding_window_rate_limiter_is_identity_scoped():
     assert denied.retry_after > 0
     assert limiter.check("mutation", "bob", limit=2, window_seconds=60, now=3).allowed
     assert limiter.check("mutation", "alice", limit=2, window_seconds=60, now=62).allowed
+
+
+def _request(path: str, *, method: str = "POST") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "scheme": "https",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [],
+            "client": ("192.0.2.10", 1234),
+            "server": ("app.example.test", 443),
+        }
+    )
+
+
+def test_code_analysis_mutations_use_expensive_rate_limit():
+    paths = (
+        "/api/code-analysis/assess",
+        "/api/code-analysis/auto-sweep/run",
+        "/api/code-analysis/results/run-1/benchmark",
+    )
+
+    assert all(
+        rate_limit_for_request(_request(path))[0] == "expensive" for path in paths
+    )
+    assert rate_limit_for_request(
+        _request("/api/code-analysis/results/run-1", method="DELETE")
+    )[0] == "mutation"
+
+
+def test_quota_identity_requires_validated_actor_and_includes_ip():
+    assert request_identity("192.0.2.10") == "ip:192.0.2.10"
+    alice = request_identity("192.0.2.10", authenticated_actor="alice")
+    assert alice.startswith("actor:")
+    assert alice.endswith(":ip:192.0.2.10")
+    assert request_identity("192.0.2.11", authenticated_actor="alice") != alice
+
+
+def test_invalid_cookie_rotation_cannot_bypass_authentication_quota(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DTVP_AUTH_RATE_LIMIT", "1")
+    main.request_rate_limiter.reset()
+    try:
+        client.cookies.set(SESSION_COOKIE_NAME, "invalid-cookie-one")
+        first = client.get("/auth/login", follow_redirects=False)
+        client.cookies.set(SESSION_COOKIE_NAME, "invalid-cookie-two")
+        second = client.get("/auth/login", follow_redirects=False)
+    finally:
+        main.request_rate_limiter.reset()
+        client.cookies.pop(SESSION_COOKIE_NAME, None)
+
+    assert first.status_code != 429
+    assert second.status_code == 429
 
 
 def test_security_audit_is_owner_only_and_redacts_sensitive_detail(tmp_path, monkeypatch):

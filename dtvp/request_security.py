@@ -98,11 +98,12 @@ def resolve_client_ip(request: Request) -> str:
         return peer
 
 
-def request_identity(request: Request, remote_ip: str, session_cookie_name: str) -> str:
-    session = request.cookies.get(session_cookie_name, "")
-    if session:
-        digest = hashlib.sha256(session.encode("utf-8")).hexdigest()[:24]
-        return f"session:{digest}"
+def request_identity(remote_ip: str, *, authenticated_actor: str = "") -> str:
+    """Return a stable quota identity only after authentication succeeded."""
+
+    if authenticated_actor:
+        digest = hashlib.sha256(authenticated_actor.encode("utf-8")).hexdigest()[:24]
+        return f"actor:{digest}:ip:{remote_ip}"
     return f"ip:{remote_ip}"
 
 
@@ -161,12 +162,21 @@ def rate_limit_for_request(request: Request) -> tuple[str, int, int] | None:
         return "authentication", settings.authentication, window
     expensive_markers = (
         "/tasks/group-vulns",
-        "/code-analysis/requests",
+        "/code-analysis/assess",
+        "/code-analysis/auto-sweep/run",
         "/project-archives/imports",
         "/tmrescore/analyze",
         "/bulk-workflows/",
     )
-    if method in UNSAFE_METHODS and any(marker in path for marker in expensive_markers):
+    is_code_analysis_benchmark = (
+        method == "POST"
+        and "/code-analysis/results/" in path
+        and path.endswith("/benchmark")
+    )
+    if method in UNSAFE_METHODS and (
+        any(marker in path for marker in expensive_markers)
+        or is_code_analysis_benchmark
+    ):
         return "expensive", settings.expensive, window
     if method in UNSAFE_METHODS:
         return "mutation", settings.mutation, window

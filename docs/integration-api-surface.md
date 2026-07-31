@@ -132,6 +132,7 @@ The repository includes Agentyzer under `agentyzer/` as the first-party implemen
 
 - `POST /assess?sync=true`
   - Start a synchronous assessment and return the finished result in the response.
+  - The analyzer must bound admitted inline requests before they wait for an execution slot; return HTTP 429 with `Retry-After` when global or owner capacity is full.
   - Expected sync response: an `AssessResponse` object containing:
     - `assessment` — an `Assessment` object with top-level verdict metadata.
     - `steps` — an ordered array of `StepFindings`.
@@ -142,6 +143,7 @@ The repository includes Agentyzer under `agentyzer/` as the first-party implemen
   - DTVP sends a prepared `benchmark` object with normalized human/automated fields and deterministic state/CVSS deltas.
   - Expected response keeps the benchmark shape and includes `comparison_method`, `evaluator`, canonical 1-5 `rating`, `findings`, and `recommendation`.
   - If the LLM evaluator is unavailable, return a deterministic fallback response with `evaluator.probabilistic=false`.
+  - LLM-backed comparisons share bounded inline admission with synchronous assessments and return HTTP 429 with `Retry-After` when capacity is full.
 
 - `GET /jobs`
   - List jobs known to the analyzer process.

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -194,3 +195,29 @@ def test_job_runtime_bounds_global_queue_and_per_owner_active_jobs(tmp_path):
 
     alice.status = JobStatus.completed
     runtime.ensure_submission_capacity("alice")
+
+
+def test_job_runtime_bounds_inline_waiters_and_releases_reservations(tmp_path):
+    runtime = JobRuntime(
+        store=JobStore(path_provider=lambda: str(tmp_path / "jobs.sqlite")),
+        max_concurrent_jobs=1,
+        max_active_jobs_per_owner=1,
+    )
+
+    async def exercise():
+        async with runtime.inline_execution_slot("alice"):
+            assert runtime.inline_request_count == 1
+            with pytest.raises(JobCapacityExceeded, match="capacity is full"):
+                runtime.admit_inline_request("bob")
+            with pytest.raises(JobCapacityExceeded, match="maximum number"):
+                runtime.ensure_submission_capacity("alice")
+
+        assert runtime.inline_request_count == 0
+        assert runtime.inline_requests_by_owner == {}
+
+        with pytest.raises(RuntimeError, match="pipeline failed"):
+            async with runtime.inline_execution_slot("alice"):
+                raise RuntimeError("pipeline failed")
+        assert runtime.inline_request_count == 0
+
+    asyncio.run(exercise())

@@ -252,6 +252,16 @@
               }
             }
           },
+          "429": {
+            "description": "Inline analyzer capacity is full; retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -617,6 +627,16 @@
                       }
                     }
                   }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Assessment queue or inline analyzer capacity is full.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

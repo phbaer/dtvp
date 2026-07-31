@@ -45,7 +45,10 @@ Owner-scoped asynchronous jobs live in bounded SQLite storage on the repository
 volume. Pending jobs resume after restart; jobs that were running are marked
 interrupted. Terminal jobs default to seven-day retention and a 1,000-record
 cap. The database and service lease use owner-only permissions. One job runs at
-a time by default; DTVP queues additional work.
+a time by default; DTVP queues additional work. Synchronous assessments and
+LLM-backed benchmark comparisons share the same execution semaphore, reserve a
+bounded inline-admission slot before waiting, and return retryable HTTP 429
+responses when global or per-owner capacity is exhausted.
 
 `agentyzer/src/configuration.py` owns service, workspace, concurrency,
 retention, and job-store defaults. Advisory prompt construction and manifest

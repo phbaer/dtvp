@@ -117,9 +117,9 @@ means the integration or override is disabled.
 | `DTVP_BACKUP_RETRY_SECONDS` | Retry delay after a failed scheduled backup; minimum 60 | `3600` |
 | `DTVP_DOCKER_SOCKET_PATH` | Host Docker Engine socket mounted by the optional privileged backup scheduler | `/var/run/docker.sock` |
 | `DTVP_RATE_LIMIT_WINDOW_SECONDS` | Application quota window | `60` |
-| `DTVP_AUTH_RATE_LIMIT` | Login/callback requests per IP and window | `30` |
-| `DTVP_EXPENSIVE_RATE_LIMIT` | Expensive task mutations per session/IP and window | `20` |
-| `DTVP_MUTATION_RATE_LIMIT` | Other state-changing requests per session/IP and window | `120` |
+| `DTVP_AUTH_RATE_LIMIT` | Login/callback requests per validated client IP and window | `30` |
+| `DTVP_EXPENSIVE_RATE_LIMIT` | Expensive task mutations per authenticated actor plus IP (or unauthenticated IP) and window | `20` |
+| `DTVP_MUTATION_RATE_LIMIT` | Other state-changing requests per authenticated actor plus IP (or unauthenticated IP) and window | `120` |
 | `DTVP_RUNTIME_UID` / `DTVP_RUNTIME_GID` | Non-root DTVP process and `./data` owner IDs | `1000` / `1000` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
 | `DTVP_CORS_ORIGINS` | Additional comma-separated CORS origins | unset |
@@ -261,7 +261,7 @@ in DTVP 2.0.
 | `AGENTYZER_ALLOW_UNAUTHENTICATED` | Explicit local-only bypass; rejected in production | `false` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
 | `AGENTYZER_MAX_QUEUED_JOBS` | Maximum accepted async jobs waiting for execution | `100` |
-| `AGENTYZER_MAX_ACTIVE_JOBS_PER_OWNER` | Maximum pending/running async jobs for one owner | `10` |
+| `AGENTYZER_MAX_ACTIVE_JOBS_PER_OWNER` | Maximum pending/running async jobs and admitted inline requests for one owner | `10` |
 | `AGENTYZER_JOB_STORE_PATH` | Durable async-job SQLite store | Compose: `/app/repos/agentyzer_jobs.sqlite`; standalone: `repos/agentyzer_jobs.sqlite` |
 | `AGENTYZER_JOB_RETENTION_SECONDS` | Terminal-job retention; `0` disables age pruning | `604800` (7 days) |
 | `AGENTYZER_JOB_MAX_RECORDS` | Maximum records; active jobs are never pruned | `1000` |

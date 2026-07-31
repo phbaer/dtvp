@@ -1156,8 +1156,17 @@ async def prompts(
         "automated Agentyzer assessment result. This endpoint evaluates the "
         "assessment artifacts only; it does not run repository or source-code analysis."
     ),
+    responses={
+        429: {
+            "model": ErrorResponse,
+            "description": "Inline analyzer capacity is full; retry later.",
+        }
+    },
 )
-async def benchmark_compare(req: BenchmarkCompareRequest):
+async def benchmark_compare(
+    req: BenchmarkCompareRequest,
+    caller: Annotated[ServiceCaller, Depends(require_service_caller)],
+):
     benchmark = req.benchmark or {}
     if not isinstance(benchmark, dict):
         raise HTTPException(status_code=400, detail="benchmark must be an object")
@@ -1169,7 +1178,15 @@ async def benchmark_compare(req: BenchmarkCompareRequest):
         )
 
     llm_client = _client_for_model(req.model)
-    return await compare_benchmark_with_llm(benchmark, llm_client)
+    try:
+        async with _job_runtime().inline_execution_slot(caller.owner):
+            return await compare_benchmark_with_llm(benchmark, llm_client)
+    except JobCapacityExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": "30"},
+        ) from exc
 
 
 @app.post(
@@ -1198,7 +1215,11 @@ async def benchmark_compare(req: BenchmarkCompareRequest):
                     }
                 }
             },
-        }
+        },
+        429: {
+            "model": ErrorResponse,
+            "description": "Assessment queue or inline analyzer capacity is full.",
+        },
     },
 )
 async def assess(
@@ -1235,8 +1256,15 @@ async def assess(
     )
 
     if sync:
-        async with _job_runtime().semaphore:
-            return await _run_assessment(req, llm_client=_client_for_request(req))
+        try:
+            async with _job_runtime().inline_execution_slot(caller.owner):
+                return await _run_assessment(req, llm_client=_client_for_request(req))
+        except JobCapacityExceeded as exc:
+            raise HTTPException(
+                status_code=429,
+                detail=str(exc),
+                headers={"Retry-After": "30"},
+            ) from exc
 
     # Async mode — create a job and return immediately.
     return _submit_async_job(req, owner=caller.owner)
