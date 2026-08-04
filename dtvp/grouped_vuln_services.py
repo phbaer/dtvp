@@ -45,6 +45,7 @@ class GroupedVulnServiceDeps:
     summary_index: Any = None
     summary_index_cache_revision: Callable[[], Any] = lambda: None
     notify_task_update: Callable[[str], None] = lambda _task_id: None
+    run_cpu_bound: Callable[..., Awaitable[Any]] = asyncio.to_thread
 
 
 GROUPED_TASK_LOG_LIMIT = 100
@@ -958,7 +959,7 @@ async def process_grouped_vulns_task(
             deps.tasks[task_id]["partial_publish_in_progress"] = True
             deps.notify_task_update(task_id)
 
-            artifacts = await asyncio.to_thread(
+            artifacts = await deps.run_cpu_bound(
                 _build_grouped_vuln_task_artifacts,
                 deps.group_vulnerabilities,
                 partial_combined_data,
@@ -1022,7 +1023,7 @@ async def process_grouped_vulns_task(
 
         artifacts = complete_partial_artifacts
         if artifacts is None:
-            artifacts = await asyncio.to_thread(
+            artifacts = await deps.run_cpu_bound(
                 _build_grouped_vuln_task_artifacts,
                 deps.group_vulnerabilities,
                 combined_data,
@@ -1081,7 +1082,7 @@ async def process_grouped_vulns_task(
 
         if deps.queue_open_vulnerabilities_for_analysis:
             try:
-                queued_count = await asyncio.to_thread(
+                queued_count = await deps.run_cpu_bound(
                     _queue_open_vulnerabilities_after_grouping,
                     deps.queue_open_vulnerabilities_for_analysis,
                     result,

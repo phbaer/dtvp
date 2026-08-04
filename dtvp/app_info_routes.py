@@ -20,6 +20,8 @@ class AppInfoRouteDeps:
     frontend_sbom_filename: str
     html_sbom_filename: str
     media_type_json: str
+    get_performance_status: Callable[[], dict[str, Any]] = lambda: {}
+    get_runtime_status: Callable[[], dict[str, Any]] = lambda: {}
 
 
 def create_app_info_router(
@@ -32,7 +34,11 @@ def create_app_info_router(
 
     @router.get("/version")
     def get_version():
-        return {"version": deps.version, "build": deps.build_commit}
+        return {
+            "version": deps.version,
+            "build": deps.build_commit,
+            "runtime": deps.get_runtime_status(),
+        }
 
     @router.get("/metadata", responses=not_found_response)
     def get_metadata():
@@ -46,6 +52,10 @@ def create_app_info_router(
     @router.get("/cache-status")
     def get_cache_status():
         return deps.get_cache_status()
+
+    @router.get("/performance-status")
+    def get_performance_status():
+        return deps.get_performance_status()
 
     @router.get("/changelog")
     def get_changelog():

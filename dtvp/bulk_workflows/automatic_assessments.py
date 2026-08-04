@@ -17,7 +17,13 @@ from ..code_analysis_assessment_services import (
     record_vulnerability_id as _record_vulnerability_id,
     text as _text,
 )
+from ..auto_analysis_services import select_auto_analysis_targets
 from ..logic import score_to_severity
+from ..rescore_rule_services import (
+    RescoreRuleError,
+    build_rescored_vector_for_state,
+    calculate_cvss_score,
+)
 from .assessment_restore import selected_groups
 from .base import BulkWorkflowContext, BulkWorkflowPlugin
 
@@ -79,12 +85,41 @@ def _score(value: Any) -> float | None:
         return None
 
 
+def _worst_verdict(assessment_entries: list[dict[str, Any]]) -> str:
+    return max(
+        assessment_entries,
+        key=lambda entry: VERDICT_PRIORITY[entry["verdict_bucket"]],
+    )["verdict_bucket"]
+
+
+def _assessment_justification(
+    assessment_entries: list[dict[str, Any]],
+    verdict: str,
+) -> str:
+    if verdict != "NOT_AFFECTED":
+        return "NOT_SET"
+    if all(
+        _lower(entry["assessment"].get("exposure")) == "none"
+        for entry in assessment_entries
+    ):
+        return "CODE_NOT_PRESENT"
+    return "CODE_NOT_REACHABLE"
+
+
 def _vulnerability_rescore(
     group: dict[str, Any],
     assessment_entries: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
+    if not assessment_entries:
+        return None
+
+    # The global CVSS belongs to the worst assessment, so a downgraded score from
+    # a milder run never overrides the run that decided the vulnerability state.
+    worst_verdict = _worst_verdict(assessment_entries)
     candidates: list[dict[str, Any]] = []
     for entry in assessment_entries:
+        if entry["verdict_bucket"] != worst_verdict:
+            continue
         adjusted_cvss = entry["assessment"].get("adjusted_cvss")
         if not isinstance(adjusted_cvss, dict):
             continue
@@ -104,8 +139,8 @@ def _vulnerability_rescore(
     if not candidates:
         return None
 
-    # A grouped vulnerability uses the highest available adjusted score, matching
-    # the existing aggregate CVSS behavior and the inline code-analysis result.
+    # Within the worst assessments the highest adjusted score wins, matching the
+    # aggregate CVSS behavior and the inline code-analysis result.
     selected = max(
         candidates,
         key=lambda candidate: (
@@ -130,6 +165,7 @@ def _vulnerability_rescore(
     proposed_score = selected["proposed_score"]
     return {
         **selected,
+        "source": "analyzer",
         "current_score": current_score,
         "current_vector": current_vector,
         "original_score": (
@@ -142,9 +178,82 @@ def _vulnerability_rescore(
     }
 
 
+def _rescore_rule_rescore(
+    group: dict[str, Any],
+    state: str,
+    rescore_rules: dict[str, Any] | None,
+    analyzer_rescore: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Builds the configured state-based rescore for the global assessment.
+
+    States with a configured transition (such as `NOT_AFFECTED` and
+    `FALSE_POSITIVE`) must end up with exactly the vector the rules define,
+    otherwise `Repair Rescoring Definitions` reports the finding right after it
+    was applied. Analyzer metrics are kept by layering the rule on top of the
+    proposed vector whenever both use the same CVSS version.
+    """
+    base_vector = _text(group.get("cvss_vector"))
+    if not rescore_rules or not base_vector:
+        return None
+
+    analyzer_vector = _text((analyzer_rescore or {}).get("proposed_vector"))
+    built = None
+    for current_vector in (analyzer_vector or None, None):
+        try:
+            built = build_rescored_vector_for_state(
+                rescore_rules,
+                state=state,
+                base_vector=base_vector,
+                current_vector=current_vector,
+                validate_config=False,
+            )
+            break
+        except (RescoreRuleError, ValueError, StopIteration):
+            continue
+    if built is None:
+        return None
+
+    proposed_vector, version = built
+    try:
+        proposed_score = calculate_cvss_score(proposed_vector, version)
+    except (RescoreRuleError, ValueError, StopIteration):
+        return None
+
+    current_score = _score(
+        group.get("rescored_cvss")
+        if group.get("rescored_cvss") is not None
+        else group.get("cvss_score", group.get("cvss"))
+    )
+    current_vector = _text(group.get("rescored_vector") or base_vector)
+    return {
+        "source": "rescore_rules",
+        "source_run_id": _text((analyzer_rescore or {}).get("source_run_id")),
+        "current_score": current_score,
+        "current_vector": current_vector,
+        "original_score": current_score,
+        "original_vector": base_vector,
+        "proposed_score": proposed_score,
+        "proposed_vector": proposed_vector,
+        "proposed_severity": score_to_severity(proposed_score),
+    }
+
+
+def _global_rescore(
+    group: dict[str, Any],
+    assessment_entries: list[dict[str, Any]],
+    state: str,
+    rescore_rules: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Configured rules win for the states they cover; otherwise the analyzer."""
+    analyzer_rescore = _vulnerability_rescore(group, assessment_entries)
+    rule_rescore = _rescore_rule_rescore(group, state, rescore_rules, analyzer_rescore)
+    return rule_rescore or analyzer_rescore
+
+
 def automatic_assessment_filter_facets(
     group: dict[str, Any],
     records: list[dict[str, Any]],
+    rescore_rules: dict[str, Any] | None = None,
 ) -> dict[str, str] | None:
     """Classify a group's saved analyses using the bulk-apply aggregation rules."""
     assessment_entries: list[dict[str, Any]] = []
@@ -162,11 +271,13 @@ def automatic_assessment_filter_facets(
     if not assessment_entries:
         return None
 
-    outcome = max(
+    outcome = _worst_verdict(assessment_entries)
+    rescore = _global_rescore(
+        group,
         assessment_entries,
-        key=lambda entry: VERDICT_PRIORITY[entry["verdict_bucket"]],
-    )["verdict_bucket"]
-    rescore = _vulnerability_rescore(group, assessment_entries)
+        verdict_state(outcome),
+        rescore_rules,
+    )
     if rescore is None:
         rescore_state = "NO_RESCORE"
     elif rescore.get("proposed_severity"):
@@ -680,6 +791,81 @@ def _assessment_record_lines(
     return lines
 
 
+def _entry_run_ids(entries: list[dict[str, Any]]) -> list[str]:
+    return sorted(
+        {
+            run_id
+            for entry in entries
+            if (run_id := _record_run_id(entry["record"]))
+        }
+    )
+
+
+def _entry_component(entry: dict[str, Any]) -> str:
+    record = entry["record"]
+    return (
+        _text(record.get("component_name"))
+        or _text(_record_context_summary(record).get("target_component"))
+        or _text(_record_target(record).get("component_name"))
+    )
+
+
+def _component_team_index(
+    group: dict[str, Any],
+    team_mapping: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Owning team per analyzable component, using the same targets a scan uses."""
+    index: dict[str, str] = {}
+    for target in select_auto_analysis_targets(group, team_mapping or {}):
+        name = _lower(target.component_name)
+        team = _text(target.team)
+        if name and team:
+            index.setdefault(name, team)
+    return index
+
+
+def _entry_team(entry: dict[str, Any], component_teams: dict[str, str]) -> str:
+    """Current ownership wins; the run's recorded target team is the fallback."""
+    team = component_teams.get(_lower(_entry_component(entry)), "")
+    if team:
+        return team
+    return _text(_record_context_summary(entry["record"]).get("target_team"))
+
+
+def _entries_by_team(
+    entries: list[dict[str, Any]],
+    component_teams: dict[str, str],
+) -> tuple[list[tuple[str, list[dict[str, Any]]]], list[dict[str, Any]]]:
+    teams: dict[str, dict[str, Any]] = {}
+    unowned: list[dict[str, Any]] = []
+    for entry in entries:
+        team = _entry_team(entry, component_teams)
+        if not team:
+            unowned.append(entry)
+            continue
+        teams.setdefault(_lower(team), {"team": team, "entries": []})["entries"].append(
+            entry
+        )
+    ordered = [
+        (bucket["team"], bucket["entries"])
+        for _key, bucket in sorted(teams.items())
+    ]
+    return ordered, unowned
+
+
+def _assessment_block_header(
+    team: str,
+    state: str,
+    justification: str,
+    run_ids: list[str],
+) -> str:
+    return (
+        f"--- [Team: {team}] [State: {state}] "
+        f"[Assessed By: Automated Code Analysis] [Justification: {justification}] "
+        f"[Evidence Reviewed: yes] [Analysis Runs: {', '.join(run_ids)}] ---"
+    )
+
+
 def _assessment_details(
     entries: list[dict[str, Any]],
     *,
@@ -687,19 +873,18 @@ def _assessment_details(
     state: str,
     justification: str,
     rescore: dict[str, Any] | None,
+    team_entries: list[tuple[str, list[dict[str, Any]]]] | None = None,
+    unowned_entries: list[dict[str, Any]] | None = None,
 ) -> str:
-    run_ids = sorted(
-        {
-            run_id
-            for entry in entries
-            if (run_id := _record_run_id(entry["record"]))
-        }
-    )
-    header = (
-        f"--- [Team: General] [State: {state}] "
-        f"[Assessed By: Automated Code Analysis] [Justification: {justification}] "
-        f"[Evidence Reviewed: yes] [Analysis Runs: {', '.join(run_ids)}] ---"
-    )
+    """Renders one block per owning team plus the global worst-wins block.
+
+    Every team keeps the analyzer evidence for the components it owns. The
+    global block carries the worst state, its justification, and the rescore
+    tags; it only repeats analyzer evidence for components that no team owns.
+    """
+    team_entries = team_entries if team_entries is not None else []
+    unowned_entries = unowned_entries if unowned_entries is not None else list(entries)
+
     lines: list[str] = []
     if rescore:
         rescore_tags: list[str] = []
@@ -711,15 +896,45 @@ def _assessment_details(
             )
         if rescore_tags:
             lines.append(" ".join(rescore_tags))
+
     lines.extend([
-        header,
+        _assessment_block_header(
+            "General",
+            state,
+            justification,
+            _entry_run_ids(entries),
+        ),
         "[Code Analysis]",
         f"Overall Verdict: {verdict.replace('_', ' ').title()}",
         f"Overall Assessment State: {state}",
         f"Automatic Assessment Count: {len(entries)}",
     ])
-    for entry in entries:
+    if team_entries:
+        lines.append(
+            f"Assessed Teams: {', '.join(team for team, _ in team_entries)}"
+        )
+    for entry in unowned_entries:
         lines.extend(["", *_assessment_record_lines(entry["record"], entry["assessment"])])
+
+    for team, team_records in team_entries:
+        team_verdict = _worst_verdict(team_records)
+        team_state = verdict_state(team_verdict)
+        lines.extend([
+            "",
+            _assessment_block_header(
+                team,
+                team_state,
+                _assessment_justification(team_records, team_verdict),
+                _entry_run_ids(team_records),
+            ),
+            "[Code Analysis]",
+            f"Overall Verdict: {team_verdict.replace('_', ' ').title()}",
+            f"Overall Assessment State: {team_state}",
+            f"Automatic Assessment Count: {len(team_records)}",
+        ])
+        for entry in team_records:
+            lines.extend(["", *_assessment_record_lines(entry["record"], entry["assessment"])])
+
     return "\n".join(lines)
 
 
@@ -781,6 +996,8 @@ def _build_group_item(
     group: dict[str, Any],
     records: list[dict[str, Any]],
     applied_keys: set[tuple[str, str]],
+    team_mapping: dict[str, Any] | None = None,
+    rescore_rules: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     assessment_entries: list[dict[str, Any]] = []
     for record in records:
@@ -798,37 +1015,23 @@ def _build_group_item(
     if not assessment_entries:
         return None
 
-    worst = max(
-        assessment_entries,
-        key=lambda entry: VERDICT_PRIORITY[entry["verdict_bucket"]],
-    )
-    overall_verdict = worst["verdict_bucket"]
+    overall_verdict = _worst_verdict(assessment_entries)
     target_state = verdict_state(overall_verdict)
-    justification = (
-        "CODE_NOT_PRESENT"
-        if overall_verdict == "NOT_AFFECTED"
-        and all(
-            _lower(entry["assessment"].get("exposure")) == "none"
-            for entry in assessment_entries
-        )
-        else "CODE_NOT_REACHABLE"
-        if overall_verdict == "NOT_AFFECTED"
-        else "NOT_SET"
+    justification = _assessment_justification(assessment_entries, overall_verdict)
+    run_ids = _entry_run_ids(assessment_entries)
+    team_entries, unowned_entries = _entries_by_team(
+        assessment_entries,
+        _component_team_index(group, team_mapping),
     )
-    run_ids = sorted(
-        {
-            _record_run_id(entry["record"])
-            for entry in assessment_entries
-            if _record_run_id(entry["record"])
-        }
-    )
-    rescore = _vulnerability_rescore(group, assessment_entries)
+    rescore = _global_rescore(group, assessment_entries, target_state, rescore_rules)
     target_details = _assessment_details(
         assessment_entries,
         verdict=overall_verdict,
         state=target_state,
         justification=justification,
         rescore=rescore,
+        team_entries=team_entries,
+        unowned_entries=unowned_entries,
     )
 
     eligible_instances: list[dict[str, Any]] = []
@@ -876,6 +1079,14 @@ def _build_group_item(
         "verdict_bucket": overall_verdict,
         "target_state": target_state,
         "target_justification": justification,
+        "teams": [team for team, _entries in team_entries],
+        "unowned_components": sorted(
+            {
+                component
+                for entry in unowned_entries
+                if (component := _entry_component(entry))
+            }
+        ),
         "finding_count": len(_instances(group)),
         "eligible_finding_count": len(eligible_instances),
         "already_applied_finding_count": already_applied_findings,
@@ -904,7 +1115,13 @@ def build_automatic_assessment_preview(context: BulkWorkflowContext) -> dict[str
     applied_keys = _application_keys(context, _unique_records(group_records))
     full_items: list[dict[str, Any]] = []
     for group, matched_records in group_records:
-        item = _build_group_item(group, matched_records, applied_keys)
+        item = _build_group_item(
+            group,
+            matched_records,
+            applied_keys,
+            context.team_mapping,
+            context.rescore_rules,
+        )
         if item is not None:
             full_items.append(item)
     eligible_items = [
@@ -967,7 +1184,13 @@ def build_automatic_assessment_payloads(
         "replaced_existing": 0,
     }
     for group, matched_records in group_records:
-        item = _build_group_item(group, matched_records, applied_keys)
+        item = _build_group_item(
+            group,
+            matched_records,
+            applied_keys,
+            context.team_mapping,
+            context.rescore_rules,
+        )
         if item is None:
             continue
         skipped["already_applied"] += item["already_applied_finding_count"]
@@ -1012,7 +1235,15 @@ def build_automatic_assessment_document(context: BulkWorkflowContext, group_ids:
     items = [
         item
         for group, records in group_records
-        if (item := _build_group_item(group, records, applied_keys)) is not None
+        if (
+            item := _build_group_item(
+                group,
+                records,
+                applied_keys,
+                context.team_mapping,
+                context.rescore_rules,
+            )
+        ) is not None
         and item.get("ticket_text")
     ]
     lines = ["# Automatic Assessment Ticket Drafts", ""]

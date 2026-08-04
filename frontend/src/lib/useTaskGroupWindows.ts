@@ -128,8 +128,10 @@ export function useTaskGroupWindows({
             pageQuery.offset = 0
             nextCursor.value = null
         } else if (nextCursor.value) {
+            pageQuery.include_counts = false
             pageQuery.cursor = nextCursor.value
         } else {
+            pageQuery.include_counts = false
             pageQuery.offset = groups.value.length
         }
 
@@ -147,7 +149,7 @@ export function useTaskGroupWindows({
             groups.value = shouldReset ? processedGroups : [...groups.value, ...processedGroups]
             total.value = window.total
             filtered.value = window.filtered
-            counts.value = window.counts || null
+            counts.value = window.counts || counts.value
             nextCursor.value = window.next_cursor || null
             partial.value = !!window.partial
             partialVersionsCompleted.value = window.partial_versions_completed ?? null

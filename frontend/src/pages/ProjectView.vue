@@ -28,6 +28,7 @@ import { useProjectAssessmentUpdates } from '../lib/useProjectAssessmentUpdates'
 import { useProjectVulnSelection } from '../lib/useProjectVulnSelection'
 import { useTaskGroupDetails } from '../lib/useTaskGroupDetails'
 import { useTaskGroupWindows } from '../lib/useTaskGroupWindows'
+import { useTaskLease } from '../lib/useTaskLease'
 import { useVisibleGroupWindow } from '../lib/useVisibleGroupWindow'
 import {
     hasAutomaticAssessmentForGroup,
@@ -431,6 +432,15 @@ const fetchVulns = async () => {
         }
     }
 }
+
+useTaskLease({
+    taskId: currentVulnTaskId,
+    isActive: () => isProjectReviewRouteActive() && document.visibilityState === 'visible',
+    onExpired: async (taskId) => {
+        if (currentVulnTaskId.value !== taskId) return
+        await fetchVulns()
+    },
+})
 
 const fetchStats = async () => {
     const name = routeProjectName()

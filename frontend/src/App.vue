@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { ref, onMounted, provide, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, provide, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { projectHeaderState } from './lib/projectHeaderStore'
 import { getVersion, getUserInfo, logout, getChangelog } from './lib/api'
 import { getRuntimeConfig } from './lib/env'
+import { buildVersionStore, recordServerIdentity } from './lib/buildVersion'
+import {
+    AUTH_EXPIRED_EVENT,
+    consumeAuthReturnPath,
+    rememberAuthReturnPath,
+    resetAuthExpiredNotification,
+} from './lib/authSession'
 import ChangelogModal from './components/ChangelogModal.vue'
 import AnalysisQueueIndicator from './components/AnalysisQueueIndicator.vue'
+import type { PythonRuntimeStatus } from './types'
 
 const version = ref('')
 const build = ref('')
+const backendRuntime = ref<PythonRuntimeStatus | null>(null)
 const user = ref({ username: '', role: '' })
 const realRole = ref('')
 const isAnalystView = ref(false)
@@ -42,7 +51,7 @@ provide('realRole', effectiveRole)
 
 const isAuthFailure = (error: any) => {
     const status = error?.response?.status
-    return status === 401 || status === 403
+    return status === 401
 }
 
 const describeBootstrapError = (error: any) => {
@@ -60,6 +69,11 @@ const loadVersionInfo = async () => {
     const v = await getVersion()
     version.value = v.version
     build.value = v.build
+    backendRuntime.value = v.runtime || null
+
+    // Baseline for staleness detection: whatever the server reports now is, by
+    // definition, the build this tab just loaded.
+    recordServerIdentity(v)
 
     const lastSeenVersion = localStorage.getItem('dtvp_last_seen_version')
     if (lastSeenVersion !== v.version && v.version !== '0.0.0') {
@@ -107,6 +121,7 @@ const loadCurrentUser = async () => {
             role: u.role || 'ANALYST' 
         }
         realRole.value = u.role || 'ANALYST'
+        resetAuthExpiredNotification()
     } catch (e) {
         if (isAuthFailure(e)) {
             user.value = { username: '', role: '' }
@@ -129,7 +144,12 @@ const bootstrapApp = async () => {
         await loadProjectMetadata()
         await loadCurrentUser()
 
-        if (route.meta.role && route.meta.role !== realRole.value) {
+        const returnPath = consumeAuthReturnPath()
+        if (route.path === '/' && returnPath) {
+            await router.replace(returnPath)
+        }
+
+        if (!returnPath && route.meta.role && route.meta.role !== realRole.value) {
             await router.replace('/')
         }
 
@@ -141,7 +161,23 @@ const bootstrapApp = async () => {
     }
 }
 
-onMounted(bootstrapApp)
+const handleAuthExpired = () => {
+    user.value = { username: '', role: '' }
+    realRole.value = ''
+    rememberAuthReturnPath(route.fullPath)
+    if (route.path !== '/login') {
+        void router.replace({ path: '/login', query: { expired: '1' } })
+    }
+}
+
+onMounted(() => {
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
+    void bootstrapApp()
+})
+
+onBeforeUnmount(() => {
+    window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired)
+})
 
 const toggleView = () => {
     isAnalystView.value = !isAnalystView.value
@@ -233,10 +269,45 @@ const acknowledgeChangelog = () => {
     showChangelog.value = false
     localStorage.setItem('dtvp_last_seen_version', version.value)
 }
+
+const updateAvailable = buildVersionStore.updateAvailable
+
+const backendRuntimeLabel = computed(() => {
+    const runtime = backendRuntime.value
+    if (!runtime) return ''
+    const python = `${runtime.implementation} ${runtime.version}`
+    if (runtime.free_threading_active) {
+        return `Backend ${python} · Free-threaded · GIL off`
+    }
+    if (runtime.gil_enabled === true) {
+        return `Backend ${python} · GIL enabled`
+    }
+    return `Backend ${python} · GIL state unknown`
+})
+
+const reloadForUpdate = () => {
+    window.location.reload()
+}
 </script>
 
 <template>
   <div class="h-screen w-full overflow-hidden flex flex-col bg-slate-950/70 text-white">
+    <div
+        v-if="updateAvailable"
+        class="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-amber-500/40 bg-amber-500/15 px-4 py-2 text-sm text-amber-100"
+        role="status"
+        data-testid="app-update-banner"
+    >
+        <span>A newer version of DTVP has been deployed. This tab is out of date and has stopped updating.</span>
+        <button
+            type="button"
+            class="rounded border border-amber-400/60 bg-amber-400/20 px-3 py-1 font-medium text-amber-50 hover:bg-amber-400/30"
+            data-testid="app-update-reload"
+            @click="reloadForUpdate"
+        >
+            Reload
+        </button>
+    </div>
     <template v-if="route.path !== '/login'">
         <div
             v-if="bootStatus !== 'ready'"
@@ -425,7 +496,16 @@ const acknowledgeChangelog = () => {
         </main>
         <footer class="z-40 w-full shrink-0 border-t border-gray-700/70 bg-gray-900/70 backdrop-blur-2xl">
             <div class="w-full p-3 flex flex-col gap-1 text-center text-[11px] text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:text-left">
-                <div class="font-medium text-gray-300">DTVP v{{ version }} (build {{ build }})</div>
+                <div class="font-medium text-gray-300">
+                    DTVP v{{ version }} (build {{ build }})
+                    <span
+                        v-if="realRole === 'REVIEWER' && backendRuntimeLabel"
+                        class="ml-2 text-cyan-300"
+                        data-testid="backend-runtime-label"
+                    >
+                        · {{ backendRuntimeLabel }}
+                    </span>
+                </div>
                 <div>
                     <a :href="projectUrls.main" target="_blank" rel="noopener noreferrer" class="text-blue-300 hover:text-blue-200">Main repo</a>
                     •

@@ -16,8 +16,11 @@ import type {
     ProjectArchivePreview,
     ProjectArchiveSnapshot,
     ProjectArchiveTask,
+    BackendPerformanceStatus,
+    DTVPVersionInfo,
 } from '../types';
 import { getRuntimeConfig } from './env';
+import { notifyAuthExpired } from './authSession';
 
 const envApiUrl = getRuntimeConfig('DTVP_API_URL', '').replace(/\/$/, '');
 const envFrontendUrl = getRuntimeConfig('DTVP_FRONTEND_URL', '').replace(/\/$/, '');
@@ -44,6 +47,24 @@ const api = axios.create({
     },
 });
 
+api.interceptors.response.use(
+    response => response,
+    error => {
+        if (error?.response?.status === 401) {
+            notifyAuthExpired();
+        }
+        return Promise.reject(error);
+    },
+);
+
+function requireFetchResponse(
+    response: Response,
+    message: string,
+): asserts response is Response & { body: ReadableStream<Uint8Array> } {
+    if (response.status === 401) notifyAuthExpired();
+    if (!response.ok || !response.body) throw new Error(message);
+}
+
 export const getProjects = async (name?: string): Promise<Project[]> => {
     // If the caller provides an empty string or only whitespace, avoid sending `?name=`.
     // Some backends (and our mock servers) treat an empty name parameter as a filters-for-nothing
@@ -66,8 +87,13 @@ export const getTaskStatistics = async (taskId: string): Promise<Statistics> => 
     return res.data;
 };
 
-export const getVersion = async (): Promise<{ version: string, build: string }> => {
+export const getVersion = async (): Promise<DTVPVersionInfo> => {
     const res = await api.get('/version');
+    return res.data;
+};
+
+export const getPerformanceStatus = async (): Promise<BackendPerformanceStatus> => {
+    const res = await api.get('/performance-status');
     return res.data;
 };
 
@@ -112,9 +138,7 @@ export const streamProjectArchiveTaskEvents = async (
     const response = await fetch(`${API_BASE}/project-archives/tasks/${encodeURIComponent(taskId)}/events`, {
         credentials: 'include',
     });
-    if (!response.ok || !response.body) {
-        throw new Error('Archive task event stream unavailable');
-    }
+    requireFetchResponse(response, 'Archive task event stream unavailable');
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -233,6 +257,12 @@ export interface TaskResponse {
     log?: string[];
 }
 
+export interface TaskNotFoundResponse {
+    status: 'not_found';
+}
+
+export type TaskStatusResponse = TaskResponse | TaskNotFoundResponse;
+
 export interface TaskStatusOptions {
     includeResult?: boolean;
 }
@@ -274,12 +304,13 @@ export interface TaskVulnGroupListQuery {
     offset?: number;
     cursor?: string | null;
     limit?: number;
+    include_counts?: boolean;
     generation?: number;
 }
 
 export type BulkWorkflowFilters = Omit<
     TaskVulnGroupListQuery,
-    'sort' | 'order' | 'offset' | 'cursor' | 'limit' | 'generation'
+    'sort' | 'order' | 'offset' | 'cursor' | 'limit' | 'include_counts' | 'generation'
 >;
 
 export interface BulkWorkflowMetadata {
@@ -436,7 +467,7 @@ export const startGroupVulnTask = async (
 export const getTaskStatus = async (
     taskId: string,
     options: TaskStatusOptions = {},
-): Promise<TaskResponse> => {
+): Promise<TaskStatusResponse> => {
     if (options.includeResult === false) {
         const res = await api.get(`/tasks/${taskId}`, { params: { include_result: false } });
         return res.data;
@@ -447,7 +478,7 @@ export const getTaskStatus = async (
 
 export const streamTaskEvents = async (
     taskId: string,
-    onStatus: (status: TaskResponse) => void | Promise<void>,
+    onStatus: (status: TaskStatusResponse) => void | Promise<void>,
 ): Promise<void> => {
     if (typeof fetch !== 'function' || typeof TextDecoder === 'undefined') {
         throw new Error('Task event stream unavailable');
@@ -456,9 +487,7 @@ export const streamTaskEvents = async (
     const response = await fetch(`${API_BASE}/tasks/${encodeURIComponent(taskId)}/events`, {
         credentials: 'include',
     });
-    if (!response.ok || !response.body) {
-        throw new Error('Task event stream unavailable');
-    }
+    requireFetchResponse(response, 'Task event stream unavailable');
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -524,6 +553,7 @@ export const bulkWorkflowFilters = (
         offset: _offset,
         cursor: _cursor,
         limit: _limit,
+        include_counts: _includeCounts,
         ...filters
     } = query;
     return filters;
@@ -664,6 +694,7 @@ export const drainTaskVulnGroups = async (
         const pageQuery: TaskVulnGroupListQuery = {
             ...query,
             limit,
+            include_counts: false,
             sort: query.sort || 'id',
             order: query.order || 'asc',
         };
@@ -708,6 +739,7 @@ export const drainTaskVulnGroupDetails = async (
         const pageQuery: TaskVulnGroupListQuery = {
             ...query,
             limit,
+            include_counts: false,
             sort: query.sort || 'id',
             order: query.order || 'asc',
         };
@@ -929,7 +961,10 @@ export const getGroupedVulns = async (
         return error;
     };
 
-    const handleStatus = async (status: TaskResponse): Promise<GroupedVuln[] | null> => {
+    const handleStatus = async (status: TaskStatusResponse): Promise<GroupedVuln[] | null> => {
+        if (status.status === 'not_found') {
+            throw buildTaskFailure('Task not found');
+        }
         if (onProgress) {
             onProgress(status.message, status.progress, status.log);
         }
@@ -963,9 +998,6 @@ export const getGroupedVulns = async (
         }
         if (status.status === 'failed') {
             throw buildTaskFailure(status.message);
-        }
-        if ((status as any).status === 'not_found') {
-            throw buildTaskFailure('Task not found');
         }
         return null;
     };

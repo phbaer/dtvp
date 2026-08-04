@@ -4,6 +4,11 @@ ARG PYTHON_VERSION=3.14
 # Stage 1: Build the frontend
 FROM node:lts-alpine AS frontend-build
 
+# Baked into the bundle so a running tab can detect that the server has since
+# been redeployed with a different build (see lib/buildVersion.ts).
+ARG BUILD_COMMIT=unknown
+ENV VITE_BUILD_COMMIT=$BUILD_COMMIT
+
 WORKDIR /app/frontend
 
 # Copy frontend package files

@@ -181,6 +181,7 @@ class GeneralApiRouteDeps:
     code_analysis_result_store: Any = None
     get_grouped_vuln_cache_revision: Callable[[], Any] = lambda: None
     group_query_executor: Any = None
+    detail_executor: Any = None
     task_event_hub: Any = None
 
 
@@ -201,6 +202,7 @@ def _task_for_user(
         not isinstance(owners, set) or user not in owners
     ):
         return None
+    task["_last_accessed_at"] = datetime.now(timezone.utc)
     return task
 
 
@@ -316,6 +318,7 @@ def _claim_reusable_grouped_vuln_task(
                 task["_owners"] = owners
             owners.add(user)
             task["_reuse_count"] = int(task.get("_reuse_count") or 0) + 1
+            task["_last_accessed_at"] = datetime.now(timezone.utc)
             return task
     return None
 
@@ -772,6 +775,7 @@ def _register_task_routes(
                 "progress": 0,
                 "created_at": now,
                 "updated_at": now,
+                "_last_accessed_at": now,
                 "result": None,
                 "log": ["Starting..."],
             }
@@ -903,6 +907,7 @@ def _register_task_routes(
         offset: int = Query(0, ge=0),
         cursor: str = "",
         limit: int = Query(100, ge=1, le=1000),
+        include_counts: bool = True,
         generation: int = Query(0, ge=0),
         *,
         user: Annotated[str, Depends(current_user_dependency)],
@@ -960,6 +965,7 @@ def _register_task_routes(
                     "offset": offset,
                     "limit": limit,
                     "cursor": cursor,
+                    "include_counts": include_counts,
                 },
             )
             if deps.group_query_executor is None:
@@ -1023,6 +1029,7 @@ def _register_task_routes(
         offset: int = Query(0, ge=0),
         cursor: str = "",
         limit: int = Query(100, ge=1, le=1000),
+        include_counts: bool = True,
         generation: int = Query(0, ge=0),
         *,
         user: Annotated[str, Depends(current_user_dependency)],
@@ -1075,6 +1082,7 @@ def _register_task_routes(
                     "offset": offset,
                     "limit": limit,
                     "cursor": cursor,
+                    "include_counts": include_counts,
                 },
             )
             if deps.group_query_executor is None:
@@ -1127,14 +1135,14 @@ def _register_task_routes(
                 hydrated,
                 task.get("_bom_cache_map") or {},
             )
-            assessment_records = discover_assessment_metadata(
-                deps.code_analysis_result_store,
-                project_name=task.get("_project_name") or None,
-            )
+            _, context = _task_group_query_context(deps, task)
+            assessment_records = context["assessment_records"]
             _annotate_code_assessment_status([hydrated], assessment_records)
             return hydrated
 
-        return await asyncio.to_thread(hydrate_group_detail)
+        if deps.detail_executor is None:
+            return await asyncio.to_thread(hydrate_group_detail)
+        return await deps.detail_executor.run(hydrate_group_detail)
 
     @router.get("/tasks/{task_id}/statistics")
     async def get_task_statistics(
@@ -1276,9 +1284,38 @@ def _team_alias_map(team_mapping: dict[str, Any]) -> dict[str, str]:
     return aliases
 
 
+def _configured_rescore_rules(deps: Any) -> dict[str, Any]:
+    """Rescore rules are optional; a deployment without them simply skips them."""
+    load_rescore_rules = getattr(deps, "load_rescore_rules", None)
+    if not callable(load_rescore_rules):
+        return {}
+    return load_rescore_rules() or {}
+
+
+def _stable_query_context_digest(*values: Any) -> str:
+    payload = json.dumps(
+        values,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _assessment_metadata_revision(result_store: Any) -> int | None:
+    revision = getattr(result_store, "get_assessment_metadata_revision", None)
+    if not callable(revision):
+        return 0 if result_store is None else None
+    try:
+        return int(revision())
+    except (TypeError, ValueError):
+        return None
+
+
 def _automatic_assessment_filter_facets(
     group_index: dict[str, Any],
     records: list[dict[str, Any]],
+    rescore_rules: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, str]]:
     record_index = build_assessment_match_index(records)
     facets: dict[str, dict[str, str]] = {}
@@ -1293,10 +1330,89 @@ def _automatic_assessment_filter_facets(
         classification = automatic_assessment_filter_facets(
             group,
             matched_records,
+            rescore_rules,
         )
         if classification is not None:
             facets[group_id] = classification
     return facets
+
+
+def _task_group_query_context(
+    deps: GeneralApiRouteDeps,
+    task: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    group_index = get_or_build_task_group_query_index(task)
+    rescore_rules = _configured_rescore_rules(deps)
+    load_team_mapping = getattr(deps, "load_team_mapping", None)
+    team_mapping = load_team_mapping() if callable(load_team_mapping) else {}
+    load_team_groups = getattr(deps, "load_team_groups", None)
+    team_group_config = load_team_groups() if callable(load_team_groups) else {}
+    assessment_revision = _assessment_metadata_revision(
+        deps.code_analysis_result_store
+    )
+    config_digest = _stable_query_context_digest(
+        rescore_rules,
+        team_mapping,
+        team_group_config,
+    )
+    cache_key = (id(group_index), assessment_revision, config_digest)
+    context_lock = task.setdefault("_group_query_context_lock", threading.RLock())
+
+    with context_lock:
+        cached = task.get("_group_query_context")
+        if (
+            assessment_revision is not None
+            and isinstance(cached, dict)
+            and cached.get("cache_key") == cache_key
+        ):
+            return group_index, cached
+
+        assessment_records = discover_assessment_metadata(
+            deps.code_analysis_result_store,
+            project_name=task.get("_project_name") or None,
+        )
+        assessment_facets = _automatic_assessment_filter_facets(
+            group_index,
+            assessment_records,
+            rescore_rules,
+        )
+        try:
+            team_groups = resolve_team_groups(
+                team_group_config,
+                team_mapping,
+            )
+            team_group_structure = canonical_team_group_structure(
+                team_group_config,
+                team_mapping,
+            )
+        except ValueError as exc:
+            deps.logger.warning(
+                "Ignoring invalid team group configuration: %s",
+                exc,
+            )
+            team_groups = {}
+            team_group_structure = {}
+
+        context = {
+            "cache_key": cache_key,
+            "dynamic_context_key": (
+                _stable_query_context_digest(
+                    id(group_index),
+                    assessment_revision,
+                    config_digest,
+                )
+                if assessment_revision is not None
+                else ""
+            ),
+            "assessment_records": assessment_records,
+            "assessment_facets": assessment_facets,
+            "team_aliases": _team_alias_map(team_mapping),
+            "team_groups": team_groups,
+            "team_group_structure": team_group_structure,
+        }
+        if assessment_revision is not None:
+            task["_group_query_context"] = context
+        return group_index, context
 
 
 def _annotate_code_assessment_status(
@@ -1321,42 +1437,20 @@ def _query_task_group_window(
     *,
     hydrate_full: bool = False,
 ) -> dict[str, Any]:
-    assessment_records = discover_assessment_metadata(
-        deps.code_analysis_result_store,
-        project_name=task.get("_project_name") or None,
-    )
+    group_index, context = _task_group_query_context(deps, task)
+    assessment_records = context["assessment_records"]
     options = dict(query_options)
     requested_assessment_ids = options.pop("automatic_assessment_ids", [])
     options["automatic_assessment_ids"] = _assessment_filter_ids(
         assessment_records,
         requested_assessment_ids,
     )
-    group_index = get_or_build_task_group_query_index(task)
-    assessment_facets = _automatic_assessment_filter_facets(
-        group_index,
-        assessment_records,
-    )
+    assessment_facets = context["assessment_facets"]
     options["automatic_assessment_facets"] = assessment_facets
-    load_team_mapping = getattr(deps, "load_team_mapping", None)
-    team_mapping = load_team_mapping() if callable(load_team_mapping) else {}
-    options["team_aliases"] = _team_alias_map(team_mapping)
-    load_team_groups = getattr(deps, "load_team_groups", None)
-    try:
-        team_group_config = (
-            load_team_groups() if callable(load_team_groups) else {}
-        )
-        options["team_groups"] = resolve_team_groups(
-            team_group_config,
-            team_mapping,
-        )
-        options["team_group_structure"] = canonical_team_group_structure(
-            team_group_config,
-            team_mapping,
-        )
-    except ValueError as exc:
-        deps.logger.warning("Ignoring invalid team group configuration: %s", exc)
-        options["team_groups"] = {}
-        options["team_group_structure"] = {}
+    options["team_aliases"] = context["team_aliases"]
+    options["team_groups"] = context["team_groups"]
+    options["team_group_structure"] = context["team_group_structure"]
+    options["dynamic_context_key"] = context["dynamic_context_key"]
     response = query_task_groups(
         group_index,
         **options,
@@ -1425,6 +1519,7 @@ def _filter_bulk_workflow_groups(
             if isinstance(groups, dict)
             else len(groups),
         ),
+        include_counts=False,
     )
     return result["items"]
 
@@ -1499,7 +1594,11 @@ def _filter_bulk_workflow_task_groups(
     result: list[dict[str, Any]] = []
     for group in filtered_groups:
         matched_records = records_for_group(group, records, record_index)
-        facets = automatic_assessment_filter_facets(group, matched_records)
+        facets = automatic_assessment_filter_facets(
+            group,
+            matched_records,
+            _configured_rescore_rules(deps),
+        )
         has_assessment = facets is not None
         if assessment_filter and not (
             (
@@ -1577,6 +1676,7 @@ def _bulk_workflow_context(
         ),
         user=user,
         team_mapping=deps.load_team_mapping(),
+        rescore_rules=_configured_rescore_rules(deps),
         result_store=deps.code_analysis_result_store,
         assessment_records=assessment_records,
         assessment_diagnostics=assessment_diagnostics,

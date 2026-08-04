@@ -1,4 +1,5 @@
 import type { CodeAnalysisAssessResponse, CodeAnalysisComponentResult } from './api'
+import { assessmentTeamKey, STATE_PRIORITY } from './assessment-helpers'
 
 export interface CodeAnalysisTaggedComponent {
     name: string
@@ -21,6 +22,26 @@ export interface PreparedCodeAnalysisResult {
     firstTeam: string | null
     adjustedVector?: string
     adjustedScore?: number
+}
+
+/** One saved analyzer run, identified by the component it assessed. */
+export interface CodeAnalysisComponentRun {
+    component: string
+    result: CodeAnalysisAssessResponse
+    runId?: string | null
+}
+
+export interface PreparedCodeAnalysisResults {
+    /** One draft per team, combining every analyzed component owned by that team. */
+    teamDrafts: CodeAnalysisTeamDraft[]
+    /** Worst assessment across all runs; belongs on the global (General) block. */
+    globalState: string
+    globalJustification: string
+    adjustedVector?: string
+    adjustedScore?: number
+    /** Components covered by a run but not mapped to a team. */
+    unmappedComponents: string[]
+    runIds: string[]
 }
 
 const mapVerdictToAssessment = (result: CodeAnalysisAssessResponse) => {
@@ -441,5 +462,108 @@ export const prepareCodeAnalysisResult = (
         firstTeam: teamDrafts[0]?.team ?? null,
         adjustedVector: result.assessment.adjusted_cvss?.adjusted_vector,
         adjustedScore: result.assessment.adjusted_cvss?.adjusted_score,
+    }
+}
+
+interface AnalyzedComponent {
+    component: string
+    team: string
+    state: string
+    justification: string
+    details: string
+    score: number | null
+    adjustedVector?: string
+    adjustedScore?: number
+    runId?: string | null
+}
+
+const statePriority = (state: string): number => STATE_PRIORITY[state] ?? 10
+
+/**
+ * Worst-wins comparison: the more severe analysis state wins, a higher analyzer
+ * CVSS score breaks a tie, and the earlier entry wins when both are equal.
+ */
+const isWorse = (candidate: AnalyzedComponent, current: AnalyzedComponent): boolean => {
+    const candidateRank = statePriority(candidate.state)
+    const currentRank = statePriority(current.state)
+    if (candidateRank !== currentRank) return candidateRank < currentRank
+    return (candidate.score ?? -1) > (current.score ?? -1)
+}
+
+/**
+ * Prepares one assessment draft per owning team from several analyzer runs, plus
+ * the worst assessment across all of them for the global (General) block.
+ *
+ * Teams keep their own analyzer text; the global block only takes state,
+ * justification, and the analyzer CVSS of the worst run because the per-team
+ * blocks already carry the reasoning.
+ */
+export const prepareCodeAnalysisResults = (
+    runs: CodeAnalysisComponentRun[],
+    taggedComponents: CodeAnalysisTaggedComponent[],
+    assignedUsers: string[],
+): PreparedCodeAnalysisResults => {
+    const seenComponents = new Set<string>()
+    const analyzed: AnalyzedComponent[] = []
+
+    for (const run of runs) {
+        const component = String(run?.component || '').trim()
+        if (!component || !run?.result) continue
+
+        const componentKey = component.toLocaleLowerCase()
+        if (seenComponents.has(componentKey)) continue
+        seenComponents.add(componentKey)
+
+        const { targetState, targetJustification } = mapVerdictToAssessment(run.result)
+        const tagged = taggedComponents.find(candidate => candidate.name.toLowerCase() === componentKey)
+        const adjustedCvss = run.result.assessment.adjusted_cvss
+
+        analyzed.push({
+            component,
+            team: tagged?.tag?.trim() || '',
+            state: targetState,
+            justification: targetJustification,
+            details: buildCodeAnalysisDetails(run.result, targetJustification, [component]),
+            score: adjustedCvss?.adjusted_score ?? null,
+            adjustedVector: adjustedCvss?.adjusted_vector,
+            adjustedScore: adjustedCvss?.adjusted_score,
+            runId: run.runId,
+        })
+    }
+
+    const teamEntries = new Map<string, { team: string, entries: AnalyzedComponent[] }>()
+    for (const entry of analyzed.filter(candidate => candidate.team)) {
+        const teamKey = assessmentTeamKey(entry.team)
+        const existing = teamEntries.get(teamKey)
+        if (existing) {
+            existing.entries.push(entry)
+        } else {
+            teamEntries.set(teamKey, { team: entry.team, entries: [entry] })
+        }
+    }
+
+    const teamDrafts = [...teamEntries.values()].map(({ team, entries }) => {
+        const worst = entries.reduce((current, entry) => isWorse(entry, current) ? entry : current)
+        return {
+            team,
+            state: worst.state,
+            details: entries.map(entry => entry.details).join('\n\n'),
+            justification: worst.justification,
+            assigned: [...assignedUsers],
+        }
+    })
+
+    const globalWorst = analyzed.length
+        ? analyzed.reduce((current, entry) => isWorse(entry, current) ? entry : current)
+        : null
+
+    return {
+        teamDrafts,
+        globalState: globalWorst?.state ?? 'NOT_SET',
+        globalJustification: globalWorst?.justification ?? 'NOT_SET',
+        adjustedVector: globalWorst?.adjustedVector,
+        adjustedScore: globalWorst?.adjustedScore,
+        unmappedComponents: analyzed.filter(entry => !entry.team).map(entry => entry.component),
+        runIds: analyzed.map(entry => entry.runId).filter((runId): runId is string => Boolean(runId)),
     }
 }

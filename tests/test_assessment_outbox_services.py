@@ -116,6 +116,27 @@ def test_outbox_retains_retry_error(tmp_path):
     assert store.get_overlay(key)["sync_status"] == "error"
 
 
+def test_outbox_drops_missing_finding_update_and_overlay(tmp_path):
+    store = AssessmentOutboxStore(str(tmp_path / "assessment_outbox.sqlite"))
+    key = ("project", "component", "vulnerability")
+    record = store.enqueue_many([_payload()])[0]
+
+    assert store.drop_missing_finding(key, record["revision"]) is True
+    assert store.pending_count() == 0
+    assert store.get_overlay(key) is None
+
+
+def test_outbox_does_not_drop_newer_revision_for_stale_missing_response(tmp_path):
+    store = AssessmentOutboxStore(str(tmp_path / "assessment_outbox.sqlite"))
+    key = ("project", "component", "vulnerability")
+    first = store.enqueue_many([_payload()])[0]
+    second = store.enqueue_many([_payload("NOT_AFFECTED")])[0]
+
+    assert store.drop_missing_finding(key, first["revision"]) is False
+    assert store.list_pending() == [second]
+    assert store.get_overlay(key)["revision"] == second["revision"]
+
+
 def test_outbox_filters_future_retries_and_discards_by_id(tmp_path):
     store = AssessmentOutboxStore(str(tmp_path / "assessment_outbox.sqlite"))
     record = store.enqueue_many([_payload()])[0]

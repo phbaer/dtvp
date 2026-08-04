@@ -149,7 +149,9 @@ describe('BulkWorkflowModal', () => {
                     group_id: 'CVE-AFFECTED',
                     verdict_bucket: 'AFFECTED',
                     eligible_finding_count: 1,
-                    run_ids: ['run-1'],
+                    run_ids: ['run-1', 'run-4'],
+                    teams: ['TEAM-API', 'TEAM-WORKER'],
+                    unowned_components: ['orphan-lib'],
                     ticket_text: 'Title: fix it',
                     rescore: {
                         current_score: 8.1,
@@ -193,8 +195,9 @@ describe('BulkWorkflowModal', () => {
         await wrapper.get('[data-testid="bulk-workflow-automatic-assessments"]').trigger('click')
         await flushPromises()
 
-        expect(wrapper.get('[data-testid="automatic-assessment-rescore-notice"]').text())
-            .toContain('writes its shown vulnerability-level CVSS rescore')
+        const notice = wrapper.get('[data-testid="automatic-assessment-rescore-notice"]').text()
+        expect(notice).toContain('one assessment per owning team')
+        expect(notice).toContain("takes the worst result's state and its CVSS rescore")
         const rescore = wrapper.get('[data-testid="automatic-assessment-rescore-CVE-AFFECTED"]')
         expect(rescore.text()).toContain('Current')
         expect(rescore.text()).toContain('Score 8.1')
@@ -212,6 +215,13 @@ describe('BulkWorkflowModal', () => {
         ).toEqual(['All', 'Critical', 'High', 'Medium', 'Low', 'Info', 'No rescore', 'Unscored'])
         expect(wrapper.get('[data-testid="automatic-assessment-filter-count"]').text())
             .toContain('Showing 3 of 3 candidates')
+
+        const affectedRow = wrapper.get('[data-testid="bulk-workflow-item-CVE-AFFECTED"]').text()
+        expect(affectedRow).toContain('2 analysis runs')
+        expect(affectedRow).toContain('2 team assessments: TEAM-API, TEAM-WORKER')
+        expect(affectedRow).toContain('no team for orphan-lib')
+        expect(wrapper.get('[data-testid="bulk-workflow-item-CVE-SAFE"]').text())
+            .toContain('global assessment only')
 
         await wrapper.get('[data-testid="automatic-outcome-filter-probably_affected"]').trigger('click')
         expect(wrapper.find('[data-testid="bulk-workflow-item-CVE-AFFECTED"]').exists()).toBe(false)

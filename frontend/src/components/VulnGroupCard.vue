@@ -12,7 +12,7 @@ import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
-import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
+import { prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun } from '../lib/codeAnalysisResult'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { getDerivedGroupTags } from '../lib/dependency-team-selection'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
@@ -148,7 +148,7 @@ const unlockBodyScroll = () => {
 }
 
 const expanded = ref(props.inModal ? true : false)
-type DetailTab = 'overview' | 'cvss' | 'assessments' | 'analysis' | 'review' | 'mapping'
+type DetailTab = 'overview' | 'assessments' | 'analysis' | 'review' | 'mapping'
 const activeDetailTab = ref<DetailTab>('overview')
 const state = ref('NOT_SET')
 const details = ref('')
@@ -203,6 +203,7 @@ const teamDrafts = ref<Map<string, AssessmentDraftState>>(new Map())
 const refreshCounter = ref(0)
 const formTouched = ref(false)
 const codeAnalysisDraftApplied = ref(false)
+const codeAnalysisDraftSummary = ref('')
 const codeAnalysisRunIds = ref<string[]>([])
 const latestCodeAnalysisCvssAdjustment = ref<CodeAnalysisCvssAdjustment | null>(null)
 const latestCodeAnalysisCvssComponents = ref<string[]>([])
@@ -411,6 +412,7 @@ const discardUnsavedDraft = () => {
     formTouched.value = false
     rawDetailsTouched.value = false
     codeAnalysisDraftApplied.value = false
+    codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
     isManualBaseMode.value = false
     assigneeInput.value = ''
@@ -725,10 +727,89 @@ const handleCodeAnalysisResult = async (
     if (prepared.adjustedScore != null) {
         pendingScore.value = prepared.adjustedScore
     }
+    applyRescoreRulesForState(prepared.targetState)
 
     formTouched.value = true
     codeAnalysisDraftApplied.value = true
+    codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = [...analysisRunIds]
+    setDetailTab('review')
+}
+
+/**
+ * Applies the configured rescore rules on top of an analyzer proposal.
+ *
+ * States with a configured transition (`NOT_AFFECTED`, `FALSE_POSITIVE`) must
+ * end up with the vector the rules define, so the rules run explicitly instead
+ * of relying on the state watcher, which is skipped when the state is unchanged.
+ * `applyStateRescore` is a no-op for states without a rule, leaving the
+ * analyzer's own vector in place.
+ */
+const applyRescoreRulesForState = (targetState: string) => {
+    if (!isReviewer.value) return
+    applyStateRescore(targetState)
+}
+
+/**
+ * Applies every saved analyzer assessment at once: each team gets the result of
+ * the components it owns, and the worst result becomes the global assessment.
+ * The global block deliberately keeps its existing text — the reasoning already
+ * lives in the team blocks.
+ */
+const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[]) => {
+    const prepared = prepareCodeAnalysisResults(runs, triggeringTaggedComponents.value, currentAssigned.value)
+
+    if (prepared.teamDrafts.length === 0) {
+        await showAlert('No Team Assessments', 'None of the analyzed components is mapped to a team.')
+        return
+    }
+
+    // Switch to the global assessment first: the selectedTeam watcher persists the
+    // current form into its own team draft, which would otherwise overwrite the
+    // analyzer drafts written below.
+    selectedTeam.value = ''
+    await nextTick()
+
+    for (const draft of prepared.teamDrafts) {
+        const existingDraft = teamDrafts.value.get(draft.team)
+        teamDrafts.value.set(draft.team, {
+            state: draft.state,
+            details: draft.details,
+            justification: draft.justification,
+            assigned: draft.assigned,
+            evidenceReviewed: existingDraft?.evidenceReviewed ?? false,
+            versionCoverageChecked: existingDraft?.versionCoverageChecked ?? false,
+            ticket: existingDraft?.ticket ?? '',
+        })
+    }
+
+    state.value = prepared.globalState
+    justification.value = prepared.globalJustification
+    formTouched.value = true
+
+    if (prepared.adjustedVector) {
+        // The pendingVector watcher recalculates the score from the vector.
+        pendingVector.value = prepared.adjustedVector
+        setCvssInstanceFromVector(prepared.adjustedVector)
+    }
+    if (prepared.adjustedScore != null) {
+        pendingScore.value = prepared.adjustedScore
+    }
+    // The configured rules own the vector for the states they cover, so they run
+    // after the analyzer proposal and on top of it.
+    applyRescoreRulesForState(prepared.globalState)
+
+    codeAnalysisDraftApplied.value = true
+    codeAnalysisRunIds.value = [...prepared.runIds]
+    codeAnalysisDraftSummary.value = [
+        `Applied ${runs.length} analyzer assessment${runs.length === 1 ? '' : 's'}`,
+        `to ${prepared.teamDrafts.length} team${prepared.teamDrafts.length === 1 ? '' : 's'}`,
+        `(${prepared.teamDrafts.map(draft => draft.team).join(', ')}).`,
+        `The global assessment uses the worst result: ${prepared.globalState.replace(/_/g, ' ')}.`,
+        ...(prepared.unmappedComponents.length
+            ? [`No team is mapped for ${prepared.unmappedComponents.join(', ')}.`]
+            : []),
+    ].join(' ')
     setDetailTab('review')
 }
 
@@ -1170,6 +1251,10 @@ const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
     justification.value = block.justification || 'NOT_SET'
     details.value = stripPendingReviewStatus(block.details || '').trim()
     formTouched.value = true
+
+    // Same as applyConsensusAssessment: the adopted state owns the rescore even
+    // when the global assessment already carried it.
+    applyRescoreRulesForState(state.value)
 }
 
 watch(selectedTeam, (_newTeam, oldTeam) => {
@@ -1245,6 +1330,7 @@ const applyStateRescore = (targetState: string) => {
         metricRules: rescoreRules?.value?.metric_rules,
         targetState,
         currentVector: pendingVector.value,
+        baseVector: props.group.cvss_vector || '',
         fallbackVersion: activeVersion.value,
     })
 
@@ -1260,6 +1346,7 @@ const rescoreRuleSyncPreview = computed(() => buildRescoredVectorForState({
     metricRules: rescoreRules?.value?.metric_rules,
     targetState: state.value,
     currentVector: pendingVector.value,
+    baseVector: props.group.cvss_vector || '',
     fallbackVersion: activeVersion.value,
 }))
 
@@ -1596,7 +1683,6 @@ const ticketRequirementHelp = computed(() => {
 
 const detailTabs = computed<Array<{ id: DetailTab, label: string, icon: Component }>>(() => [
     { id: 'overview', label: 'Overview', icon: FileText },
-    { id: 'cvss', label: 'CVSS & Rescoring', icon: Calculator },
     { id: 'assessments', label: 'Assessments', icon: ClipboardList },
     { id: 'analysis', label: 'Code Analysis', icon: Bot },
     { id: 'review', label: 'Review', icon: ShieldCheck },
@@ -1705,6 +1791,7 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
     formTouched.value = false
     rawDetailsTouched.value = false
     codeAnalysisDraftApplied.value = false
+    codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
 }
 
@@ -2003,152 +2090,6 @@ const teamBlockStateColor = (state?: string): string => {
         </section>
 
         <section
-            v-show="activeDetailTab === 'cvss'"
-            :id="detailTabPanelId('cvss')"
-            :aria-labelledby="detailTabId('cvss')"
-            class="space-y-4"
-            role="tabpanel"
-        >
-            <div v-if="isReviewer" class="p-3 border border-gray-700 rounded bg-gray-800">
-                <h4 class="text-xs font-bold text-gray-300 mb-2 flex items-center gap-2">
-                    <Calculator :size="12" />
-                    CVSS Calculator
-                </h4>
-
-                <div class="mb-2">
-                    <label for="cvss-vector-input" class="block text-xs font-semibold text-gray-500 mb-1 flex justify-between">
-                        <span>Vector String</span>
-                        <div class="flex items-center gap-2">
-                            <button
-                                @click="resetVector"
-                                class="text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"
-                                title="Reset to Original"
-                            >
-                                <RotateCcw :size="10" />
-                            </button>
-                            <button
-                                v-if="rescoreRulesOutOfSync"
-                                data-testid="sync-rescore-rules"
-                                @click="syncRescoreRules"
-                                class="text-amber-300 hover:text-amber-200 flex items-center gap-1 cursor-pointer"
-                                title="Apply the configured rules for the current assessment state; use Apply to save"
-                            >
-                                <RefreshCw :size="10" /> Sync rules
-                            </button>
-                            <button
-                                @click="cleanRescoredVector"
-                                class="text-purple-300 hover:text-purple-200 flex items-center gap-1 cursor-pointer"
-                                title="Clean unresolved modifiers/requirements"
-                            >
-                                Clean
-                            </button>
-                            <button @click="showCalculatorModal = true" class="text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer">
-                                <ExternalLink :size="10" /> Visual Calculator
-                            </button>
-                        </div>
-                    </label>
-                    <input
-                        id="cvss-vector-input"
-                        v-model="pendingVector"
-                        type="text"
-                        placeholder="CVSS:4.0/AV:N/..."
-                        class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs font-mono"
-                    />
-                    <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 text-[9px] text-gray-500/60 flex gap-1.5 truncate">
-                        <span class="uppercase font-bold shrink-0">Original:</span>
-                        <span class="truncate italic">{{ group.cvss_vector }}</span>
-                    </div>
-                </div>
-
-                <div class="flex items-center justify-between">
-                    <label for="cvss-score-input" class="block text-xs font-semibold text-gray-500">Score</label>
-                    <div class="flex gap-2">
-                        <input
-                            id="cvss-score-input"
-                            v-model="pendingScore"
-                            type="number"
-                            :readonly="!canEditBase"
-                            step="0.1"
-                            min="0"
-                            max="10"
-                            class="w-16 p-1.5 text-right rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-sm font-bold text-yellow-400 disabled:opacity-50"
-                            :class="{ 'cursor-not-allowed text-gray-500': !canEditBase }"
-                        />
-                    </div>
-                </div>
-            </div>
-
-            <section v-if="cvssVectorEntries.length || matchedProposal || latestCodeAnalysisCvssAdjustment" class="space-y-3">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                    <h4 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">CVSS & Rescoring</h4>
-                    <button
-                        v-if="isReviewer && matchedProposal"
-                        @click="applyProposal"
-                        class="inline-flex items-center gap-1 rounded border border-teal-500/40 bg-teal-600/25 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-teal-200 transition-colors hover:bg-teal-600/45 hover:text-white cursor-pointer"
-                    >
-                        <Zap :size="10" />
-                        Apply Proposal
-                    </button>
-                </div>
-
-                <CvssVectorDisplay
-                    v-if="cvssVectorEntries.length"
-                    :vectors="cvssVectorEntries"
-                />
-
-                <div
-                    v-if="hasCodeAnalysisCvssNotes && latestCodeAnalysisCvssAdjustment"
-                    class="rounded border border-gray-800 bg-gray-900/45 px-3 py-2 text-xs leading-relaxed text-gray-400"
-                >
-                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span class="font-bold uppercase tracking-wider text-gray-500">Analyzer notes</span>
-                        <span v-if="codeAnalysisCvssComponentLabel" class="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
-                            {{ codeAnalysisCvssComponentLabel }}
-                        </span>
-                    </div>
-                    <p v-if="latestCodeAnalysisCvssAdjustment.summary" class="mt-1">
-                        {{ latestCodeAnalysisCvssAdjustment.summary }}
-                    </p>
-                    <ul v-if="latestCodeAnalysisCvssAdjustment.reasons?.length" class="mt-1 list-disc list-inside space-y-0.5 text-gray-500">
-                        <li v-for="(reason, idx) in latestCodeAnalysisCvssAdjustment.reasons" :key="idx">{{ reason }}</li>
-                    </ul>
-                </div>
-
-                <div v-if="matchedProposal" class="rounded border border-teal-800/45 bg-teal-950/15 p-3">
-                    <div class="mb-2 flex items-center justify-between gap-2">
-                        <h5 class="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-300">
-                            <Zap :size="12" />
-                            Threat Model Proposal
-                        </h5>
-                        <div class="flex items-center gap-3 text-xs">
-                            <div class="font-bold text-teal-300">
-                                {{ matchedProposal.rescored_score ?? 'N/A' }}
-                                <span v-if="matchedProposal.rescored_severity" class="ml-1 text-[9px] uppercase opacity-70">({{ matchedProposal.rescored_severity }})</span>
-                            </div>
-                            <div v-if="matchedProposal.original_score != null" class="text-gray-500">
-                                <span class="text-[9px] uppercase">from</span>
-                                {{ matchedProposal.original_score }}
-                                <span v-if="matchedProposal.original_severity" class="ml-1 text-[9px] uppercase opacity-70">({{ matchedProposal.original_severity }})</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div v-if="matchedProposal.analysis?.detail" class="mt-2 border-t border-teal-800/30 pt-2 text-xs leading-relaxed text-gray-400">
-                        <span class="mb-0.5 block text-[9px] font-bold uppercase text-gray-500">Reasoning</span>
-                        {{ matchedProposal.analysis.detail }}
-                    </div>
-                    <div v-if="matchedProposal.analysis?.response?.length" class="mt-2 border-t border-teal-800/30 pt-2 text-xs leading-relaxed text-gray-400">
-                        <span class="mb-0.5 block text-[9px] font-bold uppercase text-gray-500">Analysis</span>
-                        <ul class="list-disc list-inside space-y-0.5">
-                            <li v-for="(resp, idx) in matchedProposal.analysis.response" :key="idx">
-                                {{ typeof resp === 'string' ? resp : (resp.detail || resp.title || '') }}
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </section>
-        </section>
-
-        <section
             v-show="activeDetailTab === 'assessments'"
             :id="detailTabPanelId('assessments')"
             :aria-labelledby="detailTabId('assessments')"
@@ -2193,6 +2134,7 @@ const teamBlockStateColor = (state?: string): string => {
                 :currentAssigned="currentAssigned"
                 :assessmentStatus="props.automaticAssessmentStatus"
                 @apply-result="handleCodeAnalysisResult"
+                @apply-all-results="handleApplyAllCodeAnalysisResults"
                 @result-change="handleCodeAnalysisResultChange"
             />
         </section>
@@ -2206,9 +2148,11 @@ const teamBlockStateColor = (state?: string): string => {
         >
             <div
                 v-if="codeAnalysisDraftApplied"
+                data-testid="code-analysis-draft-banner"
                 class="rounded border border-cyan-700/40 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-200"
             >
-                Code analysis draft loaded into the assessment fields. Review and apply when ready.
+                {{ codeAnalysisDraftSummary || 'Code analysis draft loaded into the assessment fields.' }}
+                Review and apply when ready.
             </div>
             <div class="bg-gray-850 p-4 rounded border border-gray-700 h-fit">
                 <h4 class="font-bold flex items-center gap-2 mb-4">
@@ -2260,136 +2204,289 @@ const teamBlockStateColor = (state?: string): string => {
                         </div>
                     </div>
 
-                    <!-- Assessment Section (Reviewer Global or Team Selected) -->
-                    <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
-                        <div class="space-y-3">
-                            <div>
-                                <label id="analysis-state-label" for="analysis-state-select" class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
-                                <CustomSelect
-                                    id="analysis-state-select"
-                                    aria-labelledby="analysis-state-label"
-                                    :modelValue="state"
-                                    @update:modelValue="state = $event; formTouched = true"
-                                    :options="ANALYSIS_STATES"
-                                    size="sm"
-                                />
+                    <div :class="isReviewer && !selectedTeam ? 'grid items-start gap-4 xl:grid-cols-2' : ''">
+                        <section
+                            v-if="isReviewer && !selectedTeam"
+                            data-testid="global-cvss-rescoring"
+                            class="min-w-0 space-y-4 rounded border border-gray-700 bg-gray-900/45 p-3"
+                        >
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <h5 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-300">
+                                    <Calculator :size="13" class="text-purple-300" />
+                                    CVSS & Rescoring
+                                </h5>
+                                <span class="text-[10px] text-gray-500">Applied with the global assessment</span>
                             </div>
 
-                            <div v-if="state === 'NOT_AFFECTED'">
-                                <label id="justification-label" for="justification-select" class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
-                                <CustomSelect
-                                    id="justification-select"
-                                    aria-labelledby="justification-label"
-                                    :modelValue="justification"
-                                    @update:modelValue="justification = $event"
-                                    :options="JUSTIFICATION_OPTIONS"
-                                    size="sm"
-                                />
-                            </div>
+                            <div class="rounded border border-gray-700 bg-gray-800 p-3">
+                                <h6 class="mb-2 flex items-center gap-2 text-xs font-bold text-gray-300">
+                                    <Calculator :size="12" />
+                                    CVSS Calculator
+                                </h6>
 
-                            <div>
-                                <label for="analysis-details-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
-                                <textarea
-                                    id="analysis-details-textarea"
-                                    v-model="details"
-                                    @input="formTouched = true"
-                                    placeholder="Technical details..."
-                                    class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
-                                ></textarea>
-                            </div>
-
-                            <!-- Assignees -->
-                            <div>
-                                <label for="assigned-users-input" class="block text-xs font-semibold text-gray-400 mb-1">Assigned Users</label>
-                                <div class="flex flex-wrap gap-1 mb-1.5">
-                                    <span
-                                        v-for="assignee in currentAssigned"
-                                        :key="assignee"
-                                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium"
-                                    >
-                                        {{ assignee }}
-                                        <button @click="removeAssignee(assignee)" class="hover:text-white text-blue-300/70 leading-none cursor-pointer">&times;</button>
-                                    </span>
-                                </div>
-                                <div class="relative">
+                                <div class="mb-2">
+                                    <label for="cvss-vector-input" class="mb-1 flex justify-between text-xs font-semibold text-gray-500">
+                                        <span>Vector String</span>
+                                        <div class="flex items-center gap-2">
+                                            <button
+                                                @click="resetVector"
+                                                class="flex cursor-pointer items-center gap-1 text-gray-400 hover:text-white"
+                                                title="Reset to Original"
+                                            >
+                                                <RotateCcw :size="10" />
+                                            </button>
+                                            <button
+                                                v-if="rescoreRulesOutOfSync"
+                                                data-testid="sync-rescore-rules"
+                                                @click="syncRescoreRules"
+                                                class="flex cursor-pointer items-center gap-1 text-amber-300 hover:text-amber-200"
+                                                title="Apply the configured rules for the current assessment state; use Apply to save"
+                                            >
+                                                <RefreshCw :size="10" /> Sync rules
+                                            </button>
+                                            <button
+                                                @click="cleanRescoredVector"
+                                                class="flex cursor-pointer items-center gap-1 text-purple-300 hover:text-purple-200"
+                                                title="Clean unresolved modifiers/requirements"
+                                            >
+                                                Clean
+                                            </button>
+                                            <button
+                                                @click="showCalculatorModal = true"
+                                                class="flex cursor-pointer items-center gap-1 text-blue-400 hover:text-blue-300"
+                                            >
+                                                <ExternalLink :size="10" /> Visual Calculator
+                                            </button>
+                                        </div>
+                                    </label>
                                     <input
-                                        id="assigned-users-input"
-                                        v-model="assigneeInput"
-                                        @input="onAssigneeInput"
-                                        @keydown.enter.prevent="addAssigneeFromInput"
-                                        @keydown.tab.prevent="addAssigneeFromInput"
+                                        id="cvss-vector-input"
+                                        v-model="pendingVector"
                                         type="text"
-                                        placeholder="Type username and press Enter..."
-                                        class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs"
-                                        @blur="assigneeSuggestionsVisible = false"
+                                        placeholder="CVSS:4.0/AV:N/..."
+                                        class="w-full rounded border border-gray-600 bg-gray-900 p-1.5 font-mono text-xs focus:border-blue-500"
                                     />
-                                    <div v-if="assigneeSuggestionsVisible && filteredUserSuggestions.length > 0"
-                                         class="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded shadow-lg max-h-32 overflow-y-auto">
-                                        <button
-                                            v-for="suggestion in filteredUserSuggestions"
-                                            :key="suggestion"
-                                            @mousedown.prevent="selectAssigneeSuggestion(suggestion)"
-                                            class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-blue-500/20 hover:text-blue-200 transition-colors cursor-pointer"
-                                        >
-                                            {{ suggestion }}
-                                        </button>
+                                    <div v-if="group.cvss_vector && group.cvss_vector !== pendingVector" class="mt-1 flex gap-1.5 truncate text-[9px] text-gray-500/60">
+                                        <span class="shrink-0 font-bold uppercase">Original:</span>
+                                        <span class="truncate italic">{{ group.cvss_vector }}</span>
                                     </div>
                                 </div>
+
+                                <div class="flex items-center justify-between">
+                                    <label for="cvss-score-input" class="block text-xs font-semibold text-gray-500">Score</label>
+                                    <input
+                                        id="cvss-score-input"
+                                        v-model="pendingScore"
+                                        type="number"
+                                        :readonly="!canEditBase"
+                                        step="0.1"
+                                        min="0"
+                                        max="10"
+                                        class="w-16 rounded border border-gray-600 bg-gray-900 p-1.5 text-right text-sm font-bold text-yellow-400 focus:border-blue-500 disabled:opacity-50"
+                                        :class="{ 'cursor-not-allowed text-gray-500': !canEditBase }"
+                                    />
+                                </div>
                             </div>
 
-                            <div v-if="isReviewer" data-testid="review-context" class="rounded border border-gray-700 bg-gray-900/45 p-3">
-                                <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                    <h5 class="text-xs font-bold uppercase tracking-wider text-gray-400">Review Context</h5>
-                                    <span
-                                        class="text-[10px] font-semibold"
-                                        :class="ticketReferenceMissing ? 'text-amber-300' : 'text-gray-500'"
+                            <section v-if="cvssVectorEntries.length || matchedProposal || latestCodeAnalysisCvssAdjustment" class="space-y-3">
+                                <div v-if="matchedProposal" class="flex justify-end">
+                                    <button
+                                        @click="applyProposal"
+                                        class="inline-flex cursor-pointer items-center gap-1 rounded border border-teal-500/40 bg-teal-600/25 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-teal-200 transition-colors hover:bg-teal-600/45 hover:text-white"
                                     >
-                                        {{ reviewContextRequiredCompleted }}/{{ reviewContextRequiredTotal }} required
-                                    </span>
+                                        <Zap :size="10" />
+                                        Apply Proposal
+                                    </button>
                                 </div>
-                                <div class="grid gap-2 sm:grid-cols-2">
-                                    <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
-                                        <input
-                                            v-model="evidenceReviewed"
-                                            type="checkbox"
-                                            class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
-                                            @change="formTouched = true"
-                                        />
-                                        Evidence reviewed
-                                    </label>
-                                    <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
-                                        <input
-                                            v-model="versionCoverageChecked"
-                                            type="checkbox"
-                                            class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
-                                            @change="formTouched = true"
-                                        />
-                                        Version coverage checked
-                                    </label>
-                                    <label class="sm:col-span-2">
-                                        <span class="mb-1 flex flex-wrap items-center justify-between gap-2">
-                                            <span class="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Ticket reference</span>
-                                            <span
-                                                data-testid="ticket-requirement-badge"
-                                                class="rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
-                                                :class="isTicketReferenceRequired
-                                                    ? 'border-amber-700/50 bg-amber-950/30 text-amber-200'
-                                                    : 'border-gray-700 bg-gray-950/50 text-gray-500'"
-                                            >
-                                                {{ isTicketReferenceRequired ? 'Required' : 'Optional' }}
-                                            </span>
+
+                                <CvssVectorDisplay
+                                    v-if="cvssVectorEntries.length"
+                                    :vectors="cvssVectorEntries"
+                                />
+
+                                <div
+                                    v-if="hasCodeAnalysisCvssNotes && latestCodeAnalysisCvssAdjustment"
+                                    class="rounded border border-gray-800 bg-gray-900/45 px-3 py-2 text-xs leading-relaxed text-gray-400"
+                                >
+                                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <span class="font-bold uppercase tracking-wider text-gray-500">Analyzer notes</span>
+                                        <span v-if="codeAnalysisCvssComponentLabel" class="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                                            {{ codeAnalysisCvssComponentLabel }}
                                         </span>
+                                    </div>
+                                    <p v-if="latestCodeAnalysisCvssAdjustment.summary" class="mt-1">
+                                        {{ latestCodeAnalysisCvssAdjustment.summary }}
+                                    </p>
+                                    <ul v-if="latestCodeAnalysisCvssAdjustment.reasons?.length" class="mt-1 list-inside list-disc space-y-0.5 text-gray-500">
+                                        <li v-for="(reason, idx) in latestCodeAnalysisCvssAdjustment.reasons" :key="idx">{{ reason }}</li>
+                                    </ul>
+                                </div>
+
+                                <div v-if="matchedProposal" class="rounded border border-teal-800/45 bg-teal-950/15 p-3">
+                                    <div class="mb-2 flex items-center justify-between gap-2">
+                                        <h6 class="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-teal-300">
+                                            <Zap :size="12" />
+                                            Threat Model Proposal
+                                        </h6>
+                                        <div class="flex items-center gap-3 text-xs">
+                                            <div class="font-bold text-teal-300">
+                                                {{ matchedProposal.rescored_score ?? 'N/A' }}
+                                                <span v-if="matchedProposal.rescored_severity" class="ml-1 text-[9px] uppercase opacity-70">({{ matchedProposal.rescored_severity }})</span>
+                                            </div>
+                                            <div v-if="matchedProposal.original_score != null" class="text-gray-500">
+                                                <span class="text-[9px] uppercase">from</span>
+                                                {{ matchedProposal.original_score }}
+                                                <span v-if="matchedProposal.original_severity" class="ml-1 text-[9px] uppercase opacity-70">({{ matchedProposal.original_severity }})</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="matchedProposal.analysis?.detail" class="mt-2 border-t border-teal-800/30 pt-2 text-xs leading-relaxed text-gray-400">
+                                        <span class="mb-0.5 block text-[9px] font-bold uppercase text-gray-500">Reasoning</span>
+                                        {{ matchedProposal.analysis.detail }}
+                                    </div>
+                                    <div v-if="matchedProposal.analysis?.response?.length" class="mt-2 border-t border-teal-800/30 pt-2 text-xs leading-relaxed text-gray-400">
+                                        <span class="mb-0.5 block text-[9px] font-bold uppercase text-gray-500">Analysis</span>
+                                        <ul class="list-inside list-disc space-y-0.5">
+                                            <li v-for="(resp, idx) in matchedProposal.analysis.response" :key="idx">
+                                                {{ typeof resp === 'string' ? resp : (resp.detail || resp.title || '') }}
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </section>
+                        </section>
+
+                        <!-- Assessment Section (Reviewer Global or Team Selected) -->
+                        <div v-if="selectedTeam || isReviewer" :class="['border rounded p-3', selectedTeam ? 'border-blue-700/50 bg-blue-950/20' : 'border-purple-700/50 bg-purple-950/20']">
+                            <div class="space-y-3">
+                                <div>
+                                    <label id="analysis-state-label" for="analysis-state-select" class="block text-xs font-semibold text-gray-400 mb-1">Analysis State</label>
+                                    <CustomSelect
+                                        id="analysis-state-select"
+                                        aria-labelledby="analysis-state-label"
+                                        :modelValue="state"
+                                        @update:modelValue="state = $event; formTouched = true"
+                                        :options="ANALYSIS_STATES"
+                                        size="sm"
+                                    />
+                                </div>
+
+                                <div v-if="state === 'NOT_AFFECTED'">
+                                    <label id="justification-label" for="justification-select" class="block text-xs font-semibold text-gray-400 mb-1">Justification</label>
+                                    <CustomSelect
+                                        id="justification-select"
+                                        aria-labelledby="justification-label"
+                                        :modelValue="justification"
+                                        @update:modelValue="justification = $event"
+                                        :options="JUSTIFICATION_OPTIONS"
+                                        size="sm"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label for="analysis-details-textarea" class="block text-xs font-semibold text-gray-400 mb-1">Analysis Details</label>
+                                    <textarea
+                                        id="analysis-details-textarea"
+                                        v-model="details"
+                                        @input="formTouched = true"
+                                        placeholder="Technical details..."
+                                        class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
+                                    ></textarea>
+                                </div>
+
+                                <!-- Assignees -->
+                                <div>
+                                    <label for="assigned-users-input" class="block text-xs font-semibold text-gray-400 mb-1">Assigned Users</label>
+                                    <div class="flex flex-wrap gap-1 mb-1.5">
+                                        <span
+                                            v-for="assignee in currentAssigned"
+                                            :key="assignee"
+                                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-200 text-[11px] font-medium"
+                                        >
+                                            {{ assignee }}
+                                            <button @click="removeAssignee(assignee)" class="hover:text-white text-blue-300/70 leading-none cursor-pointer">&times;</button>
+                                        </span>
+                                    </div>
+                                    <div class="relative">
                                         <input
-                                            v-model="ticketReference"
+                                            id="assigned-users-input"
+                                            v-model="assigneeInput"
+                                            @input="onAssigneeInput"
+                                            @keydown.enter.prevent="addAssigneeFromInput"
+                                            @keydown.tab.prevent="addAssigneeFromInput"
                                             type="text"
-                                            placeholder="e.g. SEC-1234 or remediation ticket"
-                                            :aria-required="isTicketReferenceRequired ? 'true' : 'false'"
-                                            class="w-full rounded border bg-gray-950 px-2 py-1.5 text-xs text-gray-200 focus:border-blue-500"
-                                            :class="ticketReferenceMissing ? 'border-amber-600/80' : 'border-gray-700'"
-                                            @input="formTouched = true"
+                                            placeholder="Type username and press Enter..."
+                                            class="w-full p-1.5 rounded bg-gray-900 border border-gray-600 focus:border-blue-500 text-xs"
+                                            @blur="assigneeSuggestionsVisible = false"
                                         />
-                                        <span class="mt-1 block text-[10px] text-gray-600">{{ ticketRequirementHelp }}</span>
-                                    </label>
+                                        <div v-if="assigneeSuggestionsVisible && filteredUserSuggestions.length > 0"
+                                             class="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded shadow-lg max-h-32 overflow-y-auto">
+                                            <button
+                                                v-for="suggestion in filteredUserSuggestions"
+                                                :key="suggestion"
+                                                @mousedown.prevent="selectAssigneeSuggestion(suggestion)"
+                                                class="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-blue-500/20 hover:text-blue-200 transition-colors cursor-pointer"
+                                            >
+                                                {{ suggestion }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-if="isReviewer" data-testid="review-context" class="rounded border border-gray-700 bg-gray-900/45 p-3">
+                                    <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                        <h5 class="text-xs font-bold uppercase tracking-wider text-gray-400">Review Context</h5>
+                                        <span
+                                            class="text-[10px] font-semibold"
+                                            :class="ticketReferenceMissing ? 'text-amber-300' : 'text-gray-500'"
+                                        >
+                                            {{ reviewContextRequiredCompleted }}/{{ reviewContextRequiredTotal }} required
+                                        </span>
+                                    </div>
+                                    <div class="grid gap-2 sm:grid-cols-2">
+                                        <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
+                                            <input
+                                                v-model="evidenceReviewed"
+                                                type="checkbox"
+                                                class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
+                                                @change="formTouched = true"
+                                            />
+                                            Evidence reviewed
+                                        </label>
+                                        <label class="flex items-center gap-2 rounded border border-gray-800 bg-gray-950/40 px-2 py-1.5 text-xs text-gray-300">
+                                            <input
+                                                v-model="versionCoverageChecked"
+                                                type="checkbox"
+                                                class="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 text-blue-500"
+                                                @change="formTouched = true"
+                                            />
+                                            Version coverage checked
+                                        </label>
+                                        <label class="sm:col-span-2">
+                                            <span class="mb-1 flex flex-wrap items-center justify-between gap-2">
+                                                <span class="block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Ticket reference</span>
+                                                <span
+                                                    data-testid="ticket-requirement-badge"
+                                                    class="rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                                                    :class="isTicketReferenceRequired
+                                                        ? 'border-amber-700/50 bg-amber-950/30 text-amber-200'
+                                                        : 'border-gray-700 bg-gray-950/50 text-gray-500'"
+                                                >
+                                                    {{ isTicketReferenceRequired ? 'Required' : 'Optional' }}
+                                                </span>
+                                            </span>
+                                            <input
+                                                v-model="ticketReference"
+                                                type="text"
+                                                placeholder="e.g. SEC-1234 or remediation ticket"
+                                                :aria-required="isTicketReferenceRequired ? 'true' : 'false'"
+                                                class="w-full rounded border bg-gray-950 px-2 py-1.5 text-xs text-gray-200 focus:border-blue-500"
+                                                :class="ticketReferenceMissing ? 'border-amber-600/80' : 'border-gray-700'"
+                                                @input="formTouched = true"
+                                            />
+                                            <span class="mt-1 block text-[10px] text-gray-600">{{ ticketRequirementHelp }}</span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>

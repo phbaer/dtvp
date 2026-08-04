@@ -70,7 +70,7 @@ The expanded assessment form supports assigning users with known-user suggestion
 
 ![Review context](screenshots/vuln-card-review-context.png)
 
-The Review tab keeps the global or team assessment form together with persisted review context. Ticket references are marked required only when the current rescored severity is High or Critical.
+The Review tab keeps the global or team assessment form together with persisted review context. The reviewer-only Global subview also contains CVSS and rescoring so the score and assessment can be evaluated together. Ticket references are marked required only when the current rescored severity is High or Critical.
 
 ### Inconsistent Assessment
 
@@ -90,11 +90,11 @@ The Team Mapping tab gives reviewers one scrollable component list for adding or
 
 Rescored vulnerabilities show the original CVSS score, the contextual score, and the direction of the change.
 
-### CVSS And Rescoring Tab
+### Global Review CVSS And Rescoring
 
-![CVSS and rescoring tab](screenshots/vuln-card-cvss-rescoring.png)
+![Global review CVSS and rescoring](screenshots/vuln-card-cvss-rescoring.png)
 
-The CVSS & Rescoring tab contains the vector editor, visual calculator entry point, current vector comparison, tmrescore reasoning, and analyzer CVSS notes when present.
+The Global subview of Review contains the vector editor, visual calculator entry point, current vector comparison, tmrescore reasoning, and analyzer CVSS notes when present.
 
 ### CVSS Calculator
 

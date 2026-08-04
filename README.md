@@ -75,8 +75,10 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Run focused frontend tests | `cd frontend && npm run test:unit -- ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |
 | Run local-stack UI tests | `cd frontend && npm run test:ui` |
+| Benchmark grouped-query concurrency | `uv run python scripts/benchmark_group_queries.py` |
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
+| Start the GIL-enabled fallback deployment | `docker compose -f compose.yml -f compose.gil.yml up -d --build` |
 
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml`. When upgrading `@playwright/test`, update
@@ -163,7 +165,14 @@ Important frontend components:
   generation supersedes them. Cached result indexes use packed integers and
   are evicted against both entry-count and approximate byte budgets.
   Lightweight code-assessment metadata is cached and invalidated when analyzer
-  results change.
+  results change. Derived automatic-assessment facets and team-group context
+  are reused until their metadata or configuration revision changes.
+- Grouped snapshot construction runs in a separate bounded worker pool from
+  foreground filters and vulnerability-detail hydration. This prevents several
+  simultaneous project builds from filling the application thread pool; the
+  default single build worker also avoids wasteful GIL contention. Detail
+  hydration has its own reserved pool, so project builds and cold searches do
+  not consume every slot needed to open a vulnerability.
 - The global analysis indicator polls one compact queue-and-sweep status
   response: every five seconds while work is active and every 30 seconds while
   idle, with per-client jitter. Hidden browser tabs pause polling, and detailed
@@ -178,6 +187,8 @@ Important frontend components:
   automatic and manual submissions share a configurable pending-item limit.
 - The frontend viewport-windows list rows, coalesces partial refreshes, and
   hydrates dependency paths and full assessment details only when needed.
+  Follow-up pages and full-result drains omit facet counts they do not consume;
+  the initial/filter request retains complete task-wide and filtered counts.
 - The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
   vulnerability details, BOMs, local overlays, and pending writes. Stale cached
   data remains readable while Dependency-Track is unavailable. Concurrent
@@ -196,7 +207,12 @@ Important frontend components:
   Pending assessment writes and their local overlays live in a transactional
   SQLite outbox. Newer changes to the same finding replace older pending
   values, and one application-wide bounded dispatcher retries Dependency-Track
-  synchronization without multiplying write concurrency per client. Legacy
+  synchronization without multiplying write concurrency per client. When a
+  finding disappears before synchronization, a Dependency-Track 404 triggers
+  a live findings-API check. Only a valid response confirming that the exact
+  project/component/vulnerability tuple is absent drops the queued revision
+  and its unsynced overlay; failed checks and findings that still exist keep
+  retrying. Legacy
   `pending_updates.json` entries import once on first use. Interactive and bulk
   assessment requests return after the outbox transaction commits instead of
   waiting for Dependency-Track. Per-finding local revisions reject stale DTVP
@@ -227,24 +243,30 @@ medium projects. Mostly idle or dashboard users are substantially cheaper;
 100-300 concurrent sessions is a reasonable starting estimate when they are
 not all retaining large grouped-vulnerability tasks.
 
-These are sizing estimates, not production guarantees. A synthetic benchmark
-on a 20-CPU, 15 GiB host with the Python GIL enabled measured eight concurrent
-cold searches as follows:
+These are sizing estimates, not production guarantees. The reproducible
+benchmark below was run on a 20-CPU, 15 GiB host with 20,000 groups, filtered
+facet counts enabled, and ten cold searches per simulated user:
 
-| Grouped vulnerabilities | Throughput | p95 search latency |
-| :--- | ---: | ---: |
-| 1,000 | about 730 queries/second | 1.3 ms |
-| 5,000 | about 176 queries/second | 50 ms |
-| 10,000 | about 99 queries/second | 96 ms |
-| 20,000 | about 25-40 queries/second | 260-470 ms |
+| Runtime | Simultaneous searches | Throughput | p95 search latency |
+| :--- | ---: | ---: | ---: |
+| CPython 3.14.4, GIL enabled | 1 | 19.6 queries/s | 78 ms |
+| CPython 3.14.4, GIL enabled | 4 | 21.1 queries/s | 355 ms |
+| CPython 3.14.4, GIL enabled | 8 | 22.0 queries/s | 523 ms |
+| CPython 3.14.4, free-threaded | 1 | 18.1 queries/s | 71 ms |
+| CPython 3.14.4, free-threaded | 4 | 57.2 queries/s | 91 ms |
+| CPython 3.14.4, free-threaded | 8 | 67.8 queries/s | 155 ms |
 
-At 16 simultaneous cold searches over 20,000 groups, p95 latency approached
-one second. An identical cached search took about 0.07 ms, so new search terms
-and filter combinations are the limiting case rather than pagination or repeat
-requests.
+For this CPU-heavy path, free threading provides real multi-core scaling: at
+four simultaneous cold searches it delivered about 2.7x the throughput and
+cut p95 latency by about three quarters. Moving from four to eight
+free-threaded workers gave only about 19% more throughput while increasing p95
+by about 71%. Four query workers therefore remains the balanced default.
+Identical cached searches remained below 1 ms in every case; new search/filter
+combinations and their
+facet counts are the limiting query path.
 
-A synthetic 20,000-group summary and query index retained about 78 MB of live
-Python allocations and increased initial process RSS by about 175 MB. Real
+The same 20,000-group query index retained about 65 MiB of traced Python
+allocations with the GIL build and 69 MiB with the free-threaded build. Real
 tasks also retain full vulnerability, component, dependency, and BOM details;
 budget roughly 150-300 MB or more for each large retained task. Matching
 project/CVE/mode/cache/mapping requests share one access-controlled task, and
@@ -261,10 +283,33 @@ For conservative per-instance planning:
 - code-analysis jobs: one runs concurrently by default through
   `DTVP_ANALYSIS_QUEUE_CAPACITY`; additional jobs wait in the shared queue.
 
-Before increasing those ranges, use production-shaped load tests. The first
-scaling steps are reducing grouped-task retention (for example, to 900
-seconds), increasing the frontend search debounce, and introducing a shared
-task/result store so multiple backend processes can use additional CPU cores.
+Before increasing those ranges, use production-shaped load tests. The next
+scaling steps are validating the free-threaded image with real project mixes,
+tuning the grouped-task retention/count caps against available RAM, and
+introducing a shared task/result store before multiple backend processes are
+enabled. More Uvicorn workers are not safe while live task registries remain
+process-local.
+
+Reproduce the grouped-query measurements with:
+
+```bash
+uv run python scripts/benchmark_group_queries.py \
+  --groups 1000 5000 10000 20000 \
+  --concurrency 1 4 8 16
+```
+
+The benchmark generates deterministic groups, primes only the reusable sort
+order, and then measures new search/filter contexts separately from identical
+cached requests. It reports build time, retained Python allocations,
+throughput, and p50/p95 latency in the `dtvp.group-query-benchmark/v1` schema;
+add `--json` for machine-readable output and `--no-counts` to model follow-up
+pages. Compare the normal project runtime with a clean `3.14t` interpreter on
+the same host (the benchmark itself has no third-party dependencies):
+
+```bash
+uv run python scripts/benchmark_group_queries.py
+uv run --no-project --python 3.14t python scripts/benchmark_group_queries.py
+```
 
 ## Domain Model
 
@@ -296,6 +341,13 @@ transitions support CVSS 2.0, 3.0, 3.1, and 4.0 and produce exactly `0.0`.
 Vectors preserve their original CVSS version and base metrics. Cross-version,
 malformed, or incomplete vectors stay visible for manual review rather than
 being rewritten speculatively.
+
+A configured transition owns the vector of the state it covers. Whenever a
+state with a rule is written — by the reviewer, by a code-analysis draft, or by
+a bulk apply — the rule is layered on top of the proposed vector and the base
+metrics of the Dependency-Track vector are restored, so an analyzer proposal
+contributes only its extra metrics. States without a transition keep the
+analyzer's proposed vector and score unchanged.
 
 ### Team Mapping And Analyzer Guidance
 
@@ -403,13 +455,15 @@ The detail workspace provides:
 | Tab | Purpose |
 | :--- | :--- |
 | Overview | Advisory, references, affected components, ownership, and dependency context |
-| CVSS & Rescoring | Original/rescored vectors, calculator, tmrescore, and analyzer CVSS notes |
 | Assessments | Current Dependency-Track assessment blocks |
 | Code Analysis | Target selection, queue/history, verdict, evidence, draft, ticket, and artifacts |
-| Review | Global/team assessment editor and reviewer context |
+| Review | Global assessment editor with CVSS/rescoring, tmrescore, analyzer notes, and reviewer context; team assessment editor |
 | Team Mapping | Reviewer-only ownership editor |
 
-Local drafts survive tab changes. Closing or switching a vulnerability prompts
+CVSS and rescoring controls appear in the reviewer-only Global subview of
+Review so the score and assessment can be evaluated and applied together. Team
+subviews omit global rescoring controls. Local drafts survive tab changes.
+Closing or switching a vulnerability prompts
 the reviewer to apply, discard, or keep editing. Assessment writes refresh the
 active task window, and route state preserves filters when navigating to
 statistics or code analysis. Once the transactional local save succeeds, the
@@ -430,7 +484,7 @@ The reviewer-only `Bulk Changes` dialog runs one plug-in workflow at a time:
 
 | Workflow | Candidates and action |
 | :--- | :--- |
-| Apply Automatic Assessments | Usable, unapplied analyzer assessments; applies the vulnerability-level overall verdict and proposed CVSS rescore |
+| Apply Automatic Assessments | Usable, unapplied analyzer assessments; writes one assessment per owning team plus a global assessment with the worst verdict and its CVSS rescore |
 | Sync Incomplete Assessments | Groups whose otherwise consistent assessment is missing from some findings |
 | Restore Rescored CVSS | Assessed findings with one unambiguous current vector recoverable from audit comments |
 | Repair Rescoring Definitions | Findings where a configured state-based CVSS rescore is missing, incomplete, or incorrect; repairs every safely actionable finding |
@@ -442,7 +496,9 @@ beside the fixed values that will be written. Findings with a matching
 transition but a missing or unsupported original CVSS vector remain listed for
 manual review instead of being silently omitted.
 `Apply Automatic Assessments` rows likewise show the current vulnerability
-CVSS and the automatic rescore that will be written to every eligible finding.
+CVSS and the automatic rescore that will be written to every eligible finding,
+together with the teams that receive an assessment and any analyzed component
+without a team.
 Its composable selection filters cover every automatic-analysis outcome and
 every proposed CVSS severity, plus candidates with no rescore or a vector-only
 unscored proposal. Multiple choices within a facet use OR semantics, while the
@@ -499,7 +555,20 @@ the numbered SQLite migration path.
 
 For apply, all relevant analyzer runs are combined using the most severe
 overall verdict: Affected becomes `EXPLOITABLE`; Probably Affected and Uncertain
-become `IN_TRIAGE`; Not Affected becomes `NOT_AFFECTED`. Applied details retain
+become `IN_TRIAGE`; Not Affected becomes `NOT_AFFECTED`.
+
+Applied details carry one assessment block per owning team plus the global
+block, matching the vulnerability card's `Apply all to <n> teams` action. A
+team's block holds the analyzer evidence for the components it owns and its own
+worst-wins state and justification; ownership uses the same team mapping and
+dependency-path resolution as automatic scan targets, with the run's recorded
+target team as fallback. The global block carries the worst state across all
+runs, its justification, and the CVSS rescore of that worst run — a milder run
+never contributes the global vector or score, even when its proposed score is
+higher. When the global state has a configured rescore transition, that rule
+produces the written vector and score, so `Repair Rescoring Definitions` reports
+nothing right after an apply. Components that no team owns keep their evidence
+in the global block and are listed in the preview row. Applied details retain
 every relevant run, the analyzer-generated summary and rationale verbatim, and
 all decision-relevant advisory conclusions, version notes, research findings,
 remediation recommendations, audit checks, and CVSS reasons without arbitrary
@@ -605,6 +674,17 @@ artifacts. The metadata badge and lightweight history for the current
 vulnerability load automatically; a full result (including its LLM
 conversation) loads only when its row is opened. Runs can then be removed,
 applied, benchmarked, or used as parents for follow-ups.
+
+When several components of one vulnerability have their own saved analyzer
+result, `Apply all to <n> teams` stages all of them at once. Each team receives
+the latest result of the components it owns, combined worst-wins when it owns
+more than one, and the global assessment takes state, justification, CVSS
+vector, and score from the worst result across all of them. The global block
+keeps its existing text because the reasoning already lives in the team blocks.
+Benchmark runs, unfinished runs, and superseded runs of the same component are
+never candidates, and components without a team mapping are reported instead of
+silently dropped. The staged drafts land in the `Review` tab and one `Apply`
+writes every team block and the global block in a single assessment update.
 
 An affected result produces a copyable Markdown remediation ticket. Setting
 `DTVP_JIRA_CREATE_URL` adds an action that copies the draft and opens Jira's
@@ -726,6 +806,19 @@ Deployment rules:
   do not rely only on CIDR entries.
 - DTVP OIDC is independent of Dependency-Track browser sessions. Backend calls
   use `DTVP_DT_API_KEY` and never forward browser credentials.
+- API `401` responses move the SPA to sign-in and preserve the current route for
+  the OIDC return. Reviewer authorization failures remain `403` errors and do
+  not incorrectly log the user out.
+- Completed grouped-vulnerability tasks are retained by idle time. Visible
+  project tabs renew their lightweight task lease and rebuild an expired task
+  automatically after a suspended browser resumes, so details and bulk actions
+  do not require a full-page reload.
+- Background Dependency-Track refresh tracks a timestamped, bounded set of
+  recently viewed projects. Older projects remain on disk and load on demand;
+  they no longer receive three upstream refresh calls every minute forever.
+- Process-local cache objects and named project searches use LRU limits, and
+  completed grouped tasks have a separate retained-count cap. These bounds keep
+  long-running and multi-user instances from growing without limit.
 - nginx proxies `DTVP_CONTEXT_PATH` to DTVP and defaults it to `/dtvp`.
   `DTVP_HTTP_PORT` changes the host gateway port. Direct-container deployments
   must publish port `8000` and include the context path in the URL.
@@ -735,8 +828,50 @@ Deployment rules:
   and uses a 2048-connection accept backlog.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
   logs time cache and integration initialization.
+- `/api/performance-status` reports grouped-query/build saturation, retained
+  task counts, process-local cache pressure, and the active Python/GIL state.
+  API responses include a `Server-Timing: app;dur=...` header for browser and
+  proxy latency analysis.
+- Reviewers see the Python/GIL state in the application footer and can inspect
+  live worker capacity, retained grouped tasks, and cache pressure on the
+  Settings **Runtime** tab.
 - The frontend image renders `index.html` from its immutable template on every
   start, so frontend URL and context-path changes are restart-safe.
+
+### Python Runtime Images
+
+The default Compose and published DTVP image use the Python 3.14 free-threaded
+build. Start it normally:
+
+```bash
+docker compose up -d --build
+```
+
+`Dockerfile.free-threaded` asks `uv` for the explicit `3.14t` interpreter. It
+loads DTVP's native dependencies and verifies the runtime during the image
+build. Compose also sets `DTVP_REQUIRE_FREE_THREADED=true`, so the
+application refuses to start if it receives a normal interpreter or a native
+extension re-enables the GIL. Confirm the live state under `python` in
+`/api/performance-status`; `free_threading_active` must be `true` and
+`gil_enabled` must be `false`.
+
+See the official [CPython free-threading
+guide](https://docs.python.org/3/howto/free-threading-python.html) and [`uv`
+Python variant documentation](https://docs.astral.sh/uv/concepts/python-versions/)
+for the interpreter guarantees and `3.14t` selector.
+
+Free threading lets DTVP's dedicated CPU worker pools execute Python code on
+multiple cores. It does not make Dependency-Track/network I/O faster, and the
+free-threaded interpreter has some single-thread overhead. The pipeline retains
+GIL-enabled rollback tags with a `-gil` suffix, and local deployments can use:
+
+```bash
+docker compose -f compose.yml -f compose.gil.yml up -d --build
+```
+
+Published primary tags (`latest`, release versions, `dev`, and PR tags) use
+free threading and also receive explicit `-freethreaded` aliases. The fallback
+build receives corresponding `-gil` tags.
 
 Archive imports require read, BOM upload, and vulnerability-analysis update
 permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
@@ -760,19 +895,28 @@ means the integration or override is disabled.
 | `DTVP_DT_CACHE_PATH` | Dependency-Track cache and pending update queue | `data/dt_cache` |
 | `DTVP_DT_CACHE_REFRESH_SECONDS` | Background refresh interval | `60` |
 | `DTVP_DT_PROJECT_LIST_TTL_SECONDS` | Freshness window for serving the complete cached project list without an upstream request | `30` |
+| `DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS` | Idle window for periodic per-project background refresh | `900` |
+| `DTVP_DT_ACTIVE_PROJECT_LIMIT` | Most-recent projects eligible for periodic refresh | `8` |
+| `DTVP_DT_MEMORY_CACHE_MAX_ENTRIES` | Process-local LRU file-object cache entries; disk files remain persistent | `256` |
+| `DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES` | Process-local named-project query LRU entries | `128` |
 | `DTVP_ASSESSMENT_OUTBOX_PATH` | Transactional assessment overlay and synchronization outbox | `<DTVP_DT_CACHE_PATH>/assessment_outbox.sqlite` |
 | `DTVP_ASSESSMENT_SYNC_CONCURRENCY` | Global concurrent background assessment writes to Dependency-Track | `4` |
 | `DTVP_ASSESSMENT_STRICT_DT_CONFLICTS` | Perform live Dependency-Track conflict reads before accepting assessment saves | `false` |
 | `DTVP_VERSION_FETCH_CONCURRENCY` | Parallel version fetch limit | `4` |
 | `DTVP_ASSESSMENT_IO_CONCURRENCY` | Concurrent Dependency-Track assessment reads or writes per operation | `4` |
 | `DTVP_ASSESSMENT_WRITE_MAX_ATTEMPTS` | Attempts for transient assessment-write timeouts, rate limits, and HTTP 5xx responses | `3` |
-| `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` | Completed/failed grouped-task retention | `900` |
+| `DTVP_GROUPED_VULN_TASK_TTL_SECONDS` | Completed/failed grouped-task idle retention | `900` |
+| `DTVP_GROUPED_VULN_TASK_MAX_RETAINED` | Maximum completed/failed grouped tasks retained in process | `24` |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_PATH` | Persisted summary-index SQLite path | sibling of cache path |
 | `DTVP_GROUPED_VULN_SUMMARY_INDEX_MAX_ENTRIES` | Maximum persisted summary indexes | `64` |
 | `DTVP_GROUP_QUERY_WORKERS` | Dedicated grouped-search worker threads | `4` |
 | `DTVP_GROUP_QUERY_MAX_PENDING` | Maximum grouped searches queued behind active workers | `8` |
 | `DTVP_GROUP_QUERY_CACHE_ENTRIES` | Maximum cached filter combinations per grouped task | `32` |
 | `DTVP_GROUP_QUERY_CACHE_BYTES` | Approximate per-task filtered-index and facet-cache budget | `8388608` |
+| `DTVP_GROUP_BUILD_WORKERS` | Dedicated CPU workers for grouped snapshot/index construction | `1` |
+| `DTVP_GROUP_BUILD_MAX_PENDING` | Group-build jobs admitted behind active build workers before async backpressure | `2` |
+| `DTVP_GROUP_DETAIL_WORKERS` | Reserved workers for full vulnerability detail hydration | `2` |
+| `DTVP_GROUP_DETAIL_MAX_PENDING` | Detail hydration jobs admitted before async backpressure | `8` |
 | `TEAM_MAPPING_PATH` | Component ownership mapping | `data/team_mapping.json` |
 | `TEAM_GROUPS_PATH` | Nested team-group definitions | `data/team_groups.json` |
 | `USER_ROLES_PATH` | User-to-role mapping | `data/user_roles.json` |
@@ -792,6 +936,7 @@ means the integration or override is disabled.
 | `DTVP_CONTEXT_PATH` | Application mount path | app `/`; Compose `/dtvp` |
 | `DTVP_HTTP_PORT` | Compose nginx host port | `80` |
 | `DTVP_UVICORN_KEEP_ALIVE_SECONDS` | Backend upstream keep-alive timeout | `30` |
+| `DTVP_REQUIRE_FREE_THREADED` | Fail startup unless CPython supports free threading and its GIL is actually disabled | local Python: `false`; Compose: `true` |
 | `DTVP_BOOT_APP` | Real ASGI app loaded by the boot wrapper | `dtvp.main:app` |
 | `DTVP_CORS_ORIGINS` | Additional comma-separated CORS origins | unset |
 | `DTVP_API_URL` | Frontend API base override; Vite alias `VITE_DTVP_API_URL` | empty |

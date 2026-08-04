@@ -216,6 +216,7 @@ describe('useTaskGroupWindows', () => {
             order: 'desc',
             cursor: 'cursor-1',
             limit: 1,
+            include_counts: false,
             generation: 2,
         }, {
             signal: expect.any(AbortSignal),

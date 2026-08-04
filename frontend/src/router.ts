@@ -23,7 +23,7 @@ let userRole: string | undefined = undefined;
 
 const isAuthFailure = (error: any) => {
     const status = error?.response?.status;
-    return status === 401 || status === 403;
+    return status === 401;
 };
 
 router.beforeEach(async (to, _from) => {

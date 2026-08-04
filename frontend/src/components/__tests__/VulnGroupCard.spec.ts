@@ -271,6 +271,7 @@ describe('VulnGroupCard', () => {
         expect(stickyBar.text()).toContain('Overview')
         expect(stickyBar.text()).toContain('Apply')
         expect(stickyBar.find('[data-testid="sticky-tab-apply-button"]').exists()).toBe(true)
+        expect(stickyBar.text()).not.toContain('CVSS & Rescoring')
         expect(stickyBar.text()).not.toContain('Global')
         expect(stickyBar.text()).not.toContain('Synced')
         expect(stickyBar.text()).not.toContain('CVSS 9.8')
@@ -424,7 +425,7 @@ describe('VulnGroupCard', () => {
         }))
     })
 
-    it('shows tmrescore proposal inside the CVSS overview', async () => {
+    it('shows tmrescore proposal inside the global review', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
             global: {
@@ -448,6 +449,9 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
+        const reviewTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Review'))
+        await reviewTab?.trigger('click')
+        await wrapper.vm.$nextTick()
 
         expect(wrapper.text()).toContain('CVSS & Rescoring')
         expect(wrapper.text()).toContain('Threat Model Proposal')
@@ -495,6 +499,28 @@ describe('VulnGroupCard', () => {
         await reviewTab?.trigger('click')
         await wrapper.vm.$nextTick()
     }
+
+    it('keeps CVSS and rescoring in the reviewer global review only', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, tags: ['Security'] } },
+            global: {
+                provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) },
+                stubs: { teleport: true },
+            },
+        })
+
+        await openReviewTab(wrapper)
+
+        expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).not.toContain('CVSS & Rescoring')
+        expect(wrapper.get('[data-testid="global-cvss-rescoring"]').isVisible()).toBe(true)
+        expect(wrapper.get('[data-testid="global-cvss-rescoring"]').text()).toContain('Applied with the global assessment')
+
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.find('[data-testid="global-cvss-rescoring"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Team Assessment: Security')
+    })
 
     it('keeps ticket reference optional when only the original score is critical', async () => {
         const wrapper = mount(VulnGroupCard, {
@@ -1212,7 +1238,7 @@ describe('VulnGroupCard', () => {
             }
         })
 
-        await wrapper.find('.cursor-pointer').trigger('click')
+        await openReviewTab(wrapper)
 
         // Should see Global Assessment section and Global tab
         expect(wrapper.text()).toContain('Global Assessment')

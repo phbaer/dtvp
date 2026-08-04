@@ -11,6 +11,7 @@ import {
 import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisBenchmarkComparison, CodeAnalysisBenchmarkFinding, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
+import type { CodeAnalysisComponentRun } from '../lib/codeAnalysisResult'
 import { getRuntimeConfig } from '../lib/env'
 import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 
@@ -35,6 +36,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'apply-result', result: CodeAnalysisAssessResponse, components: string[], analysisRunIds: string[]): void
+    (e: 'apply-all-results', runs: CodeAnalysisComponentRun[]): void
     (e: 'result-change', result: CodeAnalysisAssessResponse | null, components: string[]): void
 }>()
 
@@ -61,6 +63,7 @@ const followUpComponent = ref('')
 const followUpSubmitting = ref(false)
 const queueActionIds = ref<Set<string>>(new Set())
 const deletingRunIds = ref<Set<string>>(new Set())
+const applyingAll = ref(false)
 const systemPromptOpen = ref(false)
 const systemPromptLoading = ref(false)
 const systemPromptError = ref<string | null>(null)
@@ -752,6 +755,79 @@ const loadPersistedResults = async (options: LoadPersistedResultsOptions = {}) =
 const applyResult = () => {
     if (result.value) {
         emit('apply-result', result.value, analyzedComponents.value, activeResultRunIds.value)
+    }
+}
+
+// Latest saved result per owned component target, newest first. Benchmarks and
+// unfinished runs are not assessments and never become apply-all candidates.
+const applyAllCandidates = computed(() => {
+    const seen = new Set<string>()
+    const candidates: { component: string, team: string, record: CodeAnalysisResultRecord }[] = []
+
+    for (const record of persistedResults.value) {
+        if (record.source === 'benchmark') continue
+        if (record.status && record.status !== 'completed') continue
+
+        const component = visibleComponentName(record.component_name)
+        if (!component) continue
+
+        const key = component.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        candidates.push({ component, team: props.componentTeams?.[component] || '', record })
+    }
+
+    return candidates
+})
+
+const applyAllTeams = computed(() => {
+    const teams = new Map<string, string>()
+    for (const candidate of applyAllCandidates.value) {
+        const team = candidate.team.trim()
+        if (team) teams.set(team.toLocaleLowerCase(), team)
+    }
+    return [...teams.values()]
+})
+
+const canApplyAllResults = computed(() => applyAllCandidates.value.length > 1 && applyAllTeams.value.length > 0)
+
+const applyAllTitle = computed(() => {
+    const components = applyAllCandidates.value.map(candidate => candidate.component).join(', ')
+    return `Apply the latest analysis result of ${components} to ${applyAllTeams.value.join(', ')} `
+        + 'and take the worst assessment over to the global assessment.'
+})
+
+const applyAllResults = async () => {
+    if (applyingAll.value || !canApplyAllResults.value) return
+
+    applyingAll.value = true
+    error.value = null
+    try {
+        const records = await Promise.all(applyAllCandidates.value.map(async candidate => ({
+            component: candidate.component,
+            record: candidate.record.result
+                ? candidate.record
+                : await codeAnalysisGetResult(candidate.record.analysis_run_id),
+        })))
+
+        const runs: CodeAnalysisComponentRun[] = records
+            .filter(entry => entry.record.result)
+            .map(entry => ({
+                component: entry.component,
+                result: entry.record.result as CodeAnalysisAssessResponse,
+                runId: entry.record.analysis_run_id,
+            }))
+
+        if (runs.length === 0) {
+            error.value = 'No saved analysis result could be loaded for the analyzed components.'
+            return
+        }
+
+        emit('apply-all-results', runs)
+    } catch (err: any) {
+        error.value = err?.response?.data?.detail || err?.message || 'Failed to load the saved analysis results.'
+    } finally {
+        applyingAll.value = false
     }
 }
 
@@ -2127,6 +2203,19 @@ watch(analyzedComponents, (components) => {
                 </div>
                 <div class="flex shrink-0 items-center gap-2">
                     <span v-if="visiblePersistedResults.length > 0" class="text-[10px] text-gray-600">{{ visiblePersistedResults.length }} shown</span>
+                    <button
+                        v-if="canApplyAllResults"
+                        type="button"
+                        data-testid="apply-all-analysis-results"
+                        :disabled="applyingAll"
+                        :title="applyAllTitle"
+                        class="inline-flex items-center gap-1 rounded border border-cyan-700/60 bg-cyan-950/30 px-2 py-1 text-[10px] font-bold uppercase text-cyan-300 transition-colors hover:bg-cyan-900/40 disabled:cursor-wait disabled:opacity-50"
+                        @click="applyAllResults"
+                    >
+                        <Loader2 v-if="applyingAll" :size="10" class="animate-spin" />
+                        <ClipboardCheck v-else :size="10" />
+                        Apply all to {{ applyAllTeams.length }} team{{ applyAllTeams.length === 1 ? '' : 's' }}
+                    </button>
                     <button
                         type="button"
                         :disabled="historyLoading"

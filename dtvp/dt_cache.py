@@ -7,9 +7,12 @@ import tempfile
 import threading
 import time
 import logging
+from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
+
+import httpx
 
 from .assessment_outbox_services import (
     AssessmentOutboxConflictError,
@@ -27,6 +30,14 @@ CACHE_STATUS_TTL_SECONDS = 5.0
 
 class PendingUpdateExistsError(Exception):
     pass
+
+
+def _is_missing_finding_error(exc: Exception) -> bool:
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response is not None
+        and exc.response.status_code == 404
+    )
 
 
 def get_dt_cache_path() -> str:
@@ -219,6 +230,10 @@ class CacheManager:
         base_path: str = None,
         refresh_interval_seconds: int = None,
         project_list_ttl_seconds: int = None,
+        active_project_ttl_seconds: int = None,
+        active_project_limit: int = None,
+        memory_cache_max_entries: int = None,
+        project_query_cache_max_entries: int = None,
     ):
         self.base_path = base_path or get_dt_cache_path()
         self.refresh_interval_seconds = (
@@ -231,17 +246,46 @@ class CacheManager:
             if project_list_ttl_seconds is None
             else max(0, project_list_ttl_seconds)
         )
+        self.active_project_ttl_seconds = (
+            _positive_int_env(
+                "DTVP_DT_ACTIVE_PROJECT_TTL_SECONDS",
+                900,
+                minimum=60,
+            )
+            if active_project_ttl_seconds is None
+            else max(60, active_project_ttl_seconds)
+        )
+        self.active_project_limit = (
+            _positive_int_env("DTVP_DT_ACTIVE_PROJECT_LIMIT", 8)
+            if active_project_limit is None
+            else max(1, active_project_limit)
+        )
+        self.memory_cache_max_entries = (
+            _positive_int_env("DTVP_DT_MEMORY_CACHE_MAX_ENTRIES", 256)
+            if memory_cache_max_entries is None
+            else max(1, memory_cache_max_entries)
+        )
+        self.project_query_cache_max_entries = (
+            _positive_int_env("DTVP_DT_PROJECT_QUERY_CACHE_MAX_ENTRIES", 128)
+            if project_query_cache_max_entries is None
+            else max(1, project_query_cache_max_entries)
+        )
         self.lock = asyncio.Lock()
         self.pending_updates: List[Dict[str, Any]] = []
         self.active_project_uuids: Set[str] = set()
-        self.project_query_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._active_project_last_access: Dict[str, float] = {}
+        self.project_query_cache: OrderedDict[str, List[Dict[str, Any]]] = (
+            OrderedDict()
+        )
         self.cache_meta: Dict[str, Any] = {
             "fully_cached": False,
             "last_refreshed_at": None,
             "projects_refreshed_at": None,
             "revision": 0,
         }
-        self._memory_cache: Dict[str, Any] = {}
+        self._memory_cache: OrderedDict[str, Any] = OrderedDict()
+        self._memory_cache_lock = threading.RLock()
+        self._dirty_memory_paths: Dict[str, int] = {}
         self._inflight_fetches: Dict[Tuple[str, ...], asyncio.Task[Any]] = {}
         self._write_state_lock = threading.RLock()
         self._write_executor = ThreadPoolExecutor(
@@ -302,7 +346,7 @@ class CacheManager:
 
     def _read_startup_cache_state(
         self,
-    ) -> tuple[List[Dict[str, Any]], List[str], Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
         meta_default = {
             "fully_cached": False,
             "last_refreshed_at": None,
@@ -310,18 +354,20 @@ class CacheManager:
             "revision": 0,
         }
         pending = self._load_pending_updates()
-        active = _read_json(self._active_projects_path(), []) or []
+        active = self._normalize_active_projects(
+            _read_json(self._active_projects_path(), {})
+        )
         meta = _read_json(self._projects_meta_path(), meta_default) or meta_default
         return pending, active, meta
 
     def _remember_startup_cache_state(
         self,
         pending: List[Dict[str, Any]],
-        active: List[str],
+        active: Dict[str, float],
         meta: Dict[str, Any],
     ) -> None:
-        self._memory_cache[self._active_projects_path()] = active
-        self._memory_cache[self._projects_meta_path()] = meta
+        self._cache_memory_value(self._active_projects_path(), active)
+        self._cache_memory_value(self._projects_meta_path(), meta)
 
     def _save_projects_meta(self, meta: Dict[str, Any]) -> None:
         self._save_cache_file(self._projects_meta_path(), meta, touch_meta=False)
@@ -372,6 +418,26 @@ class CacheManager:
             self._cache_status_snapshot = snapshot
             self._cache_status_expires_at = now + CACHE_STATUS_TTL_SECONDS
             return copy.deepcopy(snapshot)
+
+    def get_runtime_stats(self) -> Dict[str, Any]:
+        """Return cheap in-process cache pressure counters for diagnostics."""
+        with self._memory_cache_lock:
+            memory_entries = len(self._memory_cache)
+            dirty_entries = len(self._dirty_memory_paths)
+        with self._write_state_lock:
+            last_write = self._last_write_future
+            write_errors = len(self._write_errors)
+        return {
+            "memory_entries": memory_entries,
+            "memory_entry_limit": self.memory_cache_max_entries,
+            "dirty_entries": dirty_entries,
+            "write_pending": bool(last_write and not last_write.done()),
+            "write_errors": write_errors,
+            "named_project_queries": len(self.project_query_cache),
+            "named_project_query_limit": self.project_query_cache_max_entries,
+            "active_projects": len(self.active_project_uuids),
+            "active_project_limit": self.active_project_limit,
+        }
 
     def get_cached_project_versions(self) -> List[Dict[str, Any]]:
         projects = self._load_project_cache(self._projects_path(), []) or []
@@ -461,6 +527,7 @@ class CacheManager:
         self.cache_meta["projects_refreshed_at"] = datetime.now(
             timezone.utc
         ).isoformat()
+        self.project_query_cache.clear()
 
     def _invalidate_cache_status(self) -> None:
         with self._cache_status_lock:
@@ -500,13 +567,60 @@ class CacheManager:
                 imported,
             )
 
-    def _load_active_projects(self) -> List[str]:
-        return self._load_cache_file(self._active_projects_path(), []) or []
+    def _normalize_active_projects(self, value: Any) -> Dict[str, float]:
+        now = time.time()
+        if isinstance(value, list):
+            return {
+                str(project_uuid): now
+                for project_uuid in value
+                if str(project_uuid or "").strip()
+            }
+        if not isinstance(value, dict):
+            return {}
 
-    def _save_active_projects(self, uuids: List[str]) -> None:
-        self._save_cache_file(
-            self._active_projects_path(), sorted(set(uuids)), touch_meta=False
+        normalized: Dict[str, float] = {}
+        for raw_uuid, raw_accessed_at in value.items():
+            project_uuid = str(raw_uuid or "").strip()
+            if not project_uuid:
+                continue
+            try:
+                accessed_at = float(raw_accessed_at)
+            except (TypeError, ValueError):
+                accessed_at = now
+            normalized[project_uuid] = accessed_at
+        return normalized
+
+    def _load_active_projects(self) -> Dict[str, float]:
+        return self._normalize_active_projects(
+            self._load_cache_file(self._active_projects_path(), {})
         )
+
+    def _save_active_projects(self, accesses: Dict[str, float]) -> None:
+        self._save_cache_file(
+            self._active_projects_path(),
+            dict(sorted(accesses.items())),
+            touch_meta=False,
+        )
+
+    def _prune_active_projects(self, *, now: float | None = None) -> bool:
+        current_time = time.time() if now is None else now
+        cutoff = current_time - self.active_project_ttl_seconds
+        retained = sorted(
+            (
+                (project_uuid, accessed_at)
+                for project_uuid, accessed_at in self._active_project_last_access.items()
+                if accessed_at >= cutoff
+            ),
+            key=lambda item: item[1],
+            reverse=True,
+        )[: self.active_project_limit]
+        retained_accesses = dict(retained)
+        changed = retained_accesses != self._active_project_last_access
+        self._active_project_last_access = retained_accesses
+        self.active_project_uuids = set(retained_accesses)
+        if changed:
+            self._invalidate_cache_status()
+        return changed
 
     def reset(self, base_path: str = None) -> None:
         self._write_executor.shutdown(wait=True, cancel_futures=False)
@@ -515,14 +629,17 @@ class CacheManager:
         self.lock = asyncio.Lock()
         self.pending_updates = []
         self.active_project_uuids = set()
-        self.project_query_cache = {}
+        self._active_project_last_access = {}
+        self.project_query_cache = OrderedDict()
         self.cache_meta = {
             "fully_cached": False,
             "last_refreshed_at": None,
             "projects_refreshed_at": None,
             "revision": 0,
         }
-        self._memory_cache = {}
+        self._memory_cache = OrderedDict()
+        self._memory_cache_lock = threading.RLock()
+        self._dirty_memory_paths = {}
         self._inflight_fetches = {}
         self._write_state_lock = threading.RLock()
         self._write_executor = ThreadPoolExecutor(
@@ -583,32 +700,68 @@ class CacheManager:
             cache_meta,
         ) = self._read_startup_cache_state()
         self.pending_updates = pending_updates
-        self.active_project_uuids = set(active_project_uuids)
+        self._active_project_last_access = dict(active_project_uuids)
+        active_changed = self._prune_active_projects()
         self.cache_meta = cache_meta
         self._invalidate_cache_status()
         self._remember_startup_cache_state(
             pending_updates,
-            active_project_uuids,
+            self._active_project_last_access,
             cache_meta,
         )
+        if active_changed:
+            self._save_active_projects(self._active_project_last_access)
 
     def _load_cache_file(self, path: str, default: Any = None) -> Any:
-        if path in self._memory_cache:
-            return self._memory_cache[path]
+        with self._memory_cache_lock:
+            if path in self._memory_cache:
+                self._memory_cache.move_to_end(path)
+                return self._memory_cache[path]
 
         data = _read_json(path, default)
-        self._memory_cache[path] = data
+        self._cache_memory_value(path, data)
         return data
 
     def _save_cache_file(self, path: str, data: Any, touch_meta: bool = True) -> None:
-        self._memory_cache[path] = data
+        with self._memory_cache_lock:
+            self._dirty_memory_paths[path] = self._dirty_memory_paths.get(path, 0) + 1
+        self._cache_memory_value(path, data)
         write = self._submit_atomic_write(path, data)
+
+        def mark_clean(_completed: Future[Any]) -> None:
+            with self._memory_cache_lock:
+                remaining = self._dirty_memory_paths.get(path, 1) - 1
+                if remaining > 0:
+                    self._dirty_memory_paths[path] = remaining
+                else:
+                    self._dirty_memory_paths.pop(path, None)
+                self._enforce_memory_cache_limit_locked()
+
+        write.add_done_callback(mark_clean)
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             write.result()
         if touch_meta:
             self._touch_cache_meta()
+
+    def _cache_memory_value(self, path: str, data: Any) -> None:
+        with self._memory_cache_lock:
+            self._memory_cache[path] = data
+            self._memory_cache.move_to_end(path)
+            self._enforce_memory_cache_limit_locked()
+
+    def _enforce_memory_cache_limit_locked(self) -> None:
+        while len(self._memory_cache) > self.memory_cache_max_entries:
+            evicted = False
+            for candidate in tuple(self._memory_cache):
+                if self._dirty_memory_paths.get(candidate, 0) > 0:
+                    continue
+                self._memory_cache.pop(candidate, None)
+                evicted = True
+                break
+            if not evicted:
+                break
 
     def _submit_atomic_write(self, path: str, data: Any) -> Future[Any]:
         with self._write_state_lock:
@@ -633,7 +786,12 @@ class CacheManager:
         write_error: BaseException | None = None
         if last_write is not None:
             try:
-                await asyncio.wrap_future(last_write)
+                # Do not depend on a cross-thread future callback to wake the
+                # event loop. A short timer-backed poll remains responsive and
+                # is reliable when completion races callback registration.
+                while not last_write.done():
+                    await asyncio.sleep(0.01)
+                last_write.result()
             except BaseException as exc:
                 write_error = exc
         with self._write_state_lock:
@@ -659,14 +817,19 @@ class CacheManager:
         )
         async with self.lock:
             self.pending_updates = pending_updates
-            self.active_project_uuids = set(active_project_uuids)
+            self._active_project_last_access = dict(active_project_uuids)
+            active_changed = self._prune_active_projects()
             self.cache_meta = cache_meta
             self._invalidate_cache_status()
             self._remember_startup_cache_state(
                 pending_updates,
-                active_project_uuids,
+                self._active_project_last_access,
                 cache_meta,
             )
+            if active_changed:
+                self._save_active_projects(self._active_project_last_access)
+        if active_changed:
+            await self.flush_cache_writes()
 
     async def background_sync_loop(self) -> None:
         settings = DTSettings()
@@ -708,7 +871,13 @@ class CacheManager:
             logger.debug("Failed to refresh project list: %s", exc)
 
     async def _refresh_active_projects(self, client: DTClient) -> None:
-        active = list(self.active_project_uuids)
+        async with self.lock:
+            changed = self._prune_active_projects()
+            active = list(self.active_project_uuids)
+            if changed:
+                self._save_active_projects(self._active_project_last_access)
+        if changed:
+            await self.flush_cache_writes()
         for project_uuid in active:
             try:
                 await self.refresh_project(project_uuid, client)
@@ -721,16 +890,23 @@ class CacheManager:
         await self.get_bom(client, project_uuid, refresh=True)
 
     async def record_project_access(self, project_uuid: str) -> None:
-        changed = False
+        project_uuid = str(project_uuid or "").strip()
+        if not project_uuid:
+            return
+        should_persist = False
         async with self.lock:
-            if project_uuid in self.active_project_uuids:
-                return
-            self.active_project_uuids.add(project_uuid)
-            self._invalidate_cache_status()
-            self._save_active_projects(list(self.active_project_uuids))
-            changed = True
-        if changed:
-            await self.flush_cache_writes()
+            now = time.time()
+            previous_access = self._active_project_last_access.get(project_uuid)
+            self._active_project_last_access[project_uuid] = now
+            changed = self._prune_active_projects(now=now)
+            should_persist = (
+                previous_access is None
+                or now - previous_access
+                >= min(300, max(30, self.refresh_interval_seconds))
+                or changed
+            )
+            if should_persist:
+                self._save_active_projects(self._active_project_last_access)
 
     async def get_projects(
         self, client: DTClient, name: Optional[str] = None
@@ -752,7 +928,6 @@ class CacheManager:
                         self._save_project_cache(
                             self._projects_path(), fresh_projects
                         )
-                    await self.flush_cache_writes()
                     return fresh_projects
 
                 projects = await self._singleflight_fetch(
@@ -780,6 +955,7 @@ class CacheManager:
             )
 
         if name in self.project_query_cache:
+            self.project_query_cache.move_to_end(name)
             return copy.deepcopy(self.project_query_cache[name])
 
         try:
@@ -788,6 +964,12 @@ class CacheManager:
                 fresh_results = await client.get_projects(name)
                 async with self.lock:
                     self.project_query_cache[name] = fresh_results
+                    self.project_query_cache.move_to_end(name)
+                    while (
+                        len(self.project_query_cache)
+                        > self.project_query_cache_max_entries
+                    ):
+                        self.project_query_cache.popitem(last=False)
                     if fresh_results:
                         current = self._load_project_cache(
                             self._projects_path(), []
@@ -802,7 +984,6 @@ class CacheManager:
                             if project.get("uuid") not in existing_uuids:
                                 merged.append(project)
                         self._save_project_cache(self._projects_path(), merged)
-                await self.flush_cache_writes()
                 return fresh_results
 
             results = await self._singleflight_fetch(
@@ -861,7 +1042,6 @@ class CacheManager:
                 )
                 async with self.lock:
                     self._save_project_cache(path, fresh_findings)
-                await self.flush_cache_writes()
                 return fresh_findings
 
             findings = await self._singleflight_fetch(
@@ -909,7 +1089,6 @@ class CacheManager:
                 fresh_vulns = await client.get_project_vulnerabilities(project_uuid)
                 async with self.lock:
                     self._save_project_cache(path, fresh_vulns)
-                await self.flush_cache_writes()
                 return fresh_vulns
 
             return await self._singleflight_fetch(
@@ -936,7 +1115,6 @@ class CacheManager:
                 fresh_bom = await client.get_bom(project_uuid)
                 async with self.lock:
                     self._save_project_cache(path, fresh_bom)
-                await self.flush_cache_writes()
                 return fresh_bom
 
             return await self._singleflight_fetch(
@@ -981,7 +1159,6 @@ class CacheManager:
                 )
                 async with self.lock:
                     self._save_project_cache(path, fresh_analysis)
-                await self.flush_cache_writes()
                 overlay = self.get_assessment_overlay(
                     project_uuid,
                     component_uuid,
@@ -1273,6 +1450,38 @@ class CacheManager:
                                 self._save_local_analysis(payload)
                                 saved_local = True
                     except Exception as exc:
+                        failure_message = str(exc)
+                        if _is_missing_finding_error(exc):
+                            try:
+                                finding_exists = await client.finding_exists(
+                                    project_uuid=key[0],
+                                    component_uuid=key[1],
+                                    vulnerability_uuid=key[2],
+                                )
+                            except Exception as verification_exc:
+                                failure_message = (
+                                    f"{exc}; could not verify the exact finding "
+                                    f"through Dependency-Track: {verification_exc}"
+                                )
+                            else:
+                                if not finding_exists:
+                                    dropped = await asyncio.to_thread(
+                                        self.assessment_outbox.drop_missing_finding,
+                                        key,
+                                        revision,
+                                    )
+                                    if dropped:
+                                        logger.info(
+                                            "Dropped pending DT update %s after "
+                                            "confirming its exact finding no "
+                                            "longer exists",
+                                            entry.get("id"),
+                                        )
+                                    continue
+                                failure_message = (
+                                    f"{exc}; Dependency-Track findings API is "
+                                    "reachable and the exact finding still exists"
+                                )
                         attempts = int(entry.get("attempts") or 0) + 1
                         retry_delay = min(60, 2 ** min(attempts - 1, 6))
                         next_attempt_at = (
@@ -1283,7 +1492,7 @@ class CacheManager:
                             self.assessment_outbox.mark_failed,
                             key,
                             revision,
-                            str(exc),
+                            failure_message,
                             next_attempt_at=next_attempt_at,
                         )
                         logger.warning(
@@ -1291,7 +1500,7 @@ class CacheManager:
                             "%d seconds: %s",
                             entry.get("id"),
                             retry_delay,
-                            exc,
+                            failure_message,
                         )
 
             concurrency = _positive_int_env(

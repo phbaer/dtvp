@@ -22,6 +22,7 @@ vi.mock('../../lib/api', () => ({
     uploadTeamMapping: vi.fn(),
     updateTeamMapping: vi.fn(),
     getRescoreRules: vi.fn(),
+    getPerformanceStatus: vi.fn(),
     uploadRescoreRules: vi.fn(),
     updateRescoreRules: vi.fn(),
     waitForProjectArchiveTask: vi.fn(),
@@ -38,6 +39,44 @@ describe('Settings.vue', () => {
         vi.mocked(api.getRescoreRules).mockResolvedValue({ transitions: [] })
         vi.mocked(api.getAutoAnalysisGuidance).mockResolvedValue({ components: {} })
         vi.mocked(api.listProjectArchiveSnapshots).mockResolvedValue([])
+        vi.mocked(api.getPerformanceStatus).mockResolvedValue({
+            python: {
+                implementation: 'CPython',
+                version: '3.14.4',
+                free_threaded_build: true,
+                gil_enabled: false,
+                free_threading_active: true,
+                free_threading_required: true,
+            },
+            group_queries: {
+                workers: 4, max_pending: 8, capacity: 12,
+                outstanding: 2, active: 1, queued: 1,
+                accepted_total: 20, completed_total: 18, rejected_total: 1,
+                superseded_total: 0, failed_total: 0, max_outstanding: 4,
+                queue_time_ms_total: 12, execution_time_ms_total: 120,
+            },
+            group_builds: {
+                workers: 1, max_pending: 2, capacity: 3,
+                outstanding: 0, active: 0, queued: 0, waiting: 0,
+                accepted_total: 4, completed_total: 4, failed_total: 0,
+                max_outstanding: 1, queue_time_ms_total: 0,
+                execution_time_ms_total: 80,
+            },
+            group_details: {
+                workers: 2, max_pending: 8, capacity: 10,
+                outstanding: 0, active: 0, queued: 0, waiting: 0,
+                accepted_total: 8, completed_total: 8, failed_total: 0,
+                max_outstanding: 2, queue_time_ms_total: 0,
+                execution_time_ms_total: 40,
+            },
+            grouped_tasks: { total: 3, by_status: { completed: 2, running: 1 } },
+            cache: {
+                memory_entries: 32, memory_entry_limit: 256,
+                dirty_entries: 0, write_pending: false, write_errors: 0,
+                named_project_queries: 2, named_project_query_limit: 128,
+                active_projects: 3, active_project_limit: 8,
+            },
+        })
     })
 
     it('shows Rescore Rules tab for reviewers', async () => {
@@ -56,6 +95,30 @@ describe('Settings.vue', () => {
         const tabs = wrapper.findAll('button')
         const rescoreTab = tabs.find(t => t.text().includes('Rescore Rules'))
         expect(rescoreTab?.exists()).toBe(true)
+    })
+
+    it('shows live backend runtime and capacity information to reviewers', async () => {
+        const wrapper = mount(Settings, {
+            global: {
+                provide: {
+                    user: mockUser,
+                    realRole: computed(() => mockUser.value.role)
+                },
+                stubs: ['router-link']
+            }
+        })
+
+        await flushPromises()
+        const runtimeTab = wrapper.findAll('button')
+            .find(button => button.text().includes('Runtime'))
+        await runtimeTab?.trigger('click')
+        await flushPromises()
+
+        expect(api.getPerformanceStatus).toHaveBeenCalledOnce()
+        expect(wrapper.get('[data-testid="backend-python-version"]').text()).toContain('CPython 3.14.4')
+        expect(wrapper.get('[data-testid="backend-gil-state"]').text()).toContain('GIL disabled')
+        expect(wrapper.get('[data-testid="backend-executor-queries"]').text()).toContain('Capacity')
+        expect(wrapper.get('[data-testid="backend-runtime-panel"]').text()).toContain('Memory entries')
     })
 
     it('documents deterministic team mapping selector syntax in the UI', async () => {

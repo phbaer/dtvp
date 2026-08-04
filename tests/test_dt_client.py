@@ -229,6 +229,61 @@ async def test_get_project_vulnerabilities(dt_client, respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_finding_exists_matches_exact_component_and_vulnerability(
+    dt_client, respx_mock
+):
+    route = respx_mock.get(
+        "http://dt.example.com/api/v1/finding/project/p1"
+    ).respond(
+        json=[
+            {
+                "component": {"uuid": "other-component"},
+                "vulnerability": {"uuid": "v1"},
+            },
+            {
+                "component": {"uuid": "c1"},
+                "vulnerability": {"uuid": "other-vulnerability"},
+            },
+            {
+                "component": {"uuid": "c1"},
+                "vulnerability": {"uuid": "v1"},
+            },
+        ]
+    )
+
+    assert await dt_client.finding_exists("p1", "c1", "v1") is True
+    assert route.calls.last.request.url.params["suppressed"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_finding_exists_confirms_exact_finding_is_absent(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/p1").respond(
+        json=[
+            {
+                "component": {"uuid": "other-component"},
+                "vulnerability": {"uuid": "v1"},
+            },
+            {
+                "component": {"uuid": "c1"},
+                "vulnerability": {"uuid": "other-vulnerability"},
+            },
+        ]
+    )
+
+    assert await dt_client.finding_exists("p1", "c1", "v1") is False
+
+
+@pytest.mark.asyncio
+async def test_finding_exists_rejects_unverifiable_response(dt_client, respx_mock):
+    respx_mock.get("http://dt.example.com/api/v1/finding/project/p1").respond(
+        json=[{"component": {"uuid": "c1"}}]
+    )
+
+    with pytest.raises(ValueError, match="identity is missing"):
+        await dt_client.finding_exists("p1", "c1", "v1")
+
+
+@pytest.mark.asyncio
 async def test_get_project_versions():
     async with DTClient("http://url", "key") as client:
         res = await client.get_project_versions("uuid")

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildCodeAnalysisDetails, prepareCodeAnalysisResult } from '../codeAnalysisResult'
+import { buildCodeAnalysisDetails, prepareCodeAnalysisResult, prepareCodeAnalysisResults } from '../codeAnalysisResult'
+import type { CodeAnalysisComponentRun } from '../codeAnalysisResult'
 import type { CodeAnalysisAssessResponse } from '../api'
 
 describe('codeAnalysisResult', () => {
@@ -429,5 +430,145 @@ describe('codeAnalysisResult', () => {
         expect(prepared.teamDrafts[0]?.team).toBe('API')
         expect(prepared.teamDrafts[0]?.details.match(/\[Component: lib-a\]/g)).toHaveLength(1)
         expect(prepared.teamDrafts[0]?.details.match(/\[Component: lib-b\]/g)).toHaveLength(1)
+    })
+
+    describe('prepareCodeAnalysisResults', () => {
+        const createRun = (
+            component: string,
+            verdict: string,
+            adjustedScore?: number,
+            adjustedVector?: string,
+        ): CodeAnalysisComponentRun => {
+            const response = createResponse()
+            response.assessment.verdict = verdict
+            response.assessment.affected = verdict.toLowerCase() === 'affected'
+            response.assessment.summary = `Summary for ${component}.`
+            response.assessment.reasoning = `Reasoning for ${component}.`
+            if (adjustedScore == null) {
+                delete response.assessment.adjusted_cvss
+            } else {
+                response.assessment.adjusted_cvss = {
+                    original_score: 8.1,
+                    adjusted_score: adjustedScore,
+                    adjusted_vector: adjustedVector,
+                    reasons: [],
+                    summary: '',
+                    version_affected: true,
+                }
+            }
+            return { component, result: response, runId: `run-${component}` }
+        }
+
+        it('applies every run to its own team and takes the worst assessment to global', () => {
+            const prepared = prepareCodeAnalysisResults(
+                [
+                    createRun('lib-a', 'not affected', 3.2, 'CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N'),
+                    createRun('lib-b', 'affected', 9.1, 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'),
+                    createRun('lib-c', 'probably affected', 6.0, 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L'),
+                ],
+                [
+                    { name: 'lib-a', tag: 'TEAM-A' },
+                    { name: 'lib-b', tag: 'TEAM-B' },
+                    { name: 'lib-c', tag: 'TEAM-C' },
+                ],
+                ['alice'],
+            )
+
+            expect(prepared.teamDrafts).toEqual([
+                expect.objectContaining({ team: 'TEAM-A', state: 'NOT_AFFECTED', justification: 'CODE_NOT_PRESENT', assigned: ['alice'] }),
+                expect.objectContaining({ team: 'TEAM-B', state: 'EXPLOITABLE' }),
+                expect.objectContaining({ team: 'TEAM-C', state: 'IN_TRIAGE' }),
+            ])
+            expect(prepared.teamDrafts[0]?.details).toContain('Summary for lib-a.')
+            expect(prepared.teamDrafts[0]?.details).not.toContain('Summary for lib-b.')
+            expect(prepared.globalState).toBe('EXPLOITABLE')
+            expect(prepared.globalJustification).toBe('NOT_SET')
+            expect(prepared.adjustedScore).toBe(9.1)
+            expect(prepared.adjustedVector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H')
+            expect(prepared.runIds).toEqual(['run-lib-a', 'run-lib-b', 'run-lib-c'])
+            expect(prepared.unmappedComponents).toEqual([])
+        })
+
+        it('combines several components of one team into a single worst-wins draft', () => {
+            const prepared = prepareCodeAnalysisResults(
+                [
+                    createRun('lib-a', 'not affected', 3.2),
+                    createRun('lib-b', 'probably affected', 6.0),
+                ],
+                [
+                    { name: 'lib-a', tag: 'TEAM-A' },
+                    { name: 'lib-b', tag: 'team-a' },
+                ],
+                [],
+            )
+
+            expect(prepared.teamDrafts).toHaveLength(1)
+            expect(prepared.teamDrafts[0]?.team).toBe('TEAM-A')
+            expect(prepared.teamDrafts[0]?.state).toBe('IN_TRIAGE')
+            expect(prepared.teamDrafts[0]?.details).toContain('Summary for lib-a.')
+            expect(prepared.teamDrafts[0]?.details).toContain('Summary for lib-b.')
+            expect(prepared.globalState).toBe('IN_TRIAGE')
+            expect(prepared.adjustedScore).toBe(6.0)
+        })
+
+        it('breaks a state tie with the higher analyzer score', () => {
+            const prepared = prepareCodeAnalysisResults(
+                [
+                    createRun('lib-a', 'affected', 7.5, 'CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N'),
+                    createRun('lib-b', 'affected', 9.8, 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H'),
+                ],
+                [
+                    { name: 'lib-a', tag: 'TEAM-A' },
+                    { name: 'lib-b', tag: 'TEAM-B' },
+                ],
+                [],
+            )
+
+            expect(prepared.globalState).toBe('EXPLOITABLE')
+            expect(prepared.adjustedScore).toBe(9.8)
+            expect(prepared.adjustedVector).toBe('CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H')
+        })
+
+        it('reports components without a team but still counts them for the global worst', () => {
+            const prepared = prepareCodeAnalysisResults(
+                [
+                    createRun('lib-a', 'not affected', 3.2),
+                    createRun('orphan-lib', 'affected', 9.1),
+                ],
+                [{ name: 'lib-a', tag: 'TEAM-A' }],
+                [],
+            )
+
+            expect(prepared.teamDrafts).toHaveLength(1)
+            expect(prepared.teamDrafts[0]?.team).toBe('TEAM-A')
+            expect(prepared.unmappedComponents).toEqual(['orphan-lib'])
+            expect(prepared.globalState).toBe('EXPLOITABLE')
+        })
+
+        it('ignores duplicate components and leaves the analyzer CVSS unset when the worst run has none', () => {
+            const prepared = prepareCodeAnalysisResults(
+                [
+                    createRun('lib-a', 'affected'),
+                    createRun('LIB-A', 'not affected', 3.2),
+                ],
+                [{ name: 'lib-a', tag: 'TEAM-A' }],
+                [],
+            )
+
+            expect(prepared.teamDrafts).toHaveLength(1)
+            expect(prepared.teamDrafts[0]?.state).toBe('EXPLOITABLE')
+            expect(prepared.globalState).toBe('EXPLOITABLE')
+            expect(prepared.adjustedVector).toBeUndefined()
+            expect(prepared.adjustedScore).toBeUndefined()
+        })
+
+        it('returns an empty preparation without runs', () => {
+            const prepared = prepareCodeAnalysisResults([], [{ name: 'lib-a', tag: 'TEAM-A' }], [])
+
+            expect(prepared.teamDrafts).toEqual([])
+            expect(prepared.globalState).toBe('NOT_SET')
+            expect(prepared.globalJustification).toBe('NOT_SET')
+            expect(prepared.runIds).toEqual([])
+        })
     })
 })

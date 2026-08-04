@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import socket
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -134,7 +135,11 @@ from .project_archive_services import (
     project_archive_snapshots_enabled,
     run_project_archive_snapshot_once,
 )
-from .query_execution_services import BoundedQueryExecutor
+from .python_runtime_services import (
+    get_python_runtime_status,
+    validate_python_runtime,
+)
+from .query_execution_services import BoundedQueryExecutor, BoundedWorkExecutor
 from .runtime_value_services import get_env_int_with_floor
 from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
@@ -193,6 +198,14 @@ from .vulnerability_support_services import (
 logger = logging.getLogger("dtvp")
 logger.setLevel(logging.INFO)
 
+python_runtime_status = validate_python_runtime()
+logger.info(
+    "Python runtime %s: free-threaded build=%s, GIL enabled=%s",
+    python_runtime_status["version"],
+    python_runtime_status["free_threaded_build"],
+    python_runtime_status["gil_enabled"],
+)
+
 background_tasks: set[asyncio.Task[Any]] = set()
 group_query_executor = BoundedQueryExecutor(
     workers_provider=lambda: get_env_int_with_floor(
@@ -203,6 +216,36 @@ group_query_executor = BoundedQueryExecutor(
     ),
     max_pending_provider=lambda: get_env_int_with_floor(
         "DTVP_GROUP_QUERY_MAX_PENDING",
+        default=8,
+        minimum=0,
+        logger=logger,
+    ),
+)
+group_build_executor = BoundedWorkExecutor(
+    name="dtvp-group-build",
+    workers_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_BUILD_WORKERS",
+        default=1,
+        minimum=1,
+        logger=logger,
+    ),
+    max_pending_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_BUILD_MAX_PENDING",
+        default=2,
+        minimum=0,
+        logger=logger,
+    ),
+)
+detail_executor = BoundedWorkExecutor(
+    name="dtvp-group-detail",
+    workers_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_DETAIL_WORKERS",
+        default=2,
+        minimum=1,
+        logger=logger,
+    ),
+    max_pending_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_DETAIL_MAX_PENDING",
         default=8,
         minimum=0,
         logger=logger,
@@ -257,6 +300,9 @@ async def _initialize_application_runtime() -> None:
     global _runtime_tasks
     _set_runtime_state("starting", "DTVP runtime is starting.")
     try:
+        # Re-check after startup imports so a native extension cannot silently
+        # invalidate a deployment that explicitly requires free threading.
+        validate_python_runtime()
         _runtime_tasks = await start_application_runtime(startup_service_deps)
         snapshot_task = asyncio.create_task(run_project_archive_snapshot_loop())
         background_tasks.add(snapshot_task)
@@ -306,6 +352,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await close_shared_dt_client()
         await cache_manager.flush_cache_writes()
         group_query_executor.shutdown()
+        group_build_executor.shutdown()
+        detail_executor.shutdown()
         _set_runtime_state("ready", "DTVP is ready.")
 
 
@@ -351,6 +399,16 @@ async def runtime_startup_gate(request: Request, call_next):
         headers=headers,
     )
 
+
+@app.middleware("http")
+async def add_server_timing(request: Request, call_next):
+    started_at = time.perf_counter()
+    response = await call_next(request)
+    if _is_api_or_auth_path(request.url.path):
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        response.headers.append("Server-Timing", f"app;dur={elapsed_ms:.2f}")
+    return response
+
 # Auth router
 app.include_router(auth_router, prefix=context_path)
 
@@ -391,6 +449,15 @@ def _get_grouped_vuln_task_ttl_seconds() -> int:
         "DTVP_GROUPED_VULN_TASK_TTL_SECONDS",
         default=900,
         minimum=60,
+        logger=logger,
+    )
+
+
+def _get_grouped_vuln_task_max_retained() -> int:
+    return get_env_int_with_floor(
+        "DTVP_GROUPED_VULN_TASK_MAX_RETAINED",
+        default=24,
+        minimum=1,
         logger=logger,
     )
 
@@ -438,6 +505,7 @@ grouped_vuln_service_deps = build_grouped_vuln_service_deps(
     summary_index=grouped_vuln_summary_index,
     summary_index_cache_revision=cache_manager.get_cache_revision,
     notify_task_update=task_event_hub.notify,
+    run_cpu_bound=group_build_executor.run,
 )
 
 
@@ -529,6 +597,24 @@ project_archive_service_deps = build_project_archive_service_deps(
 code_analysis_result_store = CodeAnalysisResultStore(logger=logger)
 
 
+def get_performance_status() -> dict[str, Any]:
+    grouped_status_counts: dict[str, int] = {}
+    for task in list(tasks.values()):
+        status = str(task.get("status") or "unknown").lower()
+        grouped_status_counts[status] = grouped_status_counts.get(status, 0) + 1
+    return {
+        "python": get_python_runtime_status(),
+        "group_queries": group_query_executor.stats(),
+        "group_builds": group_build_executor.stats(),
+        "group_details": detail_executor.stats(),
+        "grouped_tasks": {
+            "total": len(tasks),
+            "by_status": grouped_status_counts,
+        },
+        "cache": cache_manager.get_runtime_stats(),
+    }
+
+
 api_router.include_router(
     create_app_info_router(
         app,
@@ -545,6 +631,8 @@ api_router.include_router(
             frontend_sbom_filename=FRONTEND_SBOM_FILENAME,
             html_sbom_filename=HTML_SBOM_FILENAME,
             media_type_json=MEDIA_TYPE_JSON,
+            get_performance_status=get_performance_status,
+            get_runtime_status=get_python_runtime_status,
         ),
         not_found_response=NOT_FOUND_RESPONSE,
     )
@@ -572,6 +660,7 @@ api_router.include_router(
             not_found_response=NOT_FOUND_RESPONSE,
             get_grouped_vuln_cache_revision=cache_manager.get_cache_revision,
             group_query_executor=group_query_executor,
+            detail_executor=detail_executor,
             task_event_hub=task_event_hub,
         ),
         current_user_dependency=get_current_user,
@@ -907,6 +996,7 @@ async def run_grouped_vuln_task_cleanup_loop() -> None:
         removed = prune_grouped_vuln_tasks_impl(
             tasks,
             ttl_seconds=_get_grouped_vuln_task_ttl_seconds(),
+            max_terminal_tasks=_get_grouped_vuln_task_max_retained(),
         )
         for task_id in removed:
             task_event_hub.forget(task_id)

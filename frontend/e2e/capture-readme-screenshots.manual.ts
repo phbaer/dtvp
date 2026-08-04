@@ -1288,7 +1288,8 @@ test.describe('Capture README screenshots', () => {
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
 
-        await expect(card.getByRole('tab', { name: 'CVSS & Rescoring' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('tab', { name: 'Review' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('tab', { name: 'CVSS & Rescoring' })).toHaveCount(0)
         await expect(card.getByRole('tab', { name: 'Team Mapping' })).toBeVisible({ timeout: 10000 })
         await expect(card.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
         await expect(page.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
@@ -1310,12 +1311,12 @@ test.describe('Capture README screenshots', () => {
         await captureWithPadding(card, '../docs/screenshots/vuln-card-overview.png')
     })
 
-    test('capture CVSS and rescoring tab screenshot', async ({ page }) => {
+    test('capture global review CVSS and rescoring screenshot', async ({ page }) => {
         await page.goto('/project/TestProject')
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-6004')
-        await selectDetailTab(card, 'CVSS & Rescoring')
+        await selectDetailTab(card, 'Review')
         await expect(card.getByText('CVSS Calculator')).toBeVisible({ timeout: 10000 })
         await expect(card.getByRole('heading', { name: 'CVSS & Rescoring' })).toBeVisible({ timeout: 10000 })
         await expect(card.locator('#cvss-vector-input')).toBeVisible({ timeout: 10000 })
@@ -1520,7 +1521,7 @@ test.describe('Capture README screenshots', () => {
 
         // Expand the rescored card to access the calculator
         const card = await openProjectCard(page, 'CVE-2024-6004')
-        await selectDetailTab(card, 'CVSS & Rescoring')
+        await selectDetailTab(card, 'Review')
 
         // Wait for expanded state and find the calculator button
         await page.waitForTimeout(1500)

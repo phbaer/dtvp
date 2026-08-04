@@ -4,6 +4,7 @@ from array import array
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+from dtvp import general_api_routes
 from dtvp import task_group_query_services as query_services
 from dtvp.general_api_routes import _query_task_group_window, _task_for_user
 
@@ -132,6 +133,110 @@ def test_unfiltered_queries_reuse_the_same_sort_order(monkeypatch):
     assert [item["id"] for item in first["items"]] == [
         item["id"] for item in second["items"]
     ]
+
+
+def test_countless_page_reuses_full_query_cache_entry():
+    query_index = query_services.build_task_group_query_index(
+        [_group(index) for index in range(3)]
+    )
+
+    first = _query(query_index, offset=0, limit=1)
+    second = _query(
+        query_index,
+        offset=1,
+        limit=1,
+        include_counts=False,
+    )
+
+    assert "counts" in first
+    assert "counts" not in second
+    assert len(query_index["query_cache"]) == 1
+
+
+def test_full_query_upgrades_countless_cached_filter():
+    query_index = query_services.build_task_group_query_index(
+        [_group(index) for index in range(3)]
+    )
+
+    countless = _query(query_index, include_counts=False)
+    counted = _query(query_index, include_counts=True)
+
+    assert "counts" not in countless
+    assert counted["counts"]["filtered"]["total"] == 3
+    assert len(query_index["query_cache"]) == 1
+
+
+def test_group_window_reuses_dynamic_context_until_metadata_changes(monkeypatch):
+    class ResultStore:
+        revision = 1
+
+        def get_assessment_metadata_revision(self):
+            return self.revision
+
+        def list_assessment_metadata(self, *, project_name=None):
+            return {
+                "records": [],
+                "stored_analysis_results": 0,
+                "usable_assessment_results": 0,
+            }
+
+    store = ResultStore()
+    task = {
+        "status": "completed",
+        "result_mode": "summary",
+        "result": [_group(1)],
+    }
+    deps = SimpleNamespace(
+        code_analysis_result_store=store,
+        logger=SimpleNamespace(warning=lambda *_args, **_kwargs: None),
+        load_team_mapping=lambda: {},
+        load_team_groups=lambda: {},
+    )
+    facet_builds = 0
+    original = general_api_routes._automatic_assessment_filter_facets
+
+    def count_facet_builds(*args, **kwargs):
+        nonlocal facet_builds
+        facet_builds += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        general_api_routes,
+        "_automatic_assessment_filter_facets",
+        count_facet_builds,
+    )
+    options = {
+        "q": "",
+        "lifecycle": [],
+        "inconsistency_reason": [],
+        "analysis": [],
+        "tag": "",
+        "team": "",
+        "vuln_id": "",
+        "component": "",
+        "assignee": "",
+        "dependency": [],
+        "versions": [],
+        "cvss_mismatch": False,
+        "attributed_before_days": None,
+        "attribution_mode": "older",
+        "tmrescore": [],
+        "tmrescore_proposal_ids": [],
+        "automatic_assessment": [],
+        "automatic_assessment_ids": [],
+        "sort_by": "id",
+        "sort_order": "asc",
+        "offset": 0,
+        "limit": 25,
+        "cursor": "",
+    }
+
+    _query_task_group_window(deps, task, options)
+    _query_task_group_window(deps, task, {**options, "q": "finding"})
+    store.revision += 1
+    _query_task_group_window(deps, task, options)
+
+    assert facet_builds == 2
 
 
 def test_query_cache_uses_packed_indices_and_entry_budget(monkeypatch):

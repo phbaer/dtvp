@@ -505,11 +505,12 @@ class CodeAnalysisResultStore:
         default=None,
         init=False,
     )
+    _assessment_metadata_revision: int = field(default=0, init=False)
 
     def reset(self) -> None:
         with self._lock:
             self._loaded_path = None
-            self._assessment_metadata_cache = None
+            self._invalidate_assessment_metadata_cache_locked()
 
     def _path(self) -> str:
         return _sqlite_path_for_configured_path(self.path_provider())
@@ -535,7 +536,7 @@ class CodeAnalysisResultStore:
         path = self._path()
         if self._loaded_path == path:
             return
-        self._assessment_metadata_cache = None
+        self._invalidate_assessment_metadata_cache_locked()
         with closing(self._connect()) as connection:
             with connection:
                 self._import_legacy_json_locked(connection)
@@ -545,6 +546,13 @@ class CodeAnalysisResultStore:
 
     def _invalidate_assessment_metadata_cache_locked(self) -> None:
         self._assessment_metadata_cache = None
+        self._assessment_metadata_revision += 1
+
+    def get_assessment_metadata_revision(self) -> int:
+        """Return a cheap process-local version for derived facet caches."""
+        with self._lock:
+            self._ensure_loaded()
+            return self._assessment_metadata_revision
 
     def _legacy_import_key(self, legacy_path: str) -> str:
         return f"legacy_json_imported:{os.path.abspath(legacy_path)}"

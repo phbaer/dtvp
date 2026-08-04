@@ -21,6 +21,7 @@ class BulkWorkflowContext:
     groups: list[dict[str, Any]]
     user: str
     team_mapping: dict[str, Any] = field(default_factory=dict)
+    rescore_rules: dict[str, Any] = field(default_factory=dict)
     result_store: Any = None
     assessment_records: Optional[list[dict[str, Any]]] = None
     assessment_diagnostics: dict[str, int] = field(default_factory=dict)
