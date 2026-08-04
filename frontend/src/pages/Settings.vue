@@ -5,6 +5,7 @@ import {
     applyProjectArchiveImport,
     getProjectArchiveSnapshotDownloadUrl,
     getProjectArchiveTaskDownloadUrl,
+    getPerformanceStatus,
     getRoles,
     getAutoAnalysisGuidance,
     getTeamGroups,
@@ -25,11 +26,44 @@ import {
     getRescoreRules,
 } from '../lib/api'
 import type { TeamGroupConfig } from '../lib/api'
-import type { ProjectArchiveApplyResult, ProjectArchivePreview, ProjectArchiveSnapshot, ProjectArchiveTask } from '../types'
+import type {
+    BackendPerformanceStatus,
+    ProjectArchiveApplyResult,
+    ProjectArchivePreview,
+    ProjectArchiveSnapshot,
+    ProjectArchiveTask,
+} from '../types'
 
 const user = inject<any>('user', { role: 'ANALYST' })
 const realRole = inject<any>('realRole', ref('ANALYST'))
 const activeTab = ref('mapping')
+
+// Runtime diagnostics state
+const runtimeStatus = ref<BackendPerformanceStatus | null>(null)
+const runtimeLoading = ref(false)
+const runtimeError = ref('')
+
+const runtimeExecutors = computed(() => {
+    if (!runtimeStatus.value) return []
+    return [
+        { key: 'queries', label: 'Search queries', status: runtimeStatus.value.group_queries },
+        { key: 'builds', label: 'Snapshot builds', status: runtimeStatus.value.group_builds },
+        { key: 'details', label: 'Detail hydration', status: runtimeStatus.value.group_details },
+    ]
+})
+
+const loadRuntimeStatus = async () => {
+    if (realRole?.value !== 'REVIEWER') return
+    runtimeLoading.value = true
+    runtimeError.value = ''
+    try {
+        runtimeStatus.value = await getPerformanceStatus()
+    } catch (err: any) {
+        runtimeError.value = err?.response?.data?.detail || err?.message || 'Unable to load backend runtime information.'
+    } finally {
+        runtimeLoading.value = false
+    }
+}
 
 // Mapping state
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -723,6 +757,8 @@ watch(() => activeTab.value, (newTab) => {
         loadAutoGuidance()
     } else if (newTab === 'archives' && realRole?.value === 'REVIEWER') {
         loadArchiveSnapshots()
+    } else if (newTab === 'runtime' && realRole?.value === 'REVIEWER') {
+        loadRuntimeStatus()
     }
 })
 </script>
@@ -737,7 +773,7 @@ watch(() => activeTab.value, (newTab) => {
     </div>
 
     <!-- Tabs -->
-    <div class="flex border-b border-gray-700 mb-6">
+    <div class="mb-6 flex flex-wrap border-b border-gray-700">
         <button 
             @click="activeTab = 'mapping'"
             :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'mapping' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300']"
@@ -780,6 +816,146 @@ watch(() => activeTab.value, (newTab) => {
             <Archive :size="14" />
             Archives
         </button>
+        <button
+            v-if="user?.role === 'REVIEWER'"
+            @click="activeTab = 'runtime'"
+            :class="['px-4 py-2 text-sm font-medium border-b-2 transition-colors', activeTab === 'runtime' ? 'border-cyan-500 text-cyan-300' : 'border-transparent text-gray-400 hover:text-gray-300']"
+        >
+            Runtime
+        </button>
+    </div>
+
+    <div
+        v-if="activeTab === 'runtime' && user?.role === 'REVIEWER'"
+        class="space-y-6 rounded-lg border border-gray-700 bg-gray-800 p-6 shadow-lg"
+        data-testid="backend-runtime-panel"
+    >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h3 class="text-xl font-bold text-gray-200">Backend Runtime</h3>
+                <p class="mt-1 text-xs text-gray-400">
+                    Live Python, worker-pool, retained-task, and cache-pressure information for this backend process.
+                </p>
+            </div>
+            <button
+                type="button"
+                @click="loadRuntimeStatus"
+                :disabled="runtimeLoading"
+                class="inline-flex items-center gap-2 rounded border border-gray-600 px-3 py-2 text-xs font-bold text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+                data-testid="refresh-backend-runtime"
+            >
+                <RefreshCw :size="14" :class="runtimeLoading ? 'animate-spin' : ''" />
+                Refresh
+            </button>
+        </div>
+
+        <div v-if="runtimeLoading && !runtimeStatus" class="rounded border border-gray-700 bg-gray-900/40 p-4 text-sm text-gray-400">
+            Loading backend runtime information…
+        </div>
+        <div v-if="runtimeError" class="rounded border border-red-800 bg-red-900/30 p-4 text-sm text-red-300">
+            {{ runtimeError }}
+        </div>
+
+        <template v-if="runtimeStatus">
+            <section class="rounded border border-gray-700 bg-gray-900/40 p-4">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <div class="text-xs font-bold uppercase tracking-wider text-gray-500">Python runtime</div>
+                        <div class="mt-1 text-lg font-semibold text-gray-100" data-testid="backend-python-version">
+                            {{ runtimeStatus.python.implementation }} {{ runtimeStatus.python.version }}
+                        </div>
+                    </div>
+                    <div
+                        :class="[
+                            'rounded-full border px-3 py-1 text-xs font-bold',
+                            runtimeStatus.python.free_threading_active
+                                ? 'border-emerald-600/60 bg-emerald-900/30 text-emerald-300'
+                                : 'border-amber-600/60 bg-amber-900/30 text-amber-300',
+                        ]"
+                        data-testid="backend-gil-state"
+                    >
+                        {{ runtimeStatus.python.free_threading_active
+                            ? 'Free-threaded · GIL disabled'
+                            : runtimeStatus.python.gil_enabled
+                                ? 'GIL enabled fallback'
+                                : 'Free-threading inactive' }}
+                    </div>
+                </div>
+                <dl class="mt-4 grid gap-3 text-xs sm:grid-cols-3">
+                    <div class="rounded bg-gray-950/50 p-3">
+                        <dt class="text-gray-500">Free-threaded build</dt>
+                        <dd class="mt-1 font-semibold text-gray-200">{{ runtimeStatus.python.free_threaded_build ? 'Yes' : 'No' }}</dd>
+                    </div>
+                    <div class="rounded bg-gray-950/50 p-3">
+                        <dt class="text-gray-500">Free threading required</dt>
+                        <dd class="mt-1 font-semibold text-gray-200">{{ runtimeStatus.python.free_threading_required ? 'Yes' : 'No' }}</dd>
+                    </div>
+                    <div class="rounded bg-gray-950/50 p-3">
+                        <dt class="text-gray-500">GIL enabled</dt>
+                        <dd class="mt-1 font-semibold text-gray-200">{{ runtimeStatus.python.gil_enabled === null ? 'Unknown' : runtimeStatus.python.gil_enabled ? 'Yes' : 'No' }}</dd>
+                    </div>
+                </dl>
+            </section>
+
+            <section>
+                <h4 class="mb-3 text-xs font-bold uppercase tracking-wider text-gray-500">Worker capacity</h4>
+                <div class="grid gap-3 lg:grid-cols-3">
+                    <article
+                        v-for="executor in runtimeExecutors"
+                        :key="executor.key"
+                        class="rounded border border-gray-700 bg-gray-900/40 p-4"
+                        :data-testid="`backend-executor-${executor.key}`"
+                    >
+                        <div class="font-semibold text-gray-200">{{ executor.label }}</div>
+                        <div class="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                            <div class="rounded bg-gray-950/50 p-2">
+                                <div class="text-lg font-bold text-cyan-300">{{ executor.status.active }}</div>
+                                <div class="text-gray-500">Active</div>
+                            </div>
+                            <div class="rounded bg-gray-950/50 p-2">
+                                <div class="text-lg font-bold text-amber-300">{{ executor.status.queued }}</div>
+                                <div class="text-gray-500">Queued</div>
+                            </div>
+                            <div class="rounded bg-gray-950/50 p-2">
+                                <div class="text-lg font-bold text-gray-200">{{ executor.status.capacity }}</div>
+                                <div class="text-gray-500">Capacity</div>
+                            </div>
+                        </div>
+                        <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500">
+                            <span>Workers {{ executor.status.workers }}</span>
+                            <span>Peak {{ executor.status.max_outstanding }}</span>
+                            <span>Failed {{ executor.status.failed_total }}</span>
+                            <span v-if="executor.status.rejected_total !== undefined">Rejected {{ executor.status.rejected_total }}</span>
+                        </div>
+                    </article>
+                </div>
+            </section>
+
+            <section class="grid gap-3 lg:grid-cols-2">
+                <article class="rounded border border-gray-700 bg-gray-900/40 p-4">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500">Retained grouped tasks</h4>
+                    <div class="mt-2 text-3xl font-bold text-gray-100">{{ runtimeStatus.grouped_tasks.total }}</div>
+                    <div class="mt-3 flex flex-wrap gap-2 text-xs">
+                        <span
+                            v-for="(count, status) in runtimeStatus.grouped_tasks.by_status"
+                            :key="status"
+                            class="rounded-full border border-gray-700 bg-gray-950/50 px-3 py-1 text-gray-300"
+                        >
+                            {{ status }} {{ count }}
+                        </span>
+                    </div>
+                </article>
+                <article class="rounded border border-gray-700 bg-gray-900/40 p-4">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500">Process cache</h4>
+                    <dl class="mt-3 grid grid-cols-2 gap-3 text-xs">
+                        <div><dt class="text-gray-500">Memory entries</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.memory_entries }} / {{ runtimeStatus.cache.memory_entry_limit }}</dd></div>
+                        <div><dt class="text-gray-500">Active projects</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.active_projects }} / {{ runtimeStatus.cache.active_project_limit }}</dd></div>
+                        <div><dt class="text-gray-500">Named queries</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.named_project_queries }} / {{ runtimeStatus.cache.named_project_query_limit }}</dd></div>
+                        <div><dt class="text-gray-500">Dirty / errors</dt><dd class="font-semibold text-gray-200">{{ runtimeStatus.cache.dirty_entries }} / {{ runtimeStatus.cache.write_errors }}</dd></div>
+                    </dl>
+                </article>
+            </section>
+        </template>
     </div>
 
     <div v-if="activeTab === 'mapping'" class="bg-gray-800 rounded-lg p-6 border border-gray-700 shadow-lg">

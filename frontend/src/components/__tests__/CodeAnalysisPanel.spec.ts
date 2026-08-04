@@ -1012,4 +1012,108 @@ describe('CodeAnalysisPanel', () => {
         await wrapper.findAll('button').find(button => button.text().includes('Copy'))?.trigger('click')
         expect(clipboardWriteText).toHaveBeenCalledWith(ticketText)
     })
+
+    describe('apply all saved results', () => {
+        const makeRecord = (overrides: Record<string, any>) => ({
+            vuln_id: 'CVE-2026-0001',
+            project_name: 'ExampleApp',
+            source: 'automatic',
+            summary: { affected: false, verdict: 'Not Affected' },
+            finished_at: '2026-07-06T12:00:00Z',
+            ...overrides,
+        })
+
+        const mountPanel = () => mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service', 'owned-worker'],
+                componentTeams: { 'owned-service': 'TEAM-A', 'owned-worker': 'TEAM-B' },
+            },
+        })
+
+        it('emits the latest saved result per component', async () => {
+            const serviceResult = makeAnalysisResult('Service assessment')
+            mocks.listResults.mockResolvedValue([
+                makeRecord({
+                    analysis_run_id: 'run-service-new',
+                    component_name: 'owned-service',
+                    result: serviceResult,
+                    finished_at: '2026-07-06T13:00:00Z',
+                }),
+                makeRecord({
+                    analysis_run_id: 'run-service-old',
+                    component_name: 'owned-service',
+                    result: makeAnalysisResult('Superseded assessment'),
+                }),
+                makeRecord({ analysis_run_id: 'run-worker', component_name: 'owned-worker' }),
+            ])
+            const workerResult = makeAnalysisResult('Worker assessment')
+            mocks.getResult.mockResolvedValue(makeRecord({
+                analysis_run_id: 'run-worker',
+                component_name: 'owned-worker',
+                result: workerResult,
+            }))
+
+            const wrapper = mountPanel()
+            await loadHistory(wrapper)
+
+            await wrapper.get('[data-testid="apply-all-analysis-results"]').trigger('click')
+            await flushPromises()
+
+            expect(mocks.getResult).toHaveBeenCalledWith('run-worker')
+            expect(mocks.getResult).not.toHaveBeenCalledWith('run-service-old')
+            expect(wrapper.emitted('apply-all-results')?.[0]?.[0]).toEqual([
+                { component: 'owned-service', result: serviceResult, runId: 'run-service-new' },
+                { component: 'owned-worker', result: workerResult, runId: 'run-worker' },
+            ])
+        })
+
+        it('skips benchmark and unfinished runs and hides the button for a single component', async () => {
+            mocks.listResults.mockResolvedValue([
+                makeRecord({
+                    analysis_run_id: 'run-service',
+                    component_name: 'owned-service',
+                    result: makeAnalysisResult('Service assessment'),
+                }),
+                makeRecord({
+                    analysis_run_id: 'run-benchmark',
+                    component_name: 'owned-worker',
+                    source: 'benchmark',
+                    result: makeAnalysisResult('Benchmark run'),
+                }),
+                makeRecord({
+                    analysis_run_id: 'run-failed',
+                    component_name: 'owned-worker',
+                    status: 'failed',
+                }),
+            ])
+
+            const wrapper = mountPanel()
+            await loadHistory(wrapper)
+
+            expect(wrapper.find('[data-testid="apply-all-analysis-results"]').exists()).toBe(false)
+        })
+
+        it('reports a failure to load a saved result', async () => {
+            mocks.listResults.mockResolvedValue([
+                makeRecord({
+                    analysis_run_id: 'run-service',
+                    component_name: 'owned-service',
+                    result: makeAnalysisResult('Service assessment'),
+                }),
+                makeRecord({ analysis_run_id: 'run-worker', component_name: 'owned-worker' }),
+            ])
+            mocks.getResult.mockRejectedValue(new Error('Result store unavailable'))
+
+            const wrapper = mountPanel()
+            await loadHistory(wrapper)
+
+            await wrapper.get('[data-testid="apply-all-analysis-results"]').trigger('click')
+            await flushPromises()
+
+            expect(wrapper.emitted('apply-all-results')).toBeUndefined()
+            expect(wrapper.text()).toContain('Result store unavailable')
+        })
+    })
 })

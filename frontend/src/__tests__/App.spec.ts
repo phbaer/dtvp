@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App.vue'
 import { getUserInfo, getVersion } from '../lib/api'
 import { projectHeaderState } from '../lib/projectHeaderStore'
+import { AUTH_EXPIRED_EVENT } from '../lib/authSession'
 
 const mocks = vi.hoisted(() => ({
     route: {
@@ -140,6 +141,26 @@ describe('App bootstrap state', () => {
         expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(true)
     })
 
+    it('moves an expired live session to sign-in and remembers the route', async () => {
+        mocks.getVersion.mockResolvedValue({ version: '1.2.3', build: 'abc123' })
+        mocks.route.path = '/project/Example'
+        mocks.route.fullPath = '/project/Example?vuln=CVE-1'
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+        await wrapper.vm.$nextTick()
+
+        expect(mocks.router.replace).toHaveBeenLastCalledWith({
+            path: '/login',
+            query: { expired: '1' },
+        })
+        expect(sessionStorage.getItem('dtvp:auth-return-path')).toBe(
+            '/project/Example?vuln=CVE-1',
+        )
+    })
+
     it('offers a return to the last vulnerability list from code analysis', async () => {
         mocks.getVersion.mockResolvedValue({ version: '1.2.3', build: 'abc123' })
         mocks.route.path = '/code-analysis'
@@ -157,6 +178,48 @@ describe('App bootstrap state', () => {
         await button?.trigger('click')
 
         expect(mocks.router.push).toHaveBeenCalledWith('/project/Example%20App?id=CVE-2026-1')
+    })
+
+    it('shows the backend Python and GIL state to reviewers', async () => {
+        mocks.getVersion.mockResolvedValue({
+            version: '1.2.3',
+            build: 'abc123',
+            runtime: {
+                implementation: 'CPython',
+                version: '3.14.4',
+                free_threaded_build: true,
+                gil_enabled: false,
+                free_threading_active: true,
+                free_threading_required: true,
+            },
+        })
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        expect(wrapper.get('[data-testid="backend-runtime-label"]').text())
+            .toContain('CPython 3.14.4 · Free-threaded · GIL off')
+    })
+
+    it('does not show backend runtime details to analysts', async () => {
+        mocks.getUserInfo.mockResolvedValue({ username: 'analyst', role: 'ANALYST' })
+        mocks.getVersion.mockResolvedValue({
+            version: '1.2.3',
+            build: 'abc123',
+            runtime: {
+                implementation: 'CPython',
+                version: '3.14.4',
+                free_threaded_build: true,
+                gil_enabled: false,
+                free_threading_active: true,
+                free_threading_required: true,
+            },
+        })
+
+        const wrapper = mountApp()
+        await flushBootstrapDom(wrapper)
+
+        expect(wrapper.find('[data-testid="backend-runtime-label"]').exists()).toBe(false)
     })
 
     it('labels the project statistics toggle as a vulnerability-list return', async () => {

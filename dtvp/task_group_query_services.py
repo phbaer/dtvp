@@ -1045,6 +1045,7 @@ def _query_cache_key(
     team_aliases: dict[str, str],
     team_groups: dict[str, list[str]],
     team_group_structure: dict[str, dict[str, list[str]]],
+    dynamic_context_key: str,
     sort_by: str,
     sort_order: str,
     now_ms: int,
@@ -1053,6 +1054,18 @@ def _query_cache_key(
         now_ms // DAY_MS
         if attributed_before_days is not None
         else None
+    )
+    dynamic_parts: tuple[Any, ...] = (
+        ("context", dynamic_context_key)
+        if dynamic_context_key
+        else (
+            _automatic_assessment_facets_cache_key(
+                automatic_assessment_facets
+            ),
+            tuple(sorted(_normalized_team_aliases(team_aliases).items())),
+            tuple(sorted(_normalized_team_groups(team_groups).items())),
+            _team_group_structure_cache_key(team_group_structure),
+        )
     )
     return (
         _lower(q),
@@ -1076,10 +1089,7 @@ def _query_cache_key(
         _normalized_lower_tuple(automatic_assessment_ids),
         _normalized_upper_tuple(automatic_assessment_outcome),
         _normalized_upper_tuple(automatic_assessment_rescore),
-        _automatic_assessment_facets_cache_key(automatic_assessment_facets),
-        tuple(sorted(_normalized_team_aliases(team_aliases).items())),
-        tuple(sorted(_normalized_team_groups(team_groups).items())),
-        _team_group_structure_cache_key(team_group_structure),
+        *dynamic_parts,
         sort_by,
         sort_order,
     )
@@ -1100,16 +1110,19 @@ def _get_cache_lock(index: dict[str, Any]) -> threading.RLock:
 def _reserve_query_cache_entry(
     index: dict[str, Any],
     key: tuple[Any, ...],
+    *,
+    require_counts: bool,
 ) -> tuple[dict[str, Any] | None, Future[dict[str, Any]], bool]:
     lock = _get_cache_lock(index)
     with lock:
         cache = _get_query_cache(index)
         cached = cache.pop(key, None)
         if cached is not None:
-            cache[key] = cached
-            completed: Future[dict[str, Any]] = Future()
-            completed.set_result(cached)
-            return cached, completed, False
+            if not require_counts or cached.get("counts") is not None:
+                cache[key] = cached
+                completed: Future[dict[str, Any]] = Future()
+                completed.set_result(cached)
+                return cached, completed, False
 
         inflight = index.setdefault("_query_inflight", {})
         pending = inflight.get(key)
@@ -1279,6 +1292,8 @@ def query_task_groups(
     team_group_structure: dict[str, dict[str, list[str]]] | None = None,
     inconsistency_reason: list[str] | None = None,
     team: str = "",
+    include_counts: bool = True,
+    dynamic_context_key: str = "",
 ) -> dict[str, Any]:
     now_ms = int(datetime.now().timestamp() * 1000)
     effective_offset = decode_task_group_cursor(cursor) if cursor else offset
@@ -1314,19 +1329,25 @@ def query_task_groups(
         team_aliases=team_aliases or {},
         team_groups=team_groups or {},
         team_group_structure=team_group_structure or {},
+        dynamic_context_key=dynamic_context_key,
         sort_by=sort_by,
         sort_order=sort_order,
         now_ms=now_ms,
     )
-    cached, pending, owns_reservation = _reserve_query_cache_entry(
-        index,
-        cache_key,
-    )
+    while True:
+        cached, pending, owns_reservation = _reserve_query_cache_entry(
+            index,
+            cache_key,
+            require_counts=include_counts,
+        )
+        if cached is not None or owns_reservation:
+            break
+        completed = pending.result()
+        if not include_counts or completed.get("counts") is not None:
+            cached = completed
+            break
 
-    if cached is None and not owns_reservation:
-        cached = pending.result()
-
-    if cached:
+    if cached and not owns_reservation:
         filtered_indices = cached["indices"]
         counts = cached["counts"]
     else:
@@ -1390,8 +1411,8 @@ def query_task_groups(
                 or automatic_assessment_rescore_set
             )
             if has_filter_predicates:
-                filtered_with_indices = [
-                    (row_index, row)
+                matching_indices = [
+                    row_index
                     for row_index, row in enumerate(rows)
                     if _matches_task_group_fields(
                         row["fields"],
@@ -1425,44 +1446,25 @@ def query_task_groups(
                         now_ms=now_ms,
                     )
                 ]
-                filtered_with_indices.sort(
-                    key=lambda item: _task_group_sort_key(item[1], sort_by),
+                matching_indices.sort(
+                    key=lambda row_index: _task_group_sort_key(
+                        rows[row_index],
+                        sort_by,
+                    ),
                     reverse=sort_order != "asc",
                 )
-                filtered_indices = array(
-                    "I",
-                    (row_index for row_index, _ in filtered_with_indices),
-                )
-                filtered = [row for _, row in filtered_with_indices]
+                filtered_indices = array("I", matching_indices)
             else:
                 filtered_indices = _sorted_row_indices(
                     index,
                     sort_by,
                     sort_order,
                 )
-                filtered = rows
-
-            all_counts = _add_dynamic_counts(
-                index["counts"],
-                rows,
-                tmrescore_proposal_id_set=tmrescore_proposal_id_set,
-                automatic_assessment_id_set=automatic_assessment_id_set,
-                automatic_assessment_facets=(
-                    normalized_automatic_assessment_facets
-                ),
-                team_aliases=normalized_team_aliases,
-                team_groups=normalized_team_groups,
-                team_group_structure=normalized_team_group_structure,
-                attributed_before_days=attributed_before_days,
-                attribution_mode=normalized_mode,
-                now_ms=now_ms,
-            )
-            filtered_counts = (
-                all_counts
-                if len(filtered_indices) == len(rows)
-                else _add_dynamic_counts(
-                    _build_counts(filtered),
-                    filtered,
+            counts = None
+            if include_counts:
+                all_counts = _add_dynamic_counts(
+                    index["counts"],
+                    rows,
                     tmrescore_proposal_id_set=tmrescore_proposal_id_set,
                     automatic_assessment_id_set=automatic_assessment_id_set,
                     automatic_assessment_facets=(
@@ -1475,11 +1477,29 @@ def query_task_groups(
                     attribution_mode=normalized_mode,
                     now_ms=now_ms,
                 )
-            )
-            counts = {
-                "all": all_counts,
-                "filtered": filtered_counts,
-            }
+                if len(filtered_indices) == len(rows):
+                    filtered_counts = all_counts
+                else:
+                    filtered_rows = [rows[index] for index in filtered_indices]
+                    filtered_counts = _add_dynamic_counts(
+                        _build_counts(filtered_rows),
+                        filtered_rows,
+                        tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                        automatic_assessment_id_set=automatic_assessment_id_set,
+                        automatic_assessment_facets=(
+                            normalized_automatic_assessment_facets
+                        ),
+                        team_aliases=normalized_team_aliases,
+                        team_groups=normalized_team_groups,
+                        team_group_structure=normalized_team_group_structure,
+                        attributed_before_days=attributed_before_days,
+                        attribution_mode=normalized_mode,
+                        now_ms=now_ms,
+                    )
+                counts = {
+                    "all": all_counts,
+                    "filtered": filtered_counts,
+                }
             entry = {
                 "indices": filtered_indices,
                 "counts": counts,
@@ -1508,11 +1528,10 @@ def query_task_groups(
         if window_indices and next_offset < filtered_count
         else None
     )
-    return {
+    response = {
         "items": [row["group"] for row in window],
         "total": index["total"],
         "filtered": filtered_count,
-        "counts": counts,
         "offset": effective_offset,
         "limit": limit,
         "cursor": cursor or None,
@@ -1521,3 +1540,6 @@ def query_task_groups(
         "sort": sort_by,
         "order": sort_order,
     }
+    if include_counts:
+        response["counts"] = counts
+    return response

@@ -16,6 +16,7 @@ import {
     getDependencyChains,
     getChangelog,
     getCacheStatus,
+    getPerformanceStatus,
     getTMRescoreContext,
     getTMRescoreProjectState,
     getTMRescoreSyntheticSbomDownloadUrl,
@@ -195,6 +196,16 @@ describe('api.ts', () => {
         const result = await getCacheStatus()
 
         expect(mocks.get).toHaveBeenCalledWith('/cache-status')
+        expect(result).toEqual(mockData)
+    })
+
+    it('getPerformanceStatus calls /performance-status', async () => {
+        const mockData = { python: { version: '3.14.4', free_threading_active: true } }
+        mocks.get.mockResolvedValue({ data: mockData })
+
+        const result = await getPerformanceStatus()
+
+        expect(mocks.get).toHaveBeenCalledWith('/performance-status')
         expect(result).toEqual(mockData)
     })
 
@@ -435,10 +446,10 @@ describe('api.ts', () => {
             params: { include_result: false },
         })
         expect(mocks.get).toHaveBeenNthCalledWith(3, '/tasks/task-windowed/groups', {
-            params: { offset: 0, limit: 1, sort: 'id', order: 'asc' },
+            params: { offset: 0, limit: 1, include_counts: false, sort: 'id', order: 'asc' },
         })
         expect(mocks.get).toHaveBeenNthCalledWith(4, '/tasks/task-windowed/groups', {
-            params: { limit: 1, sort: 'id', order: 'asc', cursor: 'cursor-1' },
+            params: { limit: 1, include_counts: false, sort: 'id', order: 'asc', cursor: 'cursor-1' },
         })
         expect(result).toEqual([{ id: 'CVE-1' }, { id: 'CVE-2' }])
         expect(onProgress).toHaveBeenCalledWith('Loading vulnerability list (2/2)...', 100, ['Done'])
@@ -666,6 +677,7 @@ describe('api.ts', () => {
                 lifecycle: ['INCOMPLETE'],
                 offset: 0,
                 limit: 1,
+                include_counts: false,
                 sort: 'severity',
                 order: 'desc',
             },
@@ -674,6 +686,7 @@ describe('api.ts', () => {
             params: {
                 lifecycle: ['INCOMPLETE'],
                 limit: 1,
+                include_counts: false,
                 sort: 'severity',
                 order: 'desc',
                 cursor: 'cursor-1',
@@ -725,6 +738,7 @@ describe('api.ts', () => {
                 lifecycle: ['INCOMPLETE'],
                 offset: 0,
                 limit: 1,
+                include_counts: false,
                 sort: 'id',
                 order: 'asc',
             },
@@ -733,6 +747,7 @@ describe('api.ts', () => {
             params: {
                 lifecycle: ['INCOMPLETE'],
                 limit: 1,
+                include_counts: false,
                 sort: 'id',
                 order: 'asc',
                 cursor: 'cursor-1',

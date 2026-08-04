@@ -14,6 +14,7 @@ import type {
     CodeAnalysisAssessResponse,
     CodeAnalysisAutoSweepStatus,
 } from './api'
+import { buildVersionStore, checkForUpdate } from './buildVersion'
 
 const items = shallowRef<AnalysisQueueItem[]>([])
 const countsByStatus = shallowRef<Record<string, number>>({})
@@ -213,6 +214,13 @@ async function processStatusTransitions(previousStatuses: Map<string, AnalysisQu
 async function pollStatus() {
     const previousItems = new Map(items.value.map(item => [item.queue_id, item.status]))
     if (isDocumentVisible()) {
+        await checkForUpdate()
+        if (buildVersionStore.updateAvailable.value) {
+            // This tab is running a superseded bundle. Stop here so a stale tab
+            // cannot keep loading the server until someone reloads it.
+            stopPolling()
+            return
+        }
         await refreshStatus()
         await processStatusTransitions(previousItems)
     }

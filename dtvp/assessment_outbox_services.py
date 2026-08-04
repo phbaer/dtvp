@@ -507,6 +507,42 @@ class AssessmentOutboxStore:
                 state["updated_at"] = now
             return True
 
+    def drop_missing_finding(self, key: AssessmentKey, revision: int) -> bool:
+        """Remove an update and overlay when its Dependency-Track finding vanished."""
+        self._ensure_initialized()
+        with self._lock:
+            with closing(self._connect()) as connection:
+                with connection:
+                    deleted = connection.execute(
+                        """
+                        DELETE FROM assessment_outbox
+                        WHERE project_uuid = ?
+                          AND component_uuid = ?
+                          AND vulnerability_uuid = ?
+                          AND revision = ?
+                        """,
+                        (*key, revision),
+                    ).rowcount
+                    if not deleted:
+                        return False
+                    connection.execute(
+                        """
+                        DELETE FROM assessment_state
+                        WHERE project_uuid = ?
+                          AND component_uuid = ?
+                          AND vulnerability_uuid = ?
+                          AND revision = ?
+                        """,
+                        (*key, revision),
+                    )
+            pending = self._pending.get(key)
+            if pending is not None and int(pending.get("revision") or 0) == revision:
+                self._pending.pop(key, None)
+            state = self._states.get(key)
+            if state is not None and int(state.get("revision") or 0) == revision:
+                self._states.pop(key, None)
+            return True
+
     def discard(self, update_id: str) -> bool:
         self._ensure_initialized()
         now = _utc_now_iso()

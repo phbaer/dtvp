@@ -78,6 +78,15 @@ def app_info_client(tmp_path):
         build_commit="abc123",
         load_pyproject_metadata=lambda: {"name": "dtvp"},
         get_cache_status=lambda: {"ready": True},
+        get_performance_status=lambda: {"group_queries": {"active": 0}},
+        get_runtime_status=lambda: {
+            "implementation": "CPython",
+            "version": "3.14.4",
+            "free_threaded_build": True,
+            "gil_enabled": False,
+            "free_threading_active": True,
+            "free_threading_required": True,
+        },
         load_changelog_content=lambda: "changes",
         get_sbom_path=lambda filename: str(paths[filename]) if filename in paths else None,
         read_text=lambda path: Path(path).read_text(encoding="utf-8"),
@@ -101,9 +110,20 @@ def test_app_info_routes_return_metadata_and_generated_openapi(app_info_client):
     assert client.get("/api/version").json() == {
         "version": "2.3.4",
         "build": "abc123",
+        "runtime": {
+            "implementation": "CPython",
+            "version": "3.14.4",
+            "free_threaded_build": True,
+            "gil_enabled": False,
+            "free_threading_active": True,
+            "free_threading_required": True,
+        },
     }
     assert client.get("/api/metadata").json() == {"name": "dtvp"}
     assert client.get("/api/cache-status").json() == {"ready": True}
+    assert client.get("/api/performance-status").json() == {
+        "group_queries": {"active": 0}
+    }
     assert client.get("/api/changelog").json() == {"content": "changes"}
 
     openapi = client.get("/api/openapi.json").json()

@@ -2,6 +2,7 @@ import asyncio
 import os
 import threading
 
+import httpx
 import pytest
 from unittest.mock import AsyncMock, patch
 from dtvp.dt_cache import CacheManager, PendingUpdateExistsError
@@ -231,7 +232,7 @@ async def test_failed_shared_fetch_can_be_retried_immediately(tmp_path):
 @pytest.mark.asyncio
 async def test_record_project_access_skips_redundant_persistence(tmp_path, monkeypatch):
     manager = CacheManager(base_path=str(tmp_path))
-    saved: list[list[str]] = []
+    saved: list[dict[str, float]] = []
     monkeypatch.setattr(
         manager,
         "_save_active_projects",
@@ -244,7 +245,73 @@ async def test_record_project_access_skips_redundant_persistence(tmp_path, monke
         manager.record_project_access("project-1"),
     )
 
-    assert saved == [["project-1"]]
+    assert len(saved) == 1
+    assert set(saved[0]) == {"project-1"}
+
+
+@pytest.mark.asyncio
+async def test_active_project_refresh_is_recent_and_bounded(tmp_path, monkeypatch):
+    now = 10_000.0
+    manager = CacheManager(
+        base_path=str(tmp_path),
+        active_project_ttl_seconds=60,
+        active_project_limit=2,
+    )
+    manager._active_project_last_access = {
+        "expired": now - 61,
+        "older": now - 30,
+        "newer": now - 10,
+        "newest": now - 1,
+    }
+    manager.active_project_uuids = set(manager._active_project_last_access)
+    monkeypatch.setattr("dtvp.dt_cache.time.time", lambda: now)
+    refresh_project = AsyncMock()
+    monkeypatch.setattr(manager, "refresh_project", refresh_project)
+
+    await manager._refresh_active_projects(AsyncMock())
+
+    assert manager.active_project_uuids == {"newer", "newest"}
+    assert set(manager._load_active_projects()) == {"newer", "newest"}
+    assert {call.args[0] for call in refresh_project.await_args_list} == {
+        "newer",
+        "newest",
+    }
+
+
+def test_memory_file_cache_evicts_least_recently_used_entries(tmp_path):
+    manager = CacheManager(
+        base_path=str(tmp_path),
+        memory_cache_max_entries=2,
+    )
+    first = str(tmp_path / "first.json")
+    second = str(tmp_path / "second.json")
+    third = str(tmp_path / "third.json")
+
+    manager._load_cache_file(first, {"id": 1})
+    manager._load_cache_file(second, {"id": 2})
+    manager._load_cache_file(first, {"id": 1})
+    manager._load_cache_file(third, {"id": 3})
+
+    assert list(manager._memory_cache) == [first, third]
+
+
+@pytest.mark.asyncio
+async def test_named_project_query_cache_is_bounded_lru(tmp_path):
+    manager = CacheManager(
+        base_path=str(tmp_path),
+        project_query_cache_max_entries=2,
+    )
+    client = AsyncMock()
+    client.get_projects.side_effect = lambda name: [
+        {"name": name, "uuid": f"uuid-{name}"}
+    ]
+
+    await manager.get_projects(client, name="one")
+    await manager.get_projects(client, name="two")
+    await manager.get_projects(client, name="one")
+    await manager.get_projects(client, name="three")
+
+    assert list(manager.project_query_cache) == ["one", "three"]
 
 
 def test_cached_project_snapshot_discovers_persisted_findings(tmp_path):
@@ -407,6 +474,109 @@ async def test_pending_update_flush_records_retry_without_blocking(tmp_path):
     assert pending[0]["last_error"] == "DT unavailable"
     assert pending[0]["next_attempt_at"] is not None
     assert manager.assessment_outbox.list_due() == []
+
+
+@pytest.mark.asyncio
+async def test_pending_update_flush_drops_update_when_finding_disappeared(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    request = httpx.Request("PUT", "https://dt.example.test/api/v1/analysis")
+    response = httpx.Response(404, request=request)
+    client = AsyncMock()
+    client.update_analysis.side_effect = httpx.HTTPStatusError(
+        "finding not found",
+        request=request,
+        response=response,
+    )
+    client.finding_exists.return_value = False
+    payload = {
+        "project_uuid": "project",
+        "component_uuid": "component",
+        "vulnerability_uuid": "vulnerability",
+        "state": "IN_TRIAGE",
+        "details": "Reviewing",
+        "suppressed": False,
+    }
+    await manager.queue_analysis_update(payload)
+
+    await manager.flush_pending_updates(client)
+
+    assert manager._load_pending_updates() == []
+    client.finding_exists.assert_awaited_once_with(
+        project_uuid="project",
+        component_uuid="component",
+        vulnerability_uuid="vulnerability",
+    )
+    assert manager.get_assessment_overlay(
+        "project", "component", "vulnerability"
+    ) is None
+    assert manager._load_project_cache(
+        manager._analysis_path("project", "component", "vulnerability"),
+        None,
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_pending_update_flush_keeps_404_when_exact_finding_still_exists(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    request = httpx.Request("PUT", "https://dt.example.test/api/v1/analysis")
+    response = httpx.Response(404, request=request)
+    client = AsyncMock()
+    client.update_analysis.side_effect = httpx.HTTPStatusError(
+        "analysis route returned not found",
+        request=request,
+        response=response,
+    )
+    client.finding_exists.return_value = True
+    payload = {
+        "project_uuid": "project",
+        "component_uuid": "component",
+        "vulnerability_uuid": "vulnerability",
+        "state": "IN_TRIAGE",
+        "details": "Reviewing",
+        "suppressed": False,
+    }
+    await manager.queue_analysis_update(payload)
+
+    await manager.flush_pending_updates(client)
+
+    pending = manager._load_pending_updates()
+    assert len(pending) == 1
+    assert pending[0]["attempts"] == 1
+    assert "exact finding still exists" in pending[0]["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_pending_update_flush_keeps_404_when_dt_check_fails(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    request = httpx.Request("PUT", "https://dt.example.test/api/v1/analysis")
+    response = httpx.Response(404, request=request)
+    client = AsyncMock()
+    client.update_analysis.side_effect = httpx.HTTPStatusError(
+        "analysis route returned not found",
+        request=request,
+        response=response,
+    )
+    client.finding_exists.side_effect = httpx.ConnectError(
+        "Dependency-Track unavailable",
+        request=request,
+    )
+    payload = {
+        "project_uuid": "project",
+        "component_uuid": "component",
+        "vulnerability_uuid": "vulnerability",
+        "state": "IN_TRIAGE",
+        "details": "Reviewing",
+        "suppressed": False,
+    }
+    await manager.queue_analysis_update(payload)
+
+    await manager.flush_pending_updates(client)
+
+    pending = manager._load_pending_updates()
+    assert len(pending) == 1
+    assert pending[0]["attempts"] == 1
+    assert "could not verify the exact finding" in pending[0]["last_error"]
+    assert "Dependency-Track unavailable" in pending[0]["last_error"]
 
 
 @pytest.mark.asyncio

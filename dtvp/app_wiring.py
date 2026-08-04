@@ -83,6 +83,7 @@ def build_grouped_vuln_service_deps(
     summary_index: Any = None,
     summary_index_cache_revision: Callable[[], Any] | None = None,
     notify_task_update: Callable[[str], None] | None = None,
+    run_cpu_bound: Callable[..., Awaitable[Any]] | None = None,
 ) -> GroupedVulnServiceDeps:
     return GroupedVulnServiceDeps(
         cache_manager=cache_manager,
@@ -100,6 +101,7 @@ def build_grouped_vuln_service_deps(
         summary_index=summary_index,
         summary_index_cache_revision=summary_index_cache_revision or (lambda: None),
         notify_task_update=notify_task_update or (lambda _task_id: None),
+        run_cpu_bound=run_cpu_bound or asyncio.to_thread,
     )
 
 
@@ -237,6 +239,7 @@ def build_general_api_route_deps(
     load_team_groups: Callable[[], dict[str, Any]] | None = None,
     get_grouped_vuln_cache_revision: Callable[[], Any] | None = None,
     group_query_executor: Any = None,
+    detail_executor: Any = None,
     task_event_hub: Any = None,
 ) -> GeneralApiRouteDeps:
     return GeneralApiRouteDeps(
@@ -310,6 +313,7 @@ def build_general_api_route_deps(
             get_grouped_vuln_cache_revision or (lambda: None)
         ),
         group_query_executor=group_query_executor,
+        detail_executor=detail_executor,
         task_event_hub=task_event_hub,
     )
 
@@ -461,6 +465,8 @@ def build_app_info_route_deps(
     frontend_sbom_filename: str,
     html_sbom_filename: str,
     media_type_json: str,
+    get_performance_status: Callable[[], dict[str, Any]] | None = None,
+    get_runtime_status: Callable[[], dict[str, Any]] | None = None,
 ) -> AppInfoRouteDeps:
     return AppInfoRouteDeps(
         version=version,
@@ -475,6 +481,8 @@ def build_app_info_route_deps(
         frontend_sbom_filename=frontend_sbom_filename,
         html_sbom_filename=html_sbom_filename,
         media_type_json=media_type_json,
+        get_performance_status=get_performance_status or (lambda: {}),
+        get_runtime_status=get_runtime_status or (lambda: {}),
     )
 
 

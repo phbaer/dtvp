@@ -9,6 +9,7 @@ vi.mock('../api', () => ({
     analysisQueueCancel: vi.fn(),
     analysisQueueClear: vi.fn(),
     analysisQueueCancelQueued: vi.fn(),
+    getVersion: vi.fn(async () => ({ version: '1.0.0', build: 'abc123' })),
 }))
 
 const autoSweepStatus = {
@@ -297,6 +298,34 @@ describe('analysisQueueStore', () => {
         await vi.advanceTimersByTimeAsync(1)
         expect(statusMock).toHaveBeenCalledTimes(2)
         expect(analysisQueueStore.sweepStatus.value).toEqual(autoSweepStatus)
+
+        analysisQueueStore.stopPolling()
+    })
+
+    it('stops polling once the server reports a newer build', async () => {
+        vi.useFakeTimers()
+        vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+        const api = await import('../api')
+        const statusMock = vi.mocked(api.analysisQueueStatus)
+        statusMock.mockResolvedValue(queueStatus([]))
+        vi.mocked(api.getVersion).mockResolvedValue({ version: '1.4.0', build: 'abc123' })
+
+        const { recordServerIdentity } = await import('../buildVersion')
+        const { analysisQueueStore } = await import('../analysisQueueStore')
+
+        recordServerIdentity({ version: '1.4.0', build: 'abc123' })
+        await analysisQueueStore.startPolling()
+        expect(statusMock).toHaveBeenCalledTimes(1)
+
+        // Server redeployed underneath this tab.
+        vi.mocked(api.getVersion).mockResolvedValue({ version: '1.5.0', build: 'def456' })
+
+        await vi.advanceTimersByTimeAsync(60000)
+        const callsAfterDetection = statusMock.mock.calls.length
+
+        await vi.advanceTimersByTimeAsync(120000)
+        expect(statusMock).toHaveBeenCalledTimes(callsAfterDetection)
 
         analysisQueueStore.stopPolling()
     })

@@ -1,0 +1,54 @@
+# Primary CPython free-threaded image. Dockerfile remains the explicitly tagged
+# GIL-enabled fallback for rollback and platform compatibility.
+ARG PYTHON_VERSION=3.14t
+ARG UV_VERSION=0.11.32
+
+FROM node:lts-alpine AS frontend-build
+
+ARG BUILD_COMMIT=unknown
+ENV VITE_BUILD_COMMIT=$BUILD_COMMIT
+
+WORKDIR /app/frontend
+
+COPY frontend/package*.json ./
+RUN npm ci --include=optional
+
+COPY frontend/ ./
+COPY data/rescore_rules.json /app/data/rescore_rules.json
+RUN npm run build
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION}-alpine
+
+ARG BUILD_COMMIT=unknown
+ARG PYTHON_VERSION
+ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_MANAGED_PYTHON=1 \
+    UV_PYTHON=$PYTHON_VERSION \
+    UV_PYTHON_INSTALL_DIR=/opt/uv-python
+
+WORKDIR /app
+
+RUN uv python install "$PYTHON_VERSION"
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --python "$PYTHON_VERSION" --frozen --no-dev
+
+COPY dtvp ./dtvp
+COPY start.sh CHANGELOG.md ./
+COPY sbom/dtvp-frontend-cyclonedx.json /app/sbom/dtvp-frontend-cyclonedx.json
+COPY sbom/dtvp-backend-cyclonedx.json /app/sbom/dtvp-backend-cyclonedx.json
+RUN chmod +x start.sh
+
+# Load the native dependencies that DTVP uses and prove that none of them has
+# re-enabled the GIL before publishing the image.
+RUN DTVP_REQUIRE_FREE_THREADED=true /app/.venv/bin/python -c \
+    "import _cffi_backend, cryptography.hazmat.bindings._rust, pydantic_core; from dtvp.python_runtime_services import validate_python_runtime; validate_python_runtime()"
+
+COPY --from=frontend-build /app/frontend/dist ./frontend/dist
+RUN cp ./frontend/dist/index.html ./frontend/dist/index.html.template
+
+EXPOSE 8000
+
+CMD ["/app/start.sh"]

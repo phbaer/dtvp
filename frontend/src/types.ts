@@ -6,6 +6,61 @@ export interface Project {
     active: boolean;
 }
 
+export interface PythonRuntimeStatus {
+    implementation: string;
+    version: string;
+    free_threaded_build: boolean;
+    gil_enabled: boolean | null;
+    free_threading_active: boolean;
+    free_threading_required: boolean;
+}
+
+export interface BackendExecutorStatus {
+    workers: number;
+    max_pending: number;
+    capacity: number;
+    outstanding: number;
+    active: number;
+    queued: number;
+    waiting?: number;
+    accepted_total: number;
+    completed_total: number;
+    rejected_total?: number;
+    superseded_total?: number;
+    failed_total: number;
+    max_outstanding: number;
+    queue_time_ms_total: number;
+    execution_time_ms_total: number;
+}
+
+export interface BackendPerformanceStatus {
+    python: PythonRuntimeStatus;
+    group_queries: BackendExecutorStatus;
+    group_builds: BackendExecutorStatus;
+    group_details: BackendExecutorStatus;
+    grouped_tasks: {
+        total: number;
+        by_status: Record<string, number>;
+    };
+    cache: {
+        memory_entries: number;
+        memory_entry_limit: number;
+        dirty_entries: number;
+        write_pending: boolean;
+        write_errors: number;
+        named_project_queries: number;
+        named_project_query_limit: number;
+        active_projects: number;
+        active_project_limit: number;
+    };
+}
+
+export interface DTVPVersionInfo {
+    version: string;
+    build: string;
+    runtime?: PythonRuntimeStatus;
+}
+
 export type TagValue = string | { name?: string; tag?: string } | null;
 export type Tags = Array<string | TagValue>;
 

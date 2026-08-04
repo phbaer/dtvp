@@ -149,11 +149,32 @@ const itemStatus = (item: BulkWorkflowPreviewItem) => {
     return item.status || 'Ready'
 }
 
+const plural = (count: number, singular: string) =>
+    `${count} ${singular}${count === 1 ? '' : 's'}`
+
+const automaticAssessmentDetail = (item: BulkWorkflowPreviewItem) => {
+    const runCount = (item.run_ids || []).length
+    const replaced = Number(item.preexisting_finding_count || 0)
+    const teams = (item.teams || []) as string[]
+    const unowned = (item.unowned_components || []) as string[]
+    const teamDetail = teams.length
+        ? `${plural(teams.length, 'team assessment')}: ${teams.join(', ')}`
+        : 'global assessment only'
+    const replacedDetail = replaced
+        ? `${plural(replaced, 'existing assessment')} will be replaced`
+        : ''
+    return [
+        `${item.eligible_finding_count || 0} ready`,
+        plural(runCount, 'analysis run'),
+        teamDetail,
+        replacedDetail,
+        unowned.length ? `no team for ${unowned.join(', ')}` : '',
+    ].filter(Boolean).join(' · ')
+}
+
 const itemDetail = (item: BulkWorkflowPreviewItem) => {
     if (selectedWorkflowId.value === 'automatic-assessments') {
-        const runCount = (item.run_ids || []).length
-        const replaced = Number(item.preexisting_finding_count || 0)
-        return `${item.eligible_finding_count || 0} ready · ${runCount} analysis run${runCount === 1 ? '' : 's'}${replaced ? ` · ${replaced} existing assessment${replaced === 1 ? '' : 's'} will be replaced` : ''}`
+        return automaticAssessmentDetail(item)
     }
     if (selectedWorkflowId.value === 'incomplete-sync') {
         return `${item.finding_count || 0} findings · ${item.block_count || 0} assessment blocks`
@@ -508,7 +529,7 @@ watch(() => props.show, show => {
                             </div>
                             <div class="flex items-start gap-2 rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-[10px] leading-relaxed text-blue-100" data-testid="automatic-assessment-rescore-notice">
                                 <AlertTriangle :size="14" class="mt-0.5 shrink-0" />
-                                Applying an automatic assessment writes its shown vulnerability-level CVSS rescore to every eligible finding. Items without a proposed rescore leave CVSS unchanged.
+                                Applying an automatic assessment writes one assessment per owning team plus a global assessment that takes the worst result's state and its CVSS rescore. The shown rescore is written to every eligible finding; items without a proposed rescore leave CVSS unchanged.
                             </div>
                         </div>
 

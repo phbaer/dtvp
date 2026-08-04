@@ -550,6 +550,8 @@ def _automatic_record(
     exposure="reachable",
     ticket_text=None,
     source="automatic",
+    target_team="API",
+    adjusted_cvss=None,
 ):
     assessment = {
         "verdict": verdict,
@@ -561,6 +563,8 @@ def _automatic_record(
     }
     if ticket_text:
         assessment["ticket_text"] = ticket_text
+    if adjusted_cvss:
+        assessment["adjusted_cvss"] = adjusted_cvss
     return {
         "analysis_run_id": run_id,
         "project_name": "ExampleApp",
@@ -568,7 +572,7 @@ def _automatic_record(
         "component_name": component,
         "source": source,
         "status": "completed",
-        "context_summary": {"target_team": "API"},
+        "context_summary": {"target_team": target_team} if target_team else {},
         "result": {
             "assessment": assessment,
             "versions_checked": ["1.0.0"],
@@ -731,6 +735,7 @@ def test_automatic_assessment_workflow_applies_selected_rescore_to_vulnerability
     item = preview["items"][0]
 
     assert item["rescore"] == {
+        "source": "analyzer",
         "source_run_id": "run-affected",
         "current_score": 8.1,
         "current_vector": group["cvss_vector"],
@@ -781,6 +786,335 @@ def test_automatic_assessment_workflow_applies_selected_rescore_to_vulnerability
         for version in refreshed["affected_versions"]
         for component in version["components"]
     )
+
+
+def _owned_team_mapping():
+    return {"owned-api": ["TEAM-API"], "owned-worker": ["TEAM-WORKER"]}
+
+
+def test_automatic_assessment_workflow_writes_one_block_per_owning_team():
+    group = _automatic_group()
+    group.update(
+        {
+            "cvss_score": 9.8,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    )
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        team_mapping=_owned_team_mapping(),
+        result_store=_AutomaticResultStore(
+            [
+                _automatic_record(
+                    "run-api",
+                    "owned-api",
+                    "Not Affected",
+                    exposure="none",
+                    adjusted_cvss={
+                        "original_score": 9.8,
+                        "adjusted_score": 0.0,
+                        "adjusted_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+                    },
+                ),
+                _automatic_record(
+                    "run-worker",
+                    "owned-worker",
+                    "Affected",
+                    adjusted_cvss={
+                        "original_score": 9.8,
+                        "adjusted_score": 7.5,
+                        "adjusted_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+                    },
+                ),
+            ]
+        ),
+    )
+
+    preview_item = build_automatic_assessment_preview(context)["items"][0]
+    assert preview_item["teams"] == ["TEAM-API", "TEAM-WORKER"]
+    assert preview_item["unowned_components"] == []
+
+    payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
+    details = payloads[0][1]["details"]
+
+    # Global block: worst state plus the worst assessment's CVSS, no evidence text.
+    assert payloads[0][1]["state"] == "EXPLOITABLE"
+    assert details.startswith(
+        "[Rescored: 7.5] "
+        "[Rescored Vector: CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N]"
+    )
+    assert (
+        "--- [Team: General] [State: EXPLOITABLE] "
+        "[Assessed By: Automated Code Analysis] [Justification: NOT_SET] "
+        "[Evidence Reviewed: yes] [Analysis Runs: run-api, run-worker] ---"
+    ) in details
+    assert "Assessed Teams: TEAM-API, TEAM-WORKER" in details
+
+    global_block = details.split("--- [Team: TEAM-API]")[0]
+    assert "[Automatic Assessment: run-api]" not in global_block
+    assert "[Automatic Assessment: run-worker]" not in global_block
+
+    # Team blocks: each team keeps its own verdict and its own evidence.
+    assert (
+        "--- [Team: TEAM-API] [State: NOT_AFFECTED] "
+        "[Assessed By: Automated Code Analysis] [Justification: CODE_NOT_PRESENT] "
+        "[Evidence Reviewed: yes] [Analysis Runs: run-api] ---"
+    ) in details
+    assert (
+        "--- [Team: TEAM-WORKER] [State: EXPLOITABLE] "
+        "[Assessed By: Automated Code Analysis] [Justification: NOT_SET] "
+        "[Evidence Reviewed: yes] [Analysis Runs: run-worker] ---"
+    ) in details
+
+    api_block, worker_block = details.split("--- [Team: TEAM-WORKER]")
+    assert "[Automatic Assessment: run-api]" in api_block
+    assert "owned-api was assessed as Not Affected." in api_block
+    assert "[Automatic Assessment: run-worker]" not in api_block
+    assert "[Automatic Assessment: run-worker]" in worker_block
+    assert "owned-worker was assessed as Affected." in worker_block
+    assert "[Automatic Assessment: run-api]" not in worker_block
+
+
+def test_automatic_assessment_workflow_combines_one_team_worst_wins():
+    group = _automatic_group()
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        team_mapping={"owned-api": ["TEAM-API"], "owned-worker": ["team-api"]},
+        result_store=_AutomaticResultStore(
+            [
+                _automatic_record("run-api", "owned-api", "Not Affected", exposure="none"),
+                _automatic_record("run-worker", "owned-worker", "Probably Affected"),
+            ]
+        ),
+    )
+
+    payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
+    details = payloads[0][1]["details"]
+
+    assert details.count("--- [Team: ") == 2
+    assert (
+        "--- [Team: TEAM-API] [State: IN_TRIAGE] "
+        "[Assessed By: Automated Code Analysis] [Justification: NOT_SET] "
+        "[Evidence Reviewed: yes] [Analysis Runs: run-api, run-worker] ---"
+    ) in details
+    assert "[Automatic Assessment: run-api]" in details
+    assert "[Automatic Assessment: run-worker]" in details
+
+
+def test_automatic_assessment_rescore_follows_the_worst_verdict():
+    group = _automatic_group()
+    group.update(
+        {
+            "cvss_score": 9.8,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    )
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        team_mapping=_owned_team_mapping(),
+        result_store=_AutomaticResultStore(
+            [
+                _automatic_record(
+                    "run-api",
+                    "owned-api",
+                    "Not Affected",
+                    exposure="none",
+                    adjusted_cvss={
+                        "original_score": 9.8,
+                        "adjusted_score": 9.0,
+                        "adjusted_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:L",
+                    },
+                ),
+                _automatic_record(
+                    "run-worker",
+                    "owned-worker",
+                    "Affected",
+                    adjusted_cvss={
+                        "original_score": 9.8,
+                        "adjusted_score": 5.0,
+                        "adjusted_vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:N/A:N",
+                    },
+                ),
+            ]
+        ),
+    )
+
+    item = build_automatic_assessment_preview(context)["items"][0]
+    assert item["rescore"]["source_run_id"] == "run-worker"
+    assert item["rescore"]["proposed_score"] == 5.0
+    assert (
+        item["rescore"]["proposed_vector"]
+        == "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:N/A:N"
+    )
+
+    payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
+    assert payloads[0][1]["details"].startswith(
+        "[Rescored: 5.0] "
+        "[Rescored Vector: CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:N/A:N]"
+    )
+
+
+def _rescore_rules():
+    return json.loads(Path("data/rescore_rules.json").read_text())
+
+
+def test_automatic_assessment_applies_configured_rescore_rules_to_the_global_state():
+    group = _automatic_group()
+    group.update(
+        {
+            "cvss_score": 9.8,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    )
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        team_mapping=_owned_team_mapping(),
+        rescore_rules=_rescore_rules(),
+        result_store=_AutomaticResultStore(
+            [
+                _automatic_record("run-api", "owned-api", "Not Affected", exposure="none"),
+                _automatic_record(
+                    "run-worker",
+                    "owned-worker",
+                    "Not Affected",
+                    exposure="none",
+                    adjusted_cvss={
+                        "original_score": 9.8,
+                        "adjusted_score": 4.2,
+                        "adjusted_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:U",
+                    },
+                ),
+            ]
+        ),
+    )
+
+    item = build_automatic_assessment_preview(context)["items"][0]
+    assert item["target_state"] == "NOT_AFFECTED"
+    assert item["rescore"]["source"] == "rescore_rules"
+    assert item["rescore"]["proposed_score"] == 0.0
+    # The analyzer's own metrics survive; the configured rule decides the rest.
+    assert "E:U" in item["rescore"]["proposed_vector"]
+    for metric in ("CR:L", "IR:L", "AR:L", "MAC:H", "MAV:P", "MPR:H", "MUI:R", "MC:N", "MI:N", "MA:N"):
+        assert metric in item["rescore"]["proposed_vector"]
+
+    payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
+    details = payloads[0][1]["details"]
+    assert details.startswith(
+        f"[Rescored: 0.0] [Rescored Vector: {item['rescore']['proposed_vector']}]"
+    )
+
+    # The applied result must satisfy Repair Rescoring Definitions right away.
+    applied = json.loads(json.dumps(group))
+    for version in applied["affected_versions"]:
+        for component in version["components"]:
+            component["analysis_state"] = payloads[0][1]["state"]
+            component["analysis_details"] = details
+    repair = create_rescore_rule_sync_workflow(_rescore_rules).preview(
+        BulkWorkflowContext(task_id="task-1", groups=[applied], user="reviewer")
+    )
+    assert repair["items"] == []
+
+
+def test_automatic_assessment_rescores_a_not_affected_state_without_analyzer_cvss():
+    group = _automatic_group()
+    group.update(
+        {
+            "cvss_score": 9.8,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    )
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        team_mapping=_owned_team_mapping(),
+        rescore_rules=_rescore_rules(),
+        result_store=_AutomaticResultStore(
+            [
+                _automatic_record("run-api", "owned-api", "Not Affected", exposure="none"),
+                _automatic_record("run-worker", "owned-worker", "Not Affected"),
+            ]
+        ),
+    )
+
+    payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
+    details = payloads[0][1]["details"]
+    assert "[Rescored: 0.0]" in details
+    assert "[Rescored Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/" in details
+
+
+def test_automatic_assessment_keeps_the_analyzer_rescore_for_unruled_states():
+    group = _automatic_group()
+    group.update(
+        {
+            "cvss_score": 9.8,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        }
+    )
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        team_mapping=_owned_team_mapping(),
+        rescore_rules=_rescore_rules(),
+        result_store=_AutomaticResultStore(
+            [
+                _automatic_record(
+                    "run-worker",
+                    "owned-worker",
+                    "Affected",
+                    adjusted_cvss={
+                        "original_score": 9.8,
+                        "adjusted_score": 7.5,
+                        "adjusted_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+                    },
+                ),
+            ]
+        ),
+    )
+
+    item = build_automatic_assessment_preview(context)["items"][0]
+    assert item["target_state"] == "EXPLOITABLE"
+    assert item["rescore"]["source"] == "analyzer"
+    assert item["rescore"]["proposed_score"] == 7.5
+
+
+def test_automatic_assessment_keeps_unowned_evidence_in_the_global_block():
+    group = _automatic_group()
+    context = BulkWorkflowContext(
+        task_id="task-1",
+        groups=[group],
+        user="reviewer",
+        result_store=_AutomaticResultStore(
+            [
+                _automatic_record(
+                    "run-api",
+                    "owned-api",
+                    "Affected",
+                    target_team=None,
+                ),
+            ]
+        ),
+    )
+
+    item = build_automatic_assessment_preview(context)["items"][0]
+    assert item["teams"] == []
+    assert item["unowned_components"] == ["owned-api"]
+
+    payloads, _skipped = build_automatic_assessment_payloads(context, [group["id"]])
+    details = payloads[0][1]["details"]
+    assert details.count("--- [Team: ") == 1
+    assert "--- [Team: General] [State: EXPLOITABLE]" in details
+    assert "Assessed Teams:" not in details
+    assert "[Automatic Assessment: run-api]" in details
 
 
 def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationales():
@@ -980,6 +1314,7 @@ def test_automatic_assessment_workflow_hydrates_only_selected_full_results():
     preview = build_automatic_assessment_preview(context)
     assert preview["items"][0]["verdict_bucket"] == "AFFECTED"
     assert preview["items"][0]["rescore"] == {
+        "source": "analyzer",
         "source_run_id": "run-auto",
         "current_score": None,
         "current_vector": "",

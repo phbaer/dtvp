@@ -1,0 +1,6 @@
+services:
+  dtvp:
+    build:
+      dockerfile: Dockerfile
+    environment:
+      DTVP_REQUIRE_FREE_THREADED: "false"

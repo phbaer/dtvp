@@ -173,17 +173,44 @@ const getTransitionActions = (
     return (triggerMatch.actions?.[vectorVersion] || {}) as Record<string, string>
 }
 
+/**
+ * Restores the base metrics of the original vector.
+ *
+ * Rescoring may never change the base metrics Dependency-Track supplies, so a
+ * proposal that downgraded them (an analyzer CVSS, for example) must not become
+ * the basis of the configured rule. Mismatched versions are left untouched.
+ */
+const restoreBaseMetrics = (
+    instance: CvssInstanceLike,
+    baseVector: string,
+    version: CvssVersion,
+    metricRule?: CvssMetricRule,
+) => {
+    if (!baseVector.trim() || !metricRule?.base_metrics?.length) return
+    if (detectCvssVersion(baseVector, version) !== version) return
+
+    const base = createCvssInstance(baseVector, version)
+    for (const key of metricRule.base_metrics) {
+        const value = getComponentValue(base.instance, key)
+        if (isDefinedMetricValue(value, metricRule)) {
+            applyComponent(instance, key, value as string)
+        }
+    }
+}
+
 export const buildRescoredVectorForState = ({
     rules,
     metricRules,
     targetState,
     currentVector,
+    baseVector,
     fallbackVersion,
 }: {
     rules: Array<Record<string, any>>
     metricRules?: CvssMetricRules
     targetState: string
     currentVector: string
+    baseVector?: string
     fallbackVersion: CvssVersion
 }): { vector: string; version: CvssVersion } | null => {
     const vectorVersion = detectCvssVersion(currentVector, fallbackVersion)
@@ -195,6 +222,7 @@ export const buildRescoredVectorForState = ({
 
     const { instance, version } = createCvssInstance(currentVector, fallbackVersion)
     const metricRule = metricRules?.[version]
+    restoreBaseMetrics(instance, baseVector || '', version, metricRule)
     const relationships = metricRule?.relationships || []
     const requirementRelationships = new Map(
         relationships

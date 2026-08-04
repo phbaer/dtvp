@@ -351,6 +351,44 @@ class DTClient:
         response.raise_for_status()
         return response.json()
 
+    async def finding_exists(
+        self,
+        project_uuid: str,
+        component_uuid: str,
+        vulnerability_uuid: str,
+    ) -> bool:
+        """Check an exact finding through a healthy Dependency-Track read."""
+        response = await self.client.get(
+            f"{self.base_url}/api/v1/finding/project/{project_uuid}",
+            params={"suppressed": "true"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise ValueError("Unexpected Dependency-Track findings response")
+
+        for finding in payload:
+            if not isinstance(finding, dict):
+                raise ValueError("Unexpected Dependency-Track finding entry")
+            component = finding.get("component")
+            vulnerability = finding.get("vulnerability")
+            if not isinstance(component, dict) or not isinstance(
+                vulnerability, dict
+            ):
+                raise ValueError("Dependency-Track finding identity is missing")
+            found_component_uuid = str(component.get("uuid") or "").strip()
+            found_vulnerability_uuid = str(
+                vulnerability.get("uuid") or ""
+            ).strip()
+            if not found_component_uuid or not found_vulnerability_uuid:
+                raise ValueError("Dependency-Track finding identity is missing")
+            if (
+                found_component_uuid == component_uuid
+                and found_vulnerability_uuid == vulnerability_uuid
+            ):
+                return True
+        return False
+
     async def get_bom(self, project_uuid: str) -> Dict[str, Any]:
         """
         Get project BOM in CycloneDX JSON format.
