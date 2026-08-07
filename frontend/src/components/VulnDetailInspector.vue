@@ -8,12 +8,15 @@ defineProps<{
     group: GroupedVuln
     hasAutomaticAssessment?: boolean
     automaticAssessmentStatus?: AutomaticAssessmentStatus | null
+    activeTeamFilter?: string
+    hasNextVulnerability?: boolean
 }>()
 
 const emit = defineEmits<{
     (e: 'close'): void
     (e: 'update', group?: GroupedVuln): void
     (e: 'update:assessment', data: any): void
+    (e: 'request-next'): void
 }>()
 
 const cardRef = ref<{ confirmApplyDraftBeforeLeave?: () => Promise<boolean> } | null>(null)
@@ -38,7 +41,10 @@ defineExpose({
                 :inModal="true"
                 :hasAutomaticAssessment="hasAutomaticAssessment"
                 :automaticAssessmentStatus="automaticAssessmentStatus"
+                :activeTeamFilter="activeTeamFilter"
+                :hasNextVulnerability="hasNextVulnerability"
                 @close="emit('close')"
+                @request-next="emit('request-next')"
                 @update="(updatedGroup) => emit('update', updatedGroup)"
                 @update:assessment="(data) => emit('update:assessment', data)"
             />

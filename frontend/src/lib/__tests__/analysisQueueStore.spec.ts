@@ -278,6 +278,7 @@ describe('analysisQueueStore', () => {
         await analysisQueueStore.refresh()
 
         expect(analysisQueueStore.items.value.map(item => item.queue_id)).toEqual(['newer', 'middle', 'older'])
+        expect([...analysisQueueStore.activeVulnerabilityIds.value].sort()).toEqual(['cve-1', 'cve-2'])
     })
 
     it('uses compact status polling and backs off to 30 seconds while idle', async () => {

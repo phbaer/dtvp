@@ -25,6 +25,14 @@ export interface TeamMappingMatch {
     tags: string[]
 }
 
+interface CompiledTeamMapping {
+    entries: TeamMappingMatch[]
+    matches: Map<string, TeamMappingMatch | null>
+    canonicalTeamNames: Map<string, string>
+}
+
+const compiledTeamMappings = new WeakMap<TeamMapping, CompiledTeamMapping>()
+
 export const normalizeTeamValues = (value: TeamMappingValue): string[] => {
     const values = Array.isArray(value) ? value : [value]
     const seen = new Set<string>()
@@ -288,29 +296,85 @@ const compareMatches = (identity: Required<ComponentIdentity>) => (left: TeamMap
     return left.selector.rawKey.localeCompare(right.selector.rawKey)
 }
 
+const compiledTeamMapping = (teamMapping: TeamMapping): CompiledTeamMapping => {
+    const cached = compiledTeamMappings.get(teamMapping)
+    if (cached) return cached
+
+    const entries: TeamMappingMatch[] = Object.entries(teamMapping).flatMap(([key, value]) => {
+        const tags = normalizeTeamValues(value)
+        if (tags.length === 0) return []
+        return [{
+            key,
+            value,
+            selector: parseTeamMappingKey(key),
+            tags,
+        }]
+    })
+    const canonicalTeamNames = new Map<string, string>()
+    for (const entry of entries) {
+        const primary = entry.tags[0]
+        entry.tags.forEach(team => canonicalTeamNames.set(team.toLocaleLowerCase(), primary))
+    }
+    const compiled: CompiledTeamMapping = {
+        entries,
+        matches: new Map<string, TeamMappingMatch | null>(),
+        canonicalTeamNames,
+    }
+    compiledTeamMappings.set(teamMapping, compiled)
+    return compiled
+}
+
+export const resolveCanonicalTeamName = (
+    teamMapping: TeamMapping | undefined,
+    requestedTeam: string,
+): string => {
+    const requested = String(requestedTeam || '').trim()
+    if (!requested || !teamMapping) return requested
+    return compiledTeamMapping(teamMapping).canonicalTeamNames.get(
+        requested.toLocaleLowerCase(),
+    ) || requested
+}
+
+const teamMappingMatchCacheKey = (
+    identity: Required<ComponentIdentity>,
+    includeWildcard: boolean,
+) => [
+    includeWildcard ? '1' : '0',
+    identity.groupKnown ? '1' : '0',
+    identity.name,
+    identity.group,
+    identity.purl,
+].join('\u0000')
+
 export const findTeamMappingMatch = (
     teamMapping: TeamMapping | undefined,
     identity: ComponentIdentity,
     includeWildcard = false,
 ): TeamMappingMatch | null => {
+    if (!teamMapping) return null
     const normalizedIdentity: Required<ComponentIdentity> = {
         name: String(identity.name || '').trim(),
         group: String(identity.group || '').trim(),
         purl: String(identity.purl || '').trim(),
         groupKnown: Boolean(identity.groupKnown),
     }
-    const matches: TeamMappingMatch[] = []
+    const compiled = compiledTeamMapping(teamMapping)
+    const cacheKey = teamMappingMatchCacheKey(normalizedIdentity, includeWildcard)
+    if (compiled.matches.has(cacheKey)) {
+        return compiled.matches.get(cacheKey) || null
+    }
 
-    Object.entries(teamMapping || {}).forEach(([key, value]) => {
-        const selector = parseTeamMappingKey(key)
-        if (!selectorMatchesIdentity(selector, normalizedIdentity, includeWildcard)) return
-        const tags = normalizeTeamValues(value)
-        if (tags.length === 0) return
-        matches.push({ key, value, selector, tags })
-    })
+    const compare = compareMatches(normalizedIdentity)
+    let bestMatch: TeamMappingMatch | null = null
+    for (const candidate of compiled.entries) {
+        if (!selectorMatchesIdentity(candidate.selector, normalizedIdentity, includeWildcard)) continue
+        if (!bestMatch || compare(candidate, bestMatch) < 0) {
+            bestMatch = candidate
+        }
+    }
 
-    if (matches.length === 0) return null
-    return [...matches].sort(compareMatches(normalizedIdentity))[0]
+    compiled.matches.set(cacheKey, bestMatch)
+    return bestMatch
 }
 
 export const getTeamMappingTags = (

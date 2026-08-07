@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VulnRowCompact from '../VulnRowCompact.vue'
 import { buildVulnListItem } from '../../lib/vulnListIndex'
+import { analysisQueueStore } from '../../lib/analysisQueueStore'
 import type { GroupedVuln } from '../../types'
 
 const group: GroupedVuln = {
@@ -32,6 +33,10 @@ const group: GroupedVuln = {
 }
 
 describe('VulnRowCompact', () => {
+    beforeEach(() => {
+        analysisQueueStore.items.value = []
+    })
+
     it('emits reload without selecting the vulnerability card', async () => {
         const wrapper = mount(VulnRowCompact, {
             props: { item: buildVulnListItem(group, {}) },
@@ -42,9 +47,10 @@ describe('VulnRowCompact', () => {
         expect(wrapper.emitted('reload')).toEqual([[group]])
         expect(wrapper.emitted('select')).toBeUndefined()
         expect(wrapper.get('[data-testid="compact-vulnerability-header"]').classes())
-            .toEqual(expect.arrayContaining(['relative', 'min-h-[5rem]', 'pr-12']))
+            .toEqual(expect.arrayContaining(['relative', 'min-h-[5rem]', 'pr-40']))
         expect(wrapper.get('[data-testid="reload-vulnerability"]').classes())
             .toEqual(expect.arrayContaining(['absolute', 'bottom-2', 'right-3']))
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Needs mapping')
     })
 
     it('disables and labels the reload button while loading or after an error', async () => {
@@ -67,7 +73,7 @@ describe('VulnRowCompact', () => {
     it('shows available tmrescore and code-assessment status icons', () => {
         const vector = 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
         const item = buildVulnListItem(
-            { ...group, cvss_vector: vector, code_assessment_status: 'auto' },
+            { ...group, tags: ['Security'], cvss_vector: vector, code_assessment_status: 'auto' },
             {},
             {
                 'CVE-2026-RELOAD': {
@@ -98,6 +104,7 @@ describe('VulnRowCompact', () => {
         expect(codeAssessmentStatus.attributes('aria-label')).toBe('Code assessment available: auto')
         expect(codeAssessmentStatus.classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
         expect(codeAssessmentStatus.get('.sr-only').text()).toBe('Code assessment available')
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Result ready')
 
         const tmrescoreIcon = tmrescoreStatus.get('svg')
         const codeAssessmentIcon = codeAssessmentStatus.get('svg')
@@ -107,6 +114,27 @@ describe('VulnRowCompact', () => {
         expect(tmrescoreIcon.attributes('height')).toBe('12')
         expect(codeAssessmentIcon.attributes('width')).toBe('12')
         expect(codeAssessmentIcon.attributes('height')).toBe('12')
+    })
+
+    it('prioritizes active analysis for the vulnerability or one of its aliases', () => {
+        analysisQueueStore.items.value = [{
+            queue_id: 'queue-running',
+            vuln_id: 'ghsa-alias',
+            component_name: 'library-a',
+            submitted_by: 'analyst',
+            submitted_at: '2026-08-04T10:00:00Z',
+            status: 'running',
+            position: 0,
+        }]
+        const item = buildVulnListItem({
+            ...group,
+            aliases: ['GHSA-ALIAS'],
+            tags: ['Security'],
+        }, {})
+
+        const wrapper = mount(VulnRowCompact, { props: { item } })
+
+        expect(wrapper.get('[data-testid="workflow-state-badge"]').text()).toBe('Analysis running')
     })
 
     it('shows unavailable tmrescore and code-assessment status icons', () => {

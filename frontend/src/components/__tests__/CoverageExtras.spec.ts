@@ -10,6 +10,7 @@ vi.mock('lucide-vue-next', () => ({
     Shield: { template: '<span />' },
     Calculator: { template: '<span />' },
     ExternalLink: { template: '<span />' },
+    ArrowRight: { template: '<span />' },
     Box: { template: '<span />' },
     ShieldAlert: { template: '<span />' },
     RefreshCw: { template: '<span />' },

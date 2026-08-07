@@ -153,9 +153,22 @@ def test_countless_page_reuses_full_query_cache_entry():
     assert len(query_index["query_cache"]) == 1
 
 
-def test_full_query_upgrades_countless_cached_filter():
+def test_full_query_upgrades_countless_cached_filter(monkeypatch):
     query_index = query_services.build_task_group_query_index(
         [_group(index) for index in range(3)]
+    )
+    original_matcher = query_services._matches_task_group_fields
+    call_count = 0
+
+    def counting_matcher(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return original_matcher(*args, **kwargs)
+
+    monkeypatch.setattr(
+        query_services,
+        "_matches_task_group_fields",
+        counting_matcher,
     )
 
     countless = _query(query_index, include_counts=False)
@@ -163,7 +176,34 @@ def test_full_query_upgrades_countless_cached_filter():
 
     assert "counts" not in countless
     assert counted["counts"]["filtered"]["total"] == 3
+    assert call_count == 3
     assert len(query_index["query_cache"]) == 1
+
+
+def test_exact_team_filter_only_evaluates_indexed_candidates(monkeypatch):
+    groups = [_group(index) for index in range(100)]
+    for index, group in enumerate(groups):
+        group["tags"] = ["Platform"] if index % 10 == 0 else ["Runtime"]
+    query_index = query_services.build_task_group_query_index(groups)
+    original_matcher = query_services._matches_task_group_fields
+    call_count = 0
+
+    def counting_matcher(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return original_matcher(*args, **kwargs)
+
+    monkeypatch.setattr(
+        query_services,
+        "_matches_task_group_fields",
+        counting_matcher,
+    )
+
+    result = _query(query_index, q="", team="platform")
+
+    assert result["filtered"] == 10
+    assert all(item["tags"] == ["Platform"] for item in result["items"])
+    assert call_count == 10
 
 
 def test_group_window_reuses_dynamic_context_until_metadata_changes(monkeypatch):

@@ -153,21 +153,9 @@ def _is_source_file(fname: str) -> bool:
     return ext.lower() in _SOURCE_EXTS
 
 
-def _extract_structure(file_path: str, repo_path: str) -> str | None:
-    """Extract imports and function/class signatures from any source file.
-
-    Uses lightweight regex patterns — intentionally imprecise so that it
-    works across languages.  The LLM receives the compact output and does
-    the real semantic analysis.
-    """
-    try:
-        with open(file_path, "r", errors="ignore") as f:
-            source = f.read()
-    except Exception:
-        return None
-
-    rel = os.path.relpath(file_path, repo_path)
-    lines: List[str] = [f"=== {rel} ==="]
+def extract_structure_from_source(source: str, rel_path: str) -> str | None:
+    """Extract compact imports and signatures from an already-loaded source."""
+    lines: List[str] = [f"=== {rel_path} ==="]
 
     # Collect import-like lines (deduplicated, order preserved).
     for m in _IMPORT_RE.finditer(source):
@@ -185,6 +173,22 @@ def _extract_structure(file_path: str, repo_path: str) -> str | None:
     if len(lines) <= 1:
         return None
     return "\n".join(lines)
+
+
+def _extract_structure(file_path: str, repo_path: str) -> str | None:
+    """Extract imports and function/class signatures from any source file.
+
+    Uses lightweight regex patterns — intentionally imprecise so that it
+    works across languages.  The LLM receives the compact output and does
+    the real semantic analysis.
+    """
+    try:
+        with open(file_path, "r", errors="ignore") as f:
+            source = f.read()
+    except Exception:
+        return None
+
+    return extract_structure_from_source(source, os.path.relpath(file_path, repo_path))
 
 
 def search_usage(repo_path: str, component_name: str, symbols: List[str]) -> List[str]:

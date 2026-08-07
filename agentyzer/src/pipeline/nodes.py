@@ -1143,7 +1143,7 @@ async def llm_analyze_code(state: PipelineState) -> dict:
             f"total={llm_usage.get('total_tokens', 0)}"
         )
     if analysis.get("research_log"):
-        evidence_lines.append("Web research performed:")
+        evidence_lines.append("Research tools used:")
         for entry in analysis["research_log"]:
             evidence_lines.append(f"  {entry}")
 
@@ -1273,7 +1273,7 @@ async def llm_deep_analyze(state: PipelineState) -> dict:
             f"total={llm_usage.get('total_tokens', 0)}"
         )
     if deep.get("research_log"):
-        evidence_lines.append("Web research performed:")
+        evidence_lines.append("Research tools used:")
         for entry in deep["research_log"]:
             evidence_lines.append(f"  {entry}")
 
@@ -1620,7 +1620,7 @@ async def check_transitive_paths(state: PipelineState) -> dict:
         ]
     )
     if result.get("research_log"):
-        evidence_lines.append("Web research performed:")
+        evidence_lines.append("Research tools used:")
         for entry in result["research_log"]:
             evidence_lines.append(f"  {entry}")
 
@@ -1738,7 +1738,7 @@ async def aggregate_verdict(state: PipelineState) -> dict:
         for rng in version_ctx.get("affected_ranges_summary", []):
             verdict_evidence.append(f"  {rng}")
     if final.get("research_log"):
-        verdict_evidence.append("Web research performed:")
+        verdict_evidence.append("Research tools used:")
         for entry in final["research_log"]:
             verdict_evidence.append(f"  {entry}")
 

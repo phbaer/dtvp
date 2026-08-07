@@ -1590,6 +1590,7 @@ export interface CodeAnalysisLlmConversationTurn {
     messages?: CodeAnalysisLlmMessage[];
     response?: CodeAnalysisLlmMessage | string | null;
     usage?: Record<string, any> | null;
+    provider_metrics?: Record<string, any> | null;
     status?: string | null;
     error?: string | null;
 }
@@ -1641,11 +1642,15 @@ export interface CodeAnalysisResultRecord {
     parent_job_id?: string | null;
     follow_up_question?: string | null;
     user_guidance?: string | null;
+    user_guidance_redacted?: boolean;
     follow_up_user_guidance?: string | null;
     context_mode?: string | null;
     project_name?: string | null;
+    project_names?: string[];
     vuln_id: string;
     component_name: string;
+    component_names?: string[];
+    scan_target?: string | null;
     source?: 'manual' | 'automatic' | 'follow-up' | string;
     submitted_by?: string | null;
     submitted_at?: string | null;
@@ -1814,9 +1819,11 @@ export const codeAnalysisRunAutoSweep = async (): Promise<CodeAnalysisAutoSweepS
 export interface CodeAnalysisResultListParams {
     project_name?: string;
     vuln_id?: string;
-    component_name?: string;
+    component_name?: string | string[];
+    vuln_alias?: string[];
     source?: string;
     limit?: number;
+    offset?: number;
     include_result?: boolean;
 }
 

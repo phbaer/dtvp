@@ -4,17 +4,18 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/ap
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, ClipboardList, Bot, ShieldCheck, Tags } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
-import { prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun } from '../lib/codeAnalysisResult'
+import { buildCodeAnalysisGlobalReferenceDraft, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { getDerivedGroupTags } from '../lib/dependency-team-selection'
+import { buildTeamAliasGroups } from '../lib/team-mapping'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
 import CvssVectorDisplay from './CvssVectorDisplay.vue'
@@ -27,14 +28,17 @@ import ConflictResolutionModal from './ConflictResolutionModal.vue'
 import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
 import CodeAnalysisPanel from './CodeAnalysisPanel.vue'
+import DetailSection from './DetailSection.vue'
 import type { CodeAnalysisAssessResponse, CodeAnalysisCvssAdjustment } from '../lib/api'
-import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
+import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 
 const props = defineProps<{
     group: GroupedVuln
     inModal?: boolean
     hasAutomaticAssessment?: boolean
     automaticAssessmentStatus?: AutomaticAssessmentStatus | null
+    activeTeamFilter?: string
+    hasNextVulnerability?: boolean
 }>()
 
 const DESCRIPTION_FALLBACK = 'No description available.'
@@ -91,7 +95,13 @@ const teamMapping = inject<any>('teamMapping', ref({}))
 const rescoreRules = inject<any>('rescoreRules', ref({ transitions: [] }))
 const tmrescoreProposals = inject<any>('tmrescoreProposals', ref({}))
 
-const emit = defineEmits(['update', 'update:assessment', 'toggle-expand', 'close'])
+const emit = defineEmits([
+    'update',
+    'update:assessment',
+    'toggle-expand',
+    'close',
+    'request-next',
+])
 
 const ANALYSIS_STATES = [
     { value: 'NOT_SET', label: 'Not Set', description: 'No analysis has been performed yet.' },
@@ -148,13 +158,15 @@ const unlockBodyScroll = () => {
 }
 
 const expanded = ref(props.inModal ? true : false)
-type DetailTab = 'overview' | 'assessments' | 'analysis' | 'review' | 'mapping'
+type DetailTab = 'overview' | 'analysis' | 'review' | 'mapping'
 const activeDetailTab = ref<DetailTab>('overview')
 const state = ref('NOT_SET')
 const details = ref('')
 const justification = ref('NOT_SET')
 const suppressed = ref(false)
 const selectedTeam = ref('')
+const showAllAssessmentTeams = ref(false)
+const scopedCodeAnalysisAvailable = ref(false)
 // Removed onlyTargetSelectedTeam - team selection now automatically targets team instances
 const updating = ref(false)
 const loadingDetails = ref(false)
@@ -205,6 +217,9 @@ const formTouched = ref(false)
 const codeAnalysisDraftApplied = ref(false)
 const codeAnalysisDraftSummary = ref('')
 const codeAnalysisRunIds = ref<string[]>([])
+const codeAnalysisProposalRuns = ref<CodeAnalysisComponentRun[]>([])
+const automaticFallbackTeams = ref<Set<string>>(new Set())
+const assessmentSubmitted = ref(false)
 const latestCodeAnalysisCvssAdjustment = ref<CodeAnalysisCvssAdjustment | null>(null)
 const latestCodeAnalysisCvssComponents = ref<string[]>([])
 
@@ -383,11 +398,12 @@ const handleReviewCancel = () => {
 const confirmApplyDraftBeforeLeave = async (): Promise<boolean> => {
     if (!hasUnsavedDraft.value) return true
 
+    const actionLabel = isReviewer.value ? 'Save' : 'Submit'
     const shouldApply = await promptConfirm(
-        'Unsaved draft',
-        'Apply this assessment draft before leaving? Discard closes without saving, while Stay keeps the local edits open.',
+        'Unsaved assessment',
+        `${actionLabel} this assessment before leaving? Discard closes without saving, while Stay keeps the local edits open.`,
         false,
-        { confirmLabel: 'Apply', cancelLabel: 'Stay', discardLabel: 'Discard' },
+        { confirmLabel: actionLabel, cancelLabel: 'Stay', discardLabel: 'Discard' },
     )
     if (!shouldApply) return false
 
@@ -414,6 +430,7 @@ const discardUnsavedDraft = () => {
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
+    automaticFallbackTeams.value = new Set()
     isManualBaseMode.value = false
     assigneeInput.value = ''
     assigneeSuggestionsVisible.value = false
@@ -440,20 +457,30 @@ const dependencyInfo = useVulnDependencyInfo({
     group: computed(() => props.group),
     teamMapping,
     refreshCounter,
+    teamFilter: computed(() => props.activeTeamFilter || ''),
 })
 
 const allInstances = dependencyInfo.allInstances
+const visibleInstances = dependencyInfo.visibleInstances
+const visibleInstanceSet = computed(() => new Set(visibleInstances.value))
+const activeTeamScope = dependencyInfo.activeTeam
 const getInstanceTeamKey = dependencyInfo.getInstanceTeamKey
 const instanceTeams = dependencyInfo.instanceTeams
 const effectiveTags = dependencyInfo.effectiveTags
+const teamAliasGroups = computed(() => buildTeamAliasGroups(teamMapping?.value || {}))
+const activeTeamScopeAliases = computed(() => activeTeamScope.value
+    ? teamAliasGroups.value[activeTeamScope.value] || []
+    : []
+)
 
 const totalTargeted = computed(() => {
-    // When a team is selected, automatically target only that team's instances
-    // Fall back to all instances if no instances have the team tag (e.g. virtual teams like 'automation')
     if (selectedTeam.value) {
-        const matched = allInstances.value.filter((inst, index) => {
-            return (instanceTeams.value.get(getInstanceTeamKey(inst, index)) || []).includes(selectedTeam.value)
-        }).length
+        const selectedTeamKey = selectedTeam.value.toLocaleLowerCase()
+        const matched = allInstances.value.filter((inst, index) => (
+            instanceTeams.value.get(getInstanceTeamKey(inst, index)) || []
+        ).some(team => team.toLocaleLowerCase() === selectedTeamKey)).length
+        // Legacy findings can carry only the vulnerability-level team tag.
+        // Keep their assessment workflow usable until a component mapping exists.
         return matched > 0 ? matched : allInstances.value.length
     }
     return allInstances.value.length
@@ -643,9 +670,10 @@ const applyProposal = async () => {
     const proposal = matchedProposal.value
     if (!proposal || !proposal.rescored_vector) return
 
-    // Set team first — this triggers updateFormFromGroup via the selectedTeam watcher.
-    // We must wait for that reset to complete before applying proposal values.
-    selectedTeam.value = 'automation'
+    // A threat-model proposal is reviewer context for the global assessment,
+    // not a synthetic team assessment. Stage it in the normal form and let the
+    // reviewer persist it with the card's save action.
+    selectedTeam.value = ''
     await nextTick()
 
     pendingVector.value = proposal.rescored_vector
@@ -683,25 +711,48 @@ const applyProposal = async () => {
     details.value = parts.join('\n')
 
     formTouched.value = true
-
-    // Auto-submit immediately so the automation block is persisted to all
-    // instances.  This way, when the user subsequently switches to their own
-    // team and submits their assessment, the merge logic already sees the
-    // automation block from the server/cache — no second apply needed.
-    await handleUpdate(false)
 }
 
 const handleCodeAnalysisResult = async (
     result: CodeAnalysisAssessResponse,
     components: string[],
     analysisRunIds: string[] = [],
+    persistedTargetTeam?: string,
 ) => {
+    const taggedComponents = [...triggeringTaggedComponents.value]
+    if (persistedTargetTeam && components.length === 1 && !taggedComponents.some(component =>
+        component.name.toLocaleLowerCase() === components[0].toLocaleLowerCase()
+    )) {
+        taggedComponents.push({
+            name: components[0],
+            versions: [],
+            tag: persistedTargetTeam,
+        })
+    }
     const prepared = prepareCodeAnalysisResult(
         result,
         components,
-        triggeringTaggedComponents.value,
+        taggedComponents,
         currentAssigned.value,
     )
+
+    if (!prepared.firstTeam || prepared.teamDrafts.length === 0) {
+        await showAlert(
+            'Team Ownership Required',
+            'The analyzed component is not mapped to a team, so this result cannot be staged as an assessment draft.',
+        )
+        return
+    }
+
+    // Let the team watcher finish preserving/restoring the previous form
+    // before installing the analyzer draft. Otherwise its queued update can
+    // replace the newly populated fields after navigation.
+    selectedTeam.value = prepared.firstTeam
+    await nextTick()
+    automaticFallbackTeams.value = new Set([
+        ...automaticFallbackTeams.value,
+        prepared.firstTeam.toLocaleLowerCase(),
+    ])
 
     for (const draft of prepared.teamDrafts) {
         const existingDraft = teamDrafts.value.get(draft.team)
@@ -715,11 +766,14 @@ const handleCodeAnalysisResult = async (
             ticket: existingDraft?.ticket ?? '',
         })
     }
+    stageCodeAnalysisGlobalReference()
 
-    selectedTeam.value = prepared.firstTeam ?? ''
-    state.value = prepared.targetState
-    justification.value = prepared.targetJustification
-    details.value = prepared.detailsText
+    const selectedDraft = prepared.teamDrafts.find(draft => draft.team === prepared.firstTeam)
+        || prepared.teamDrafts[0]
+    state.value = selectedDraft.state
+    justification.value = selectedDraft.justification
+    details.value = selectedDraft.details
+    currentAssigned.value = [...selectedDraft.assigned]
 
     if (prepared.adjustedVector) {
         pendingVector.value = prepared.adjustedVector
@@ -733,7 +787,7 @@ const handleCodeAnalysisResult = async (
     codeAnalysisDraftApplied.value = true
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = [...analysisRunIds]
-    setDetailTab('review')
+    setDetailTab('review', true)
 }
 
 /**
@@ -750,17 +804,129 @@ const applyRescoreRulesForState = (targetState: string) => {
     applyStateRescore(targetState)
 }
 
+const stageCodeAnalysisGlobalReference = (): AssessmentDraftState | null => {
+    const assessments = new Map<string, CodeAnalysisTeamDraft>()
+    for (const block of mergedAssessmentData.value.blocks) {
+        if (block.team.toLocaleLowerCase() === 'general') continue
+        assessments.set(block.team.toLocaleLowerCase(), {
+            team: block.team,
+            state: block.state,
+            details: block.details || '',
+            justification: block.justification || 'NOT_SET',
+            assigned: block.assigned ? [...block.assigned] : [],
+        })
+    }
+    for (const [team, draft] of teamDrafts.value.entries()) {
+        if (team.toLocaleLowerCase() === 'general') continue
+        assessments.set(team.toLocaleLowerCase(), { team, ...draft })
+    }
+
+    const generalDraftEntry = [...teamDrafts.value.entries()]
+        .find(([team]) => team.toLocaleLowerCase() === 'general')
+    const savedGeneral = mergedAssessmentData.value.blocks
+        .find(block => block.team.toLocaleLowerCase() === 'general')
+    const activeGlobal = !selectedTeam.value && formTouched.value
+        ? {
+            team: 'General',
+            state: state.value,
+            details: details.value,
+            justification: justification.value,
+            assigned: [...currentAssigned.value],
+        }
+        : null
+    let existingGlobal: CodeAnalysisTeamDraft | null = null
+    if (generalDraftEntry) {
+        existingGlobal = { team: 'General', ...generalDraftEntry[1] }
+    } else if (activeGlobal) {
+        existingGlobal = activeGlobal
+    } else if (savedGeneral) {
+        existingGlobal = {
+            team: 'General',
+            state: savedGeneral.state,
+            details: savedGeneral.details || '',
+            justification: savedGeneral.justification || 'NOT_SET',
+            assigned: savedGeneral.assigned ? [...savedGeneral.assigned] : [],
+        }
+    }
+    const prepared = buildCodeAnalysisGlobalReferenceDraft([...assessments.values()], existingGlobal)
+    if (!prepared) return null
+
+    for (const team of [...teamDrafts.value.keys()]) {
+        if (team.toLocaleLowerCase() === 'general') teamDrafts.value.delete(team)
+    }
+    const staged: AssessmentDraftState = {
+        state: prepared.state,
+        details: prepared.details,
+        justification: prepared.justification,
+        assigned: [...prepared.assigned],
+        evidenceReviewed: generalDraftEntry?.[1].evidenceReviewed ?? (activeGlobal ? evidenceReviewed.value : savedGeneral?.evidenceReviewed) ?? false,
+        versionCoverageChecked: generalDraftEntry?.[1].versionCoverageChecked ?? (activeGlobal ? versionCoverageChecked.value : savedGeneral?.versionCoverageChecked) ?? false,
+        ticket: generalDraftEntry?.[1].ticket ?? (activeGlobal ? ticketReference.value : savedGeneral?.ticket) ?? '',
+    }
+    teamDrafts.value.set('General', staged)
+    return staged
+}
+
 /**
- * Applies every saved analyzer assessment at once: each team gets the result of
- * the components it owns, and the worst result becomes the global assessment.
- * The global block deliberately keeps its existing text — the reasoning already
- * lives in the team blocks.
+ * Stages the latest analyzer results as fallbacks for teams that do not already
+ * have a manual assessment. The reviewer draft then uses the worst effective
+ * state across authoritative team assessments and those analyzer fallbacks.
  */
 const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[]) => {
-    const prepared = prepareCodeAnalysisResults(runs, triggeringTaggedComponents.value, currentAssigned.value)
+    const activeTeamKey = activeTeamScope.value.toLocaleLowerCase()
+    const scopedRuns = activeTeamKey
+        ? runs.filter(run => triggeringTaggedComponents.value.some(component => (
+            component.name.toLocaleLowerCase() === run.component.toLocaleLowerCase()
+            && component.tag.toLocaleLowerCase() === activeTeamKey
+        )))
+        : runs
+    const prepared = prepareCodeAnalysisResults(scopedRuns, triggeringTaggedComponents.value, currentAssigned.value)
 
     if (prepared.teamDrafts.length === 0) {
         await showAlert('No Team Assessments', 'None of the analyzed components is mapped to a team.')
+        return
+    }
+
+    if (activeTeamScope.value) {
+        const scopedDraft = prepared.teamDrafts.find(draft => draft.team.toLocaleLowerCase() === activeTeamKey)
+        if (!scopedDraft) {
+            await showAlert(
+                'No Scoped Team Assessment',
+                `None of the selected analysis results belongs to ${activeTeamScope.value}.`,
+            )
+            return
+        }
+
+        selectedTeam.value = scopedDraft.team
+        await nextTick()
+        automaticFallbackTeams.value = new Set([
+            ...automaticFallbackTeams.value,
+            scopedDraft.team.toLocaleLowerCase(),
+        ])
+        const existingDraft = teamDrafts.value.get(scopedDraft.team)
+        teamDrafts.value.set(scopedDraft.team, {
+            state: scopedDraft.state,
+            details: scopedDraft.details,
+            justification: scopedDraft.justification,
+            assigned: scopedDraft.assigned,
+            evidenceReviewed: existingDraft?.evidenceReviewed ?? false,
+            versionCoverageChecked: existingDraft?.versionCoverageChecked ?? false,
+            ticket: existingDraft?.ticket ?? '',
+        })
+        stageCodeAnalysisGlobalReference()
+        state.value = scopedDraft.state
+        justification.value = scopedDraft.justification
+        details.value = scopedDraft.details
+        currentAssigned.value = [...scopedDraft.assigned]
+        formTouched.value = true
+        codeAnalysisDraftApplied.value = true
+        codeAnalysisRunIds.value = [...prepared.runIds]
+        codeAnalysisDraftSummary.value = [
+            `Applied ${scopedRuns.length} scoped analyzer assessment${scopedRuns.length === 1 ? '' : 's'}`,
+            `to ${scopedDraft.team}.`,
+            `Combined state: ${scopedDraft.state.replace(/_/g, ' ')}.`,
+        ].join(' ')
+        setDetailTab('review', true)
         return
     }
 
@@ -770,8 +936,21 @@ const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[
     selectedTeam.value = ''
     await nextTick()
 
+    const fallbackTeams: string[] = []
+    const preservedTeams: string[] = []
     for (const draft of prepared.teamDrafts) {
         const existingDraft = teamDrafts.value.get(draft.team)
+        const savedBlock = mergedAssessmentData.value.blocks.find(block => (
+            block.team.toLocaleLowerCase() === draft.team.toLocaleLowerCase()
+        ))
+        const hasTeamAssessment = Boolean(
+            (existingDraft?.state && existingDraft.state !== 'NOT_SET')
+            || (savedBlock?.state && savedBlock.state !== 'NOT_SET'),
+        )
+        if (hasTeamAssessment) {
+            preservedTeams.push(draft.team)
+            continue
+        }
         teamDrafts.value.set(draft.team, {
             state: draft.state,
             details: draft.details,
@@ -781,41 +960,141 @@ const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[
             versionCoverageChecked: existingDraft?.versionCoverageChecked ?? false,
             ticket: existingDraft?.ticket ?? '',
         })
+        fallbackTeams.push(draft.team)
     }
+    automaticFallbackTeams.value = new Set([
+        ...automaticFallbackTeams.value,
+        ...fallbackTeams.map(team => team.toLocaleLowerCase()),
+    ])
 
-    state.value = prepared.globalState
-    justification.value = prepared.globalJustification
+    const unmappedRuns = scopedRuns.filter(run => !triggeringTaggedComponents.value.some(component => (
+        component.name.toLocaleLowerCase() === run.component.toLocaleLowerCase()
+        && Boolean(component.tag.trim())
+    )))
+    const unmappedPrepared = prepareCodeAnalysisResults(unmappedRuns, triggeringTaggedComponents.value, currentAssigned.value)
+    const globalReference = stageCodeAnalysisGlobalReference()
+    const effectiveWorst = [
+        globalReference && {
+            state: globalReference.state,
+            justification: globalReference.justification,
+        },
+        ...(unmappedRuns.length ? [{
+            state: unmappedPrepared.globalState,
+            justification: unmappedPrepared.globalJustification,
+        }] : []),
+    ]
+        .filter((assessment): assessment is { state: string, justification: string } => Boolean(assessment?.state && assessment.state !== 'NOT_SET'))
+        .sort((left, right) => (STATE_PRIORITY[left.state] ?? 10) - (STATE_PRIORITY[right.state] ?? 10))[0]
+    if (globalReference) {
+        globalReference.state = effectiveWorst?.state || prepared.globalState
+        globalReference.justification = effectiveWorst?.justification || prepared.globalJustification
+        teamDrafts.value.set('General', globalReference)
+        state.value = globalReference.state
+        justification.value = globalReference.justification
+        details.value = globalReference.details
+    }
     formTouched.value = true
 
-    if (prepared.adjustedVector) {
+    if (globalReference && prepared.adjustedVector) {
         // The pendingVector watcher recalculates the score from the vector.
         pendingVector.value = prepared.adjustedVector
         setCvssInstanceFromVector(prepared.adjustedVector)
     }
-    if (prepared.adjustedScore != null) {
+    if (globalReference && prepared.adjustedScore != null) {
         pendingScore.value = prepared.adjustedScore
     }
     // The configured rules own the vector for the states they cover, so they run
     // after the analyzer proposal and on top of it.
-    applyRescoreRulesForState(prepared.globalState)
+    if (globalReference) applyRescoreRulesForState(state.value)
 
     codeAnalysisDraftApplied.value = true
     codeAnalysisRunIds.value = [...prepared.runIds]
     codeAnalysisDraftSummary.value = [
         `Applied ${runs.length} analyzer assessment${runs.length === 1 ? '' : 's'}`,
-        `to ${prepared.teamDrafts.length} team${prepared.teamDrafts.length === 1 ? '' : 's'}`,
-        `(${prepared.teamDrafts.map(draft => draft.team).join(', ')}).`,
-        `The global assessment uses the worst result: ${prepared.globalState.replace(/_/g, ' ')}.`,
+        `to ${fallbackTeams.length} team${fallbackTeams.length === 1 ? '' : 's'}`,
+        fallbackTeams.length ? `(${fallbackTeams.join(', ')}).` : '',
+        fallbackTeams.length ? 'Analyzer proposals fill only teams without a saved assessment.' : '',
+        preservedTeams.length ? `Preserved saved team assessments for ${preservedTeams.join(', ')}.` : '',
+        globalReference
+            ? `The global assessment references those team blocks and uses the effective worst result: ${state.value.replace(/_/g, ' ')}.`
+            : 'The existing global assessment was preserved.',
         ...(prepared.unmappedComponents.length
             ? [`No team is mapped for ${prepared.unmappedComponents.join(', ')}.`]
             : []),
     ].join(' ')
-    setDetailTab('review')
+    setDetailTab('review', true)
 }
 
 const handleCodeAnalysisResultChange = (result: CodeAnalysisAssessResponse | null, components: string[]) => {
     latestCodeAnalysisCvssAdjustment.value = result?.assessment.adjusted_cvss ?? null
     latestCodeAnalysisCvssComponents.value = result?.assessment.adjusted_cvss ? components : []
+}
+
+const handleCodeAnalysisProposalsChange = (runs: CodeAnalysisComponentRun[]) => {
+    codeAnalysisProposalRuns.value = runs
+}
+
+const applySelectedAutomaticProposal = () => {
+    const proposal = selectedAutomaticProposal.value
+    const team = selectedTeam.value
+    if (!proposal || !team) return
+
+    const existingDraft = teamDrafts.value.get(team)
+    teamDrafts.value.set(team, {
+        state: proposal.state,
+        justification: proposal.justification,
+        details: proposal.details,
+        assigned: existingDraft?.assigned || [...currentAssigned.value],
+        evidenceReviewed: existingDraft?.evidenceReviewed ?? evidenceReviewed.value,
+        versionCoverageChecked: existingDraft?.versionCoverageChecked ?? versionCoverageChecked.value,
+        ticket: existingDraft?.ticket ?? ticketReference.value,
+    })
+    stageCodeAnalysisGlobalReference()
+    state.value = proposal.state
+    justification.value = proposal.justification
+    details.value = proposal.details
+    formTouched.value = true
+    codeAnalysisDraftApplied.value = true
+    codeAnalysisRunIds.value = selectedAutomaticProposalRuns.value
+        .map(run => run.runId)
+        .filter((runId): runId is string => Boolean(runId))
+    automaticFallbackTeams.value = new Set([
+        ...automaticFallbackTeams.value,
+        team.toLocaleLowerCase(),
+    ])
+    codeAnalysisDraftSummary.value = `Analyzer proposal selected for ${team}. Review it before saving or submitting.`
+}
+
+const markSelectedTeamAssessmentManual = () => {
+    const teamKey = selectedTeam.value.toLocaleLowerCase()
+    if (!teamKey || !automaticFallbackTeams.value.has(teamKey)) return
+    const next = new Set(automaticFallbackTeams.value)
+    next.delete(teamKey)
+    automaticFallbackTeams.value = next
+}
+
+const applyEffectiveAssessmentSummary = async () => {
+    const worst = effectiveAssessmentWorst.value
+    if (!isReviewer.value || !worst) return
+
+    const reference = buildCodeAnalysisGlobalReferenceDraft(effectiveTeamAssessments.value
+        .filter(assessment => assessment.state !== 'NOT_SET')
+        .map(assessment => ({
+            team: assessment.team,
+            state: assessment.state,
+            justification: assessment.justification,
+            details: assessment.details,
+            assigned: [],
+        })))
+    if (!reference) return
+
+    selectedTeam.value = ''
+    await nextTick()
+    state.value = reference.state
+    justification.value = reference.justification
+    details.value = reference.details
+    formTouched.value = true
+    applyRescoreRulesForState(reference.state)
 }
 
 const currentDisplayScore = computed(() => {
@@ -1077,6 +1356,7 @@ const groupedAssessments = computed(() => {
 
     ((props.group && props.group.affected_versions) || []).forEach(v => {
         ((v && v.components) || []).forEach(c => {
+            if (!visibleInstanceSet.value.has(c)) return
             const stateVal = (c && c.analysis_state) || 'NOT_SET'
             const detailsVal = c.analysis_details || ''
             const suppressedVal = !!c.is_suppressed
@@ -1274,7 +1554,23 @@ watch(selectedTeam, (_newTeam, oldTeam) => {
     updateFormFromGroup()
 })
 
-watch(() => props.group, () => updateFormFromGroup(true), { immediate: true })
+watch(() => props.group, () => {
+    assessmentSubmitted.value = false
+    updateFormFromGroup(true)
+}, { immediate: true })
+
+watch(formTouched, (touched) => {
+    if (touched) assessmentSubmitted.value = false
+    if (
+        !touched
+        && activeDetailTab.value === 'review'
+        && activeTeamScope.value
+        && !showAllAssessmentTeams.value
+        && scopedAssessmentTeam.value
+    ) {
+        selectedTeam.value = scopedAssessmentTeam.value
+    }
+})
 
 // Keep raw details in sync with the merged assessment data when not manually edited
 watch(() => mergedAssessmentData.value.fullText, (newText) => {
@@ -1448,6 +1744,15 @@ const refreshDetails = async () => {
 
 
 const handleUpdate = async (force: boolean = false, isApprove: boolean = false) => {
+    if (!isReviewer.value && assessmentMissingFields.value.length > 0) {
+        setDetailTab('review', true)
+        await showAlert(
+            'Assessment Incomplete',
+            `Complete ${assessmentMissingFields.value.join(', ')} before submitting for review.`,
+        )
+        return
+    }
+
     if (isDebugPersistenceEnabled()) {
         console.log('[Persistence Debug] handleUpdate started', {
             force,
@@ -1656,7 +1961,31 @@ const assessmentScoreTitle = computed(() => {
     return vector ? `CVSS vector: ${vector}` : 'No CVSS vector available'
 })
 const hasUnsavedDraft = computed(() => formTouched.value || rawDetailsTouched.value)
-const canApplyAssessment = computed(() => !updating.value && !loadingDetails.value && totalTargeted.value > 0)
+const assessmentMissingFields = computed(() => {
+    if (isReviewer.value) return []
+    const missing: string[] = []
+    if (!selectedTeam.value) missing.push('team')
+    if (!state.value || state.value === 'NOT_SET') missing.push('analysis state')
+    if (!details.value.trim()) missing.push('analysis details')
+    if (state.value === 'NOT_AFFECTED' && (!justification.value || justification.value === 'NOT_SET')) {
+        missing.push('justification')
+    }
+    return missing
+})
+const canApplyAssessment = computed(() => (
+    !updating.value
+    && !loadingDetails.value
+    && totalTargeted.value > 0
+    && hasUnsavedDraft.value
+    && assessmentMissingFields.value.length === 0
+))
+const assessmentActionLabel = computed(() => {
+    if (updating.value) return isReviewer.value ? 'Saving...' : 'Submitting...'
+    if (isReviewer.value) return 'Save assessment'
+    return selectedTeam.value
+        ? `Submit ${selectedTeam.value} for review`
+        : 'Select a team'
+})
 const reviewContextRescoredSeverity = computed(() => {
     if (!hasStableRescore.value && !isRescoredOrModified.value) return null
     const score = Number(currentDisplayScore.value)
@@ -1682,12 +2011,29 @@ const ticketRequirementHelp = computed(() => {
 })
 
 const detailTabs = computed<Array<{ id: DetailTab, label: string, icon: Component }>>(() => [
-    { id: 'overview', label: 'Overview', icon: FileText },
-    { id: 'assessments', label: 'Assessments', icon: ClipboardList },
-    { id: 'analysis', label: 'Code Analysis', icon: Bot },
-    { id: 'review', label: 'Review', icon: ShieldCheck },
+    { id: 'overview', label: 'Context', icon: FileText },
+    { id: 'analysis', label: 'Code Evidence', icon: Bot },
+    { id: 'review', label: 'Assessment', icon: ShieldCheck },
     ...(isReviewer.value ? [{ id: 'mapping' as DetailTab, label: 'Team Mapping', icon: Tags }] : []),
 ])
+
+const detailTabStatus = (tab: DetailTab) => {
+    if (tab === 'overview') return `${visibleInstances.value.length}/${allInstances.value.length}`
+    if (tab === 'analysis') {
+        if (codeAnalysisAvailableForScope.value) return 'Ready'
+        if (activeTeamScope.value) {
+            return assessmentCompleteForScope.value || pendingReviewForScope.value ? '' : 'Needed'
+        }
+        return technicalState.value === 'NOT_SET' ? 'Needed' : ''
+    }
+    if (tab === 'review') {
+        if (assessmentSubmitted.value || pendingReviewForScope.value) return 'Pending'
+        if (assessmentCompleteForScope.value) return 'Done'
+        if (hasUnsavedDraft.value) return assessmentMissingFields.value.length ? 'Incomplete' : 'Draft'
+        return activeTeamScope.value ? 'Needed' : ''
+    }
+    return ''
+}
 
 const detailTabClass = (tab: DetailTab) =>
     activeDetailTab.value === tab
@@ -1697,7 +2043,17 @@ const detailTabClass = (tab: DetailTab) =>
 const detailTabId = (tab: DetailTab) => `vuln-${props.group.id}-detail-tab-${tab}`
 const detailTabPanelId = (tab: DetailTab) => `vuln-${props.group.id}-detail-panel-${tab}`
 
-const setDetailTab = (tab: DetailTab) => {
+const setDetailTab = (tab: DetailTab, preserveReviewTeam = false) => {
+    if (tab === 'review' && !preserveReviewTeam) {
+        const matchingTeam = (
+            activeTeamScope.value && !showAllAssessmentTeams.value
+                ? scopedAssessmentTeam.value
+                : (!selectedTeam.value && !isReviewer.value && allAssessmentTeams.value.length === 1
+                    ? allAssessmentTeams.value[0]
+                    : '')
+        )
+        if (matchingTeam) selectedTeam.value = matchingTeam
+    }
     activeDetailTab.value = tab
     nextTick(() => {
         detailsEl.value?.scrollTo?.({ top: 0, behavior: 'smooth' })
@@ -1708,6 +2064,147 @@ const uniqueComponents = dependencyInfo.uniqueComponents
 const affectedTaggedComponents = dependencyInfo.affectedTaggedComponents
 const triggeringTaggedComponents = dependencyInfo.triggeringTaggedComponents
 const normalizedTags = dependencyInfo.normalizedTags
+const allAssessmentTeams = computed(() => {
+    const teams = normalizedTags.value.filter(team => team.toLocaleLowerCase() !== 'automation')
+    for (const team of teamDrafts.value.keys()) {
+        if (
+            team.toLocaleLowerCase() !== 'automation'
+            && team.toLocaleLowerCase() !== 'general'
+            && !teams.some(candidate => candidate.toLocaleLowerCase() === team.toLocaleLowerCase())
+        ) {
+            teams.push(team)
+        }
+    }
+    return teams
+})
+const preparedAutomaticProposals = computed(() => prepareCodeAnalysisResults(
+    codeAnalysisProposalRuns.value,
+    triggeringTaggedComponents.value,
+    [],
+))
+const automaticTeamProposals = computed(() => new Map(
+    preparedAutomaticProposals.value.teamDrafts.map(draft => [draft.team.toLocaleLowerCase(), draft]),
+))
+const selectedAutomaticProposal = computed(() => (
+    selectedTeam.value
+        ? automaticTeamProposals.value.get(selectedTeam.value.toLocaleLowerCase()) || null
+        : null
+))
+const selectedAutomaticProposalRuns = computed(() => {
+    const teamKey = selectedTeam.value.toLocaleLowerCase()
+    if (!teamKey) return []
+    return codeAnalysisProposalRuns.value.filter(run => triggeringTaggedComponents.value.some(component => (
+        component.name.toLocaleLowerCase() === run.component.toLocaleLowerCase()
+        && component.tag.toLocaleLowerCase() === teamKey
+    )))
+})
+const selectedAutomaticProposalSummary = computed(() => selectedAutomaticProposalRuns.value
+    .map(run => `${run.component}: ${run.result.assessment.summary}`)
+    .filter(Boolean)
+    .join(' '))
+const selectedAutomaticProposalRationale = computed(() => selectedAutomaticProposalRuns.value
+    .map(run => `${run.component}: ${run.result.assessment.reasoning || run.result.assessment.summary}`)
+    .filter(Boolean)
+    .join(' '))
+
+type EffectiveTeamAssessment = {
+    team: string
+    state: string
+    justification: string
+    details: string
+    source: 'team' | 'automatic' | 'missing'
+}
+
+const effectiveTeamAssessments = computed<EffectiveTeamAssessment[]>(() => allAssessmentTeams.value.map(team => {
+    const teamKey = team.toLocaleLowerCase()
+    const saved = mergedAssessmentData.value.blocks.find(block => block.team.toLocaleLowerCase() === teamKey)
+    const draft = [...teamDrafts.value.entries()].find(([key]) => key.toLocaleLowerCase() === teamKey)?.[1]
+    const isAutomaticFallback = automaticFallbackTeams.value.has(teamKey)
+    const current = !isAutomaticFallback && selectedTeam.value.toLocaleLowerCase() === teamKey && state.value !== 'NOT_SET'
+        ? {
+            state: state.value,
+            justification: justification.value,
+            details: details.value,
+        }
+        : null
+    const manual = current || (!isAutomaticFallback ? draft : null) || saved
+    if (manual?.state && manual.state !== 'NOT_SET') {
+        return {
+            team,
+            state: manual.state,
+            justification: manual.justification || 'NOT_SET',
+            details: manual.details || '',
+            source: 'team',
+        }
+    }
+
+    const proposal = automaticTeamProposals.value.get(teamKey)
+    if (proposal?.state && proposal.state !== 'NOT_SET') {
+        return {
+            team,
+            state: proposal.state,
+            justification: proposal.justification,
+            details: proposal.details,
+            source: 'automatic',
+        }
+    }
+    return { team, state: 'NOT_SET', justification: 'NOT_SET', details: '', source: 'missing' }
+}))
+const effectiveAssessmentWorst = computed(() => effectiveTeamAssessments.value
+    .filter(assessment => assessment.state !== 'NOT_SET')
+    .sort((left, right) => (STATE_PRIORITY[left.state] ?? 10) - (STATE_PRIORITY[right.state] ?? 10))[0] || null)
+const scopedAssessmentTeam = computed(() => {
+    if (!activeTeamScope.value || visibleInstances.value.length === 0) return ''
+    const activeKey = activeTeamScope.value.toLocaleLowerCase()
+    return allAssessmentTeams.value.find(team => team.toLocaleLowerCase() === activeKey) || ''
+})
+const teamTabs = computed(() => {
+    if (!activeTeamScope.value || (isReviewer.value && showAllAssessmentTeams.value)) {
+        return allAssessmentTeams.value
+    }
+    return scopedAssessmentTeam.value ? [scopedAssessmentTeam.value] : []
+})
+const scopedAssessmentProgress = computed(() => {
+    if (!scopedAssessmentTeam.value || visibleInstances.value.length === 0) {
+        return { complete: false, pending: false }
+    }
+
+    const teamKey = scopedAssessmentTeam.value.toLocaleLowerCase()
+    let pending = false
+    const covered = visibleInstances.value.every(instance => {
+        const rawInstance = instance as Record<string, any>
+        const instanceDetails = String(rawInstance.analysis_details || rawInstance.analysisDetails || '')
+        const blocks = parseAssessmentBlocks(instanceDetails)
+        const hasApplicableBlock = blocks.some(block => {
+            const blockTeam = block.team.toLocaleLowerCase()
+            return (
+                (blockTeam === 'general' || blockTeam === teamKey)
+                && Boolean(block.state)
+                && block.state !== 'NOT_SET'
+            )
+        })
+        const legacyAssessment = blocks.length === 0
+            && String(rawInstance.analysis_state || rawInstance.analysisState || 'NOT_SET') !== 'NOT_SET'
+        if ((hasApplicableBlock || legacyAssessment) && instanceDetails.includes('[Status: Pending Review]')) {
+            pending = true
+        }
+        return hasApplicableBlock || legacyAssessment
+    })
+
+    return { complete: covered && !pending, pending }
+})
+const assessmentCompleteForScope = computed(() => activeTeamScope.value
+    ? scopedAssessmentProgress.value.complete
+    : displayState.value === 'ASSESSED' || displayState.value === 'ASSESSED_LEGACY'
+)
+const pendingReviewForScope = computed(() => activeTeamScope.value
+    ? scopedAssessmentProgress.value.pending
+    : isPendingReview.value
+)
+const codeAnalysisAvailableForScope = computed(() => activeTeamScope.value
+    ? scopedCodeAnalysisAvailable.value
+    : Boolean(props.automaticAssessmentStatus)
+)
 const codeAnalysisComponents = computed(() =>
     triggeringTaggedComponents.value.map(c => c.name)
         .map(name => String(name || '').trim())
@@ -1716,6 +2213,193 @@ const codeAnalysisComponents = computed(() =>
 const codeAnalysisComponentTeams = computed(() =>
     Object.fromEntries(triggeringTaggedComponents.value.map(c => [c.name, c.tag]))
 )
+const hiddenTeamScopeInstanceCount = computed(() => Math.max(
+    0,
+    allInstances.value.length - visibleInstances.value.length,
+))
+const scopedAffectedProjectVersions = computed(() => {
+    const versions = new Set<string>()
+    for (const instance of visibleInstances.value) {
+        const version = String((instance as Record<string, any>).project_version || '').trim()
+        if (version) versions.add(version)
+    }
+    return [...versions].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
+})
+
+type WorkflowActionId = 'mapping' | 'analysis' | 'assessment' | 'submit' | 'waiting' | 'done'
+type WorkflowAction = {
+    id: WorkflowActionId
+    title: string
+    detail: string
+    label: string
+    tone: 'amber' | 'cyan' | 'blue' | 'green' | 'purple'
+}
+
+const workflowAction = computed<WorkflowAction>(() => {
+    const canMoveNext = Boolean(props.hasNextVulnerability)
+    if (assessmentSubmitted.value) {
+        return {
+            id: isReviewer.value ? 'done' : 'waiting',
+            title: isReviewer.value ? 'Assessment saved' : 'Assessment submitted for review',
+            detail: isReviewer.value
+                ? 'The assessment changes were saved successfully.'
+                : 'No further analyst action is required for this vulnerability right now.',
+            label: canMoveNext ? 'Next vulnerability' : '',
+            tone: isReviewer.value ? 'green' : 'purple',
+        }
+    }
+    if (pendingReviewForScope.value) {
+        return {
+            id: 'waiting',
+            title: 'Waiting for reviewer',
+            detail: 'The analyst assessment is pending reviewer approval.',
+            label: canMoveNext ? 'Next vulnerability' : '',
+            tone: 'purple',
+        }
+    }
+    if (assessmentCompleteForScope.value) {
+        return {
+            id: 'done',
+            title: 'Assessment complete',
+            detail: 'This vulnerability is complete for the current workflow.',
+            label: canMoveNext ? 'Next vulnerability' : '',
+            tone: 'green',
+        }
+    }
+    if (activeTeamScope.value && visibleInstances.value.length === 0) {
+        return {
+            id: 'mapping',
+            title: 'Component mapping needs attention',
+            detail: isReviewer.value
+                ? `No component in this vulnerability resolves to ${activeTeamScope.value}. Review the mapping before continuing.`
+                : `No component resolves to ${activeTeamScope.value}. Ask a reviewer to correct the team mapping.`,
+            label: isReviewer.value ? 'Review team mapping' : 'View mapping details',
+            tone: 'amber',
+        }
+    }
+    if (hasUnsavedDraft.value) {
+        if (assessmentMissingFields.value.length > 0) {
+            return {
+                id: 'assessment',
+                title: 'Complete the assessment draft',
+                detail: `Still needed: ${assessmentMissingFields.value.join(', ')}.`,
+                label: 'Complete assessment',
+                tone: 'amber',
+            }
+        }
+        return {
+            id: 'submit',
+            title: isReviewer.value ? 'Assessment changes are ready' : 'Assessment draft is ready',
+            detail: isReviewer.value
+                ? 'Review the changed fields, then save the assessment.'
+                : `Review the draft, then submit it for ${selectedTeam.value || 'team'} review.`,
+            label: assessmentActionLabel.value,
+            tone: 'blue',
+        }
+    }
+    if (codeAnalysisAvailableForScope.value) {
+        return {
+            id: 'analysis',
+            title: 'Code-analysis result available',
+            detail: 'Review the latest scoped result before starting another run, then use it as an assessment draft if it is suitable.',
+            label: 'Review code evidence',
+            tone: 'cyan',
+        }
+    }
+    if (!activeTeamScope.value && technicalState.value !== 'NOT_SET') {
+        return {
+            id: 'assessment',
+            title: 'Record the team assessment',
+            detail: 'The current evidence is ready to be turned into a team assessment.',
+            label: 'Open assessment',
+            tone: 'blue',
+        }
+    }
+    return {
+        id: codeAnalysisComponents.value.length ? 'analysis' : 'mapping',
+        title: codeAnalysisComponents.value.length ? 'Gather code evidence' : 'Component mapping needs attention',
+        detail: codeAnalysisComponents.value.length
+            ? `Review existing history or analyze ${codeAnalysisComponents.value.length} scoped component${codeAnalysisComponents.value.length === 1 ? '' : 's'}.`
+            : 'No team-assigned analysis target is available. Review the dependency context and mapping.',
+        label: codeAnalysisComponents.value.length
+            ? 'Open code evidence'
+            : isReviewer.value ? 'Review team mapping' : 'Review context',
+        tone: codeAnalysisComponents.value.length ? 'cyan' : 'amber',
+    }
+})
+
+const workflowActionClass = computed(() => ({
+    amber: 'border-amber-700/45 bg-amber-950/20 text-amber-100',
+    cyan: 'border-cyan-700/45 bg-cyan-950/20 text-cyan-100',
+    blue: 'border-blue-700/45 bg-blue-950/20 text-blue-100',
+    green: 'border-green-700/45 bg-green-950/20 text-green-100',
+    purple: 'border-purple-700/45 bg-purple-950/20 text-purple-100',
+}[workflowAction.value.tone]))
+
+const workflowActionTargetTab = computed<DetailTab | null>(() => {
+    if (workflowAction.value.id === 'analysis') return 'analysis'
+    if (workflowAction.value.id === 'assessment' || workflowAction.value.id === 'submit') return 'review'
+    if (workflowAction.value.id === 'mapping') return isReviewer.value ? 'mapping' : 'overview'
+    return null
+})
+const workflowActionAtDestination = computed(() => (
+    workflowActionTargetTab.value !== null
+    && activeDetailTab.value === workflowActionTargetTab.value
+))
+const workflowActionDetail = computed(() => {
+    if (!workflowActionAtDestination.value) return workflowAction.value.detail
+    if (workflowAction.value.id === 'analysis') {
+        return codeAnalysisAvailableForScope.value
+            ? 'Choose a target run below, review its outcome, then use it as an assessment draft when the evidence is suitable.'
+            : 'Expand Run new analysis or review the latest stored run for each affected target below.'
+    }
+    if (workflowAction.value.id === 'assessment' || workflowAction.value.id === 'submit') {
+        return assessmentMissingFields.value.length
+            ? `Complete the highlighted assessment fields below: ${assessmentMissingFields.value.join(', ')}.`
+            : `Review the ${selectedTeam.value || 'current'} assessment below, then ${isReviewer.value ? 'save it' : 'submit it for review'}.`
+    }
+    if (workflowAction.value.id === 'mapping') {
+        return isReviewer.value
+            ? 'Review the affected component mappings below and assign the missing team ownership.'
+            : 'Review the affected component and dependency context below, then ask a reviewer to update ownership.'
+    }
+    return workflowAction.value.detail
+})
+const showWorkflowPrimaryAction = computed(() => (
+    Boolean(workflowAction.value.label)
+    && !workflowActionAtDestination.value
+))
+
+const handleWorkflowAction = () => {
+    if (workflowAction.value.id === 'submit') {
+        void handleUpdate(false)
+        return
+    }
+    if (workflowAction.value.id === 'waiting' || workflowAction.value.id === 'done') {
+        emit('request-next')
+        return
+    }
+    if (workflowAction.value.id === 'mapping') {
+        setDetailTab(isReviewer.value ? 'mapping' : 'overview')
+        return
+    }
+    setDetailTab(workflowAction.value.id === 'analysis' ? 'analysis' : 'review')
+}
+const scopedHeaderTags = computed(() => activeTeamScope.value
+    ? [activeTeamScope.value]
+    : normalizedTags.value
+)
+const scopedComponentSummary = computed(() => {
+    const names = uniqueComponents.value.map(component => component.name)
+    if (names.length <= 2) return names.join(', ')
+    return `${names[0]}, ${names[1]} +${names.length - 2}`
+})
+const scopedOldestAttributedOnMs = computed(() => {
+    const values = visibleInstances.value
+        .map(instance => parseAttributionTimestamp(instance.attributed_on))
+        .filter((value): value is number => value != null)
+    return values.length ? Math.min(...values) : null
+})
 const codeAnalysisProjectName = computed(() => {
     const names = new Set(
         (props.group.affected_versions || [])
@@ -1793,6 +2477,7 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
     codeAnalysisDraftApplied.value = false
     codeAnalysisDraftSummary.value = ''
     codeAnalysisRunIds.value = []
+    automaticFallbackTeams.value = new Set()
 }
 
 const handleAssessmentUpdateResults = async (results: any[], finalState: string, finalText: string) => {
@@ -1806,6 +2491,8 @@ const handleAssessmentUpdateResults = async (results: any[], finalState: string,
     const success = results.find((r: any) => r.status === 'success')
     if (success) {
         applySuccessfulAssessmentUpdate(success, results, finalState, finalText)
+        await nextTick()
+        assessmentSubmitted.value = true
     }
 }
 
@@ -1834,11 +2521,20 @@ const handleAssessmentUpdateError = async (err: any) => {
     console.error(err)
 }
 
-const teamTabs = computed(() => {
-    const tags = [...normalizedTags.value]
-    if (!tags.includes('automation')) tags.push('automation')
-    return tags
-})
+const toggleAssessmentTeamScope = () => {
+    showAllAssessmentTeams.value = !showAllAssessmentTeams.value
+    if (!showAllAssessmentTeams.value && scopedAssessmentTeam.value) {
+        selectedTeam.value = scopedAssessmentTeam.value
+    }
+}
+
+watch(activeTeamScope, () => {
+    showAllAssessmentTeams.value = false
+    scopedCodeAnalysisAvailable.value = false
+    if (activeTeamScope.value) {
+        selectedTeam.value = scopedAssessmentTeam.value
+    }
+}, { immediate: true })
 
 const teamBlockMeta = (team: string): AssessmentBlock | undefined => {
     return mergedAssessmentData.value.blocks.find(b => b.team === team)
@@ -1917,7 +2613,7 @@ const teamBlockStateColor = (state?: string): string => {
             :pendingScore="pendingScore"
             :stableRescoredScore="stableRescoredScore"
             :hasStableRescore="hasStableRescore"
-            :normalizedTags="normalizedTags"
+            :normalizedTags="scopedHeaderTags"
             :assessedTeams="assessedTeams"
             @copy-id="copyId"
             :expanded="expanded"
@@ -1931,6 +2627,9 @@ const teamBlockStateColor = (state?: string): string => {
             :hasTmrescoreAnalysis="!!matchedProposal"
             :scoreTitle="assessmentScoreTitle"
             :hasUnsavedDraft="hasUnsavedDraft"
+            :instanceCountOverride="visibleInstances.length"
+            :oldestAttributedOnMsOverride="scopedOldestAttributedOnMs"
+            :componentSummaryOverride="scopedComponentSummary"
             @approve-assessment="approveAssessment"
         >
             <template v-if="inModal" #actions>
@@ -1965,6 +2664,13 @@ const teamBlockStateColor = (state?: string): string => {
                     >
                         <component :is="tab.icon" :size="13" aria-hidden="true" />
                         {{ tab.label }}
+                        <span
+                            v-if="detailTabStatus(tab.id)"
+                            class="rounded-full border border-current/20 bg-black/20 px-1.5 py-0.5 text-[9px] normal-case tracking-normal opacity-80"
+                            :data-testid="`detail-tab-status-${tab.id}`"
+                        >
+                            {{ detailTabStatus(tab.id) }}
+                        </span>
                     </button>
                 </div>
                 <div
@@ -1981,19 +2687,39 @@ const teamBlockStateColor = (state?: string): string => {
                     <Loader2 v-else :size="12" class="animate-spin" />
                     {{ assessmentPersistenceStatus.label }}
                 </div>
-                <button
-                    @click="() => handleUpdate(false)"
-                    :disabled="!canApplyAssessment"
-                    class="my-1.5 inline-flex shrink-0 items-center justify-center gap-2 rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    data-testid="sticky-tab-apply-button"
-                    :title="`Apply assessment to ${totalTargeted} target${totalTargeted === 1 ? '' : 's'}`"
-                >
-                    <Loader2 v-if="updating" :size="13" class="animate-spin" />
-                    <CheckCircle v-else :size="13" />
-                    {{ updating ? 'Updating...' : 'Apply' }}
-                </button>
             </div>
         </div>
+
+        <section
+            data-testid="analyst-next-action"
+            class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-3"
+            :class="workflowActionClass"
+        >
+            <div class="flex min-w-0 flex-1 items-start gap-2.5">
+                <CircleDot :size="16" class="mt-0.5 shrink-0 opacity-80" />
+                <div class="min-w-0">
+                    <div class="text-[10px] font-black uppercase tracking-widest opacity-65">Next action</div>
+                    <div class="mt-0.5 text-sm font-bold">{{ workflowAction.title }}</div>
+                    <p class="mt-0.5 text-xs leading-relaxed opacity-75">{{ workflowActionDetail }}</p>
+                    <div v-if="workflowActionAtDestination" class="mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide opacity-65">
+                        <CheckCircle :size="11" />
+                        You are at the next step
+                    </div>
+                </div>
+            </div>
+            <button
+                v-if="showWorkflowPrimaryAction"
+                type="button"
+                data-testid="workflow-primary-action"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded border border-current/30 bg-black/20 px-3 py-2 text-xs font-bold transition-colors hover:bg-black/35 disabled:cursor-not-allowed disabled:opacity-45"
+                :disabled="workflowAction.id === 'submit' && !canApplyAssessment"
+                @click="handleWorkflowAction"
+            >
+                <Loader2 v-if="updating" :size="13" class="animate-spin" />
+                <ArrowRight v-else :size="13" />
+                {{ workflowAction.label }}
+            </button>
+        </section>
 
         <section
             v-show="activeDetailTab === 'overview'"
@@ -2002,11 +2728,12 @@ const teamBlockStateColor = (state?: string): string => {
             class="space-y-5 pt-1"
             role="tabpanel"
         >
-        <section class="space-y-4">
-            <!-- Title + Description -->
-            <div>
-                <h4 v-if="group.title && group.title !== group.id" class="mb-2 text-base font-semibold text-gray-100">{{ group.title }}</h4>
-                <h4 v-else class="mb-2 text-sm font-semibold text-gray-200">Description</h4>
+            <DetailSection
+                step="Context · 1"
+                title="Description & references"
+                description="Understand the advisory before evaluating where it appears in this project."
+            >
+                <h5 v-if="group.title && group.title !== group.id" class="mb-2 text-base font-semibold text-gray-100">{{ group.title }}</h5>
                 <div
                     class="advisory-markdown text-sm text-gray-400 leading-relaxed"
                     data-testid="vuln-description"
@@ -2026,13 +2753,51 @@ const teamBlockStateColor = (state?: string): string => {
                         {{ link.label }}
                     </a>
                 </div>
-            </div>
+            </DetailSection>
+
+            <DetailSection
+                step="Context · 2"
+                title="Finding scope & affected components"
+                description="See where the vulnerability was found, which team owns the current scope, and the exact components that require analysis."
+                bodyClass="space-y-3"
+            >
+                <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                    <span class="font-bold uppercase tracking-wider text-gray-500">Found in project versions</span>
+                    <span
+                        v-for="version in scopedAffectedProjectVersions"
+                        :key="version"
+                        data-testid="context-project-version"
+                        class="rounded border border-gray-700 bg-gray-950/45 px-2 py-1 font-mono text-gray-300"
+                    >
+                        {{ version }}
+                    </span>
+                    <span v-if="scopedAffectedProjectVersions.length === 0" class="text-gray-600">No matching project versions</span>
+                </div>
+
+                <div
+                    v-if="activeTeamScope"
+                    data-testid="vulnerability-team-scope"
+                    class="flex flex-wrap items-center justify-between gap-2 rounded border border-blue-800/40 bg-blue-950/20 px-3 py-2 text-[11px] text-blue-200"
+                >
+                    <span>Owning team scope: <strong>{{ activeTeamScope }}</strong></span>
+                    <span class="text-blue-300/70">
+                        {{ visibleInstances.length }} of {{ allInstances.length }} finding{{ allInstances.length === 1 ? '' : 's' }} shown
+                        <template v-if="hiddenTeamScopeInstanceCount"> · {{ hiddenTeamScopeInstanceCount }} outside this team</template>
+                    </span>
+                </div>
+
+                <div
+                    v-if="activeTeamScope && visibleInstances.length === 0"
+                    class="rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200"
+                >
+                    No components in this vulnerability currently resolve to {{ activeTeamScope }}.
+                </div>
 
             <div
-                v-if="triggeringTaggedComponents.length > 0 || affectedTaggedComponents.length > 0 || (isReviewer && uniqueComponents.length > 0)"
-                class="grid gap-4 rounded border border-gray-800/80 bg-gray-900/35 p-3 lg:grid-cols-3"
+                v-if="triggeringTaggedComponents.length > 0 || affectedTaggedComponents.length > 0 || uniqueComponents.length > 0"
+                class="grid gap-4 rounded border border-gray-800/80 bg-gray-950/30 p-3 lg:grid-cols-3"
             >
-                <div v-if="triggeringTaggedComponents.length > 0" class="space-y-2">
+                <div v-if="triggeringTaggedComponents.length > 0" data-testid="triggering-team-components" class="space-y-2">
                     <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Triggering team-mapped components</h4>
                     <div class="flex flex-wrap gap-1.5">
                         <span
@@ -2062,8 +2827,7 @@ const teamBlockStateColor = (state?: string): string => {
                     </div>
                 </div>
 
-                <!-- Affected Components Summary (Reviewers only) -->
-                <div v-if="isReviewer && uniqueComponents.length > 0" class="space-y-2">
+                <div v-if="uniqueComponents.length > 0" data-testid="affected-components" class="space-y-2">
                     <h4 class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Affected Components</h4>
                     <div class="flex flex-wrap gap-1.5">
                         <span
@@ -2076,37 +2840,40 @@ const teamBlockStateColor = (state?: string): string => {
                     </div>
                 </div>
             </div>
-        </section>
+            </DetailSection>
 
-        <section class="border-t border-gray-800/80 pt-4">
-            <h4 class="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">Dependency Context</h4>
-            <VulnGroupCardDependencies
-                :instances="allInstances"
-                :embedded="false"
-                :showTitle="false"
-                @mapping-updated="handleMappingUpdated"
-            />
-        </section>
-        </section>
+            <DetailSection
+                step="Context · 3"
+                title="Dependency context"
+                description="Trace how each affected component enters the product and confirm the dependency relationship used for analysis."
+                data-testid="dependency-context"
+            >
+                <VulnGroupCardDependencies
+                    :instances="visibleInstances"
+                    :embedded="false"
+                    :showTitle="false"
+                    @mapping-updated="handleMappingUpdated"
+                />
+            </DetailSection>
 
-        <section
-            v-show="activeDetailTab === 'assessments'"
-            :id="detailTabPanelId('assessments')"
-            :aria-labelledby="detailTabId('assessments')"
-            class="space-y-3"
-            role="tabpanel"
-        >
-            <h4 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Current Assessments</h4>
-            <VulnGroupAssessmentDetails
-                v-for="assessment in groupedAssessments"
-                :key="`${assessment.state}-${assessment.instances.length}`"
-                :assessment="assessment"
-                :isReviewer="isReviewer"
-                :showDependencies="false"
-                @apply-all="handleApplyAllAssessment"
-                @adopt-team="handleAdoptTeamBlock"
-                @mapping-updated="handleMappingUpdated"
-            />
+            <DetailSection
+                step="Context · 4"
+                title="Existing assessment evidence"
+                description="Read-only evidence already stored for findings in the current component scope. Create or change the assessment in the Assessment tab."
+                bodyClass="space-y-3"
+                data-testid="vulnerability-assessments"
+            >
+                <VulnGroupAssessmentDetails
+                    v-for="assessment in groupedAssessments"
+                    :key="`${assessment.state}-${assessment.instances.length}`"
+                    :assessment="assessment"
+                    :isReviewer="isReviewer"
+                    :showDependencies="false"
+                    @apply-all="handleApplyAllAssessment"
+                    @adopt-team="handleAdoptTeamBlock"
+                    @mapping-updated="handleMappingUpdated"
+                />
+            </DetailSection>
         </section>
 
         <section
@@ -2118,24 +2885,30 @@ const teamBlockStateColor = (state?: string): string => {
         >
             <CodeAnalysisPanel
                 :vulnId="group.id"
+                :vulnAliases="group.aliases"
                 :projectName="codeAnalysisProjectName"
                 :cvssVector="group.cvss_vector"
                 :componentNames="codeAnalysisComponents"
                 :componentTeams="codeAnalysisComponentTeams"
+                :teamScope="activeTeamScope"
+                :teamScopeAliases="activeTeamScopeAliases"
                 :affectedProductVersions="sortedAffectedProjectVersions"
                 :assessedTeams="assessedTeams"
                 :analysisGuidance="codeAnalysisGuidance"
                 :currentState="state"
                 :currentJustification="justification"
                 :currentDetails="details"
-                :currentTeam="selectedTeam || 'General'"
+                :currentTeam="activeTeamScope || selectedTeam || 'General'"
                 :currentCvssScore="pendingScore"
                 :currentCvssVector="pendingVector"
                 :currentAssigned="currentAssigned"
                 :assessmentStatus="props.automaticAssessmentStatus"
+                :isReviewer="isReviewer"
                 @apply-result="handleCodeAnalysisResult"
                 @apply-all-results="handleApplyAllCodeAnalysisResults"
                 @result-change="handleCodeAnalysisResultChange"
+                @scope-results-change="scopedCodeAnalysisAvailable = $event"
+                @proposals-change="handleCodeAnalysisProposalsChange"
             />
         </section>
 
@@ -2146,23 +2919,69 @@ const teamBlockStateColor = (state?: string): string => {
             class="space-y-3"
             role="tabpanel"
         >
+            <div class="rounded-lg border border-blue-800/40 bg-blue-950/10 px-4 py-3">
+                <h3 class="flex items-center gap-2 text-sm font-bold text-blue-100">
+                    <Shield :size="15" class="text-blue-400" />
+                    Assessment
+                </h3>
+                <p class="mt-1 max-w-4xl text-xs leading-relaxed text-gray-500">
+                    Confirm the scope, record the decision and rationale, then complete the review checks before saving or submitting.
+                </p>
+            </div>
+            <div
+                v-if="!isReviewer"
+                data-testid="assessment-completeness"
+                class="rounded border px-3 py-2.5 text-xs"
+                :class="assessmentMissingFields.length
+                    ? 'border-amber-700/40 bg-amber-950/20 text-amber-100'
+                    : 'border-green-700/40 bg-green-950/20 text-green-100'"
+            >
+                <div class="font-bold">
+                    {{ assessmentMissingFields.length ? 'Assessment needs input' : 'Assessment is ready to submit' }}
+                </div>
+                <div class="mt-1 opacity-75">
+                    <template v-if="assessmentMissingFields.length">
+                        Complete {{ assessmentMissingFields.join(', ') }}.
+                    </template>
+                    <template v-else>
+                        Review the team, state, justification, and details before submitting for review.
+                    </template>
+                </div>
+            </div>
             <div
                 v-if="codeAnalysisDraftApplied"
                 data-testid="code-analysis-draft-banner"
                 class="rounded border border-cyan-700/40 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-200"
             >
                 {{ codeAnalysisDraftSummary || 'Code analysis draft loaded into the assessment fields.' }}
-                Review and apply when ready.
+                Review and {{ isReviewer ? 'save' : 'submit' }} when ready.
             </div>
-            <div class="bg-gray-850 p-4 rounded border border-gray-700 h-fit">
-                <h4 class="font-bold flex items-center gap-2 mb-4">
-                    <Shield :size="16" class="text-blue-400"/>
-                    {{ selectedTeam ? `Team Assessment: ${selectedTeam}` : 'Global Assessment' }}
-                </h4>
-
-                <div class="space-y-4">
+            <div class="h-fit space-y-5">
                     <!-- Team Tabs -->
-                    <div>
+                    <DetailSection
+                        step="Assessment · 1"
+                        :title="selectedTeam ? `Team Assessment: ${selectedTeam}` : isReviewer ? 'Global Assessment' : 'Team Assessment'"
+                        :description="selectedTeam ? `Editing the ${selectedTeam} team assessment.` : isReviewer ? 'Editing the global assessment.' : 'Select the team assessment to edit.'"
+                    >
+                        <div
+                            v-if="activeTeamScope"
+                            data-testid="assessment-team-scope"
+                            class="mb-2 flex flex-wrap items-center justify-between gap-2 rounded border border-blue-800/40 bg-blue-950/20 px-3 py-2 text-[11px] text-blue-200"
+                        >
+                            <span>
+                                Assessment scope: <strong>{{ activeTeamScope }}</strong>
+                                <template v-if="!isReviewer"> · other teams are hidden</template>
+                            </span>
+                            <button
+                                v-if="isReviewer"
+                                type="button"
+                                data-testid="toggle-assessment-team-scope"
+                                class="rounded border border-blue-700/60 bg-blue-900/30 px-2 py-1 font-semibold text-blue-100 transition-colors hover:bg-blue-900/55"
+                                @click="toggleAssessmentTeamScope"
+                            >
+                                {{ showAllAssessmentTeams ? `Focus ${activeTeamScope}` : 'Show all teams' }}
+                            </button>
+                        </div>
                         <div class="flex flex-wrap gap-0 border-b border-gray-700">
                             <button
                                 v-if="isReviewer"
@@ -2180,6 +2999,7 @@ const teamBlockStateColor = (state?: string): string => {
                             <button
                                 v-for="team in teamTabs"
                                 :key="team"
+                                data-testid="review-team-tab"
                                 @click="selectedTeam = team"
                                 :class="[
                                     'px-3 py-1.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer',
@@ -2202,8 +3022,91 @@ const teamBlockStateColor = (state?: string): string => {
                                 {{ new Date(teamBlockMeta(selectedTeam || 'General')!.timestamp!).toLocaleDateString() }}
                             </span>
                         </div>
-                    </div>
 
+                        <div
+                            v-if="isReviewer && !selectedTeam && effectiveTeamAssessments.length"
+                            data-testid="effective-team-assessment-summary"
+                            class="mt-3 border-l-2 border-purple-500/60 bg-purple-950/10 px-3 py-2.5"
+                        >
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <div class="text-[9px] font-bold uppercase tracking-wider text-purple-300">Effective team summary</div>
+                                    <div class="mt-0.5 text-xs text-gray-400">
+                                        Team assessments take precedence; the latest analyzer proposal fills only missing teams.
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span v-if="effectiveAssessmentWorst" class="text-[10px] text-gray-500">
+                                        Worst: <strong class="text-gray-200">{{ effectiveAssessmentWorst.state.replaceAll('_', ' ') }}</strong>
+                                    </span>
+                                    <button
+                                        v-if="effectiveAssessmentWorst"
+                                        type="button"
+                                        data-testid="use-effective-assessment-summary"
+                                        class="rounded bg-purple-700/70 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-purple-600"
+                                        @click="applyEffectiveAssessmentSummary"
+                                    >
+                                        Use for global assessment
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mt-2 divide-y divide-gray-800/70">
+                                <div
+                                    v-for="assessment in effectiveTeamAssessments"
+                                    :key="assessment.team"
+                                    class="flex flex-wrap items-center justify-between gap-2 py-1.5 text-[10px]"
+                                >
+                                    <span class="font-semibold text-gray-300">{{ assessment.team }}</span>
+                                    <span class="flex items-center gap-2">
+                                        <span :class="assessment.source === 'team' ? 'text-blue-300' : assessment.source === 'automatic' ? 'text-cyan-300' : 'text-gray-600'">
+                                            {{ assessment.source === 'team' ? 'Team assessment' : assessment.source === 'automatic' ? 'Analyzer fallback' : 'Missing' }}
+                                        </span>
+                                        <span class="font-semibold text-gray-400">{{ assessment.state.replaceAll('_', ' ') }}</span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </DetailSection>
+
+                    <DetailSection
+                        step="Assessment · 2"
+                        title="Decision & rationale"
+                        description="Set the assessment state, justification, technical rationale, ownership, and any reviewer-only rescoring context."
+                    >
+                    <div
+                        v-if="selectedTeam && selectedAutomaticProposal"
+                        data-testid="automatic-assessment-proposal"
+                        class="mb-4 border-l-2 border-cyan-500/70 bg-cyan-950/10 px-3 py-2.5"
+                    >
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div class="min-w-0 flex-1">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-[9px] font-bold uppercase tracking-wider text-cyan-300">Analyzer proposal</span>
+                                    <span class="text-xs font-bold text-gray-200">{{ selectedAutomaticProposal.state.replaceAll('_', ' ') }}</span>
+                                    <span class="text-[10px] text-gray-500">{{ selectedAutomaticProposalRuns.length }} target{{ selectedAutomaticProposalRuns.length === 1 ? '' : 's' }}</span>
+                                </div>
+                                <p v-if="selectedAutomaticProposalSummary" class="mt-1 text-xs leading-relaxed text-gray-300">
+                                    {{ selectedAutomaticProposalSummary }}
+                                </p>
+                                <p v-if="selectedAutomaticProposalRationale" class="mt-1 text-[11px] leading-relaxed text-gray-500">
+                                    <span class="font-semibold text-gray-400">Rationale:</span> {{ selectedAutomaticProposalRationale }}
+                                </p>
+                                <p class="mt-1.5 text-[10px] text-gray-600">
+                                    {{ teamBlockMeta(selectedTeam)?.state && teamBlockMeta(selectedTeam)?.state !== 'NOT_SET'
+                                        ? 'The saved team assessment remains authoritative unless you choose this proposal and save it.'
+                                        : 'Until the team saves an assessment, reviewers use this proposal as the team fallback.' }}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                data-testid="use-automatic-assessment-proposal"
+                                class="shrink-0 rounded bg-cyan-700/80 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-cyan-600"
+                                @click="applySelectedAutomaticProposal"
+                            >
+                                Use proposal
+                            </button>
+                        </div>
+                    </div>
                     <div :class="isReviewer && !selectedTeam ? 'grid items-start gap-4 xl:grid-cols-2' : ''">
                         <section
                             v-if="isReviewer && !selectedTeam"
@@ -2240,7 +3143,7 @@ const teamBlockStateColor = (state?: string): string => {
                                                 data-testid="sync-rescore-rules"
                                                 @click="syncRescoreRules"
                                                 class="flex cursor-pointer items-center gap-1 text-amber-300 hover:text-amber-200"
-                                                title="Apply the configured rules for the current assessment state; use Apply to save"
+                                                title="Apply the configured rules for the current assessment state; then save the assessment"
                                             >
                                                 <RefreshCw :size="10" /> Sync rules
                                             </button>
@@ -2295,7 +3198,7 @@ const teamBlockStateColor = (state?: string): string => {
                                         class="inline-flex cursor-pointer items-center gap-1 rounded border border-teal-500/40 bg-teal-600/25 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-teal-200 transition-colors hover:bg-teal-600/45 hover:text-white"
                                     >
                                         <Zap :size="10" />
-                                        Apply Proposal
+                                        Use Proposal Draft
                                     </button>
                                 </div>
 
@@ -2365,7 +3268,7 @@ const teamBlockStateColor = (state?: string): string => {
                                         id="analysis-state-select"
                                         aria-labelledby="analysis-state-label"
                                         :modelValue="state"
-                                        @update:modelValue="state = $event; formTouched = true"
+                                        @update:modelValue="state = $event; formTouched = true; markSelectedTeamAssessmentManual()"
                                         :options="ANALYSIS_STATES"
                                         size="sm"
                                     />
@@ -2377,7 +3280,7 @@ const teamBlockStateColor = (state?: string): string => {
                                         id="justification-select"
                                         aria-labelledby="justification-label"
                                         :modelValue="justification"
-                                        @update:modelValue="justification = $event"
+                                        @update:modelValue="justification = $event; formTouched = true; markSelectedTeamAssessmentManual()"
                                         :options="JUSTIFICATION_OPTIONS"
                                         size="sm"
                                     />
@@ -2388,7 +3291,7 @@ const teamBlockStateColor = (state?: string): string => {
                                     <textarea
                                         id="analysis-details-textarea"
                                         v-model="details"
-                                        @input="formTouched = true"
+                                        @input="formTouched = true; markSelectedTeamAssessmentManual()"
                                         placeholder="Technical details..."
                                         class="w-full p-2 rounded bg-gray-800 border border-gray-600 focus:border-blue-500 h-48 resize-y text-sm"
                                     ></textarea>
@@ -2495,13 +3398,15 @@ const teamBlockStateColor = (state?: string): string => {
                     <!-- No-Team Section (Prompt for non-reviewers) -->
                     <div v-if="!selectedTeam && !isReviewer" class="p-4 rounded border border-gray-700 bg-gray-800/50 flex flex-col items-center justify-center text-center space-y-2">
                         <Shield :size="32" class="text-blue-500/50" />
-                        <h4 class="text-sm font-bold text-gray-300">Select a Team Tab</h4>
+                        <h4 class="text-sm font-bold text-gray-300">{{ activeTeamScope ? 'Team Mapping Required' : 'Select a Team Tab' }}</h4>
                         <p class="text-xs text-gray-400 max-w-xs">
-                          Global assessments are restricted to reviewers. Select a team tab above to provide an assessment.
+                          {{ activeTeamScope
+                              ? `No component assessment target currently resolves to ${activeTeamScope}. Ask a reviewer to correct the mapping.`
+                              : 'Global assessments are restricted to reviewers. Select a team tab above to provide an assessment.' }}
                         </p>
                     </div>
 
-                    <div v-if="isReviewer">
+                    <div v-if="isReviewer && (!activeTeamScope || showAllAssessmentTeams || !selectedTeam)">
                         <button
                             @click="toggleRawEdit"
                             class="text-xs text-gray-500 hover:text-gray-300 transition-colors cursor-pointer flex items-center gap-1"
@@ -2520,12 +3425,13 @@ const teamBlockStateColor = (state?: string): string => {
                         </div>
                     </div>
 
-                    <div v-if="isReviewer" class="flex items-center gap-2">
+                    <div v-if="isReviewer && (!activeTeamScope || showAllAssessmentTeams || !selectedTeam)" class="flex items-center gap-2">
                         <input
                             type="checkbox"
                             :id="`suppress-${group.id}`"
                             v-model="suppressed"
                             class="w-4 h-4 rounded"
+                            @change="formTouched = true"
                         />
                         <label :for="`suppress-${group.id}`" class="text-sm">Suppress this vulnerability</label>
                     </div>
@@ -2566,14 +3472,16 @@ const teamBlockStateColor = (state?: string): string => {
                             {{ consensusButtonLabel }}
                         </button>
                     </div>
+                    </DetailSection>
 
-                    <div class="flex gap-2">
+                    <div class="flex gap-2 rounded-lg border border-gray-700/70 bg-gray-900/45 p-3">
                         <button
                             @click="() => handleUpdate(false)"
-                            :disabled="updating || loadingDetails || totalTargeted === 0"
+                            :disabled="!canApplyAssessment"
+                            data-testid="assessment-submit-button"
                             class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
                         >
-                            {{ updating ? 'Updating...' : 'Apply' }}
+                            {{ assessmentActionLabel }}
                         </button>
                         <button
                             @click="refreshDetails"
@@ -2584,7 +3492,6 @@ const teamBlockStateColor = (state?: string): string => {
                             <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
                         </button>
                     </div>
-                </div>
             </div>
         </section>
 
@@ -2596,11 +3503,26 @@ const teamBlockStateColor = (state?: string): string => {
             class="space-y-3"
             role="tabpanel"
         >
-            <VulnGroupCardDependencies
-                :instances="allInstances"
-                mode="mapping"
-                @mapping-updated="handleMappingUpdated"
-            />
+            <div class="rounded-lg border border-purple-800/40 bg-purple-950/10 px-4 py-3">
+                <h3 class="flex items-center gap-2 text-sm font-bold text-purple-100">
+                    <Tags :size="15" class="text-purple-400" />
+                    Team mapping
+                </h3>
+                <p class="mt-1 max-w-4xl text-xs leading-relaxed text-gray-500">
+                    Confirm component ownership so Context, Code Evidence, and Assessment use the same team scope.
+                </p>
+            </div>
+            <DetailSection
+                step="Team mapping · 1"
+                title="Affected component ownership"
+                description="Review or change the mapping for components visible in this vulnerability."
+            >
+                <VulnGroupCardDependencies
+                    :instances="visibleInstances"
+                    mode="mapping"
+                    @mapping-updated="handleMappingUpdated"
+                />
+            </DetailSection>
         </section>
     </div>
 

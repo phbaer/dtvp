@@ -1,6 +1,16 @@
 #!/bin/sh
 set -e
 
+# Print the packaged project version before importing the application so it is
+# present in the container logs even when application initialization fails.
+DTVP_VERSION=$(
+    /app/.venv/bin/python -c 'import tomllib; print(tomllib.load(open("/app/pyproject.toml", "rb"))["project"]["version"])' 2>/dev/null ||
+    true
+)
+DTVP_VERSION=${DTVP_VERSION:-unknown}
+DTVP_BUILD_NUMBER=${DTVP_BUILD_NUMBER:-unknown}
+printf 'DTVP version: %s (build number: %s)\n' "${DTVP_VERSION}" "${DTVP_BUILD_NUMBER}"
+
 # Default DTVP_CONTEXT_PATH to / if not set
 DTVP_CONTEXT_PATH=${DTVP_CONTEXT_PATH:-/}
 

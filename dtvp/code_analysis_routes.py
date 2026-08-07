@@ -806,25 +806,32 @@ def _register_code_analysis_routes(
         vuln_id: str,
         *,
         user: Annotated[str, Depends(current_user_dependency)],
-        component_name: Annotated[Optional[str], Query()] = None,
+        component_name: Annotated[Optional[list[str]], Query()] = None,
+        vuln_alias: Annotated[Optional[list[str]], Query()] = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
         include_result: Annotated[bool, Query()] = False,
     ):
+        list_options = {
+            "project_name": project_name,
+            "vuln_ids": [vuln_id, *(vuln_alias or [])],
+            "component_names": component_name,
+            "limit": _coerce_limit(limit),
+            "offset": offset,
+        }
         if include_result:
-            return await asyncio.to_thread(
-                deps.result_store.list,
-                project_name=project_name,
-                vuln_id=vuln_id,
-                component_name=component_name,
-                limit=_coerce_limit(limit),
-                include_result=True,
+            metadata = await asyncio.to_thread(
+                deps.result_store.list_result_metadata,
+                **list_options,
             )
+            records = await asyncio.gather(*(
+                asyncio.to_thread(deps.result_store.get, record["analysis_run_id"])
+                for record in metadata
+            ))
+            return [record for record in records if record]
         return await asyncio.to_thread(
             deps.result_store.list_result_metadata,
-            project_name=project_name,
-            vuln_id=vuln_id,
-            component_name=component_name,
-            limit=_coerce_limit(limit),
+            **list_options,
         )
 
     @router.post(
@@ -1021,17 +1028,25 @@ def _register_analysis_queue_routes(
                 detail="Follow-up question is required.",
             )
 
+        target_component = req.component_name or str(
+            parent.get("component_name") or ""
+        )
+        follow_up_guidance = _append_static_component_guidance(
+            load_auto_analysis_guidance=deps.load_auto_analysis_guidance,
+            vuln_id=str(parent.get("vuln_id") or ""),
+            component_name=target_component,
+            user_guidance=req.user_guidance,
+        )
         user_guidance = build_follow_up_guidance(
             parent,
             question,
-            extra_guidance=req.user_guidance,
+            extra_guidance=follow_up_guidance,
         )
 
         try:
             item = deps.analysis_queue.submit(
                 vuln_id=str(parent.get("vuln_id") or ""),
-                component_name=req.component_name
-                or str(parent.get("component_name") or ""),
+                component_name=target_component,
                 project_name=req.project_name
                 if req.project_name is not None
                 else parent.get("project_name"),
@@ -1044,7 +1059,7 @@ def _register_analysis_queue_routes(
                 parent_run_id=parent.get("analysis_run_id"),
                 parent_job_id=parent.get("job_id"),
                 follow_up_question=question,
-                follow_up_user_guidance=req.user_guidance,
+                follow_up_user_guidance=follow_up_guidance,
                 context_mode=req.context_mode or "compact",
                 source="follow-up",
             )

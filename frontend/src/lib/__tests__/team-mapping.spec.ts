@@ -5,6 +5,7 @@ import {
     getPrimaryTeamForComponent,
     getTeamMappingTags,
     parseTeamMappingKey,
+    resolveCanonicalTeamName,
 } from '../team-mapping'
 
 describe('team mapping selectors', () => {
@@ -126,5 +127,24 @@ describe('team mapping selectors', () => {
                 },
             ),
         ).toEqual(['PurlTeam'])
+    })
+
+    it('compiles a mapping only once across repeated component lookups', () => {
+        let ownKeysCalls = 0
+        const mapping = new Proxy({
+            core: ['CoreTeam', 'core alias'],
+            worker: 'RuntimeTeam',
+        }, {
+            ownKeys(target) {
+                ownKeysCalls += 1
+                return Reflect.ownKeys(target)
+            },
+        })
+
+        expect(getPrimaryTeamForComponent('core', mapping, null, true)).toBe('CoreTeam')
+        expect(getPrimaryTeamForComponent('worker', mapping, null, true)).toBe('RuntimeTeam')
+        expect(getPrimaryTeamForComponent('core', mapping, null, true)).toBe('CoreTeam')
+        expect(resolveCanonicalTeamName(mapping, 'core alias')).toBe('CoreTeam')
+        expect(ownKeysCalls).toBe(1)
     })
 })

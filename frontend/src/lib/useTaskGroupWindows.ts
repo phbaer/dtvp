@@ -12,6 +12,7 @@ interface UseTaskGroupWindowsOptions {
     limit: number
     processGroups?: (groups: GroupedVuln[]) => MaybePromise<GroupedVuln[]>
     onResetVisibleItems?: () => void
+    deferCountsOnReset?: boolean | ((query: TaskVulnGroupListQuery) => boolean)
 }
 
 export function useTaskGroupWindows({
@@ -21,6 +22,7 @@ export function useTaskGroupWindows({
     limit,
     processGroups = groups => groups,
     onResetVisibleItems,
+    deferCountsOnReset = false,
 }: UseTaskGroupWindowsOptions) {
     const total = ref<number | null>(null)
     const filtered = ref<number | null>(null)
@@ -37,10 +39,50 @@ export function useTaskGroupWindows({
     const windowError = ref('')
     let requestId = 0
     let activeRequestController: AbortController | null = null
+    let activeCountsController: AbortController | null = null
 
     const cancelActiveRequest = () => {
         activeRequestController?.abort()
         activeRequestController = null
+        activeCountsController?.abort()
+        activeCountsController = null
+    }
+
+    const refreshCounts = async (
+        taskId: string,
+        querySnapshot: TaskVulnGroupListQuery,
+        activeRequestId: number,
+    ) => {
+        const requestController = new AbortController()
+        activeCountsController?.abort()
+        activeCountsController = requestController
+        try {
+            const countWindow = await getTaskVulnGroups(taskId, {
+                ...querySnapshot,
+                offset: 0,
+                limit: 1,
+                include_counts: true,
+                generation: activeRequestId,
+            }, {
+                signal: requestController.signal,
+            })
+            if (activeRequestId !== requestId) return
+            total.value = countWindow.total
+            filtered.value = countWindow.filtered
+            counts.value = countWindow.counts || null
+        } catch (err: any) {
+            if (
+                activeRequestId !== requestId
+                || requestController.signal.aborted
+                || err?.name === 'CanceledError'
+                || err?.code === 'ERR_CANCELED'
+            ) return
+            console.error('Failed to refresh vulnerability filter counts:', err)
+        } finally {
+            if (activeCountsController === requestController) {
+                activeCountsController = null
+            }
+        }
     }
 
     const hasMoreGroups = computed(() =>
@@ -107,9 +149,16 @@ export function useTaskGroupWindows({
         if (!taskId) return
 
         const shouldReset = options.reset !== false
+        const querySnapshot: TaskVulnGroupListQuery = { ...query.value }
+        const shouldDeferCounts = shouldReset && (
+            typeof deferCountsOnReset === 'function'
+                ? deferCountsOnReset(querySnapshot)
+                : deferCountsOnReset
+        )
         if (shouldReset) {
             windowLoading.value = true
             windowError.value = ''
+            if (shouldDeferCounts) counts.value = null
         } else {
             if (appendLoading.value || !hasMoreGroups.value) return
             appendLoading.value = true
@@ -120,13 +169,14 @@ export function useTaskGroupWindows({
         activeRequestController = requestController
         const activeRequestId = ++requestId
         const pageQuery: TaskVulnGroupListQuery = {
-            ...query.value,
+            ...querySnapshot,
             limit,
             generation: activeRequestId,
         }
         if (shouldReset) {
             pageQuery.offset = 0
             nextCursor.value = null
+            if (shouldDeferCounts) pageQuery.include_counts = false
         } else if (nextCursor.value) {
             pageQuery.include_counts = false
             pageQuery.cursor = nextCursor.value
@@ -158,6 +208,9 @@ export function useTaskGroupWindows({
             versionsCompleted.value = window.versions_completed ?? versionsCompleted.value
             versionsTotal.value = window.versions_total ?? versionsTotal.value
             if (shouldReset) onResetVisibleItems?.()
+            if (shouldDeferCounts) {
+                void refreshCounts(taskId, querySnapshot, activeRequestId)
+            }
         } catch (err: any) {
             if (activeRequestId !== requestId) return
             if (

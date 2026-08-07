@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GroupedVuln } from '../../types'
-import { summarizeGroupForList } from '../vulnListSummary'
+import { isSummaryGroupedVuln, summarizeGroupForList } from '../vulnListSummary'
 
 const makeFullGroup = (overrides: Partial<GroupedVuln> = {}): GroupedVuln => ({
     id: 'CVE-2026-0001',
@@ -44,6 +44,16 @@ const makeFullGroup = (overrides: Partial<GroupedVuln> = {}): GroupedVuln => ({
 })
 
 describe('vulnListSummary', () => {
+    it('distinguishes summaries from refreshed full groups that also carry list metadata', () => {
+        const fullGroup = makeFullGroup({
+            list_metadata: { lifecycle: 'INCOMPLETE' },
+        })
+        const summary = summarizeGroupForList(fullGroup, {})
+
+        expect(isSummaryGroupedVuln(summary)).toBe(true)
+        expect(isSummaryGroupedVuln(fullGroup)).toBe(false)
+    })
+
     it('summarizes a full group into a lightweight list payload', () => {
         const summary = summarizeGroupForList(makeFullGroup(), {
             'library-a': ['Team Primary', 'Team Alias'],

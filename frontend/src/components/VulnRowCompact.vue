@@ -4,6 +4,7 @@ import type { GroupedVuln } from '../types'
 import type { VulnListItem } from '../lib/vulnListIndex'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import { CheckCircle, RefreshCw } from 'lucide-vue-next'
+import { analysisQueueStore } from '../lib/analysisQueueStore'
 
 const props = defineProps<{
     item: VulnListItem
@@ -68,6 +69,34 @@ const rescoredSeverityHex = computed(() => {
 
 const handleClick = () => emit('select', group.value)
 const handleReload = () => emit('reload', group.value)
+
+type WorkflowTone = 'amber' | 'cyan' | 'blue' | 'green' | 'purple'
+const workflowState = computed<{ label: string; tone: WorkflowTone }>(() => {
+    const vulnerabilityIds = new Set(
+        [group.value.id, ...(group.value.aliases || [])]
+            .map(value => String(value || '').trim().toLocaleLowerCase())
+            .filter(Boolean),
+    )
+    const analysisActive = [...vulnerabilityIds]
+        .some(vulnerabilityId => analysisQueueStore.activeVulnerabilityIds.value.has(vulnerabilityId))
+    if (analysisActive) return { label: 'Analysis running', tone: 'cyan' }
+    if (isPendingReview.value) return { label: 'Awaiting review', tone: 'purple' }
+    if (isAssessed.value) return { label: 'Complete', tone: 'green' }
+    if (normalizedTags.value.filter(team => team.toLocaleLowerCase() !== 'automation').length === 0) {
+        return { label: 'Needs mapping', tone: 'amber' }
+    }
+    if (listItem.value.hasAutomaticAssessment) return { label: 'Result ready', tone: 'cyan' }
+    if (technicalState.value === 'NOT_SET') return { label: 'Needs analysis', tone: 'amber' }
+    return { label: 'Needs assessment', tone: 'blue' }
+})
+
+const workflowStateClass = computed(() => ({
+    amber: 'border-amber-700/50 bg-amber-950/45 text-amber-200',
+    cyan: 'border-cyan-700/50 bg-cyan-950/45 text-cyan-200',
+    blue: 'border-blue-700/50 bg-blue-950/45 text-blue-200',
+    green: 'border-green-700/50 bg-green-950/45 text-green-200',
+    purple: 'border-purple-700/50 bg-purple-950/45 text-purple-200',
+}[workflowState.value.tone]))
 </script>
 
 <template>
@@ -121,7 +150,7 @@ const handleReload = () => emit('reload', group.value)
 
         <!-- Header row -->
         <div
-            class="relative flex min-h-[5rem] items-start gap-2 overflow-hidden py-2 pl-[62px] pr-12"
+            class="relative flex min-h-[5rem] items-start gap-2 overflow-hidden py-2 pl-[62px] pr-40"
             data-testid="compact-vulnerability-header"
         >
             <div class="min-w-0 flex-1">
@@ -166,6 +195,13 @@ const handleReload = () => emit('reload', group.value)
             >
                 <RefreshCw :size="14" :class="{ 'animate-spin': reloading }" />
             </button>
+            <span
+                data-testid="workflow-state-badge"
+                class="absolute bottom-2 right-12 z-20 inline-flex rounded border px-2 py-1 text-[9px] font-black uppercase tracking-wide"
+                :class="workflowStateClass"
+            >
+                {{ workflowState.label }}
+            </span>
             <span v-if="reloadError" class="sr-only" role="status">{{ reloadError }}</span>
         </div>
     </div>

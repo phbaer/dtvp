@@ -14,7 +14,7 @@ system: |-
   - REACHABLE: YES|NO|UNCERTAIN. CONFIDENCE: High|Medium|Low.
   - INTERMEDIARY names the most relevant package(s).
   - REASONING is one line with labels: Component API, Chain, Surface, Evidence, Fix/Validate.
-  - If intermediary behavior is unknown and an intermediary package is named, first emit only FETCH_SOURCE: <intermediary-package>; use FETCH_SEARCH: <intermediary package> <vulnerable package> if source/package identity is unclear.
+  - If intermediary behavior is unknown and an intermediary package is named, first emit only FETCH_SOURCE: <intermediary-package>. If an exact public repository URL is already supplied and the deciding behavior requires repo-wide source inspection, emit only CLONE_REPOSITORY: <url> | <intermediary API or vulnerable dependency to trace> | <optional branch-or-tag>. Use FETCH_SEARCH: <intermediary package> <vulnerable package> if source/package identity is unclear.
   - Cite only supplied snippets, dependency chains, and fetched source facts. Do not invent intermediary internals.
 analysis_protocol: |-
   Internal analysis protocol:

@@ -81,8 +81,10 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Start the GIL-enabled fallback deployment | `docker compose -f compose.yml -f compose.gil.yml up -d --build` |
 
 The CI end-to-end job uses the Playwright container image in
-`.github/workflows/build-publish.yml`. When upgrading `@playwright/test`, update
-that image tag in the same change.
+`.github/workflows/build-publish.yml`. Its image tag must exactly match the
+resolved `@playwright/test` version in `frontend/package-lock.json`; update both
+in the same change. The regular, manual, and real-stack Playwright
+configurations cover Chromium, Firefox, and WebKit desktop browsers.
 
 ## Repository And Architecture
 
@@ -163,7 +165,10 @@ Important frontend components:
   dedicated bounded executor so cold searches cannot exhaust the default
   application thread pool; queued browser searches are discarded when a newer
   generation supersedes them. Cached result indexes use packed integers and
-  are evicted against both entry-count and approximate byte budgets.
+  are evicted against both entry-count and approximate byte budgets. Exact
+  Team filters start from a per-task inverted index instead of scanning every
+  vulnerability, and a count-less cached result reuses its filtered order when
+  the corresponding facet-count request arrives.
   Lightweight code-assessment metadata is cached and invalidated when analyzer
   results change. Derived automatic-assessment facets and team-group context
   are reused until their metadata or configuration revision changes.
@@ -187,8 +192,11 @@ Important frontend components:
   automatic and manual submissions share a configurable pending-item limit.
 - The frontend viewport-windows list rows, coalesces partial refreshes, and
   hydrates dependency paths and full assessment details only when needed.
+  Refreshed full-detail groups remain distinguishable from lightweight list
+  summaries even when both carry current list metadata.
   Follow-up pages and full-result drains omit facet counts they do not consume;
-  the initial/filter request retains complete task-wide and filtered counts.
+  a Team-filter request renders its card window without facet counts, then
+  refreshes complete task-wide and filtered counts in the background.
 - The local cache under `DTVP_DT_CACHE_PATH` stores projects, findings,
   vulnerability details, BOMs, local overlays, and pending writes. Stale cached
   data remains readable while Dependency-Track is unavailable. Concurrent
@@ -330,8 +338,11 @@ aggregate state follows these rules:
   `[State: ...]`, `[Assessed By: ...]`, `[Reviewed By: ...]`,
   `[Rescored Vector: ...]`, and `[Assigned: ...]`.
 - Structured details retain at most one block per team (case-insensitive).
-  Team assessments are not copied into the General block, and generated
-  General summaries from older sync operations are removed on the next sync.
+  Code-analysis assessment drafts keep evidence in the owning-team blocks and
+  maintain one General block that references those teams and takes their worst
+  effective state. An independently authored General assessment is preserved;
+  team evidence is never copied into it. Generated General summaries from older
+  sync operations are removed on the next sync.
 - Dependency paths come from CycloneDX BOM dependency graphs. Dependency-Track
   attribution timestamps are retained as `attributed_on`.
 
@@ -371,7 +382,10 @@ case-sensitive specificity, exact case, then lexical key order. Mapping does
 not otherwise match BOM refs, Dependency-Track UUIDs, or component versions.
 
 Values are either a primary team string or an array whose first entry is the
-primary label and remaining entries are historical aliases.
+primary label and remaining entries are historical aliases. Every authenticated
+user can read this ownership context so analyst views resolve the same teams as
+backend filters and automatic analysis; creating or changing mappings remains
+reviewer-only.
 
 `TEAM_GROUPS_PATH` defaults to `data/team_groups.json` and is also editable in
 Settings. Each group has explicit direct `teams` and nested `groups`, so an
@@ -433,14 +447,29 @@ vulnerability-ID searches are combined with all active filters.
 The Filters sidebar provides a searchable, alphabetically sorted Team dropdown
 from the complete task facet list. Selecting a team uses a case-insensitive
 exact name match; `team:` smart-search tokens remain available for free-form
-team searches. The top search result count is the final number of grouped
-vulnerabilities after every active filter, independent of how many paginated
-rows are currently loaded. When filters reduce the task, it is shown relative
-to the unfiltered task total. Every filter-chip count and the Team open/assessed
-breakdown is calculated from that same final filtered result. Complete
-task-wide facets remain available as filter choices even when their current
-filtered count is zero. Overlapping properties such as teams and inconsistency
-reasons can therefore have counts whose sum exceeds the final result count.
+team searches. That selection also scopes component-driven content inside an
+opened vulnerability card: affected and triggering components, project
+versions, header component/count/age metadata, current-assessment rows,
+dependency context, code-analysis targets, and run history show only the
+selected team's closest mapped components. Saved analyzer runs with explicit
+`target_team` metadata must also match the canonical team or one of its
+configured aliases; legacy component-scoped runs without that metadata remain
+visible for compatibility. Team mappings are compiled and component ownership
+is resolved once per card scope so switching filters does not repeatedly scan
+the full mapping. Advisory metadata remains vulnerability-wide context. An
+approved General assessment remains authoritative across teams; otherwise the
+tab badges and Next action state use assessment coverage from the selected
+team's visible findings. The card reports how many findings are inside the
+active team scope, and stale asynchronous history loads are discarded when the
+selected scope changes. The top search result count is the final number of
+grouped vulnerabilities after every active filter, independent of how many
+paginated rows are currently loaded. When filters reduce the task, it is shown
+relative to the unfiltered task total. Every filter-chip count and the Team
+open/assessed breakdown is calculated from that same final filtered result.
+Complete task-wide facets remain available as filter choices even when their
+current filtered count is zero. Overlapping properties such as teams and
+inconsistency reasons can therefore have counts whose sum exceeds the final
+result count.
 When groups are configured, the Results tab renders one Per Group table with
 indented nested groups, direct team members, and non-grouped teams at the root,
 so each parent total can be compared with its subgroup and team totals without
@@ -454,25 +483,55 @@ The detail workspace provides:
 
 | Tab | Purpose |
 | :--- | :--- |
-| Overview | Advisory, references, affected components, ownership, and dependency context |
-| Assessments | Current Dependency-Track assessment blocks |
-| Code Analysis | Target selection, queue/history, verdict, evidence, draft, ticket, and artifacts |
-| Review | Global assessment editor with CVSS/rescoring, tmrescore, analyzer notes, and reviewer context; team assessment editor |
+| Context | Four ordered sections: advisory and references; finding/team/component scope with affected components visible to analysts and reviewers; dependency context; existing assessment evidence |
+| Code Evidence | A semantic run list with an expandable new-analysis control; selected rows own indented outcome and evidence disclosures; worst-case combined assessment |
+| Assessment | Consistent scope and decision/rationale sections; analyzer proposals for team decisions; reviewer-only effective team summary and global CVSS/rescoring controls |
 | Team Mapping | Reviewer-only ownership editor |
 
+Compact vulnerability rows expose the current workflow state, such as mapping
+needed, analysis running, result ready, assessment needed, awaiting review, or
+complete. Inside the card, tab status badges and one Next action guide lead to
+the relevant tab. The guide's navigation control disappears after reaching its
+destination and is replaced by concrete in-tab instructions, leaving the real
+run, draft, save, or submit control as the next action instead of repeating the
+same button. The sticky bar contains only navigation and persistence state.
+After a successful assessment save or analyst submission, the guide advances
+to the next vulnerability in the current filtered and sorted result set.
+
 CVSS and rescoring controls appear in the reviewer-only Global subview of
-Review so the score and assessment can be evaluated and applied together. Team
-subviews omit global rescoring controls. Local drafts survive tab changes.
-Closing or switching a vulnerability prompts
-the reviewer to apply, discard, or keep editing. Assessment writes refresh the
-active task window, and route state preserves filters when navigating to
-statistics or code analysis. Once the transactional local save succeeds, the
-card reports that it is saved locally while Dependency-Track synchronization
-continues in the background; retry failures remain visible without blocking
-another edit. Per-finding local revisions are retained across list updates so
-subsequent edits keep conflict protection. Each vulnerability card can reload
-its current assessment directly from Dependency-Track; the refreshed task
-snapshot updates the card, lifecycle filters, and counts together.
+Assessment so the score and assessment can be evaluated and saved together.
+Team subviews omit global rescoring controls. Analysts see mapped ownership and
+triggering components in Context and can launch analysis for owned targets.
+Each team subview shows the latest scoped analyzer assessment as a proposal,
+including its state, summary, and rationale. A user can copy that proposal into
+the editable draft, but a saved or manually edited team assessment remains
+authoritative. Reviewers use the latest analyzer result only as a fallback for
+a team without a manual assessment; the effective summary and Global draft use
+the worst state across those per-team sources. This source precedence is
+intentional rather than timestamp-based, so a newer automated run cannot
+silently replace a team's considered decision.
+An active Team filter establishes the card's assessment context immediately.
+Analysts see and edit only that team's Assessment subview. Reviewers start in
+the same focused view, retain direct access to Global, and can explicitly show
+all other teams when a cross-team review is needed; returning to the focused
+view restores the exact filtered team. Analyst submission requires a mapped
+team, a non-empty analysis
+state and details, and a justification for `NOT_AFFECTED`; the action is
+explicitly labeled as a submission for reviewer approval. Assessment contains
+only Global (for reviewers) and real mapped teams; automatic analysis and
+tmrescore remain supporting context rather than a synthetic `automation` team.
+A tmrescore proposal stages a normal Global draft and waits for the explicit
+save action. Local drafts survive tab and team-scope changes. Closing or
+switching a vulnerability prompts the user to save, discard, or keep editing.
+Assessment writes refresh the active task window, and route state preserves
+filters when navigating to statistics or code analysis. Once the transactional
+local save succeeds, the card reports that it is saved locally while
+Dependency-Track synchronization continues in the background; retry failures
+remain visible without blocking another edit. Per-finding local revisions are
+retained across list updates so subsequent edits keep conflict protection.
+Each vulnerability card can reload its current assessment directly from
+Dependency-Track; the refreshed task snapshot updates the card, lifecycle
+filters, and counts together.
 Vulnerability headers use compact status icons to show both available and
 unavailable states for tmrescore/vscorer and code-analysis assessments. In the
 compact list, the Dependency-Track reload action stays at the bottom-right of
@@ -667,24 +726,76 @@ Result APIs:
 
 #### Project Workspace And Dashboard
 
-The vulnerability card contains target selection, queue/history, verdict and
-evidence, an editable assessment draft, benchmark comparison, component
-results, ticket draft, version coverage, LLM conversation, and pipeline
-artifacts. The metadata badge and lightweight history for the current
-vulnerability load automatically; a full result (including its LLM
-conversation) loads only when its row is opened. Runs can then be removed,
-applied, benchmarked, or used as parents for follow-ups.
+The vulnerability card presents Code Evidence as a target-oriented workflow.
+For analysts, the target-oriented runs section leads; reviewers start with the
+Combined assessment because it is their primary decision input. The expandable
+`Run new analysis` control sits inside the runs section above its compact latest-
+run list. Each target row keeps View, Use as draft, Earlier runs, and Delete
+actions on the right. View reveals a dismissible inline outcome with summary,
+rationale, and follow-up question context directly beneath that row. The list
+indents the complete selected-run detail region—including every disclosure—so
+the owning row remains visually unambiguous. Assessment draft, benchmark,
+component results, ticket, version coverage, LLM conversation, and pipeline
+evidence are peer disclosures in the same run context and start collapsed.
+Derivative benchmark records do not replace a target's latest analysis row.
+The LLM conversation opens in a taller vertically resizable viewer and can move
+into an accessible near-full-screen dialog without changing renderers or losing
+context. Each captured turn is a numbered request/tool/response timeline with
+explicit `Agentyzer → Model` and `Model → Agentyzer` provenance, raw request and
+response copy actions, and token/model metadata. Timeline stages are separately
+collapsible: verbose requests and tool evidence start closed, model responses
+start open, and conversation-wide controls switch between overview and full
+audit views. Expanded stages use bounded, keyboard-focusable scroll regions so
+one long prompt, tool trace, or response cannot consume the whole conversation
+viewer. Inline and nested regions chain unused wheel movement to their parent,
+so a short section or a reached scroll boundary does not trap page scrolling;
+only the full-screen dialog contains overscroll. A summary above the timeline
+reports Local-to-LLM messages and prompt
+tokens, LLM-to-Local responses and completion tokens, total/captured timing,
+per-turn LLM and inferred local-tool timing, retries, context adaptations,
+models/providers, tool requests/results/failures, repository inspections, and
+trace coverage when older providers omit telemetry. The per-turn timing table is
+itself bounded and keyboard-scrollable for long conversations. Current configured prompts are
+shown only as a clearly warned fallback when a run did not persist its actual
+conversation, so configuration cannot be mistaken for run evidence. An
+**Additional guidance used** panel extracts component/reviewer guidance from
+the persisted model-request messages and identifies the exact turns that
+received it. Saved queue guidance without a matching trace is labeled as not
+verifiable, while storage-policy redaction is called out explicitly. Static
+component guidance is resolved for both initial and follow-up runs against the
+component actually selected for that request.
+The Combined assessment displays the worst latest target verdict plus a
+rationale that preserves the component-level reasoning before a draft is
+staged. Preview and draft preparation share the same verdict-to-assessment
+ordering (`EXPLOITABLE`, `IN_TRIAGE`, then `NOT_AFFECTED`) and use analyzer CVSS
+only to break ties within the same state.
+
+The metadata badge and lightweight history for the current
+vulnerability and aliases load automatically for every component in the active
+scope. History is paged until complete, grouped per component, and nests a
+follow-up's predecessor chain beneath its latest successor while retaining
+earlier independent runs. A full result (including its LLM conversation) loads
+only when its row is opened. Runs can then be removed, applied, benchmarked, or
+used as parents for follow-ups. Using one as an assessment draft resolves its
+persisted target team, switches directly to that Assessment subview, and
+populates the visible form deterministically; an unmapped result is reported
+instead of being assigned to an unrelated first team. When any completed scoped
+result exists, the new-analysis form starts collapsed; rerunning remains an
+intentional action for changed scope or evidence.
 
 When several components of one vulnerability have their own saved analyzer
-result, `Apply all to <n> teams` stages all of them at once. Each team receives
-the latest result of the components it owns, combined worst-wins when it owns
-more than one, and the global assessment takes state, justification, CVSS
-vector, and score from the worst result across all of them. The global block
-keeps its existing text because the reasoning already lives in the team blocks.
+result, `Use latest results as draft` uses the current scope. With an active
+Team filter, it stages only the filtered team's component results plus one
+General reference; it never stages another team's draft. Without a Team filter,
+saved or manually edited team assessments are preserved and the latest analyzer
+proposal is staged only for teams that are still missing a decision. The
+General draft references the effective team blocks and uses their worst state
+without duplicating their evidence. An existing independently authored General
+assessment remains authoritative in either scope.
 Benchmark runs, unfinished runs, and superseded runs of the same component are
 never candidates, and components without a team mapping are reported instead of
-silently dropped. The staged drafts land in the `Review` tab and one `Apply`
-writes every team block and the global block in a single assessment update.
+silently dropped. Staged drafts land in the `Assessment` tab for explicit review
+before saving.
 
 An affected result produces a copyable Markdown remediation ticket. Setting
 `DTVP_JIRA_CREATE_URL` adds an action that copies the draft and opens Jira's
@@ -712,9 +823,20 @@ inspection endpoints; persisted DTVP context remains the fallback.
 
 Agentyzer prompt bundles live under `agentyzer/config/prompts/`. They enforce
 structured, conservative assessment contracts and support native tool calls or
-text `FETCH_*` fallbacks for allowlisted web/package/source research. Java
-dependency discovery covers Maven and Gradle build, lock, and version-catalog
-formats.
+text directive fallbacks for allowlisted web/package/source research. The
+`clone_repository` / `CLONE_REPOSITORY` tool can additionally shallow-clone a
+dependent public HTTPS repository into Agentyzer's persistent local cache and
+analyze a narrow dependency, symbol, API, or call-path focus. It enumerates and
+searches the complete eligible committed tree, then runs matching Git blobs
+through the same language-aware import/call-site parsers and structural
+extraction used for the primary repository before returning bounded evidence.
+It never checks out or executes repository code, rejects credentials and
+non-public destinations, and is constrained by host, clone-count, timeout,
+repository-size, file-size, analysis-file, and output limits. External source,
+comments, documentation, strings, tests, and prompt-like content are explicitly
+delimited as untrusted evidence and can never become analyst guidance or change
+the task/tool contract. Java dependency discovery covers Maven and Gradle build,
+lock, and version-catalog formats.
 
 #### Automatic Scanning
 
@@ -828,6 +950,9 @@ Deployment rules:
   and uses a 2048-connection accept backlog.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
   logs time cache and integration initialization.
+- The DTVP and Agentyzer container startup scripts print their packaged project
+  versions and image build numbers before importing either application, so this
+  deployment identity remains visible in Docker logs even if initialization fails.
 - `/api/performance-status` reports grouped-query/build saturation, retained
   task counts, process-local cache pressure, and the active Python/GIL state.
   API responses include a `Server-Timing: app;dur=...` header for browser and
@@ -943,6 +1068,7 @@ means the integration or override is disabled.
 | `DTVP_DEFAULT_PROJECT_FILTER` | Dashboard default project filter | empty |
 | `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` | Attribution-age presets | `7d,14d,28d` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
+| `BUILD_NUMBER` | Compose image build number, baked into DTVP and Agentyzer startup logs | `unknown` |
 
 ### Project Archives
 
@@ -1006,6 +1132,13 @@ means the integration or override is disabled.
 | `AGENTYZER_OPENWEBUI_CONTEXT_SAFETY_MARGIN` | Reserved token margin | `256` |
 | `AGENTYZER_OPENWEBUI_CONTEXT_RETRIES` | Oversized-context retries | `2` |
 | `AGENTYZER_OPENWEBUI_MIN_COMPLETION_TOKENS` | Completion budget preserved during compaction | `256` |
+| `AGENTYZER_RESEARCH_CLONE_ENABLED` | Allow bounded local dependent-repository inspection | `true` |
+| `AGENTYZER_RESEARCH_GIT_HOSTS` | Comma-separated public HTTPS Git host allowlist (`*` permits any public host) | `github.com,gitlab.com,bitbucket.org` |
+| `AGENTYZER_RESEARCH_MAX_CLONES_PER_ANALYSIS` | Shared repository-clone budget across one LLM research loop | `3` |
+| `AGENTYZER_RESEARCH_CLONE_TIMEOUT_SECONDS` | Clone/inspection Git command timeout | `90` |
+| `AGENTYZER_RESEARCH_CLONE_MAX_REPOSITORY_MB` | Maximum cached research-clone disk use | `256` |
+| `AGENTYZER_RESEARCH_CLONE_MAX_FILE_BYTES` | Maximum committed file size inspected | `256000` |
+| `AGENTYZER_RESEARCH_CLONE_CACHE_TTL_SECONDS` | Freshness window before a research repository is cloned again | `3600` |
 
 ## SBOM, Documentation, And License
 

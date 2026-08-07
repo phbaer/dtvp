@@ -140,8 +140,9 @@ async function mockAnalysisQueue(
     const queueItems = items.map(item => ({ ...item }))
 
     await page.unroute('**/api/analysis-queue')
+    await page.unroute('**/api/analysis-queue/status')
     await page.unroute('**/api/analysis-queue/submit')
-    await page.unroute(/\/api\/analysis-queue\/(?!submit$)[^/]+$/)
+    await page.unroute(/\/api\/analysis-queue\/(?!(?:submit|status)$)[^/]+$/)
 
     await page.route('**/api/analysis-queue', async (route) => {
         await route.fulfill({
@@ -151,7 +152,24 @@ async function mockAnalysisQueue(
         })
     })
 
-    await page.route(/\/api\/analysis-queue\/(?!submit$)[^/]+$/, async (route) => {
+    await page.route('**/api/analysis-queue/status', async (route) => {
+        const countsByStatus = queueItems.reduce<Record<string, number>>((counts, item) => {
+            const status = String(item.status || 'unknown')
+            counts[status] = (counts[status] || 0) + 1
+            return counts
+        }, {})
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                counts_by_status: countsByStatus,
+                items: queueItems,
+                auto_sweep: null,
+            }),
+        })
+    })
+
+    await page.route(/\/api\/analysis-queue\/(?!(?:submit|status)$)[^/]+$/, async (route) => {
         const queueId = decodeURIComponent(route.request().url().split('/').pop() || '')
         const item = queueItems.find(entry => entry.queue_id === queueId)
         if (!item) {
@@ -423,7 +441,7 @@ async function openProjectCard(page: Page, groupId: string) {
     await expect(inspector).toBeVisible({ timeout: 10000 })
 
     const detailCard = inspector.locator('.vuln-card').first()
-    await expect(detailCard.getByRole('tab', { name: 'Overview' })).toBeVisible({ timeout: 10000 })
+    await expect(detailCard.getByRole('tab', { name: 'Context' })).toBeVisible({ timeout: 10000 })
     await expect(detailCard.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
     return detailCard
 }
@@ -1288,7 +1306,7 @@ test.describe('Capture README screenshots', () => {
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
 
-        await expect(card.getByRole('tab', { name: 'Review' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('tab', { name: 'Assessment' })).toBeVisible({ timeout: 10000 })
         await expect(card.getByRole('tab', { name: 'CVSS & Rescoring' })).toHaveCount(0)
         await expect(card.getByRole('tab', { name: 'Team Mapping' })).toBeVisible({ timeout: 10000 })
         await expect(card.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
@@ -1316,7 +1334,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-6004')
-        await selectDetailTab(card, 'Review')
+        await selectDetailTab(card, 'Assessment')
         await expect(card.getByText('CVSS Calculator')).toBeVisible({ timeout: 10000 })
         await expect(card.getByRole('heading', { name: 'CVSS & Rescoring' })).toBeVisible({ timeout: 10000 })
         await expect(card.locator('#cvss-vector-input')).toBeVisible({ timeout: 10000 })
@@ -1416,7 +1434,7 @@ test.describe('Capture README screenshots', () => {
 
         // Expand the NEEDS_APPROVAL card to see the assignment form
         const card = await openProjectCard(page, 'CVE-2024-3001')
-        await selectDetailTab(card, 'Review')
+        await selectDetailTab(card, 'Assessment')
 
         // Wait for the expanded section
         await expect(page.getByText('Assigned Users').first()).toBeVisible({ timeout: 10000 })
@@ -1450,7 +1468,7 @@ test.describe('Capture README screenshots', () => {
         const sidebar = page.getByTestId('stats-sidebar')
         const resultsPanel = page.getByTestId('stats-sidebar-results')
         await expect(resultsPanel).toBeVisible({ timeout: 5000 })
-        await expect(resultsPanel.getByText('7 Findings')).toBeVisible({ timeout: 5000 })
+        await expect(resultsPanel.getByText('7 Vulnerabilities')).toBeVisible({ timeout: 5000 })
         await expect(resultsPanel.getByText('Per Team')).toBeVisible({ timeout: 5000 })
         await expect(resultsPanel.getByText('Cache Status')).toBeVisible({ timeout: 5000 })
 
@@ -1503,7 +1521,7 @@ test.describe('Capture README screenshots', () => {
 
         // Expand the inconsistent card to show conflicting team assessments
         const card = await openProjectCard(page, 'CVE-2024-5003')
-        await selectDetailTab(card, 'Assessments')
+        await selectDetailTab(card, 'Context')
 
         // Wait for assessment details to load
         await page.waitForTimeout(2000)
@@ -1521,7 +1539,7 @@ test.describe('Capture README screenshots', () => {
 
         // Expand the rescored card to access the calculator
         const card = await openProjectCard(page, 'CVE-2024-6004')
-        await selectDetailTab(card, 'Review')
+        await selectDetailTab(card, 'Assessment')
 
         // Wait for expanded state and find the calculator button
         await page.waitForTimeout(1500)
@@ -1540,14 +1558,55 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture bulk sync modal screenshot', async ({ page }) => {
+        const workflow = {
+            id: 'incomplete-sync',
+            label: 'Sync Incomplete Assessments',
+            description: 'Copy the existing consistent assessment to findings where it is missing.',
+            supports_apply: true,
+            supports_document: false,
+            version: 1,
+        }
+        await page.route('**/api/bulk-workflows/summary', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                task_id: 'task-docs',
+                workflows: [{ ...workflow, candidate_count: 1, summary: { groups: 1 } }],
+            }),
+        }))
+        await page.route('**/api/bulk-workflows/incomplete-sync/preview-task', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ task_id: 'docs-bulk-preview' }),
+        }))
+        await page.route('**/api/bulk-workflows/tasks/docs-bulk-preview', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                task_id: 'docs-bulk-preview',
+                status: 'completed',
+                progress: 100,
+                result: {
+                    task_id: 'task-docs',
+                    workflow,
+                    preview_token: 'docs-preview-token',
+                    selectable_group_ids: ['CVE-2024-4002'],
+                    items: [{ group_id: 'CVE-2024-4002', finding_count: 2, block_count: 1 }],
+                    summary: { groups: 1, findings: 2 },
+                },
+            }),
+        }))
+
         await page.goto('/project/TestProject')
         await page.waitForLoadState('networkidle')
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
 
-        await page.getByRole('button', { name: /Bulk Sync/ }).click()
-
-        const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Confirm Bulk Sync' }).first()
+        await page.getByRole('button', { name: 'Bulk Changes' }).click()
+        const modal = page.locator('.fixed.inset-0').filter({ hasText: 'Bulk Changes' }).first()
         await expect(modal).toBeVisible({ timeout: 10000 })
+        await modal.getByTestId('bulk-workflow-incomplete-sync').click()
+        await expect(modal.getByRole('heading', { name: 'Sync Incomplete Assessments' })).toBeVisible({ timeout: 10000 })
+
         await captureWithPadding(modal, '../docs/screenshots/bulk-sync-modal.png')
     })
 
@@ -1559,7 +1618,7 @@ test.describe('Capture README screenshots', () => {
 
         // Expand the inconsistent card and force a conflict via the API response.
         const card = await openProjectCard(page, 'CVE-2024-5003')
-        await selectDetailTab(card, 'Review')
+        await selectDetailTab(card, 'Assessment')
         await page.waitForTimeout(1000)
 
         await page.route('**/api/assessment', async (route) => {
@@ -1590,9 +1649,13 @@ test.describe('Capture README screenshots', () => {
             })
         })
 
-        const applyButton = card.getByRole('button', { name: /^Apply$/ }).nth(1)
-        await expect(applyButton).toBeVisible({ timeout: 10000 })
-        await applyButton.click()
+        const analysisDetails = card.locator('#analysis-details-textarea')
+        const existingDetails = await analysisDetails.inputValue()
+        await analysisDetails.fill(`${existingDetails}\nConflict screenshot edit.`.trim())
+
+        const saveButton = card.getByTestId('assessment-submit-button')
+        await expect(saveButton).toBeEnabled({ timeout: 10000 })
+        await saveButton.click()
 
         const submitButton = page.getByRole('button', { name: 'Submit' }).first()
         await expect(submitButton).toBeVisible({ timeout: 10000 })
@@ -1611,7 +1674,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
-        await selectDetailTab(card, 'Review')
+        await selectDetailTab(card, 'Assessment')
         await expect(card.getByText('Review Context')).toBeVisible({ timeout: 10000 })
         await expect(card.getByTestId('ticket-requirement-badge')).toHaveText('Required', { timeout: 10000 })
 
@@ -1689,7 +1752,7 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
-        await selectDetailTab(card, 'Code Analysis')
+        await selectDetailTab(card, 'Code Evidence')
         await expect(card.getByText('Analyzing…')).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('running', { exact: true })).toBeVisible({ timeout: 10000 })
 
@@ -1754,9 +1817,13 @@ test.describe('Capture README screenshots', () => {
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
-        await selectDetailTab(card, 'Code Analysis')
-        await expect(card.getByText('platform-gateway exposes a reachable parser initialization path used by external requests.')).toBeVisible({ timeout: 10000 })
-        await expect(card.getByText('Use as Assessment Draft')).toBeVisible({ timeout: 10000 })
+        await selectDetailTab(card, 'Code Evidence')
+        await expect(card.getByRole('button', { name: 'View', exact: true })).toBeVisible({ timeout: 10000 })
+        await card.getByRole('button', { name: 'View', exact: true }).click()
+        await expect(card.getByTestId('inline-analysis-outcome').getByText('platform-gateway exposes a reachable parser initialization path used by external requests.')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('Use as draft').first()).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('combined-analysis-assessment').getByText('platform-gateway', { exact: true })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('combined-assessment-preview').getByText('Combined rationale')).toBeVisible({ timeout: 10000 })
 
         await card.getByRole('button', { name: /Pipeline Evidence/ }).click()
         await expect(card.getByText('Reachability scan')).toBeVisible({ timeout: 10000 })

@@ -11,6 +11,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 
 from src.agents import dependency_scanner
 from src.agents.dependency_scanner import RepoError
+from src.agents.repository_research import repository_clone_enabled
 from src.api.jobs import (
     Job,
     _now_iso,
@@ -284,6 +285,7 @@ def _service_configuration() -> ServiceConfiguration:
             "context_compaction": True,
             "follow_up_assessments": True,
             "benchmark_comparisons": True,
+            "local_repository_research": repository_clone_enabled(),
         },
     )
 

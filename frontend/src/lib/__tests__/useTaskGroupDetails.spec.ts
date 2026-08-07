@@ -81,6 +81,41 @@ describe('useTaskGroupDetails', () => {
         expect(details.selectedGroupLoading.value).toBe(false)
     })
 
+    it('caches refreshed full details that also include list metadata', async () => {
+        const api = await import('../api')
+        const hydratedGroup: GroupedVuln = {
+            ...group('CVE-1', true),
+            title: 'refreshed full details',
+            affected_versions: [{
+                project_name: 'Project',
+                project_version: '1.0.0',
+                project_uuid: 'project-uuid',
+                components: [{
+                    project_name: 'Project',
+                    project_version: '1.0.0',
+                    project_uuid: 'project-uuid',
+                    component_name: 'library-a',
+                    component_version: '1.0.0',
+                    component_uuid: 'component-uuid',
+                    vulnerability_uuid: 'vulnerability-uuid',
+                    finding_uuid: 'finding-uuid',
+                    analysis_state: 'NOT_AFFECTED',
+                    analysis_details: 'Full assessment details',
+                    analysis_comments: [],
+                    dependency_chains: ['library-a -> Project'],
+                    is_suppressed: false,
+                }],
+            }],
+        }
+        vi.mocked(api.getTaskVulnGroup).mockResolvedValue(hydratedGroup)
+
+        const { details } = createHarness({ 'CVE-1': group('CVE-1', true) })
+
+        await expect(details.ensureFullGroup('CVE-1')).resolves.toBe(hydratedGroup)
+        expect(details.fullGroupCache.value['CVE-1']).toEqual(hydratedGroup)
+        expect(details.selectedGroup.value).toEqual(hydratedGroup)
+    })
+
     it('force-refreshes a cached full group from the task detail endpoint', async () => {
         const api = await import('../api')
         const cachedGroup = group('CVE-1')

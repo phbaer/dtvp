@@ -1,6 +1,8 @@
 FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
 WORKDIR /app
 
+ARG BUILD_NUMBER=unknown
+
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 
 # Trust local / corporate CA certificates injected at build time
@@ -15,9 +17,12 @@ RUN uv sync --frozen --no-dev
 
 COPY config ./config
 COPY src ./src
+COPY start.sh ./start.sh
+RUN chmod +x ./start.sh
 
 ENV PYTHONPATH=/app
 ENV AGENTYZER_CONFIG_DIR=/app/config
 ENV AGENTYZER_REPOS_DIR=/app/repos
+ENV AGENTYZER_BUILD_NUMBER=$BUILD_NUMBER
 EXPOSE 8000
-CMD ["uv", "run", "--no-sync", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/start.sh"]

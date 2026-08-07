@@ -20,7 +20,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Iterable, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -286,39 +286,68 @@ def analyze_repository(
     SymbolGraph
         Aggregated import + call information across all source files.
     """
+    def source_documents() -> Iterable[tuple[str, str]]:
+        for root, dirs, files in os.walk(repo_path):
+            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+            for fname in files:
+                ext = os.path.splitext(fname)[1].lower()
+                if _get_lang_by_ext().get(ext) is None:
+                    continue
+                fpath = os.path.join(root, fname)
+                rel = os.path.relpath(fpath, repo_path)
+                try:
+                    with open(fpath, "r", errors="ignore") as fh:
+                        yield rel, fh.read()
+                except Exception:
+                    continue
+
+    return analyze_source_documents(source_documents(), component_name, known_symbols)
+
+
+def analyze_source_documents(
+    documents: Iterable[tuple[str, str]],
+    component_name: str,
+    known_symbols: list[str] | None = None,
+    *,
+    additional_component_names: Iterable[str] = (),
+) -> SymbolGraph:
+    """Analyze already-loaded source documents with the repository analyzers.
+
+    This is the object-safe counterpart of :func:`analyze_repository`. It lets
+    callers analyze committed Git blobs without materializing or executing an
+    untrusted worktree. ``additional_component_names`` supports focused
+    dependent-repository research while the primary repository path keeps its
+    existing single-component behavior.
+    """
     graph = SymbolGraph()
-    variants = _component_variants(component_name)
+    variants = sorted(
+        {
+            variant
+            for name in (component_name, *additional_component_names)
+            for variant in _component_variants(str(name or "").strip())
+            if variant
+        }
+    )
     if not variants:
         return graph
 
     known = set(known_symbols or [])
     lang_counts: dict[str, int] = {}
-
-    for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
-        for fname in files:
-            ext = os.path.splitext(fname)[1].lower()
-            lang = _get_lang_by_ext().get(ext)
-            if lang is None:
-                continue
-            fpath = os.path.join(root, fname)
-            rel = os.path.relpath(fpath, repo_path)
-            lang_counts[lang] = lang_counts.get(lang, 0) + 1
-            try:
-                with open(fpath, "r", errors="ignore") as fh:
-                    source = fh.read()
-            except Exception:
-                continue
-            if not any(v in source for v in variants):
-                # Fast skip: file doesn't mention the component at all.
-                continue
-            try:
-                imports, calls = _dispatch(lang, source, rel, variants, known)
-            except Exception:
-                logger.debug("AST analysis failed for %s", rel, exc_info=True)
-                continue
-            graph.imports.extend(imports)
-            graph.calls.extend(calls)
+    for rel_path, source in documents:
+        ext = os.path.splitext(rel_path)[1].lower()
+        lang = _get_lang_by_ext().get(ext)
+        if lang is None:
+            continue
+        lang_counts[lang] = lang_counts.get(lang, 0) + 1
+        if not any(variant in source for variant in variants):
+            continue
+        try:
+            imports, calls = _dispatch(lang, source, rel_path, variants, known)
+        except Exception:
+            logger.debug("AST analysis failed for %s", rel_path, exc_info=True)
+            continue
+        graph.imports.extend(imports)
+        graph.calls.extend(calls)
 
     # Collect unique resolved symbols (from imports) excluding "*".
     seen: set[str] = set()
@@ -337,7 +366,7 @@ def analyze_repository(
     graph.language_stats = lang_counts
 
     logger.info(
-        "[ast_analyzer] Analyzed %d files (%s), found %d imports, %d calls, "
+        "[ast_analyzer] Analyzed %d source documents (%s), found %d imports, %d calls, "
         "%d resolved symbols",
         graph.files_analyzed,
         ", ".join(f"{l}={n}" for l, n in sorted(lang_counts.items())),

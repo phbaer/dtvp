@@ -120,4 +120,41 @@ describe('useVulnDependencyInfo', () => {
             },
         ])
     })
+
+    it('scopes component-derived context to the selected team and its aliases', () => {
+        const group = ref(createGroup())
+        const teamMapping = ref<Record<string, string | string[]>>({
+            'log4j-core': ['TEAM-DIRECT', 'Direct Alias'],
+            'shared-lib': ['TEAM-SHARED', 'Shared Alias'],
+        })
+        const teamFilter = ref('Shared Alias')
+
+        const info = useVulnDependencyInfo({
+            group: computed(() => group.value),
+            teamMapping,
+            refreshCounter: ref(0),
+            teamFilter,
+        })
+
+        expect(info.activeTeam.value).toBe('TEAM-SHARED')
+        expect(info.visibleInstances.value.map(instance => instance.finding_uuid)).toEqual(['finding-1'])
+        expect(info.dependencyRelationship.value).toBe('TRANSITIVE')
+        expect(info.sortedAffectedProjectVersions.value).toEqual(['1.5.0'])
+        expect(info.uniqueComponents.value).toEqual([
+            { name: 'slf4j-api', versions: ['1.7.36'] },
+        ])
+        expect(info.triggeringTaggedComponents.value).toEqual([
+            { name: 'shared-lib', versions: [], tag: 'TEAM-SHARED' },
+        ])
+
+        teamFilter.value = 'Direct Alias'
+        expect(info.activeTeam.value).toBe('TEAM-DIRECT')
+        expect(info.visibleInstances.value.map(instance => instance.finding_uuid)).toEqual(['finding-2'])
+        expect(info.uniqueComponents.value).toEqual([
+            { name: 'log4j-core', versions: ['2.17.0'] },
+        ])
+
+        teamFilter.value = ''
+        expect(info.visibleInstances.value).toHaveLength(2)
+    })
 })

@@ -12,7 +12,7 @@ from .inconsistency import INCONSISTENCY_REASONS
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 6
+TASK_GROUP_QUERY_INDEX_VERSION = 7
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -982,11 +982,16 @@ def _add_dynamic_counts(
 
 def build_task_group_query_index(groups: list[dict[str, Any]]) -> dict[str, Any]:
     rows = [{"group": group, "fields": _group_list_fields(group)} for group in groups]
+    team_indices: dict[str, array] = {}
+    for row_index, row in enumerate(rows):
+        for team in set(row["fields"]["tags_lower"]):
+            team_indices.setdefault(team, array("I")).append(row_index)
     return {
         "version": TASK_GROUP_QUERY_INDEX_VERSION,
         "rows": rows,
         "total": len(groups),
         "counts": _build_counts(rows),
+        "team_indices": team_indices,
         "query_cache": {},
         "sort_cache": {},
         "_query_inflight": {},
@@ -1131,7 +1136,9 @@ def _reserve_query_cache_entry(
 
         pending = Future()
         inflight[key] = pending
-        return None, pending, True
+        # A count-less page already contains the expensive filtered/sorted
+        # indices. Let the owner reuse those indices while it adds the facets.
+        return cached, pending, True
 
 
 def _complete_query_cache_entry(
@@ -1410,12 +1417,19 @@ def query_task_groups(
                 or automatic_assessment_outcome_set
                 or automatic_assessment_rescore_set
             )
-            if has_filter_predicates:
+            if cached is not None:
+                filtered_indices = cached["indices"]
+            elif has_filter_predicates:
+                candidate_indices = (
+                    index.get("team_indices", {}).get(team_filter, ())
+                    if team_filter
+                    else range(len(rows))
+                )
                 matching_indices = [
                     row_index
-                    for row_index, row in enumerate(rows)
+                    for row_index in candidate_indices
                     if _matches_task_group_fields(
-                        row["fields"],
+                        rows[row_index]["fields"],
                         q_terms=q_terms,
                         lifecycle=lifecycle_set,
                         inconsistency_reason=inconsistency_reason_set,

@@ -19,6 +19,7 @@ class OllamaClient(LLMClient):
         self.host = host.rstrip("/")
         self.model = model
         self.last_error = ""
+        self.last_usage: dict[str, int] | None = None
         self.conversation_trace: list[dict] = []
 
     async def generate(
@@ -85,6 +86,8 @@ class OllamaClient(LLMClient):
         )
 
         parts: list[str] = []
+        provider_metrics: dict[str, int] = {}
+        self.last_usage = None
         # Use a generous read timeout — the model streams tokens slowly and
         # we must not abort mid-generation.  The *connect* timeout stays
         # short so we fail fast if Ollama is unreachable.
@@ -106,6 +109,31 @@ class OllamaClient(LLMClient):
                         if token:
                             parts.append(token)
                         if chunk.get("done"):
+                            prompt_tokens = chunk.get("prompt_eval_count")
+                            completion_tokens = chunk.get("eval_count")
+                            if isinstance(prompt_tokens, int) and prompt_tokens >= 0:
+                                self.last_usage = {"prompt_tokens": prompt_tokens}
+                            if isinstance(completion_tokens, int) and completion_tokens >= 0:
+                                self.last_usage = {
+                                    **(self.last_usage or {}),
+                                    "completion_tokens": completion_tokens,
+                                }
+                            if self.last_usage:
+                                self.last_usage["total_tokens"] = sum(
+                                    self.last_usage.get(key, 0)
+                                    for key in ("prompt_tokens", "completion_tokens")
+                                )
+                            provider_metrics = {
+                                key: value
+                                for key in (
+                                    "total_duration",
+                                    "load_duration",
+                                    "prompt_eval_duration",
+                                    "eval_duration",
+                                )
+                                if isinstance((value := chunk.get(key)), int)
+                                and value >= 0
+                            }
                             break
             except Exception as e:
                 self.last_error = str(e)
@@ -120,6 +148,9 @@ class OllamaClient(LLMClient):
         trace_entry["finished_at"] = _utc_now_iso()
         trace_entry["status"] = "completed"
         trace_entry["response"] = {"role": "assistant", "content": result}
+        trace_entry["usage"] = self.last_usage
+        if provider_metrics:
+            trace_entry["provider_metrics"] = provider_metrics
         self.conversation_trace.append(trace_entry)
         logger.debug("Ollama response length: %d chars", len(result))
         return result

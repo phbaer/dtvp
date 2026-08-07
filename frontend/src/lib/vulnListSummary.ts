@@ -7,8 +7,18 @@ import {
 } from './assessment-helpers'
 import { classifyGroup } from './group-classifier'
 
+const hasFullDetailFields = (group: GroupedVuln) =>
+    (group.affected_versions || []).some(version =>
+        (version.components || []).some(component =>
+            Object.hasOwn(component, 'analysis_details')
+            || Object.hasOwn(component, 'analysisDetails')
+            || Object.hasOwn(component, 'analysis_comments')
+            || Object.hasOwn(component, 'dependency_chains')
+        )
+    )
+
 export const isSummaryGroupedVuln = (group: GroupedVuln | null | undefined) =>
-    !!group?.list_metadata
+    !!group?.list_metadata && !hasFullDetailFields(group)
 
 const normalizeAssessedTeams = (
     teams: Iterable<string>,

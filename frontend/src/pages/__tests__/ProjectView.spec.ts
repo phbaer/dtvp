@@ -80,10 +80,11 @@ vi.mock('../../components/VulnDetailInspector.vue', () => ({
             <aside data-testid="detail-inspector">
                 <span>{{ group.id }}</span>
                 <button data-testid="close-inspector" @click="$emit('close')">close</button>
+                <button data-testid="next-inspector" @click="$emit('request-next')">next</button>
             </aside>
         `,
-        props: ['group'],
-        emits: ['close', 'update', 'update:assessment']
+        props: ['group', 'hasNextVulnerability'],
+        emits: ['close', 'update', 'update:assessment', 'request-next']
     }
 }))
 
@@ -326,6 +327,25 @@ describe('ProjectView.vue', () => {
         expect(replaceSpy).toHaveBeenCalledWith(expect.objectContaining({
             query: expect.objectContaining({ vuln: 'CVE-2' }),
         }))
+    })
+
+    it('opens the next filtered vulnerability from the completed-workflow action', async () => {
+        const mockGroups = [
+            { id: 'CVE-1', title: 'First', affected_versions: [] },
+            { id: 'CVE-2', title: 'Second', affected_versions: [] },
+        ]
+        vi.mocked(getGroupedVulns).mockResolvedValue(mockGroups as any)
+
+        const wrapper = await mountProjectView({ routeName: 'TestProject' })
+        const rows = wrapper.findAllComponents({ name: 'VulnRowCompact' })
+        await rows[0].vm.$emit('select', rows[0].props('item').group)
+        const firstSelectedId = wrapper.get('[data-testid="detail-inspector"]').text()
+
+        expect(wrapper.findComponent({ name: 'VulnDetailInspector' }).props('hasNextVulnerability')).toBe(true)
+        await wrapper.findComponent({ name: 'VulnDetailInspector' }).vm.$emit('request-next')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="detail-inspector"]').text()).not.toBe(firstSelectedId)
     })
 
     it('reloads a vulnerability card assessment without selecting the card', async () => {
