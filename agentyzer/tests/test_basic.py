@@ -19,6 +19,7 @@ from src.api.models import (
     JobStatus,
 )
 from src.llm import prompt_registry
+from src.llm.ollama_client import OllamaClient
 from src.llm.openwebui_client import OpenWebUIClient
 from src.main import (
     app,
@@ -47,6 +48,7 @@ def test_health_exposes_service_configuration_and_backend(client):
     assert configuration["service_version"] == "0.1.0"
     assert configuration["features"]["async_assessments"] is True
     assert configuration["features"]["request_model_override"] is True
+    assert configuration["features"]["local_repository_research"] is True
 
     repositories = configuration["repositories"]
     assert repositories["workspace_dir"]
@@ -485,6 +487,58 @@ class _FakeOpenWebUIClient:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+def test_ollama_client_captures_directional_token_usage_and_provider_timing(monkeypatch):
+    response = _FakeOpenWebUIResponse(
+        lines=[
+            '{"response":"ok","done":false}',
+            json.dumps(
+                {
+                    "response": "",
+                    "done": True,
+                    "prompt_eval_count": 13,
+                    "eval_count": 5,
+                    "total_duration": 2_000_000_000,
+                    "load_duration": 100_000_000,
+                    "prompt_eval_duration": 700_000_000,
+                    "eval_duration": 1_200_000_000,
+                }
+            ),
+        ]
+    )
+
+    class FakeOllamaHttpClient:
+        def stream(self, method, url, **kwargs):
+            return response
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(
+        "src.llm.ollama_client.async_client",
+        lambda **kwargs: FakeOllamaHttpClient(),
+    )
+    client = OllamaClient(model="mistral")
+
+    result = asyncio.run(client.generate("hello", system="trusted system"))
+
+    assert result == "ok"
+    assert client.last_usage == {
+        "prompt_tokens": 13,
+        "completion_tokens": 5,
+        "total_tokens": 18,
+    }
+    assert client.conversation_trace[0]["usage"] == client.last_usage
+    assert client.conversation_trace[0]["provider_metrics"] == {
+        "total_duration": 2_000_000_000,
+        "load_duration": 100_000_000,
+        "prompt_eval_duration": 700_000_000,
+        "eval_duration": 1_200_000_000,
+    }
 
 
 def test_openwebui_client_includes_server_error_detail(monkeypatch):

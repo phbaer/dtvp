@@ -49,7 +49,11 @@ def _register_mapping_routes(
 
     @router.get("/settings/mapping", responses=forbidden_response)
     async def get_team_mapping(user: CurrentUser):
-        _require_reviewer(deps, user, "Only reviewers can view team mapping")
+        # Component ownership is part of the analyst review context.  Keep the
+        # mutating endpoints below reviewer-only, but let every authenticated
+        # user resolve team-owned components consistently with the backend
+        # filters.
+        _ = user
         return deps.load_team_mapping()
 
     @router.post("/settings/mapping", responses=forbidden_response)

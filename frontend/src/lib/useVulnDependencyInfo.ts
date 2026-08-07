@@ -2,14 +2,13 @@ import { computed, type ComputedRef, type Ref } from 'vue'
 import type { GroupedVuln, Instance } from '../types'
 import {
     findTeamMappingEntryForComponent,
-    getClosestAffectedTeamsForInstance,
-    getClosestAffectedTeamsForInstances,
+    getAffectedTeamsFromPaths,
     getFirstMappedTeamOnPath,
     getPathParts,
-    getPrimaryTeamForComponent,
     normalizeLegacyTags,
     selectRepresentativePaths,
 } from './dependency-team-selection'
+import { resolveCanonicalTeamName } from './team-mapping'
 import { sortVersions } from './version'
 
 export type DependencyRelationship = 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'
@@ -24,6 +23,7 @@ interface UseVulnDependencyInfoOptions {
     group: ComputedRef<GroupedVuln> | Ref<GroupedVuln>
     teamMapping: Ref<Record<string, string | string[]>>
     refreshCounter?: Ref<number>
+    teamFilter?: ComputedRef<string> | Ref<string>
 }
 
 const sortComponentVersions = (versions: Set<string>) => {
@@ -40,7 +40,7 @@ const sortTaggedComponents = (items: Map<string, { versions: Set<string>; tag: s
         .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }))
 }
 
-export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: UseVulnDependencyInfoOptions) {
+export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, teamFilter }: UseVulnDependencyInfoOptions) {
     const allInstances = computed(() => {
         refreshCounter?.value
         return group.value.affected_versions?.flatMap(version => version.components) || []
@@ -50,26 +50,66 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
         return instance.finding_uuid || `${instance.project_uuid || ''}:${instance.component_uuid || ''}:${index}`
     }
 
-    const instanceTeams = computed(() => {
-        const teamsByInstance = new Map<string, string[]>()
-        allInstances.value.forEach((instance, index) => {
-            teamsByInstance.set(
-                getInstanceTeamKey(instance, index),
-                getClosestAffectedTeamsForInstance(instance, teamMapping.value || {}),
+    const instanceOwnership = computed(() => {
+        const mapping = teamMapping.value || {}
+        return allInstances.value.map((instance, index) => {
+            const directMapping = findTeamMappingEntryForComponent(
+                instance.component_name,
+                mapping,
+                instance.component_group,
+                'component_group' in instance,
+                instance.component_purl,
             )
+            const directTeam = directMapping?.tags[0] || ''
+            return {
+                instance,
+                key: getInstanceTeamKey(instance, index),
+                directTeam,
+                teams: directTeam
+                    ? [directTeam]
+                    : getAffectedTeamsFromPaths(instance.dependency_chains, mapping),
+            }
         })
-        return teamsByInstance
     })
 
+    const instanceTeams = computed(() => {
+        return new Map(instanceOwnership.value.map(ownership => [
+            ownership.key,
+            ownership.teams,
+        ]))
+    })
+
+    const activeTeam = computed(() => {
+        const requested = String(teamFilter?.value || '').trim()
+        if (!requested) return ''
+        return resolveCanonicalTeamName(teamMapping.value, requested)
+    })
+
+    const visibleOwnership = computed(() => {
+        const active = activeTeam.value.toLocaleLowerCase()
+        if (!active) return instanceOwnership.value
+        return instanceOwnership.value.filter(ownership =>
+            ownership.teams.some(team => team.toLocaleLowerCase() === active)
+        )
+    })
+
+    const visibleInstances = computed(() => {
+        return visibleOwnership.value.map(ownership => ownership.instance)
+    })
+
+    const visibleInstanceSet = computed(() => new Set(visibleInstances.value))
+
     const effectiveTags = computed(() => {
-        const derived = getClosestAffectedTeamsForInstances(allInstances.value, teamMapping.value || {})
+        const derived = Array.from(new Set(
+            instanceOwnership.value.flatMap(ownership => ownership.teams),
+        ))
         if (derived.length > 0) return derived
         return normalizeLegacyTags(group.value.tags, teamMapping.value)
     })
 
     const dependencyRelationship = computed<DependencyRelationship>(() => {
         const flags = new Set(
-            allInstances.value
+            visibleInstances.value
                 .map(instance => instance.is_direct_dependency)
                 .filter((value): value is boolean => typeof value === 'boolean'),
         )
@@ -81,6 +121,9 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
 
     const sortedAffectedProjectVersions = computed(() => {
         const versions = (group.value.affected_versions || [])
+            .filter(version => !activeTeam.value || (version.components || []).some(component =>
+                visibleInstanceSet.value.has(component)
+            ))
             .map(version => version.project_version)
             .filter((version): version is string => !!version)
 
@@ -89,7 +132,7 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
 
     const uniqueComponents = computed(() => {
         const components = new Map<string, Set<string>>()
-        for (const instance of allInstances.value) {
+        for (const instance of visibleInstances.value) {
             if (!components.has(instance.component_name)) {
                 components.set(instance.component_name, new Set())
             }
@@ -104,28 +147,16 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
 
     const affectedTaggedComponents = computed(() => {
         const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
-        for (const version of group.value.affected_versions || []) {
-            for (const component of version.components || []) {
-                const name = component.component_name || 'Unknown'
-                const mappingEntry = findTeamMappingEntryForComponent(
-                    name,
-                    teamMapping.value || {},
-                    component.component_group,
-                    'component_group' in component,
-                    component.component_purl,
-                )
-                if (!mappingEntry) continue
+        for (const { instance: component, directTeam } of visibleOwnership.value) {
+            const name = component.component_name || 'Unknown'
+            if (!directTeam) continue
 
-                const tag = mappingEntry.tags[0]
-                if (!tag) continue
+            if (!taggedComponents.has(name)) {
+                taggedComponents.set(name, { versions: new Set(), tag: directTeam })
+            }
 
-                if (!taggedComponents.has(name)) {
-                    taggedComponents.set(name, { versions: new Set(), tag })
-                }
-
-                if (component.component_version) {
-                    taggedComponents.get(name)?.versions.add(component.component_version)
-                }
+            if (component.component_version) {
+                taggedComponents.get(name)?.versions.add(component.component_version)
             }
         }
 
@@ -134,7 +165,7 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
 
     const triggeringTaggedComponents = computed(() => {
         const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
-        const paths = allInstances.value.flatMap(instance => instance.dependency_chains || [])
+        const paths = visibleInstances.value.flatMap(instance => instance.dependency_chains || [])
         const selectedPaths = selectRepresentativePaths(paths, teamMapping.value, 100)
 
         for (const selectedPath of selectedPaths) {
@@ -148,19 +179,12 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
             }
         }
 
-        for (const instance of allInstances.value) {
+        for (const { instance, directTeam } of visibleOwnership.value) {
             const name = instance.component_name || 'Unknown'
-            const directTag = getPrimaryTeamForComponent(
-                name,
-                teamMapping.value,
-                instance.component_group,
-                'component_group' in instance,
-                instance.component_purl,
-            )
-            if (!directTag) continue
+            if (!directTeam) continue
 
             if (!taggedComponents.has(name)) {
-                taggedComponents.set(name, { versions: new Set(), tag: directTag })
+                taggedComponents.set(name, { versions: new Set(), tag: directTeam })
             }
 
             if (instance.component_version) {
@@ -175,6 +199,8 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter }: Us
 
     return {
         allInstances,
+        visibleInstances,
+        activeTeam,
         getInstanceTeamKey,
         instanceTeams,
         effectiveTags,

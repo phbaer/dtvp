@@ -59,6 +59,119 @@ FETCH_URL: https://example.com/advisory
     ]
 
 
+def test_parse_fetch_directives_supports_local_repository_clone():
+    directives = web_research.parse_fetch_directives(
+        "CLONE_REPOSITORY: https://github.com/keycloak/keycloak.git "
+        "| focus=netty resolver call path | ref=release/26.2"
+    )
+
+    assert directives == [
+        {
+            "type": "repository",
+            "target": "https://github.com/keycloak/keycloak.git",
+            "focus": "netty resolver call path",
+            "revision": "release/26.2",
+        }
+    ]
+    assert web_research.has_fetch_directives(
+        "CLONE_REPOSITORY: https://github.com/keycloak/keycloak.git | netty"
+    )
+    assert web_research._strip_fetch_lines(
+        "CLONE_REPOSITORY: https://github.com/keycloak/keycloak.git | netty\n"
+        "REACHABLE: UNCERTAIN"
+    ) == "REACHABLE: UNCERTAIN"
+
+
+def test_research_tool_schema_exposes_bounded_repository_clone():
+    tools = {
+        schema["function"]["name"]: schema["function"]
+        for schema in web_research.research_tool_schemas()
+    }
+
+    clone = tools["clone_repository"]
+    assert clone["parameters"]["required"] == ["repository_url", "focus"]
+    assert "never executed" in clone["description"]
+
+
+def test_research_tool_schema_hides_repository_clone_when_disabled(monkeypatch):
+    monkeypatch.setenv("AGENTYZER_RESEARCH_CLONE_ENABLED", "false")
+
+    names = {
+        schema["function"]["name"]
+        for schema in web_research.research_tool_schemas()
+    }
+
+    assert "clone_repository" not in names
+
+
+def test_fulfill_repository_clone_uses_focus_revision_and_shared_budget(monkeypatch):
+    calls = []
+
+    async def fake_clone(repository_url, **kwargs):
+        calls.append((repository_url, kwargs))
+        return {
+            "repository_url": repository_url,
+            "ok": True,
+            "text": "Repository source evidence",
+            "error": None,
+        }
+
+    monkeypatch.setattr(web_research, "clone_and_inspect_repository", fake_clone)
+    budget = web_research.ResearchBudget(repository_clones_remaining=1)
+    directive = {
+        "type": "repository",
+        "target": "https://github.com/keycloak/keycloak.git",
+        "focus": "Netty resolver",
+        "revision": "release/26.2",
+    }
+
+    first = asyncio.run(
+        web_research.fulfill_directives(
+            [directive],
+            vulnerable_component="io.netty:netty-resolver-dns",
+            research_budget=budget,
+        )
+    )
+    second = asyncio.run(
+        web_research.fulfill_directives([directive], research_budget=budget)
+    )
+
+    assert "Repository inspection" in first
+    assert calls == [
+        (
+            "https://github.com/keycloak/keycloak.git",
+            {
+                "focus": "Netty resolver",
+                "revision": "release/26.2",
+                "vulnerable_component": "io.netty:netty-resolver-dns",
+            },
+        )
+    ]
+    assert "per-analysis repository clone limit reached" in second
+
+
+def test_native_clone_tool_call_preserves_repository_inspection_arguments():
+    directive = web_research._tool_call_to_directive(
+        {
+            "id": "clone_1",
+            "function": {
+                "name": "clone_repository",
+                "arguments": (
+                    '{"repository_url":"https://github.com/keycloak/keycloak.git",'
+                    '"focus":"Netty resolver","revision":"release/26.2"}'
+                ),
+            },
+        }
+    )
+
+    assert directive == {
+        "type": "repository",
+        "target": "https://github.com/keycloak/keycloak.git",
+        "focus": "Netty resolver",
+        "revision": "release/26.2",
+    }
+
+
 def test_search_web_extracts_duckduckgo_lite_results(monkeypatch):
     html = """
 <html><body>
@@ -192,7 +305,9 @@ def test_generate_with_research_fulfills_inline_validation_request(monkeypatch):
                 "results were checked. Validate: review dependency tree."
             )
 
-    async def fake_fulfill(directives, vulnerable_component=""):
+    async def fake_fulfill(
+        directives, vulnerable_component="", research_budget=None
+    ):
         assert directives == [
             {
                 "type": "search",

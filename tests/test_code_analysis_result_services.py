@@ -188,6 +188,49 @@ def test_code_analysis_result_metadata_applies_unfiltered_limit_in_sql(
     assert decode_calls == 4
 
 
+def test_code_analysis_result_metadata_filters_aliases_components_and_pages(tmp_path):
+    store = CodeAnalysisResultStore(
+        path_provider=lambda: str(tmp_path / "code_analysis_results.sqlite")
+    )
+
+    def record(run_id, vuln_id, component_name, minute):
+        store.record_queue_item_result(
+            SimpleNamespace(
+                queue_id=run_id,
+                project_name="ExampleApp",
+                vuln_id=vuln_id,
+                component_name=component_name,
+                source="manual",
+                submitted_at=f"2026-01-03T03:{minute:02d}:00+00:00",
+                finished_at=f"2026-01-03T03:{minute:02d}:30+00:00",
+                result=None,
+            ),
+            {"assessment": {"verdict": "Not Affected"}},
+        )
+
+    record("primary-service", "CVE-2026-PAGED", "owned-service", 1)
+    record("alias-service", "GHSA-PAGED-ALIAS", "owned-service", 2)
+    record("primary-worker", "CVE-2026-PAGED", "owned-worker", 3)
+    record("other-vulnerability", "CVE-2026-OTHER", "owned-service", 4)
+
+    first_page = store.list_result_metadata(
+        project_name="ExampleApp",
+        vuln_ids=["CVE-2026-PAGED", "GHSA-PAGED-ALIAS"],
+        component_names=["owned-service"],
+        limit=1,
+    )
+    second_page = store.list_result_metadata(
+        project_name="ExampleApp",
+        vuln_ids=["CVE-2026-PAGED", "GHSA-PAGED-ALIAS"],
+        component_names=["owned-service"],
+        limit=1,
+        offset=1,
+    )
+
+    assert [record["analysis_run_id"] for record in first_page] == ["alias-service"]
+    assert [record["analysis_run_id"] for record in second_page] == ["primary-service"]
+
+
 def test_code_analysis_result_store_backfills_rescore_metadata_version(tmp_path):
     database_path = tmp_path / "code_analysis_results.sqlite"
     store = CodeAnalysisResultStore(path_provider=lambda: str(database_path))

@@ -34,7 +34,7 @@ def test_verdict_prompt_pins_uncertain_transitive_cases_to_probable_affected():
         "Current version affected + transitive path UNCERTAIN -> request source/search if not already fetched; then Probably Affected, not Not Affected."
         in prompt
     )
-    assert "request FETCH_SEARCH, FETCH_URL, or FETCH_SOURCE before final fields" in prompt
+    assert "request FETCH_SEARCH, FETCH_URL, FETCH_SOURCE, or a narrowly focused CLONE_REPOSITORY before final fields" in prompt
     assert (
         "Not Affected/exposure=none require affirmative exclusion for the assessed codebase"
         in prompt

@@ -26,7 +26,7 @@ The dashboard lists Dependency-Track projects, versions, classifiers, and review
 
 ![Project review](screenshots/project-view.png)
 
-The project review page is the main vulnerability workflow. It combines grouped vulnerability cards, lifecycle state, team ownership, assessment controls, dependency-path context, and code-analysis shortcuts.
+The project review page is the main vulnerability workflow. It combines grouped vulnerability cards, lifecycle state, team ownership, assessment controls, dependency-path context, and code-analysis shortcuts. Compact row badges and the opened card's single Next action guide identify the next useful analyst step. Once its destination tab is open, navigation disappears and the guide points to the concrete control in that tab. A Team filter also scopes the opened card's code evidence and assessment workflow, so another team's saved run or draft does not drive the selected team's next action.
 
 ### Lifecycle Badges
 
@@ -36,11 +36,11 @@ The lifecycle view shows the project list with open, incomplete, inconsistent, n
 
 ## Vulnerability Review Details
 
-### Vulnerability Card Overview
+### Vulnerability Card Context
 
 ![Vulnerability card overview](screenshots/vuln-card-overview.png)
 
-The Overview tab starts with the advisory description and references, then shows affected components, team ownership, and dependency context.
+The Context tab uses four clearly separated sections in a fixed reading order: advisory description and references; project-version, team, finding, and exact component scope; dependency context; and existing assessment evidence. Exact affected components remain visible for both analysts and reviewers and follow the active Team scope.
 
 ### Assignee Chips And Approval
 
@@ -70,13 +70,13 @@ The expanded assessment form supports assigning users with known-user suggestion
 
 ![Review context](screenshots/vuln-card-review-context.png)
 
-The Review tab keeps the global or team assessment form together with persisted review context. The reviewer-only Global subview also contains CVSS and rescoring so the score and assessment can be evaluated together. Ticket references are marked required only when the current rescored severity is High or Critical.
+The Assessment tab uses the same section hierarchy as Context and Code Evidence: first confirm the Global or team scope, then complete the decision and rationale. With a Team filter, analysts see only that team's subview; reviewers start focused on it and can explicitly reveal Global and all-team controls. Team subviews present the latest scoped analyzer result as an optional proposal, while saved or manually edited team assessments remain authoritative. The reviewer-only Global subview summarizes the worst effective state across team decisions and analyzer fallbacks, and also contains CVSS and rescoring so the score and assessment can be evaluated together. Ticket references are marked required only when the current rescored severity is High or Critical.
 
 ### Inconsistent Assessment
 
 ![Inconsistent assessment](screenshots/inconsistent-assessment.png)
 
-The Assessments tab shows conflicting team assessment blocks so reviewers can compare states and resolve the mismatch.
+Existing assessment evidence in Context shows conflicting team blocks so reviewers can compare states and resolve the mismatch in Assessment.
 
 ### Team Mapping
 
@@ -94,7 +94,7 @@ Rescored vulnerabilities show the original CVSS score, the contextual score, and
 
 ![Global review CVSS and rescoring](screenshots/vuln-card-cvss-rescoring.png)
 
-The Global subview of Review contains the vector editor, visual calculator entry point, current vector comparison, tmrescore reasoning, and analyzer CVSS notes when present.
+The Global subview of Assessment contains the vector editor, visual calculator entry point, current vector comparison, tmrescore reasoning, and analyzer CVSS notes when present.
 
 ### CVSS Calculator
 
@@ -157,13 +157,17 @@ The configured model is reported by vscorer and shown read-only in DTVP.
 
 ![Code analysis running](screenshots/code-analysis-running.png)
 
-Expanded vulnerability cards show inline code-analysis state, queue position, active progress, and the current pipeline activity.
+The Code Evidence tab shows inline code-analysis state, queue position, active progress, and the current pipeline activity.
 
 ### Inline Scan Result
 
 ![Code analysis result](screenshots/code-analysis-result.png)
 
-Completed inline results show the generated assessment, confidence, CVSS adjustment, and pipeline evidence that can be applied back to the assessment workflow.
+Analysts start with the target-oriented runs section; reviewers start with the Combined assessment and its worst latest verdict plus component-level rationale. The expandable new-analysis control sits inside the runs section above a semantic target list, whose rows keep View, Use as draft, Earlier runs, and Delete actions. Selecting a row opens one indented detail region directly below it with the dismissible outcome, summary, rationale, follow-up context, and all peer disclosures. Assessment draft, benchmark, component results, ticket, version coverage, LLM conversation, and pipeline evidence start collapsed. Derivative benchmark records do not displace a target's latest analysis. Combined preview and draft preparation share the same worst-state ordering, with analyzer CVSS used only as a same-state tie-breaker. When a Team filter is active, history and availability badges include only compatible team-targeted runs (including configured aliases) plus legacy runs for the visible components; combining results stages only the filtered team's draft.
+
+Opening LLM Conversation provides a taller vertically resizable timeline with an optional near-full-screen dialog. A summary above the timeline reports Local-to-LLM and LLM-to-Local message/token totals, captured and per-turn timing, inferred inter-turn local/tool time, retries, context adaptation, model/provider coverage, and requested-versus-locally-executed tool statistics. Every captured turn separates the Agentyzer-assembled request, tool exchange, and raw model response with explicit direction labels and copy actions. Tool activity also identifies bounded local dependent-repository inspections and their returned evidence separately from web/package fetches. If no trace was persisted, configured prompt values remain visibly marked as a non-captured fallback.
+The Additional guidance used panel lists the exact component/reviewer guidance found in persisted model requests and the turn numbers that received it. Guidance saved on the analyzer request but absent from the trace is marked as not verifiable; storage-policy redaction is explicit rather than being mistaken for an empty guidance configuration. Follow-up runs resolve static guidance against their selected target component as well as initial runs.
+Each request, tool, and response stage is independently collapsible. Requests and tool evidence start closed while model responses remain open; Expand all and Collapse all switch the complete conversation between audit and overview modes. Expanded stage bodies are bounded, keyboard-focusable scroll regions so unusually long prompts, traces, and answers do not obscure the rest of the conversation. Inline and nested regions pass unused wheel scrolling to the surrounding detail view when they have no overflow or reach a boundary; only the full-screen dialog contains overscroll.
 
 ### Code Analysis Dashboard
 

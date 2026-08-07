@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
     deleteResult: vi.fn(),
     getPrompts: vi.fn(),
     benchmarkResult: vi.fn(),
+    fetchResult: vi.fn(),
+    getCachedResult: vi.fn(),
 }))
 
 const clipboardWriteText = vi.fn()
@@ -35,8 +37,8 @@ vi.mock('../../lib/analysisQueueStore', () => ({
         submit: mocks.submit,
         submitFollowUp: mocks.submitFollowUp,
         cancel: mocks.cancel,
-        fetchResult: vi.fn(),
-        getCachedResult: vi.fn(),
+        fetchResult: mocks.fetchResult,
+        getCachedResult: mocks.getCachedResult,
     },
 }))
 
@@ -59,7 +61,15 @@ const loadHistory = async (_wrapper: ReturnType<typeof mount>) => {
 
 const viewHistoryRun = async (wrapper: ReturnType<typeof mount>, runId: string) => {
     await loadHistory(wrapper)
-    await wrapper.get(`[data-testid="analysis-history-row"][data-run-id="${runId}"]`).trigger('click')
+    const row = wrapper.get(`[data-testid="analysis-history-row"][data-run-id="${runId}"]`)
+    await row.findAll('button').find(button => button.text().trim() === 'View')?.trigger('click')
+    await flushPromises()
+}
+
+const expandDisclosure = async (wrapper: ReturnType<typeof mount>, label: string) => {
+    const button = wrapper.findAll('button').find(candidate => candidate.text().includes(label))
+    expect(button, `Expected ${label} disclosure`).toBeDefined()
+    await button?.trigger('click')
     await flushPromises()
 }
 
@@ -133,10 +143,381 @@ describe('CodeAnalysisPanel', () => {
         expect(mocks.listResults).toHaveBeenCalledWith(
             'ExampleApp',
             'CVE-2026-0001',
-            { limit: 20 },
+            {
+                component_name: ['owned-service'],
+                vuln_alias: [],
+                limit: 500,
+                offset: 0,
+            },
         )
         expect(mocks.getResult).not.toHaveBeenCalled()
         expect(wrapper.text()).toContain('Automatic and manual assessments available')
+    })
+
+    it('requests aliases and shows every relevant run grouped by component', async () => {
+        const records = Array.from({ length: 6 }, (_, index) => ({
+            analysis_run_id: `run-${index}`,
+            queue_id: `run-${index}`,
+            vuln_id: index % 2 ? 'GHSA-ALIAS' : 'CVE-2026-0001',
+            component_name: index < 4 ? 'owned-service' : 'owned-worker',
+            project_name: 'ExampleApp',
+            source: 'manual',
+            summary: { affected: false, verdict: 'Not Affected' },
+            finished_at: `2026-07-06T12:0${index}:00Z`,
+        }))
+        records[5].source = 'follow-up'
+        Object.assign(records[5], { parent_run_id: 'run-4' })
+        mocks.listResults.mockResolvedValue(records)
+        mocks.getResult.mockImplementation(async (runId: string) => {
+            const record = records.find(candidate => candidate.analysis_run_id === runId)
+            return record ? { ...record, result: makeAnalysisResult(`Outcome for ${runId}`) } : undefined
+        })
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                vulnAliases: ['GHSA-ALIAS'],
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service', 'owned-worker'],
+                componentTeams: {
+                    'owned-service': 'Platform',
+                    'owned-worker': 'Runtime',
+                },
+            },
+        })
+        await flushPromises()
+
+        expect(mocks.listResults).toHaveBeenCalledWith(
+            'ExampleApp',
+            'CVE-2026-0001',
+            {
+                component_name: ['owned-service', 'owned-worker'],
+                vuln_alias: ['GHSA-ALIAS'],
+                limit: 500,
+                offset: 0,
+            },
+        )
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(2)
+        expect(wrapper.findAll('[data-testid="analysis-history-component-group"]')).toHaveLength(2)
+        const earlierButtons = wrapper.findAll('button').filter(button => button.text().includes('Earlier runs'))
+        expect(earlierButtons).toHaveLength(2)
+        for (const button of earlierButtons) await button.trigger('click')
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(6)
+        expect(wrapper.text()).toContain('Follow-up chain (1)')
+        expect(wrapper.text()).toContain('Independent runs (3)')
+
+        const earlierRow = wrapper.get('[data-testid="analysis-history-row"][data-run-id="run-0"]')
+        await earlierRow.findAll('button').find(button => button.text().trim() === 'View')?.trigger('click')
+        await flushPromises()
+        expect(earlierRow.element.nextElementSibling?.getAttribute('data-testid')).toBe('selected-analysis-run-details')
+        expect(earlierRow.element.nextElementSibling?.querySelector('[data-testid="inline-analysis-outcome"]')).not.toBeNull()
+        expect(earlierRow.element.nextElementSibling?.querySelector('[data-testid="selected-analysis-supporting-evidence"]')).not.toBeNull()
+        expect(earlierRow.text()).toContain('Hide')
+        await earlierRow.findAll('button').find(button => button.text().trim() === 'Hide')?.trigger('click')
+        await flushPromises()
+        expect(earlierRow.element.nextElementSibling?.getAttribute('data-testid')).not.toBe('selected-analysis-run-details')
+
+        expect(wrapper.text()).toContain('6 runs')
+        expect(wrapper.find('[data-testid="reusable-analysis-banner"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="analysis-runs-section"]').text()).toContain('Analysis runs by target')
+        expect(wrapper.get('[data-testid="combined-analysis-assessment"]').text()).toContain('Combined assessment')
+        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeUndefined()
+    })
+
+    it('offers the latest reusable result when a newer benchmark record exists', async () => {
+        mocks.listResults.mockResolvedValue([
+            {
+                analysis_run_id: 'benchmark-newest',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'owned-service',
+                project_name: 'ExampleApp',
+                source: 'benchmark',
+                status: 'completed',
+                summary: { verdict: 'Benchmark' },
+                finished_at: '2026-07-06T13:00:00Z',
+            },
+            {
+                analysis_run_id: 'analysis-reusable',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'owned-worker',
+                project_name: 'ExampleApp',
+                source: 'manual',
+                status: 'completed',
+                summary: { verdict: 'Not Affected' },
+                finished_at: '2026-07-06T12:00:00Z',
+            },
+        ])
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service', 'owned-worker'],
+            },
+        })
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="reusable-analysis-banner"]').exists()).toBe(false)
+        expect(wrapper.get('[data-component="owned-worker"]').text()).toContain('Not Affected')
+        expect(wrapper.get('[data-testid="combined-analysis-assessment"]').text()).toContain('owned-worker')
+        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeUndefined()
+    })
+
+    it('offers an opened completed queue result as the combined draft while history persistence catches up', async () => {
+        const queueResult = makeAnalysisResult('Fresh completed queue result')
+        mocks.queueItems.value = [{
+            queue_id: 'queue-completed',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'owned-service',
+            project_name: 'ExampleApp',
+            submitted_by: 'tester',
+            submitted_at: '2026-07-06T12:00:00Z',
+            finished_at: '2026-07-06T12:01:00Z',
+            status: 'completed',
+            position: 0,
+        }]
+        mocks.fetchResult.mockResolvedValue(queueResult)
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service'],
+                isReviewer: true,
+            },
+        })
+        await flushPromises()
+
+        await wrapper.findAll('button').find(button => button.text().trim() === 'View')?.trigger('click')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="inline-analysis-outcome"]').text()).toContain('Fresh completed queue result')
+        expect(wrapper.get('[data-testid="combined-analysis-assessment"]').text()).toContain('owned-service')
+        expect(wrapper.find('[data-testid="apply-single-analysis-result"]').exists()).toBe(true)
+        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeUndefined()
+        expect(wrapper.get('[data-testid="combined-analysis-assessment"]').classes()).toContain('order-2')
+        expect(wrapper.get('[data-testid="analysis-runs-section"]').classes()).toContain('order-3')
+        expect(wrapper.get('[data-testid="analysis-runs-section"]').element.contains(
+            wrapper.get('[data-testid="new-analysis-section"]').element,
+        )).toBe(true)
+        expect(wrapper.get('[data-testid="combined-assessment-preview"]').text()).toContain('Combined rationale')
+    })
+
+    it('uses the mapped worst assessment in the combined preview even when a safer result has a higher score', async () => {
+        const safer = makeAnalysisResult('Worker is not reachable')
+        ;(safer.assessment as any).adjusted_cvss = {
+            original_score: 9.8,
+            adjusted_score: 9.8,
+            adjusted_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+            reasons: [],
+            summary: 'High score from the safer run.',
+            version_affected: true,
+        }
+        const uncertain = makeAnalysisResult('Service may be reachable')
+        uncertain.assessment.verdict = 'Probably Affected'
+        uncertain.assessment.exposure = 'possibly reachable'
+        uncertain.assessment.reasoning = 'A runtime guard could not be confirmed.'
+        ;(uncertain.assessment as any).adjusted_cvss = {
+            original_score: 6.4,
+            adjusted_score: 6.4,
+            adjusted_vector: 'CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L',
+            reasons: [],
+            summary: 'Score from the worse run.',
+            version_affected: true,
+        }
+        mocks.listResults.mockResolvedValue([
+            {
+                analysis_run_id: 'run-safer',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'owned-worker',
+                project_name: 'ExampleApp',
+                source: 'automatic',
+                summary: { affected: false, verdict: 'Not Affected' },
+                result: safer,
+                finished_at: '2026-07-06T12:00:00Z',
+            },
+            {
+                analysis_run_id: 'run-uncertain',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'owned-service',
+                project_name: 'ExampleApp',
+                source: 'automatic',
+                summary: { affected: false, verdict: 'Probably Affected' },
+                result: uncertain,
+                finished_at: '2026-07-06T12:00:00Z',
+            },
+        ])
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service', 'owned-worker'],
+            },
+        })
+        await flushPromises()
+
+        const preview = wrapper.get('[data-testid="combined-assessment-preview"]')
+        expect(preview.text()).toContain('Probably Affected')
+        expect(preview.text()).toContain('Worst-case verdict: Probably Affected (owned-service)')
+        expect(preview.classes()).toContain('border-amber-500/70')
+        expect((wrapper.vm as any).combinedAssessmentPreview.assessment.adjusted_cvss.adjusted_score).toBe(6.4)
+    })
+
+    it('filters persisted results by explicit target team while retaining legacy component-scoped runs', async () => {
+        mocks.listResults.mockResolvedValue([
+            {
+                analysis_run_id: 'security-run',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'shared-service',
+                project_name: 'ExampleApp',
+                source: 'automatic',
+                status: 'completed',
+                context_summary: { target_team: 'Security' },
+                summary: { verdict: 'Not Affected' },
+                result: makeAnalysisResult('Security assessment'),
+            },
+            {
+                analysis_run_id: 'runtime-run',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'shared-service',
+                project_name: 'ExampleApp',
+                source: 'manual',
+                status: 'completed',
+                context_summary: { target_team: 'Runtime' },
+                summary: { verdict: 'Affected' },
+            },
+            {
+                analysis_run_id: 'security-alias-run',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'shared-service',
+                project_name: 'ExampleApp',
+                source: 'manual',
+                status: 'completed',
+                context_summary: { target_team: 'Sec Alias' },
+                summary: { verdict: 'Uncertain' },
+            },
+            {
+                analysis_run_id: 'legacy-run',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'shared-service',
+                project_name: 'ExampleApp',
+                source: 'manual',
+                status: 'completed',
+                summary: { verdict: 'Uncertain' },
+            },
+        ])
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['shared-service'],
+                componentTeams: { 'shared-service': 'Security' },
+                teamScope: 'Security',
+                teamScopeAliases: ['Sec Alias'],
+                assessmentStatus: 'mixed',
+            },
+        })
+        await flushPromises()
+
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(1)
+        await wrapper.findAll('button').find(button => button.text().includes('Earlier runs'))?.trigger('click')
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(3)
+        expect(wrapper.find('[data-run-id="security-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-run-id="security-alias-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-run-id="legacy-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-run-id="runtime-run"]').exists()).toBe(false)
+        expect(wrapper.text()).toContain('Automatic and manual assessments available')
+        expect(wrapper.emitted('scope-results-change')?.at(-1)).toEqual([true])
+
+        await viewHistoryRun(wrapper, 'security-run')
+        expect(wrapper.find('[data-testid="inline-analysis-outcome"]').exists()).toBe(true)
+
+        await wrapper.setProps({ teamScope: 'Runtime', teamScopeAliases: [] })
+        await flushPromises()
+
+        expect(wrapper.find('[data-testid="inline-analysis-outcome"]').exists()).toBe(false)
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(1)
+        await wrapper.findAll('button').find(button => button.text().includes('Earlier runs'))?.trigger('click')
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(2)
+        expect(wrapper.find('[data-run-id="security-run"]').exists()).toBe(false)
+        expect(wrapper.find('[data-run-id="security-alias-run"]').exists()).toBe(false)
+        expect(wrapper.find('[data-run-id="runtime-run"]').exists()).toBe(true)
+        expect(wrapper.find('[data-run-id="legacy-run"]').exists()).toBe(true)
+    })
+
+    it('does not expose another team\'s code-assessment availability in a scoped view', async () => {
+        mocks.listResults.mockResolvedValue([{
+            analysis_run_id: 'runtime-only',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'shared-service',
+            project_name: 'ExampleApp',
+            source: 'automatic',
+            status: 'completed',
+            context_summary: { target_team: 'Runtime' },
+            summary: { verdict: 'Affected' },
+        }])
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['shared-service'],
+                componentTeams: { 'shared-service': 'Security' },
+                teamScope: 'Security',
+                assessmentStatus: 'auto',
+            },
+        })
+        await flushPromises()
+
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(0)
+        expect(wrapper.text()).not.toContain('Automatic assessment available')
+        expect(wrapper.emitted('scope-results-change')?.at(-1)).toEqual([false])
+        expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeDefined()
+    })
+
+    it('ignores history returned for an obsolete component scope', async () => {
+        let resolveObsolete: (records: any[]) => void = () => {}
+        mocks.listResults
+            .mockReturnValueOnce(new Promise(resolve => {
+                resolveObsolete = resolve
+            }))
+            .mockResolvedValueOnce([{
+                analysis_run_id: 'run-current',
+                queue_id: 'run-current',
+                vuln_id: 'CVE-2026-0001',
+                component_name: 'current-service',
+                project_name: 'ExampleApp',
+                source: 'manual',
+                summary: { affected: false, verdict: 'Not Affected' },
+                finished_at: '2026-07-06T12:00:00Z',
+            }])
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['obsolete-service'],
+            },
+        })
+        await wrapper.setProps({ componentNames: ['current-service'] })
+        await flushPromises()
+
+        resolveObsolete([{
+            analysis_run_id: 'run-obsolete',
+            queue_id: 'run-obsolete',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'obsolete-service',
+            project_name: 'ExampleApp',
+            source: 'manual',
+            summary: { affected: false, verdict: 'Not Affected' },
+            finished_at: '2026-07-06T11:00:00Z',
+        }])
+        await flushPromises()
+
+        expect(wrapper.text()).toContain('current-service')
+        expect(wrapper.text()).not.toContain('obsolete-service')
     })
 
     it('reconciles selected components when the vulnerability target list changes', async () => {
@@ -273,7 +654,7 @@ describe('CodeAnalysisPanel', () => {
 
         await flushPromises()
         expect(wrapper.findAll('button').some(button => button.text().trim() === 'Benchmark')).toBe(false)
-        await wrapper.findAll('button').find(button => button.text().trim() === 'Analyze')?.trigger('click')
+        await wrapper.get('[data-testid="code-analysis-start"]').trigger('click')
         await flushPromises()
         await flushPromises()
 
@@ -298,6 +679,7 @@ describe('CodeAnalysisPanel', () => {
         })
         expect(wrapper.text()).toContain('Agreement 4/5')
         expect(wrapper.text()).toContain('Good match')
+        await expandDisclosure(wrapper, 'Assessment Benchmark')
         expect(wrapper.text()).toContain('Agentyzer probabilistic')
         expect(wrapper.text()).toContain('judge-model')
         expect(wrapper.text()).toContain('Existing Assessment')
@@ -324,39 +706,48 @@ describe('CodeAnalysisPanel', () => {
         expect(benchmarkFinding.text()).toContain('Aligned')
         expect(benchmarkFinding.find('svg').exists()).toBe(true)
 
-        const decision = wrapper.get('[data-testid="assessment-decision"]')
-        const summary = wrapper.get('[data-testid="assessment-summary"]')
-        expect(wrapper.html().indexOf('data-testid="assessment-decision"')).toBeLessThan(
-            wrapper.html().indexOf('data-testid="assessment-summary"'),
-        )
-        expect(decision.text()).toContain('Evidence Quality')
-        expect(decision.text()).not.toContain('Follow-up Question')
-        expect(summary.text()).toContain('Follow-up Question')
-        expect(summary.text()).not.toContain('Evidence Quality')
-        expect(wrapper.get('[data-testid="assessment-summary-body"]').element.parentElement).toBe(summary.element)
-        expect(wrapper.get('[data-testid="assessment-draft-body"]').element.parentElement).toBe(
-            wrapper.get('[data-testid="assessment-draft"]').element,
-        )
+        const decision = wrapper.get('[data-testid="inline-analysis-outcome"]')
+        expect(decision.text()).toContain('Run outcome')
+        expect(decision.text()).toContain('Rationale')
+        expect(decision.text()).toContain('No reachable vulnerable call path was found.')
+        expect(decision.text()).toContain('Version uncertain')
+        expect(decision.text()).toContain('Ask a follow-up')
+        expect(wrapper.get('[data-testid="selected-analysis-supporting-evidence"]').element.closest('[data-testid="analysis-runs-section"]')).not.toBeNull()
+
+        expect(wrapper.find('[data-testid="assessment-draft-body"]').exists()).toBe(false)
         expect(wrapper.get('[data-testid="assessment-benchmark-body"]').element.parentElement).toBe(
             wrapper.get('[data-testid="assessment-benchmark"]').element,
         )
+        expect(wrapper.text()).not.toContain('Analysis artifacts')
 
         const disclosureButtons = wrapper.findAll('button[aria-expanded]')
-        const summaryIndex = disclosureButtons.findIndex(button => button.text().includes('Summary'))
         const draftIndex = disclosureButtons.findIndex(button => button.text().includes('Assessment Draft'))
         const benchmarkIndex = disclosureButtons.findIndex(button => button.text().includes('Assessment Benchmark'))
-        expect(summaryIndex).toBeGreaterThanOrEqual(0)
-        expect(draftIndex).toBeGreaterThan(summaryIndex)
+        const coverageIndex = disclosureButtons.findIndex(button => button.text().includes('Version Coverage'))
+        const conversationIndex = disclosureButtons.findIndex(button => button.text().includes('LLM Conversation'))
+        const pipelineIndex = disclosureButtons.findIndex(button => button.text().includes('Pipeline Evidence'))
+        expect(draftIndex).toBeGreaterThanOrEqual(0)
         expect(benchmarkIndex).toBeGreaterThan(draftIndex)
-        expect(disclosureButtons[summaryIndex].attributes('aria-expanded')).toBe('true')
-        expect(disclosureButtons[draftIndex].attributes('aria-expanded')).toBe('true')
+        expect(coverageIndex).toBeGreaterThan(benchmarkIndex)
+        expect(conversationIndex).toBeGreaterThan(coverageIndex)
+        expect(pipelineIndex).toBeGreaterThan(conversationIndex)
+        expect(disclosureButtons[draftIndex].attributes('aria-expanded')).toBe('false')
         expect(disclosureButtons[benchmarkIndex].attributes('aria-expanded')).toBe('true')
+        expect(disclosureButtons[coverageIndex].attributes('aria-expanded')).toBe('false')
+        expect(disclosureButtons[conversationIndex].attributes('aria-expanded')).toBe('false')
+        expect(disclosureButtons[pipelineIndex].attributes('aria-expanded')).toBe('false')
 
         await disclosureButtons[draftIndex].trigger('click')
-        expect(disclosureButtons[draftIndex].attributes('aria-expanded')).toBe('false')
-        expect(disclosureButtons[summaryIndex].attributes('aria-expanded')).toBe('true')
+        expect(disclosureButtons[draftIndex].attributes('aria-expanded')).toBe('true')
+        expect(wrapper.get('[data-testid="assessment-draft-body"]').element.parentElement).toBe(
+            wrapper.get('[data-testid="assessment-draft"]').element,
+        )
         expect(disclosureButtons[benchmarkIndex].attributes('aria-expanded')).toBe('true')
         expect(wrapper.text()).toContain('Agreement 4/5')
+
+        await wrapper.get('[data-testid="hide-analysis-outcome"]').trigger('click')
+        expect(wrapper.find('[data-testid="inline-analysis-outcome"]').exists()).toBe(false)
+        expect(wrapper.find('[data-testid="selected-analysis-supporting-evidence"]').exists()).toBe(false)
     })
 
     it('does not offer a separate benchmark or load a comparison without an existing assessment', async () => {
@@ -426,7 +817,7 @@ describe('CodeAnalysisPanel', () => {
         expect(mocks.getPrompts).not.toHaveBeenCalled()
 
         await wrapper.find('#code-analysis-guidance').setValue('Also check upstream Keycloak exposure.')
-        await wrapper.findAll('button').find(button => button.text().includes('LLM Conversation'))?.trigger('click')
+        await wrapper.findAll('button').find(button => button.text().includes('Analyzer request context'))?.trigger('click')
         await flushPromises()
 
         expect(mocks.getPrompts).toHaveBeenCalledWith({
@@ -434,7 +825,7 @@ describe('CodeAnalysisPanel', () => {
             system_only: false,
         })
         expect(wrapper.text()).toContain('System prompt text')
-        expect(wrapper.text()).toContain('Additional request guidance')
+        expect(wrapper.text()).toContain('Guidance prepared for the next analyzer request')
         expect(wrapper.text()).toContain('TMRescore reviewer context.')
         expect(wrapper.text()).toContain('Also check upstream Keycloak exposure.')
     })
@@ -487,7 +878,10 @@ describe('CodeAnalysisPanel', () => {
                     model: 'mistral',
                     provider: 'openwebui',
                     status: 'completed',
-                    usage: { total_tokens: 18 },
+                    started_at: '2026-07-06T12:00:00.000Z',
+                    finished_at: '2026-07-06T12:00:02.000Z',
+                    request: { attempts: 2, context_adaptations: [{ type: 'compact' }] },
+                    usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
                     messages: [
                         { role: 'system', content: 'Actual system prompt sent to the model.' },
                         {
@@ -519,7 +913,9 @@ describe('CodeAnalysisPanel', () => {
                     model: 'mistral',
                     provider: 'openwebui',
                     status: 'completed',
-                    usage: { total_tokens: 7 },
+                    started_at: '2026-07-06T12:00:03.000Z',
+                    finished_at: '2026-07-06T12:00:04.500Z',
+                    usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
                     messages: [
                         { role: 'system', content: 'Research-capable system prompt.' },
                         { role: 'user', content: 'Now analyze the following:\nVULNERABILITY: CVE-2026-0001' },
@@ -536,7 +932,9 @@ describe('CodeAnalysisPanel', () => {
                     model: 'mistral',
                     provider: 'openwebui',
                     status: 'completed',
-                    usage: { total_tokens: 9 },
+                    started_at: '2026-07-06T12:00:05.000Z',
+                    finished_at: '2026-07-06T12:00:06.000Z',
+                    usage: { prompt_tokens: 6, completion_tokens: 3, total_tokens: 9 },
                     messages: [
                         { role: 'system', content: 'Research-capable system prompt.' },
                         { role: 'user', content: 'Now analyze the following:\nVULNERABILITY: CVE-2026-0001' },
@@ -553,6 +951,14 @@ describe('CodeAnalysisPanel', () => {
                                     arguments: '{"package":"org.keycloak:keycloak-core"}',
                                 },
                             },
+                            {
+                                id: 'call_clone',
+                                type: 'function',
+                                function: {
+                                    name: 'clone_repository',
+                                    arguments: '{"repository_url":"https://github.com/keycloak/keycloak.git","focus":"Netty resolver call path","revision":"release/26.2"}',
+                                },
+                            },
                         ],
                     },
                 },
@@ -560,7 +966,9 @@ describe('CodeAnalysisPanel', () => {
                     model: 'mistral',
                     provider: 'openwebui',
                     status: 'completed',
-                    usage: { total_tokens: 11 },
+                    started_at: '2026-07-06T12:00:08.000Z',
+                    finished_at: '2026-07-06T12:00:10.000Z',
+                    usage: { prompt_tokens: 7, completion_tokens: 4, total_tokens: 11 },
                     messages: [
                         { role: 'system', content: 'Research-capable system prompt.' },
                         { role: 'user', content: 'Now analyze the following:\nVULNERABILITY: CVE-2026-0001' },
@@ -576,6 +984,14 @@ describe('CodeAnalysisPanel', () => {
                                         arguments: '{"package":"org.keycloak:keycloak-core"}',
                                     },
                                 },
+                                {
+                                    id: 'call_clone',
+                                    type: 'function',
+                                    function: {
+                                        name: 'clone_repository',
+                                        arguments: '{"repository_url":"https://github.com/keycloak/keycloak.git","focus":"Netty resolver call path","revision":"release/26.2"}',
+                                    },
+                                },
                             ],
                         },
                         {
@@ -587,6 +1003,16 @@ describe('CodeAnalysisPanel', () => {
                                 'Registry metadata for Keycloak core.',
                             ].join('\n'),
                         },
+                        {
+                            role: 'tool',
+                            name: 'clone_repository',
+                            tool_call_id: 'call_clone',
+                            content: [
+                                '--- Repository inspection: https://github.com/keycloak/keycloak.git ---',
+                                'Revision: release/26.2 @ 123456789abc',
+                                'Local clone: created shallow clone; repository code was not executed',
+                            ].join('\n'),
+                        },
                     ],
                     response: { role: 'assistant', content: 'Final native-tool researched answer.' },
                 },
@@ -594,7 +1020,9 @@ describe('CodeAnalysisPanel', () => {
                     model: 'mistral',
                     provider: 'openwebui',
                     status: 'completed',
-                    usage: { total_tokens: 22 },
+                    started_at: '2026-07-06T12:00:11.000Z',
+                    finished_at: '2026-07-06T12:00:14.000Z',
+                    usage: { prompt_tokens: 15, completion_tokens: 7, total_tokens: 22 },
                     messages: [
                         { role: 'system', content: 'Research continuation system prompt.' },
                         {
@@ -649,6 +1077,23 @@ describe('CodeAnalysisPanel', () => {
 
         expect(mocks.getPrompts).not.toHaveBeenCalled()
         expect(wrapper.text()).toContain('Actual LLM conversation')
+        expect(wrapper.text()).toContain('Conversation summary')
+        expect(wrapper.get('[data-testid="llm-local-message-count"]').text()).toContain('13 messages')
+        expect(wrapper.get('[data-testid="llm-response-message-count"]').text()).toContain('5 responses')
+        expect(wrapper.get('[data-testid="llm-conversation-total-time"]').text()).toContain('14 s altogether')
+        expect(wrapper.get('[data-testid="llm-tool-usage-summary"]').text()).toContain('4 LLM requests · 5 local results')
+        expect(wrapper.get('[data-testid="llm-conversation-summary"]').text()).toContain('44 prompt tokens')
+        expect(wrapper.get('[data-testid="llm-conversation-summary"]').text()).toContain('23 completion tokens')
+        expect(wrapper.get('[data-testid="llm-conversation-summary"]').text()).toContain('Total tokens: 67')
+        expect(wrapper.get('[data-testid="llm-conversation-summary"]').text()).toContain('9.5 s LLM · 4.5 s inferred local/tool')
+        expect(wrapper.get('[data-testid="llm-conversation-summary"]').text()).toContain('Retries: 1')
+        expect(wrapper.get('[data-testid="llm-conversation-summary"]').text()).toContain('Context adaptations: 1')
+        expect(wrapper.get('[data-testid="llm-conversation-timing-table"]').findAll('tbody tr')).toHaveLength(5)
+        expect(wrapper.get('[data-testid="llm-guidance-evidence"]').text()).toContain('Additional guidance used')
+        expect(wrapper.get('[data-testid="llm-guidance-evidence"]').text()).toContain('Captured in model request')
+        expect(wrapper.get('[data-testid="llm-guidance-evidence"]').text()).toContain('owned-service')
+        expect(wrapper.get('[data-testid="llm-guidance-evidence"]').text()).toContain('Model request turn 1')
+        expect(wrapper.get('[data-testid="llm-guidance-evidence"]').text()).toContain('Per-component reviewer guidance.')
         expect(wrapper.text()).toContain('Version Coverage')
         expect(wrapper.text()).toContain('Checked Ref')
         expect(wrapper.text()).toContain('Product Version')
@@ -661,8 +1106,27 @@ describe('CodeAnalysisPanel', () => {
         expect(wrapper.text()).toContain('2.0.0')
         expect(wrapper.text()).toContain('unknown')
         expect(wrapper.text()).toContain('not affected')
-        expect(wrapper.text()).toContain('What was sent to the LLM')
-        expect(wrapper.text()).toContain('sent to LLM · static prompt')
+        expect(wrapper.text()).toContain('Request assembled by Agentyzer')
+        expect(wrapper.text()).toContain('Agentyzer → Model')
+        expect(wrapper.text()).not.toContain('Actual system prompt sent to the model.')
+        expect(wrapper.text()).toContain('Actual assistant response.')
+        expect(wrapper.findAll('[data-testid="llm-stage-toggle-request"]').every(toggle => toggle.attributes('aria-expanded') === 'false')).toBe(true)
+        expect(wrapper.findAll('[data-testid="llm-stage-toggle-tools"]').every(toggle => toggle.attributes('aria-expanded') === 'false')).toBe(true)
+        expect(wrapper.findAll('[data-testid="llm-stage-toggle-response"]').every(toggle => toggle.attributes('aria-expanded') === 'true')).toBe(true)
+
+        await wrapper.get('[data-testid="expand-all-llm-stages"]').trigger('click')
+
+        expect(wrapper.findAll('[data-testid^="llm-stage-toggle-"]').every(toggle => toggle.attributes('aria-expanded') === 'true')).toBe(true)
+        expect(wrapper.get('[data-testid="llm-stage-content-request"]').classes()).toContain('max-h-96')
+        expect(wrapper.get('[data-testid="llm-stage-content-request"]').classes()).toContain('overflow-y-auto')
+        expect(wrapper.get('[data-testid="llm-stage-content-request"]').classes()).toContain('overscroll-auto')
+        expect(wrapper.get('[data-testid="llm-stage-content-request"]').classes()).not.toContain('overscroll-contain')
+        expect(wrapper.get('[data-testid="llm-stage-content-request"]').attributes('tabindex')).toBe('0')
+        expect(wrapper.get('[data-testid="llm-stage-content-tools"]').classes()).toContain('max-h-80')
+        expect(wrapper.get('[data-testid="llm-stage-content-tools"]').classes()).toContain('overscroll-auto')
+        expect(wrapper.get('[data-testid="llm-stage-content-response"]').classes()).toContain('max-h-96')
+        expect(wrapper.get('[data-testid="llm-stage-content-response"]').classes()).toContain('overscroll-auto')
+        expect(wrapper.text()).toContain('Agentyzer → model · instruction')
         expect(wrapper.text()).toContain('Static · system prompt')
         expect(wrapper.text()).toContain('Actual system prompt sent to the model.')
         expect(wrapper.text()).toContain('Static · prompt template prefix')
@@ -683,12 +1147,57 @@ describe('CodeAnalysisPanel', () => {
         expect(wrapper.text()).toContain('Search results provided')
         expect(wrapper.text()).toContain('Downloaded URL text provided')
         expect(wrapper.text()).toContain('Package metadata provided')
+        expect(wrapper.text()).toContain('Requested local repository inspection')
+        expect(wrapper.text()).toContain('https://github.com/keycloak/keycloak.git · Netty resolver call path')
+        expect(wrapper.text()).toContain('Local repository evidence provided')
         expect(wrapper.text()).toContain('Dynamic · tool result')
         expect(wrapper.text()).toContain('Web search failed')
         expect(wrapper.text()).toContain('Per-component reviewer guidance.')
-        expect(wrapper.text()).toContain('How the LLM answered')
-        expect(wrapper.text()).toContain('received from LLM · assistant response')
+        expect(wrapper.text()).toContain('Model response')
+        expect(wrapper.text()).toContain('Model → Agentyzer')
+        expect(wrapper.text()).toContain('assistant response · captured verbatim')
         expect(wrapper.text()).toContain('Actual assistant response.')
+
+        const conversationViewport = wrapper.get('[data-testid="llm-conversation-scroll-region"]')
+        expect(conversationViewport.classes()).toContain('h-[32rem]')
+        expect(conversationViewport.classes()).toContain('resize-y')
+        expect(conversationViewport.classes()).toContain('overscroll-auto')
+        expect(conversationViewport.classes()).not.toContain('overscroll-contain')
+
+        await wrapper.get('[data-testid="open-llm-conversation-dialog"]').trigger('click')
+        await flushPromises()
+        const dialog = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="LLM conversation"]')
+        expect(dialog).not.toBeNull()
+        expect(dialog?.textContent).toContain('Request assembled by Agentyzer')
+        expect(dialog?.textContent).toContain('Actual assistant response.')
+        const dialogScrollRegion = dialog?.querySelector<HTMLElement>('[data-testid="llm-conversation-scroll-region"]')
+        expect(dialogScrollRegion?.classList.contains('overscroll-contain')).toBe(true)
+        expect(dialogScrollRegion?.classList.contains('overscroll-auto')).toBe(false)
+
+        const copyResponse = dialog?.querySelector<HTMLButtonElement>('[aria-label="Copy model response for turn 1"]')
+        copyResponse?.click()
+        await flushPromises()
+        expect(clipboardWriteText).toHaveBeenCalledWith('Actual assistant response.')
+
+        dialog?.querySelector<HTMLButtonElement>('[data-testid="close-llm-conversation-dialog"]')?.click()
+        await flushPromises()
+        expect(document.body.querySelector('[role="dialog"][aria-label="LLM conversation"]')).toBeNull()
+        expect(wrapper.get('[data-testid="llm-conversation-scroll-region"]').text()).toContain('Actual assistant response.')
+
+        await wrapper.get('[data-testid="collapse-all-llm-stages"]').trigger('click')
+        expect(wrapper.findAll('[data-testid^="llm-stage-toggle-"]').every(toggle => toggle.attributes('aria-expanded') === 'false')).toBe(true)
+        expect(wrapper.text()).not.toContain('Actual assistant response.')
+        expect(wrapper.text()).not.toContain('Actual system prompt sent to the model.')
+
+        await wrapper.findAll('[data-testid="llm-stage-toggle-response"]')[0].trigger('click')
+        expect(wrapper.text()).toContain('Actual assistant response.')
+
+        await wrapper.get('[data-testid="open-llm-conversation-dialog"]').trigger('click')
+        expect(document.body.style.overflow).toBe('hidden')
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        await flushPromises()
+        expect(document.body.querySelector('[role="dialog"][aria-label="LLM conversation"]')).toBeNull()
+        expect(document.body.style.overflow).toBe('')
     })
 
     it('shows saved selected-run guidance when no LLM trace is available', async () => {
@@ -726,9 +1235,48 @@ describe('CodeAnalysisPanel', () => {
             include_values: true,
             system_only: false,
         })
-        expect(wrapper.text()).toContain('Additional request guidance')
+        expect(wrapper.text()).toContain('This run did not capture a conversation')
+        expect(wrapper.text()).toContain('may differ from what the model received')
+        expect(wrapper.text()).toContain('Saved additional guidance')
+        expect(wrapper.text()).toContain('Use not verifiable')
+        expect(wrapper.text()).toContain('no model conversation was captured')
         expect(wrapper.text()).toContain('Component-specific auto-assessment guidance configured in DTVP.')
         expect(wrapper.text()).toContain('Check owned-service runtime exposure.')
+    })
+
+    it('makes redacted guidance explicit when a selected run has no trace', async () => {
+        const summaryRecord = {
+            analysis_run_id: 'run-with-redacted-guidance',
+            queue_id: 'run-with-redacted-guidance',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'owned-service',
+            project_name: 'ExampleApp',
+            source: 'automatic',
+            summary: { affected: false, verdict: 'Not Affected' },
+            finished_at: '2026-07-06T12:00:00Z',
+        }
+        mocks.listResults.mockResolvedValue([summaryRecord])
+        mocks.getResult.mockResolvedValue({
+            ...summaryRecord,
+            user_guidance: null,
+            user_guidance_redacted: true,
+            result: makeAnalysisResult('Stored automatic assessment'),
+        })
+
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service'],
+            },
+        })
+
+        await viewHistoryRun(wrapper, 'run-with-redacted-guidance')
+        await wrapper.findAll('button').find(button => button.text().includes('LLM Conversation'))?.trigger('click')
+        await flushPromises()
+
+        expect(wrapper.text()).toContain('Additional guidance and prompt trace content were redacted')
+        expect(wrapper.text()).toContain('model use cannot be verified')
     })
 
     it('emits the persisted analysis run id with an individual assessment draft', async () => {
@@ -753,13 +1301,15 @@ describe('CodeAnalysisPanel', () => {
                 vulnId: 'CVE-2026-0001',
                 projectName: 'ExampleApp',
                 componentNames: ['owned-service'],
+                componentTeams: { 'owned-service': 'Platform' },
             },
         })
         await viewHistoryRun(wrapper, 'run-provenance')
 
-        await wrapper.findAll('button').find(button => button.text().includes('Use as Assessment Draft'))?.trigger('click')
+        await wrapper.get('[data-testid="inline-analysis-outcome"]').find('button').trigger('click')
 
         expect(wrapper.emitted('apply-result')?.[0]?.[2]).toEqual(['run-provenance'])
+        expect(wrapper.emitted('apply-result')?.[0]?.[3]).toBe('Platform')
     })
 
     it('removes a saved analysis run from the card history', async () => {
@@ -888,7 +1438,7 @@ describe('CodeAnalysisPanel', () => {
 
         const selectedFollowUpRow = wrapper.findAll('div').find(node =>
             node.text().includes('Follow-up')
-            && node.text().includes('Selected')
+            && node.text().includes('Hide')
             && node.text().includes('owned-service')
         )
         expect(selectedFollowUpRow).toBeDefined()
@@ -1067,6 +1617,38 @@ describe('CodeAnalysisPanel', () => {
                 { component: 'owned-service', result: serviceResult, runId: 'run-service-new' },
                 { component: 'owned-worker', result: workerResult, runId: 'run-worker' },
             ])
+        })
+
+        it('describes a team-scoped apply-all without promising a global draft', async () => {
+            mocks.listResults.mockResolvedValue([
+                makeRecord({
+                    analysis_run_id: 'run-service',
+                    component_name: 'owned-service',
+                    context_summary: { target_team: 'TEAM-A' },
+                    result: makeAnalysisResult('Service assessment'),
+                }),
+                makeRecord({
+                    analysis_run_id: 'run-worker',
+                    component_name: 'owned-worker',
+                    context_summary: { target_team: 'TEAM-A' },
+                    result: makeAnalysisResult('Worker assessment'),
+                }),
+            ])
+
+            const wrapper = mount(CodeAnalysisPanel, {
+                props: {
+                    vulnId: 'CVE-2026-0001',
+                    projectName: 'ExampleApp',
+                    componentNames: ['owned-service', 'owned-worker'],
+                    componentTeams: { 'owned-service': 'TEAM-A', 'owned-worker': 'TEAM-A' },
+                    teamScope: 'TEAM-A',
+                },
+            })
+            await loadHistory(wrapper)
+
+            const button = wrapper.get('[data-testid="apply-all-analysis-results"]')
+            expect(button.attributes('title')).toContain('scoped TEAM-A assessment')
+            expect(button.attributes('title')).not.toContain('global assessment')
         })
 
         it('skips benchmark and unfinished runs and hides the button for a single component', async () => {

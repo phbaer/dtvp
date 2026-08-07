@@ -900,6 +900,33 @@ def test_completed_analysis_queue_item_persists_result_history(client):
     assert detail["user_guidance_redacted"] is False
 
 
+def test_vulnerability_result_history_accepts_component_alias_and_offset_filters(client):
+    with patch.object(
+        main.code_analysis_result_store,
+        "list_result_metadata",
+        return_value=[],
+    ) as list_metadata:
+        response = client.get(
+            "/api/projects/ExampleApp/vulnerabilities/CVE-2026-PAGED/analysis-results",
+            params=[
+                ("component_name", "owned-service"),
+                ("component_name", "owned-worker"),
+                ("vuln_alias", "GHSA-PAGED-ALIAS"),
+                ("limit", "500"),
+                ("offset", "500"),
+            ],
+        )
+
+    assert response.status_code == 200
+    list_metadata.assert_called_once_with(
+        project_name="ExampleApp",
+        vuln_ids=["CVE-2026-PAGED", "GHSA-PAGED-ALIAS"],
+        component_names=["owned-service", "owned-worker"],
+        limit=500,
+        offset=500,
+    )
+
+
 def test_code_analysis_benchmark_result_delegates_to_agentyzer(client):
     item = main.analysis_queue.submit(
         vuln_id="CVE-2026-BENCH",
@@ -1218,6 +1245,59 @@ def test_analysis_queue_follow_up_uses_persisted_parent_context(client):
     assert payload["follow_up_user_guidance"] is None
     assert "Compact prior context" in payload["user_guidance"]
     assert "Extension is not affected" in payload["user_guidance"]
+
+
+def test_analysis_queue_follow_up_appends_guidance_for_selected_target(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        main,
+        "load_auto_analysis_guidance",
+        lambda: {
+            "components": {
+                "keycloak-extension": "Inspect only extension-owned code.",
+                "keycloak": "Inspect the upstream Keycloak runtime and deployment.",
+            }
+        },
+    )
+    parent = main.analysis_queue.submit(
+        vuln_id="CVE-2026-FOLLOW-GUIDANCE",
+        component_name="keycloak-extension",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+    )
+    parent.status = "running"
+    main.analysis_queue._finish_item(
+        parent,
+        status="completed",
+        result={
+            "assessment": {
+                "summary": "The extension-owned code was checked.",
+                "reasoning": "The upstream runtime needs a separate follow-up.",
+            },
+            "steps": [],
+        },
+    )
+
+    response = client.post(
+        "/api/analysis-queue/follow-up",
+        json={
+            "parent_run_id": parent.queue_id,
+            "question": "Is the upstream runtime affected?",
+            "component_name": "keycloak",
+            "user_guidance": "Check the deployed version as well.",
+        },
+    )
+
+    assert response.status_code == 200
+    item = main.analysis_queue.get(response.json()["queue_id"])
+    assert item.component_name == "keycloak"
+    assert item.follow_up_user_guidance.startswith("Check the deployed version as well.")
+    assert "scan target keycloak" in item.follow_up_user_guidance
+    assert "Inspect the upstream Keycloak runtime" in item.follow_up_user_guidance
+    assert "Inspect only extension-owned code" not in item.follow_up_user_guidance
+    assert item.follow_up_user_guidance in item.user_guidance
 
 
 def test_analysis_queue_cancel_completed_removes_item(client):

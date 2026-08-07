@@ -44,6 +44,11 @@ export interface PreparedCodeAnalysisResults {
     runIds: string[]
 }
 
+export const CODE_ANALYSIS_GLOBAL_REFERENCE_PREFIX = [
+    '[Code Analysis]',
+    'Global state follows the owning-team assessments.',
+].join('\n')
+
 const mapVerdictToAssessment = (result: CodeAnalysisAssessResponse) => {
     const verdict = result.assessment.verdict
         .trim()
@@ -427,11 +432,6 @@ const groupComponentsByTeam = (
         }
     }
 
-    if (teamComponents.size === 0 && taggedComponents.length > 0) {
-        const fallback = taggedComponents[0]
-        teamComponents.set(fallback.tag.trim(), [fallback.name])
-    }
-
     return teamComponents
 }
 
@@ -479,6 +479,27 @@ interface AnalyzedComponent {
 
 const statePriority = (state: string): number => STATE_PRIORITY[state] ?? 10
 
+export const codeAnalysisAssessmentState = (result: CodeAnalysisAssessResponse): string => (
+    mapVerdictToAssessment(result).targetState
+)
+
+/**
+ * Compares complete analyzer responses using the same assessment-state mapping
+ * and CVSS tie-breaker as team/global draft preparation.
+ */
+export const isCodeAnalysisResultWorse = (
+    candidate: CodeAnalysisAssessResponse,
+    current: CodeAnalysisAssessResponse,
+): boolean => {
+    const candidateState = codeAnalysisAssessmentState(candidate)
+    const currentState = codeAnalysisAssessmentState(current)
+    const candidateRank = statePriority(candidateState)
+    const currentRank = statePriority(currentState)
+    if (candidateRank !== currentRank) return candidateRank < currentRank
+    return (candidate.assessment.adjusted_cvss?.adjusted_score ?? -1)
+        > (current.assessment.adjusted_cvss?.adjusted_score ?? -1)
+}
+
 /**
  * Worst-wins comparison: the more severe analysis state wins, a higher analyzer
  * CVSS score breaks a tie, and the earlier entry wins when both are equal.
@@ -488,6 +509,63 @@ const isWorse = (candidate: AnalyzedComponent, current: AnalyzedComponent): bool
     const currentRank = statePriority(current.state)
     if (candidateRank !== currentRank) return candidateRank < currentRank
     return (candidate.score ?? -1) > (current.score ?? -1)
+}
+
+export const isCodeAnalysisGlobalReference = (details: string): boolean => (
+    details.trim().startsWith(CODE_ANALYSIS_GLOBAL_REFERENCE_PREFIX)
+)
+
+const existingGlobalNotes = (details: string): string => {
+    const normalized = details.trim()
+    if (!isCodeAnalysisGlobalReference(normalized)) return normalized
+    return normalized
+        .slice(CODE_ANALYSIS_GLOBAL_REFERENCE_PREFIX.length)
+        .replace(/^\s*Assessed Teams:\s*[^\n]*(?:\n|$)/, '')
+        .trim()
+}
+
+/**
+ * Builds the single synthetic General draft used by code-analysis workflows.
+ * Team evidence stays in its owning-team block; General records only the
+ * worst effective decision and links it to those blocks by team name.
+ *
+ * A non-generated General decision is authoritative and is never replaced.
+ */
+export const buildCodeAnalysisGlobalReferenceDraft = (
+    assessments: CodeAnalysisTeamDraft[],
+    existingGlobal?: CodeAnalysisTeamDraft | null,
+): CodeAnalysisTeamDraft | null => {
+    if (
+        existingGlobal?.state
+        && existingGlobal.state !== 'NOT_SET'
+        && !isCodeAnalysisGlobalReference(existingGlobal.details)
+    ) {
+        return null
+    }
+
+    const byTeam = new Map<string, CodeAnalysisTeamDraft>()
+    for (const assessment of assessments) {
+        const team = assessment.team.trim()
+        if (!team || assessmentTeamKey(team) === 'general' || assessment.state === 'NOT_SET') continue
+        byTeam.set(assessmentTeamKey(team), { ...assessment, team })
+    }
+    const effective = [...byTeam.values()]
+    if (effective.length === 0) return null
+
+    const worst = effective.reduce((current, assessment) => (
+        statePriority(assessment.state) < statePriority(current.state) ? assessment : current
+    ))
+    const teams = effective.map(assessment => assessment.team).sort((left, right) => left.localeCompare(right))
+    const reference = `${CODE_ANALYSIS_GLOBAL_REFERENCE_PREFIX}\nAssessed Teams: ${teams.join(', ')}`
+    const preservedNotes = existingGlobal ? existingGlobalNotes(existingGlobal.details) : ''
+
+    return {
+        team: 'General',
+        state: worst.state,
+        justification: worst.justification || 'NOT_SET',
+        details: preservedNotes ? `${reference}\n\n${preservedNotes}` : reference,
+        assigned: existingGlobal?.assigned ? [...existingGlobal.assigned] : [],
+    }
 }
 
 /**

@@ -273,7 +273,7 @@ const componentSummary = computed(() => {
           </template>
         </span>
 
-        <span v-if="componentSummary" :class="['inline-flex min-w-0 items-center gap-1 text-[10px] text-gray-500 font-medium truncate', compact ? 'max-w-[16rem]' : 'max-w-[20rem]']" :title="componentSummary">
+        <span v-if="componentSummary" :class="['inline-flex min-w-0 items-center gap-1 text-[10px] text-gray-500 font-medium truncate', compact ? 'max-w-[16rem]' : 'max-w-[20rem]']" :title="componentSummary" data-testid="component-summary">
           <Package :size="9" class="shrink-0 text-gray-600" />
           {{ componentSummary }}
         </span>

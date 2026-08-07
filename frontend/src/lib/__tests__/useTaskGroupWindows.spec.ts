@@ -1,3 +1,4 @@
+import { flushPromises } from '@vue/test-utils'
 import { computed, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTaskGroupWindows } from '../useTaskGroupWindows'
@@ -116,6 +117,80 @@ describe('useTaskGroupWindows', () => {
         expect(taskWindows.versionsTotal.value).toBe(5)
         expect(taskWindows.windowLoading.value).toBe(false)
         expect(resetVisibleItems).toHaveBeenCalledTimes(1)
+    })
+
+    it('renders the filtered card window before refreshing expensive counts', async () => {
+        const api = await import('../api')
+        let resolveCounts: (value: any) => void = () => {}
+        vi.mocked(api.getTaskVulnGroups)
+            .mockResolvedValueOnce({
+                items: [group('CVE-Platform')],
+                total: 100,
+                filtered: 4,
+                offset: 0,
+                limit: 25,
+                next_cursor: null,
+                sort: 'id',
+                order: 'asc',
+            })
+            .mockReturnValueOnce(new Promise(resolve => {
+                resolveCounts = resolve
+            }))
+
+        const groups = ref<GroupedVuln[]>([])
+        const taskWindows = useTaskGroupWindows({
+            currentTaskId: ref('task-1'),
+            groups,
+            query: computed(() => ({ team: 'Platform', sort: 'id', order: 'asc' })),
+            limit: 25,
+            deferCountsOnReset: true,
+        })
+
+        await taskWindows.loadWindow({ reset: true })
+
+        expect(groups.value.map(item => item.id)).toEqual(['CVE-Platform'])
+        expect(taskWindows.windowLoading.value).toBe(false)
+        expect(taskWindows.counts.value).toBeNull()
+        expect(api.getTaskVulnGroups).toHaveBeenNthCalledWith(1, 'task-1', {
+            team: 'Platform',
+            sort: 'id',
+            order: 'asc',
+            limit: 25,
+            generation: 1,
+            offset: 0,
+            include_counts: false,
+        }, {
+            signal: expect.any(AbortSignal),
+        })
+
+        resolveCounts({
+            items: [group('CVE-Platform')],
+            total: 100,
+            filtered: 4,
+            counts: {
+                all: { total: 100 },
+                filtered: { total: 4 },
+            },
+            offset: 0,
+            limit: 1,
+            next_cursor: null,
+            sort: 'id',
+            order: 'asc',
+        })
+        await flushPromises()
+
+        expect(taskWindows.counts.value?.filtered.total).toBe(4)
+        expect(api.getTaskVulnGroups).toHaveBeenNthCalledWith(2, 'task-1', {
+            team: 'Platform',
+            sort: 'id',
+            order: 'asc',
+            offset: 0,
+            limit: 1,
+            include_counts: true,
+            generation: 1,
+        }, {
+            signal: expect.any(AbortSignal),
+        })
     })
 
     it('updates partial progress from task status and clears it when completed', () => {

@@ -28,6 +28,7 @@ vi.mock('lucide-vue-next', () => ({
     AlertTriangle: { template: '<span class="icon-alert" />' },
     Calculator: { template: '<span class="icon-calc" />' },
     ExternalLink: { template: '<span class="icon-link" />' },
+    ArrowRight: { template: '<span />' },
     RotateCcw: { template: '<span class="icon-rotate-ccw" />' },
     History: { template: '<span class="icon-history" />' },
     Package: { template: '<span class="icon-package" />' },

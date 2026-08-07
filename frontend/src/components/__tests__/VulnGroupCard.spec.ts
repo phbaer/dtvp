@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
+import CodeAnalysisPanel from '../CodeAnalysisPanel.vue'
 import defaultRescoreRules from '../../../../data/rescore_rules.json'
 
 // Mock API
@@ -95,6 +96,19 @@ describe('VulnGroupCard', () => {
             }
         ]
     }
+
+    const analyzerResult = (verdict: string, summary: string, reasoning: string) => ({
+        assessment: {
+            affected: verdict === 'Affected',
+            verdict,
+            confidence: 'High',
+            exposure: verdict === 'Affected' ? 'reachable' : 'not reachable',
+            summary,
+            reasoning,
+        },
+        steps: [],
+        versions_checked: ['1.0'],
+    })
 
     beforeEach(() => {
         vi.clearAllMocks()
@@ -260,7 +274,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('1.0') // Version should be shown
     })
 
-    it('keeps the sticky detail bar focused on tabs and apply', async () => {
+    it('keeps the sticky detail bar focused on tabs and renders the next action only once', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup }
         })
@@ -268,14 +282,110 @@ describe('VulnGroupCard', () => {
         await wrapper.find('.cursor-pointer').trigger('click')
 
         const stickyBar = wrapper.get('[data-vuln-card-sticky-nav]')
-        expect(stickyBar.text()).toContain('Overview')
-        expect(stickyBar.text()).toContain('Apply')
-        expect(stickyBar.find('[data-testid="sticky-tab-apply-button"]').exists()).toBe(true)
+        expect(stickyBar.text()).toContain('Context')
+        expect(stickyBar.text()).toContain('Code Evidence')
+        expect(stickyBar.text()).toContain('Assessment')
+        expect(stickyBar.text()).not.toContain('Review context')
+        expect(stickyBar.find('[data-testid="sticky-tab-apply-button"]').exists()).toBe(false)
+        expect(wrapper.findAll('[data-testid="analyst-next-action"]')).toHaveLength(1)
+        expect(wrapper.findAll('[data-testid="workflow-primary-action"]').length).toBeLessThanOrEqual(1)
         expect(stickyBar.text()).not.toContain('CVSS & Rescoring')
         expect(stickyBar.text()).not.toContain('Global')
         expect(stickyBar.text()).not.toContain('Synced')
         expect(stickyBar.text()).not.toContain('CVSS 9.8')
         expect(stickyBar.text()).not.toContain('1 target')
+    })
+
+    it('turns next-action navigation into concrete guidance at the destination tab', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: ref({ role: 'ANALYST', username: 'analyst' }),
+                    teamMapping: ref({ lib: ['Security'] }),
+                },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        expect(wrapper.get('[data-testid="workflow-primary-action"]').text()).toContain('Open code evidence')
+
+        await wrapper.get('[data-testid="workflow-primary-action"]').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect((wrapper.vm as any).activeDetailTab).toBe('analysis')
+        expect(wrapper.find('[data-testid="workflow-primary-action"]').exists()).toBe(false)
+        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('You are at the next step')
+        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('Expand Run new analysis')
+    })
+
+    it('orders Context from description through scope and dependencies to assessment evidence', async () => {
+        const wrapper = mount(VulnGroupCard, { props: { group: mockGroup } })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const html = wrapper.html()
+        const description = html.indexOf('Description &amp; references')
+        const scope = html.indexOf('Finding scope &amp; affected components')
+        const dependencies = html.indexOf('Dependency context')
+        const assessments = html.indexOf('Existing assessment evidence')
+        expect(description).toBeGreaterThanOrEqual(0)
+        expect(description).toBeLessThan(scope)
+        expect(scope).toBeLessThan(dependencies)
+        expect(dependencies).toBeLessThan(assessments)
+    })
+
+    it('shows scoped affected components in Context for analysts', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup, activeTeamFilter: 'Security' },
+            global: {
+                provide: {
+                    user: ref({ role: 'ANALYST', username: 'analyst' }),
+                    teamMapping: ref({ lib: ['Security'] }),
+                },
+            },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+
+        const components = wrapper.get('[data-testid="affected-components"]')
+        expect(components.text()).toContain('Affected Components')
+        expect(components.text()).toContain('lib@1.0')
+    })
+
+    it('guides analysts through the required assessment fields before submission', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        const assessmentTab = wrapper.findAll('[role="tab"]')
+            .find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect((wrapper.vm as any).selectedTeam).toBe('Security')
+        expect(wrapper.get('[data-testid="assessment-completeness"]').text())
+            .toContain('analysis state, analysis details')
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled'))
+            .toBeDefined()
+
+        ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        await wrapper.find('textarea').setValue('The vulnerable code is absent.')
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.get('[data-testid="assessment-completeness"]').text())
+            .toContain('justification')
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled'))
+            .toBeDefined()
+
+        ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.get('[data-testid="assessment-completeness"]').text())
+            .toContain('Assessment is ready to submit')
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled'))
+            .toBeUndefined()
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').text())
+            .toBe('Submit Security for review')
     })
 
     it('renders advisory descriptions as markdown', async () => {
@@ -299,7 +409,7 @@ describe('VulnGroupCard', () => {
 
     it('submits assessment update', async () => {
         const wrapper = mount(VulnGroupCard, {
-            props: { group: mockGroup },
+            props: { group: mockGroup, hasNextVulnerability: true },
             global: { provide: { user: { value: { username: 'tester' } } }, stubs: { teleport: true } }
         })
 
@@ -312,14 +422,15 @@ describe('VulnGroupCard', () => {
 
         // Set state
         ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
         await wrapper.vm.$nextTick()
         await wrapper.find('textarea').setValue('False positive')
 
         // Click Apply
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         expect(applyBtn).toBeDefined()
-        expect(applyBtn?.element.disabled).toBe(false)
-        applyBtn?.trigger('click')
+        expect((applyBtn.element as HTMLButtonElement).disabled).toBe(false)
+        await applyBtn.trigger('click')
         await flushPromises()
 
         // Confirm in modal
@@ -330,7 +441,7 @@ describe('VulnGroupCard', () => {
         // Verify API call
         expect(updateAssessment).toHaveBeenCalledWith(expect.objectContaining({
             state: 'NOT_AFFECTED',
-            details: expect.stringMatching(/---\s*\[Team:\s*Security\]\s*\[State:\s*NOT_AFFECTED\]\s*\[Assessed By:\s*tester\]\s*\[Date:\s*\d+\]\s*\[Justification:\s*NOT_SET\]\s*---\n\nFalse positive/),
+            details: expect.stringMatching(/---\s*\[Team:\s*Security\]\s*\[State:\s*NOT_AFFECTED\]\s*\[Assessed By:\s*tester\]\s*\[Date:\s*\d+\]\s*\[Justification:\s*CODE_NOT_PRESENT\]\s*---\n\nFalse positive/),
             team: 'Security'
         }))
 
@@ -338,6 +449,9 @@ describe('VulnGroupCard', () => {
         expect(wrapper.emitted()).toHaveProperty('update:assessment')
         expect(wrapper.get('[data-testid="assessment-persistence-status"]').text())
             .toContain('Saved locally — syncing to Dependency-Track')
+        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('Assessment submitted for review')
+        await wrapper.get('[data-testid="workflow-primary-action"]').trigger('click')
+        expect(wrapper.emitted('request-next')).toHaveLength(1)
         expect((wrapper.vm as any).originalAnalysis.f1).toEqual(expect.objectContaining({
             dtvpRevision: 1,
             dtvpSyncStatus: 'pending',
@@ -345,11 +459,16 @@ describe('VulnGroupCard', () => {
         }))
     })
 
-    it('keeps analysis run provenance with a code-analysis assessment draft', async () => {
+    it('keeps analysis provenance and adds one global reference to a team code-analysis draft', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup },
-            global: { provide: { user: { value: { username: 'tester' } } } },
+            global: {
+                provide: { user: { value: { username: 'tester' } } },
+                stubs: { teleport: true },
+            },
         })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
         const analysisResult = {
             assessment: {
                 affected: false,
@@ -367,10 +486,35 @@ describe('VulnGroupCard', () => {
             analysisResult,
             ['lib'],
             ['automatic-run-1'],
+            'Security',
         )
 
         expect((wrapper.vm as any).codeAnalysisRunIds).toEqual(['automatic-run-1'])
         expect((wrapper.vm as any).codeAnalysisDraftApplied).toBe(true)
+        expect((wrapper.vm as any).selectedTeam).toBe('Security')
+        expect((wrapper.vm as any).activeDetailTab).toBe('review')
+        expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
+        expect((wrapper.vm as any).details).toContain('No vulnerable code path was found.')
+        expect((wrapper.vm as any).teamDrafts.get('General')).toEqual(expect.objectContaining({
+            state: 'NOT_AFFECTED',
+            justification: 'CODE_NOT_PRESENT',
+            details: expect.stringContaining('Assessed Teams: Security'),
+        }))
+        expect((wrapper.vm as any).teamDrafts.get('General').details)
+            .not.toContain('No vulnerable code path was found.')
+
+        await wrapper.get('[data-testid="assessment-submit-button"]').trigger('click')
+        await flushPromises()
+        await wrapper.findAll('button').find(button => button.text() === 'Submit')?.trigger('click')
+        await flushPromises()
+
+        const payload = vi.mocked(updateAssessment).mock.calls[0]?.[0] as any
+        expect(payload.analysis_run_ids).toEqual(['automatic-run-1'])
+        expect(payload.details.match(/\[Team: General\]/g)).toHaveLength(1)
+        expect(payload.details.match(/\[Team: Security\]/g)).toHaveLength(1)
+        const globalBlock = payload.details.split('--- [Team: Security]')[0]
+        expect(globalBlock).toContain('Assessed Teams: Security')
+        expect(globalBlock).not.toContain('No vulnerable code path was found.')
     })
 
     it('preserves existing global analysis when applying a selected team update', async () => {
@@ -409,10 +553,11 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
         await wrapper.find('textarea').setValue('Updated team details')
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        await applyBtn.trigger('click')
         await flushPromises()
 
         const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
@@ -449,14 +594,287 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        const reviewTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Review'))
+        const reviewTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))
         await reviewTab?.trigger('click')
         await wrapper.vm.$nextTick()
 
         expect(wrapper.text()).toContain('CVSS & Rescoring')
         expect(wrapper.text()).toContain('Threat Model Proposal')
-        expect(wrapper.text()).toContain('Apply Proposal')
+        expect(wrapper.text()).toContain('Use Proposal Draft')
         expect(wrapper.text()).toContain('Threat model reduces exposure for the reviewed deployment.')
+    })
+
+    it('shows mapped overview context and enables code analysis for analysts', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: ref({ role: 'ANALYST', username: 'analyst' }),
+                    teamMapping: ref({ lib: ['Security'] }),
+                },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="triggering-team-components"]').text()).toContain('Security')
+        expect(wrapper.get('[data-testid="dependency-context"]').text()).toContain('Team:Security')
+
+        const analysisTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Code Evidence'))
+        await analysisTab?.trigger('click')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="code-analysis-start"]').attributes('disabled')).toBeUndefined()
+    })
+
+    it('shows the latest analyzer result as an optional proposal in the team assessment', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: mockGroup },
+            global: {
+                provide: {
+                    user: ref({ role: 'ANALYST', username: 'analyst' }),
+                    teamMapping: ref({ lib: ['Security'] }),
+                },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        wrapper.getComponent(CodeAnalysisPanel).vm.$emit('proposals-change', [{
+            component: 'lib',
+            runId: 'auto-security',
+            result: analyzerResult('Affected', 'Reachable parser use.', 'The request path reaches the parser.'),
+        }])
+        await wrapper.vm.$nextTick()
+
+        const assessmentTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        const proposal = wrapper.get('[data-testid="automatic-assessment-proposal"]')
+        expect(proposal.text()).toContain('Analyzer proposal')
+        expect(proposal.text()).toContain('Reachable parser use.')
+        expect(proposal.text()).toContain('The request path reaches the parser.')
+        expect((wrapper.vm as any).state).toBe('NOT_SET')
+
+        await proposal.get('[data-testid="use-automatic-assessment-proposal"]').trigger('click')
+        expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
+        expect((wrapper.vm as any).details).toContain('Reachable parser use.')
+        expect((wrapper.vm as any).teamDrafts.get('General')).toEqual(expect.objectContaining({
+            state: 'EXPLOITABLE',
+            details: expect.stringContaining('Assessed Teams: Security'),
+        }))
+        expect(wrapper.get('[data-testid="code-analysis-draft-banner"]').text()).toContain('Analyzer proposal selected for Security')
+    })
+
+    it('prefers saved team assessments and uses analyzer proposals only for missing teams in reviewer summary', async () => {
+        const securityComponent = {
+            ...mockComponents[0],
+            analysis_state: 'NOT_AFFECTED',
+            analysis_details: '--- [Team: Security] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_PRESENT] ---\nManual Security rationale.',
+        }
+        const runtimeComponent = {
+            ...mockComponents[0],
+            component_name: 'worker',
+            component_uuid: 'c2',
+            finding_uuid: 'f2',
+            tags: ['Runtime'],
+            analysis_state: 'NOT_SET',
+            analysis_details: '',
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    affected_versions: [{
+                        ...mockGroup.affected_versions[0],
+                        components: [securityComponent, runtimeComponent],
+                    }],
+                },
+            },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER', username: 'reviewer' }),
+                    teamMapping: ref({ lib: ['Security'], worker: ['Runtime'] }),
+                },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        wrapper.getComponent(CodeAnalysisPanel).vm.$emit('proposals-change', [
+            {
+                component: 'lib',
+                runId: 'auto-security',
+                result: analyzerResult('Affected', 'Automatic Security result.', 'Automatic Security rationale.'),
+            },
+            {
+                component: 'worker',
+                runId: 'auto-runtime',
+                result: analyzerResult('Not Affected', 'Automatic Runtime result.', 'Automatic Runtime rationale.'),
+            },
+        ])
+        await wrapper.vm.$nextTick()
+
+        const assessmentTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        const summary = wrapper.get('[data-testid="effective-team-assessment-summary"]')
+        expect(summary.text()).toContain('Security')
+        expect(summary.text()).toContain('Team assessment')
+        expect(summary.text()).toContain('Runtime')
+        expect(summary.text()).toContain('Analyzer fallback')
+        expect(summary.text()).toContain('Worst: NOT AFFECTED')
+        expect(summary.text()).not.toContain('Worst: EXPLOITABLE')
+
+        await summary.get('[data-testid="use-effective-assessment-summary"]').trigger('click')
+        await wrapper.vm.$nextTick()
+        expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
+        expect((wrapper.vm as any).details).toContain('Assessed Teams: Runtime, Security')
+        expect((wrapper.vm as any).details).not.toContain('Manual Security rationale.')
+        expect((wrapper.vm as any).details).not.toContain('Automatic Runtime result.')
+    })
+
+    it('scopes vulnerability component context to the selected team', async () => {
+        const otherComponent = {
+            ...mockComponents[0],
+            component_name: 'worker',
+            component_uuid: 'c2',
+            finding_uuid: 'f2',
+            tags: ['Runtime'],
+            analysis_state: 'EXPLOITABLE',
+            analysis_details: '--- [Team: Runtime] [State: EXPLOITABLE] [Assessed By: runtime-user] ---\nRuntime assessment.',
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    affected_versions: [{
+                        ...mockGroup.affected_versions[0],
+                        components: [mockComponents[0], otherComponent],
+                    }],
+                },
+                activeTeamFilter: 'Security',
+                automaticAssessmentStatus: 'auto',
+            },
+            global: {
+                provide: {
+                    user: ref({ role: 'ANALYST', username: 'analyst' }),
+                    teamMapping: ref({ lib: ['Security', 'Sec Alias'], worker: ['Runtime'] }),
+                },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await flushPromises()
+
+        expect(wrapper.get('[data-testid="vulnerability-team-scope"]').text()).toContain('1 of 2 findings shown')
+        expect(wrapper.get('[data-testid="instance-count"]').text()).toContain('1×')
+        expect(wrapper.get('[data-testid="component-summary"]').text()).toContain('lib')
+        expect(wrapper.get('[data-testid="component-summary"]').text()).not.toContain('worker')
+        expect(wrapper.get('[data-testid="dependency-context"]').text()).toContain('lib')
+        expect(wrapper.get('[data-testid="dependency-context"]').text()).not.toContain('worker')
+
+        expect(wrapper.get('[data-testid="vulnerability-assessments"]').text()).toContain('lib')
+        expect(wrapper.get('[data-testid="vulnerability-assessments"]').text()).not.toContain('worker')
+        expect(wrapper.getComponent(CodeAnalysisPanel).props('teamScope')).toBe('Security')
+        expect(wrapper.getComponent(CodeAnalysisPanel).props('teamScopeAliases')).toEqual(['Sec Alias'])
+
+        const assessmentTab = wrapper.findAll('[role="tab"]')
+            .find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.get('[data-testid="assessment-team-scope"]').text())
+            .toContain('Assessment scope: Security · other teams are hidden')
+        expect((wrapper.vm as any).selectedTeam).toBe('Security')
+        expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text()))
+            .toEqual(['Security'])
+        expect(assessmentTab?.text()).toContain('Needed')
+        expect(wrapper.get('[data-testid="analyst-next-action"]').text()).toContain('Gather code evidence')
+    })
+
+    it('focuses reviewers on the filtered team while keeping an explicit all-team view', async () => {
+        const runtimeComponent = {
+            ...mockComponents[0],
+            component_name: 'worker',
+            component_uuid: 'c2',
+            finding_uuid: 'f2',
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: {
+                group: {
+                    ...mockGroup,
+                    affected_versions: [{
+                        ...mockGroup.affected_versions[0],
+                        components: [mockComponents[0], runtimeComponent],
+                    }],
+                },
+                activeTeamFilter: 'Security',
+            },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER', username: 'reviewer' }),
+                    teamMapping: ref({ lib: ['Security'], worker: ['Runtime'] }),
+                },
+            },
+        })
+
+        await wrapper.find('.cursor-pointer').trigger('click')
+        const assessmentTab = wrapper.findAll('[role="tab"]')
+            .find(tab => tab.text().includes('Assessment'))
+        await assessmentTab?.trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect((wrapper.vm as any).selectedTeam).toBe('Security')
+        expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text()))
+            .toEqual(['Security'])
+        expect(wrapper.findAll('button').some(button => button.text().trim() === 'Global')).toBe(true)
+
+        await wrapper.get('[data-testid="toggle-assessment-team-scope"]').trigger('click')
+        await wrapper.vm.$nextTick()
+
+        expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text()))
+            .toEqual(['Security', 'Runtime'])
+        expect(wrapper.findAll('button').some(button => button.text().trim() === 'Global')).toBe(true)
+
+        await wrapper.get('[data-testid="toggle-assessment-team-scope"]').trigger('click')
+        await wrapper.vm.$nextTick()
+        expect((wrapper.vm as any).selectedTeam).toBe('Security')
+        expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text()))
+            .toEqual(['Security'])
+    })
+
+    it('keeps automation out of Review and stages proposals without saving', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, tags: ['Security', 'automation'] } },
+            global: {
+                provide: {
+                    user: ref({ role: 'REVIEWER', username: 'reviewer' }),
+                    teamMapping: ref({ lib: ['Security'] }),
+                    tmrescoreProposals: ref({
+                        'CVE-2023-1234': {
+                            original_score: 9.8,
+                            rescored_score: 4.2,
+                            original_vector: mockGroup.cvss_vector,
+                            rescored_vector: 'CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:L/I:L/A:N',
+                            analysis: { detail: 'Scoped deployment evidence.' },
+                        },
+                    }),
+                },
+            },
+        })
+
+        await openReviewTab(wrapper)
+        expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text())).not.toContain('Automation')
+
+        await (wrapper.vm as any).applyProposal()
+        await wrapper.vm.$nextTick()
+
+        expect((wrapper.vm as any).selectedTeam).toBe('')
+        expect((wrapper.vm as any).formTouched).toBe(true)
+        expect((wrapper.vm as any).details).toContain('Scoped deployment evidence.')
+        expect(updateAssessment).not.toHaveBeenCalled()
     })
 
     it('shows whether a tmrescore/vscorer analysis is available in the header', () => {
@@ -494,7 +912,7 @@ describe('VulnGroupCard', () => {
 
     const openReviewTab = async (wrapper: ReturnType<typeof mount>) => {
         await wrapper.find('.cursor-pointer').trigger('click')
-        const reviewTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Review'))
+        const reviewTab = wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))
         expect(reviewTab).toBeDefined()
         await reviewTab?.trigger('click')
         await wrapper.vm.$nextTick()
@@ -572,9 +990,12 @@ describe('VulnGroupCard', () => {
         // Select Team
         ;(wrapper.vm as any).selectedTeam = 'Security'
         await wrapper.vm.$nextTick()
+        ;(wrapper.vm as any).state = 'EXPLOITABLE'
+        await wrapper.vm.$nextTick()
+        await wrapper.find('textarea').setValue('Validated exploitable path')
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        await applyBtn.trigger('click')
         await flushPromises()
 
         // Modal appears, click Confirm
@@ -643,8 +1064,12 @@ describe('VulnGroupCard', () => {
         })
 
         await wrapper.find('.cursor-pointer').trigger('click')
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click')
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        ;(wrapper.vm as any).state = 'EXPLOITABLE'
+        await wrapper.vm.$nextTick()
+        await wrapper.find('textarea').setValue('Draft that should remain local')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        await applyBtn.trigger('click')
         await flushPromises()
 
         // Modal appears, click Cancel
@@ -675,8 +1100,8 @@ describe('VulnGroupCard', () => {
             await checkboxes[checkboxes.length - 1]?.setValue(true) // Suppression is last
         }
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        await applyBtn.trigger('click')
         await flushPromises()
 
         const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
@@ -733,9 +1158,12 @@ describe('VulnGroupCard', () => {
         // Select Team
         ;(wrapper.vm as any).selectedTeam = 'Security'
         await wrapper.vm.$nextTick()
+        ;(wrapper.vm as any).state = 'EXPLOITABLE'
+        await wrapper.vm.$nextTick()
+        await wrapper.find('textarea').setValue('Validated exploitable path')
 
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        await applyBtn.trigger('click')
         await flushPromises()
 
         // Confirm
@@ -761,7 +1189,7 @@ describe('VulnGroupCard', () => {
         expect(badge.classes()).toContain('text-red-400')
     })
 
-    it('asks to apply an unsaved draft before leaving the card', async () => {
+    it('asks analysts to submit an unsaved draft before leaving the card', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: mockGroup, inModal: true },
             global: { stubs: { teleport: true } }
@@ -775,8 +1203,8 @@ describe('VulnGroupCard', () => {
         const leavePromise = (wrapper.vm as any).confirmApplyDraftBeforeLeave()
         await flushPromises()
 
-        expect(wrapper.text()).toContain('Apply this assessment draft before leaving?')
-        expect(wrapper.findAll('button').some(button => button.text() === 'Apply')).toBe(true)
+        expect(wrapper.text()).toContain('Submit this assessment before leaving?')
+        expect(wrapper.findAll('button').some(button => button.text() === 'Submit')).toBe(true)
         expect(wrapper.findAll('button').some(button => button.text() === 'Discard')).toBe(true)
 
         const stayButton = wrapper.findAll('button').find(button => button.text() === 'Stay')
@@ -829,10 +1257,11 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Justification')
         ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
         await wrapper.vm.$nextTick()
+        await wrapper.find('textarea').setValue('Vulnerable code is not present')
 
         // Apply bulk update
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click') // Do NOT await here, it waits for promptConfirm
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        applyBtn.trigger('click') // Do NOT await here, it waits for promptConfirm
         await flushPromises()
 
         // Interact with custom modal
@@ -862,8 +1291,8 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         await wrapper.find('textarea').setValue('False positive mock')
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        await applyBtn.trigger('click')
         await flushPromises()
 
         const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
@@ -1047,12 +1476,13 @@ describe('VulnGroupCard', () => {
         await flushPromises()
 
         ;(wrapper.vm as any).state = 'NOT_AFFECTED'
+        ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
         await wrapper.vm.$nextTick()
         await flushPromises()
 
         await wrapper.find('textarea').setValue('Analyst no rescore')
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click')
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        await applyBtn.trigger('click')
         await flushPromises()
 
         const confirmBtn = wrapper.findAll('button').find(b => b.text() === 'Submit')
@@ -1115,8 +1545,8 @@ describe('VulnGroupCard', () => {
         await wrapper.find('textarea').setValue('Security confirmed exploitable')
 
         // Click Apply
-        const applyBtn = wrapper.findAll('button').find(b => b.text() === 'Apply')
-        applyBtn?.trigger('click') // Do NOT await
+        const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
+        applyBtn.trigger('click') // Do NOT await
         await flushPromises()
 
         // Confirm in modal

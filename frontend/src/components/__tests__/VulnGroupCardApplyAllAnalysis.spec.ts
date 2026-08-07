@@ -98,8 +98,8 @@ describe('VulnGroupCard apply-all analyzer assessments', () => {
         ],
     }
 
-    const mountCard = (rescoreRules?: Record<string, any>) => mount(VulnGroupCard, {
-        props: { group: JSON.parse(JSON.stringify(group)) },
+    const mountCard = (rescoreRules?: Record<string, any>, cardProps: Record<string, any> = {}) => mount(VulnGroupCard, {
+        props: { group: JSON.parse(JSON.stringify(group)), ...cardProps },
         global: {
             provide: {
                 user: ref({ role: 'REVIEWER', username: 'tester' }),
@@ -162,11 +162,33 @@ describe('VulnGroupCard apply-all analyzer assessments', () => {
         expect(banner).toContain('worst result: EXPLOITABLE')
     })
 
+    it('stages the filtered team plus one global reference when applying scoped results', async () => {
+        const wrapper = mountCard(undefined, { activeTeamFilter: 'TEAM-A' })
+        await applyAll(wrapper)
+
+        const vm = wrapper.vm as any
+        expect(vm.selectedTeam).toBe('TEAM-A')
+        expect(vm.state).toBe('NOT_AFFECTED')
+        expect(vm.teamDrafts.get('TEAM-A')).toEqual(expect.objectContaining({
+            state: 'NOT_AFFECTED',
+            details: expect.stringContaining('Summary for lib-a.'),
+        }))
+        expect(vm.teamDrafts.has('TEAM-B')).toBe(false)
+        expect(vm.teamDrafts.get('General')).toEqual(expect.objectContaining({
+            state: 'NOT_AFFECTED',
+            details: expect.stringContaining('Assessed Teams: TEAM-A'),
+        }))
+        expect(vm.teamDrafts.get('General').details).not.toContain('Summary for lib-a.')
+        expect(vm.codeAnalysisRunIds).toEqual(['run-a'])
+        expect(wrapper.get('[data-testid="code-analysis-draft-banner"]').text())
+            .toContain('Applied 1 scoped analyzer assessment to TEAM-A.')
+    })
+
     it('writes every team block and the global worst state in a single update', async () => {
         const wrapper = mountCard()
         await applyAll(wrapper)
 
-        await wrapper.get('[data-testid="sticky-tab-apply-button"]').trigger('click')
+        await wrapper.get('[data-testid="assessment-submit-button"]').trigger('click')
         await flushPromises()
         await wrapper.findAll('button').find(button => button.text() === 'Submit')?.trigger('click')
         await flushPromises()
@@ -179,8 +201,44 @@ describe('VulnGroupCard apply-all analyzer assessments', () => {
         expect(payload.details).toMatch(/\[Team: General\] \[State: EXPLOITABLE\]/)
         expect(payload.details).toMatch(/\[Team: TEAM-A\] \[State: NOT_AFFECTED\]/)
         expect(payload.details).toMatch(/\[Team: TEAM-B\] \[State: EXPLOITABLE\]/)
+        expect(payload.details.match(/\[Team: General\]/g)).toHaveLength(1)
         expect(payload.details).toContain('[Rescored: 8.1]')
         expect(payload.details).toContain('[Rescored Vector: CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H]')
+        expect(payload.details).toContain('Summary for lib-a.')
+        expect(payload.details).toContain('Summary for lib-b.')
+        const globalBlock = payload.details.split('--- [Team: TEAM-A]')[0]
+        expect(globalBlock).toContain('Assessed Teams: TEAM-A, TEAM-B')
+        expect(globalBlock).not.toContain('Summary for lib-a.')
+        expect(globalBlock).not.toContain('Summary for lib-b.')
+    })
+
+    it('preserves one independently authored global assessment while staging team evidence', async () => {
+        const groupWithGlobal = JSON.parse(JSON.stringify(group))
+        const firstComponent = groupWithGlobal.affected_versions[0].components[0]
+        firstComponent.analysis_state = 'IN_TRIAGE'
+        firstComponent.analysis_details = [
+            '--- [Team: General] [State: IN_TRIAGE] [Assessed By: reviewer] [Justification: NOT_SET] ---',
+            'Independent global policy decision.',
+        ].join('\n')
+        const wrapper = mountCard(undefined, { group: groupWithGlobal })
+
+        await applyAll(wrapper)
+
+        const vm = wrapper.vm as any
+        expect(vm.state).toBe('IN_TRIAGE')
+        expect(vm.details).toBe('Independent global policy decision.')
+        expect(vm.teamDrafts.has('General')).toBe(false)
+        expect(wrapper.get('[data-testid="code-analysis-draft-banner"]').text())
+            .toContain('The existing global assessment was preserved.')
+
+        await wrapper.get('[data-testid="assessment-submit-button"]').trigger('click')
+        await flushPromises()
+        await wrapper.findAll('button').find(button => button.text() === 'Submit')?.trigger('click')
+        await flushPromises()
+
+        const payload = vi.mocked(updateAssessment).mock.calls[0]?.[0] as any
+        expect(payload.details.match(/\[Team: General\]/g)).toHaveLength(1)
+        expect(payload.details).toContain('Independent global policy decision.')
         expect(payload.details).toContain('Summary for lib-a.')
         expect(payload.details).toContain('Summary for lib-b.')
     })
@@ -218,7 +276,7 @@ describe('VulnGroupCard apply-all analyzer assessments', () => {
         }
         expect(vm.pendingScore).toBe(0)
 
-        await wrapper.get('[data-testid="sticky-tab-apply-button"]').trigger('click')
+        await wrapper.get('[data-testid="assessment-submit-button"]').trigger('click')
         await flushPromises()
         await wrapper.findAll('button').find(button => button.text() === 'Submit')?.trigger('click')
         await flushPromises()

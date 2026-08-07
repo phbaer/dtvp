@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCodeAnalysisDetails, prepareCodeAnalysisResult, prepareCodeAnalysisResults } from '../codeAnalysisResult'
+import { buildCodeAnalysisDetails, buildCodeAnalysisGlobalReferenceDraft, prepareCodeAnalysisResult, prepareCodeAnalysisResults } from '../codeAnalysisResult'
 import type { CodeAnalysisComponentRun } from '../codeAnalysisResult'
 import type { CodeAnalysisAssessResponse } from '../api'
 
@@ -286,7 +286,7 @@ describe('codeAnalysisResult', () => {
         expect(details).not.toContain('Prefer a low-info outcome')
     })
 
-    it('prepares team drafts from matching components and falls back to the first tagged team', () => {
+    it('does not assign an unmatched component to an unrelated team', () => {
         const response = createResponse()
         const prepared = prepareCodeAnalysisResult(
             response,
@@ -300,16 +300,8 @@ describe('codeAnalysisResult', () => {
 
         expect(prepared.targetState).toBe('NOT_AFFECTED')
         expect(prepared.targetJustification).toBe('CODE_NOT_PRESENT')
-        expect(prepared.firstTeam).toBe('TEAM-PLATFORM')
-        expect(prepared.teamDrafts).toEqual([
-            {
-                team: 'TEAM-PLATFORM',
-                state: 'NOT_AFFECTED',
-                details: prepared.detailsText,
-                justification: 'CODE_NOT_PRESENT',
-                assigned: ['alice', 'bob'],
-            },
-        ])
+        expect(prepared.firstTeam).toBeNull()
+        expect(prepared.teamDrafts).toEqual([])
         expect(prepared.adjustedVector).toBe('CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N')
         expect(prepared.adjustedScore).toBe(3.2)
     })
@@ -430,6 +422,68 @@ describe('codeAnalysisResult', () => {
         expect(prepared.teamDrafts[0]?.team).toBe('API')
         expect(prepared.teamDrafts[0]?.details.match(/\[Component: lib-a\]/g)).toHaveLength(1)
         expect(prepared.teamDrafts[0]?.details.match(/\[Component: lib-b\]/g)).toHaveLength(1)
+    })
+
+    describe('buildCodeAnalysisGlobalReferenceDraft', () => {
+        const teamDraft = (team: string, state: string, details: string, justification = 'NOT_SET') => ({
+            team,
+            state,
+            details,
+            justification,
+            assigned: [],
+        })
+
+        it('creates one worst-wins global reference without copying team evidence', () => {
+            const global = buildCodeAnalysisGlobalReferenceDraft([
+                teamDraft('TEAM-A', 'NOT_AFFECTED', 'Evidence unique to team A.', 'CODE_NOT_PRESENT'),
+                teamDraft('TEAM-B', 'EXPLOITABLE', 'Evidence unique to team B.'),
+                teamDraft('team-a', 'IN_TRIAGE', 'Latest decision for team A.'),
+            ])
+
+            expect(global).toEqual(expect.objectContaining({
+                team: 'General',
+                state: 'EXPLOITABLE',
+                justification: 'NOT_SET',
+            }))
+            expect(global?.details).toContain('Global state follows the owning-team assessments.')
+            expect(global?.details).toContain('Assessed Teams: team-a, TEAM-B')
+            expect(global?.details).not.toContain('Evidence unique to team A.')
+            expect(global?.details).not.toContain('Evidence unique to team B.')
+        })
+
+        it('preserves an independently authored global assessment', () => {
+            const global = buildCodeAnalysisGlobalReferenceDraft(
+                [teamDraft('TEAM-A', 'EXPLOITABLE', 'Team evidence.')],
+                teamDraft('General', 'NOT_AFFECTED', 'Reviewer-owned global policy.', 'CODE_NOT_PRESENT'),
+            )
+
+            expect(global).toBeNull()
+        })
+
+        it('keeps notes from an incomplete global block when linking it to team assessments', () => {
+            const global = buildCodeAnalysisGlobalReferenceDraft(
+                [teamDraft('TEAM-A', 'NOT_AFFECTED', 'Team evidence.', 'CODE_NOT_PRESENT')],
+                teamDraft('General', 'NOT_SET', 'Keep this reviewer note.'),
+            )
+
+            expect(global?.state).toBe('NOT_AFFECTED')
+            expect(global?.details).toContain('Assessed Teams: TEAM-A')
+            expect(global?.details).toContain('Keep this reviewer note.')
+        })
+
+        it('updates an existing generated reference instead of creating another global assessment', () => {
+            const generated = buildCodeAnalysisGlobalReferenceDraft([
+                teamDraft('TEAM-A', 'NOT_AFFECTED', 'Old team evidence.', 'CODE_NOT_PRESENT'),
+            ])!
+            const updated = buildCodeAnalysisGlobalReferenceDraft([
+                teamDraft('TEAM-A', 'NOT_AFFECTED', 'New team evidence.', 'CODE_NOT_PRESENT'),
+                teamDraft('TEAM-B', 'IN_TRIAGE', 'New team evidence.'),
+            ], generated)
+
+            expect(updated?.state).toBe('IN_TRIAGE')
+            expect(updated?.details).toContain('Assessed Teams: TEAM-A, TEAM-B')
+            expect(updated?.details.match(/Global state follows/g)).toHaveLength(1)
+        })
     })
 
     describe('prepareCodeAnalysisResults', () => {

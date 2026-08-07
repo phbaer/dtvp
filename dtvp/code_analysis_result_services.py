@@ -1056,15 +1056,23 @@ class CodeAnalysisResultStore:
         *,
         project_name: Optional[str] = None,
         vuln_id: Optional[str] = None,
+        vuln_ids: Optional[list[str]] = None,
         component_name: Optional[str] = None,
+        component_names: Optional[list[str]] = None,
         source: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
         assessments_only: bool = False,
     ) -> list[dict[str, Any]]:
         project_filter = _lower(project_name)
-        vuln_filter = _lower(vuln_id)
-        component_filter = _lower(component_name)
+        vuln_filters = set(filter(None, map(_lower, [vuln_id, *(vuln_ids or [])])))
+        ordered_vuln_filters = sorted(vuln_filters)
+        component_filters = set(filter(None, map(
+            _lower,
+            [component_name, *(component_names or [])],
+        )))
         source_filter = _lower(source)
+        result_offset = max(0, int(offset or 0))
         max_results = max(
             1,
             min(int(limit or 100), get_code_analysis_results_max_records()),
@@ -1073,24 +1081,30 @@ class CodeAnalysisResultStore:
             self._ensure_loaded()
             where: list[str] = []
             params: list[Any] = []
-            if vuln_filter:
+            if ordered_vuln_filters:
+                placeholders = ",".join("?" for _ in ordered_vuln_filters)
                 where.append(
-                    """
+                    f"""
                     (
-                        metadata.vuln_id_lower = ?
+                        metadata.vuln_id_lower IN ({placeholders})
                         OR (
                             metadata.vuln_id_lower = ''
-                            AND results.vuln_id_lower = ?
+                            AND results.vuln_id_lower IN ({placeholders})
                         )
                     )
                     """
                 )
-                params.extend([vuln_filter, vuln_filter])
+                params.extend([*ordered_vuln_filters, *ordered_vuln_filters])
             if assessments_only:
                 where.append("metadata.has_assessment = 1")
             where_sql = f"WHERE {' AND '.join(where)}" if where else ""
             sql_limit = ""
-            if not project_filter and not component_filter and not source_filter:
+            if (
+                not project_filter
+                and not component_filters
+                and not source_filter
+                and result_offset == 0
+            ):
                 sql_limit = "LIMIT ?"
                 params.append(max_results)
             with closing(self._connect()) as connection:
@@ -1127,6 +1141,7 @@ class CodeAnalysisResultStore:
                 ).fetchall()
 
         records: list[dict[str, Any]] = []
+        matched_records = 0
         for row in rows:
             project_names = _decode_json_strings(row[11])
             component_names = _decode_json_strings(row[12])
@@ -1144,12 +1159,12 @@ class CodeAnalysisResultStore:
                 and project_filter != _lower(row[1])
             ):
                 continue
-            if vuln_filter and vuln_filter != normalized_vuln:
+            if vuln_filters and normalized_vuln not in vuln_filters:
                 continue
             if (
-                component_filter
-                and component_filter != scan_target
-                and component_filter not in component_names
+                component_filters
+                and scan_target not in component_filters
+                and component_filters.isdisjoint(component_names)
             ):
                 continue
             if source_filter:
@@ -1158,6 +1173,10 @@ class CodeAnalysisResultStore:
                     source_aliases.add("automatic")
                 if source_filter not in source_aliases:
                     continue
+            if matched_records < result_offset:
+                matched_records += 1
+                continue
+            matched_records += 1
             assessment = _decode_json_dict(row[15])
             record_data = _decode_json_dict(row[16])
             records.append(

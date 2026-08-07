@@ -492,13 +492,14 @@ def test_get_team_mapping(client):
             assert response.json() == {"test": "team"}
 
 
-def test_get_team_mapping_forbidden_for_analyst(client):
+def test_get_team_mapping_allowed_for_analyst(client):
     from unittest.mock import patch
 
     with patch("dtvp.main.get_user_role", return_value="ANALYST"):
-        response = client.get("/api/settings/mapping")
-        assert response.status_code == 403
-        assert "Only reviewers" in response.json()["detail"]
+        with patch("dtvp.main.load_team_mapping", return_value={"lib": "Platform"}):
+            response = client.get("/api/settings/mapping")
+            assert response.status_code == 200
+            assert response.json() == {"lib": "Platform"}
 
 
 def test_get_auto_analysis_guidance(client):

@@ -57,11 +57,12 @@ Agentyzer exposes two operator surfaces:
 
 At startup the service:
 
-1. Loads and hot-reloads `config/repos.yaml` for component-to-repository mappings.
-2. Validates the prompt bundles used by the LLM-assisted steps.
-3. Constructs the configured LLM backend from environment variables.
-4. Initializes an in-memory job store for async assessments.
-5. Performs an LLM health check and logs whether model-backed steps are available.
+1. Prints the packaged Agentyzer project version and image build number before importing the application.
+2. Loads and hot-reloads `config/repos.yaml` for component-to-repository mappings.
+3. Validates the prompt bundles used by the LLM-assisted steps.
+4. Constructs the configured LLM backend from environment variables.
+5. Initializes an in-memory job store for async assessments.
+6. Performs an LLM health check and logs whether model-backed steps are available.
 
 ## End-To-End Process
 
@@ -280,7 +281,7 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `OPENWEBUI_HOST` | `http://localhost:3000` | Base URL for OpenWebUI. |
 | `OPENWEBUI_MODEL` | `mistral` | Model identifier served by OpenWebUI. |
 | `OPENWEBUI_API_KEY` | empty | Bearer token for OpenWebUI when required. |
-| `OPENWEBUI_TOOL_CALLS` | `auto` | Native OpenAI-style research tool calls for OpenWebUI, or `off` to use text `FETCH_*` only. |
+| `OPENWEBUI_TOOL_CALLS` | `auto` | Native OpenAI-style research tool calls for OpenWebUI, or `off` to use text research directives. |
 | `OPENWEBUI_CONTEXT_WINDOW` | `0` | Optional model context window in tokens. When set, Agentyzer pre-trims oversized OpenWebUI prompts before sending them. |
 | `OPENWEBUI_CONTEXT_SAFETY_MARGIN` | `256` | Token margin reserved below the configured or reported context limit. |
 | `OPENWEBUI_CONTEXT_RETRIES` | `2` | Number of retries after OpenWebUI rejects a request for exceeding context length. |
@@ -289,6 +290,13 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | `1` | Maximum number of async or sync assessment pipelines allowed to execute at the same time. Extra async jobs remain `pending` until a slot opens. |
+| `AGENTYZER_RESEARCH_CLONE_ENABLED` | `true` | Enable bounded LLM-requested local inspection of dependent repositories. |
+| `AGENTYZER_RESEARCH_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Comma-separated public HTTPS Git host allowlist; `*` permits any public host after address checks. |
+| `AGENTYZER_RESEARCH_MAX_CLONES_PER_ANALYSIS` | `3` | Repository-clone requests allowed across one analysis research loop. |
+| `AGENTYZER_RESEARCH_CLONE_TIMEOUT_SECONDS` | `90` | Per Git clone or inspection command timeout. |
+| `AGENTYZER_RESEARCH_CLONE_MAX_REPOSITORY_MB` | `256` | Maximum disk size accepted for one cached research clone. |
+| `AGENTYZER_RESEARCH_CLONE_MAX_FILE_BYTES` | `256000` | Largest committed text file eligible for excerpts. |
+| `AGENTYZER_RESEARCH_CLONE_CACHE_TTL_SECONDS` | `3600` | Time a matching shallow clone can be reused without network refresh. |
 
 ### Component registry
 
@@ -655,7 +663,26 @@ The pipeline state contract lives in `src/pipeline/state.py` and carries:
 - Final output in `result`.
 - Structured `step_reports` and append-only `evidence` for auditing.
 
-The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. With OpenWebUI and `OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`); Agentyzer executes them locally through its existing allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
+The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. Persisted `llm_conversation` turns include request/response timestamps and directional token usage when the provider reports it; Ollama also retains its native evaluation-duration metrics. With OpenWebUI and `OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`, `clone_repository`); Agentyzer executes them locally through allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` and `CLONE_REPOSITORY` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
+
+`clone_repository` fills the gap between a dependency-chain name and the
+implementation evidence needed to judge reachability. The model supplies a
+public HTTPS repository URL, a narrow search focus, and optionally a branch or
+tag. Agentyzer validates the host and its resolved addresses, rejects embedded
+credentials and Git ref expressions, performs a shallow filtered clone without
+a worktree, enumerates and searches the complete eligible committed source and
+manifest tree, and feeds matching blobs through the same language-aware
+import/call-site analyzers and structural extraction as the primary checkout.
+It returns bounded parser findings, matching excerpts, and commit provenance;
+hooks, build scripts, submodules, package managers, and repository code are
+never run. Returned content is wrapped as untrusted external evidence. Source
+comments, documentation, strings, tests, filenames, and prompt-like content can
+never become analyst guidance or override the trusted task, tool policy, or
+response contract. Research
+clones live under `AGENTYZER_REPOS_DIR/research`, are locked per cache path, and
+are reused within the configured TTL. Private dependent repositories are not
+available to the model-facing tool; configured primary repositories continue
+to use the separate authenticated `repos.yaml` workflow.
 
 All LLM prompts are managed as YAML bundles in `config/prompts/`. Prompt bundles use compact `analysis_protocol` sections instead of bundled few-shot example transcripts. The protocol tells the model to keep analysis private, apply security researcher/remediator/auditor/ticket-author lenses internally, and emit only structured evidence fields such as call paths, dependency chains, exclusions, remediation, and validation notes. Response contracts define exact field order, allowed values, evidence labels, and disallow markdown, JSON, preambles, conclusions, or extra fields. Legacy custom prompt bundles that still provide `few_shot` are accepted as a compatibility alias for `analysis_protocol`.
 

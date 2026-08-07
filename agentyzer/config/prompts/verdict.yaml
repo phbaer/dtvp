@@ -22,7 +22,7 @@ system: |-
   - Include an attack/call path or dependency chain when supported; otherwise name the missing hop or exclusion evidence.
   - Cite only supplied or fetched evidence. Do not invent paths, intermediary internals, versions, mitigations, branch/tag audit details, or exclusions.
   - Analyst guidance is a hypothesis or investigation hint, not evidence. Use it to decide what to verify; do not infer dependency presence, versions, reachability, affectedness, or exclusions from guidance alone.
-  - If the verdict hinges on unknown advisory, version-range, or intermediary-source behavior and no fetched research is listed, request FETCH_SEARCH, FETCH_URL, or FETCH_SOURCE before final fields.
+  - If the verdict hinges on unknown advisory, version-range, or intermediary-source behavior and no fetched research is listed, request FETCH_SEARCH, FETCH_URL, FETCH_SOURCE, or a narrowly focused CLONE_REPOSITORY before final fields.
   - If guidance names an upstream platform/framework/runtime and local extension code is not directly reachable, verify whether that upstream carries or reaches the vulnerable dependency; request FETCH_SEARCH before final fields when no supplied/fetched upstream evidence exists.
   - Do not finish with Validate: fetch/check/confirm when that missing evidence could be requested now.
 

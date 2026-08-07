@@ -770,8 +770,8 @@ class AssessResponse(BaseModel):
         default_factory=list,
         description=(
             "Actual LLM conversation turns captured during this assessment. Each "
-            "turn includes the messages sent to the model and the assistant response "
-            "when available."
+            "turn includes timestamps, messages sent to the model, the assistant "
+            "response, directional token usage, and provider metrics when available."
         ),
     )
 

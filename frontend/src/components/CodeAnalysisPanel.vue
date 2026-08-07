@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, History, Send, Ban, FileText, Copy, ExternalLink, Trash2 } from 'lucide-vue-next'
+import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, Eye, History, Ban, FileText, Copy, ExternalLink } from 'lucide-vue-next'
 import {
     codeAnalysisBenchmarkResult,
     codeAnalysisDeleteResult,
@@ -8,19 +8,26 @@ import {
     codeAnalysisGetResult,
     codeAnalysisListVulnerabilityResults,
 } from '../lib/api'
-import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisBenchmarkComparison, CodeAnalysisBenchmarkFinding, CodeAnalysisComponentResult, CodeAnalysisCvssAdjustment, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
+import type { AnalysisQueueItem, CodeAnalysisAssessResponse, CodeAnalysisAssessment, CodeAnalysisBenchmarkComparison, CodeAnalysisBenchmarkFinding, CodeAnalysisComponentResult, CodeAnalysisLlmConversationTurn, CodeAnalysisLlmMessage, CodeAnalysisResultRecord, CodeAnalysisStepFindings } from '../lib/api'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
-import { prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
+import { codeAnalysisAssessmentState, isCodeAnalysisResultWorse, prepareCodeAnalysisResult } from '../lib/codeAnalysisResult'
 import type { CodeAnalysisComponentRun } from '../lib/codeAnalysisResult'
 import { getRuntimeConfig } from '../lib/env'
 import type { AutomaticAssessmentStatus } from '../lib/vulnListIndex'
+import CodeAnalysisHistoryRow from './CodeAnalysisHistoryRow.vue'
+import CodeAnalysisConversationViewport from './CodeAnalysisConversationViewport.vue'
+import CodeAnalysisRunOutcome from './CodeAnalysisRunOutcome.vue'
+import DetailSection from './DetailSection.vue'
 
 const props = defineProps<{
     vulnId: string
+    vulnAliases?: string[]
     projectName?: string
     cvssVector?: string
     componentNames: string[]
     componentTeams?: Record<string, string>
+    teamScope?: string
+    teamScopeAliases?: string[]
     affectedProductVersions?: string[]
     assessedTeams?: Set<string>
     analysisGuidance?: string
@@ -32,12 +39,15 @@ const props = defineProps<{
     currentCvssVector?: string
     currentAssigned?: string[]
     assessmentStatus?: AutomaticAssessmentStatus | null
+    isReviewer?: boolean
 }>()
 
 const emit = defineEmits<{
-    (e: 'apply-result', result: CodeAnalysisAssessResponse, components: string[], analysisRunIds: string[]): void
+    (e: 'apply-result', result: CodeAnalysisAssessResponse, components: string[], analysisRunIds: string[], targetTeam?: string): void
     (e: 'apply-all-results', runs: CodeAnalysisComponentRun[]): void
     (e: 'result-change', result: CodeAnalysisAssessResponse | null, components: string[]): void
+    (e: 'scope-results-change', available: boolean): void
+    (e: 'proposals-change', runs: CodeAnalysisComponentRun[]): void
 }>()
 
 const userGuidance = ref('')
@@ -45,9 +55,9 @@ const error = ref<string | null>(null)
 const result = ref<CodeAnalysisAssessResponse | null>(null)
 const stepsExpanded = ref(false)
 const coverageOpen = ref(false)
-const assessmentSummaryOpen = ref(true)
-const assessmentDraftOpen = ref(true)
-const assessmentBenchmarkOpen = ref(true)
+const assessmentDraftOpen = ref(false)
+const assessmentBenchmarkOpen = ref(false)
+const componentResultsOpen = ref(false)
 const ticketDraftOpen = ref(false)
 const selectedComponents = ref<Set<string>>(new Set())
 const componentDropdownOpen = ref(false)
@@ -64,10 +74,16 @@ const followUpSubmitting = ref(false)
 const queueActionIds = ref<Set<string>>(new Set())
 const deletingRunIds = ref<Set<string>>(new Set())
 const applyingAll = ref(false)
+const combinedHydrating = ref(false)
+const combinedHydrationError = ref<string | null>(null)
+const expandedHistoryComponents = ref<Set<string>>(new Set())
 const systemPromptOpen = ref(false)
 const systemPromptLoading = ref(false)
 const systemPromptError = ref<string | null>(null)
 const systemPromptPayload = ref<Record<string, any> | null>(null)
+const conversationCopyState = ref<Record<string, 'idle' | 'copied' | 'error'>>({})
+type ConversationStage = 'request' | 'tools' | 'response'
+const conversationStageOpen = ref<Record<string, boolean>>({})
 const ticketCopyState = ref<'idle' | 'copied' | 'error'>('idle')
 const jiraCreateUrl = getRuntimeConfig('DTVP_JIRA_CREATE_URL', '').trim()
 const benchmarkComparison = ref<CodeAnalysisBenchmarkComparison | null>(null)
@@ -75,7 +91,11 @@ const benchmarkLoading = ref(false)
 const benchmarkError = ref<string | null>(null)
 const HISTORY_RESULT_REFRESH_ATTEMPTS = 4
 const HISTORY_RESULT_REFRESH_DELAY_MS = 500
+const HISTORY_PAGE_SIZE = 500
 let benchmarkLoadCounter = 0
+let historyLoadCounter = 0
+let combinedHydrationCounter = 0
+const conversationCopyTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 // Track queue IDs for items submitted from this panel
 const pendingQueueIds = ref<string[]>([])
@@ -91,14 +111,6 @@ type AnalysisBatch = {
 let analysisBatchCounter = 0
 const analysisBatches = new Map<string, AnalysisBatch>()
 
-// Severity ordering for worst-wins merging
-const VERDICT_SEVERITY: Record<string, number> = {
-    affected: 3,
-    inconclusive: 2,
-    'not affected': 1,
-    not_affected: 1,
-}
-
 const uniqueComponents = computed(() => {
     const seen = new Set<string>()
     return props.componentNames
@@ -112,6 +124,30 @@ const uniqueComponents = computed(() => {
         })
 })
 
+const vulnerabilityIdKeys = computed(() => new Set(
+    [props.vulnId, ...(props.vulnAliases || [])]
+        .map(value => String(value || '').trim().toLocaleLowerCase())
+        .filter(Boolean),
+))
+
+const relevantComponentKeys = computed(() => new Set(
+    uniqueComponents.value.map(component => component.toLocaleLowerCase()),
+))
+
+const teamScopeKeys = computed(() => new Set(
+    [props.teamScope, ...(props.teamScopeAliases || [])]
+        .map(team => String(team || '').trim().toLocaleLowerCase())
+        .filter(Boolean),
+))
+const teamScopeKey = computed(() => String(props.teamScope || '').trim().toLocaleLowerCase())
+const matchesTeamScope = (item: { context_summary?: Record<string, any> | null }) => {
+    if (!teamScopeKey.value) return true
+    const targetTeam = String(item.context_summary?.target_team || '').trim().toLocaleLowerCase()
+    // Older/manual records do not always retain target_team. Their component
+    // scope is still authoritative, while an explicit different team is not.
+    return !targetTeam || teamScopeKeys.value.has(targetTeam)
+}
+
 const allSelected = computed(() =>
     uniqueComponents.value.length > 0 && uniqueComponents.value.every(c => selectedComponents.value.has(c))
 )
@@ -123,20 +159,46 @@ const hasExistingAssessment = computed(() => {
     return Boolean(state && state !== 'NOT_SET')
 })
 
-const visiblePersistedResults = computed(() => persistedResults.value.slice(0, 4))
 const latestPersistedResult = computed(() => persistedResults.value[0] || null)
+const latestReusableResult = computed(() => persistedResults.value.find(record => (
+    record.source !== 'benchmark'
+    && (!record.status || record.status === 'completed')
+)) || null)
+const hasReusableAnalysis = computed(() => Boolean(
+    latestReusableResult.value || completedQueueItems.value.length > 0,
+))
+const effectiveAssessmentStatus = computed<AutomaticAssessmentStatus | null>(() => {
+    if (!teamScopeKey.value) return props.assessmentStatus || null
+    if (!historyLoaded.value) return null
+    const reusableRecords = persistedResults.value.filter(record => (
+        record.source !== 'benchmark'
+        && (!record.status || record.status === 'completed')
+    ))
+    if (reusableRecords.length === 0) return null
+
+    const coveredComponents = new Set(
+        reusableRecords.map(record => record.component_name.toLocaleLowerCase()),
+    )
+    if (uniqueComponents.value.some(component => !coveredComponents.has(component.toLocaleLowerCase()))) {
+        return 'partial'
+    }
+    const hasAutomatic = reusableRecords.some(record => record.source === 'automatic')
+    const hasManual = reusableRecords.some(record => record.source !== 'automatic')
+    if (hasAutomatic && hasManual) return 'mixed'
+    return hasAutomatic ? 'auto' : 'manual'
+})
 const assessmentStatusLabel = computed(() => ({
     auto: 'Automatic assessment available',
     manual: 'Manual assessment available',
     mixed: 'Automatic and manual assessments available',
     partial: 'Assessment coverage is partial',
-}[props.assessmentStatus || 'auto']))
+}[effectiveAssessmentStatus.value || 'auto']))
 const assessmentStatusClass = computed(() => ({
     auto: 'border-cyan-700/40 bg-cyan-950/30 text-cyan-300',
     manual: 'border-blue-700/40 bg-blue-950/30 text-blue-300',
     mixed: 'border-purple-700/40 bg-purple-950/30 text-purple-300',
     partial: 'border-amber-700/40 bg-amber-950/30 text-amber-300',
-}[props.assessmentStatus || 'auto']))
+}[effectiveAssessmentStatus.value || 'auto']))
 const followUpParentRunId = computed(() => selectedRunId.value || latestPersistedResult.value?.analysis_run_id || null)
 const selectedPersistedResult = computed(() => {
     const runId = selectedRunId.value
@@ -170,6 +232,87 @@ function visibleComponentName(component: string) {
     return uniqueComponents.value.find(candidate => candidate.toLowerCase() === normalized)
 }
 
+const recordVisibleComponent = (record: CodeAnalysisResultRecord) => {
+    const candidates = [
+        record.scan_target,
+        record.component_name,
+        ...(record.component_names || []),
+    ]
+    for (const candidate of candidates) {
+        const visible = visibleComponentName(String(candidate || ''))
+        if (visible) return visible
+    }
+    return null
+}
+
+type AnalysisHistoryComponentGroup = {
+    component: string
+    team: string
+    latest: CodeAnalysisResultRecord
+    predecessors: CodeAnalysisResultRecord[]
+    earlier: CodeAnalysisResultRecord[]
+    total: number
+}
+
+const historyComponentGroups = computed<AnalysisHistoryComponentGroup[]>(() => {
+    const recordsByComponent = new Map<string, CodeAnalysisResultRecord[]>()
+    uniqueComponents.value.forEach(component => recordsByComponent.set(component, []))
+
+    persistedResults.value.forEach(record => {
+        if (record.source === 'benchmark') return
+        const component = recordVisibleComponent(record)
+        if (component) recordsByComponent.get(component)?.push(record)
+    })
+
+    return [...recordsByComponent.entries()].flatMap(([component, records]) => {
+        if (!records.length) return []
+        const sorted = [...records].sort((left, right) => {
+            const leftTime = Date.parse(left.finished_at || left.recorded_at || left.submitted_at || '') || 0
+            const rightTime = Date.parse(right.finished_at || right.recorded_at || right.submitted_at || '') || 0
+            return rightTime - leftTime || right.analysis_run_id.localeCompare(left.analysis_run_id)
+        })
+        const byRunId = new Map(sorted.map(record => [record.analysis_run_id, record]))
+        const latest = sorted[0]
+        const predecessors: CodeAnalysisResultRecord[] = []
+        const chainIds = new Set([latest.analysis_run_id])
+        let parentId = latest.parent_run_id || ''
+        while (parentId && !chainIds.has(parentId)) {
+            const parent = byRunId.get(parentId)
+            if (!parent) break
+            predecessors.push(parent)
+            chainIds.add(parent.analysis_run_id)
+            parentId = parent.parent_run_id || ''
+        }
+        return [{
+            component,
+            team: props.componentTeams?.[component] || '',
+            latest,
+            predecessors,
+            earlier: sorted.filter(record => !chainIds.has(record.analysis_run_id)),
+            total: sorted.length,
+        }]
+    })
+})
+
+const historyRecordCount = computed(() => persistedResults.value.filter(record => record.source !== 'benchmark').length)
+
+const isReusableRecord = (record: CodeAnalysisResultRecord) => (
+    record.source !== 'benchmark'
+    && (!record.status || record.status === 'completed')
+)
+
+const toggleComponentHistory = (component: string) => {
+    const next = new Set(expandedHistoryComponents.value)
+    const key = component.toLocaleLowerCase()
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    expandedHistoryComponents.value = next
+}
+
+const isComponentHistoryExpanded = (component: string) => (
+    expandedHistoryComponents.value.has(component.toLocaleLowerCase())
+)
+
 function toggleComponent(comp: string) {
     const next = new Set(selectedComponents.value)
     if (next.has(comp)) next.delete(comp)
@@ -194,10 +337,12 @@ function buildLaunchGuidance(): string | undefined {
 }
 
 const launchGuidancePreview = computed(() => buildLaunchGuidance() || '')
-const requestGuidancePreview = computed(() => {
-    const selectedGuidance = stringifyPromptContent(selectedPersistedResult.value?.user_guidance)
-    return selectedGuidance || launchGuidancePreview.value
-})
+const savedRunGuidance = computed(() =>
+    stringifyPromptContent(selectedPersistedResult.value?.user_guidance).trim()
+)
+const selectedRunGuidanceRedacted = computed(() =>
+    Boolean(selectedPersistedResult.value?.user_guidance_redacted)
+)
 
 type AssessmentDraftPreviewRow = {
     label: string
@@ -412,14 +557,20 @@ const evidenceQualityBadges = computed<EvidenceQualityBadge[]>(() => {
 
 const evidenceQualityClass = (tone: EvidenceQualityTone) => {
     switch (tone) {
-        case 'green': return 'border-green-700/40 bg-green-950/25 text-green-200'
-        case 'cyan': return 'border-cyan-700/40 bg-cyan-950/25 text-cyan-200'
-        case 'blue': return 'border-blue-700/40 bg-blue-950/25 text-blue-200'
-        case 'amber': return 'border-amber-700/40 bg-amber-950/30 text-amber-200'
-        case 'yellow': return 'border-yellow-700/40 bg-yellow-950/25 text-yellow-200'
-        default: return 'border-gray-700/50 bg-gray-950/40 text-gray-300'
+        case 'green': return 'text-green-300'
+        case 'cyan': return 'text-cyan-300'
+        case 'blue': return 'text-blue-300'
+        case 'amber': return 'text-amber-300'
+        case 'yellow': return 'text-yellow-300'
+        default: return 'text-gray-400'
     }
 }
+
+const presentedEvidenceQualityBadges = computed(() => evidenceQualityBadges.value.map(badge => ({
+    label: badge.label,
+    detail: badge.detail,
+    className: evidenceQualityClass(badge.tone),
+})))
 
 // Keep selection canonical when a reused card receives a different component list.
 watch(uniqueComponents, (comps, previousComps) => {
@@ -441,7 +592,10 @@ watch(uniqueComponents, (comps, previousComps) => {
 // Find active queue items for this vulnerability
 const activeQueueItems = computed(() => {
     return analysisQueueStore.items.value.filter(
-        i => i.vuln_id === props.vulnId && (i.status === 'queued' || i.status === 'running')
+        i => vulnerabilityIdKeys.value.has(String(i.vuln_id || '').toLocaleLowerCase())
+            && relevantComponentKeys.value.has(String(i.component_name || '').toLocaleLowerCase())
+            && matchesTeamScope(i)
+            && (i.status === 'queued' || i.status === 'running')
     )
 })
 
@@ -522,12 +676,6 @@ const stepStatusColor = (status: string) => {
     return 'text-yellow-400'
 }
 
-function worstCvss(a: CodeAnalysisCvssAdjustment | undefined, b: CodeAnalysisCvssAdjustment | undefined): CodeAnalysisCvssAdjustment | undefined {
-    if (!a) return b
-    if (!b) return a
-    return a.adjusted_score >= b.adjusted_score ? a : b
-}
-
 function mergeCheckedVersions(results: { component: string; response: CodeAnalysisAssessResponse }[]): string[] {
     const merged = new Set<string>()
     for (const { response } of results) {
@@ -541,36 +689,20 @@ function mergeCheckedVersions(results: { component: string; response: CodeAnalys
 }
 
 function mergeResults(results: { component: string; response: CodeAnalysisAssessResponse }[]): CodeAnalysisAssessResponse {
-    let worstAssessment: CodeAnalysisAssessment = results[0].response.assessment
+    let worstResponse = results[0].response
     let allSteps: CodeAnalysisStepFindings[] = []
     let allConversationTurns: CodeAnalysisLlmConversationTurn[] = []
     const componentResults: CodeAnalysisComponentResult[] = []
 
     for (const { component, response } of results) {
         const cur = response.assessment
-        const curSeverity = VERDICT_SEVERITY[cur.verdict.toLowerCase()] ?? 0
-        const worstSeverity = VERDICT_SEVERITY[worstAssessment.verdict.toLowerCase()] ?? 0
-
         componentResults.push({
             component,
             assessment: cur,
             versions_checked: response.versions_checked,
         })
 
-        if (curSeverity > worstSeverity ||
-            (curSeverity === worstSeverity && (cur.adjusted_cvss?.adjusted_score ?? 0) > (worstAssessment.adjusted_cvss?.adjusted_score ?? 0))) {
-            worstAssessment = {
-                ...cur,
-                adjusted_cvss: worstCvss(worstAssessment.adjusted_cvss, cur.adjusted_cvss),
-                summary: cur.summary,
-                reasoning: cur.reasoning,
-            }
-        } else {
-            worstAssessment = {
-                ...worstAssessment,
-                adjusted_cvss: worstCvss(worstAssessment.adjusted_cvss, cur.adjusted_cvss),
-            }
-        }
+        if (isCodeAnalysisResultWorse(response, worstResponse)) worstResponse = response
 
         allSteps = allSteps.concat(response.steps.map(s => ({
             ...s,
@@ -584,14 +716,27 @@ function mergeResults(results: { component: string; response: CodeAnalysisAssess
         )
     }
 
+    let worstAssessment: CodeAnalysisAssessment = worstResponse.assessment
     const summaryParts = results.map(r => `${r.component}: ${r.response.assessment.verdict}`)
+    const rationaleParts = results
+        .map(({ component, response }) => {
+            const rationale = String(response.assessment.reasoning || response.assessment.summary || '').trim()
+            return rationale ? `${component}: ${rationale}` : ''
+        })
+        .filter(Boolean)
+    const worstComponents = results
+        .filter(({ response }) => response.assessment.verdict === worstAssessment.verdict)
+        .map(({ component }) => component)
     const ticketParts = results
         .map(r => stringifyTicketValue(r.response.assessment.ticket_text))
         .filter(Boolean)
     worstAssessment = {
         ...worstAssessment,
         summary: `Combined analysis for ${results.length} components. ${summaryParts.join('; ')}`,
-        reasoning: 'Global result merged from the latest completed analysis for each selected component.',
+        reasoning: [
+            `Worst-case verdict: ${worstAssessment.verdict}${worstComponents.length ? ` (${worstComponents.join(', ')})` : ''}.`,
+            ...rationaleParts,
+        ].join(' '),
         ...(ticketParts.length ? { ticket_text: ticketParts.join('\n\n---\n\n') } : {}),
     }
 
@@ -663,7 +808,8 @@ const handleComponentComplete = (
     }
 }
 
-const handleComponentError = (_batchId: string, component: string, err: string) => {
+const handleComponentError = (batchId: string, component: string, err: string) => {
+    if (!analysisBatches.has(batchId)) return
     error.value = `[${component}] ${err}`
 }
 
@@ -715,23 +861,49 @@ const startAnalysis = async () => {
 const startScan = async () => startAnalysis()
 
 const loadPersistedResults = async (options: LoadPersistedResultsOptions = {}) => {
+    const loadId = ++historyLoadCounter
     const expectedRunId = options.expectedRunId || null
     const attempts = Math.max(1, options.attempts ?? 1)
     const delayMs = Math.max(0, options.delayMs ?? 0)
+    const componentNames = [...uniqueComponents.value]
+    const vulnId = props.vulnId
+    const vulnAliases = [...(props.vulnAliases || [])]
+    const projectName = props.projectName || '_all_'
     historyLoading.value = true
     historyError.value = null
     try {
-        const projectName = props.projectName || '_all_'
+        if (componentNames.length === 0) {
+            persistedResults.value = []
+            return
+        }
         for (let attempt = 0; attempt < attempts; attempt += 1) {
-            const records = await codeAnalysisListVulnerabilityResults(
-                projectName,
-                props.vulnId,
-                { limit: 20 },
-            )
-            persistedResults.value = records
+            const records: CodeAnalysisResultRecord[] = []
+            let offset = 0
+            while (true) {
+                const page = await codeAnalysisListVulnerabilityResults(
+                    projectName,
+                    vulnId,
+                    {
+                        component_name: componentNames,
+                        vuln_alias: vulnAliases,
+                        limit: HISTORY_PAGE_SIZE,
+                        offset,
+                    },
+                )
+                if (loadId !== historyLoadCounter) return
+                records.push(...page)
+                if (page.length < HISTORY_PAGE_SIZE) break
+                offset += page.length
+            }
+            const dedupedRecords = [...new Map(
+                records
+                    .filter(matchesTeamScope)
+                    .map(record => [record.analysis_run_id, record]),
+            ).values()]
+            persistedResults.value = dedupedRecords
 
             const expectedRecord = expectedRunId
-                ? records.find(record => recordMatchesRunId(record, expectedRunId))
+                ? dedupedRecords.find(record => recordMatchesRunId(record, expectedRunId))
                 : null
             if (expectedRecord) {
                 selectedRunId.value = expectedRecord.analysis_run_id
@@ -743,30 +915,107 @@ const loadPersistedResults = async (options: LoadPersistedResultsOptions = {}) =
                 break
             }
             await waitFor(delayMs)
+            if (loadId !== historyLoadCounter) return
         }
     } catch (err: any) {
+        if (loadId !== historyLoadCounter) return
         historyError.value = err?.response?.data?.detail || err?.message || 'Unable to load analysis history.'
     } finally {
-        historyLoaded.value = true
-        historyLoading.value = false
+        if (loadId === historyLoadCounter) {
+            historyLoaded.value = true
+            historyLoading.value = false
+        }
     }
 }
 
 const applyResult = () => {
     if (result.value) {
-        emit('apply-result', result.value, analyzedComponents.value, activeResultRunIds.value)
+        const persistedTeam = String(selectedPersistedResult.value?.context_summary?.target_team || '').trim()
+        const mappedTeam = analyzedComponents.value
+            .map(component => visibleComponentName(component) || component)
+            .map(component => props.componentTeams?.[component] || '')
+            .find(Boolean)
+        emit(
+            'apply-result',
+            result.value,
+            analyzedComponents.value,
+            activeResultRunIds.value,
+            persistedTeam || mappedTeam || undefined,
+        )
     }
 }
 
-// Latest saved result per owned component target, newest first. Benchmarks and
-// unfinished runs are not assessments and never become apply-all candidates.
+const transientCompletedRecords = computed<CodeAnalysisResultRecord[]>(() => {
+    const recordedRunIds = new Set(persistedResults.value.flatMap(record => [
+        record.analysis_run_id,
+        record.queue_id || '',
+    ]))
+    const records = collectedResults.value.flatMap((entry, index): CodeAnalysisResultRecord[] => {
+        const runId = activeResultRunIds.value[index] || selectedRunId.value || ''
+        if (runId && recordedRunIds.has(runId)) return []
+        return [{
+            analysis_run_id: runId || `current-${entry.component}`,
+            queue_id: runId || null,
+            vuln_id: props.vulnId,
+            component_name: entry.component,
+            project_name: props.projectName,
+            source: 'manual',
+            finished_at: new Date().toISOString(),
+            status: 'completed',
+            context_summary: props.currentTeam ? { target_team: props.currentTeam } : null,
+            summary: {
+                affected: entry.response.assessment.verdict.toLocaleLowerCase() === 'affected',
+                verdict: entry.response.assessment.verdict,
+            },
+            result: entry.response,
+        }]
+    })
+
+    for (const item of completedQueueItems.value) {
+        if (recordedRunIds.has(item.queue_id)) continue
+        const response = item.queue_id === selectedRunId.value && result.value
+            ? result.value
+            : analysisQueueStore.getCachedResult(item.queue_id)
+        if (!response) continue
+        records.push({
+            analysis_run_id: item.queue_id,
+            queue_id: item.queue_id,
+            vuln_id: item.vuln_id,
+            component_name: item.component_name,
+            project_name: item.project_name,
+            source: item.source,
+            submitted_by: item.submitted_by,
+            submitted_at: item.submitted_at,
+            started_at: item.started_at,
+            finished_at: item.finished_at,
+            status: item.status,
+            context_summary: item.context_summary,
+            summary: {
+                affected: response.assessment.verdict.toLocaleLowerCase() === 'affected',
+                verdict: response.assessment.verdict,
+            },
+            result: response,
+        })
+    }
+    return records
+})
+
+// Latest completed result per owned component target, newest first. Include a
+// completed queue result while persistence catches up so the combined draft is
+// never empty immediately after an analyst opens a successful run.
 const applyAllCandidates = computed(() => {
     const seen = new Set<string>()
     const candidates: { component: string, team: string, record: CodeAnalysisResultRecord }[] = []
 
-    for (const record of persistedResults.value) {
-        if (record.source === 'benchmark') continue
-        if (record.status && record.status !== 'completed') continue
+    const eligibleRecords = [...persistedResults.value, ...transientCompletedRecords.value]
+        .filter(record => record.source !== 'benchmark' && (!record.status || record.status === 'completed'))
+        .sort((left, right) => {
+            const leftTime = Date.parse(left.finished_at || left.recorded_at || left.submitted_at || '') || 0
+            const rightTime = Date.parse(right.finished_at || right.recorded_at || right.submitted_at || '') || 0
+            return rightTime - leftTime || right.analysis_run_id.localeCompare(left.analysis_run_id)
+        })
+
+    for (const record of eligibleRecords) {
 
         const component = visibleComponentName(record.component_name)
         if (!component) continue
@@ -791,15 +1040,87 @@ const applyAllTeams = computed(() => {
 
 const canApplyAllResults = computed(() => applyAllCandidates.value.length > 1 && applyAllTeams.value.length > 0)
 
+const combinedCandidateRuns = computed<CodeAnalysisComponentRun[]>(() => applyAllCandidates.value.flatMap(candidate => (
+    candidate.record.result
+        ? [{
+            component: candidate.component,
+            result: candidate.record.result,
+            runId: candidate.record.analysis_run_id,
+        }]
+        : []
+)))
+
+const combinedAssessmentPreview = computed<CodeAnalysisAssessResponse | null>(() => {
+    const entries = combinedCandidateRuns.value.map(run => ({
+        component: run.component,
+        response: run.result,
+    }))
+    return entries.length ? mergeResults(entries) : null
+})
+const combinedAssessmentPreviewState = computed(() => combinedAssessmentPreview.value
+    ? codeAnalysisAssessmentState(combinedAssessmentPreview.value)
+    : 'NOT_SET'
+)
+const combinedAssessmentPreviewBorderClass = computed(() => {
+    if (combinedAssessmentPreviewState.value === 'EXPLOITABLE') return 'border-red-500/70 bg-red-950/15'
+    if (combinedAssessmentPreviewState.value === 'IN_TRIAGE') return 'border-amber-500/70 bg-amber-950/15'
+    return 'border-green-500/70 bg-green-950/10'
+})
+const combinedAssessmentPreviewTextClass = computed(() => {
+    if (combinedAssessmentPreviewState.value === 'EXPLOITABLE') return 'text-red-300'
+    if (combinedAssessmentPreviewState.value === 'IN_TRIAGE') return 'text-amber-300'
+    return 'text-green-300'
+})
+
+const hydrateCombinedCandidates = async () => {
+    const missing = applyAllCandidates.value.filter(candidate => !candidate.record.result)
+    if (!missing.length) {
+        combinedHydrationError.value = null
+        return
+    }
+
+    const hydrationId = ++combinedHydrationCounter
+    const requestedScope = teamScopeKey.value
+    combinedHydrating.value = true
+    combinedHydrationError.value = null
+    const settled = await Promise.allSettled(missing.map(candidate => (
+        codeAnalysisGetResult(candidate.record.analysis_run_id)
+    )))
+    if (hydrationId !== combinedHydrationCounter || requestedScope !== teamScopeKey.value) return
+
+    const hydrated = new Map<string, CodeAnalysisResultRecord>()
+    settled.forEach((outcome, index) => {
+        if (outcome.status !== 'fulfilled' || !outcome.value?.result) return
+        const record = outcome.value
+        if (!relevantComponentKeys.value.has(record.component_name.toLocaleLowerCase()) || !matchesTeamScope(record)) return
+        hydrated.set(missing[index].record.analysis_run_id, record)
+    })
+    if (hydrated.size) {
+        persistedResults.value = persistedResults.value.map(record => (
+            hydrated.get(record.analysis_run_id) || record
+        ))
+    }
+    const failed = settled.length - hydrated.size
+    if (failed > 0) {
+        combinedHydrationError.value = `${failed} latest target result${failed === 1 ? '' : 's'} could not be loaded for the combined assessment.`
+    }
+    combinedHydrating.value = false
+}
+
 const applyAllTitle = computed(() => {
     const components = applyAllCandidates.value.map(candidate => candidate.component).join(', ')
-    return `Apply the latest analysis result of ${components} to ${applyAllTeams.value.join(', ')} `
+    const targetTeams = applyAllTeams.value.join(', ')
+    if (teamScopeKey.value) {
+        return `Apply the latest analysis result of ${components} to the scoped ${targetTeams} assessment.`
+    }
+    return `Apply the latest analysis result of ${components} to ${targetTeams} `
         + 'and take the worst assessment over to the global assessment.'
 })
 
 const applyAllResults = async () => {
     if (applyingAll.value || !canApplyAllResults.value) return
 
+    const requestedTeamScope = teamScopeKey.value
     applyingAll.value = true
     error.value = null
     try {
@@ -818,6 +1139,7 @@ const applyAllResults = async () => {
                 runId: entry.record.analysis_run_id,
             }))
 
+        if (requestedTeamScope !== teamScopeKey.value) return
         if (runs.length === 0) {
             error.value = 'No saved analysis result could be loaded for the analyzed components.'
             return
@@ -833,10 +1155,119 @@ const applyAllResults = async () => {
 
 // Completed queue items for this vuln (any component)
 const completedQueueItems = computed(() => {
+    const persistedRunIds = new Set(persistedResults.value.flatMap(record => [
+        record.analysis_run_id,
+        record.queue_id || '',
+    ]))
     return analysisQueueStore.items.value.filter(
-        i => i.vuln_id === props.vulnId && i.status === 'completed'
+        i => vulnerabilityIdKeys.value.has(String(i.vuln_id || '').toLocaleLowerCase())
+            && relevantComponentKeys.value.has(String(i.component_name || '').toLocaleLowerCase())
+            && matchesTeamScope(i)
+            && i.status === 'completed'
+            && !persistedRunIds.has(i.queue_id)
     )
 })
+
+type AnalysisRunListEntry =
+    | { key: string, kind: 'active', item: AnalysisQueueItem }
+    | { key: string, kind: 'completed', item: AnalysisQueueItem }
+    | { key: string, kind: 'persisted', record: CodeAnalysisResultRecord, team?: string, nested: boolean, component: string, earlierCount?: number, historyExpanded?: boolean }
+    | { key: string, kind: 'history-label', label: string, tone: 'cyan' | 'gray' }
+    | { key: string, kind: 'current' }
+
+const analysisRunListEntries = computed<AnalysisRunListEntry[]>(() => {
+    const entries: AnalysisRunListEntry[] = activeQueueItems.value.map(item => ({
+        key: `active:${item.queue_id}`,
+        kind: 'active',
+        item,
+    }))
+    let selectedRowFound = false
+
+    for (const item of completedQueueItems.value) {
+        entries.push({ key: `completed:${item.queue_id}`, kind: 'completed', item })
+        if (item.queue_id === selectedRunId.value) selectedRowFound = true
+    }
+
+    for (const group of historyComponentGroups.value) {
+        entries.push({
+            key: `persisted:${group.latest.analysis_run_id}`,
+            kind: 'persisted',
+            record: group.latest,
+            team: group.team,
+            nested: false,
+            component: group.component,
+            earlierCount: group.predecessors.length + group.earlier.length,
+            historyExpanded: isComponentHistoryExpanded(group.component),
+        })
+        if (recordMatchesRunId(group.latest, selectedRunId.value || '')) selectedRowFound = true
+        if (!isComponentHistoryExpanded(group.component)) continue
+
+        if (group.predecessors.length) {
+            entries.push({
+                key: `label:${group.component}:follow-up`,
+                kind: 'history-label',
+                label: `Follow-up chain (${group.predecessors.length})`,
+                tone: 'cyan',
+            })
+            for (const record of group.predecessors) {
+                entries.push({
+                    key: `persisted:${record.analysis_run_id}`,
+                    kind: 'persisted',
+                    record,
+                    team: group.team,
+                    nested: true,
+                    component: group.component,
+                })
+                if (recordMatchesRunId(record, selectedRunId.value || '')) selectedRowFound = true
+            }
+        }
+        if (group.earlier.length) {
+            entries.push({
+                key: `label:${group.component}:independent`,
+                kind: 'history-label',
+                label: `Independent runs (${group.earlier.length})`,
+                tone: 'gray',
+            })
+            for (const record of group.earlier) {
+                entries.push({
+                    key: `persisted:${record.analysis_run_id}`,
+                    kind: 'persisted',
+                    record,
+                    team: group.team,
+                    nested: true,
+                    component: group.component,
+                })
+                if (recordMatchesRunId(record, selectedRunId.value || '')) selectedRowFound = true
+            }
+        }
+    }
+
+    if (result.value && !selectedRowFound) entries.push({ key: 'current-result', kind: 'current' })
+    return entries
+})
+
+const isSelectedAnalysisRunEntry = (entry: AnalysisRunListEntry): boolean => Boolean(result.value && (
+    entry.kind === 'current'
+    || (entry.kind === 'completed' && entry.item.queue_id === selectedRunId.value)
+    || (entry.kind === 'persisted' && recordMatchesRunId(entry.record, selectedRunId.value || ''))
+))
+
+const selectedRunQuestion = computed(() => (
+    selectedPersistedResult.value?.follow_up_question
+    || completedQueueItems.value.find(item => item.queue_id === selectedRunId.value)?.follow_up_question
+    || null
+))
+
+const closeSelectedResult = () => {
+    result.value = null
+    selectedRunId.value = null
+    selectedFullRecord.value = null
+    analyzedComponents.value = []
+    activeResultRunIds.value = []
+    followUpQuestion.value = ''
+    benchmarkComparison.value = null
+    benchmarkError.value = null
+}
 
 const completedComponentNames = computed(() => {
     return new Set([
@@ -858,8 +1289,14 @@ const assessedComponentNames = computed(() => {
 })
 
 const viewCompletedResult = async (item: AnalysisQueueItem) => {
+    const requestedTeamScope = teamScopeKey.value
     const res = await analysisQueueStore.fetchResult(item.queue_id)
-    if (!res) return
+    if (
+        !res
+        || requestedTeamScope !== teamScopeKey.value
+        || !relevantComponentKeys.value.has(item.component_name.toLocaleLowerCase())
+        || !matchesTeamScope(item)
+    ) return
 
     result.value = res
     analyzedComponents.value = [item.component_name]
@@ -873,10 +1310,24 @@ const viewCompletedResult = async (item: AnalysisQueueItem) => {
     }
 }
 
+const toggleCompletedResult = async (item: AnalysisQueueItem) => {
+    if (selectedRunId.value === item.queue_id && result.value) {
+        closeSelectedResult()
+        return
+    }
+    await viewCompletedResult(item)
+}
+
 const viewPersistedResult = async (record: CodeAnalysisResultRecord) => {
+    const requestedTeamScope = teamScopeKey.value
     try {
         const full = record.result ? record : await codeAnalysisGetResult(record.analysis_run_id)
-        if (!full.result) return
+        if (
+            !full.result
+            || requestedTeamScope !== teamScopeKey.value
+            || !relevantComponentKeys.value.has(full.component_name.toLocaleLowerCase())
+            || !matchesTeamScope(full)
+        ) return
         result.value = full.result
         analyzedComponents.value = [full.component_name]
         selectedRunId.value = full.analysis_run_id
@@ -889,6 +1340,21 @@ const viewPersistedResult = async (record: CodeAnalysisResultRecord) => {
         }
     } catch (err: any) {
         error.value = err?.response?.data?.detail || err?.message || 'Failed to load analysis result.'
+    }
+}
+
+const togglePersistedResult = async (record: CodeAnalysisResultRecord) => {
+    if (recordMatchesRunId(record, selectedRunId.value || '') && result.value) {
+        closeSelectedResult()
+        return
+    }
+    await viewPersistedResult(record)
+}
+
+const applyPersistedResult = async (record: CodeAnalysisResultRecord) => {
+    await viewPersistedResult(record)
+    if (selectedRunId.value === record.analysis_run_id && result.value) {
+        applyResult()
     }
 }
 
@@ -1001,33 +1467,6 @@ const removePersistedResult = async (record: CodeAnalysisResultRecord) => {
         after.delete(runId)
         deletingRunIds.value = after
     }
-}
-
-const formatHistoryTimestamp = (value?: string | null) => {
-    if (!value) return 'unknown'
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return 'unknown'
-    return date.toLocaleString([], {
-        month: 'short',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-    })
-}
-
-const formatContextSummary = (record: CodeAnalysisResultRecord) => {
-    const summary = record.context_summary || {}
-    const versionCount = Array.isArray(summary.project_versions)
-        ? summary.project_versions.length
-        : null
-    const instanceCount = typeof summary.instance_count === 'number'
-        ? summary.instance_count
-        : null
-    const parts = [
-        versionCount !== null ? `${versionCount} version${versionCount === 1 ? '' : 's'}` : '',
-        instanceCount !== null ? `${instanceCount} finding${instanceCount === 1 ? '' : 's'}` : '',
-    ].filter(Boolean)
-    return parts.join(', ')
 }
 
 const uniqueTextValues = (values: Array<string | null | undefined>) => {
@@ -1237,9 +1676,6 @@ const benchmarkEvaluatorLabel = (comparison: CodeAnalysisBenchmarkComparison) =>
     return 'DTVP fallback'
 }
 
-const verdictClass = (record: CodeAnalysisResultRecord) =>
-    record.summary?.affected ? 'text-red-300' : 'text-green-400'
-
 const benchmarkRatingClass = (tone?: string) => {
     switch (tone) {
         case 'green': return 'border-green-700/40 bg-green-950/30 text-green-200'
@@ -1448,7 +1884,7 @@ type ConversationMessage = {
 
 type ConversationToolActivity = {
     key: string
-    kind: 'search' | 'download' | 'package' | 'source' | 'failed' | 'research'
+    kind: 'search' | 'download' | 'package' | 'source' | 'repository' | 'failed' | 'research'
     label: string
     target: string
     detail: string
@@ -1610,12 +2046,36 @@ const conversationResponse = (turn: CodeAnalysisLlmConversationTurn) => {
         : null
 }
 
+const conversationRequestText = (messages: ConversationMessage[]) =>
+    messages
+        .map(message => `[${conversationActorLabel(message.role).toUpperCase()}]\n${message.content}`)
+        .join('\n\n')
+
+const copyConversationText = async (key: string, content: string) => {
+    const text = content.trim()
+    if (!text) return
+    const existingTimer = conversationCopyTimers.get(key)
+    if (existingTimer) clearTimeout(existingTimer)
+    try {
+        await navigator.clipboard.writeText(text)
+        conversationCopyState.value = { ...conversationCopyState.value, [key]: 'copied' }
+    } catch {
+        conversationCopyState.value = { ...conversationCopyState.value, [key]: 'error' }
+    }
+    const timer = setTimeout(() => {
+        conversationCopyState.value = { ...conversationCopyState.value, [key]: 'idle' }
+        conversationCopyTimers.delete(key)
+    }, 1800)
+    conversationCopyTimers.set(key, timer)
+}
+
 const toolLabelForDirective = (directive: string) => {
     const normalized = directive.toUpperCase()
     if (normalized === 'FETCH_SEARCH') return { kind: 'search' as const, label: 'Requested web search' }
     if (normalized === 'FETCH_URL') return { kind: 'download' as const, label: 'Requested URL download' }
     if (normalized === 'FETCH_PACKAGE') return { kind: 'package' as const, label: 'Requested package lookup' }
     if (normalized === 'FETCH_SOURCE') return { kind: 'source' as const, label: 'Requested source download' }
+    if (normalized === 'CLONE_REPOSITORY') return { kind: 'repository' as const, label: 'Requested local repository inspection' }
     return { kind: 'research' as const, label: 'Requested external resource' }
 }
 
@@ -1625,6 +2085,7 @@ const toolLabelForNativeCall = (name: string) => {
     if (normalized === 'fetch_url') return { kind: 'download' as const, label: 'Requested URL download' }
     if (normalized === 'fetch_package') return { kind: 'package' as const, label: 'Requested package lookup' }
     if (normalized === 'fetch_source') return { kind: 'source' as const, label: 'Requested source download' }
+    if (normalized === 'clone_repository') return { kind: 'repository' as const, label: 'Requested local repository inspection' }
     return { kind: 'research' as const, label: 'Requested external resource' }
 }
 
@@ -1644,7 +2105,10 @@ const nativeToolCallArgs = (call: Record<string, any>): Record<string, any> => {
 
 const nativeToolCallTarget = (call: Record<string, any>) => {
     const args = nativeToolCallArgs(call)
-    return String(args.query || args.url || args.package || args.name || '').trim()
+    const target = String(args.query || args.repository_url || args.url || args.package || args.name || '').trim()
+    const focus = String(args.focus || '').trim()
+    const revision = String(args.revision || args.ref || '').trim()
+    return [target, focus, revision ? `ref ${revision}` : ''].filter(Boolean).join(' · ')
 }
 
 const analyzerRequiredToolLabel = (label: string) => label.replace(/^Requested\b/, 'Analyzer-required')
@@ -1675,6 +2139,12 @@ const toolResultMeta = (heading: string): Pick<ConversationToolActivity, 'kind' 
     if (normalized.startsWith('source fetch failed')) {
         return { kind: 'failed', label: 'Source download failed', status: 'failed' }
     }
+    if (normalized.startsWith('repository inspection')) {
+        return { kind: 'repository', label: 'Local repository evidence provided', status: 'provided' }
+    }
+    if (normalized.startsWith('repository clone failed')) {
+        return { kind: 'failed', label: 'Repository inspection failed', status: 'failed' }
+    }
     if (normalized.startsWith('tool call failed')) {
         return { kind: 'failed', label: 'Tool call failed', status: 'failed' }
     }
@@ -1693,7 +2163,7 @@ const conversationToolActivities = (turn: CodeAnalysisLlmConversationTurn): Conv
 
     const response = conversationResponse(turn)
     const responseContent = response?.content || ''
-    const directivePattern = /^\s*FETCH_(SEARCH|URL|PACKAGE|SOURCE):\s*(.+)$/gim
+    const directivePattern = /^\s*(FETCH_(?:SEARCH|URL|PACKAGE|SOURCE)|CLONE_REPOSITORY):\s*(.+)$/gim
     for (const call of nativeToolCalls(turn.response)) {
         const name = nativeToolCallName(call)
         const target = nativeToolCallTarget(call)
@@ -1707,7 +2177,7 @@ const conversationToolActivities = (turn: CodeAnalysisLlmConversationTurn): Conv
         })
     }
     for (const match of responseContent.matchAll(directivePattern)) {
-        const directive = `FETCH_${match[1].toUpperCase()}`
+        const directive = match[1].toUpperCase()
         const target = (match[2] || '').trim()
         if (!target) continue
         const meta = toolLabelForDirective(directive)
@@ -1721,14 +2191,14 @@ const conversationToolActivities = (turn: CodeAnalysisLlmConversationTurn): Conv
     }
 
     const messages = Array.isArray(turn.messages) ? turn.messages : []
-    const resultPattern = /^---\s*(Search results for|Search failed|Fetched|Fetch failed|Package info|Package lookup failed|Source of|Source fetch failed|Tool call failed):?\s*(.*?)\s*---$/gim
+    const resultPattern = /^---\s*(Search results for|Search failed|Fetched|Fetch failed|Package info|Package lookup failed|Source of|Source fetch failed|Repository inspection|Repository clone failed|Tool call failed):?\s*(.*?)\s*---$/gim
     for (const message of messages) {
         const role = String(message?.role || '').toLowerCase()
         if (role !== 'user' && role !== 'tool') continue
         const content = stringifyPromptContent(message?.content)
         if (/MANDATORY EXTERNAL CHECK/im.test(content)) {
             for (const match of content.matchAll(directivePattern)) {
-                const directive = `FETCH_${match[1].toUpperCase()}`
+                const directive = match[1].toUpperCase()
                 const target = (match[2] || '').trim()
                 if (!target) continue
                 const meta = toolLabelForDirective(directive)
@@ -1767,7 +2237,250 @@ const toolActivityClass = (activity: ConversationToolActivity) => {
     }
     if (activity.kind === 'search') return 'border-cyan-700/50 bg-cyan-950/30 text-cyan-100'
     if (activity.kind === 'download' || activity.kind === 'source') return 'border-blue-700/50 bg-blue-950/30 text-blue-100'
+    if (activity.kind === 'repository') return 'border-purple-700/50 bg-purple-950/30 text-purple-100'
     return 'border-gray-700/60 bg-gray-900 text-gray-200'
+}
+
+const llmConversationViewTurns = computed(() => llmConversationTurns.value.map((turn, index) => {
+    const messages = conversationMessages(turn)
+    return {
+        key: `${turn.started_at || 'turn'}-${index}`,
+        turn,
+        messages,
+        requestText: conversationRequestText(messages),
+        activities: conversationToolActivities(turn),
+        response: conversationResponse(turn),
+    }
+}))
+
+type ConversationGuidanceEvidence = {
+    key: string
+    component: string
+    content: string
+    turns: number[]
+}
+
+const capturedConversationGuidance = computed<ConversationGuidanceEvidence[]>(() => {
+    const evidence = new Map<string, ConversationGuidanceEvidence>()
+    llmConversationViewTurns.value.forEach((conversation, index) => {
+        conversation.messages.forEach(message => {
+            message.parts
+                .filter(part => part.kind === 'guidance')
+                .forEach(part => {
+                    const content = part.content
+                        .replace(/^(?:ANALYST GUIDANCE|Additional reviewer guidance)\b\s*:?\s*/i, '')
+                        .trim()
+                    if (!content) return
+                    const component = String(
+                        conversation.turn.component
+                        || selectedPersistedResult.value?.component_name
+                        || analyzedComponents.value[0]
+                        || '',
+                    ).trim()
+                    const key = `${component.toLocaleLowerCase()}\u0000${content}`
+                    const existing = evidence.get(key)
+                    if (existing) {
+                        if (!existing.turns.includes(index + 1)) existing.turns.push(index + 1)
+                        return
+                    }
+                    evidence.set(key, {
+                        key,
+                        component,
+                        content,
+                        turns: [index + 1],
+                    })
+                })
+        })
+    })
+    return [...evidence.values()]
+})
+
+const conversationMetric = (value: unknown): number | null => {
+    if (value == null || value === '') return null
+    const numeric = typeof value === 'number' ? value : Number(value)
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : null
+}
+
+const conversationUsageMetric = (turn: CodeAnalysisLlmConversationTurn, ...keys: string[]) => {
+    for (const key of keys) {
+        const value = conversationMetric(turn.usage?.[key])
+        if (value != null) return value
+    }
+    return null
+}
+
+const conversationTimestamp = (value: unknown): number | null => {
+    const timestamp = Date.parse(String(value || ''))
+    return Number.isFinite(timestamp) ? timestamp : null
+}
+
+const formatConversationDuration = (milliseconds: number | null) => {
+    if (milliseconds == null) return 'Not reported'
+    if (milliseconds < 1_000) return `${Math.max(1, Math.round(milliseconds))} ms`
+    const seconds = milliseconds / 1_000
+    if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`
+    const minutes = Math.floor(seconds / 60)
+    const remaining = Math.round(seconds % 60)
+    return `${minutes}m ${remaining}s`
+}
+
+const formatConversationTokens = (tokens: number | null) =>
+    tokens == null ? 'Not reported' : Math.round(tokens).toLocaleString()
+
+const llmConversationStatistics = computed(() => {
+    const rows = llmConversationViewTurns.value.map((conversation, index) => {
+        const startedAt = conversationTimestamp(conversation.turn.started_at)
+        const finishedAt = conversationTimestamp(conversation.turn.finished_at)
+        const durationMs = startedAt != null && finishedAt != null && finishedAt >= startedAt
+            ? finishedAt - startedAt
+            : null
+        const promptTokens = conversationUsageMetric(conversation.turn, 'prompt_tokens', 'input_tokens')
+        const completionTokens = conversationUsageMetric(conversation.turn, 'completion_tokens', 'output_tokens')
+        const reportedTotal = conversationUsageMetric(conversation.turn, 'total_tokens')
+        const totalTokens = reportedTotal ?? (
+            promptTokens != null || completionTokens != null
+                ? (promptTokens || 0) + (completionTokens || 0)
+                : null
+        )
+        const requestedTools = conversation.activities.filter(activity =>
+            activity.status === 'requested' && !activity.label.startsWith('Analyzer-required'),
+        )
+        const analyzerRequiredTools = conversation.activities.filter(activity =>
+            activity.status === 'requested' && activity.label.startsWith('Analyzer-required'),
+        )
+        return {
+            key: conversation.key,
+            label: formatConversationMeta(conversation.turn, index),
+            startedAt,
+            finishedAt,
+            durationMs,
+            localDurationMs: null as number | null,
+            outboundMessages: Array.isArray(conversation.turn.messages) ? conversation.turn.messages.length : 0,
+            inboundMessages: conversation.turn.response ? 1 : 0,
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            requestedTools: requestedTools.length,
+            analyzerRequiredTools: analyzerRequiredTools.length,
+            localToolResults: conversation.activities.filter(activity => activity.status !== 'requested').length,
+            status: String(conversation.turn.status || 'unknown'),
+            component: String(conversation.turn.component || ''),
+            attempts: conversationMetric(conversation.turn.request?.attempts),
+            contextAdaptations: Array.isArray(conversation.turn.request?.context_adaptations)
+                ? conversation.turn.request.context_adaptations.length
+                : 0,
+        }
+    })
+
+    rows.forEach((row, index) => {
+        const next = rows[index + 1]
+        if (!next || row.finishedAt == null || next.startedAt == null) return
+        if (row.component && next.component && row.component !== next.component) return
+        if (next.startedAt >= row.finishedAt) row.localDurationMs = next.startedAt - row.finishedAt
+    })
+
+    const sumKnown = (values: Array<number | null>) => {
+        const known = values.filter((value): value is number => value != null)
+        return known.length ? known.reduce((total, value) => total + value, 0) : null
+    }
+    const started = rows.map(row => row.startedAt).filter((value): value is number => value != null)
+    const finished = rows.map(row => row.finishedAt).filter((value): value is number => value != null)
+    const capturedSpanMs = started.length && finished.length
+        ? Math.max(...finished) - Math.min(...started)
+        : null
+
+    const uniqueLocalResults = new Map<string, ConversationToolActivity>()
+    const uniqueAnalyzerRequests = new Set<string>()
+    const toolTypeCounts = new Map<string, number>()
+    let llmToolRequests = 0
+    llmConversationViewTurns.value.forEach(conversation => {
+        conversation.activities.forEach(activity => {
+            if (activity.status === 'requested') {
+                if (activity.label.startsWith('Analyzer-required')) {
+                    uniqueAnalyzerRequests.add(activity.key)
+                } else {
+                    llmToolRequests += 1
+                    toolTypeCounts.set(activity.kind, (toolTypeCounts.get(activity.kind) || 0) + 1)
+                }
+                return
+            }
+            uniqueLocalResults.set(activity.key, activity)
+        })
+    })
+    const localToolResults = [...uniqueLocalResults.values()]
+    const toolFailures = localToolResults.filter(activity => activity.status === 'failed').length
+    const models = [...new Set(llmConversationTurns.value.map(turn => String(turn.model || '')).filter(Boolean))]
+    const providers = [...new Set(llmConversationTurns.value.map(turn => String(turn.provider || turn.backend || '')).filter(Boolean))]
+    const retries = rows.reduce((total, row) => total + Math.max(0, (row.attempts || 1) - 1), 0)
+    const contextAdaptations = rows.reduce((total, row) => total + row.contextAdaptations, 0)
+    const completedTurns = rows.filter(row => row.status === 'completed').length
+    const totalCompletionTokens = sumKnown(rows.map(row => row.completionTokens))
+    const totalDurationMs = sumKnown(rows.map(row => row.durationMs))
+
+    return {
+        rows,
+        outboundMessages: rows.reduce((total, row) => total + row.outboundMessages, 0),
+        inboundMessages: rows.reduce((total, row) => total + row.inboundMessages, 0),
+        promptTokens: sumKnown(rows.map(row => row.promptTokens)),
+        completionTokens: totalCompletionTokens,
+        totalTokens: sumKnown(rows.map(row => row.totalTokens)),
+        usageTurns: rows.filter(row => row.totalTokens != null).length,
+        timedTurns: rows.filter(row => row.durationMs != null).length,
+        requestCharacters: llmConversationViewTurns.value.reduce((total, conversation) => total + conversation.requestText.length, 0),
+        responseCharacters: llmConversationViewTurns.value.reduce((total, conversation) => total + (conversation.response?.content.length || 0), 0),
+        totalDurationMs,
+        localDurationMs: sumKnown(rows.map(row => row.localDurationMs)),
+        capturedSpanMs,
+        llmToolRequests,
+        analyzerRequiredTools: uniqueAnalyzerRequests.size,
+        localToolResults: localToolResults.length,
+        toolFailures,
+        repositoryInspections: localToolResults.filter(activity => activity.kind === 'repository').length,
+        toolTypes: [...toolTypeCounts.entries()].sort((left, right) => right[1] - left[1]),
+        retries,
+        contextAdaptations,
+        completedTurns,
+        failedTurns: rows.length - completedTurns,
+        models,
+        providers,
+        throughput: totalCompletionTokens != null && totalDurationMs && totalDurationMs > 0
+            ? totalCompletionTokens / (totalDurationMs / 1_000)
+            : null,
+    }
+})
+
+const conversationStageKey = (turnKey: string, stage: ConversationStage) => `${turnKey}:${stage}`
+const conversationStageId = (index: number, stage: ConversationStage) => `llm-turn-${index + 1}-${stage}`
+const isConversationStageOpen = (turnKey: string, stage: ConversationStage) =>
+    conversationStageOpen.value[conversationStageKey(turnKey, stage)] ?? stage === 'response'
+
+const conversationStages = computed(() => llmConversationViewTurns.value.flatMap(conversation => {
+    const stages: ConversationStage[] = ['request']
+    if (conversation.activities.length > 0) stages.push('tools')
+    if (conversation.response) stages.push('response')
+    return stages.map(stage => ({ turnKey: conversation.key, stage }))
+}))
+
+const allConversationStagesOpen = computed(() =>
+    conversationStages.value.length > 0
+    && conversationStages.value.every(({ turnKey, stage }) => isConversationStageOpen(turnKey, stage)),
+)
+const anyConversationStageOpen = computed(() =>
+    conversationStages.value.some(({ turnKey, stage }) => isConversationStageOpen(turnKey, stage)),
+)
+
+const toggleConversationStage = (turnKey: string, stage: ConversationStage) => {
+    const key = conversationStageKey(turnKey, stage)
+    conversationStageOpen.value = {
+        ...conversationStageOpen.value,
+        [key]: !isConversationStageOpen(turnKey, stage),
+    }
+}
+
+const setAllConversationStages = (open: boolean) => {
+    conversationStageOpen.value = Object.fromEntries(
+        conversationStages.value.map(({ turnKey, stage }) => [conversationStageKey(turnKey, stage), open]),
+    )
 }
 
 const stringifyPromptContent = (value: unknown): string => {
@@ -1943,7 +2656,8 @@ const llmConversationSummary = computed(() => {
     const turns = llmConversationTurns.value.length
     if (turns) return `${turns} LLM turn${turns === 1 ? '' : 's'}`
     if (systemPromptBundles.value.length > 0) return `${systemPromptBundles.value.length} prompt bundle${systemPromptBundles.value.length === 1 ? '' : 's'}`
-    if (requestGuidancePreview.value) return 'Request guidance available'
+    if (savedRunGuidance.value) return 'Saved guidance · use not verifiable'
+    if (selectedRunGuidanceRedacted.value) return 'Guidance redacted'
     return 'No conversation reported'
 })
 
@@ -1986,20 +2700,17 @@ const conversationActorLabel = (role: string) => {
 const conversationSentMeta = (role: string) => {
     switch (normalizeConversationRole(role)) {
         case 'system':
-            return 'sent to LLM · static prompt'
+            return 'Agentyzer → model · instruction'
         case 'user':
-            return 'sent to LLM · request payload'
+            return 'Agentyzer → model · request payload'
         case 'assistant':
-            return 'sent to LLM · prior LLM message'
+            return 'model → Agentyzer · earlier response re-sent'
         case 'tool':
-            return 'sent to LLM · tool result'
+            return 'tool → Agentyzer → model · result'
         default:
-            return 'sent to LLM'
+            return 'Agentyzer → model'
     }
 }
-
-const conversationRowClass = (role: string) =>
-    normalizeConversationRole(role) === 'user' ? 'justify-end' : 'justify-start'
 
 const conversationBubbleClass = (role: string) => {
     switch (normalizeConversationRole(role)) {
@@ -2044,7 +2755,44 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
     document.removeEventListener('click', handleClickOutside)
+    for (const timer of conversationCopyTimers.values()) clearTimeout(timer)
+    conversationCopyTimers.clear()
 })
+
+watch([
+    () => props.vulnId,
+    () => props.projectName || '',
+    () => (props.vulnAliases || []).join('\u0000'),
+    () => uniqueComponents.value.join('\u0000'),
+    teamScopeKey,
+    () => [...teamScopeKeys.value].sort().join('\u0000'),
+], (_current, previous) => {
+    if (!previous) return
+    analysisBatches.clear()
+    persistedResults.value = []
+    expandedHistoryComponents.value = new Set()
+    historyLoaded.value = false
+    selectedRunId.value = null
+    selectedFullRecord.value = null
+    result.value = null
+    analyzedComponents.value = []
+    activeResultRunIds.value = []
+    collectedResults.value = []
+    pendingQueueIds.value = []
+    followUpComponent.value = ''
+    followUpQuestion.value = ''
+    benchmarkLoadCounter += 1
+    combinedHydrationCounter += 1
+    combinedHydrating.value = false
+    combinedHydrationError.value = null
+    benchmarkComparison.value = null
+    benchmarkError.value = null
+    void loadPersistedResults()
+})
+
+watch([historyLoaded, hasReusableAnalysis], ([loaded, available]) => {
+    emit('scope-results-change', loaded && available)
+}, { immediate: true })
 
 function handleClickOutside(e: MouseEvent) {
     const target = e.target as HTMLElement
@@ -2066,9 +2814,11 @@ watch(result, (current) => {
     coverageOpen.value = false
     stepsExpanded.value = false
     systemPromptOpen.value = false
-    assessmentSummaryOpen.value = true
-    assessmentDraftOpen.value = true
-    assessmentBenchmarkOpen.value = true
+    conversationCopyState.value = {}
+    conversationStageOpen.value = {}
+    assessmentDraftOpen.value = false
+    assessmentBenchmarkOpen.value = false
+    componentResultsOpen.value = false
     ticketDraftOpen.value = false
     emit('result-change', current, analyzedComponents.value)
 })
@@ -2091,15 +2841,32 @@ watch(analyzedComponents, (components) => {
         emit('result-change', result.value, components)
     }
 })
+
+watch(
+    () => applyAllCandidates.value
+        .map(candidate => `${candidate.record.analysis_run_id}:${candidate.record.result ? 'loaded' : 'summary'}`)
+        .join('|'),
+    () => { void hydrateCombinedCandidates() },
+    { immediate: true },
+)
+
+watch(combinedCandidateRuns, runs => {
+    emit('proposals-change', runs)
+}, { immediate: true })
 </script>
 
 <template>
-    <div class="border border-cyan-700/40 rounded bg-gray-900/45 p-3 space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <h5 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-300">
+    <div class="flex flex-col gap-5">
+        <div class="order-0 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-cyan-800/40 bg-cyan-950/10 px-4 py-3">
+            <div>
+                <h3 class="flex items-center gap-2 text-sm font-bold text-cyan-100">
                 <Zap :size="14" />
-                Code Analysis
-            </h5>
+                    Code evidence
+                </h3>
+                <p class="mt-1 max-w-4xl text-xs leading-relaxed text-gray-500">
+                    Run analysis when evidence is missing, then review the latest result for every affected target before creating a combined assessment.
+                </p>
+            </div>
             <span v-if="statusLabel" class="inline-flex items-center gap-1 text-[11px] font-semibold" :class="statusClass">
                 <Loader2 v-if="queueStatus === 'running' || submitting" :size="11" class="animate-spin" />
                 <Clock v-else-if="queueStatus === 'queued'" :size="11" />
@@ -2109,22 +2876,45 @@ watch(analyzedComponents, (components) => {
 
         <div
             v-if="!hasOwnedTargets"
-            class="rounded border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-xs text-amber-200"
+            class="order-1 rounded border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-xs text-amber-200"
         >
             No team-assigned component target is available for code analysis.
         </div>
 
-        <section class="rounded border border-gray-800 bg-gray-950/35 p-3">
-            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
-                <div>
-                    <h6 class="text-[11px] font-bold uppercase tracking-wider text-cyan-300">Start Analysis</h6>
-                    <p class="mt-1 text-xs leading-relaxed text-gray-500">Select one or more components, then press Analyze.</p>
+        <DetailSection
+            :step="isReviewer ? 'Code evidence · 2' : 'Code evidence · 1'"
+            title="Analysis runs by target"
+            description="Run analysis when evidence is missing, then inspect the latest stored result for each affected target. Older runs stay collapsed until needed."
+            bodyClass="space-y-3"
+            :class="isReviewer ? 'order-3' : 'order-2'"
+            data-testid="analysis-runs-section"
+        >
+        <details
+            :open="!hasReusableAnalysis"
+            data-testid="new-analysis-section"
+            class="group rounded border border-cyan-800/50 bg-gray-900/45"
+        >
+            <summary class="flex cursor-pointer list-none flex-wrap items-start justify-between gap-3 px-4 py-3 transition-colors hover:bg-cyan-950/15">
+                <div class="flex min-w-0 items-start gap-3">
+                    <span class="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-cyan-700/50 bg-cyan-950/35 text-cyan-300">
+                        <ChevronDown :size="14" class="transition-transform group-open:rotate-180" />
+                    </span>
+                    <div>
+                        <div class="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-500/80">New run</div>
+                        <h4 class="mt-1 text-sm font-bold text-gray-100">Run new analysis</h4>
+                        <p class="mt-1 text-xs leading-relaxed text-gray-500">
+                            {{ hasReusableAnalysis ? 'A saved result already exists. Rerun only when the scope or evidence has changed.' : 'Select one or more components, then run the scoped analysis.' }}
+                        </p>
+                    </div>
                 </div>
-                <span v-if="hasOwnedTargets" class="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[10px] font-semibold uppercase text-gray-400">
-                    {{ selectedComponents.size }} selected
-                </span>
-            </div>
-            <div class="grid gap-3 items-end md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
+                <div class="flex items-center gap-2">
+                    <span v-if="hasOwnedTargets" class="rounded border border-gray-700 bg-gray-950/50 px-2 py-1 text-[10px] font-semibold uppercase text-gray-400">
+                        {{ selectedComponents.size }} selected
+                    </span>
+                    <span class="text-[10px] font-bold uppercase tracking-wide text-cyan-400">Expand</span>
+                </div>
+            </summary>
+            <div class="grid items-end gap-3 border-t border-gray-800/90 p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                 <div class="relative">
                     <label for="code-analysis-components" class="block text-[11px] font-semibold text-gray-500 uppercase mb-1">Components</label>
                     <button
@@ -2176,6 +2966,7 @@ watch(analyzedComponents, (components) => {
                 <button
                     @click="startScan"
                     :disabled="!canStartScan"
+                    data-testid="code-analysis-start"
                     class="flex items-center justify-center gap-2 px-4 py-2 rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
                     :class="submitting
                         ? 'bg-cyan-900/40 text-cyan-400 border border-cyan-700/40'
@@ -2183,39 +2974,64 @@ watch(analyzedComponents, (components) => {
                 >
                     <Loader2 v-if="submitting" :size="14" class="animate-spin" />
                     <Zap v-else :size="14" />
-                    {{ submitting ? 'Submitting...' : activeQueueItems.length > 0 ? 'Analyze More' : 'Analyze' }}
+                    {{ submitting ? 'Submitting...' : hasReusableAnalysis ? 'Run Again' : activeQueueItems.length > 0 ? 'Analyze More' : `Analyze ${selectedComponents.size || ''}`.trim() }}
                 </button>
 
             </div>
-        </section>
+            <section v-if="!result" class="space-y-2 border-t border-gray-800/90 px-4 py-3">
+                <button
+                    type="button"
+                    @click="loadSystemPrompts"
+                    class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-cyan-300 cursor-pointer"
+                >
+                    <Loader2 v-if="systemPromptLoading" :size="12" class="animate-spin" />
+                    <FileText v-else :size="12" />
+                    {{ systemPromptOpen ? 'Hide analyzer request context' : 'Analyzer request context' }}
+                </button>
+                <div v-if="systemPromptOpen" class="rounded border border-gray-700/50 bg-gray-950/60 p-2">
+                    <div v-if="systemPromptLoading" class="flex items-center gap-2 text-xs text-gray-500">
+                        <Loader2 :size="12" class="animate-spin" />
+                        Loading request context
+                    </div>
+                    <div v-else-if="systemPromptError" class="text-xs text-amber-300">
+                        {{ systemPromptError }}
+                    </div>
+                    <div v-else-if="systemPromptBundles.length === 0 && !launchGuidancePreview" class="text-xs text-gray-500">
+                        No analyzer request context is available.
+                    </div>
+                    <div v-else class="max-h-72 overflow-auto space-y-2">
+                        <div
+                            v-for="bundle in systemPromptBundles"
+                            :key="bundle.bundle"
+                            class="space-y-1"
+                        >
+                            <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">{{ bundle.bundle }} configured prompt values (fallback, not a captured run)</div>
+                            <pre
+                                v-for="(value, key) in (bundle.values || {})"
+                                :key="String(key)"
+                                class="whitespace-pre-wrap break-words rounded bg-gray-900 p-2 text-[10px] leading-relaxed text-gray-300"
+                            >{{ formatPromptValueLabel(key) }}:
+{{ value }}</pre>
+                        </div>
+                        <div v-if="launchGuidancePreview" class="space-y-1">
+                            <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">Guidance prepared for the next analyzer request</div>
+                            <pre class="whitespace-pre-wrap break-words rounded bg-gray-900 p-2 text-[10px] leading-relaxed text-gray-300">{{ launchGuidancePreview }}</pre>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </details>
 
-        <section class="space-y-1.5 border-t border-gray-800/80 pt-3">
-            <div class="flex items-center justify-between gap-3">
-                <div class="flex min-w-0 flex-wrap items-center gap-2">
-                    <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Runs &amp; History</h6>
+            <template #actions>
+                <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
                     <span
-                        v-if="assessmentStatus"
+                        v-if="effectiveAssessmentStatus"
                         class="rounded border px-1.5 py-0.5 text-[10px] font-semibold"
                         :class="assessmentStatusClass"
                     >
                         {{ assessmentStatusLabel }}
                     </span>
-                </div>
-                <div class="flex shrink-0 items-center gap-2">
-                    <span v-if="visiblePersistedResults.length > 0" class="text-[10px] text-gray-600">{{ visiblePersistedResults.length }} shown</span>
-                    <button
-                        v-if="canApplyAllResults"
-                        type="button"
-                        data-testid="apply-all-analysis-results"
-                        :disabled="applyingAll"
-                        :title="applyAllTitle"
-                        class="inline-flex items-center gap-1 rounded border border-cyan-700/60 bg-cyan-950/30 px-2 py-1 text-[10px] font-bold uppercase text-cyan-300 transition-colors hover:bg-cyan-900/40 disabled:cursor-wait disabled:opacity-50"
-                        @click="applyAllResults"
-                    >
-                        <Loader2 v-if="applyingAll" :size="10" class="animate-spin" />
-                        <ClipboardCheck v-else :size="10" />
-                        Apply all to {{ applyAllTeams.length }} team{{ applyAllTeams.length === 1 ? '' : 's' }}
-                    </button>
+                    <span v-if="historyRecordCount > 0" class="text-[10px] text-gray-600">{{ historyRecordCount }} run{{ historyRecordCount === 1 ? '' : 's' }}</span>
                     <button
                         type="button"
                         :disabled="historyLoading"
@@ -2227,256 +3043,133 @@ watch(analyzedComponents, (components) => {
                         {{ historyLoaded ? 'Refresh' : 'Load history' }}
                     </button>
                 </div>
-            </div>
+            </template>
 
             <div
-                v-for="qi in activeQueueItems"
-                :key="qi.queue_id"
-                class="grid gap-2 rounded border px-2.5 py-1.5 text-[11px] md:grid-cols-[minmax(0,1fr)_auto]"
-                :class="{
-                    'bg-yellow-900/20 border-yellow-700/30': qi.status === 'queued',
-                    'bg-blue-900/20 border-blue-700/30': qi.status === 'running',
-                }"
+                role="list"
+                aria-label="Analysis runs"
+                data-testid="analysis-run-list"
+                class="divide-y divide-gray-800/80 overflow-hidden rounded border border-gray-800/90 bg-gray-950/20"
             >
-                <div class="flex min-w-0 flex-wrap items-center gap-2">
-                    <Loader2 v-if="qi.status === 'running'" :size="12" class="animate-spin text-blue-400" />
-                    <Clock v-else :size="12" class="text-yellow-400" />
-                    <span class="min-w-0 truncate font-mono text-gray-200">{{ qi.component_name }}</span>
-                    <span v-if="qi.source && qi.source !== 'manual'" class="rounded border px-1.5 py-0.5 text-[10px] uppercase font-semibold" :class="sourceClass(qi.source)">
-                        {{ sourceLabel(qi.source) }}
-                    </span>
-                    <span v-if="qi.status === 'queued' && qi.position > 0" class="text-yellow-400 font-bold">#{{ qi.position }}</span>
-                    <span class="uppercase font-semibold" :class="qi.status === 'running' ? 'text-blue-400' : 'text-yellow-400'">{{ qi.status }}</span>
-                </div>
-                <button
-                    @click="cancelQueueItem(qi)"
-                    :disabled="isQueueActionBusy(qi.queue_id)"
-                    class="inline-flex items-center justify-center gap-1 rounded border border-transparent px-2 py-1 text-[10px] uppercase font-bold text-gray-500 hover:border-red-700/50 hover:bg-red-950/20 hover:text-red-300 cursor-pointer disabled:cursor-wait disabled:opacity-50"
-                >
-                    <Loader2 v-if="isQueueActionBusy(qi.queue_id)" :size="10" class="animate-spin" />
-                    <Ban v-else :size="10" />
-                    {{ qi.status === 'running' ? 'Abort' : 'Cancel' }}
-                </button>
-            </div>
-
-            <div v-if="historyLoading" class="flex items-center gap-2 px-1 py-1 text-xs text-gray-500">
+            <div v-if="historyLoading" role="listitem" aria-live="polite" class="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
                 <Loader2 :size="12" class="animate-spin" />
                 Loading analysis history
             </div>
-
+            <template v-for="entry in analysisRunListEntries" :key="entry.key">
             <div
-                v-for="qi in completedQueueItems"
-                :key="qi.queue_id"
-                class="grid gap-2 rounded border border-green-700/20 bg-green-900/10 px-2.5 py-1.5 text-[11px] cursor-pointer hover:bg-green-900/20 md:grid-cols-[minmax(0,1fr)_auto]"
-                @click="viewCompletedResult(qi)"
+                role="listitem"
+                :data-testid="entry.kind === 'persisted' && !entry.nested ? 'analysis-history-component-group' : undefined"
+                :data-component="entry.kind === 'persisted' && !entry.nested ? entry.component : undefined"
+                :class="[
+                    isSelectedAnalysisRunEntry(entry) ? 'bg-cyan-950/10' : '',
+                    entry.kind === 'persisted' && entry.nested ? 'border-l border-gray-800 pl-6' : '',
+                ]"
             >
-                <div class="flex min-w-0 flex-wrap items-center gap-2">
-                    <CheckCircle :size="12" class="text-green-400" />
-                    <span class="min-w-0 truncate font-mono text-gray-200">{{ qi.component_name }}</span>
-                    <span v-if="qi.source && qi.source !== 'manual'" class="rounded border px-1.5 py-0.5 text-[10px] uppercase font-semibold" :class="sourceClass(qi.source)">
-                        {{ sourceLabel(qi.source) }}
-                    </span>
-                    <span class="uppercase font-semibold text-green-400">completed</span>
-                </div>
-                <span class="text-[10px] text-cyan-400 font-semibold uppercase">View Result</span>
-            </div>
-
-            <div
-                v-for="record in visiblePersistedResults"
-                :key="record.analysis_run_id"
-                data-testid="analysis-history-row"
-                :data-run-id="record.analysis_run_id"
-                class="grid gap-2 rounded border px-2.5 py-1.5 text-[11px] cursor-pointer hover:bg-cyan-900/15 md:grid-cols-[minmax(0,1fr)_auto]"
-                :class="selectedRunId === record.analysis_run_id ? 'bg-cyan-900/20 border-cyan-700/40' : 'bg-gray-950/35 border-gray-700/40'"
-                @click="viewPersistedResult(record)"
-            >
-                <div class="min-w-0">
+                <div
+                    v-if="entry.kind === 'active'"
+                    class="grid gap-2 px-3 py-2.5 text-[11px] md:grid-cols-[minmax(0,1fr)_auto]"
+                    :class="entry.item.status === 'running' ? 'bg-blue-950/10' : 'bg-yellow-950/10'"
+                >
                     <div class="flex min-w-0 flex-wrap items-center gap-2">
-                        <History :size="12" class="shrink-0 text-cyan-400" />
-                        <span class="min-w-0 truncate font-mono text-gray-200">{{ record.component_name }}</span>
-                        <span class="shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase font-semibold" :class="sourceClass(record.source)">
-                            {{ sourceLabel(record.source) }}
+                        <Loader2 v-if="entry.item.status === 'running'" :size="12" class="animate-spin text-blue-400" />
+                        <Clock v-else :size="12" class="text-yellow-400" />
+                        <span class="min-w-0 truncate font-mono text-gray-200">{{ entry.item.component_name }}</span>
+                        <span v-if="entry.item.source && entry.item.source !== 'manual'" class="text-[9px] font-semibold uppercase" :class="sourceClass(entry.item.source)">
+                            {{ sourceLabel(entry.item.source) }}
                         </span>
-                        <span class="shrink-0 uppercase font-semibold" :class="verdictClass(record)">
-                            {{ record.summary?.verdict || 'saved' }}
-                        </span>
-                        <span class="text-[10px] text-gray-500">{{ formatHistoryTimestamp(record.finished_at || record.recorded_at) }}</span>
+                        <span v-if="entry.item.status === 'queued' && entry.item.position > 0" class="font-bold text-yellow-400">#{{ entry.item.position }}</span>
+                        <span class="font-semibold uppercase" :class="entry.item.status === 'running' ? 'text-blue-400' : 'text-yellow-400'">{{ entry.item.status }}</span>
                     </div>
-                    <div class="mt-0.5 flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 pl-5 text-[10px] text-gray-600">
-                        <span v-if="formatContextSummary(record)">{{ formatContextSummary(record) }}</span>
-                        <span v-if="record.context_fingerprint" class="font-mono">ctx {{ record.context_fingerprint.slice(0, 8) }}</span>
-                    </div>
-                </div>
-                <div class="flex shrink-0 items-center gap-2">
-                    <span v-if="selectedRunId === record.analysis_run_id" class="text-[10px] font-semibold uppercase text-cyan-300">Selected</span>
-                    <span class="text-[10px] text-cyan-400 font-semibold uppercase">View</span>
                     <button
                         type="button"
-                        class="inline-flex h-6 w-6 items-center justify-center rounded border border-gray-700 text-gray-500 transition-colors hover:border-red-700/60 hover:bg-red-950/20 hover:text-red-300 disabled:cursor-wait disabled:opacity-50"
-                        :disabled="isDeletingRun(record.analysis_run_id)"
-                        :title="`Remove analysis run ${record.analysis_run_id}`"
-                        aria-label="Remove analysis run"
-                        @click.stop="removePersistedResult(record)"
+                        :disabled="isQueueActionBusy(entry.item.queue_id)"
+                        class="inline-flex items-center justify-center gap-1 rounded px-2 py-1 text-[9px] font-bold uppercase text-gray-500 hover:bg-red-950/20 hover:text-red-300 disabled:cursor-wait disabled:opacity-50"
+                        @click="cancelQueueItem(entry.item)"
                     >
-                        <Loader2 v-if="isDeletingRun(record.analysis_run_id)" :size="12" class="animate-spin" />
-                        <Trash2 v-else :size="12" />
+                        <Loader2 v-if="isQueueActionBusy(entry.item.queue_id)" :size="10" class="animate-spin" />
+                        <Ban v-else :size="10" />
+                        {{ entry.item.status === 'running' ? 'Abort' : 'Cancel' }}
                     </button>
                 </div>
-            </div>
-        </section>
 
-        <div v-if="historyError" class="rounded border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-xs text-amber-200">
-            {{ historyError }}
-        </div>
-
-        <section v-if="!result" class="space-y-2 border-t border-gray-800/80 pt-3">
-            <button
-                type="button"
-                @click="loadSystemPrompts"
-                class="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500 hover:text-cyan-300 cursor-pointer"
-            >
-                <Loader2 v-if="systemPromptLoading" :size="12" class="animate-spin" />
-                <FileText v-else :size="12" />
-                {{ systemPromptOpen ? 'Hide LLM Conversation' : 'LLM Conversation' }}
-            </button>
-            <div v-if="systemPromptOpen" class="rounded border border-gray-700/50 bg-gray-950/60 p-2">
-                <div v-if="systemPromptLoading" class="flex items-center gap-2 text-xs text-gray-500">
-                    <Loader2 :size="12" class="animate-spin" />
-                    Loading conversation
-                </div>
-                <div v-else-if="systemPromptError" class="text-xs text-amber-300">
-                    {{ systemPromptError }}
-                </div>
-                <div v-else-if="systemPromptBundles.length === 0 && !requestGuidancePreview" class="text-xs text-gray-500">
-                    No LLM conversation reported
-                </div>
-                <div v-else class="max-h-72 overflow-auto space-y-2">
-                    <div
-                        v-for="bundle in systemPromptBundles"
-                        :key="bundle.bundle"
-                        class="space-y-1"
-                    >
-                        <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">{{ bundle.bundle }} configured prompt values (fallback, not a captured run)</div>
-                        <pre
-                            v-for="(value, key) in (bundle.values || {})"
-                            :key="String(key)"
-                            class="whitespace-pre-wrap break-words rounded bg-gray-900 p-2 text-[10px] leading-relaxed text-gray-300"
-                        >{{ formatPromptValueLabel(key) }}:
-{{ value }}</pre>
-                    </div>
-                    <div v-if="requestGuidancePreview" class="space-y-1">
-                        <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">Additional request guidance sent to analyzer</div>
-                        <pre class="whitespace-pre-wrap break-words rounded bg-gray-900 p-2 text-[10px] leading-relaxed text-gray-300">{{ requestGuidancePreview }}</pre>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <div v-if="error" class="flex items-start gap-2 p-2 rounded bg-red-900/20 border border-red-700/40 text-xs text-red-300">
-            <XCircle :size="14" class="shrink-0 mt-0.5" />
-            <span>{{ error }}</span>
-        </div>
-
-        <div v-if="result" class="space-y-4 border-t border-gray-800/80 pt-3">
-            <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Assessment Decision</h6>
-            <section data-testid="assessment-decision" class="rounded border p-3" :class="{
-                'bg-red-900/20 border-red-700/40': result.assessment.affected,
-                'bg-green-900/20 border-green-700/40': !result.assessment.affected,
-            }">
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                    <div class="flex min-w-0 items-start gap-3">
-                        <component :is="result.assessment.affected ? AlertTriangle : CheckCircle" :size="18" class="mt-0.5 shrink-0" :class="verdictColor" />
-                        <div class="min-w-0">
-                            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Verdict</div>
-                            <div class="text-base font-bold" :class="verdictColor">{{ result.assessment.verdict }}</div>
-                            <div class="mt-1 flex flex-wrap items-center gap-2">
-                                <span class="text-[11px] px-2 py-0.5 rounded border" :class="confidenceBadge">
-                                    {{ result.assessment.confidence }} confidence
-                                </span>
-                                <span class="text-[11px] text-gray-300">{{ result.assessment.exposure }}</span>
-                            </div>
-                        </div>
+                <div v-else-if="entry.kind === 'completed'" class="grid gap-2 bg-green-950/10 px-3 py-2.5 text-[11px] md:grid-cols-[minmax(0,1fr)_auto]">
+                    <div class="flex min-w-0 flex-wrap items-center gap-2">
+                        <CheckCircle :size="12" class="text-green-400" />
+                        <span class="min-w-0 truncate font-mono text-gray-200">{{ entry.item.component_name }}</span>
+                        <span v-if="entry.item.source && entry.item.source !== 'manual'" class="text-[9px] font-semibold uppercase" :class="sourceClass(entry.item.source)">
+                            {{ sourceLabel(entry.item.source) }}
+                        </span>
+                        <span class="font-semibold uppercase text-green-400">completed</span>
                     </div>
                     <button
-                        @click="applyResult"
-                        class="inline-flex items-center justify-center gap-2 px-3 py-2 rounded text-xs font-bold bg-cyan-600 hover:bg-cyan-700 text-white transition-colors cursor-pointer"
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[9px] font-bold uppercase text-green-300 hover:bg-green-950/30"
+                        :aria-expanded="isSelectedAnalysisRunEntry(entry) ? 'true' : 'false'"
+                        @click="toggleCompletedResult(entry.item)"
                     >
-                        <CheckCircle :size="14" />
-                        Use as Assessment Draft
+                        <Eye :size="11" />
+                        {{ isSelectedAnalysisRunEntry(entry) ? 'Hide' : 'View' }}
                     </button>
                 </div>
-                <div class="mt-3 border-t border-white/10 pt-3">
-                    <h6 class="mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-400">Evidence Quality</h6>
-                    <div class="flex flex-wrap gap-2">
-                        <span
-                            v-for="badge in evidenceQualityBadges"
-                            :key="badge.label"
-                            class="inline-flex items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide"
-                            :class="evidenceQualityClass(badge.tone)"
-                            :title="badge.detail"
-                        >
-                            {{ badge.label }}
-                        </span>
-                    </div>
-                </div>
-            </section>
 
-            <section data-testid="assessment-summary" class="overflow-hidden rounded border border-cyan-900/50 bg-cyan-950/10">
-                <button
-                    type="button"
-                    @click="assessmentSummaryOpen = !assessmentSummaryOpen"
-                    class="flex w-full flex-wrap items-center justify-between gap-2 bg-cyan-950/20 px-3 py-2 text-left transition-colors hover:bg-cyan-950/30"
-                    :aria-expanded="assessmentSummaryOpen"
+                <CodeAnalysisHistoryRow
+                    v-else-if="entry.kind === 'persisted'"
+                    :record="entry.record"
+                    :team="entry.team"
+                    :nested="entry.nested"
+                    :selected="isSelectedAnalysisRunEntry(entry)"
+                    :deleting="isDeletingRun(entry.record.analysis_run_id)"
+                    :canApply="isReusableRecord(entry.record)"
+                    :earlierCount="entry.earlierCount"
+                    :historyExpanded="entry.historyExpanded"
+                    @select="togglePersistedResult"
+                    @apply="applyPersistedResult"
+                    @remove="removePersistedResult"
+                    @toggle-history="toggleComponentHistory(entry.component)"
+                />
+
+                <div
+                    v-else-if="entry.kind === 'history-label'"
+                    class="bg-gray-950/25 px-8 py-1.5 text-[9px] font-semibold uppercase tracking-wide"
+                    :class="entry.tone === 'cyan' ? 'text-cyan-500' : 'text-gray-500'"
                 >
-                    <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-cyan-200">
-                        <component :is="assessmentSummaryOpen ? ChevronUp : ChevronDown" :size="12" />
-                        Summary
-                    </span>
-                    <span class="text-[10px] font-semibold text-gray-500">Rationale, final reasoning, and follow-up</span>
-                </button>
-                <div v-if="assessmentSummaryOpen" data-testid="assessment-summary-body" class="space-y-3 border-t border-cyan-900/40 p-3">
-                    <p class="text-sm leading-relaxed text-gray-200">{{ result.assessment.summary }}</p>
-                    <div v-if="result.assessment.reasoning" class="border-t border-cyan-900/30 pt-3">
-                        <h6 class="mb-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">Reasoning</h6>
-                        <p class="text-xs leading-relaxed text-gray-400">{{ result.assessment.reasoning }}</p>
-                    </div>
-                    <div
-                        v-if="followUpParentRunId"
-                        class="grid items-end gap-3 border-t border-cyan-900/30 pt-3 md:grid-cols-[minmax(0,1fr)_minmax(8rem,14rem)_auto]"
-                    >
-                        <div>
-                            <label for="code-analysis-follow-up" class="mb-1 block text-[11px] font-semibold uppercase text-gray-500">Follow-up Question</label>
-                            <input
-                                id="code-analysis-follow-up"
-                                v-model="followUpQuestion"
-                                :disabled="controlsBusy"
-                                placeholder="e.g. Is the platform package affected?"
-                                class="w-full rounded border border-gray-700 bg-gray-950 p-2 text-xs focus:border-cyan-500 disabled:opacity-50"
-                                @keyup.enter="startFollowUp"
-                            />
-                        </div>
-                        <div>
-                            <label for="code-analysis-follow-up-target" class="mb-1 block text-[11px] font-semibold uppercase text-gray-500">Target</label>
-                            <input
-                                id="code-analysis-follow-up-target"
-                                v-model="followUpComponent"
-                                :disabled="controlsBusy"
-                                class="w-full rounded border border-gray-700 bg-gray-950 p-2 font-mono text-xs focus:border-cyan-500 disabled:opacity-50"
-                                @keyup.enter="startFollowUp"
-                            />
-                        </div>
-                        <button
-                            @click="startFollowUp"
-                            :disabled="controlsBusy || !followUpParentRunId || !followUpQuestion.trim()"
-                            class="flex items-center justify-center gap-2 whitespace-nowrap rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
-                        >
-                            <Loader2 v-if="followUpSubmitting" :size="14" class="animate-spin" />
-                            <Send v-else :size="14" />
-                            Follow-up
-                        </button>
-                    </div>
+                    {{ entry.label }}
                 </div>
-            </section>
+
+                <div v-else class="grid gap-2 bg-green-950/10 px-3 py-2.5 text-[11px] md:grid-cols-[minmax(0,1fr)_auto]">
+                    <div class="flex min-w-0 flex-wrap items-center gap-2">
+                        <CheckCircle :size="12" class="text-green-400" />
+                        <span class="font-semibold text-gray-200">Current analysis result</span>
+                        <span class="truncate font-mono text-gray-500">{{ analyzedComponents.join(', ') }}</span>
+                    </div>
+                    <button type="button" class="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[9px] font-bold uppercase text-green-300 hover:bg-green-950/30" @click="closeSelectedResult">
+                        <Eye :size="11" /> Hide
+                    </button>
+                </div>
+
+        <div
+            v-if="isSelectedAnalysisRunEntry(entry) && result"
+            class="space-y-2 border-l-2 border-cyan-900/70 px-3 pb-3 pt-1"
+            :class="entry.kind === 'persisted' && entry.nested ? 'ml-12' : 'ml-8'"
+            data-testid="selected-analysis-run-details"
+        >
+        <CodeAnalysisRunOutcome
+            :result="result"
+            :verdictClass="verdictColor"
+            :confidenceClass="confidenceBadge"
+            :evidenceBadges="presentedEvidenceQualityBadges"
+            :runQuestion="selectedRunQuestion"
+            :canFollowUp="Boolean(followUpParentRunId)"
+            :followUpQuestion="followUpQuestion"
+            :followUpTarget="followUpComponent"
+            :followUpBusy="controlsBusy"
+            @update:followUpQuestion="followUpQuestion = $event"
+            @update:followUpTarget="followUpComponent = $event"
+            @follow-up="startFollowUp"
+            @apply="applyResult"
+            @close="closeSelectedResult"
+        />
+        <div class="space-y-1" data-testid="selected-analysis-supporting-evidence">
 
             <section v-if="assessmentDraftPreview" data-testid="assessment-draft" class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
                     <button
@@ -2485,15 +3178,13 @@ watch(analyzedComponents, (components) => {
                         class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
                         :aria-expanded="assessmentDraftOpen"
                     >
-                        <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                        <span class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                             <component :is="assessmentDraftOpen ? ChevronUp : ChevronDown" :size="12" />
                             Assessment Draft
                         </span>
-                        <span class="flex flex-wrap items-center gap-2">
-                            <span class="font-semibold text-amber-300">{{ assessmentDraftChangeCount }} change{{ assessmentDraftChangeCount === 1 ? '' : 's' }}</span>
-                            <span class="rounded border border-cyan-700/40 bg-cyan-950/30 px-2 py-0.5 font-semibold text-cyan-200">
-                                Target {{ assessmentDraftPreview.targetTeam }}
-                            </span>
+                        <span class="flex flex-wrap items-center gap-2 text-[10px]">
+                            <span class="font-semibold text-amber-400">{{ assessmentDraftChangeCount }} change{{ assessmentDraftChangeCount === 1 ? '' : 's' }}</span>
+                            <span class="text-cyan-300">Target {{ assessmentDraftPreview.targetTeam }}</span>
                         </span>
                     </button>
                     <div v-if="assessmentDraftOpen" data-testid="assessment-draft-body" class="overflow-x-auto border-t border-gray-800 p-3">
@@ -2536,13 +3227,13 @@ watch(analyzedComponents, (components) => {
                         class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
                         :aria-expanded="assessmentBenchmarkOpen"
                     >
-                        <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                        <span class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                             <component :is="assessmentBenchmarkOpen ? ChevronUp : ChevronDown" :size="12" />
                             Assessment Benchmark
                         </span>
                         <span
                             v-if="benchmarkComparison"
-                            class="inline-flex items-center gap-2 rounded border px-2 py-1 font-bold uppercase"
+                            class="inline-flex items-center gap-1.5 text-[10px] font-semibold"
                             :class="benchmarkRatingClass(benchmarkComparison.rating.tone)"
                         >
                             Agreement <span class="font-mono">{{ benchmarkComparison.rating.score }}/{{ benchmarkComparison.rating.max_score }}</span>
@@ -2579,7 +3270,7 @@ watch(analyzedComponents, (components) => {
                                 <div class="mt-3 grid gap-3">
                                     <div>
                                         <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Score</div>
-                                        <div class="mt-1 font-mono text-lg font-semibold text-gray-100">{{ formatBenchmarkCvss(benchmarkComparison.human.cvss_score) }}</div>
+                                        <div class="mt-1 font-mono text-sm font-semibold text-gray-100">{{ formatBenchmarkCvss(benchmarkComparison.human.cvss_score) }}</div>
                                     </div>
                                     <div>
                                         <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Vector</div>
@@ -2599,7 +3290,7 @@ watch(analyzedComponents, (components) => {
                                 <div class="mt-3 grid gap-3">
                                     <div>
                                         <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Score</div>
-                                        <div class="mt-1 font-mono text-lg font-semibold text-gray-100">{{ formatBenchmarkCvss(benchmarkComparison.automated.cvss_score) }}</div>
+                                        <div class="mt-1 font-mono text-sm font-semibold text-gray-100">{{ formatBenchmarkCvss(benchmarkComparison.automated.cvss_score) }}</div>
                                     </div>
                                     <div>
                                         <div class="text-[9px] font-bold uppercase tracking-wider text-gray-600">CVSS Vector</div>
@@ -2675,9 +3366,22 @@ watch(analyzedComponents, (components) => {
                     </div>
             </section>
 
-            <section v-if="result.component_results?.length" class="space-y-2 border-t border-gray-800/80 pt-3">
-                <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Component Results</h6>
-                <div class="grid gap-2 md:grid-cols-2">
+            <section v-if="result.component_results?.length" data-testid="component-results" class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
+                <button
+                    type="button"
+                    class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
+                    :aria-expanded="componentResultsOpen"
+                    @click="componentResultsOpen = !componentResultsOpen"
+                >
+                    <span class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                        <component :is="componentResultsOpen ? ChevronUp : ChevronDown" :size="12" />
+                        Component results
+                    </span>
+                    <span class="text-[10px] text-gray-600">
+                        {{ result.component_results.length }} target{{ result.component_results.length === 1 ? '' : 's' }}
+                    </span>
+                </button>
+                <div v-if="componentResultsOpen" class="grid gap-2 border-t border-gray-800 p-2 md:grid-cols-2">
                     <div
                         v-for="componentResult in result.component_results"
                         :key="componentResult.component"
@@ -2743,14 +3447,12 @@ watch(analyzedComponents, (components) => {
                 </div>
             </section>
 
-            <section class="space-y-2 border-t border-gray-800/80 pt-3">
-                <h6 class="text-[11px] font-bold uppercase tracking-wider text-gray-500">Analysis Artifacts</h6>
-
-                <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
+            <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
                     <button
                         type="button"
                         @click="coverageOpen = !coverageOpen"
                         class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
+                        :aria-expanded="coverageOpen"
                     >
                         <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <component :is="coverageOpen ? ChevronUp : ChevronDown" :size="12" />
@@ -2799,11 +3501,12 @@ watch(analyzedComponents, (components) => {
                     </div>
                 </div>
 
-                <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
+            <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
                     <button
                         type="button"
                         @click="loadSystemPrompts"
                         class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
+                        :aria-expanded="systemPromptOpen"
                     >
                         <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <Loader2 v-if="systemPromptLoading" :size="12" class="animate-spin" />
@@ -2812,119 +3515,428 @@ watch(analyzedComponents, (components) => {
                         </span>
                         <span class="text-[10px] font-semibold text-gray-500">{{ llmConversationSummary }}</span>
                     </button>
-                    <div v-if="systemPromptOpen" class="border-t border-gray-700/50 bg-gray-950/60 p-2">
+                    <CodeAnalysisConversationViewport v-if="systemPromptOpen">
                         <div v-if="systemPromptLoading" class="flex items-center gap-2 text-xs text-gray-500">
                             <Loader2 :size="12" class="animate-spin" />
                             Loading conversation
                         </div>
-                        <div v-else-if="systemPromptError" class="text-xs text-amber-300">
+                        <div v-else-if="systemPromptError" class="rounded border border-amber-800/50 bg-amber-950/20 p-3 text-xs text-amber-300">
                             {{ systemPromptError }}
                         </div>
-                        <div v-else-if="llmConversationTurns.length === 0 && systemPromptBundles.length === 0 && !requestGuidancePreview" class="text-xs text-gray-500">
+                        <div v-else-if="llmConversationTurns.length === 0 && systemPromptBundles.length === 0 && !savedRunGuidance && !selectedRunGuidanceRedacted" class="text-xs text-gray-500">
                             No LLM conversation reported
                         </div>
-                        <div v-else class="max-h-72 overflow-auto space-y-2">
-                            <div v-if="llmConversationTurns.length > 0" class="space-y-2">
-                                <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">Actual LLM conversation</div>
-                                <div
-                                    v-for="(turn, index) in llmConversationTurns"
-                                    :key="`${turn.started_at || 'turn'}-${index}`"
-                                    class="space-y-2 rounded border border-gray-800 bg-gray-950/70 p-2"
-                                >
-                                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] uppercase font-semibold text-gray-500">
-                                        <span>{{ formatConversationMeta(turn, index) }}</span>
-                                        <span v-if="turn.usage?.total_tokens" class="font-mono">{{ turn.usage.total_tokens }} tokens</span>
+                        <div v-else class="space-y-5">
+                            <div v-if="llmConversationTurns.length > 0" class="space-y-4">
+                                <div class="flex flex-wrap items-end justify-between gap-2 border-b border-gray-800 pb-3">
+                                    <div>
+                                        <div class="text-[11px] font-bold uppercase tracking-wider text-cyan-300">Actual LLM conversation</div>
+                                        <p class="mt-1 text-[11px] leading-relaxed text-gray-500">
+                                            Captured run evidence. Each turn shows the assembled Agentyzer request before the model output it produced.
+                                        </p>
                                     </div>
-                                    <div class="space-y-1.5">
-                                        <div class="text-[9px] font-bold uppercase tracking-wider text-cyan-300">What was sent to the LLM</div>
-                                        <div
-                                            v-for="(message, messageIndex) in conversationMessages(turn)"
-                                            :key="`message-${messageIndex}`"
-                                            class="flex"
-                                            :class="conversationRowClass(message.role)"
+                                    <div class="flex flex-wrap items-center justify-end gap-1.5">
+                                        <span class="rounded-full border border-gray-700 bg-gray-900 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-gray-400">
+                                            {{ llmConversationTurns.length }} turn{{ llmConversationTurns.length === 1 ? '' : 's' }}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            data-testid="expand-all-llm-stages"
+                                            class="rounded px-2 py-1 text-[9px] font-semibold text-gray-400 transition-colors hover:bg-gray-800 hover:text-gray-200 disabled:cursor-default disabled:opacity-40"
+                                            :disabled="allConversationStagesOpen"
+                                            @click="setAllConversationStages(true)"
                                         >
-                                            <div
-                                                class="min-w-0 max-w-[92%] rounded border px-2.5 py-2 shadow-sm"
-                                                :class="conversationBubbleClass(message.role)"
-                                            >
-                                                <div class="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                                                    <span class="text-[10px] font-bold uppercase tracking-wider">{{ conversationActorLabel(message.role) }}</span>
-                                                    <span class="text-[9px] font-semibold uppercase tracking-wider opacity-70">{{ conversationSentMeta(message.role) }}</span>
-                                                </div>
-                                                <div
-                                                    v-for="(part, partIndex) in message.parts"
-                                                    :key="`${messageIndex}-${part.key}`"
-                                                    class="space-y-1"
-                                                    :class="partIndex > 0 ? 'mt-2 border-t border-white/10 pt-2' : ''"
-                                                >
-                                                    <div class="text-[9px] font-bold uppercase tracking-wider" :class="conversationPartLabelClass(part.kind)">{{ part.label }}</div>
-                                                    <pre class="whitespace-pre-wrap break-words text-[10px] leading-relaxed">{{ part.content }}</pre>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div v-if="conversationToolActivities(turn).length > 0" class="space-y-1.5">
-                                        <div class="text-[9px] font-bold uppercase tracking-wider text-amber-300">Tool activity</div>
-                                        <div class="flex flex-col gap-1">
-                                            <div
-                                                v-for="activity in conversationToolActivities(turn)"
-                                                :key="activity.key"
-                                                class="max-w-[92%] rounded border px-2.5 py-1.5 text-[10px]"
-                                                :class="toolActivityClass(activity)"
-                                            >
-                                                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                                    <span class="font-bold uppercase tracking-wider">{{ activity.label }}</span>
-                                                    <span class="rounded border border-current/30 px-1 py-0.5 font-mono text-[9px] uppercase opacity-80">{{ activity.status }}</span>
-                                                </div>
-                                                <div class="mt-1 break-words font-mono text-[10px] opacity-90">{{ activity.target }}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div v-if="conversationResponse(turn)" class="space-y-1.5">
-                                        <div class="text-[9px] font-bold uppercase tracking-wider text-green-300">How the LLM answered</div>
-                                        <div class="flex justify-start">
-                                            <div class="min-w-0 max-w-[92%] rounded border px-2.5 py-2 shadow-sm" :class="conversationBubbleClass('assistant')">
-                                                <div class="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                                                    <span class="text-[10px] font-bold uppercase tracking-wider">LLM</span>
-                                                    <span class="text-[9px] font-semibold uppercase tracking-wider opacity-70">received from LLM · {{ conversationResponse(turn)?.role }} response</span>
-                                                </div>
-                                                <pre class="whitespace-pre-wrap break-words text-[10px] leading-relaxed">{{ conversationResponse(turn)?.content }}</pre>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div v-if="turn.error" class="rounded bg-red-950/40 p-2 text-[10px] text-red-300">
-                                        {{ turn.error }}
+                                            Expand all
+                                        </button>
+                                        <button
+                                            type="button"
+                                            data-testid="collapse-all-llm-stages"
+                                            class="rounded px-2 py-1 text-[9px] font-semibold text-gray-400 transition-colors hover:bg-gray-800 hover:text-gray-200 disabled:cursor-default disabled:opacity-40"
+                                            :disabled="!anyConversationStageOpen"
+                                            @click="setAllConversationStages(false)"
+                                        >
+                                            Collapse all
+                                        </button>
                                     </div>
                                 </div>
+                                <section
+                                    class="overflow-hidden rounded-md border border-fuchsia-900/45 bg-fuchsia-950/10"
+                                    data-testid="llm-guidance-evidence"
+                                    aria-label="Additional guidance used"
+                                >
+                                    <div class="flex flex-wrap items-start justify-between gap-2 border-b border-fuchsia-900/35 px-3 py-2.5">
+                                        <div>
+                                            <h3 class="text-[11px] font-bold uppercase tracking-wider text-fuchsia-200">Additional guidance used</h3>
+                                            <p class="mt-0.5 text-[10px] leading-relaxed text-gray-500">
+                                                Guidance is reviewer context to investigate, not evidence of affectedness by itself.
+                                            </p>
+                                        </div>
+                                        <span
+                                            v-if="capturedConversationGuidance.length > 0"
+                                            class="rounded-full border border-green-700/50 bg-green-950/30 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-green-300"
+                                        >
+                                            Captured in model request
+                                        </span>
+                                        <span
+                                            v-else-if="savedRunGuidance"
+                                            class="rounded-full border border-amber-700/50 bg-amber-950/30 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-amber-300"
+                                        >
+                                            Saved · use not verifiable
+                                        </span>
+                                        <span
+                                            v-else-if="selectedRunGuidanceRedacted"
+                                            class="rounded-full border border-amber-700/50 bg-amber-950/30 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-amber-300"
+                                        >
+                                            Redacted
+                                        </span>
+                                        <span v-else class="text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                                            None captured
+                                        </span>
+                                    </div>
+                                    <div v-if="capturedConversationGuidance.length > 0" class="divide-y divide-fuchsia-900/25">
+                                        <article
+                                            v-for="guidance in capturedConversationGuidance"
+                                            :key="guidance.key"
+                                            class="px-3 py-2.5"
+                                        >
+                                            <div class="mb-1.5 flex flex-wrap items-center gap-1.5 text-[9px] font-semibold text-gray-500">
+                                                <span v-if="guidance.component" class="rounded bg-gray-900 px-1.5 py-0.5 text-gray-300">{{ guidance.component }}</span>
+                                                <span>Model request turn{{ guidance.turns.length === 1 ? '' : 's' }} {{ guidance.turns.join(', ') }}</span>
+                                            </div>
+                                            <pre class="max-h-48 overflow-y-auto overscroll-auto whitespace-pre-wrap break-words rounded border border-fuchsia-900/30 bg-gray-950/50 p-2 text-[10px] leading-relaxed text-gray-300" tabindex="0">{{ guidance.content }}</pre>
+                                        </article>
+                                    </div>
+                                    <div v-else-if="savedRunGuidance" class="space-y-2 px-3 py-2.5">
+                                        <p class="text-[10px] leading-relaxed text-amber-200">
+                                            DTVP saved this guidance with the analyzer request, but it was not found in the captured model messages. Without matching trace evidence, model use cannot be verified.
+                                        </p>
+                                        <pre class="max-h-48 overflow-y-auto overscroll-auto whitespace-pre-wrap break-words rounded border border-amber-900/35 bg-gray-950/50 p-2 text-[10px] leading-relaxed text-gray-300" tabindex="0">{{ savedRunGuidance }}</pre>
+                                    </div>
+                                    <p v-else-if="selectedRunGuidanceRedacted" class="px-3 py-2.5 text-[10px] leading-relaxed text-amber-200">
+                                        Guidance and prompt trace content were removed by the result-storage policy, so this run cannot prove which additional guidance reached the model.
+                                    </p>
+                                    <p v-else class="px-3 py-2.5 text-[10px] leading-relaxed text-gray-500">
+                                        No additional guidance marker was found in any captured model request for this run.
+                                    </p>
+                                </section>
+                                <section
+                                    class="overflow-hidden rounded-md border border-cyan-900/45 bg-cyan-950/10"
+                                    data-testid="llm-conversation-summary"
+                                    aria-label="LLM conversation summary"
+                                >
+                                    <div class="flex flex-wrap items-start justify-between gap-2 border-b border-cyan-900/35 px-3 py-2.5">
+                                        <div>
+                                            <h3 class="text-[11px] font-bold uppercase tracking-wider text-cyan-200">Conversation summary</h3>
+                                            <p class="mt-0.5 text-[10px] leading-relaxed text-gray-500">
+                                                Persisted message, token, timing, and tool telemetry for this trace.
+                                            </p>
+                                        </div>
+                                        <span class="text-[9px] font-semibold text-gray-500">
+                                            {{ llmConversationStatistics.completedTurns }}/{{ llmConversationStatistics.rows.length }} completed
+                                        </span>
+                                    </div>
+
+                                    <dl class="grid divide-y divide-cyan-900/25 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+                                        <div class="px-3 py-2.5">
+                                            <dt class="text-[9px] font-bold uppercase tracking-wider text-cyan-400">Local → LLM</dt>
+                                            <dd class="mt-1 text-sm font-semibold text-gray-100" data-testid="llm-local-message-count">
+                                                {{ llmConversationStatistics.outboundMessages.toLocaleString() }} messages
+                                            </dd>
+                                            <dd class="mt-0.5 text-[10px] text-gray-500">
+                                                {{ formatConversationTokens(llmConversationStatistics.promptTokens) }} prompt tokens · {{ llmConversationStatistics.requestCharacters.toLocaleString() }} chars
+                                            </dd>
+                                        </div>
+                                        <div class="px-3 py-2.5">
+                                            <dt class="text-[9px] font-bold uppercase tracking-wider text-green-400">LLM → Local</dt>
+                                            <dd class="mt-1 text-sm font-semibold text-gray-100" data-testid="llm-response-message-count">
+                                                {{ llmConversationStatistics.inboundMessages.toLocaleString() }} responses
+                                            </dd>
+                                            <dd class="mt-0.5 text-[10px] text-gray-500">
+                                                {{ formatConversationTokens(llmConversationStatistics.completionTokens) }} completion tokens · {{ llmConversationStatistics.responseCharacters.toLocaleString() }} chars
+                                            </dd>
+                                        </div>
+                                        <div class="px-3 py-2.5">
+                                            <dt class="text-[9px] font-bold uppercase tracking-wider text-purple-400">Captured time</dt>
+                                            <dd class="mt-1 text-sm font-semibold text-gray-100" data-testid="llm-conversation-total-time">
+                                                {{ formatConversationDuration(llmConversationStatistics.capturedSpanMs) }} altogether
+                                            </dd>
+                                            <dd class="mt-0.5 text-[10px] text-gray-500">
+                                                {{ formatConversationDuration(llmConversationStatistics.totalDurationMs) }} LLM · {{ formatConversationDuration(llmConversationStatistics.localDurationMs) }} inferred local/tool
+                                            </dd>
+                                        </div>
+                                        <div class="px-3 py-2.5">
+                                            <dt class="text-[9px] font-bold uppercase tracking-wider text-amber-400">Tool activity</dt>
+                                            <dd class="mt-1 text-sm font-semibold text-gray-100" data-testid="llm-tool-usage-summary">
+                                                {{ llmConversationStatistics.llmToolRequests }} LLM requests · {{ llmConversationStatistics.localToolResults }} local results
+                                            </dd>
+                                            <dd class="mt-0.5 text-[10px] text-gray-500">
+                                                {{ llmConversationStatistics.repositoryInspections }} repo · {{ llmConversationStatistics.toolFailures }} failed<span v-if="llmConversationStatistics.analyzerRequiredTools"> · {{ llmConversationStatistics.analyzerRequiredTools }} analyzer-required</span>
+                                            </dd>
+                                        </div>
+                                    </dl>
+
+                                    <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-cyan-900/25 px-3 py-2 text-[9px] text-gray-500">
+                                        <span><strong class="font-semibold text-gray-300">Total tokens:</strong> {{ formatConversationTokens(llmConversationStatistics.totalTokens) }} ({{ llmConversationStatistics.usageTurns }}/{{ llmConversationStatistics.rows.length }} turns reported)</span>
+                                        <span><strong class="font-semibold text-gray-300">Timing:</strong> {{ llmConversationStatistics.timedTurns }}/{{ llmConversationStatistics.rows.length }} turns reported</span>
+                                        <span v-if="llmConversationStatistics.throughput != null"><strong class="font-semibold text-gray-300">Throughput:</strong> {{ llmConversationStatistics.throughput.toFixed(1) }} completion tokens/s</span>
+                                        <span><strong class="font-semibold text-gray-300">Retries:</strong> {{ llmConversationStatistics.retries }}</span>
+                                        <span><strong class="font-semibold text-gray-300">Context adaptations:</strong> {{ llmConversationStatistics.contextAdaptations }}</span>
+                                        <span><strong class="font-semibold text-gray-300">Models:</strong> {{ llmConversationStatistics.models.join(', ') || 'Not reported' }}</span>
+                                        <span><strong class="font-semibold text-gray-300">Providers:</strong> {{ llmConversationStatistics.providers.join(', ') || 'Not reported' }}</span>
+                                        <span v-if="llmConversationStatistics.toolTypes.length"><strong class="font-semibold text-gray-300">Requested tools:</strong> {{ llmConversationStatistics.toolTypes.map(([kind, count]) => `${kind} ${count}`).join(' · ') }}</span>
+                                    </div>
+
+                                    <div
+                                        class="max-h-64 overflow-auto overscroll-auto border-t border-cyan-900/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50"
+                                        tabindex="0"
+                                        aria-label="Per-turn LLM conversation timing"
+                                    >
+                                        <table class="min-w-full text-left text-[10px]" data-testid="llm-conversation-timing-table">
+                                            <thead class="bg-gray-950/55 text-[9px] font-bold uppercase tracking-wider text-gray-500">
+                                                <tr>
+                                                    <th class="px-3 py-1.5">Step</th>
+                                                    <th class="px-2 py-1.5">Messages</th>
+                                                    <th class="px-2 py-1.5">Tokens in / out</th>
+                                                    <th class="px-2 py-1.5">LLM time</th>
+                                                    <th class="px-2 py-1.5">Local/tool after</th>
+                                                    <th class="px-2 py-1.5">Tools</th>
+                                                    <th class="px-3 py-1.5 text-right">Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-gray-800/70 text-gray-300">
+                                                <tr v-for="row in llmConversationStatistics.rows" :key="`summary-${row.key}`">
+                                                    <td class="whitespace-nowrap px-3 py-1.5 font-semibold">{{ row.label }}</td>
+                                                    <td class="whitespace-nowrap px-2 py-1.5">{{ row.outboundMessages }} → · {{ row.inboundMessages }} ←</td>
+                                                    <td class="whitespace-nowrap px-2 py-1.5 font-mono">{{ formatConversationTokens(row.promptTokens) }} / {{ formatConversationTokens(row.completionTokens) }}</td>
+                                                    <td class="whitespace-nowrap px-2 py-1.5 font-mono">{{ formatConversationDuration(row.durationMs) }}</td>
+                                                    <td class="whitespace-nowrap px-2 py-1.5 font-mono" :title="row.localDurationMs == null ? 'No following timestamp available' : 'Inferred from this LLM response finishing until the next LLM request starts'">
+                                                        {{ formatConversationDuration(row.localDurationMs) }}
+                                                    </td>
+                                                    <td class="whitespace-nowrap px-2 py-1.5">{{ row.requestedTools }} LLM · {{ row.localToolResults }} local<span v-if="row.analyzerRequiredTools"> · {{ row.analyzerRequiredTools }} required</span></td>
+                                                    <td class="whitespace-nowrap px-3 py-1.5 text-right uppercase" :class="row.status === 'completed' ? 'text-green-400' : 'text-amber-300'">{{ row.status }}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <p class="border-t border-cyan-900/25 px-3 py-1.5 text-[9px] leading-relaxed text-gray-600">
+                                        LLM time uses each persisted request timestamp. Local/tool time is the inferred gap before the next request; work before the first or after the final LLM call is not captured.
+                                    </p>
+                                </section>
+                                <article
+                                    v-for="(conversation, index) in llmConversationViewTurns"
+                                    :key="conversation.key"
+                                    class="rounded-md border border-gray-800 bg-gray-950/45"
+                                    data-testid="llm-conversation-turn"
+                                >
+                                    <header class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 bg-gray-900/45 px-3 py-2">
+                                        <div class="text-[10px] font-bold uppercase tracking-wider text-gray-300">
+                                            {{ formatConversationMeta(conversation.turn, index) }}
+                                        </div>
+                                        <span v-if="conversation.turn.usage?.total_tokens" class="font-mono text-[9px] text-gray-500">
+                                            {{ conversation.turn.usage.total_tokens }} tokens
+                                        </span>
+                                    </header>
+
+                                    <div class="relative ml-4 space-y-6 border-l border-gray-700/70 px-4 py-4 sm:ml-5 sm:pl-5">
+                                        <section class="relative space-y-3">
+                                            <span class="absolute -left-[1.62rem] top-0 flex h-5 w-5 items-center justify-center rounded-full border border-cyan-600 bg-cyan-950 text-[9px] font-bold text-cyan-200">1</span>
+                                            <div class="flex flex-wrap items-start justify-between gap-2">
+                                                <button
+                                                    type="button"
+                                                    class="group flex min-w-0 items-start gap-1.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50"
+                                                    data-testid="llm-stage-toggle-request"
+                                                    :aria-expanded="isConversationStageOpen(conversation.key, 'request')"
+                                                    :aria-controls="conversationStageId(index, 'request')"
+                                                    @click="toggleConversationStage(conversation.key, 'request')"
+                                                >
+                                                    <component :is="isConversationStageOpen(conversation.key, 'request') ? ChevronUp : ChevronDown" :size="13" class="mt-px shrink-0 text-cyan-400" />
+                                                    <span>
+                                                        <span class="block text-[11px] font-bold uppercase tracking-wider text-cyan-200">Request assembled by Agentyzer</span>
+                                                        <span class="mt-0.5 block text-[10px] text-gray-500">{{ conversation.messages.length }} message{{ conversation.messages.length === 1 ? '' : 's' }} · complete model payload</span>
+                                                    </span>
+                                                </button>
+                                                <div class="flex items-center gap-1.5">
+                                                    <span class="rounded border border-cyan-700/50 bg-cyan-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-cyan-200">Agentyzer → Model</span>
+                                                    <button
+                                                        v-if="conversation.requestText"
+                                                        type="button"
+                                                        class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold text-gray-400 hover:bg-gray-800 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                                                        :aria-label="`Copy request for turn ${index + 1}`"
+                                                        @click="copyConversationText(`request-${index}`, conversation.requestText)"
+                                                    >
+                                                        <Copy :size="10" />
+                                                        {{ conversationCopyState[`request-${index}`] === 'copied' ? 'Copied' : conversationCopyState[`request-${index}`] === 'error' ? 'Copy failed' : 'Copy request' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div
+                                                v-if="isConversationStageOpen(conversation.key, 'request')"
+                                                :id="conversationStageId(index, 'request')"
+                                                data-testid="llm-stage-content-request"
+                                                class="max-h-96 space-y-2 overflow-y-auto overscroll-auto pr-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50"
+                                                tabindex="0"
+                                                :aria-label="`Request content for turn ${index + 1}`"
+                                            >
+                                                <div
+                                                    v-for="(message, messageIndex) in conversation.messages"
+                                                    :key="`message-${messageIndex}`"
+                                                    class="min-w-0 rounded border px-3 py-2.5 shadow-sm"
+                                                    :class="conversationBubbleClass(message.role)"
+                                                >
+                                                    <div class="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-b border-white/10 pb-1.5">
+                                                        <span class="text-[10px] font-bold uppercase tracking-wider">{{ conversationActorLabel(message.role) }}</span>
+                                                        <span class="text-[9px] font-semibold uppercase tracking-wider opacity-70">{{ conversationSentMeta(message.role) }}</span>
+                                                    </div>
+                                                    <div
+                                                        v-for="(part, partIndex) in message.parts"
+                                                        :key="`${messageIndex}-${part.key}`"
+                                                        class="space-y-1"
+                                                        :class="partIndex > 0 ? 'mt-3 border-t border-white/10 pt-2.5' : ''"
+                                                    >
+                                                        <div class="text-[9px] font-bold uppercase tracking-wider" :class="conversationPartLabelClass(part.kind)">{{ part.label }}</div>
+                                                        <pre class="whitespace-pre-wrap break-words text-[11px] leading-relaxed">{{ part.content }}</pre>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </section>
+
+                                        <section v-if="conversation.activities.length > 0" class="relative space-y-3">
+                                            <span class="absolute -left-[1.62rem] top-0 flex h-5 w-5 items-center justify-center rounded-full border border-amber-600 bg-amber-950 text-[9px] font-bold text-amber-200">2</span>
+                                            <div class="flex flex-wrap items-start justify-between gap-2">
+                                                <button
+                                                    type="button"
+                                                    class="group flex min-w-0 items-start gap-1.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+                                                    data-testid="llm-stage-toggle-tools"
+                                                    :aria-expanded="isConversationStageOpen(conversation.key, 'tools')"
+                                                    :aria-controls="conversationStageId(index, 'tools')"
+                                                    @click="toggleConversationStage(conversation.key, 'tools')"
+                                                >
+                                                    <component :is="isConversationStageOpen(conversation.key, 'tools') ? ChevronUp : ChevronDown" :size="13" class="mt-px shrink-0 text-amber-400" />
+                                                    <span>
+                                                        <span class="block text-[11px] font-bold uppercase tracking-wider text-amber-200">Tool activity</span>
+                                                        <span class="mt-0.5 block text-[10px] text-gray-500">{{ conversation.activities.length }} detected event{{ conversation.activities.length === 1 ? '' : 's' }}</span>
+                                                    </span>
+                                                </button>
+                                                <span class="rounded border border-amber-700/50 bg-amber-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-200">Agentyzer ↔ Tools</span>
+                                            </div>
+                                            <div
+                                                v-if="isConversationStageOpen(conversation.key, 'tools')"
+                                                :id="conversationStageId(index, 'tools')"
+                                                data-testid="llm-stage-content-tools"
+                                                class="max-h-80 grid gap-1.5 overflow-y-auto overscroll-auto pr-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 lg:grid-cols-2"
+                                                tabindex="0"
+                                                :aria-label="`Tool activity for turn ${index + 1}`"
+                                            >
+                                                <div
+                                                    v-for="activity in conversation.activities"
+                                                    :key="activity.key"
+                                                    class="rounded border px-2.5 py-2 text-[10px]"
+                                                    :class="toolActivityClass(activity)"
+                                                >
+                                                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                                        <span class="font-bold uppercase tracking-wider">{{ activity.label }}</span>
+                                                        <span class="rounded border border-current/30 px-1 py-0.5 font-mono text-[9px] uppercase opacity-80">{{ activity.status }}</span>
+                                                    </div>
+                                                    <div class="mt-1 break-words font-mono text-[10px] opacity-90">{{ activity.target }}</div>
+                                                </div>
+                                            </div>
+                                        </section>
+
+                                        <section v-if="conversation.response" class="relative space-y-3">
+                                            <span class="absolute -left-[1.62rem] top-0 flex h-5 w-5 items-center justify-center rounded-full border border-green-600 bg-green-950 text-[9px] font-bold text-green-200">{{ conversation.activities.length > 0 ? 3 : 2 }}</span>
+                                            <div class="flex flex-wrap items-start justify-between gap-2">
+                                                <button
+                                                    type="button"
+                                                    class="group flex min-w-0 items-start gap-1.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500/50"
+                                                    data-testid="llm-stage-toggle-response"
+                                                    :aria-expanded="isConversationStageOpen(conversation.key, 'response')"
+                                                    :aria-controls="conversationStageId(index, 'response')"
+                                                    @click="toggleConversationStage(conversation.key, 'response')"
+                                                >
+                                                    <component :is="isConversationStageOpen(conversation.key, 'response') ? ChevronUp : ChevronDown" :size="13" class="mt-px shrink-0 text-green-400" />
+                                                    <span>
+                                                        <span class="block text-[11px] font-bold uppercase tracking-wider text-green-200">Model response</span>
+                                                        <span class="mt-0.5 block text-[10px] text-gray-500">Raw answer · {{ conversation.response.content.length.toLocaleString() }} characters</span>
+                                                    </span>
+                                                </button>
+                                                <div class="flex items-center gap-1.5">
+                                                    <span class="rounded border border-green-700/50 bg-green-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-green-200">Model → Agentyzer</span>
+                                                    <button
+                                                        type="button"
+                                                        class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold text-gray-400 hover:bg-gray-800 hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-green-500/50"
+                                                        :aria-label="`Copy model response for turn ${index + 1}`"
+                                                        @click="copyConversationText(`response-${index}`, conversation.response?.content || '')"
+                                                    >
+                                                        <Copy :size="10" />
+                                                        {{ conversationCopyState[`response-${index}`] === 'copied' ? 'Copied' : conversationCopyState[`response-${index}`] === 'error' ? 'Copy failed' : 'Copy response' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div
+                                                v-if="isConversationStageOpen(conversation.key, 'response')"
+                                                :id="conversationStageId(index, 'response')"
+                                                data-testid="llm-stage-content-response"
+                                                class="max-h-96 overflow-y-auto overscroll-auto rounded border px-3 py-2.5 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500/50"
+                                                tabindex="0"
+                                                :aria-label="`Model response for turn ${index + 1}`"
+                                                :class="conversationBubbleClass('assistant')"
+                                            >
+                                                <div class="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-b border-white/10 pb-1.5">
+                                                    <span class="text-[10px] font-bold uppercase tracking-wider">Model output</span>
+                                                    <span class="text-[9px] font-semibold uppercase tracking-wider opacity-70">{{ conversation.response?.role }} response · captured verbatim</span>
+                                                </div>
+                                                <pre class="whitespace-pre-wrap break-words text-[11px] leading-relaxed">{{ conversation.response?.content }}</pre>
+                                            </div>
+                                        </section>
+
+                                        <div v-if="conversation.turn.error" class="rounded border border-red-800/50 bg-red-950/40 p-2 text-[10px] text-red-300">
+                                            {{ conversation.turn.error }}
+                                        </div>
+                                    </div>
+                                </article>
                             </div>
+
                             <template v-if="llmConversationTurns.length === 0">
+                                <div class="rounded border border-amber-800/40 bg-amber-950/15 p-3 text-[10px] leading-relaxed text-amber-200">
+                                    This run did not capture a conversation. Configured prompt values below are current fallbacks and may differ from what the model received.
+                                </div>
                                 <div
                                     v-for="bundle in systemPromptBundles"
                                     :key="bundle.bundle"
-                                    class="space-y-1"
+                                    class="space-y-2"
                                 >
-                                    <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">{{ bundle.bundle }} configured prompt values (fallback, not a captured run)</div>
+                                    <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">{{ bundle.bundle }} configured prompt values · not captured from this run</div>
                                     <pre
                                         v-for="(value, key) in (bundle.values || {})"
                                         :key="String(key)"
-                                        class="whitespace-pre-wrap break-words rounded bg-gray-900 p-2 text-[10px] leading-relaxed text-gray-300"
+                                        class="whitespace-pre-wrap break-words rounded border border-gray-800 bg-gray-900 p-3 text-[11px] leading-relaxed text-gray-300"
                                     >{{ formatPromptValueLabel(key) }}:
 {{ value }}</pre>
                                 </div>
                             </template>
-                            <div v-if="llmConversationTurns.length === 0 && requestGuidancePreview" class="space-y-1">
-                                <div class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">Additional request guidance sent to analyzer</div>
-                                <pre class="whitespace-pre-wrap break-words rounded bg-gray-900 p-2 text-[10px] leading-relaxed text-gray-300">{{ requestGuidancePreview }}</pre>
+                            <div v-if="llmConversationTurns.length === 0 && savedRunGuidance" class="space-y-2">
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <div class="text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">Saved additional guidance</div>
+                                    <span class="rounded-full border border-amber-700/50 bg-amber-950/30 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-amber-300">Use not verifiable</span>
+                                </div>
+                                <p class="text-[10px] leading-relaxed text-amber-200">
+                                    DTVP saved this guidance on the analyzer request, but no model conversation was captured for this run.
+                                </p>
+                                <pre class="max-h-48 overflow-y-auto overscroll-auto whitespace-pre-wrap break-words rounded border border-fuchsia-900/40 bg-fuchsia-950/15 p-3 text-[11px] leading-relaxed text-gray-300" tabindex="0">{{ savedRunGuidance }}</pre>
+                            </div>
+                            <div v-else-if="llmConversationTurns.length === 0 && selectedRunGuidanceRedacted" class="rounded border border-amber-800/40 bg-amber-950/15 p-3 text-[10px] leading-relaxed text-amber-200">
+                                Additional guidance and prompt trace content were redacted by the result-storage policy, so model use cannot be verified for this run.
                             </div>
                         </div>
-                    </div>
+                    </CodeAnalysisConversationViewport>
                 </div>
 
-                <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
+            <div class="overflow-hidden rounded border border-gray-800 bg-gray-950/40">
                     <button
                         type="button"
                         @click="stepsExpanded = !stepsExpanded"
                         class="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-950/60"
+                        :aria-expanded="stepsExpanded"
                     >
                         <span class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-500">
                             <component :is="stepsExpanded ? ChevronUp : ChevronDown" :size="12" />
@@ -2948,8 +3960,124 @@ watch(analyzedComponents, (components) => {
                         </div>
                     </div>
                 </div>
-            </section>
         </div>
+        </div>
+            </div>
+            </template>
+            <div
+                v-if="historyLoaded && !historyLoading && analysisRunListEntries.length === 0"
+                role="listitem"
+                class="px-3 py-3 text-xs text-gray-500"
+            >
+                No analysis runs are stored for the components in this scope.
+            </div>
+            </div>
+
+        <div v-if="historyError" class="rounded border border-amber-700/40 bg-amber-900/15 px-3 py-2 text-xs text-amber-200">
+            {{ historyError }}
+        </div>
+
+        <div v-if="error" class="flex items-start gap-2 rounded border border-red-700/40 bg-red-900/20 p-2 text-xs text-red-300">
+            <XCircle :size="14" class="mt-0.5 shrink-0" />
+            <span>{{ error }}</span>
+        </div>
+        </DetailSection>
+
+        <DetailSection
+            :step="isReviewer ? 'Code evidence · 1' : 'Code evidence · 2'"
+            title="Combined assessment"
+            :description="isReviewer
+                ? 'Review the worst-case proposal across the latest result for every affected target before inspecting individual runs.'
+                : 'Combine the latest completed run for every affected target into one scoped assessment proposal.'"
+            bodyClass="space-y-3"
+            data-testid="combined-analysis-assessment"
+            :class="isReviewer ? 'order-2' : 'order-3'"
+        >
+            <template #actions>
+                <button
+                    v-if="canApplyAllResults"
+                    type="button"
+                    data-testid="apply-all-analysis-results"
+                    :disabled="applyingAll || combinedHydrating"
+                    :title="applyAllTitle"
+                    class="inline-flex items-center gap-1.5 rounded bg-cyan-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-cyan-700 disabled:cursor-wait disabled:opacity-50"
+                    @click="applyAllResults"
+                >
+                    <Loader2 v-if="applyingAll" :size="12" class="animate-spin" />
+                    <ClipboardCheck v-else :size="12" />
+                    Use {{ applyAllCandidates.length }} latest results as draft
+                </button>
+                <button
+                    v-else-if="applyAllCandidates.length === 1"
+                    type="button"
+                    data-testid="apply-single-analysis-result"
+                    class="inline-flex items-center gap-1.5 rounded bg-cyan-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-cyan-700"
+                    @click="applyPersistedResult(applyAllCandidates[0].record)"
+                >
+                    <CheckCircle :size="12" />
+                    Use result as draft
+                </button>
+            </template>
+
+            <div
+                v-if="combinedAssessmentPreview"
+                class="border-l-2 px-3 py-2.5"
+                :class="combinedAssessmentPreviewBorderClass"
+                data-testid="combined-assessment-preview"
+            >
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Worst assessment</span>
+                    <span
+                        class="text-sm font-bold"
+                        :class="combinedAssessmentPreviewTextClass"
+                    >
+                        {{ combinedAssessmentPreview.assessment.verdict }}
+                    </span>
+                    <span class="text-[10px] text-gray-500">
+                        {{ combinedCandidateRuns.length }}/{{ applyAllCandidates.length }} latest targets loaded
+                    </span>
+                </div>
+                <p class="mt-1 text-xs leading-relaxed text-gray-300">{{ combinedAssessmentPreview.assessment.summary }}</p>
+                <div v-if="combinedAssessmentPreview.assessment.reasoning" class="mt-2">
+                    <div class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Combined rationale</div>
+                    <p class="mt-0.5 text-xs leading-relaxed text-gray-400">{{ combinedAssessmentPreview.assessment.reasoning }}</p>
+                </div>
+            </div>
+
+            <div v-if="combinedHydrating" class="flex items-center gap-2 text-[11px] text-gray-500">
+                <Loader2 :size="11" class="animate-spin" />
+                Loading the latest target rationales
+            </div>
+            <div v-if="combinedHydrationError" class="text-[11px] text-amber-300">
+                {{ combinedHydrationError }}
+            </div>
+
+            <div v-if="applyAllCandidates.length" class="divide-y divide-gray-800/70">
+                <div
+                    v-for="candidate in applyAllCandidates"
+                    :key="candidate.record.analysis_run_id"
+                    class="flex items-center justify-between gap-3 px-1 py-1.5"
+                >
+                    <div class="min-w-0">
+                        <div class="truncate font-mono text-xs text-gray-200">{{ candidate.component }}</div>
+                        <div v-if="candidate.team" class="mt-0.5 text-[10px] text-blue-300">{{ candidate.team }}</div>
+                    </div>
+                    <span class="shrink-0 text-[9px] font-bold uppercase text-gray-400">
+                        {{ candidate.record.summary?.verdict || 'Completed' }}
+                    </span>
+                </div>
+            </div>
+            <div v-else class="rounded border border-gray-800 bg-gray-950/25 px-3 py-3 text-xs text-gray-500">
+                No completed target results are available to combine yet. Run analysis above or wait for queued work to finish.
+            </div>
+
+            <p v-if="applyAllCandidates.length > 1" class="text-[11px] leading-relaxed text-gray-500">
+                The draft uses the most severe target verdict and keeps each target's evidence and run provenance. Review the generated fields in Assessment before saving or submitting.
+            </p>
+            <p v-else-if="applyAllCandidates.length === 1" class="text-[11px] leading-relaxed text-gray-500">
+                Only one target currently has a completed result, so its individual result is the complete scoped draft.
+            </p>
+        </DetailSection>
 
     </div>
 </template>

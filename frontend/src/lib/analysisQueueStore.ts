@@ -86,6 +86,16 @@ const queuedItems = computed(() =>
 
 const hasActivity = computed(() => activeCount.value > 0)
 
+const activeVulnerabilityIds = computed(() => {
+    const ids = new Set<string>()
+    for (const item of items.value) {
+        if (item.status !== 'queued' && item.status !== 'running') continue
+        const vulnerabilityId = String(item.vuln_id || '').trim().toLocaleLowerCase()
+        if (vulnerabilityId) ids.add(vulnerabilityId)
+    }
+    return ids
+})
+
 async function refresh() {
     try {
         items.value = sortQueueItemsLatestFirst(await analysisQueueList())
@@ -395,6 +405,7 @@ export const analysisQueueStore = {
     runningItem,
     queuedItems,
     hasActivity,
+    activeVulnerabilityIds,
     refresh,
     refreshStatus,
     startPolling,
