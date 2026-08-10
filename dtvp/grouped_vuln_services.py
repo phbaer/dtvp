@@ -43,9 +43,10 @@ class GroupedVulnServiceDeps:
         Callable[[List[Dict[str, Any]], Dict[str, Any]], int]
     ] = None
     summary_index: Any = None
-    summary_index_cache_revision: Callable[[], Any] = lambda: None
+    summary_index_cache_revision: Callable[..., Any] = lambda **_kwargs: None
     notify_task_update: Callable[[str], None] = lambda _task_id: None
     run_cpu_bound: Callable[..., Awaitable[Any]] = asyncio.to_thread
+    run_postprocess: Callable[..., Awaitable[Any]] = asyncio.to_thread
 
 
 GROUPED_TASK_LOG_LIMIT = 100
@@ -877,7 +878,10 @@ async def process_grouped_vulns_task(
         summary_cache_scope: Dict[str, Any] | None = None
 
         if response_mode == "summary" and deps.summary_index is not None:
-            cache_revision = deps.summary_index_cache_revision()
+            cache_revision = deps.summary_index_cache_revision(
+                name=name,
+                versions=versions,
+            )
             summary_cache_key = build_grouped_vuln_summary_cache_key(
                 name=name,
                 cve=cve,
@@ -898,7 +902,10 @@ async def process_grouped_vulns_task(
                 ],
                 "cache_revision": cache_revision,
             }
-            cached_summary = deps.summary_index.load(summary_cache_key)
+            cached_summary = await asyncio.to_thread(
+                deps.summary_index.load,
+                summary_cache_key,
+            )
             if cached_summary and isinstance(cached_summary.get("result"), list):
                 cached_result = cached_summary["result"]
                 deps.tasks[task_id]["result_mode"] = response_mode
@@ -938,74 +945,123 @@ async def process_grouped_vulns_task(
             deps.notify_task_update(task_id)
 
         complete_partial_artifacts: Dict[str, Any] | None = None
+        pending_partial_snapshot: tuple[
+            List[Dict[str, Any]],
+            Dict[str, Any],
+            Dict[str, Dict[str, int]],
+        ] | None = None
+        partial_publisher_task: asyncio.Task[None] | None = None
 
-        async def publish_partial_summary(
+        async def drain_partial_summaries() -> None:
+            nonlocal complete_partial_artifacts, pending_partial_snapshot
+            while pending_partial_snapshot is not None:
+                (
+                    partial_combined_data,
+                    partial_bom_cache_map,
+                    partial_version_severity_counts,
+                ) = pending_partial_snapshot
+                pending_partial_snapshot = None
+                partial_versions = [
+                    entry["version"] for entry in partial_combined_data
+                ]
+                partial_completed = len(partial_combined_data)
+                now = datetime.now(timezone.utc)
+                deps.tasks[task_id]["message"] = (
+                    "Preparing partial vulnerability window "
+                    f"for {partial_completed}/{len(versions)} project versions..."
+                )
+                deps.tasks[task_id]["updated_at"] = now
+                deps.tasks[task_id]["partial_publish_in_progress"] = True
+                deps.notify_task_update(task_id)
+
+                artifacts = await deps.run_cpu_bound(
+                    _build_grouped_vuln_task_artifacts,
+                    deps.group_vulnerabilities,
+                    partial_combined_data,
+                    partial_bom_cache_map,
+                    team_mapping,
+                    partial_versions,
+                    partial_version_severity_counts,
+                    response_mode,
+                )
+
+                # A newer window arrived while this build ran. Skip publishing
+                # stale work and immediately build the newest available window.
+                if pending_partial_snapshot is not None:
+                    continue
+
+                now = datetime.now(timezone.utc)
+                deps.tasks[task_id]["result_mode"] = response_mode
+                deps.tasks[task_id]["result"] = artifacts["visible_result"]
+                deps.tasks[task_id]["partial_result_available"] = True
+                deps.tasks[task_id]["partial_versions_completed"] = partial_completed
+                deps.tasks[task_id]["partial_total_versions"] = len(versions)
+                deps.tasks[task_id]["partial_updated_at"] = now
+                deps.tasks[task_id]["updated_at"] = now
+                deps.tasks[task_id]["partial_publish_in_progress"] = False
+                deps.tasks[task_id]["message"] = (
+                    "Published partial vulnerability window "
+                    f"for {partial_completed}/{len(versions)} project versions."
+                )
+                deps.tasks[task_id]["_partial_full_result"] = artifacts[
+                    "full_result"
+                ]
+                deps.tasks[task_id]["_assessment_partial_group_index"] = artifacts[
+                    "assessment_group_index"
+                ]
+                deps.tasks[task_id]["_group_query_index"] = artifacts["query_index"]
+                deps.tasks[task_id]["_statistics_rollup"] = artifacts[
+                    "statistics_rollup"
+                ]
+                if partial_completed == len(versions):
+                    complete_partial_artifacts = artifacts
+                deps.notify_task_update(task_id)
+
+        def queue_partial_summary(
             partial_combined_data: List[Dict[str, Any]],
             partial_bom_cache_map: Dict[str, Any],
             partial_version_severity_counts: Dict[str, Dict[str, int]],
         ) -> None:
-            nonlocal complete_partial_artifacts
+            nonlocal pending_partial_snapshot, partial_publisher_task
             if response_mode != "summary" or not partial_combined_data:
                 return
-
-            partial_versions = [entry["version"] for entry in partial_combined_data]
-            partial_completed = len(partial_combined_data)
-            now = datetime.now(timezone.utc)
-            deps.tasks[task_id]["message"] = (
-                "Preparing partial vulnerability window "
-                f"for {partial_completed}/{len(versions)} project versions..."
-            )
-            deps.tasks[task_id]["updated_at"] = now
-            deps.tasks[task_id]["partial_publish_in_progress"] = True
-            deps.notify_task_update(task_id)
-
-            artifacts = await deps.run_cpu_bound(
-                _build_grouped_vuln_task_artifacts,
-                deps.group_vulnerabilities,
+            if partial_publisher_task is not None and partial_publisher_task.done():
+                partial_publisher_task.result()
+                partial_publisher_task = None
+            pending_partial_snapshot = (
                 partial_combined_data,
                 partial_bom_cache_map,
-                team_mapping,
-                partial_versions,
                 partial_version_severity_counts,
-                response_mode,
             )
+            if partial_publisher_task is None:
+                partial_publisher_task = asyncio.create_task(
+                    drain_partial_summaries()
+                )
 
-            now = datetime.now(timezone.utc)
-            deps.tasks[task_id]["result_mode"] = response_mode
-            deps.tasks[task_id]["result"] = artifacts["visible_result"]
-            deps.tasks[task_id]["partial_result_available"] = True
-            deps.tasks[task_id]["partial_versions_completed"] = partial_completed
-            deps.tasks[task_id]["partial_total_versions"] = len(versions)
-            deps.tasks[task_id]["partial_updated_at"] = now
-            deps.tasks[task_id]["updated_at"] = now
-            deps.tasks[task_id]["partial_publish_in_progress"] = False
-            deps.tasks[task_id]["message"] = (
-                "Published partial vulnerability window "
-                f"for {partial_completed}/{len(versions)} project versions."
+        try:
+            (
+                combined_data,
+                bom_cache_map,
+                version_severity_counts,
+            ) = await collect_version_snapshots(
+                deps,
+                versions,
+                client,
+                cve,
+                team_mapping,
+                progress_callback=update_progress,
+                partial_callback=queue_partial_summary,
             )
-            deps.tasks[task_id]["_partial_full_result"] = artifacts["full_result"]
-            deps.tasks[task_id]["_assessment_partial_group_index"] = artifacts[
-                "assessment_group_index"
-            ]
-            deps.tasks[task_id]["_group_query_index"] = artifacts["query_index"]
-            deps.tasks[task_id]["_statistics_rollup"] = artifacts["statistics_rollup"]
-            if partial_completed == len(versions):
-                complete_partial_artifacts = artifacts
-            deps.notify_task_update(task_id)
-
-        (
-            combined_data,
-            bom_cache_map,
-            version_severity_counts,
-        ) = await collect_version_snapshots(
-            deps,
-            versions,
-            client,
-            cve,
-            team_mapping,
-            progress_callback=update_progress,
-            partial_callback=publish_partial_summary,
-        )
+        except BaseException:
+            if partial_publisher_task is not None:
+                partial_publisher_task.cancel()
+                await asyncio.gather(
+                    partial_publisher_task,
+                    return_exceptions=True,
+                )
+            raise
+        if partial_publisher_task is not None:
+            await partial_publisher_task
         now = datetime.now(timezone.utc)
         deps.tasks[task_id]["message"] = (
             "Grouping vulnerabilities and preparing filtered result windows..."
@@ -1063,7 +1119,10 @@ async def process_grouped_vulns_task(
             and deps.summary_index is not None
             and summary_cache_scope is not None
         ):
-            final_cache_revision = deps.summary_index_cache_revision()
+            final_cache_revision = deps.summary_index_cache_revision(
+                name=name,
+                versions=versions,
+            )
             summary_cache_key = build_grouped_vuln_summary_cache_key(
                 name=name,
                 cve=cve,
@@ -1072,7 +1131,8 @@ async def process_grouped_vulns_task(
                 cache_revision=final_cache_revision,
             )
             summary_cache_scope["cache_revision"] = final_cache_revision
-            deps.summary_index.save(
+            await asyncio.to_thread(
+                deps.summary_index.save,
                 summary_cache_key,
                 scope=summary_cache_scope,
                 summaries=deps.tasks[task_id]["result"],
@@ -1080,9 +1140,12 @@ async def process_grouped_vulns_task(
                 total_versions=len(versions),
             )
 
+        # Result delivery is complete. Wake event-stream clients before the
+        # optional automatic-analysis planning pass, which can be substantial.
+        deps.notify_task_update(task_id)
         if deps.queue_open_vulnerabilities_for_analysis:
             try:
-                queued_count = await deps.run_cpu_bound(
+                queued_count = await deps.run_postprocess(
                     _queue_open_vulnerabilities_after_grouping,
                     deps.queue_open_vulnerabilities_for_analysis,
                     result,
@@ -1102,7 +1165,7 @@ async def process_grouped_vulns_task(
                     "Task %s failed to queue automatic code analysis scans",
                     task_id,
                 )
-        deps.notify_task_update(task_id)
+            deps.notify_task_update(task_id)
     except Exception as exc:
         now = datetime.now(timezone.utc)
         deps.tasks[task_id]["status"] = "failed"

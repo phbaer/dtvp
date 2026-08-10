@@ -37,6 +37,7 @@ export interface BackendPerformanceStatus {
     python: PythonRuntimeStatus;
     group_queries: BackendExecutorStatus;
     group_builds: BackendExecutorStatus;
+    group_postprocessing: BackendExecutorStatus;
     group_details: BackendExecutorStatus;
     grouped_tasks: {
         total: number;

@@ -150,7 +150,9 @@ class BoundedQueryExecutor:
             # has a chance to release the reserved capacity.
             finish_outstanding()
             raise
-        return await _await_thread_future(future)
+        # A cancelled asyncio waiter must not cancel a queued thread future:
+        # invoke() owns the accounting cleanup and may not have started yet.
+        return await _await_thread_future(asyncio.shield(future))
 
     def stats(self) -> dict[str, Any]:
         with self._lock:
@@ -290,7 +292,9 @@ class BoundedWorkExecutor:
                 self._outstanding = max(0, self._outstanding - 1)
             semaphore.release()
             raise
-        return await _await_thread_future(future)
+        # Keep queued work alive after caller cancellation so invoke() can
+        # release its reserved semaphore slot and outstanding counter.
+        return await _await_thread_future(asyncio.shield(future))
 
     def stats(self) -> dict[str, Any]:
         with self._lock:

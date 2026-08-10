@@ -474,7 +474,7 @@ Representative service configuration excerpt:
   "model": "mistral",
   "llm_provider": "ollama",
   "configuration": {
-    "service_version": "1.0.20",
+    "service_version": "<packaged version>",
     "config_dir": "config",
     "repos_config_path": "config/repos.yaml",
     "repositories": {

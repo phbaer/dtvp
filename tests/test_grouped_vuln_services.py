@@ -1,9 +1,11 @@
 import asyncio
+import logging
 
 from dtvp.grouped_vuln_services import (
     GroupedVulnServiceDeps,
     _build_grouped_vuln_task_artifacts,
     collect_version_snapshots,
+    process_grouped_vulns_task,
     summarize_grouped_vulnerabilities,
 )
 from dtvp.task_group_query_services import (
@@ -72,6 +74,102 @@ def test_collect_version_snapshots_throttles_partial_publications():
 
     assert sorted(progress_updates) == list(range(1, 26))
     assert partial_sizes == [1, 10, 19, 25]
+
+
+def test_partial_build_does_not_block_remaining_version_progress():
+    versions = [
+        {"name": "Example", "version": str(index), "uuid": f"version-{index}"}
+        for index in range(4)
+    ]
+    release_later_versions = asyncio.Event()
+    build_started = asyncio.Event()
+    release_build = asyncio.Event()
+    postprocess_started = asyncio.Event()
+    release_postprocess = asyncio.Event()
+    build_calls = 0
+
+    class FakeCacheManager:
+        async def get_projects(self, client, name):
+            return versions
+
+        async def get_vulnerabilities(self, client, project_uuid, cve=None):
+            if project_uuid != "version-0":
+                await release_later_versions.wait()
+            return []
+
+        async def get_project_vulnerabilities(self, client, project_uuid):
+            return []
+
+        async def get_bom(self, client, project_uuid):
+            return {}
+
+    async def run_cpu_bound(function, *args, **kwargs):
+        nonlocal build_calls
+        build_calls += 1
+        if build_calls == 1:
+            build_started.set()
+            await release_build.wait()
+        return function(*args, **kwargs)
+
+    async def run_postprocess(function, *args, **kwargs):
+        postprocess_started.set()
+        await release_postprocess.wait()
+        return function(*args, **kwargs)
+
+    async def scenario():
+        task_id = "coalesced-partials"
+        tasks = {task_id: {"status": "pending", "log": []}}
+        notified_statuses = []
+        deps = GroupedVulnServiceDeps(
+            cache_manager=FakeCacheManager(),
+            logger=logging.getLogger(__name__),
+            tasks=tasks,
+            bom_analysis_cache_cls=lambda bom, team_mapping: {},
+            get_version_fetch_concurrency=lambda: 4,
+            merge_vulnerability_details=lambda findings, full_vulns: {},
+            sort_projects_by_version=lambda values: values,
+            load_team_mapping=lambda: {},
+            group_vulnerabilities=lambda combined_data, **kwargs: [],
+            queue_open_vulnerabilities_for_analysis=lambda grouped, mapping: 0,
+            notify_task_update=lambda notified_task_id: notified_statuses.append(
+                tasks[notified_task_id]["status"]
+            ),
+            run_cpu_bound=run_cpu_bound,
+            run_postprocess=run_postprocess,
+        )
+
+        processing = asyncio.create_task(
+            process_grouped_vulns_task(
+                deps,
+                task_id,
+                "Example",
+                None,
+                client=object(),
+                response_mode="summary",
+            )
+        )
+        await asyncio.wait_for(build_started.wait(), timeout=1)
+        assert tasks[task_id]["versions_completed"] == 1
+
+        release_later_versions.set()
+
+        async def wait_for_all_fetches():
+            while tasks[task_id]["versions_completed"] < len(versions):
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_all_fetches(), timeout=1)
+        assert tasks[task_id]["versions_completed"] == len(versions)
+
+        release_build.set()
+        await asyncio.wait_for(postprocess_started.wait(), timeout=1)
+        assert tasks[task_id]["status"] == "completed"
+        assert notified_statuses[-1] == "completed"
+        release_postprocess.set()
+        await asyncio.wait_for(processing, timeout=1)
+        assert tasks[task_id]["status"] == "completed"
+
+    asyncio.run(scenario())
+    assert build_calls == 2
 
 
 def test_summary_artifact_build_skips_dependency_chain_expansion():

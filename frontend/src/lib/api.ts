@@ -484,8 +484,10 @@ export const streamTaskEvents = async (
         throw new Error('Task event stream unavailable');
     }
 
+    const abortController = new AbortController();
     const response = await fetch(`${API_BASE}/tasks/${encodeURIComponent(taskId)}/events`, {
         credentials: 'include',
+        signal: abortController.signal,
     });
     requireFetchResponse(response, 'Task event stream unavailable');
 
@@ -503,18 +505,35 @@ export const streamTaskEvents = async (
         }
     };
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (value) {
-            buffer += decoder.decode(value, { stream: !done });
-            await flushLines();
+    try {
+        while (true) {
+            let idleTimer: ReturnType<typeof setTimeout> | undefined;
+            const idleTimeout = new Promise<never>((_resolve, reject) => {
+                idleTimer = setTimeout(() => {
+                    reject(new Error('Task event stream became idle'));
+                }, 35_000);
+            });
+            let chunk: ReadableStreamReadResult<Uint8Array>;
+            try {
+                chunk = await Promise.race([reader.read(), idleTimeout]);
+            } finally {
+                if (idleTimer !== undefined) clearTimeout(idleTimer);
+            }
+            const { done, value } = chunk;
+            if (value) {
+                buffer += decoder.decode(value, { stream: !done });
+                await flushLines();
+            }
+            if (done) break;
         }
-        if (done) break;
-    }
 
-    buffer += decoder.decode();
-    if (buffer.trim()) {
-        await onStatus(JSON.parse(buffer));
+        buffer += decoder.decode();
+        if (buffer.trim()) {
+            await onStatus(JSON.parse(buffer));
+        }
+    } finally {
+        abortController.abort();
+        await reader.cancel().catch(() => undefined);
     }
 };
 

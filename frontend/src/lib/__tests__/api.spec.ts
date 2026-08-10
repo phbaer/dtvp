@@ -381,15 +381,49 @@ describe('api.ts', () => {
             onTaskCompleted,
         })
 
-        expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/tasks/task-events/events'), {
+        expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/tasks/task-events/events'), expect.objectContaining({
             credentials: 'include',
-        })
+            signal: expect.any(AbortSignal),
+        }))
         expect(mocks.get).not.toHaveBeenCalled()
         expect(onPartialResultAvailable).toHaveBeenCalledWith('task-events', runningEvent)
         expect(onTaskCompleted).toHaveBeenCalledWith('task-events', completedEvent)
         expect(onProgress).toHaveBeenCalledWith('Done', 100, undefined)
         expect(result).toEqual([{ id: 'CVE-1' }])
         vi.unstubAllGlobals()
+    })
+
+    it('getGroupedVulns falls back to polling when the event stream is idle', async () => {
+        const mockTaskStart = { task_id: 'task-idle-stream' }
+        const mockTaskCompleted = {
+            status: 'completed',
+            progress: 100,
+            message: 'Done',
+            result: [{ id: 'CVE-FALLBACK' }],
+        }
+        let streamCancelled = false
+        const body = new ReadableStream({
+            cancel() {
+                streamCancelled = true
+            },
+        })
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })
+        vi.stubGlobal('fetch', fetchMock)
+        mocks.post.mockResolvedValue({ data: mockTaskStart })
+        mocks.get.mockResolvedValue({ data: mockTaskCompleted })
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+        vi.useFakeTimers()
+
+        const resultPromise = getGroupedVulns('Test', undefined, undefined, {
+            useEventStream: true,
+        })
+        await vi.advanceTimersByTimeAsync(35_100)
+
+        await expect(resultPromise).resolves.toEqual([{ id: 'CVE-FALLBACK' }])
+        expect(streamCancelled).toBe(true)
+        expect(mocks.get).toHaveBeenCalledWith('/tasks/task-idle-stream')
+        vi.unstubAllGlobals()
+        vi.useRealTimers()
     })
 
     it('getGroupedVulns can defer result download and drain task windows', async () => {
