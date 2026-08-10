@@ -1,10 +1,15 @@
 import asyncio
+import fcntl
 import hashlib
 import logging
 import os
 import re
+import shutil
+import tempfile
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import IO, Any, Dict, Iterator, List
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from git import GitCommandError, Repo
@@ -13,6 +18,16 @@ logger = logging.getLogger(__name__)
 
 # Persistent directory for cloned repos.
 _REPOS_DIR = os.environ.get("AGENTYZER_REPOS_DIR", "repos")
+
+_LOCKS_DIRNAME = ".locks"
+_WORKTREES_DIRNAME = ".worktrees"
+_LEASES_DIRNAME = ".leases"
+
+# Worktree leases stay open for the lifetime of an analysis.  The OS releases
+# their advisory locks if the process exits, allowing a later run to reclaim a
+# checkout left behind by a crash.
+_worktree_leases_guard = threading.Lock()
+_worktree_leases: dict[str, IO[str]] = {}
 
 # Pattern to strip embedded credentials from URLs and error messages.
 _CREDENTIAL_RE = re.compile(r"://[^@/]+@")
@@ -37,6 +52,50 @@ def _repo_dir(url: str) -> str:
     # Use the last path component (repo name) for readability.
     name = Path(parts.path).stem or "repo"
     return os.path.join(_REPOS_DIR, f"{name}-{digest}")
+
+
+def _repo_key(url: str) -> str:
+    """Return the credential-free directory key for a repository URL."""
+    return os.path.basename(_repo_dir(url))
+
+
+def _safe_workspace_id(workspace_id: str) -> str:
+    """Convert an internal run identifier into one safe path component."""
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", workspace_id):
+        return workspace_id
+    return hashlib.sha256(workspace_id.encode()).hexdigest()[:32]
+
+
+def _worktree_dir(url: str, workspace_id: str) -> str:
+    return os.path.join(
+        _REPOS_DIR,
+        _WORKTREES_DIRNAME,
+        _repo_key(url),
+        _safe_workspace_id(workspace_id),
+    )
+
+
+def _lease_path(url: str, workspace_id: str) -> str:
+    return os.path.join(
+        _REPOS_DIR,
+        _LEASES_DIRNAME,
+        _repo_key(url),
+        f"{_safe_workspace_id(workspace_id)}.lock",
+    )
+
+
+@contextmanager
+def _repository_lock(url: str) -> Iterator[None]:
+    """Serialize cache mutations for one repository across OS processes."""
+    lock_dir = os.path.join(_REPOS_DIR, _LOCKS_DIRNAME)
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, f"{_repo_key(url)}.lock")
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _auth_url(url: str, auth: Dict[str, Any]) -> str:
@@ -69,11 +128,18 @@ def _auth_url(url: str, auth: Dict[str, Any]) -> str:
     return url
 
 
-async def prepare_repo(component_cfg: Dict[str, Any]) -> str:
-    """Clone or update a repo for scanning. Returns local path.
+async def prepare_repo(
+    component_cfg: Dict[str, Any],
+    *,
+    workspace_id: str,
+) -> str:
+    """Prepare an isolated repository worktree for one analysis.
 
-    If the repo already exists on disk it is fetched and reset to the
-    latest remote HEAD.  Otherwise a fresh clone is performed.
+    The persistent control repository is cloned or fetched under a
+    cross-process lock.  A detached, leased worktree is then created at the
+    resolved remote-default-branch commit and returned to the caller.  Later
+    analyses may update the control repository without changing this run's
+    files.
 
     Git operations are blocking I/O — they are offloaded to a thread so
     the asyncio event loop stays responsive (prevents 504 from upstream
@@ -92,46 +158,215 @@ async def prepare_repo(component_cfg: Dict[str, Any]) -> str:
     dest = _repo_dir(url)
     os.makedirs(_REPOS_DIR, exist_ok=True)
 
-    await asyncio.to_thread(_sync_repo, authenticated_url, safe_url, dest)
-    return dest
+    return await asyncio.to_thread(
+        _prepare_worktree,
+        url,
+        authenticated_url,
+        safe_url,
+        dest,
+        workspace_id,
+    )
 
 
-def _sync_repo(authenticated_url: str, safe_url: str, dest: str) -> None:
-    """Blocking helper that performs the actual git clone/fetch."""
+async def cleanup_repo_worktree(
+    component_cfg: Dict[str, Any],
+    *,
+    workspace_id: str,
+) -> None:
+    """Remove one run's worktree and release its cross-process lease."""
+    url = component_cfg.get("url")
+    if not url:
+        return
+    await asyncio.to_thread(_cleanup_worktree_for_run, url, workspace_id)
+
+
+def _prepare_worktree(
+    url: str,
+    authenticated_url: str,
+    safe_url: str,
+    dest: str,
+    workspace_id: str,
+) -> str:
+    """Synchronously prepare a cache and leased detached worktree."""
+    worktree = _worktree_dir(url, workspace_id)
+    lease = _lease_path(url, workspace_id)
+
+    with _repository_lock(url):
+        repo, commit = _sync_repo(authenticated_url, safe_url, dest)
+        _cleanup_stale_worktrees(repo, url)
+        lease_file = _acquire_worktree_lease(lease)
+        try:
+            os.makedirs(os.path.dirname(worktree), exist_ok=True)
+            if os.path.lexists(worktree):
+                _remove_worktree(repo, worktree)
+            repo.git.worktree("add", "--detach", worktree, commit)
+        except Exception as exc:
+            _remove_worktree(repo, worktree)
+            _release_worktree_lease(lease, lease_file)
+            raise RepoError(
+                f"Failed to create isolated worktree for {safe_url}: "
+                f"{_sanitize(str(exc))}"
+            ) from None
+
+    logger.info("Prepared isolated worktree %s at %s", worktree, commit)
+    return worktree
+
+
+def _cleanup_worktree_for_run(url: str, workspace_id: str) -> None:
+    dest = _repo_dir(url)
+    worktree = _worktree_dir(url, workspace_id)
+    lease = _lease_path(url, workspace_id)
+
+    with _repository_lock(url):
+        lease_file = _claim_worktree_lease(lease)
+        if lease_file is None:
+            logger.warning(
+                "Skipped cleanup for active worktree owned by another process: %s",
+                worktree,
+            )
+            return
+        try:
+            if os.path.isdir(os.path.join(dest, ".git")):
+                _remove_worktree(Repo(dest), worktree)
+            else:
+                _remove_path(worktree)
+        finally:
+            _release_worktree_lease(lease, lease_file)
+
+
+def _acquire_worktree_lease(path: str) -> IO[str]:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lease_file = open(path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(lease_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except Exception:
+        lease_file.close()
+        raise RepoError(f"Workspace lease is already active: {path}") from None
+    with _worktree_leases_guard:
+        _worktree_leases[path] = lease_file
+    return lease_file
+
+
+def _claim_worktree_lease(path: str) -> IO[str] | None:
+    """Claim an owned or abandoned lease for cleanup."""
+    with _worktree_leases_guard:
+        owned = _worktree_leases.pop(path, None)
+    if owned is not None:
+        return owned
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lease_file = open(path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(lease_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lease_file.close()
+        return None
+    return lease_file
+
+
+def _release_worktree_lease(path: str, lease_file: IO[str]) -> None:
+    with _worktree_leases_guard:
+        if _worktree_leases.get(path) is lease_file:
+            _worktree_leases.pop(path, None)
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    finally:
+        fcntl.flock(lease_file.fileno(), fcntl.LOCK_UN)
+        lease_file.close()
+
+
+def _cleanup_stale_worktrees(repo: Repo, url: str) -> None:
+    """Reclaim worktrees whose owning process no longer holds its lease."""
+    worktree_root = os.path.join(_REPOS_DIR, _WORKTREES_DIRNAME, _repo_key(url))
+    lease_root = os.path.join(_REPOS_DIR, _LEASES_DIRNAME, _repo_key(url))
+    os.makedirs(worktree_root, exist_ok=True)
+    os.makedirs(lease_root, exist_ok=True)
+
+    for lease_entry in Path(lease_root).glob("*.lock"):
+        lease = str(lease_entry)
+        with _worktree_leases_guard:
+            if lease in _worktree_leases:
+                continue
+        lease_file = _claim_worktree_lease(lease)
+        if lease_file is None:
+            continue
+        worktree = os.path.join(worktree_root, lease_entry.stem)
+        try:
+            _remove_worktree(repo, worktree)
+        finally:
+            _release_worktree_lease(lease, lease_file)
+
+    leased_ids = {entry.stem for entry in Path(lease_root).glob("*.lock")}
+    for worktree_entry in Path(worktree_root).iterdir():
+        if worktree_entry.name not in leased_ids:
+            _remove_worktree(repo, str(worktree_entry))
+
+    try:
+        repo.git.worktree("prune", "--expire", "now")
+    except GitCommandError:
+        logger.warning("Failed to prune stale worktree metadata for %s", repo.working_dir)
+
+
+def _remove_worktree(repo: Repo, worktree: str) -> None:
+    try:
+        repo.git.worktree("remove", "--force", worktree)
+    except GitCommandError:
+        _remove_path(worktree)
+        try:
+            repo.git.worktree("prune", "--expire", "now")
+        except GitCommandError:
+            pass
+
+
+def _remove_path(path: str) -> None:
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+
+def _sync_repo(authenticated_url: str, safe_url: str, dest: str) -> tuple[Repo, str]:
+    """Clone/fetch the control repository and resolve an immutable commit."""
     if os.path.isdir(os.path.join(dest, ".git")):
-        # Repo already cloned — update it.
-        logger.info("Repo exists at %s — pulling latest changes", dest)
+        logger.info("Repository cache exists at %s — fetching latest changes", dest)
         try:
             repo = Repo(dest)
-            # Update the remote URL in case credentials changed.
             origin = repo.remotes.origin
             with origin.config_writer as cw:
                 cw.set("url", authenticated_url)
-            origin.fetch()
-            # Reset working tree to remote HEAD.
-            default_branch = _default_branch(repo)
-            repo.head.reset(f"origin/{default_branch}", index=True, working_tree=True)
-            logger.info("Updated %s to origin/%s", dest, default_branch)
-        except Exception:
-            logger.exception("Update failed for %s — re-cloning", safe_url)
-            import shutil
-
-            shutil.rmtree(dest, ignore_errors=True)
+            origin.fetch(prune=True)
             try:
-                Repo.clone_from(authenticated_url, dest)
-            except GitCommandError as clone_exc:
-                raise RepoError(
-                    f"Failed to clone repository {safe_url}: {_sanitize(str(clone_exc))}"
-                ) from None
-            except Exception as clone_exc:
-                raise RepoError(
-                    f"Failed to clone repository {safe_url}: {_sanitize(str(clone_exc))}"
-                ) from None
+                repo.git.remote("set-head", "origin", "--auto")
+            except GitCommandError:
+                logger.debug("Could not refresh origin/HEAD for %s", safe_url)
+        except Exception as exc:
+            logger.exception("Update failed for %s", safe_url)
+            raise RepoError(
+                f"Failed to update repository {safe_url}: {_sanitize(str(exc))}"
+            ) from None
     else:
-        # Fresh clone.
-        logger.info("Cloning %s → %s", safe_url, dest)
+        if os.path.lexists(dest):
+            logger.warning("Removing incomplete repository cache at %s", dest)
+            _remove_path(dest)
+        logger.info("Cloning repository cache %s → %s", safe_url, dest)
         try:
-            Repo.clone_from(authenticated_url, dest)
+            for stale_temp in Path(os.path.dirname(dest)).glob(
+                f".{os.path.basename(dest)}-clone-*"
+            ):
+                _remove_path(str(stale_temp))
+            with tempfile.TemporaryDirectory(
+                prefix=f".{os.path.basename(dest)}-clone-",
+                dir=os.path.dirname(dest),
+            ) as temp_root:
+                candidate = os.path.join(temp_root, "repository")
+                Repo.clone_from(authenticated_url, candidate, no_checkout=True)
+                os.replace(candidate, dest)
+            repo = Repo(dest)
             logger.info("Clone successful: %s", dest)
         except GitCommandError as exc:
             logger.error("Clone failed for %s: %s", safe_url, _sanitize(str(exc)))
@@ -143,6 +378,22 @@ def _sync_repo(authenticated_url: str, safe_url: str, dest: str) -> None:
             raise RepoError(
                 f"Failed to clone repository {safe_url}: {_sanitize(str(exc))}"
             ) from None
+
+    try:
+        default_branch = _default_branch(repo)
+        commit = repo.commit(f"origin/{default_branch}").hexsha
+    except Exception as exc:
+        raise RepoError(
+            f"Failed to resolve remote default branch for {safe_url}: "
+            f"{_sanitize(str(exc))}"
+        ) from None
+    logger.info(
+        "Repository cache %s resolved origin/%s at %s",
+        dest,
+        default_branch,
+        commit,
+    )
+    return repo, commit
 
 
 def _default_branch(repo: Repo) -> str:

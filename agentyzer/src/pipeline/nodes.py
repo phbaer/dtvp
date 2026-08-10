@@ -12,11 +12,13 @@ vice-versa.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 
 from src.agents import (
+    archive_extractor,
     ast_analyzer,
     code_scanner,
     dependency_scanner,
@@ -570,17 +572,10 @@ async def filter_advisory(state: PipelineState) -> dict:
     cfg_eco = (state.get("component_cfg") or {}).get("ecosystem")
     if cfg_eco:
         project_eco.add(cfg_eco)
-    # Use repo_path when already set in state (pre-seeded or already cloned).
+    # A pre-seeded focus path is already stable for this run.  Configured
+    # repositories are prepared later as isolated worktrees; never inspect the
+    # mutable shared control repository here before prepare_repo has locked it.
     effective_repo_path = state.get("repo_path")
-    # filter_advisory runs before prepare_repo, so repo_path is usually not
-    # set yet.  If the repo was previously cloned we can still detect the
-    # ecosystem from the on-disk copy by computing the deterministic path.
-    if not effective_repo_path:
-        cfg_url = (state.get("component_cfg") or {}).get("url")
-        if cfg_url:
-            candidate = dependency_scanner._repo_dir(cfg_url)
-            if os.path.isdir(candidate):
-                effective_repo_path = candidate
     if not project_eco:
         project_eco = _detect_project_ecosystems(effective_repo_path)
 
@@ -867,7 +862,7 @@ async def prepare_repo(state: PipelineState) -> dict:
             "repo_path": repo_path,
             "step_reports": {
                 "prepare_repo": {
-                    "title": "Repository Clone",
+                    "title": "Repository Preparation",
                     "status": "skipped",
                     "findings": {"repo_path": repo_path},
                     "evidence": [f"Using local path {repo_path} (no clone needed)"],
@@ -876,10 +871,13 @@ async def prepare_repo(state: PipelineState) -> dict:
             "evidence": [f"Using local path {repo_path} (no clone needed)"],
         }
     logger.info(
-        "[prepare_repo] Cloning repo for component '%s'", state["component_name"]
+        "[prepare_repo] Preparing repo for component '%s'", state["component_name"]
     )
     try:
-        repo_path = await dependency_scanner.prepare_repo(state["component_cfg"])
+        repo_path = await dependency_scanner.prepare_repo(
+            state["component_cfg"],
+            workspace_id=state["workspace_id"],
+        )
     except RepoError as exc:
         logger.error("[prepare_repo] %s", exc)
         raise
@@ -888,13 +886,69 @@ async def prepare_repo(state: PipelineState) -> dict:
         "repo_path": repo_path,
         "step_reports": {
             "prepare_repo": {
-                "title": "Repository Clone",
+                "title": "Repository Preparation",
                 "status": "ok",
                 "findings": {"repo_path": repo_path},
-                "evidence": [f"Cloned repo to {repo_path}"],
+                "evidence": [f"Prepared isolated repository worktree at {repo_path}"],
             },
         },
-        "evidence": [f"Cloned repo to {repo_path}"],
+        "evidence": [f"Prepared isolated repository worktree at {repo_path}"],
+    }
+
+
+# ----------------------------------------------------------------------- #
+# inspect_archives
+# ----------------------------------------------------------------------- #
+async def inspect_archives(state: PipelineState) -> dict:
+    """Expand bounded repository archives so normal scanners can inspect them."""
+    repo_path = state["repo_path"]
+    logger.info("[inspect_archives] Inspecting archives in %s", repo_path)
+    inspection = await asyncio.to_thread(
+        archive_extractor.inspect_repository_archives,
+        repo_path,
+        state["workspace_id"],
+    )
+    inspected = inspection["inspected"]
+    errors = inspection["errors"]
+    if inspected and errors:
+        status = "partial"
+    elif inspected:
+        status = "ok"
+    elif errors:
+        status = "partial"
+    else:
+        status = "skipped"
+
+    evidence = [
+        (
+            f"Inspected {inspected} repository archive(s); "
+            f"{len(errors)} archive(s) were rejected or unreadable"
+        )
+    ]
+    evidence.extend(
+        f"Archive {item['path']}: {item['format']}, {item['members']} members, "
+        f"{item['extracted_bytes']} extracted bytes"
+        for item in inspection["archives"]
+    )
+    evidence.extend(
+        f"Archive {item['path']} skipped: {item['error']}" for item in errors
+    )
+    if inspection["truncated"]:
+        evidence.append(
+            "Additional archives were skipped after reaching the per-analysis limit"
+        )
+
+    return {
+        "archive_inspection": inspection,
+        "step_reports": {
+            "inspect_archives": {
+                "title": "Archive Inspection",
+                "status": status,
+                "findings": inspection,
+                "evidence": evidence,
+            },
+        },
+        "evidence": evidence,
     }
 
 
@@ -911,7 +965,8 @@ async def scan_dependencies(state: PipelineState) -> dict:
         state["component_name"],
         sbom_attributed,
     )
-    dep_info = dependency_scanner.find_component(
+    dep_info = await asyncio.to_thread(
+        dependency_scanner.find_component,
         state["repo_path"],
         scan_target,
         sbom_attributed=sbom_attributed,
@@ -975,7 +1030,12 @@ async def scan_code(state: PipelineState) -> dict:
     )
 
     # --- AST analysis: discover imported symbols + call sites --- #
-    ast_graph = ast_analyzer.analyze_repository(repo_path, component, symbols)
+    ast_graph = await asyncio.to_thread(
+        ast_analyzer.analyze_repository,
+        repo_path,
+        component,
+        symbols,
+    )
 
     # When the advisory listed no vulnerable symbols, try CWE heuristics.
     cwe_hints: list[str] = []
@@ -994,9 +1054,35 @@ async def scan_code(state: PipelineState) -> dict:
     )
 
     # --- Traditional text search with expanded symbols --- #
-    usage = code_scanner.search_usage(repo_path, component, all_symbols)
-    snippets = code_scanner.collect_snippets(repo_path, component, all_symbols)
-    structure = code_scanner.collect_structure(repo_path, component, all_symbols)
+    usage, structure = await asyncio.gather(
+        asyncio.to_thread(
+            code_scanner.search_usage,
+            repo_path,
+            component,
+            all_symbols,
+        ),
+        asyncio.to_thread(
+            code_scanner.collect_structure,
+            repo_path,
+            component,
+            all_symbols,
+        ),
+    )
+    snippets = await asyncio.to_thread(
+        code_scanner.collect_snippets,
+        repo_path,
+        component,
+        all_symbols,
+        hits=usage,
+    )
+    archive_sources = state.get("archive_inspection", {}).get("archives", [])
+    if archive_sources and (snippets or structure):
+        archive_context = "\n".join(
+            f"- {item['scan_root']} was extracted from {item['path']} "
+            f"({item['format']} archive)"
+            for item in archive_sources
+        )
+        structure = f"ARCHIVE SOURCE PROVENANCE:\n{archive_context}\n\n{structure}"
 
     # --- Format AST context for LLM --- #
     ast_context = ast_analyzer.format_for_llm(ast_graph)
@@ -1036,6 +1122,7 @@ async def scan_code(state: PipelineState) -> dict:
             f"AST analysis: {len(ast_graph.imports)} imports, "
             f"{len(ast_graph.calls)} call sites across "
             f"{ast_graph.files_analyzed} files",
+            f"Repository archives inspected: {len(archive_sources)}",
         ]
     )
     if usage and usage != ["No direct usage found"]:
@@ -1063,6 +1150,7 @@ async def scan_code(state: PipelineState) -> dict:
                     "ast_imports": len(ast_graph.imports),
                     "ast_calls": len(ast_graph.calls),
                     "discovered_symbols": ast_graph.resolved_symbols,
+                    "archives_inspected": len(archive_sources),
                 },
                 "evidence": evidence_lines,
             },

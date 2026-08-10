@@ -1,6 +1,6 @@
 [project]
 name = "dtvp"
-version = "1.0.19"
+version = "1.0.20"
 authors = ["phbaer <git@ph.baer.one>"]
 urls = { "Homepage" = "https://baer.one", "Main repo" = "https://git.baer.one/phbaer/dtvp", "GitHub" = "https://github.com/phbaer/dtvp", "Mastodon" = "https://baer.im/@phbaer" }
 description = "A vulnerability management platform for dependency track"
@@ -35,7 +35,7 @@ agentyzer = { path = "agentyzer", editable = true }
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = "."
-addopts = "--cov=. --cov-report=term-missing --cov-report=html"
+addopts = "--import-mode=importlib --cov=. --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
 omit = [

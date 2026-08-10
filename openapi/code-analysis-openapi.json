@@ -10,7 +10,7 @@
     "license": {
       "name": "Proprietary"
     },
-    "version": "0.1.0"
+    "version": "1.0.20"
   },
   "paths": {
     "/health": {
@@ -413,7 +413,7 @@
                       "poll_url": "/jobs/9f7e2c4b5a6d",
                       "configuration": {
                         "service_name": "Agentic Vulnerability Analyzer",
-                        "service_version": "0.1.0",
+                        "service_version": "1.0.20",
                         "config_dir": "config",
                         "repos_config_path": "config/repos.yaml",
                         "repositories": {
@@ -435,6 +435,7 @@
                           "job_cancellation": true,
                           "job_logs": true,
                           "focus_path": true,
+                          "repository_archive_inspection": true,
                           "repos_config_hot_reload": true
                         }
                       },
@@ -449,9 +450,9 @@
                         },
                         "repositories": {
                           "workspace_dir": "repos",
-                          "reuse_strategy": "stable directory per sanitized repository URL",
-                          "update_strategy": "fetch and reset an existing clone before scanning",
-                          "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; raise it only when the LLM backend and repository workspaces can handle parallel scans"
+                          "reuse_strategy": "stable control repository plus detached per-analysis worktree",
+                          "update_strategy": "cross-process repository lock around clone, fetch, and worktree creation",
+                          "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; configured repositories use isolated worktrees, while focus_path concurrency is caller-managed"
                         },
                         "jobs": {
                           "job_store": "in_memory",
@@ -1132,7 +1133,7 @@
             },
             "type": "array",
             "title": "Llm Conversation",
-            "description": "Actual LLM conversation turns captured during this assessment. Each turn includes the messages sent to the model and the assistant response when available."
+            "description": "Actual LLM conversation turns captured during this assessment. Each turn includes timestamps, messages sent to the model, the assistant response, directional token usage, and provider metrics when available."
           }
         },
         "type": "object",
@@ -2142,9 +2143,9 @@
               "supports_model_override": true
             },
             "repositories": {
-              "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; raise it only when the LLM backend and repository workspaces can handle parallel scans",
-              "reuse_strategy": "stable directory per sanitized repository URL",
-              "update_strategy": "fetch and reset an existing clone before scanning",
+              "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; configured repositories use isolated worktrees, while focus_path concurrency is caller-managed",
+              "reuse_strategy": "stable control repository plus detached per-analysis worktree",
+              "update_strategy": "cross-process repository lock around clone, fetch, and worktree creation",
               "workspace_dir": "repos"
             }
           },
@@ -2158,6 +2159,7 @@
               "job_cancellation": true,
               "job_logs": true,
               "repos_config_hot_reload": true,
+              "repository_archive_inspection": true,
               "request_model_override": true,
               "sync_assessments": true
             },
@@ -2173,7 +2175,7 @@
               "workspace_dir": "repos"
             },
             "service_name": "Agentic Vulnerability Analyzer",
-            "service_version": "0.1.0"
+            "service_version": "1.0.20"
           },
           "llm_backend": "http://localhost:11434",
           "llm_provider": "ollama",
@@ -2597,23 +2599,24 @@
                 "title": "Dependency Scan"
               }
             ],
-            "completed_steps": 3,
+            "completed_steps": 5,
             "current_activity": "Searching source files for vulnerable symbols and usage",
             "current_agent": "code_scanner",
             "current_step": "scan_code",
             "current_title": "Code Scan",
-            "last_completed_step": "prepare_repo",
+            "last_completed_step": "inspect_archives",
             "last_updated_at": "2026-04-24T15:42:11.102938+00:00",
-            "percent": 25,
+            "percent": 38,
             "step_statuses": {
               "discover_vuln": "completed",
               "fetch_advisory": "completed",
               "filter_advisory": "completed",
+              "inspect_archives": "completed",
               "prepare_repo": "completed",
               "scan_code": "running",
               "scan_dependencies": "running"
             },
-            "total_steps": 12
+            "total_steps": 13
           },
           "status": "running"
         }
@@ -2740,9 +2743,9 @@
               "supports_model_override": true
             },
             "repositories": {
-              "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; raise it only when the LLM backend and repository workspaces can handle parallel scans",
-              "reuse_strategy": "stable directory per sanitized repository URL",
-              "update_strategy": "fetch and reset an existing clone before scanning",
+              "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; configured repositories use isolated worktrees, while focus_path concurrency is caller-managed",
+              "reuse_strategy": "stable control repository plus detached per-analysis worktree",
+              "update_strategy": "cross-process repository lock around clone, fetch, and worktree creation",
               "workspace_dir": "repos"
             }
           },
@@ -2756,6 +2759,7 @@
               "job_cancellation": true,
               "job_logs": true,
               "repos_config_hot_reload": true,
+              "repository_archive_inspection": true,
               "request_model_override": true,
               "sync_assessments": true
             },
@@ -2771,7 +2775,7 @@
               "workspace_dir": "repos"
             },
             "service_name": "Agentic Vulnerability Analyzer",
-            "service_version": "0.1.0"
+            "service_version": "1.0.20"
           },
           "job_id": "9f7e2c4b5a6d",
           "poll_url": "/jobs/9f7e2c4b5a6d",

@@ -1,4 +1,7 @@
 import asyncio
+import threading
+
+import pytest
 
 import src.pipeline.graph as pipeline_graph_module
 from src.pipeline import nodes
@@ -64,6 +67,116 @@ async def _fake_deep_analyze_with_llm(*args, **kwargs):
         "reasoning": "Deep analysis unavailable: OpenWebUI request failed: Model not found",
         "error": "OpenWebUI request failed: Model not found",
     }
+
+
+def test_inspect_archives_node_reports_tool_results(monkeypatch, tmp_path):
+    inspection = {
+        "discovered": 2,
+        "inspected": 1,
+        "archives": [
+            {
+                "path": "source.zip",
+                "format": "zip",
+                "nesting_level": 0,
+                "members": 3,
+                "extracted_bytes": 120,
+                "scan_root": "__agentyzer_archives__/run/source/content",
+            }
+        ],
+        "errors": [{"path": "broken.rar", "error": "invalid archive"}],
+        "truncated": False,
+        "limits": {},
+    }
+    monkeypatch.setattr(
+        nodes.archive_extractor,
+        "inspect_repository_archives",
+        lambda repo_path, workspace_id: inspection,
+    )
+
+    async def _run_inline(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(nodes.asyncio, "to_thread", _run_inline)
+
+    result = asyncio.run(
+        nodes.inspect_archives(
+            {"repo_path": str(tmp_path), "workspace_id": "archive-run"}
+        )
+    )
+
+    assert result["archive_inspection"] == inspection
+    report = result["step_reports"]["inspect_archives"]
+    assert report["status"] == "partial"
+    assert report["findings"]["inspected"] == 1
+    assert any("source.zip" in evidence for evidence in report["evidence"])
+
+
+def test_repository_scan_branches_do_blocking_work_concurrently(monkeypatch, tmp_path):
+    rendezvous = threading.Barrier(2)
+
+    def _fake_find_component(*_args, **_kwargs):
+        rendezvous.wait(timeout=2)
+        return {
+            "found": False,
+            "repo_found": False,
+            "sbom_attributed": True,
+            "presence_basis": "not_found",
+            "direct": False,
+            "transitive": False,
+            "declared_in": [],
+            "locked_version": None,
+            "lock_files": [],
+        }
+
+    def _fake_analyze_repository(*_args, **_kwargs):
+        rendezvous.wait(timeout=2)
+        return nodes.ast_analyzer.SymbolGraph()
+
+    monkeypatch.setattr(
+        nodes.dependency_scanner,
+        "find_component",
+        _fake_find_component,
+    )
+    monkeypatch.setattr(
+        nodes.ast_analyzer,
+        "analyze_repository",
+        _fake_analyze_repository,
+    )
+    monkeypatch.setattr(
+        nodes.code_scanner,
+        "search_usage",
+        lambda *_args, **_kwargs: ["No direct usage found"],
+    )
+    monkeypatch.setattr(
+        nodes.code_scanner,
+        "collect_structure",
+        lambda *_args, **_kwargs: "",
+    )
+    monkeypatch.setattr(
+        nodes.code_scanner,
+        "collect_snippets",
+        lambda *_args, **_kwargs: [],
+    )
+
+    state = {
+        "repo_path": str(tmp_path),
+        "component_name": "demo",
+        "scan_targets": [],
+        "sbom_attributed": True,
+        "advisories": {"vulnerable_symbols": [], "cwe": []},
+        "archive_inspection": {},
+    }
+
+    async def _run_branches():
+        return await asyncio.gather(
+            nodes.scan_dependencies(state),
+            nodes.scan_code(state),
+        )
+
+    dependency_result, code_result = asyncio.run(_run_branches())
+
+    assert dependency_result["dep_info"]["found"] is False
+    assert code_result["usage"] == ["No direct usage found"]
 
 
 def test_build_advisory_analysis_input_preserves_markdown_details():
@@ -933,7 +1046,7 @@ def test_scan_dependencies_forwards_sbom_attribution_override_false(
     assert result["dep_info"]["sbom_attributed"] is False
 
 
-def test_run_pipeline_defaults_sbom_attributed_true(monkeypatch):
+def test_run_pipeline_defaults_sbom_attributed_true(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
     class _FakeGraph:
@@ -957,7 +1070,7 @@ def test_run_pipeline_defaults_sbom_attributed_true(monkeypatch):
         pipeline_graph_module.run_pipeline(
             vuln_id="CVE-2024-9999",
             component_cfg={"name": "demo-component"},
-            focus_path="/tmp/repo",
+            focus_path=str(tmp_path),
         )
     )
 
@@ -967,7 +1080,7 @@ def test_run_pipeline_defaults_sbom_attributed_true(monkeypatch):
     assert result["assessment"]["dependency_presence"]["sbom_attributed"] is False
 
 
-def test_run_pipeline_respects_sbom_attributed_override(monkeypatch):
+def test_run_pipeline_respects_sbom_attributed_override(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
     class _FakeGraph:
@@ -991,7 +1104,7 @@ def test_run_pipeline_respects_sbom_attributed_override(monkeypatch):
         pipeline_graph_module.run_pipeline(
             vuln_id="CVE-2024-9999",
             component_cfg={"name": "demo-component", "sbom_attributed": False},
-            focus_path="/tmp/repo",
+            focus_path=str(tmp_path),
         )
     )
 
@@ -999,6 +1112,41 @@ def test_run_pipeline_respects_sbom_attributed_override(monkeypatch):
     assert initial_state["sbom_attributed"] is False
     assert result["assessment"]["verdict"] == "Inconclusive"
     assert result["assessment"]["dependency_presence"]["sbom_attributed"] is False
+
+
+def test_run_pipeline_cleans_isolated_worktree_after_graph_failure(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FailingGraph:
+        async def ainvoke(self, initial_state):
+            captured["workspace_id"] = initial_state["workspace_id"]
+            raise RuntimeError("pipeline failed")
+
+    async def _fake_cleanup(component_cfg, *, workspace_id):
+        captured["cleanup_component_cfg"] = component_cfg
+        captured["cleanup_workspace_id"] = workspace_id
+
+    monkeypatch.setattr(pipeline_graph_module, "graph", _FailingGraph())
+    monkeypatch.setattr(
+        pipeline_graph_module.dependency_scanner,
+        "cleanup_repo_worktree",
+        _fake_cleanup,
+    )
+    component_cfg = {
+        "name": "demo-component",
+        "url": "https://example.invalid/core.git",
+    }
+
+    with pytest.raises(RuntimeError, match="pipeline failed"):
+        asyncio.run(
+            pipeline_graph_module.run_pipeline(
+                vuln_id="CVE-2024-9999",
+                component_cfg=component_cfg,
+            )
+        )
+
+    assert captured["cleanup_component_cfg"] == component_cfg
+    assert captured["cleanup_workspace_id"] == captured["workspace_id"]
 
 
 def test_build_remediation_view_requires_action_when_audit_fails_downgrade():
@@ -1445,7 +1593,10 @@ def test_upstream_guidance_without_successful_research_remains_unsupported():
     assert guarded["affected"] is False
 
 
-def test_run_pipeline_promotes_unsupported_historical_only_not_affected(monkeypatch):
+def test_run_pipeline_promotes_unsupported_historical_only_not_affected(
+    monkeypatch,
+    tmp_path,
+):
     captured: dict[str, object] = {}
 
     class _FakeGraph:
@@ -1518,7 +1669,7 @@ def test_run_pipeline_promotes_unsupported_historical_only_not_affected(monkeypa
         pipeline_graph_module.run_pipeline(
             vuln_id="GHSA-test",
             component_cfg={"name": "lodash"},
-            focus_path="/tmp/repo",
+            focus_path=str(tmp_path),
         )
     )
 
@@ -1536,6 +1687,7 @@ def test_run_pipeline_promotes_unsupported_historical_only_not_affected(monkeypa
 
 def test_run_pipeline_keeps_not_affected_when_historical_only_but_unreachable(
     monkeypatch,
+    tmp_path,
 ):
     class _FakeGraph:
         async def ainvoke(self, initial_state):
@@ -1597,7 +1749,7 @@ def test_run_pipeline_keeps_not_affected_when_historical_only_but_unreachable(
         pipeline_graph_module.run_pipeline(
             vuln_id="GHSA-test",
             component_cfg={"name": "lodash"},
-            focus_path="/tmp/repo",
+            focus_path=str(tmp_path),
         )
     )
 

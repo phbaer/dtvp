@@ -80,6 +80,10 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
 | Start the GIL-enabled fallback deployment | `docker compose -f compose.yml -f compose.gil.yml up -d --build` |
 
+The root pytest configuration uses importlib import mode so `uv run pytest`
+can collect the DTVP and nested Agentyzer suites together even when both suites
+contain test modules with the same filename.
+
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml`. Its image tag must exactly match the
 resolved `@playwright/test` version in `frontend/package-lock.json`; update both
@@ -838,6 +842,15 @@ delimited as untrusted evidence and can never become analyst guidance or change
 the task/tool contract. Java dependency discovery covers Maven and Gradle build,
 lock, and version-catalog formats.
 
+The primary-repository pipeline also has an `archive_inspector` tool. It
+discovers archives contained in the prepared checkout, expands supported
+members into an isolated per-analysis workspace, and exposes the resulting
+manifests and source files to the normal dependency, version, AST, and code
+scanners. Archive contents are never executed. Extraction rejects traversal,
+links, special filesystem entries, encrypted members, duplicate files, and
+configured size or count limits; malformed archives are recorded as partial
+evidence without preventing other archives from being inspected.
+
 #### Automatic Scanning
 
 Automatic scanning requires both `DTVP_AUTO_CODE_ANALYSIS_ENABLED=true` and a
@@ -856,7 +869,10 @@ configured analyzer.
 
 DTVP and Agentyzer default to one running scan. Raise
 `DTVP_ANALYSIS_QUEUE_CAPACITY` and `AGENTYZER_MAX_CONCURRENT_JOBS` together only
-when the analyzer, model backend, and workspaces support parallel scans.
+when the analyzer host and model backend support parallel scans. Agentyzer
+serializes shared-cache Git mutations with per-repository filesystem locks and
+analyzes configured repositories in detached per-run worktrees, so concurrent
+components mapped to the same repository do not share mutable scan files.
 
 ## Development
 
@@ -917,10 +933,10 @@ Deployment rules:
 
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
   archives survive container restarts.
-- Compose starts Agentyzer and persists cloned repositories in the
-  `agentyzer-repos` volume. Populate or override the sanitized
-  `agentyzer/config/repos.yaml` before enabling automatic scans; never commit
-  repository credentials.
+- Compose starts Agentyzer and persists control repositories, worktree locks,
+  and transient detached worktrees in the `agentyzer-repos` volume. Populate
+  or override the sanitized `agentyzer/config/repos.yaml` before enabling
+  automatic scans; never commit repository credentials.
 - Internal services use Compose names and container ports. DTVP reaches
   Dependency-Track at `http://dtrack-apiserver:8080` and Agentyzer at
   `http://agentyzer:8000` unless overridden.
@@ -997,6 +1013,16 @@ docker compose -f compose.yml -f compose.gil.yml up -d --build
 Published primary tags (`latest`, release versions, `dev`, and PR tags) use
 free threading and also receive explicit `-freethreaded` aliases. The fallback
 build receives corresponding `-gil` tags.
+
+DTVP and Agentyzer release in lockstep from this monorepo. Their
+`pyproject.toml` versions must match before the workflow creates a Git tag, and
+a manually pushed `v*` tag must match both packaged versions before either
+container is published. An existing release tag is accepted only when both
+version files inside its tagged commit match the tag. The single Git tag
+identifies the shared source commit; the workflow publishes that version tag
+and `latest` to both the `dtvp` and `agentyzer` container packages. Agentyzer's
+health/configuration responses read the installed package metadata instead of
+a hard-coded API version.
 
 Archive imports require read, BOM upload, and vulnerability-analysis update
 permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
@@ -1123,6 +1149,12 @@ means the integration or override is disabled.
 | `AGENTYZER_PORT` | Compose host port | `8095` |
 | `AGENTYZER_LOG_LEVEL` | Service log level | `INFO` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
+| `AGENTYZER_ARCHIVE_MAX_INPUT_BYTES` | Maximum input size for one repository archive | `1073741824` |
+| `AGENTYZER_ARCHIVE_MAX_ARCHIVES` | Maximum archives inspected per analysis | `25` |
+| `AGENTYZER_ARCHIVE_MAX_NESTING` | Maximum nested-archive depth | `2` |
+| `AGENTYZER_ARCHIVE_MAX_MEMBERS` | Maximum combined archive member count | `50000` |
+| `AGENTYZER_ARCHIVE_MAX_MEMBER_BYTES` | Maximum extracted size of one member | `268435456` |
+| `AGENTYZER_ARCHIVE_MAX_EXTRACTED_BYTES` | Maximum combined extracted archive data | `2147483648` |
 | `AGENTYZER_LLM_BACKEND` | `ollama` or `openwebui` | `ollama` |
 | `AGENTYZER_OLLAMA_HOST` / `AGENTYZER_OLLAMA_MODEL` | Ollama endpoint and model | `http://host.docker.internal:11434` / `mistral` |
 | `AGENTYZER_OPENWEBUI_HOST` / `AGENTYZER_OPENWEBUI_MODEL` | OpenWebUI endpoint and model | `http://host.docker.internal:3000` / `mistral` |

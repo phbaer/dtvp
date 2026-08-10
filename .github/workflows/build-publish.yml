@@ -119,15 +119,29 @@ jobs:
       - name: Extract Version
         id: get_version
         run: |
-          VERSION=$(uv version | awk '{print $2}')
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
+          DTVP_VERSION=$(uv version | awk '{print $2}')
+          AGENTYZER_VERSION=$(cd agentyzer && uv version | awk '{print $2}')
+          if [[ "$DTVP_VERSION" != "$AGENTYZER_VERSION" ]]; then
+            echo "DTVP version $DTVP_VERSION does not match Agentyzer version $AGENTYZER_VERSION." >&2
+            echo "Update both pyproject.toml files and lockfiles before creating a release." >&2
+            exit 1
+          fi
+          echo "VERSION=$DTVP_VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=v$DTVP_VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $DTVP_VERSION (DTVP and Agentyzer)"
       - name: Check Git Tag
         id: check_tag
         run: |
           TAG=${{ steps.get_version.outputs.TAG }}
-          if git tag -l | grep -q "^${TAG}$"; then
+          VERSION=${{ steps.get_version.outputs.VERSION }}
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            TAG_DTVP_VERSION=$(git show "$TAG:pyproject.toml" | awk -F'"' '/^version = "/ {print $2; exit}')
+            TAG_AGENTYZER_VERSION=$(git show "$TAG:agentyzer/pyproject.toml" | awk -F'"' '/^version = "/ {print $2; exit}')
+            if [[ "$TAG_DTVP_VERSION" != "$VERSION" || "$TAG_AGENTYZER_VERSION" != "$VERSION" ]]; then
+              echo "Git tag $TAG does not contain matching DTVP and Agentyzer package versions." >&2
+              echo "Tagged versions: DTVP=$TAG_DTVP_VERSION, Agentyzer=$TAG_AGENTYZER_VERSION; expected $VERSION." >&2
+              exit 1
+            fi
             echo "Git tag ${TAG} already exists — skipping release tag creation."
             echo "TAG_EXISTS=true" >> $GITHUB_OUTPUT
           else
@@ -216,11 +230,21 @@ jobs:
       - name: Extract Version
         id: get_version
         run: |
+          DTVP_VERSION=$(uv version | awk '{print $2}')
+          AGENTYZER_VERSION=$(cd agentyzer && uv version | awk '{print $2}')
+          if [[ "$DTVP_VERSION" != "$AGENTYZER_VERSION" ]]; then
+            echo "DTVP version $DTVP_VERSION does not match Agentyzer version $AGENTYZER_VERSION." >&2
+            exit 1
+          fi
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
+            RELEASE_VERSION="${GITHUB_REF#refs/tags/v}"
+            if [[ "$RELEASE_VERSION" != "$DTVP_VERSION" ]]; then
+              echo "Release tag v$RELEASE_VERSION does not match packaged version $DTVP_VERSION." >&2
+              exit 1
+            fi
+            VERSION="v$RELEASE_VERSION"
           else
-            VERSION=$(uv version | awk '{print $2}')
-            VERSION="v${VERSION}"
+            VERSION="v$DTVP_VERSION"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
       - name: Generate CHANGELOG.md for Docker

@@ -24,6 +24,7 @@ from src.llm.openwebui_client import OpenWebUIClient
 from src.main import (
     app,
 )
+from src.version import VERSION
 
 
 @pytest.fixture(scope="module")
@@ -45,10 +46,11 @@ def test_health_exposes_service_configuration_and_backend(client):
 
     configuration = data["configuration"]
     assert configuration["service_name"] == "Agentic Vulnerability Analyzer"
-    assert configuration["service_version"] == "0.1.0"
+    assert configuration["service_version"] == VERSION
     assert configuration["features"]["async_assessments"] is True
     assert configuration["features"]["request_model_override"] is True
     assert configuration["features"]["local_repository_research"] is True
+    assert configuration["features"]["repository_archive_inspection"] is True
 
     repositories = configuration["repositories"]
     assert repositories["workspace_dir"]
@@ -202,7 +204,7 @@ def test_openapi_contains_descriptions_and_examples(client):
 
     spec = r.json()
     assert spec["info"]["title"] == "Agentic Vulnerability Analyzer"
-    assert spec["info"]["version"] == "0.1.0"
+    assert spec["info"]["version"] == VERSION
     assert (
         spec["paths"]["/assess"]["post"]["summary"]
         == "Start a vulnerability assessment"
@@ -315,9 +317,9 @@ def test_job_status_response_includes_live_progress_snapshot():
 
     response = _job_status_response(job)
 
-    assert response.progress.percent == 8
+    assert response.progress.percent == 7
     assert response.progress.completed_steps == 1
-    assert response.progress.total_steps == 12
+    assert response.progress.total_steps == 13
     assert response.progress.current_step == "scan_code"
     assert response.progress.current_agent == "code_scanner"
     assert response.progress.active_agents[0].activity.endswith("usage")
