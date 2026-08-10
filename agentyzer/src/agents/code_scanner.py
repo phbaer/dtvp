@@ -233,13 +233,16 @@ def collect_snippets(
     repo_path: str,
     component_name: str,
     symbols: List[str],
+    *,
+    hits: List[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Collect source-code snippets around every hit for LLM context.
 
     Returns a list of ``{"file": ..., "line": ..., "snippet": ...}`` dicts
     trimmed so the total doesn't exceed ``_MAX_CONTEXT_CHARS``.
     """
-    hits = search_usage(repo_path, component_name, symbols)
+    if hits is None:
+        hits = search_usage(repo_path, component_name, symbols)
     if hits == ["No direct usage found"]:
         return []
 

@@ -20,6 +20,32 @@ def handler():
     assert reach in ("Reachable", "Potentially Reachable")
 
 
+def test_collect_snippets_reuses_precomputed_hits(monkeypatch, tmp_path):
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    source = repository / "app.py"
+    source.write_text("before\nvulnerable_call()\nafter\n")
+    hits = [f"{source}:2: vulnerable_call()"]
+
+    monkeypatch.setattr(
+        code_scanner,
+        "search_usage",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("source tree was scanned twice")
+        ),
+    )
+
+    snippets = code_scanner.collect_snippets(
+        str(repository),
+        "demo",
+        ["vulnerable_call"],
+        hits=hits,
+    )
+
+    assert snippets[0]["file"] == "app.py"
+    assert "vulnerable_call()" in snippets[0]["snippet"]
+
+
 def test_prompts_use_staged_analysis_workflow():
     assert "Keep analysis private" in code_scanner._SYSTEM_PROMPT
     assert "Use three compact lenses:" in code_scanner._SYSTEM_PROMPT

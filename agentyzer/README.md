@@ -87,6 +87,7 @@ Assessment request
     ├── fetch_advisory
     ├── filter_advisory
     ├── prepare_repo
+    ├── inspect_archives
     ├── parallel branch A
     │   ├── scan_dependencies
     │   ├── analyze_versions
@@ -112,13 +113,17 @@ flowchart TD
     J --> G
 
     G --> WF[Web fetcher\nOSV and GHSA]
+    G --> AI[Archive inspector]
     G --> DS[Dependency scanner]
     G --> CS[Code scanner and AST analyzer]
     G --> VA[Version analyzer]
     G --> VD[Verdict and CVSS aggregator]
     G --> LLM[LLM backend\nOllama or OpenWebUI]
 
-    DS --> R[(Target repository)]
+    AI --> R[(Target repository)]
+    AI --> DS
+    AI --> CS
+    DS --> R
     CS --> R
     VA --> R
     WF --> E[(External advisory sources)]
@@ -136,14 +141,15 @@ The implemented step order is defined in `src/pipeline/graph.py` and runs as fol
 2. `fetch_advisory`: fetch advisory details, affected packages, affected ranges, vulnerable symbols, and summary text.
 3. `filter_advisory`: determine whether the advisory is relevant to the assessed component before spending time on deeper analysis.
 4. `prepare_repo`: resolve the configured repository or local focus path and prepare the checkout for scanning.
-5. `scan_dependencies`: inspect manifests and lock files for direct or transitive presence of the vulnerable package.
-6. `scan_code`: search the repository for imports, symbol usage, and vulnerable API references.
-7. `llm_analyze_code`: send code snippets and surrounding context to the LLM to estimate reachability.
-8. `llm_deep_analyze`: perform a deeper LLM pass over the relevant code neighborhood to judge exploitability more carefully.
-9. `analyze_versions`: compare discovered versions against the advisory's explicit versions and normalized version ranges.
-10. `what_if_remediation`: compute candidate upgrade or mitigation directions based on the detected version state.
-11. `check_transitive_paths`: analyze dependency chains and intermediary packages for transitive exposure.
-12. `aggregate_verdict`: merge all evidence into the final assessment, including summary, reasoning, remediation, audit view, and CVSS adjustments.
+5. `inspect_archives`: discover supported archives inside the checkout, safely expand them into an isolated per-run workspace, and expose their manifests and source files to the normal scanners.
+6. `scan_dependencies`: inspect repository and extracted-archive manifests and lock files for direct or transitive presence of the vulnerable package.
+7. `scan_code`: search repository and extracted-archive source for imports, symbol usage, and vulnerable API references.
+8. `llm_analyze_code`: send code snippets, archive provenance, and surrounding context to the LLM to estimate reachability.
+9. `llm_deep_analyze`: perform a deeper LLM pass over the relevant code neighborhood to judge exploitability more carefully.
+10. `analyze_versions`: compare discovered versions against the advisory's explicit versions and normalized version ranges.
+11. `what_if_remediation`: compute candidate upgrade or mitigation directions based on the detected version state.
+12. `check_transitive_paths`: analyze dependency chains and intermediary packages for transitive exposure.
+13. `aggregate_verdict`: merge all evidence into the final assessment, including summary, reasoning, remediation, audit view, and CVSS adjustments.
 
 If `filter_advisory` concludes the advisory is not relevant, the pipeline can short-circuit directly to verdict aggregation.
 
@@ -290,6 +296,12 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | `1` | Maximum number of async or sync assessment pipelines allowed to execute at the same time. Extra async jobs remain `pending` until a slot opens. |
+| `AGENTYZER_ARCHIVE_MAX_INPUT_BYTES` | `1073741824` | Maximum compressed or uncompressed input size accepted for one repository archive. |
+| `AGENTYZER_ARCHIVE_MAX_ARCHIVES` | `25` | Maximum number of top-level and nested archives inspected in one analysis. |
+| `AGENTYZER_ARCHIVE_MAX_NESTING` | `2` | Maximum nested-archive depth inspected after the top-level archive. |
+| `AGENTYZER_ARCHIVE_MAX_MEMBERS` | `50000` | Maximum combined member count across repository archives in one analysis. |
+| `AGENTYZER_ARCHIVE_MAX_MEMBER_BYTES` | `268435456` | Maximum extracted size accepted for one archive member. |
+| `AGENTYZER_ARCHIVE_MAX_EXTRACTED_BYTES` | `2147483648` | Maximum combined extracted bytes across repository archives in one analysis. |
 | `AGENTYZER_RESEARCH_CLONE_ENABLED` | `true` | Enable bounded LLM-requested local inspection of dependent repositories. |
 | `AGENTYZER_RESEARCH_GIT_HOSTS` | `github.com,gitlab.com,bitbucket.org` | Comma-separated public HTTPS Git host allowlist; `*` permits any public host after address checks. |
 | `AGENTYZER_RESEARCH_MAX_CLONES_PER_ANALYSIS` | `3` | Repository-clone requests allowed across one analysis research loop. |
@@ -427,7 +439,7 @@ Async jobs are held in memory inside the FastAPI process. That means:
 - `DELETE /jobs/{job_id}` cancels a `pending` or `running` job, and removes a finished job from memory.
 - `POST /jobs/{job_id}/compact` extracts bounded request, verdict, CVSS, evidence, and step-finding context from a completed job so clients can reuse it without replaying the full result.
 - `POST /jobs/{job_id}/follow-up` creates a new async job from that compact context and an analyst question. DTVP uses this path for follow-up vulnerability assessment questions. The rendered compact context is capped before it is embedded into model guidance.
-- `AGENTYZER_MAX_CONCURRENT_JOBS` bounds how many pipelines run at once. The default is `1`, matching the usual single-LLM-backend deployment. Raise it only when the configured model backend and repository workspace strategy can handle parallel scans.
+- `AGENTYZER_MAX_CONCURRENT_JOBS` bounds how many pipelines run at once. The default is `1`, matching the usual single-LLM-backend deployment. Configured repositories are isolated per run; raise the limit only when the model backend and host CPU/disk capacity can handle parallel scans.
 
 Job status responses include:
 
@@ -462,7 +474,7 @@ Representative service configuration excerpt:
   "model": "mistral",
   "llm_provider": "ollama",
   "configuration": {
-    "service_version": "0.1.0",
+    "service_version": "1.0.20",
     "config_dir": "config",
     "repos_config_path": "config/repos.yaml",
     "repositories": {
@@ -481,7 +493,7 @@ Representative service configuration excerpt:
       "healthy": true
     },
     "repositories": {
-      "reuse_strategy": "stable directory per sanitized repository URL using the repo name and a SHA-256 URL hash"
+      "reuse_strategy": "stable control repository per sanitized URL plus a detached worktree for each analysis"
     },
     "jobs": {
       "job_store": "in_memory",
@@ -684,6 +696,21 @@ are reused within the configured TTL. Private dependent repositories are not
 available to the model-facing tool; configured primary repositories continue
 to use the separate authenticated `repos.yaml` workflow.
 
+The `archive_inspector` is a dedicated primary-repository tool that runs after
+checkout preparation. It discovers tar archives (plain, gzip, bzip2, xz, or
+zstd), ZIP-compatible packages (including JAR, WAR, EAR, wheel, NuGet, APK,
+and AAR), 7z files, and RAR files inside the checkout. Supported members are
+expanded beneath a unique `__agentyzer_archives__/<analysis-id>` directory so
+the existing dependency, version, AST, and code scanners see the contents and
+retain archive provenance. Nested archives share the same analysis limits.
+
+Archive contents are never executed. The extractor rejects traversal paths,
+links, special filesystem entries, encrypted members, duplicate files, and
+configured input, member, expansion, nesting, or count limits. A malformed or
+unsupported archive is recorded as partial evidence while other archives
+continue. The generated directory is removed with the per-run worktree; for a
+caller-supplied `focus_path`, Agentyzer removes only its own analysis directory.
+
 All LLM prompts are managed as YAML bundles in `config/prompts/`. Prompt bundles use compact `analysis_protocol` sections instead of bundled few-shot example transcripts. The protocol tells the model to keep analysis private, apply security researcher/remediator/auditor/ticket-author lenses internally, and emit only structured evidence fields such as call paths, dependency chains, exclusions, remediation, and validation notes. Response contracts define exact field order, allowed values, evidence labels, and disallow markdown, JSON, preambles, conclusions, or extra fields. Legacy custom prompt bundles that still provide `few_shot` are accepted as a compatibility alias for `analysis_protocol`.
 
 OpenWebUI context limits are handled in two ways. If OpenWebUI rejects a request
@@ -697,27 +724,36 @@ with a 131072-token context can use `OPENWEBUI_CONTEXT_WINDOW=131072`.
 
 Multiple async jobs can be submitted to the FastAPI process. Accepted jobs are kept in the in-memory job store; at most `AGENTYZER_MAX_CONCURRENT_JOBS` pipelines run at the same time, and the rest stay `pending` until an execution slot opens. The default is `1` because DTVP's packaged deployment usually points Agentyzer at one LLM backend. Increase the value only when the model backend, CPU/disk resources, and repository workspace strategy can support parallel scans.
 
-Inside one running pipeline, Agentyzer still exposes parallel branch visibility through `progress.active_agents` and `progress.step_statuses`; the pipeline graph can fan out into dependency/version and code/LLM branches after repository preparation.
+Inside one running pipeline, Agentyzer still exposes parallel branch visibility through `progress.active_agents` and `progress.step_statuses`; the pipeline graph fans out into dependency/version and code/LLM branches after archive inspection. Filesystem-heavy dependency, AST, usage, and structure scans run off the async event loop so both branches make progress concurrently. Usage hits are reused for snippet collection instead of walking the source tree a second time.
 
-Repository workspaces are already reused across runs. `src/agents/dependency_scanner.py` maps each repository URL to a stable directory under `AGENTYZER_REPOS_DIR` (default: `repos`) using the repo name plus a SHA-256 hash of the sanitized URL. That means repeated runs for the same configured repository use the same local workspace instead of cloning repeatedly.
+Repository data is reused across runs without sharing a mutable scan directory.
+`src/agents/dependency_scanner.py` maps each repository URL to a stable control
+repository under `AGENTYZER_REPOS_DIR` (default: `repos`) using the repo name
+plus a SHA-256 hash of the sanitized URL. Initial clones are built in a
+temporary directory and atomically moved into place. Existing caches are
+fetched without resetting their working trees.
 
-For different projects, raising `AGENTYZER_MAX_CONCURRENT_JOBS` can be realistic with the current design:
+Repository preparation takes a filesystem-backed, per-repository advisory
+lock before cloning or fetching, resolving the remote default branch to a
+commit, and registering a detached `git worktree`. The lock coordinates API
+processes or containers that use the same repository volume, provided the
+shared filesystem supports advisory file locks. Each pipeline scans only its
+own worktree under `.worktrees/<repository-key>/<analysis-id>`, so a later
+fetch cannot change files being analyzed by an earlier run. Git objects remain
+shared through the control repository instead of being cloned for every
+component.
 
-- Different repository URLs map to different workspace directories.
-- Clone/fetch work is offloaded to worker threads, so large Git operations do not block the event loop.
-- The main shared bottlenecks are CPU/disk IO during scans and the configured LLM backend throughput.
-- The global execution limit is process-local and applies before a pipeline starts. There is not yet a separate LLM-stage rate limiter.
+Active worktrees hold OS-backed lease files. Normal completion, errors, and
+cancellation remove the worktree in the pipeline's cleanup path. If a process
+crashes, the OS releases its lease; the next preparation of that repository
+reclaims the abandoned checkout and prunes stale Git worktree metadata.
 
-For the same project or any two jobs that resolve to the same workspace, the current implementation is not fully parallel-safe. Existing workspaces are refreshed by updating the remote URL, fetching, and resetting the working tree to the remote default branch. If two jobs do that against the same directory at once, one run can reset, re-clone, or mutate files while the other run is scanning.
-
-The recommended implementation path is:
-
-1. Add a per-workspace async lock around clone/fetch/reset so only one job updates a given cached repository at a time.
-2. After the update, analyze an isolated per-run checkout created with `git worktree add --detach` at the resolved commit, or another snapshot mechanism. This reuses the Git object database and avoids a full clone while keeping each scan's files stable.
-3. Clean up per-run worktrees when the job is deleted or after a retention window.
-4. Add optional per-LLM-stage semaphores or provider-specific rate limiting when a deployment needs more than one overall pipeline slot.
-
-So, multiple parallel runs for different projects are feasible when capacity is raised deliberately; robust parallel runs sharing the same underlying repository need workspace locking plus per-run worktrees or snapshots to preserve reuse without repeated clones.
+Raising `AGENTYZER_MAX_CONCURRENT_JOBS` is therefore repository-safe for
+configured repositories that share either identical or different URLs. The
+remaining shared bottlenecks are CPU and disk IO, plus configured LLM backend
+throughput; the global execution limit remains process-local and there is not
+yet a separate LLM-stage rate limiter. User-supplied `focus_path` checkouts are
+not managed by this cache and remain the caller's concurrency responsibility.
 
 ## Docker Setup
 
@@ -726,7 +762,7 @@ So, multiple parallel runs for different projects are feasible when capacity is 
 The top-level `Dockerfile`:
 
 1. Uses `ghcr.io/astral-sh/uv:python3.14-trixie-slim` as the base image.
-2. Installs Git because repository cloning and tag inspection are required.
+2. Installs Git for repository operations and `unrar-free` for RAR inspection.
 3. Optionally mounts a CA certificate secret at build time and installs it into the system trust store.
 4. Installs locked production dependencies with `uv sync --frozen --no-dev`.
 5. Copies `config/` and `src/` into `/app`.
@@ -775,6 +811,12 @@ The root `Jenkinsfile` is a two-stage Docker-oriented pipeline:
 
 Post-build cleanup removes the build-number-tagged local image.
 
+The repository release workflow versions DTVP and Agentyzer in lockstep. Both
+`pyproject.toml` files must match the `v*` Git tag before release images are
+published. The shared monorepo tag produces matching version and `latest`
+container tags for both projects, and the Agentyzer API reports its installed
+package version through health and configuration responses.
+
 The pipeline assumes the registry and credentials configured in `Jenkinsfile` are valid for the target environment.
 
 ## Testing
@@ -822,6 +864,6 @@ uv run pytest --junitxml=test-reports/results.xml
 - LLM-backed stages depend on backend reachability; startup logs warn when the backend is unavailable.
 - The CLI does not perform scanning itself; it only calls the API.
 - `focus_path` is documented as an absolute path and is the safest way to assess an already checked-out repository.
-- When `AGENTYZER_MAX_CONCURRENT_JOBS` is raised, concurrent jobs for different repository workspaces can run in parallel; concurrent jobs sharing one mutable workspace need locking or isolated worktrees for robust production use.
+- When `AGENTYZER_MAX_CONCURRENT_JOBS` is raised, configured repositories use isolated worktrees even when jobs share one repository URL. Concurrent use of a caller-supplied `focus_path` remains caller-managed.
 - The service trusts the system CA store for outbound HTTP calls and can also consume injected CA certificates at image-build time.
 - The shipped `config/repos.yaml` in this repository is intentionally empty. Populate it with environment-specific component mappings, and keep credential-bearing variants out of public branches.

@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 
@@ -52,3 +53,34 @@ def test_publish_workflow_supplies_build_number_to_every_project_image():
     )
 
     assert workflow.count("BUILD_NUMBER=${{ github.run_number }}") == 3
+
+
+def test_release_versions_are_lockstep_and_validated_before_tagging():
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        dtvp_version = tomllib.load(handle)["project"]["version"]
+    with (ROOT / "agentyzer" / "pyproject.toml").open("rb") as handle:
+        agentyzer_version = tomllib.load(handle)["project"]["version"]
+    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert dtvp_version == agentyzer_version
+    assert workflow.count(
+        "AGENTYZER_VERSION=$(cd agentyzer && uv version | awk '{print $2}')"
+    ) == 2
+    assert "does not match Agentyzer version" in workflow
+    assert "Release tag v$RELEASE_VERSION does not match packaged version" in workflow
+    assert "TAG_DTVP_VERSION=$(git show" in workflow
+    assert "TAG_AGENTYZER_VERSION=$(git show" in workflow
+    assert "does not contain matching DTVP and Agentyzer package versions" in workflow
+
+
+def test_release_workflow_publishes_dtvp_and_agentyzer_version_tags():
+    workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/dtvp:{2}" in workflow
+    assert "/agentyzer:{2}" in workflow
+    assert "/dtvp:latest" in workflow
+    assert "/agentyzer:latest" in workflow

@@ -173,6 +173,27 @@ def test_unknown_project_ecosystem_assumes_relevant():
     assert result["advisory_relevant"] is True
 
 
+def test_configured_repository_cache_is_not_read_before_isolated_prepare(
+    monkeypatch,
+    tmp_path,
+):
+    cached_repo = tmp_path / "repos" / "cached"
+    cached_repo.mkdir(parents=True)
+    (cached_repo / "pyproject.toml").touch()
+    monkeypatch.setattr(
+        "src.pipeline.nodes.dependency_scanner._repo_dir",
+        lambda _url: str(cached_repo),
+    )
+    state = _make_state(
+        advisories={"affected_packages": ["npm:lodash"]},
+        component_cfg={"url": "https://example.invalid/core.git"},
+    )
+
+    result = _run(filter_advisory(state))
+
+    assert result["advisory_relevant"] is True
+
+
 def test_unknown_project_ecosystem_can_use_llm_to_filter():
     state = _make_state(
         advisories={

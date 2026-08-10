@@ -16,6 +16,8 @@ Topology
          │ [relevant]
     prepare_repo
          │
+   inspect_archives
+         │
      ┌───┴───┐
      │       │               (parallel branches)
      ▼       ▼
@@ -41,10 +43,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import uuid
 from typing import Any, Awaitable, Callable, Dict, Mapping
 
 from langgraph.graph import END, StateGraph
 
+from src.agents import archive_extractor, dependency_scanner
 from src.llm.base import LLMClient
 from src.pipeline import nodes
 from src.pipeline.state import PipelineState
@@ -69,6 +73,7 @@ PIPELINE_STEP_ORDER = [
     "fetch_advisory",
     "filter_advisory",
     "prepare_repo",
+    "inspect_archives",
     "scan_dependencies",
     "scan_code",
     "llm_analyze_code",
@@ -99,6 +104,11 @@ STEP_METADATA: Dict[str, Dict[str, str]] = {
         "title": "Repository Preparation",
         "agent": "dependency_scanner",
         "activity": "Preparing the repository checkout for scanning",
+    },
+    "inspect_archives": {
+        "title": "Archive Inspection",
+        "agent": "archive_inspector",
+        "activity": "Inspecting bounded archives contained in the repository",
     },
     "scan_dependencies": {
         "title": "Dependency Scan",
@@ -164,9 +174,21 @@ NODE_INPUT_KEYS: Dict[str, tuple[str, ...]] = {
         "ollama",
         "vuln_id",
     ),
-    "prepare_repo": ("repo_path", "component_name", "component_cfg"),
+    "prepare_repo": (
+        "repo_path",
+        "component_name",
+        "component_cfg",
+        "workspace_id",
+    ),
+    "inspect_archives": ("repo_path", "workspace_id"),
     "scan_dependencies": ("repo_path", "component_name", "scan_targets"),
-    "scan_code": ("advisories", "component_name", "scan_targets", "repo_path"),
+    "scan_code": (
+        "advisories",
+        "component_name",
+        "scan_targets",
+        "repo_path",
+        "archive_inspection",
+    ),
     "llm_analyze_code": (
         "ollama",
         "snippets",
@@ -397,6 +419,7 @@ def build_graph() -> Any:
         "fetch_advisory": nodes.fetch_advisory,
         "filter_advisory": nodes.filter_advisory,
         "prepare_repo": nodes.prepare_repo,
+        "inspect_archives": nodes.inspect_archives,
         "scan_dependencies": nodes.scan_dependencies,
         "scan_code": nodes.scan_code,
         "llm_analyze_code": nodes.llm_analyze_code,
@@ -427,9 +450,10 @@ def build_graph() -> Any:
         {"prepare_repo": "prepare_repo", "aggregate_verdict": "aggregate_verdict"},
     )
 
-    # Fan-out: two parallel branches after repo is cloned
-    g.add_edge("prepare_repo", "scan_dependencies")
-    g.add_edge("prepare_repo", "scan_code")
+    # Inspect packaged source before the regular scanners fan out.
+    g.add_edge("prepare_repo", "inspect_archives")
+    g.add_edge("inspect_archives", "scan_dependencies")
+    g.add_edge("inspect_archives", "scan_code")
 
     # Branch A: dependency → version inventory → what-if remediation
     g.add_edge("scan_dependencies", "analyze_versions")
@@ -512,6 +536,62 @@ async def run_pipeline(
     progress_callback: Callable[[Dict[str, Any]], Any] | None = None,
     debug: bool = False,
 ) -> Dict[str, Any]:
+    """Run one pipeline with an isolated, automatically cleaned workspace."""
+    workspace_id = uuid.uuid4().hex
+    try:
+        return await _run_pipeline_with_workspace(
+            vuln_id,
+            component_cfg,
+            ollama=ollama,
+            dependency_paths=dependency_paths,
+            affected_product_versions=affected_product_versions,
+            focus_path=focus_path,
+            user_guidance=user_guidance,
+            cvss_vector=cvss_vector,
+            progress_callback=progress_callback,
+            debug=debug,
+            workspace_id=workspace_id,
+        )
+    finally:
+        if focus_path:
+            try:
+                await asyncio.to_thread(
+                    archive_extractor.cleanup_archive_workspace,
+                    focus_path,
+                    workspace_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to clean archive inspection workspace for analysis %s",
+                    workspace_id,
+                )
+        if not focus_path:
+            try:
+                await dependency_scanner.cleanup_repo_worktree(
+                    component_cfg,
+                    workspace_id=workspace_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to clean repository worktree for analysis %s",
+                    workspace_id,
+                )
+
+
+async def _run_pipeline_with_workspace(
+    vuln_id: str | None,
+    component_cfg: Dict[str, Any],
+    ollama: LLMClient | None = None,
+    dependency_paths: list[list[str]] | None = None,
+    affected_product_versions: list[str] | None = None,
+    focus_path: str | None = None,
+    user_guidance: str | None = None,
+    cvss_vector: str | None = None,
+    progress_callback: Callable[[Dict[str, Any]], Any] | None = None,
+    debug: bool = False,
+    *,
+    workspace_id: str,
+) -> Dict[str, Any]:
     """Run the full vulnerability analysis pipeline and return the result.
 
     If *vuln_id* is ``None``, the pipeline discovers the worst known
@@ -539,11 +619,13 @@ async def run_pipeline(
         "user_guidance": user_guidance or "",
         "cvss_vector": cvss_vector or "",
         "progress_callback": progress_callback,
+        "workspace_id": workspace_id,
         "discovered_vulns": [],
         "advisories": {},
         "advisory_relevant": True,
         "summary": "",
         "repo_path": focus_path or "",
+        "archive_inspection": {},
         "dep_info": {},
         "usage": [],
         "snippets": [],

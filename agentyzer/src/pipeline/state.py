@@ -38,6 +38,7 @@ class PipelineState(TypedDict, total=False):
         str  # optional caller-provided CVSS vector; empty string when not provided
     )
     progress_callback: Any  # optional in-process hook for async job progress updates
+    workspace_id: str  # internal identifier for the isolated repository worktree
 
     # ---- intermediate results ----
     discovered_vulns: List[Dict[str, Any]]
@@ -45,6 +46,7 @@ class PipelineState(TypedDict, total=False):
     advisory_relevant: bool  # set by filter_advisory; False → skip analysis
     summary: str
     repo_path: str
+    archive_inspection: Dict[str, Any]
     dep_info: Dict[str, Any]
     usage: List[str]
     snippets: List[Dict[str, Any]]

@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.version import VERSION
+
 # ===================================================================== #
 # Dependency-Track compatible enums                                      #
 # ===================================================================== #
@@ -259,7 +261,7 @@ JOB_SUBMITTED_EXAMPLE = {
     "poll_url": "/jobs/9f7e2c4b5a6d",
     "configuration": {
         "service_name": "Agentic Vulnerability Analyzer",
-        "service_version": "0.1.0",
+        "service_version": VERSION,
         "config_dir": "config",
         "repos_config_path": "config/repos.yaml",
         "repositories": {
@@ -279,6 +281,7 @@ JOB_SUBMITTED_EXAMPLE = {
             "job_cancellation": True,
             "job_logs": True,
             "focus_path": True,
+            "repository_archive_inspection": True,
             "repos_config_hot_reload": True,
         },
     },
@@ -293,9 +296,9 @@ JOB_SUBMITTED_EXAMPLE = {
         },
         "repositories": {
             "workspace_dir": "repos",
-            "reuse_strategy": "stable directory per sanitized repository URL",
-            "update_strategy": "fetch and reset an existing clone before scanning",
-            "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; raise it only when the LLM backend and repository workspaces can handle parallel scans",
+            "reuse_strategy": "stable control repository plus detached per-analysis worktree",
+            "update_strategy": "cross-process repository lock around clone, fetch, and worktree creation",
+            "parallel_safety": "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; configured repositories use isolated worktrees, while focus_path concurrency is caller-managed",
         },
         "jobs": {
             "job_store": "in_memory",
@@ -317,14 +320,14 @@ JOB_STATUS_EXAMPLE = {
     "finished_at": None,
     "error": None,
     "progress": {
-        "completed_steps": 3,
-        "total_steps": 12,
-        "percent": 25,
+        "completed_steps": 5,
+        "total_steps": 13,
+        "percent": 38,
         "current_step": "scan_code",
         "current_title": "Code Scan",
         "current_agent": "code_scanner",
         "current_activity": "Searching source files for vulnerable symbols and usage",
-        "last_completed_step": "prepare_repo",
+        "last_completed_step": "inspect_archives",
         "last_updated_at": "2026-04-24T15:42:11.102938+00:00",
         "active_agents": [
             {
@@ -347,6 +350,7 @@ JOB_STATUS_EXAMPLE = {
             "fetch_advisory": "completed",
             "filter_advisory": "completed",
             "prepare_repo": "completed",
+            "inspect_archives": "completed",
             "scan_code": "running",
             "scan_dependencies": "running",
         },

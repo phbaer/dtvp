@@ -3,7 +3,7 @@ WORKDIR /app
 
 ARG BUILD_NUMBER=unknown
 
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git unrar-free && rm -rf /var/lib/apt/lists/*
 
 # Trust local / corporate CA certificates injected at build time
 RUN --mount=type=secret,id=ca-certs,target=/tmp/ca-certs.crt \

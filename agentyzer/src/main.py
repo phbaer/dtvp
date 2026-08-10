@@ -59,6 +59,7 @@ from src.llm.prompt_registry import (
     validate_all_prompt_bundles,
 )
 from src.pipeline import run_pipeline
+from src.version import VERSION
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -206,7 +207,7 @@ app = FastAPI(
         "The API runs a multi-step vulnerability assessment pipeline over a target component or repository. "
         "It can execute synchronously for immediate results or asynchronously via background jobs that can be polled later."
     ),
-    version="0.1.0",
+    version=VERSION,
     lifespan=lifespan,
     contact={"name": "Agentyzer Maintainers"},
     license_info={"name": "Proprietary"},
@@ -281,6 +282,7 @@ def _service_configuration() -> ServiceConfiguration:
             "job_cancellation": True,
             "job_logs": True,
             "focus_path": True,
+            "repository_archive_inspection": True,
             "repos_config_hot_reload": True,
             "context_compaction": True,
             "follow_up_assessments": True,
@@ -321,18 +323,18 @@ def _backend_information() -> BackendInformation:
         repositories=RepositoryBackendInfo(
             workspace_dir=dependency_scanner._REPOS_DIR,
             reuse_strategy=(
-                "stable directory per sanitized repository URL using the repo name "
-                "and a SHA-256 URL hash"
+                "stable control repository per sanitized URL plus a detached "
+                "worktree for each analysis"
             ),
             update_strategy=(
-                "fetch and reset an existing clone to the remote default branch "
-                "before scanning; clone when the workspace is missing"
+                "cross-process per-repository lock around atomic clone, fetch, "
+                "commit resolution, and worktree creation"
             ),
             parallel_safety=(
                 "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; different "
-                "repository URLs map to different workspaces and can run concurrently; "
-                "raise the limit only when the LLM backend and repository workspaces can "
-                "safely handle parallel scans"
+                "or identical configured repository URLs use isolated worktrees; "
+                "focus_path concurrency remains caller-managed; raise the limit only "
+                "when the LLM backend and host capacity can handle parallel scans"
             ),
         ),
         jobs=JobBackendInfo(
