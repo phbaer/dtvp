@@ -665,7 +665,8 @@ def _extract_7z(
             for member in prepared
             if not member.is_directory
         }
-        archive.extractall(
+        archive.extract(
+            targets=list(member_map),
             factory=_SevenZipWriterFactory(
                 destination,
                 member_map,
