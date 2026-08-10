@@ -774,7 +774,10 @@ def _register_task_routes(
         return StreamingResponse(
             event_stream(),
             media_type="application/x-ndjson",
-            headers={"Cache-Control": "no-cache"},
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     @router.get("/tasks/{task_id}/groups")

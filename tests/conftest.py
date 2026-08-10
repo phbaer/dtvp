@@ -1,4 +1,5 @@
 import os
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -84,6 +85,13 @@ def client(mock_dt_client):
         patch.object(dt_cache.cache_manager, "initialize", _noop_sync),
     ):
         with TestClient(main.app) as test_client:
+            deadline = time.monotonic() + 5
+            while not main._runtime_ready():
+                if main.app_runtime_state.get("status") == "failed":
+                    pytest.fail(str(main.app_runtime_state.get("error")))
+                if time.monotonic() >= deadline:
+                    pytest.fail("DTVP test runtime did not become ready")
+                time.sleep(0.01)
             yield test_client
 
     main.app.dependency_overrides.clear()
