@@ -53,6 +53,7 @@ def test_dtvp_container_prints_packaged_project_version_before_server_start():
 
 def test_agentyzer_container_prints_packaged_project_version_before_server_start():
     dockerfile = (ROOT / "agentyzer" / "Dockerfile").read_text(encoding="utf-8")
+    dockerignore = (ROOT / "agentyzer" / ".dockerignore").read_text(encoding="utf-8")
     start_script = (ROOT / "agentyzer" / "start.sh").read_text(encoding="utf-8")
 
     version_lookup = 'version("agentyzer")'
@@ -60,6 +61,7 @@ def test_agentyzer_container_prints_packaged_project_version_before_server_start
     server_start = "exec /app/.venv/bin/uvicorn"
 
     assert "COPY start.sh ./start.sh" in dockerfile
+    assert "!start.sh" in dockerignore.splitlines()
     assert "RUN chmod +x ./start.sh" in dockerfile
     assert 'CMD ["/app/start.sh"]' in dockerfile
     assert "ARG BUILD_NUMBER=unknown" in dockerfile

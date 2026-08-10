@@ -4,6 +4,7 @@
 !pyproject.toml
 !uv.lock
 !README.md
+!start.sh
 !src/
 !src/**
 src/**/__pycache__/

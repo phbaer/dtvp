@@ -146,9 +146,10 @@ hard-coded SHA-256, and invokes the binary directly so the Forgejo `act` runner
 does not depend on an action mirror, nested installer, or action-cache service.
 All four candidate-image scans reuse that installation and its local database
 cache.
-The application containers use checksum-pinned minimal Alpine runtimes;
-Agentyzer copies a separately pinned `uv` binary and adds Git as its only
-runtime package.
+The application containers use checksum-pinned minimal Alpine runtimes.
+Agentyzer's restricted build context explicitly includes its startup wrapper,
+copies a separately pinned `uv` binary, and adds Git as its only runtime
+package.
 
 Coverage reports measure production sources even when a module is never
 imported by a test. Backend and Agentyzer coverage are branch-aware and run in
