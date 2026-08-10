@@ -349,7 +349,7 @@ def test_summary_task_seeds_from_persistent_summary_index():
         load_team_mapping=lambda: {"*": "Team"},
         group_vulnerabilities=group_vulnerabilities,
         summary_index=summary_index,
-        summary_index_cache_revision=lambda: next(cache_revisions),
+        summary_index_cache_revision=lambda **_kwargs: next(cache_revisions),
     )
 
     asyncio.run(

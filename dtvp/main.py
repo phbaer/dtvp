@@ -225,12 +225,27 @@ group_build_executor = BoundedWorkExecutor(
     name="dtvp-group-build",
     workers_provider=lambda: get_env_int_with_floor(
         "DTVP_GROUP_BUILD_WORKERS",
-        default=1,
+        default=2,
         minimum=1,
         logger=logger,
     ),
     max_pending_provider=lambda: get_env_int_with_floor(
         "DTVP_GROUP_BUILD_MAX_PENDING",
+        default=4,
+        minimum=0,
+        logger=logger,
+    ),
+)
+group_postprocess_executor = BoundedWorkExecutor(
+    name="dtvp-group-postprocess",
+    workers_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_POSTPROCESS_WORKERS",
+        default=1,
+        minimum=1,
+        logger=logger,
+    ),
+    max_pending_provider=lambda: get_env_int_with_floor(
+        "DTVP_GROUP_POSTPROCESS_MAX_PENDING",
         default=2,
         minimum=0,
         logger=logger,
@@ -353,6 +368,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await cache_manager.flush_cache_writes()
         group_query_executor.shutdown()
         group_build_executor.shutdown()
+        group_postprocess_executor.shutdown()
         detail_executor.shutdown()
         _set_runtime_state("ready", "DTVP is ready.")
 
@@ -503,9 +519,10 @@ grouped_vuln_service_deps = build_grouped_vuln_service_deps(
         )
     ),
     summary_index=grouped_vuln_summary_index,
-    summary_index_cache_revision=cache_manager.get_cache_revision,
+    summary_index_cache_revision=cache_manager.get_grouped_cache_revision,
     notify_task_update=task_event_hub.notify,
     run_cpu_bound=group_build_executor.run,
+    run_postprocess=group_postprocess_executor.run,
 )
 
 
@@ -606,6 +623,7 @@ def get_performance_status() -> dict[str, Any]:
         "python": get_python_runtime_status(),
         "group_queries": group_query_executor.stats(),
         "group_builds": group_build_executor.stats(),
+        "group_postprocessing": group_postprocess_executor.stats(),
         "group_details": detail_executor.stats(),
         "grouped_tasks": {
             "total": len(tasks),
@@ -658,7 +676,7 @@ api_router.include_router(
             default_dependency_chain_limit=DEFAULT_DEPENDENCY_CHAIN_LIMIT,
             service_unavailable_response=SERVICE_UNAVAILABLE_RESPONSE,
             not_found_response=NOT_FOUND_RESPONSE,
-            get_grouped_vuln_cache_revision=cache_manager.get_cache_revision,
+            get_grouped_vuln_cache_revision=cache_manager.get_grouped_cache_revision,
             group_query_executor=group_query_executor,
             detail_executor=detail_executor,
             task_event_hub=task_event_hub,

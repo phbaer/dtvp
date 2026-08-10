@@ -48,6 +48,7 @@ const runtimeExecutors = computed(() => {
     return [
         { key: 'queries', label: 'Search queries', status: runtimeStatus.value.group_queries },
         { key: 'builds', label: 'Snapshot builds', status: runtimeStatus.value.group_builds },
+        { key: 'postprocess', label: 'Snapshot post-processing', status: runtimeStatus.value.group_postprocessing },
         { key: 'details', label: 'Detail hydration', status: runtimeStatus.value.group_details },
     ]
 })

@@ -27,6 +27,47 @@ def test_cache_status_reuses_snapshot_until_cache_changes(tmp_path):
     assert third["last_refreshed_at"] is not None
 
 
+def test_grouped_cache_revision_is_scoped_and_skips_identical_writes(tmp_path):
+    manager = CacheManager(base_path=str(tmp_path))
+    projects = [
+        {"name": "App One", "uuid": "project-1", "version": "1.0"},
+        {"name": "App Two", "uuid": "project-2", "version": "2.0"},
+    ]
+    manager._save_project_cache(manager._projects_path(), projects)
+
+    initial = manager.get_grouped_cache_revision(name="App One")
+    manager._save_project_cache(
+        manager._findings_path("project-2"),
+        [{"vulnerability": {"uuid": "vuln-2"}}],
+    )
+    assert manager.get_grouped_cache_revision(name="App One") == initial
+
+    manager._save_project_cache(
+        manager._findings_path("project-1"),
+        [{"vulnerability": {"uuid": "vuln-1"}}],
+    )
+    relevant_change = manager.get_grouped_cache_revision(name="App One")
+    assert relevant_change != initial
+
+    global_revision = manager.get_cache_revision()
+    manager._save_project_cache(
+        manager._findings_path("project-1"),
+        [{"vulnerability": {"uuid": "vuln-1"}}],
+    )
+    assert manager.get_cache_revision() == global_revision
+    assert manager.get_grouped_cache_revision(name="App One") == relevant_change
+
+    manager._save_project_cache(
+        manager._projects_path(),
+        [*projects, {"name": "App Three", "uuid": "project-3", "version": "3.0"}],
+    )
+    assert manager.get_grouped_cache_revision(name="App One") == relevant_change
+
+    updated_projects = [dict(projects[0], version="1.1"), projects[1]]
+    manager._save_project_cache(manager._projects_path(), updated_projects)
+    assert manager.get_grouped_cache_revision(name="App One") != relevant_change
+
+
 @pytest.mark.asyncio
 async def test_cache_file_encoding_does_not_block_event_loop(tmp_path):
     manager = CacheManager(base_path=str(tmp_path))

@@ -86,6 +86,7 @@ def test_grouped_vuln_task_events_stream_status_without_result(client):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert response.headers["x-accel-buffering"] == "no"
     lines = [line for line in response.text.splitlines() if line]
     assert len(lines) == 1
     event = json.loads(lines[0])

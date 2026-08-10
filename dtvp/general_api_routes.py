@@ -179,7 +179,7 @@ class GeneralApiRouteDeps:
     service_unavailable_response: dict[int | str, dict[str, Any]]
     not_found_response: dict[int | str, dict[str, Any]]
     code_analysis_result_store: Any = None
-    get_grouped_vuln_cache_revision: Callable[[], Any] = lambda: None
+    get_grouped_vuln_cache_revision: Callable[..., Any] = lambda **_kwargs: None
     group_query_executor: Any = None
     detail_executor: Any = None
     task_event_hub: Any = None
@@ -231,7 +231,7 @@ def _grouped_vuln_task_key(
     cve: Optional[str],
     response_mode: str,
 ) -> tuple[str, str, str, str, str]:
-    cache_revision = deps.get_grouped_vuln_cache_revision()
+    cache_revision = deps.get_grouped_vuln_cache_revision(name=name)
     team_mapping = deps.load_team_mapping()
     revision_text = json.dumps(cache_revision, sort_keys=True, default=str)
     mapping_text = json.dumps(team_mapping, sort_keys=True, default=str)
@@ -266,7 +266,7 @@ def _finalize_grouped_vuln_task_key(
         ):
             return
         revision_text = json.dumps(
-            deps.get_grouped_vuln_cache_revision(),
+            deps.get_grouped_vuln_cache_revision(name=task_key[0]),
             sort_keys=True,
             default=str,
         )
@@ -876,7 +876,10 @@ def _register_task_routes(
         return StreamingResponse(
             event_stream(),
             media_type="application/x-ndjson",
-            headers={"Cache-Control": "no-cache"},
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     @router.get("/tasks/{task_id}/groups")

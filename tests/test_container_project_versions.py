@@ -5,6 +5,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _project_version(path: Path) -> str:
+    with path.open("rb") as handle:
+        return str(tomllib.load(handle)["project"]["version"])
+
+
+def _locked_package_version(path: Path, package_name: str) -> str:
+    with path.open("rb") as handle:
+        packages = tomllib.load(handle)["package"]
+    package = next(
+        package for package in packages if package["name"] == package_name
+    )
+    return str(package["version"])
+
+
 def test_dtvp_container_prints_packaged_project_version_before_server_start():
     start_script = (ROOT / "start.sh").read_text(encoding="utf-8")
     dockerfiles = [
@@ -56,15 +70,20 @@ def test_publish_workflow_supplies_build_number_to_every_project_image():
 
 
 def test_release_versions_are_lockstep_and_validated_before_tagging():
-    with (ROOT / "pyproject.toml").open("rb") as handle:
-        dtvp_version = tomllib.load(handle)["project"]["version"]
-    with (ROOT / "agentyzer" / "pyproject.toml").open("rb") as handle:
-        agentyzer_version = tomllib.load(handle)["project"]["version"]
+    dtvp_version = _project_version(ROOT / "pyproject.toml")
+    agentyzer_version = _project_version(ROOT / "agentyzer" / "pyproject.toml")
+    root_lock = ROOT / "uv.lock"
+    agentyzer_lock = ROOT / "agentyzer" / "uv.lock"
     workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
         encoding="utf-8"
     )
 
     assert dtvp_version == agentyzer_version
+    assert _locked_package_version(root_lock, "dtvp") == dtvp_version
+    assert _locked_package_version(root_lock, "agentyzer") == agentyzer_version
+    assert (
+        _locked_package_version(agentyzer_lock, "agentyzer") == agentyzer_version
+    )
     assert workflow.count(
         "AGENTYZER_VERSION=$(cd agentyzer && uv version | awk '{print $2}')"
     ) == 2

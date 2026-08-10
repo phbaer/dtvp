@@ -81,9 +81,10 @@ def build_grouped_vuln_service_deps(
         Callable[[list[dict[str, Any]], dict[str, Any]], int] | None
     ) = None,
     summary_index: Any = None,
-    summary_index_cache_revision: Callable[[], Any] | None = None,
+    summary_index_cache_revision: Callable[..., Any] | None = None,
     notify_task_update: Callable[[str], None] | None = None,
     run_cpu_bound: Callable[..., Awaitable[Any]] | None = None,
+    run_postprocess: Callable[..., Awaitable[Any]] | None = None,
 ) -> GroupedVulnServiceDeps:
     return GroupedVulnServiceDeps(
         cache_manager=cache_manager,
@@ -99,9 +100,12 @@ def build_grouped_vuln_service_deps(
             queue_open_vulnerabilities_for_analysis
         ),
         summary_index=summary_index,
-        summary_index_cache_revision=summary_index_cache_revision or (lambda: None),
+        summary_index_cache_revision=(
+            summary_index_cache_revision or (lambda **_kwargs: None)
+        ),
         notify_task_update=notify_task_update or (lambda _task_id: None),
         run_cpu_bound=run_cpu_bound or asyncio.to_thread,
+        run_postprocess=run_postprocess or asyncio.to_thread,
     )
 
 
@@ -237,7 +241,7 @@ def build_general_api_route_deps(
     not_found_response: dict[int | str, dict[str, Any]],
     code_analysis_result_store: Any = None,
     load_team_groups: Callable[[], dict[str, Any]] | None = None,
-    get_grouped_vuln_cache_revision: Callable[[], Any] | None = None,
+    get_grouped_vuln_cache_revision: Callable[..., Any] | None = None,
     group_query_executor: Any = None,
     detail_executor: Any = None,
     task_event_hub: Any = None,
@@ -310,7 +314,7 @@ def build_general_api_route_deps(
         not_found_response=not_found_response,
         code_analysis_result_store=code_analysis_result_store,
         get_grouped_vuln_cache_revision=(
-            get_grouped_vuln_cache_revision or (lambda: None)
+            get_grouped_vuln_cache_revision or (lambda **_kwargs: None)
         ),
         group_query_executor=group_query_executor,
         detail_executor=detail_executor,

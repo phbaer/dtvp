@@ -56,11 +56,18 @@ describe('Settings.vue', () => {
                 queue_time_ms_total: 12, execution_time_ms_total: 120,
             },
             group_builds: {
-                workers: 1, max_pending: 2, capacity: 3,
+                workers: 2, max_pending: 4, capacity: 6,
                 outstanding: 0, active: 0, queued: 0, waiting: 0,
                 accepted_total: 4, completed_total: 4, failed_total: 0,
                 max_outstanding: 1, queue_time_ms_total: 0,
                 execution_time_ms_total: 80,
+            },
+            group_postprocessing: {
+                workers: 1, max_pending: 2, capacity: 3,
+                outstanding: 0, active: 0, queued: 0, waiting: 0,
+                accepted_total: 2, completed_total: 2, failed_total: 0,
+                max_outstanding: 1, queue_time_ms_total: 0,
+                execution_time_ms_total: 30,
             },
             group_details: {
                 workers: 2, max_pending: 8, capacity: 10,

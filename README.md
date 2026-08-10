@@ -157,13 +157,18 @@ Important frontend components:
   mutations wake all event-stream clients through one shared event hub instead
   of one polling loop per client. Serialized status is reused across clients,
   progress streams carry only the latest 20 log entries, and a 15-second blank
-  heartbeat keeps idle streams open.
+  heartbeat keeps idle streams open. The backend also emits
+  `X-Accel-Buffering: no`; if an outer proxy still buffers or leaves the stream
+  idle for 35 seconds, the browser cancels it and resumes through status
+  polling.
 - Partial version results appear while grouping continues. Summary tasks
   publish at the first version, roughly one-third milestones, and completion
   instead of rebuilding cumulative snapshots after every tenth of the project.
-  CPU-heavy grouping, indexing, and filtering run outside the async event loop.
-  When the final partial publish already contains every version, it becomes the
-  completed snapshot without repeating grouping and index construction.
+  Version fetching continues while a partial window is being built; pending
+  milestones coalesce to the newest snapshot instead of blocking progress or
+  queuing stale builds. CPU-heavy grouping, indexing, and filtering run outside
+  the async event loop. When the final partial publish already contains every
+  version, it becomes the completed snapshot without repeating construction.
 - Grouped-task searches use thread-safe per-task query caches, share identical
   in-flight queries, and reuse sort orders across filter changes. They run in a
   dedicated bounded executor so cold searches cannot exhaust the default
@@ -178,10 +183,13 @@ Important frontend components:
   are reused until their metadata or configuration revision changes.
 - Grouped snapshot construction runs in a separate bounded worker pool from
   foreground filters and vulnerability-detail hydration. This prevents several
-  simultaneous project builds from filling the application thread pool; the
-  default single build worker also avoids wasteful GIL contention. Detail
-  hydration has its own reserved pool, so project builds and cold searches do
-  not consume every slot needed to open a vulnerability.
+  simultaneous project builds from filling the application thread pool; two
+  build workers allow independent users to make progress on the required
+  free-threaded Python runtime. Automatic-analysis planning runs in a separate
+  post-processing pool and starts only after clients are notified that the
+  snapshot is complete. Detail hydration has its own reserved pool, so project
+  builds and cold searches do not consume every slot needed to open a
+  vulnerability.
 - The global analysis indicator polls one compact queue-and-sweep status
   response: every five seconds while work is active and every 30 seconds while
   idle, with per-client jitter. Hidden browser tabs pause polling, and detailed
@@ -214,8 +222,11 @@ Important frontend components:
   finding. Older Dependency-Track versions fall back to the legacy endpoint.
   Cache JSON is encoded and atomically replaced by one ordered writer thread;
   async operations await durability without holding the event loop or cache
-  lock. A monotonic cache generation keys grouped snapshots, and summaries
-  created during a cold fill are saved against the generation after that fill.
+  lock. Cache writes whose JSON content did not change are skipped. Grouped
+  snapshots use project-scoped revisions plus the selected version metadata,
+  so a background refresh or activity in another project does not invalidate
+  an otherwise reusable result. Summaries created during a cold fill are saved
+  against the scoped revision after that fill.
   Pending assessment writes and their local overlays live in a transactional
   SQLite outbox. Newer changes to the same finding replace older pending
   values, and one application-wide bounded dispatcher retries Dependency-Track
@@ -969,8 +980,9 @@ Deployment rules:
 - The DTVP and Agentyzer container startup scripts print their packaged project
   versions and image build numbers before importing either application, so this
   deployment identity remains visible in Docker logs even if initialization fails.
-- `/api/performance-status` reports grouped-query/build saturation, retained
-  task counts, process-local cache pressure, and the active Python/GIL state.
+- `/api/performance-status` reports grouped-query/build/post-processing
+  saturation, retained task counts, process-local cache pressure, and the
+  active Python/GIL state.
   API responses include a `Server-Timing: app;dur=...` header for browser and
   proxy latency analysis.
 - Reviewers see the Python/GIL state in the application footer and can inspect
@@ -1064,8 +1076,10 @@ means the integration or override is disabled.
 | `DTVP_GROUP_QUERY_MAX_PENDING` | Maximum grouped searches queued behind active workers | `8` |
 | `DTVP_GROUP_QUERY_CACHE_ENTRIES` | Maximum cached filter combinations per grouped task | `32` |
 | `DTVP_GROUP_QUERY_CACHE_BYTES` | Approximate per-task filtered-index and facet-cache budget | `8388608` |
-| `DTVP_GROUP_BUILD_WORKERS` | Dedicated CPU workers for grouped snapshot/index construction | `1` |
-| `DTVP_GROUP_BUILD_MAX_PENDING` | Group-build jobs admitted behind active build workers before async backpressure | `2` |
+| `DTVP_GROUP_BUILD_WORKERS` | Dedicated CPU workers for grouped snapshot/index construction | `2` |
+| `DTVP_GROUP_BUILD_MAX_PENDING` | Group-build jobs admitted behind active build workers before async backpressure | `4` |
+| `DTVP_GROUP_POSTPROCESS_WORKERS` | Dedicated workers for automatic-analysis planning after a snapshot completes | `1` |
+| `DTVP_GROUP_POSTPROCESS_MAX_PENDING` | Post-processing jobs admitted behind active workers before async backpressure | `2` |
 | `DTVP_GROUP_DETAIL_WORKERS` | Reserved workers for full vulnerability detail hydration | `2` |
 | `DTVP_GROUP_DETAIL_MAX_PENDING` | Detail hydration jobs admitted before async backpressure | `8` |
 | `TEAM_MAPPING_PATH` | Component ownership mapping | `data/team_mapping.json` |

@@ -277,11 +277,13 @@ class CacheManager:
         self.project_query_cache: OrderedDict[str, List[Dict[str, Any]]] = (
             OrderedDict()
         )
+        self._cache_meta_lock = threading.RLock()
         self.cache_meta: Dict[str, Any] = {
             "fully_cached": False,
             "last_refreshed_at": None,
             "projects_refreshed_at": None,
             "revision": 0,
+            "project_revisions": {},
         }
         self._memory_cache: OrderedDict[str, Any] = OrderedDict()
         self._memory_cache_lock = threading.RLock()
@@ -336,12 +338,14 @@ class CacheManager:
                 "last_refreshed_at": None,
                 "projects_refreshed_at": None,
                 "revision": 0,
+                "project_revisions": {},
             },
         ) or {
             "fully_cached": False,
             "last_refreshed_at": None,
             "projects_refreshed_at": None,
             "revision": 0,
+            "project_revisions": {},
         }
 
     def _read_startup_cache_state(
@@ -352,6 +356,7 @@ class CacheManager:
             "last_refreshed_at": None,
             "projects_refreshed_at": None,
             "revision": 0,
+            "project_revisions": {},
         }
         pending = self._load_pending_updates()
         active = self._normalize_active_projects(
@@ -370,7 +375,14 @@ class CacheManager:
         self._cache_memory_value(self._projects_meta_path(), meta)
 
     def _save_projects_meta(self, meta: Dict[str, Any]) -> None:
-        self._save_cache_file(self._projects_meta_path(), meta, touch_meta=False)
+        # cache_meta is mutated in place, so an equality-based no-op check cannot
+        # reliably detect its changes. Always persist an explicit metadata save.
+        self._save_cache_file(
+            self._projects_meta_path(),
+            copy.deepcopy(meta),
+            touch_meta=False,
+            force=True,
+        )
 
     def get_cache_status(self) -> Dict[str, Any]:
         with self._cache_status_lock:
@@ -494,14 +506,81 @@ class CacheManager:
         bom = self._load_project_cache(self._bom_path(project_uuid), {}) or {}
         return findings, project_vulnerabilities, bom
 
-    def _touch_cache_meta(self) -> None:
+    def _touch_cache_meta(
+        self,
+        *,
+        project_uuids: Set[str] | None = None,
+    ) -> None:
         self._invalidate_cache_status()
-        self.cache_meta["last_refreshed_at"] = datetime.now(timezone.utc).isoformat()
-        self.cache_meta["revision"] = int(self.cache_meta.get("revision") or 0) + 1
-        self._save_projects_meta(self.cache_meta)
+        with self._cache_meta_lock:
+            self.cache_meta["last_refreshed_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+            self.cache_meta["revision"] = int(
+                self.cache_meta.get("revision") or 0
+            ) + 1
+            project_revisions = self.cache_meta.setdefault("project_revisions", {})
+            if not isinstance(project_revisions, dict):
+                project_revisions = {}
+                self.cache_meta["project_revisions"] = project_revisions
+            for project_uuid in project_uuids or set():
+                normalized_uuid = str(project_uuid or "").strip()
+                if normalized_uuid:
+                    project_revisions[normalized_uuid] = (
+                        int(project_revisions.get(normalized_uuid) or 0) + 1
+                    )
+            self._save_projects_meta(self.cache_meta)
 
     def get_cache_revision(self) -> int:
-        return int(self.cache_meta.get("revision") or 0)
+        with self._cache_meta_lock:
+            return int(self.cache_meta.get("revision") or 0)
+
+    def get_grouped_cache_revision(
+        self,
+        *,
+        name: str = "",
+        versions: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Return a stable revision limited to the grouped project's inputs."""
+        selected_versions = versions
+        if selected_versions is None:
+            cached_versions = self._load_project_cache(self._projects_path(), []) or []
+            normalized_name = str(name or "").strip().lower()
+            selected_versions = [
+                project
+                for project in cached_versions
+                if not normalized_name
+                or str(project.get("name") or "").strip().lower()
+                == normalized_name
+            ]
+
+        version_fingerprint = sorted(
+            (
+                str(project.get("uuid") or ""),
+                str(project.get("name") or ""),
+                str(project.get("version") or ""),
+                str(project.get("lastBomImport") or ""),
+                str(project.get("lastRiskScore") or ""),
+                bool(project.get("active", True)),
+            )
+            for project in selected_versions
+        )
+        with self._cache_meta_lock:
+            raw_project_revisions = self.cache_meta.get("project_revisions") or {}
+            project_revisions = (
+                raw_project_revisions
+                if isinstance(raw_project_revisions, dict)
+                else {}
+            )
+            revisions = [
+                (project_uuid, int(project_revisions.get(project_uuid) or 0))
+                for project_uuid, *_rest in version_fingerprint
+                if project_uuid
+            ]
+        return {
+            "versions": version_fingerprint,
+            "project_revisions": revisions,
+        }
 
     def _project_list_is_fresh(self) -> bool:
         if (
@@ -631,11 +710,13 @@ class CacheManager:
         self.active_project_uuids = set()
         self._active_project_last_access = {}
         self.project_query_cache = OrderedDict()
+        self._cache_meta_lock = threading.RLock()
         self.cache_meta = {
             "fully_cached": False,
             "last_refreshed_at": None,
             "projects_refreshed_at": None,
             "revision": 0,
+            "project_revisions": {},
         }
         self._memory_cache = OrderedDict()
         self._memory_cache_lock = threading.RLock()
@@ -722,8 +803,26 @@ class CacheManager:
         self._cache_memory_value(path, data)
         return data
 
-    def _save_cache_file(self, path: str, data: Any, touch_meta: bool = True) -> None:
+    def _save_cache_file(
+        self,
+        path: str,
+        data: Any,
+        touch_meta: bool = True,
+        *,
+        force: bool = False,
+    ) -> bool:
         with self._memory_cache_lock:
+            cached = self._memory_cache.get(path)
+            has_cached = path in self._memory_cache
+            write_pending = self._dirty_memory_paths.get(path, 0) > 0
+            if (
+                not force
+                and has_cached
+                and cached == data
+                and (write_pending or os.path.exists(path))
+            ):
+                self._memory_cache.move_to_end(path)
+                return False
             self._dirty_memory_paths[path] = self._dirty_memory_paths.get(path, 0) + 1
         self._cache_memory_value(path, data)
         write = self._submit_atomic_write(path, data)
@@ -744,6 +843,7 @@ class CacheManager:
             write.result()
         if touch_meta:
             self._touch_cache_meta()
+        return True
 
     def _cache_memory_value(self, path: str, data: Any) -> None:
         with self._memory_cache_lock:
@@ -805,8 +905,48 @@ class CacheManager:
         await self.flush_cache_writes()
         self._write_executor.shutdown(wait=True, cancel_futures=False)
 
-    def _save_project_cache(self, path: str, data: Any) -> None:
-        self._save_cache_file(path, data)
+    def _save_project_cache(
+        self,
+        path: str,
+        data: Any,
+        *,
+        project_uuid: str | None = None,
+    ) -> bool:
+        changed = self._save_cache_file(path, data, touch_meta=False)
+        if changed:
+            inferred_project_uuid = project_uuid or self._project_uuid_for_cache_path(
+                path
+            )
+            self._touch_cache_meta(
+                project_uuids={inferred_project_uuid}
+                if inferred_project_uuid
+                else None
+            )
+        elif os.path.abspath(path) == os.path.abspath(self._projects_path()):
+            # A successful no-op project-list refresh still updates its TTL.
+            self._save_projects_meta(self.cache_meta)
+        return changed
+
+    def _project_uuid_for_cache_path(self, path: str) -> str | None:
+        try:
+            relative_path = os.path.relpath(path, self.base_path)
+        except ValueError:
+            return None
+        parts = relative_path.split(os.sep)
+        if len(parts) != 2 or parts[0] not in {
+            "findings",
+            "project_vulnerabilities",
+            "boms",
+            "analysis",
+        }:
+            return None
+        filename = parts[1]
+        if not filename.endswith(".json"):
+            return None
+        stem = filename[:-5]
+        if parts[0] == "analysis":
+            stem = stem.split("__", 1)[0]
+        return stem or None
 
     def _load_project_cache(self, path: str, default: Any = None) -> Any:
         return self._load_cache_file(path, default)
@@ -1041,7 +1181,11 @@ class CacheManager:
                     fresh_findings,
                 )
                 async with self.lock:
-                    self._save_project_cache(path, fresh_findings)
+                    self._save_project_cache(
+                        path,
+                        fresh_findings,
+                        project_uuid=project_uuid,
+                    )
                 return fresh_findings
 
             findings = await self._singleflight_fetch(
@@ -1088,7 +1232,11 @@ class CacheManager:
             async def fetch_project_vulnerabilities() -> List[Dict[str, Any]]:
                 fresh_vulns = await client.get_project_vulnerabilities(project_uuid)
                 async with self.lock:
-                    self._save_project_cache(path, fresh_vulns)
+                    self._save_project_cache(
+                        path,
+                        fresh_vulns,
+                        project_uuid=project_uuid,
+                    )
                 return fresh_vulns
 
             return await self._singleflight_fetch(
@@ -1114,7 +1262,11 @@ class CacheManager:
             async def fetch_bom() -> Optional[Dict[str, Any]]:
                 fresh_bom = await client.get_bom(project_uuid)
                 async with self.lock:
-                    self._save_project_cache(path, fresh_bom)
+                    self._save_project_cache(
+                        path,
+                        fresh_bom,
+                        project_uuid=project_uuid,
+                    )
                 return fresh_bom
 
             return await self._singleflight_fetch(
@@ -1158,7 +1310,11 @@ class CacheManager:
                     fresh_analysis,
                 )
                 async with self.lock:
-                    self._save_project_cache(path, fresh_analysis)
+                    self._save_project_cache(
+                        path,
+                        fresh_analysis,
+                        project_uuid=project_uuid,
+                    )
                 overlay = self.get_assessment_overlay(
                     project_uuid,
                     component_uuid,
@@ -1298,7 +1454,11 @@ class CacheManager:
                         marked = _mark_assessment_for_review_with_threadmodel_change(
                             source_analysis, previous_score, current_score
                         )
-                        self._save_project_cache(current_path, marked)
+                        self._save_project_cache(
+                            current_path,
+                            marked,
+                            project_uuid=project_uuid,
+                        )
                         finding["analysis"] = marked
                         continue
                 continue
@@ -1316,7 +1476,11 @@ class CacheManager:
 
             _, previous_analysis = candidates[0]
             preserved_analysis = _mark_assessment_for_review(previous_analysis)
-            self._save_project_cache(current_path, preserved_analysis)
+            self._save_project_cache(
+                current_path,
+                preserved_analysis,
+                project_uuid=project_uuid,
+            )
             finding["analysis"] = preserved_analysis
 
         return findings
@@ -1394,7 +1558,13 @@ class CacheManager:
         async with self.lock:
             self.pending_updates = self._load_pending_updates()
             self._invalidate_cache_status()
-            self._touch_cache_meta()
+            self._touch_cache_meta(
+                project_uuids={
+                    str(payload.get("project_uuid") or "").strip()
+                    for payload in payloads
+                    if str(payload.get("project_uuid") or "").strip()
+                }
+            )
         self._assessment_sync_wakeup.set()
         return entries
 
@@ -1532,11 +1702,12 @@ class CacheManager:
         self._save_project_cache(
             self._analysis_path(project_uuid, component_uuid, vulnerability_uuid),
             analysis_data,
+            project_uuid=project_uuid,
         )
 
     def _save_local_analyses(self, payloads: List[Dict[str, Any]]) -> None:
         """Persist local overlays while updating cache metadata only once."""
-        saved = False
+        changed_projects: Set[str] = set()
         for payload in payloads:
             project_uuid = payload.get("project_uuid")
             component_uuid = payload.get("component_uuid")
@@ -1548,7 +1719,7 @@ class CacheManager:
                 "analysisDetails": payload.get("details"),
                 "isSuppressed": payload.get("suppressed", False),
             }
-            self._save_cache_file(
+            changed = self._save_cache_file(
                 self._analysis_path(
                     project_uuid,
                     component_uuid,
@@ -1557,9 +1728,10 @@ class CacheManager:
                 analysis_data,
                 touch_meta=False,
             )
-            saved = True
-        if saved:
-            self._touch_cache_meta()
+            if changed:
+                changed_projects.add(str(project_uuid))
+        if changed_projects:
+            self._touch_cache_meta(project_uuids=changed_projects)
 
 
 cache_manager = CacheManager()
