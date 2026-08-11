@@ -9,9 +9,12 @@ tags:
 source_paths:
   - dtvp/
   - agentyzer/src/
+  - Dockerfile
+  - Dockerfile.free-threaded
   - agentyzer/Dockerfile
   - frontend/src/
   - compose.yml
+  - compose.secrets.yml
   - deploy/arcane/compose.yml
   - threatmodel/dtvp.py
   - threatmodel/report-template.md

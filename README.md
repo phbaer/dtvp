@@ -109,8 +109,8 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Benchmark grouped-query concurrency | `uv run python scripts/benchmark_group_queries.py` |
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
 | Regenerate CycloneDX SBOMs | `./scripts/generate-sboms.sh` |
-| Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
-| Start the GIL-enabled fallback deployment | `docker compose -f compose.yml -f compose.gil.yml up -d --build` |
+| Start the packaged deployment | `cp .env.dist .env && docker compose -f compose.yml -f compose.secrets.yml up -d` |
+| Start the GIL-enabled fallback deployment | `docker compose -f compose.yml -f compose.secrets.yml -f compose.gil.yml up -d --build` |
 | Deploy with Arcane | See [`deploy/arcane/`](deploy/arcane/README.md) |
 | Start the optional Dependency-Track demo | `docker compose --env-file .env --env-file demo/dependency-track/.env -f compose.yml -f demo/dependency-track/compose.yml up -d` |
 | Back up packaged durable state | `./scripts/backup-compose-state.sh /absolute/backup/root` |
@@ -1005,13 +1005,14 @@ BuildKit secret instead of disabling TLS verification:
 ```bash
 DTVP_CA_CERTS_FILE=/path/to/ca-bundle.crt \
   docker compose -f compose.yml -f compose.ca-certs.yml build
-docker compose up -d
+docker compose -f compose.yml -f compose.secrets.yml up -d
 ```
 
 The bundle is not sent in either Docker build context. It is installed in the
-runtime trust stores so HTTPS OIDC and internal integration endpoints can be
-verified normally; do not set `NODE_TLS_REJECT_UNAUTHORIZED=0` or disable
-certificate checks.
+runtime trust stores, and uv explicitly uses that native trust store while
+installing Python and dependencies, so HTTPS downloads, OIDC, and internal
+integration endpoints can be verified normally. Do not set
+`NODE_TLS_REJECT_UNAUTHORIZED=0` or disable certificate checks.
 
 Select an available backend adapter, set its URL and least-privilege API key,
 complete OIDC settings, and configure an HTTPS public URL plus random session,

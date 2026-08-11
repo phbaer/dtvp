@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -94,6 +96,8 @@ def test_compose_pins_images_and_segments_trust_zones():
 
 def test_compose_secret_overlays_keep_credentials_out_of_service_environment():
     overlay = (ROOT / "compose.secrets.yml").read_text()
+    overlay_config = yaml.safe_load(overlay)
+    agentyzer_environment = overlay_config["services"]["agentyzer"]["environment"]
     demo_overlay = (
         ROOT / "demo" / "dependency-track" / "compose.secrets.yml"
     ).read_text()
@@ -108,6 +112,13 @@ def test_compose_secret_overlays_keep_credentials_out_of_service_environment():
     ) in overlay
     assert "DTVP_SESSION_SECRET_KEY_FILE: /run/secrets/dtvp_session_secret_key" in overlay
     assert "AGENTYZER_SERVICE_TOKEN_FILE: /run/secrets/agentyzer_service_token" in overlay
+    assert agentyzer_environment["AGENTYZER_OPENWEBUI_API_KEY"] == ""
+    assert (
+        agentyzer_environment["AGENTYZER_OPENWEBUI_API_KEY_FILE"]
+        == "/run/secrets/agentyzer_openwebui_api_key"
+    )
+    assert "OPENWEBUI_API_KEY" not in agentyzer_environment
+    assert "OPENWEBUI_API_KEY_FILE" not in agentyzer_environment
     assert "DTVP_BACKUP_DATABASE_PASSWORD" not in overlay
     assert "dependency_track_database_password" not in overlay
     assert "environment: DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY" in import_overlay

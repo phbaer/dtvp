@@ -40,6 +40,7 @@ ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT \
     DTVP_BUILD_NUMBER=$BUILD_NUMBER
 
 WORKDIR /app
+ENV UV_SYSTEM_CERTS=true
 
 # Optionally add a private CA to the runtime trust store for internal OIDC and
 # integration HTTPS endpoints. BuildKit keeps the source bundle out of context.
