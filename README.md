@@ -31,6 +31,23 @@ change. `AGENTS.md` and `skills/*/SKILL.md` are short routing entry points.
 - Includes mock Dependency-Track, tmrescore, and code-analysis services for
   local development and tests.
 
+## Security At A Glance
+
+DTVP fails closed around identity, authorization, backend selection, storage,
+and concurrency. It uses OIDC code flow with PKCE, backend-enforced roles and
+fresh-state conflict checks, distinct least-privilege workload credentials,
+bounded and sanitized untrusted inputs, and human review for LLM output.
+Packaged Compose adds secret-file mounts, host/origin and request limits,
+non-root read-only containers, narrow writable volumes, network segmentation,
+exclusive per-volume process leases, audit/storage health, and verified backup
+helpers. The release path uses lockfiles, immutable pins, security scans, SBOMs,
+provenance, and digest signing.
+
+Operators still own HTTPS, IdP MFA, exact host/proxy/egress policy, independent
+secret rotation, immutable audit export, encrypted off-host backups and restore
+tests, source-cache retention, and signature verification. See the complete
+[security principles, guardrail catalogue, threat analysis, and residual risks](docs/threat-model.md).
+
 ## Quick Start
 
 Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)

@@ -29,7 +29,7 @@ review_when:
 
 # DTVP Threat Model
 
-Last reviewed: 2026-07-31
+Last reviewed: 2026-08-11
 
 This document records DTVP's security boundaries, abuse cases, implemented
 controls, and residual risks. The canonical curated context is in the
@@ -67,6 +67,58 @@ The primary objectives are:
 Availability is important, but the current design favors one fail-closed API
 process per DTVP state volume and one per Agentyzer repository volume. It does
 not claim high availability or horizontally coordinated execution.
+
+## Security Principles
+
+These principles are normative. A change that weakens one requires an explicit
+threat-model update, compensating controls, a migration note, and focused tests.
+
+1. **Fail closed at every trust boundary.** Missing authentication, unknown
+   backends, invalid hosts/origins, unsafe production settings, unhealthy
+   storage, and contended runtime leases stop the affected operation; they do
+   not enable a permissive fallback.
+2. **Authorize on the server and as late as practical.** The backend derives the
+   actor and role, reloads current state before sensitive writes, and never
+   treats hidden frontend controls or analyzer output as authorization.
+3. **Use least privilege and separate principals.** Human sessions, normal
+   backend review, archive import, Agentyzer owner scope, Agentyzer service-wide
+   scope, Git access, LLM access, CI publishing, and host backup authority are
+   distinct capabilities and must not share credentials.
+4. **Do not create a confused deputy.** Browser cookies, bearer tokens, and
+   authorization headers terminate at DTVP. Downstream work uses scoped
+   workload identity while DTVP retains the human initiator for authorization
+   and attribution.
+5. **Treat every external artifact as hostile data.** Archives, SBOMs,
+   repository files, vendor responses, advisories, Markdown, URLs, and LLM
+   responses are validated, size-bounded, escaped or sanitized, and never
+   interpreted as trusted instructions.
+6. **Bound work before accepting it.** Request bodies, decompression, queues,
+   per-owner jobs, concurrent calls, retained tasks/results, repository reads,
+   model context, audit files, and logs have explicit limits and backpressure.
+7. **Namespace durable state by security identity.** Vendor resources, caches,
+   outboxes, queues, archives, proposals, and analyzer results are tied to a
+   stable backend type and instance ID so one tenant or vendor cannot reuse
+   another's state accidentally.
+8. **Preserve integrity through concurrency and restart.** Fresh-state conflict
+   checks, transactional SQLite stores, atomic file replacement, exclusive
+   per-volume process leases, bounded retries, and explicit interrupted states
+   protect assessments and background work.
+9. **Minimize disclosure and persistence.** Secrets use file mounts in
+   production, sensitive values are redacted, Git credentials are child-only,
+   remotes are scrubbed, diagnostics are authenticated and non-cacheable, and
+   retained source caches are credential-free and disposable.
+10. **Reduce blast radius in every deployment.** Application processes run
+    non-root with read-only roots, dropped capabilities, bounded PIDs, narrow
+    writable mounts, and segmented networks. Privileged helpers are optional,
+    isolated, and treated as host-administrator boundaries.
+11. **Make security-relevant actions attributable and recoverable.** Structured
+    audit events, storage/integrity health, durable queues, verified backups,
+    restore procedures, and external retention provide evidence and recovery;
+    health checks alone never count as a backup.
+12. **Build reproducibly and promote evidence, not trust.** Exact lockfiles,
+    immutable build inputs, restricted CI permissions, dependency/source/image
+    scans, SBOMs, provenance, digest signing, and signature verification guard
+    the release path.
 
 ## System And Trust Boundaries
 
@@ -166,6 +218,30 @@ hard tenant boundary.
   service and explicit Compose secret files. Arcane administrators and the
   Docker host remain privileged and can still read the source project
   environment.
+
+## Guardrail Catalogue
+
+The catalogue separates controls enforced by DTVP from responsibilities that
+cannot be implemented inside the application boundary. Configuration names and
+defaults are maintained in the [configuration reference](configuration.md).
+
+| Area | Enforced guardrails | Operator obligations and deliberate limits |
+| :--- | :--- | :--- |
+| Human identity and sessions | OIDC authorization code flow uses state, nonce, PKCE, issuer/JWKS/signature/claim validation, asymmetric algorithm allowlisting, short-lived transactions, expiring signed `HttpOnly` cookies, production `Secure` cookies, and overlap-safe session-key rotation. The development bypass is rejected in production. | Require MFA and secure recovery at the IdP, use HTTPS end to end, register exact callbacks, generate a random key of at least 32 characters, and remove the previous key after the grace window—or immediately after suspected compromise. |
+| Application authorization and write integrity | Backend dependencies derive the authenticated actor and role; reviewer-only and team-scoped operations are checked on every route. Assessment writes rebuild permitted fields, reconcile fresh backend state, detect snapshot conflicts, and make reviewer force replacement explicit. | Give reviewer roles sparingly, monitor both DTVP and vendor-side writes, and treat frontend visibility only as guidance. |
+| Workload credentials and rotation | DTVP never forwards browser credentials. Normal backend review and archive import use separate keys; Agentyzer owner and `*` scopes use separate service/admin tokens. Files take precedence over direct values, token comparisons are constant-time, short/duplicate/colliding generations fail, and temporary previous generations are scope-preserving. | Create dedicated least-privilege vendor teams/roles, generate independent secrets, mount them with the production secret profile, rotate with bounded overlap, and keep Git, LLM, signing, registry, and Docker credentials outside unrelated services. |
+| HTTP trust boundary | Production Host allowlists reject wildcards, unsafe methods require an allowed Origin, trusted proxy CIDRs bound forwarded-client-IP use, request IDs are syntax-limited, CORS is explicit, authentication/mutation/expensive-operation quotas are bounded, and nginx adds edge limits plus body and timeout controls. | Terminate TLS at a trusted gateway, configure exact public hosts/origins and only immediate proxy CIDRs, retain normal certificate verification, and add distributed edge quotas before horizontal scaling. |
+| Browser and rendered content | CSP, HSTS in production, clickjacking/MIME/referrer/permissions/opener headers, Vue escaping, DOMPurify's allowlist, HTML-escaped SBOM rendering, no-store sensitive responses, and same-origin runtime configuration constrain browser execution and caching. | Keep TLS and frontend dependencies patched; treat sanitizer or browser compromise as residual risk and do not add inline/runtime-generated script without reviewing CSP. |
+| Files, uploads, archives, and structured input | Settings and multipart bodies have route limits. Archive members are validated before extraction for normalized containment, type, encryption, count, per-member and total bytes, and compression ratio; 7z extraction receives only the validated member list. Import separates preview from reviewer-authorized apply. Pydantic and explicit string/list limits bound analyzer inputs. | Review structurally valid archive previews, keep vendor ingestion quotas, and never relax an outer proxy below the route's required upload size without preserving application limits. |
+| Outbound integrations and SSRF | Provider endpoints are operator configuration; research fetches require HTTPS, public resolved addresses, restricted redirects and content, and bounded time/bytes. Research clones use a public-host allowlist and budgets. Internal and outbound Compose networks are separate, and browser credentials are not propagated. | Approve IdP/backend/vscorer/LLM/Git destinations, constrain DNS and egress to them, account for rebinding/new routes at the network layer, and install private CAs instead of disabling TLS. |
+| LLM and source handling | Repository reads remain inside configured roots, reject links and non-regular files, and enforce per-file/aggregate limits. Git credentials exist only in child environments and persisted remotes are scrubbed. Prompts label source/web/model content as untrusted, deterministic claim checks require evidence, and generated assessments require human review. | Use an approved private or data-governed model, define source retention, restrict the repository volume, discard/re-clone it when required, and assume prompt injection remains possible. |
+| Admission, availability, and retention | nginx and process-local rate limits, bounded executors/semaphores, DTVP and Agentyzer queue capacities, pre-wait per-owner admission, task TTLs, result/job record caps, bounded repository/model work, log rotation, and minimum-free-space checks prevent silent unbounded growth. | Tune limits with production-shaped load tests and monitoring. Large legitimate portfolios remain expensive; process-local quotas are not a distributed denial-of-service control. |
+| Durable state, concurrency, and backend isolation | Atomic owner-only files, transactional SQLite migrations/stores, integrity checks, durable interrupted/retry states, backend-scoped paths and resource references, namespace markers, bounded cache writes, and one exclusive `flock` lease per DTVP/Agentyzer volume protect local integrity. Unsupported adapters remain unavailable. | Run exactly one DTVP process per state volume and one Agentyzer process per repository volume on filesystems with reliable locking. Design shared queues, leases, stores, and quotas before scaling out; migrate backend IDs explicitly. |
+| Audit and diagnostics | Security events record actor, role, request, client IP, action, outcome, and event hashes in owner-only bounded JSONL files. Operational status is sanitized, authenticated, non-cacheable, and exposes detailed audit/storage/quota health only to reviewers. | Forward logs to authenticated immutable retention, alert on audit/storage/readiness failures, protect host clocks and log shipping, and recognize that a host administrator can rewrite local evidence. |
+| Backup and recovery | The manual helper verifies an archive before marking success. The optional scheduler serializes runs, pauses DTVP for consistent state, has no network, and excludes the credential-free disposable repository cache. Backup freshness participates in readiness when configured. | Enable an appropriate backup mechanism, accept Docker-socket host authority only deliberately, encrypt and replicate off-host, define retention, back up the external vulnerability backend separately, and perform restore drills. Arcane snapshots require stopping the project and do not update DTVP's marker automatically. |
+| Containers and networks | Packaged Compose uses non-root application processes, read-only roots, `no-new-privileges`, dropped capabilities, PID/tmpfs/log limits, narrow mounts, health-gated startup, and internal gateway/application/analysis networks with service-specific outbound bridges. Debug ports, archive import, Git export, demos, and the socket-bearing scheduler are opt-in. | Keep the Docker/Arcane host patched and access-controlled, set bind-mount ownership correctly, publish only the gateway or an intentional loopback endpoint, and never treat containers as a tenant boundary against a host administrator. |
+| Build, CI, and release | Python/npm lockfiles, exact uv/tool versions, immutable third-party action and image references, restricted default CI permissions, same-repository PR publishing, provider-parity tests, Bandit/dependency/npm/Trivy gates, generated-contract/OKF/threat-model checks, SBOMs, provenance, PR-only tags, and cosign signing plus immediate verification protect promotion. | Protect trusted runners, registry and signing keys; review dependency updates and pins; verify deployed release signatures by digest; do not promote PR images as stable releases. |
+| Deployment profiles and demos | Production startup rejects missing credentials, insecure callbacks/cookies, wildcard hosts, disabled auth, colliding tokens, unsupported adapters, and unsafe multi-process state. Dependency-Track and mock services live in an isolated demo boundary; Arcane keeps per-service non-secret files and explicit secret mounts. | Never use demo credentials/services as production infrastructure. Pin Arcane images by version or digest, restrict Arcane project/volume access, and review every enabled optional profile as a new trust boundary. |
 
 ## Threat Analysis
 
