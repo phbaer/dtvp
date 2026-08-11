@@ -50,9 +50,13 @@ def test_trusted_pull_requests_publish_only_pr_scoped_images():
     ) in workflow
     assert workflow.count(
         "github.event_name == 'pull_request' && format"
-    ) == 3
+    ) == 4
     assert (
         "format('{0}/{1}/dtvp:pr-{2}', vars.RUNNER_PACKAGE_PUSH_HOST, "
+        "vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number)"
+    ) in workflow
+    assert (
+        "format('{0}/{1}/dtvp:pr-{2}-gil', vars.RUNNER_PACKAGE_PUSH_HOST, "
         "vars.RUNNER_PACKAGE_PUSH_USER, github.event.pull_request.number)"
     ) in workflow
     assert (

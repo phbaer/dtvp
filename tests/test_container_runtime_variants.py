@@ -34,17 +34,19 @@ def test_compose_gil_override_is_an_explicit_fallback():
     assert 'DTVP_REQUIRE_FREE_THREADED: "false"' in override
 
 
-def test_pipeline_publishes_only_the_free_threaded_dtvp_image():
+def test_pipeline_publishes_free_threaded_primary_and_gil_fallback_tags():
     workflow = (ROOT / ".github/workflows/build-publish.yml").read_text(
         encoding="utf-8"
     )
 
-    assert "Build and Push DTVP (free-threaded)" in workflow
+    assert "Build and Push DTVP (free-threaded default)" in workflow
     assert "file: Dockerfile.free-threaded" in workflow
-    assert "Build and Push DTVP (GIL fallback)" not in workflow
-    assert "file: Dockerfile\n" not in workflow
-    assert "-freethreaded" not in workflow
-    assert "-gil" not in workflow
+    assert "dtvp:latest-freethreaded" in workflow
+    assert "dtvp:dev-freethreaded" in workflow
+    assert "Build and Push DTVP (GIL fallback)" in workflow
+    assert "/dtvp:pr-{2}-gil" in workflow
+    assert "dtvp:latest-gil" in workflow
+    assert "dtvp:dev-gil" in workflow
 
 
 def test_image_publication_waits_for_all_test_suites_and_avoids_redundant_setup():

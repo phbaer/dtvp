@@ -1327,8 +1327,9 @@ Release images are signed by immutable digest with cosign. Configure an
 encrypted cosign private key and its password as protected CI secrets named
 `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`, and distribute the corresponding
 `cosign.pub` through a trusted channel. Tag builds fail when either signing
-secret is absent; mutable `dev` and `pr-<number>` images are deliberately not
-signed.
+secret is absent; mutable `dev`, `pr-<number>`, and `pr-<number>-gil` images are
+deliberately not signed. Every push-enabled PR build receives a variant-specific
+tag so the registry operation cannot silently run without a destination.
 Verify a release against its displayed digest, for example:
 
 ```sh
