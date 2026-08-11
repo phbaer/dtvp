@@ -19,6 +19,8 @@ source_paths:
   - deploy/arcane/.env.example
   - deploy/arcane/dtvp.env
   - deploy/arcane/agentyzer.env
+  - deploy/arcane/dtvp-healthcheck.py
+  - deploy/arcane/agentyzer-healthcheck.py
   - demo/dependency-track/compose.yml
   - demo/dependency-track/.env.dist
   - demo/dependency-track/ecosystem.config.js
@@ -144,6 +146,12 @@ Arcane's local-template gallery, manual editor, and repository sync. Its
 `.env.example` follows Arcane's recognized environment-template convention.
 The project deliberately avoids build contexts, nginx companion files, and
 Docker-socket access.
+
+Arcane directory sync or the manual project workspace must retain the two
+versioned `*-healthcheck.py` companion files. Compose mounts each probe
+read-only and invokes it with the Python interpreter already present in the
+corresponding application image; healthcheck logic is therefore reviewable and
+testable without being embedded in YAML.
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |

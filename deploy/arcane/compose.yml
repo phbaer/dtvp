@@ -36,22 +36,12 @@ services:
       - agentyzer_admin_token
     volumes:
       - dtvp-data:/app/data
+      - ./dtvp-healthcheck.py:/app/healthcheck.py:ro
     healthcheck:
       test:
         - CMD
         - /app/.venv/bin/python
-        - -c
-        - |
-          import http.client, os, urllib.parse
-          context = "/" + os.environ.get("DTVP_CONTEXT_PATH", "/").strip("/")
-          context = "" if context == "/" else context
-          frontend = urllib.parse.urlsplit(os.environ["DTVP_FRONTEND_URL"])
-          connection = http.client.HTTPConnection("127.0.0.1", 8000, timeout=5)
-          connection.request("GET", context + "/readyz", headers={"Host": frontend.netloc})
-          response = connection.getresponse()
-          response.read()
-          connection.close()
-          raise SystemExit(0 if response.status == 200 else 1)
+        - /app/healthcheck.py
       interval: 10s
       timeout: 6s
       retries: 12
@@ -92,20 +82,12 @@ services:
     volumes:
       - agentyzer-repos:/app/repos
       - ./repos.yaml:/app/config/repos.yaml:ro
+      - ./agentyzer-healthcheck.py:/app/healthcheck.py:ro
     healthcheck:
       test:
         - CMD
         - /app/.venv/bin/python
-        - -c
-        - |
-          import http.client, os, pathlib
-          token = pathlib.Path(os.environ["AGENTYZER_SERVICE_TOKEN_FILE"]).read_text(encoding="utf-8").strip()
-          connection = http.client.HTTPConnection("127.0.0.1", 8000, timeout=5)
-          connection.request("GET", "/readyz", headers={"Authorization": "Bearer " + token, "X-Agentyzer-Owner": "healthcheck"})
-          response = connection.getresponse()
-          response.read()
-          connection.close()
-          raise SystemExit(0 if response.status == 200 else 1)
+        - /app/healthcheck.py
       interval: 10s
       timeout: 6s
       retries: 12

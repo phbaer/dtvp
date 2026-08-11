@@ -8,6 +8,8 @@ independently operated external system.
 
 - `dtvp.env` contains non-secret DTVP runtime settings.
 - `agentyzer.env` contains non-secret Agentyzer runtime settings.
+- `dtvp-healthcheck.py` and `agentyzer-healthcheck.py` are dependency-free
+  readiness probes mounted read-only into their respective containers.
 - `.env.example` is the Arcane-recognized project environment sample. Copy its
   values into Arcane's Environment Configuration editor; the resulting project
   `.env` contains image/port selectors and secrets only.
@@ -26,19 +28,19 @@ contains the canonical `compose.yml` and `.env.example` filenames. Copy the
 complete directory to `<arcane-data>/templates/dtvp`, open
 **Customization → Templates**, and create the project from the DTVP template.
 Before deploying, review the environment sample, replace every required secret,
-and use the project workspace to confirm that `dtvp.env`, `agentyzer.env`, and
-`repos.yaml` are present. Add those three companion files from this directory if
-the installed Arcane release imported only the Compose and environment-template
-files.
+and use the project workspace to confirm that `dtvp.env`, `agentyzer.env`,
+`repos.yaml`, and both `*-healthcheck.py` files are present. Add those companion
+files from this directory if the installed Arcane release imported only the
+Compose and environment-template files.
 
 ## Manual Arcane project
 
 1. Open **Projects**, choose **Create Project**, and name it `dtvp`.
 2. Paste `compose.yml` into the Compose editor.
-3. Enable **Workspace** and create `dtvp.env`, `agentyzer.env`, and
-   `repos.yaml` from the files in this directory. Adjust the non-secret runtime
-   settings and add repository mappings without credentials or authenticated
-   clone URLs.
+3. Enable **Workspace** and create `dtvp.env`, `agentyzer.env`, `repos.yaml`,
+   `dtvp-healthcheck.py`, and `agentyzer-healthcheck.py` from the files in this
+   directory. Adjust the non-secret runtime settings and add repository
+   mappings without credentials or authenticated clone URLs.
 4. Open **Environment Configuration (.env)**, copy `.env.example`, and replace
    every required secret. Generate independent session/service/admin secrets
    with `openssl rand -hex 32`; do not reuse values across roles.

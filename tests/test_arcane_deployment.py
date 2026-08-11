@@ -39,7 +39,7 @@ def test_arcane_project_separates_durable_and_disposable_state():
     compose = _compose()
     services = compose["services"]
 
-    assert services["dtvp"]["volumes"] == ["dtvp-data:/app/data"]
+    assert "dtvp-data:/app/data" in services["dtvp"]["volumes"]
     assert "agentyzer-repos:/app/repos" in services["agentyzer"]["volumes"]
     assert set(compose["volumes"]) == {"dtvp-data", "agentyzer-repos"}
 
@@ -48,6 +48,32 @@ def test_arcane_project_separates_durable_and_disposable_state():
     assert "`agentyzer-repos`" in readme
     assert "disposable" in readme
     assert "Do not back up `agentyzer-repos`" in readme
+
+
+def test_arcane_healthchecks_are_versioned_read_only_companion_scripts():
+    compose = _compose()
+    services = compose["services"]
+    source = (ARCANE_ROOT / "compose.yml").read_text(encoding="utf-8")
+
+    expected = {
+        "dtvp": "./dtvp-healthcheck.py:/app/healthcheck.py:ro",
+        "agentyzer": "./agentyzer-healthcheck.py:/app/healthcheck.py:ro",
+    }
+    for service_name, mount in expected.items():
+        service = services[service_name]
+        assert mount in service["volumes"]
+        assert service["healthcheck"]["test"] == [
+            "CMD",
+            "/app/.venv/bin/python",
+            "/app/healthcheck.py",
+        ]
+
+        script = ARCANE_ROOT / f"{service_name}-healthcheck.py"
+        assert script.is_file()
+        compile(script.read_text(encoding="utf-8"), str(script), "exec")
+
+    assert "import http.client" not in source
+    assert "- -c" not in source
 
 
 def test_arcane_project_separates_service_environment_and_secret_files():
