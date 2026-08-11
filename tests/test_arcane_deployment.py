@@ -115,7 +115,8 @@ def test_arcane_service_env_files_are_non_secret_and_prefixed():
 
 
 def test_arcane_project_contains_manual_and_git_managed_inputs():
-    assert (ARCANE_ROOT / ".env.dist").is_file()
+    assert (ARCANE_ROOT / ".env.example").is_file()
+    assert not (ARCANE_ROOT / ".env.dist").exists()
     assert (ARCANE_ROOT / "dtvp.env").is_file()
     assert (ARCANE_ROOT / "agentyzer.env").is_file()
     assert yaml.safe_load((ARCANE_ROOT / "repos.yaml").read_text(encoding="utf-8")) == {
@@ -123,9 +124,37 @@ def test_arcane_project_contains_manual_and_git_managed_inputs():
     }
 
     readme = (ARCANE_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "## Local Arcane template" in readme
+    assert "<arcane-data>/templates/dtvp" in readme
     assert "## Manual Arcane project" in readme
     assert "## Git-managed Arcane project" in readme
     assert "deploy/arcane/compose.yml" in readme
+
+
+def test_arcane_environment_sample_covers_compose_interpolation_and_secrets():
+    compose = _compose()
+    sample_names = _env_names(".env.example")
+    secret_environment_names = {
+        definition["environment"] for definition in compose["secrets"].values()
+    }
+
+    assert {
+        "DTVP_IMAGE",
+        "AGENTYZER_IMAGE",
+        "DTVP_HTTP_BIND_ADDRESS",
+        "DTVP_HTTP_PORT",
+    }.issubset(sample_names)
+    assert secret_environment_names == {
+        "DTVP_VULNERABILITY_BACKEND_API_KEY",
+        "DTVP_VULNERABILITY_BACKEND_IMPORT_API_KEY",
+        "DTVP_SESSION_SECRET_KEY",
+        "DTVP_SESSION_PREVIOUS_SECRET_KEY",
+        "DTVP_OIDC_CLIENT_SECRET",
+        "AGENTYZER_SERVICE_TOKEN",
+        "AGENTYZER_ADMIN_TOKEN",
+        "AGENTYZER_OPENWEBUI_API_KEY",
+    }
+    assert secret_environment_names.issubset(sample_names)
 
 
 def test_packaged_compose_uses_canonical_agentyzer_environment_names():

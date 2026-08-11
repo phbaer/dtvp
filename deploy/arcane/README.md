@@ -8,14 +8,28 @@ independently operated external system.
 
 - `dtvp.env` contains non-secret DTVP runtime settings.
 - `agentyzer.env` contains non-secret Agentyzer runtime settings.
-- Arcane's project `.env`, initialized from `.env.dist`, contains image/port
-  selectors and secrets only.
+- `.env.example` is the Arcane-recognized project environment sample. Copy its
+  values into Arcane's Environment Configuration editor; the resulting project
+  `.env` contains image/port selectors and secrets only.
 
 The project has two named volumes:
 
 - `dtvp-data` is durable DTVP-owned state and must be backed up.
 - `agentyzer-repos` contains cloned repositories, worktrees, and local job
   state. It is disposable and must not be included in DTVP backups.
+
+## Local Arcane template
+
+Arcane recognizes this directory under its documented
+[local-template convention](https://getarcane.app/docs/templates) because it
+contains the canonical `compose.yml` and `.env.example` filenames. Copy the
+complete directory to `<arcane-data>/templates/dtvp`, open
+**Customization → Templates**, and create the project from the DTVP template.
+Before deploying, review the environment sample, replace every required secret,
+and use the project workspace to confirm that `dtvp.env`, `agentyzer.env`, and
+`repos.yaml` are present. Add those three companion files from this directory if
+the installed Arcane release imported only the Compose and environment-template
+files.
 
 ## Manual Arcane project
 
@@ -25,7 +39,7 @@ The project has two named volumes:
    `repos.yaml` from the files in this directory. Adjust the non-secret runtime
    settings and add repository mappings without credentials or authenticated
    clone URLs.
-4. Open **Environment Configuration (.env)**, copy `.env.dist`, and replace
+4. Open **Environment Configuration (.env)**, copy `.env.example`, and replace
    every required secret. Generate independent session/service/admin secrets
    with `openssl rand -hex 32`; do not reuse values across roles.
 5. Add the DTVP image registry to Arcane first if it requires authentication,
@@ -46,7 +60,7 @@ direct network exposure.
    project is already running.
 5. Maintain non-secret deployment settings in `dtvp.env` and `agentyzer.env`
    on the deployment branch. Edit the project `.env` in Arcane and copy the
-   secret values from `.env.dist`. Arcane keeps this file editable and outside
+   secret values from `.env.example`. Arcane keeps this file editable and outside
    the read-only Git workspace, so secrets do not need to be committed.
 
 For reproducible Git-managed releases, replace the default `:latest` image

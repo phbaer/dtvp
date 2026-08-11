@@ -16,7 +16,7 @@ source_paths:
   - compose.yml
   - .env.dist
   - deploy/arcane/compose.yml
-  - deploy/arcane/.env.dist
+  - deploy/arcane/.env.example
   - deploy/arcane/dtvp.env
   - deploy/arcane/agentyzer.env
   - demo/dependency-track/compose.yml
@@ -139,9 +139,11 @@ and is intentionally excluded.
 
 ## Arcane Deployment
 
-`deploy/arcane/compose.yml` is an image-only Compose project suitable for both
-Arcane's manual editor and repository sync. It deliberately avoids build
-contexts, nginx companion files, and Docker-socket access.
+`deploy/arcane/compose.yml` is an image-only Compose project suitable for
+Arcane's local-template gallery, manual editor, and repository sync. Its
+`.env.example` follows Arcane's recognized environment-template convention.
+The project deliberately avoids build contexts, nginx companion files, and
+Docker-socket access.
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |

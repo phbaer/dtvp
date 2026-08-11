@@ -943,8 +943,9 @@ credentials, networks, volumes, and nginx routes are not part of the default
 stack.
 
 For image-only deployment through Arcane, use the self-contained
-[`deploy/arcane/`](deploy/arcane/README.md) project. The same Compose file can
-be pasted into a manually managed Arcane project or selected at
+[`deploy/arcane/`](deploy/arcane/README.md) sample. Its canonical `compose.yml`
+and `.env.example` work with Arcane's local-template convention; the Compose
+file can also be pasted into a manually managed project or selected at
 `deploy/arcane/compose.yml` for Git sync. Arcane retains an editable project
 environment outside the read-only Git workspace for secrets, while
 service-specific non-secret settings remain separately versioned.

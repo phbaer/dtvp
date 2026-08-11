@@ -41,7 +41,7 @@ TMRescore and code analysis are optional integrations.
 | `frontend/` | Vue 3, Vite, and Tailwind single-page application |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `demo/dependency-track/` | Optional, isolated Dependency-Track demonstration deployment and local mock runtime |
-| `deploy/arcane/` | Image-only Arcane project for manual or Git-managed deployment |
+| `deploy/arcane/` | Image-only Arcane template/project for local, manual, or Git-managed deployment |
 | `threatmodel/` | Executable OWASP pytm model and findings-report template for DTVP and Agentyzer |
 | `tests/` | Backend pytest suite |
 | `data/` | Local configuration, cache data, mappings, rules, and archives |
@@ -80,9 +80,11 @@ explicitly privileged operator component and is not enabled by default.
 
 The Arcane deployment is a separate image-only topology. It publishes DTVP
 directly, stores DTVP state in an Arcane-managed named volume, and keeps
-Agentyzer clones/jobs in a second disposable volume. Its Compose project can be
-pasted manually or synced from Git; Arcane owns the deployment `.env`, while
-the repository owns the service-specific non-secret environment files.
+Agentyzer clones/jobs in a second disposable volume. Its canonical
+`compose.yml` and `.env.example` can seed Arcane's local template gallery, the
+Compose project can be pasted manually or synced from Git, and Arcane owns the
+deployment `.env` while the repository owns the service-specific non-secret
+environment files.
 
 ## Knowledge Map
 
