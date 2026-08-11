@@ -915,6 +915,16 @@ cp .env.dist .env
 docker compose -f compose.yml -f compose.secrets.yml up -d
 ```
 
+Existing instances need a state-aware migration: current root Compose no longer
+owns Dependency-Track or PostgreSQL, production secrets move to file mounts,
+and the backend instance ID controls every local state namespace. Preserve the
+complete DTVP data and vendor database backups; map legacy `DTVP_DT_*` settings
+to `DTVP_VULNERABILITY_BACKEND_*`; use backend ID `dependency-track` and retain
+the old `data/dt_cache` path on the first upgrade; create distinct Agentyzer
+service/admin tokens; and fix `./data` ownership for the non-root runtime. Follow
+the full [change summary, migration, verification, and rollback guide](docs/upgrade.md)
+before replacing a running stack.
+
 The base file keeps direct environment-value support for local compatibility.
 Production deployments should include `compose.secrets.yml`; it converts the
 selected backend API key, session key, OIDC client secret, both analyzer
