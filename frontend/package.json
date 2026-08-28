@@ -38,7 +38,7 @@
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "flush-promises": "^1.0.2",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.1.4",
     "vitest": "^4.1.10",
