@@ -43,6 +43,7 @@ vi.mock('lucide-vue-next', () => ({
     ClipboardList: { template: '<span />' },
     Bot: { template: '<span />' },
     Tags: { template: '<span />' },
+    Trash2: { template: '<span />' },
     X: { template: '<span />' }
 }))
 

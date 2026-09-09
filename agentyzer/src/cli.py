@@ -326,6 +326,21 @@ def _print_assessment(data: dict) -> None:
         f"\n{color_start}{icon} {verdict}{color_end}  (confidence: {confidence}, exposure: {exposure})"
     )
 
+    executive_summary = a.get("executive_summary") or {}
+    if executive_summary:
+        print("\n  Executive summary:")
+        vulnerability = executive_summary.get("vulnerability")
+        assessment = executive_summary.get("assessment")
+        if vulnerability:
+            print(f"    Vulnerability: {vulnerability}")
+        if assessment:
+            print(f"    Assessment: {assessment}")
+        why = executive_summary.get("why") or []
+        if why:
+            print("    Decision rationale:")
+            for reason in why:
+                print(f"      - {reason}")
+
     advisory_relevance = a.get("advisory_relevance")
     if advisory_relevance:
         decision = (
@@ -333,10 +348,16 @@ def _print_assessment(data: dict) -> None:
         )
         source = advisory_relevance.get("source", "rules")
         print(f"  Advisory filter: {decision} ({source})")
-        for reason in advisory_relevance.get("reasons", [])[:2]:
+        for reason in advisory_relevance.get("reasons", []):
             print(f"    • {reason}")
 
     version_analysis = a.get("version_analysis") or {}
+    covered_product_versions = version_analysis.get("covered_product_versions", [])
+    if covered_product_versions:
+        print(
+            "  Product versions covered: "
+            + ", ".join(str(version) for version in covered_product_versions)
+        )
     if version_analysis.get("detected_version"):
         src = version_analysis.get("version_source", "unknown")
         affected_label = (
@@ -350,7 +371,7 @@ def _print_assessment(data: dict) -> None:
             print(f"    • {note}")
     checked_versions = version_analysis.get("checked_versions", [])
     if checked_versions:
-        print("    Project versions analyzed:")
+        print("    Dependency versions checked by repository ref:")
         for item in checked_versions:
             ref = item.get("ref") or "?"
             ref_type = item.get("ref_type") or "?"

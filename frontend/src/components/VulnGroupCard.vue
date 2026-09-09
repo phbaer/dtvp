@@ -6,13 +6,13 @@ import { marked } from 'marked'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, getConsensusAssessment, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
-import { buildCodeAnalysisGlobalReferenceDraft, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
+import { buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { getDerivedGroupTags } from '../lib/dependency-team-selection'
 import { buildTeamAliasGroups } from '../lib/team-mapping'
@@ -230,6 +230,7 @@ const rawDetailsTouched = ref(false)
 const evidenceReviewed = ref(false)
 const versionCoverageChecked = ref(false)
 const ticketReference = ref('')
+const assessmentTicketCopyState = ref<'idle' | 'copied' | 'error'>('idle')
 
 // Assignee state
 const currentAssigned = ref<string[]>([])
@@ -323,6 +324,7 @@ const cvssInstance = ref<any>(null)
 const isManualBaseMode = ref(false)
 const initialVector = ref('')
 const initialScore = ref<number | null>(null)
+const isDerivedCvssScoreUpdate = ref(false)
 
 const reviewModal = ref({
     show: false,
@@ -459,6 +461,11 @@ const dependencyInfo = useVulnDependencyInfo({
     refreshCounter,
     teamFilter: computed(() => props.activeTeamFilter || ''),
 })
+const unscopedDependencyInfo = useVulnDependencyInfo({
+    group: computed(() => props.group),
+    teamMapping,
+    refreshCounter,
+})
 
 const allInstances = dependencyInfo.allInstances
 const visibleInstances = dependencyInfo.visibleInstances
@@ -498,11 +505,6 @@ const assessmentSyncIssues = computed(() => getGroupAssessmentSyncIssues(props.g
 
 const technicalState = computed(() => {
     return getGroupTechnicalState(props.group)
-})
-
-const consensusButtonLabel = computed(() => {
-    return displayState.value === 'INCOMPLETE' ? 'Sync all' : 'Apply worst assessment'
-
 })
 
 const isPendingReview = computed(() => {
@@ -1298,9 +1300,26 @@ const clearVector = () => {
 watch(pendingVector, (newVector) => {
     const score = calculateScoreFromVector(newVector)
     if (score !== null) {
-        pendingScore.value = score
+        isDerivedCvssScoreUpdate.value = true
+        try {
+            pendingScore.value = score
+        } finally {
+            isDerivedCvssScoreUpdate.value = false
+        }
     }
 })
+
+watch(pendingVector, (newVector, oldVector) => {
+    if (!isInternalUpdate.value && newVector !== oldVector) {
+        formTouched.value = true
+    }
+}, { flush: 'sync' })
+
+watch(pendingScore, (newScore, oldScore) => {
+    if (!isInternalUpdate.value && !isDerivedCvssScoreUpdate.value && newScore !== oldScore) {
+        formTouched.value = true
+    }
+}, { flush: 'sync' })
 
 const mergedAssessmentData = computed(() => {
     return buildMergedAssessmentData(allInstances.value, refreshCounter.value)
@@ -1460,7 +1479,9 @@ const updateFormFromGroup = (force = true) => {
     }
 }
 
-const applyConsensusAssessment = () => {
+const syncAllAssessments = () => {
+    if (displayState.value !== 'INCOMPLETE') return
+
     const allBlocks = mergedAssessmentData.value.blocks
 
     if (allBlocks.length === 0) {
@@ -1470,15 +1491,15 @@ const applyConsensusAssessment = () => {
 
     const { dtStates, dtJustification } = resolveDependencyTrackConsensusInput(allInstances.value)
 
-    const consensus = getConsensusAssessment(allBlocks, displayState.value as string, dtStates, dtJustification)
-    state.value = consensus.state
-    justification.value = consensus.justification
-    details.value = consensus.details
+    const syncDraft = getAssessmentSyncDraft(allBlocks, dtStates, dtJustification)
+    state.value = syncDraft.state
+    justification.value = syncDraft.justification
+    details.value = syncDraft.details
 
     // Always trigger a rescore for the resolved state, even if state.value
     // didn't change (the watcher's newState !== oldState guard would skip it).
     if (isReviewer.value) {
-        applyStateRescore(consensus.state)
+        applyStateRescore(syncDraft.state)
     }
 }
 
@@ -1504,7 +1525,7 @@ const handleApplyAllAssessment = async (assessmentDetails: string, assessmentSta
     formTouched.value = true
 
     // Explicitly trigger rescore — the watch(state) guard may skip it when
-    // the state value hasn't changed (same pattern as applyConsensusAssessment).
+    // the state value hasn't changed (same pattern as syncAllAssessments).
     if (isReviewer.value) {
         applyStateRescore(state.value)
     }
@@ -1532,12 +1553,13 @@ const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
     details.value = stripPendingReviewStatus(block.details || '').trim()
     formTouched.value = true
 
-    // Same as applyConsensusAssessment: the adopted state owns the rescore even
+    // Same as syncAllAssessments: the adopted state owns the rescore even
     // when the global assessment already carried it.
     applyRescoreRulesForState(state.value)
 }
 
 watch(selectedTeam, (_newTeam, oldTeam) => {
+    assessmentTicketCopyState.value = 'idle'
     // Persist current tab's form edits before switching away
     if (oldTeam !== undefined && formTouched.value) {
         const draftKey = oldTeam || 'General'
@@ -1616,7 +1638,7 @@ watch(expanded, (isOpen) => {
 })
 /**
  * Applies the configured rescore rules for a given state.
- * Extracted so it can be triggered explicitly (e.g. from applyConsensusAssessment)
+ * Extracted so it can be triggered explicitly (e.g. from syncAllAssessments)
  * without relying solely on the watch(state) guard.
  */
 const applyStateRescore = (targetState: string) => {
@@ -1659,7 +1681,7 @@ const syncRescoreRules = () => {
 watch(state, (newState, oldState) => {
     // Only auto-rescore if we're changing states via user interaction.
     // We check `loadingDetails` to avoid rescoring during the initial data load.
-    // Note: applyConsensusAssessment calls applyStateRescore() directly to
+    // Note: syncAllAssessments calls applyStateRescore() directly to
     // bypass the newState !== oldState guard when syncing.
     if (!loadingDetails.value && !updating.value && newState !== oldState && isReviewer.value) {
         applyStateRescore(newState)
@@ -2098,14 +2120,84 @@ const selectedAutomaticProposalRuns = computed(() => {
         && component.tag.toLocaleLowerCase() === teamKey
     )))
 })
-const selectedAutomaticProposalSummary = computed(() => selectedAutomaticProposalRuns.value
-    .map(run => `${run.component}: ${run.result.assessment.summary}`)
-    .filter(Boolean)
-    .join(' '))
+const selectedAutomaticProposalSummary = computed(() => {
+    const runs = selectedAutomaticProposalRuns.value
+    const worstRun = runs.find(run => codeAnalysisAssessmentState(run.result) === selectedAutomaticProposal.value?.state)
+        || runs[0]
+    if (!worstRun) return ''
+    const summary = worstRun.result.assessment.executive_summary?.assessment
+        || worstRun.result.assessment.summary
+    const coverage = runs.length > 1 ? ` (${runs.length} targets; worst result shown)` : ''
+    return `${worstRun.component}: ${summary}${coverage}`
+})
 const selectedAutomaticProposalRationale = computed(() => selectedAutomaticProposalRuns.value
-    .map(run => `${run.component}: ${run.result.assessment.reasoning || run.result.assessment.summary}`)
+    .map(run => run.result.assessment.executive_summary
+        ? ''
+        : `${run.component}: ${run.result.assessment.reasoning || run.result.assessment.summary}`)
     .filter(Boolean)
     .join(' '))
+const assessmentComponentsByTeam = computed(() => {
+    const componentsByTeam = new Map<string, string[]>()
+    for (const component of unscopedDependencyInfo.triggeringTaggedComponents.value) {
+        const teamKey = component.tag.toLocaleLowerCase()
+        const components = componentsByTeam.get(teamKey) || []
+        if (!components.some(name => name.toLocaleLowerCase() === component.name.toLocaleLowerCase())) {
+            components.push(component.name)
+        }
+        componentsByTeam.set(teamKey, components)
+    }
+    return componentsByTeam
+})
+const selectedAssessmentTeamComponents = computed(() => (
+    selectedTeam.value
+        ? assessmentComponentsByTeam.value.get(selectedTeam.value.toLocaleLowerCase()) || []
+        : []
+))
+const stringifyAssessmentTicketValue = (value: unknown): string => {
+    if (value == null || value === '') return ''
+    if (typeof value === 'string') return value.trim()
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+    try {
+        return JSON.stringify(value)
+    } catch {
+        return String(value)
+    }
+}
+const selectedTeamTicketText = computed(() => {
+    const ticketTexts = selectedAutomaticProposalRuns.value
+        .map(run => stringifyAssessmentTicketValue(run.result.assessment.ticket_text))
+        .filter(Boolean)
+    return [...new Set(ticketTexts)].join('\n\n---\n\n')
+})
+const copyTextWithFallback = (text: string) => {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', 'true')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    if (!copied) throw new Error('Clipboard copy was not accepted by the browser.')
+}
+const copySelectedTeamTicket = async () => {
+    if (!selectedTeamTicketText.value) return
+    assessmentTicketCopyState.value = 'idle'
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(selectedTeamTicketText.value)
+        } else {
+            copyTextWithFallback(selectedTeamTicketText.value)
+        }
+        assessmentTicketCopyState.value = 'copied'
+        globalThis.setTimeout(() => {
+            if (assessmentTicketCopyState.value === 'copied') assessmentTicketCopyState.value = 'idle'
+        }, 2000)
+    } catch {
+        assessmentTicketCopyState.value = 'error'
+    }
+}
 
 type EffectiveTeamAssessment = {
     team: string
@@ -2456,10 +2548,15 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
         dtvp_results: results.filter(result => result.status === 'success'),
     })
 
-    pendingScore.value = null
-    pendingVector.value = savedResult.nextPendingVector
-    initialVector.value = savedResult.nextInitialVector
-    initialScore.value = savedResult.nextInitialScore
+    isInternalUpdate.value = true
+    try {
+        initialVector.value = savedResult.nextInitialVector
+        initialScore.value = savedResult.nextInitialScore
+        pendingVector.value = savedResult.nextPendingVector
+        pendingScore.value = savedResult.nextInitialScore
+    } finally {
+        isInternalUpdate.value = false
+    }
     isManualBaseMode.value = false
     lastRescoredScore.value = savedResult.nextLastRescoredScore
     showConflictModal.value = false
@@ -2892,7 +2989,7 @@ const teamBlockStateColor = (state?: string): string => {
                 :componentTeams="codeAnalysisComponentTeams"
                 :teamScope="activeTeamScope"
                 :teamScopeAliases="activeTeamScopeAliases"
-                :affectedProductVersions="sortedAffectedProjectVersions"
+                :projectVersions="sortedAffectedProjectVersions"
                 :assessedTeams="assessedTeams"
                 :analysisGuidance="codeAnalysisGuidance"
                 :currentState="state"
@@ -3013,6 +3110,26 @@ const teamBlockStateColor = (state?: string): string => {
                             </button>
                         </div>
 
+                        <div
+                            v-if="selectedTeam"
+                            data-testid="assessment-team-components"
+                            class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]"
+                        >
+                            <span class="font-semibold uppercase tracking-wide text-gray-500">
+                                {{ selectedAssessmentTeamComponents.length === 1 ? 'Component' : 'Components' }} for {{ selectedTeam }}:
+                            </span>
+                            <span
+                                v-for="component in selectedAssessmentTeamComponents"
+                                :key="component"
+                                class="rounded border border-blue-800/60 bg-blue-950/30 px-1.5 py-0.5 font-mono text-blue-200"
+                            >
+                                {{ component }}
+                            </span>
+                            <span v-if="selectedAssessmentTeamComponents.length === 0" class="text-amber-300">
+                                No mapped component
+                            </span>
+                        </div>
+
                         <!-- Block header metadata (read-only) -->
                         <div v-if="teamBlockMeta(selectedTeam || 'General')" class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-gray-500">
                             <span v-if="teamBlockMeta(selectedTeam || 'General')!.user && teamBlockMeta(selectedTeam || 'General')!.user !== 'Unknown'">
@@ -3072,7 +3189,31 @@ const teamBlockStateColor = (state?: string): string => {
                         step="Assessment · 2"
                         title="Decision & rationale"
                         description="Set the assessment state, justification, technical rationale, ownership, and any reviewer-only rescoring context."
+                        data-testid="assessment-decision-section"
                     >
+                    <template #actions>
+                        <div class="flex shrink-0 items-center gap-2" data-testid="assessment-decision-actions">
+                            <button
+                                type="button"
+                                @click="() => handleUpdate(false)"
+                                :disabled="!canApplyAssessment"
+                                data-testid="assessment-submit-button"
+                                class="rounded bg-blue-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {{ assessmentActionLabel }}
+                            </button>
+                            <button
+                                type="button"
+                                @click="refreshDetails"
+                                :disabled="updating || loadingDetails"
+                                class="rounded border border-gray-600 bg-gray-800 px-3 py-2 text-gray-300 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                title="Reload from server (discard local changes)"
+                                aria-label="Reload assessment from server"
+                            >
+                                <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
+                            </button>
+                        </div>
+                    </template>
                     <div
                         v-if="selectedTeam && selectedAutomaticProposal"
                         data-testid="automatic-assessment-proposal"
@@ -3097,14 +3238,30 @@ const teamBlockStateColor = (state?: string): string => {
                                         : 'Until the team saves an assessment, reviewers use this proposal as the team fallback.' }}
                                 </p>
                             </div>
-                            <button
-                                type="button"
-                                data-testid="use-automatic-assessment-proposal"
-                                class="shrink-0 rounded bg-cyan-700/80 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-cyan-600"
-                                @click="applySelectedAutomaticProposal"
-                            >
-                                Use proposal
-                            </button>
+                            <div class="flex shrink-0 flex-wrap items-center gap-2">
+                                <button
+                                    v-if="selectedTeamTicketText"
+                                    type="button"
+                                    data-testid="copy-team-ticket"
+                                    class="rounded border border-cyan-700/70 bg-cyan-950/40 px-2.5 py-1.5 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900/60"
+                                    :class="assessmentTicketCopyState === 'error' ? 'border-amber-600/80 text-amber-200' : ''"
+                                    @click="copySelectedTeamTicket"
+                                >
+                                    {{ assessmentTicketCopyState === 'copied'
+                                        ? 'Ticket copied'
+                                        : assessmentTicketCopyState === 'error'
+                                            ? 'Copy failed'
+                                            : 'Copy ticket' }}
+                                </button>
+                                <button
+                                    type="button"
+                                    data-testid="use-automatic-assessment-proposal"
+                                    class="rounded bg-cyan-700/80 px-2.5 py-1.5 text-[10px] font-bold text-white hover:bg-cyan-600"
+                                    @click="applySelectedAutomaticProposal"
+                                >
+                                    Use proposal
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div :class="isReviewer && !selectedTeam ? 'grid items-start gap-4 xl:grid-cols-2' : ''">
@@ -3179,7 +3336,7 @@ const teamBlockStateColor = (state?: string): string => {
                                     <label for="cvss-score-input" class="block text-xs font-semibold text-gray-500">Score</label>
                                     <input
                                         id="cvss-score-input"
-                                        v-model="pendingScore"
+                                        v-model.number="pendingScore"
                                         type="number"
                                         :readonly="!canEditBase"
                                         step="0.1"
@@ -3436,7 +3593,10 @@ const teamBlockStateColor = (state?: string): string => {
                         <label :for="`suppress-${group.id}`" class="text-sm">Suppress this vulnerability</label>
                     </div>
 
-                    <div v-if="isReviewer && !selectedTeam && mergedAssessmentData.blocks.length > 0" class="pt-2 border-t border-gray-700 mt-2">
+                    <div
+                        v-if="isReviewer && !selectedTeam && mergedAssessmentData.blocks.length > 0 && (assessmentSyncIssues.length > 0 || displayState === 'INCOMPLETE')"
+                        class="pt-2 border-t border-gray-700 mt-2"
+                    >
                         <div
                             v-if="assessmentSyncIssues.length > 0"
                             data-testid="assessment-sync-reasons"
@@ -3449,7 +3609,9 @@ const teamBlockStateColor = (state?: string): string => {
                                 class="mb-1.5 text-[10px] font-black uppercase tracking-widest"
                                 :class="displayState === 'INCONSISTENT' ? 'text-indigo-300' : 'text-amber-400'"
                             >
-                                Why synchronization is needed
+                                {{ displayState === 'INCONSISTENT'
+                                    ? 'Why manual resolution is needed'
+                                    : 'Why synchronization is needed' }}
                             </div>
                             <div
                                 v-for="issue in assessmentSyncIssues"
@@ -3465,33 +3627,16 @@ const teamBlockStateColor = (state?: string): string => {
                             </div>
                         </div>
                         <button
-                            @click="applyConsensusAssessment"
+                            v-if="displayState === 'INCOMPLETE'"
+                            data-testid="sync-all-assessments"
+                            @click="syncAllAssessments"
                             class="w-full mb-2 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-500 border border-yellow-600/50 font-bold py-1.5 rounded text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
                         >
                             <AlertTriangle :size="14" />
-                            {{ consensusButtonLabel }}
+                            Sync all
                         </button>
                     </div>
                     </DetailSection>
-
-                    <div class="flex gap-2 rounded-lg border border-gray-700/70 bg-gray-900/45 p-3">
-                        <button
-                            @click="() => handleUpdate(false)"
-                            :disabled="!canApplyAssessment"
-                            data-testid="assessment-submit-button"
-                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded transition-colors disabled:opacity-50 cursor-pointer"
-                        >
-                            {{ assessmentActionLabel }}
-                        </button>
-                        <button
-                            @click="refreshDetails"
-                            :disabled="updating || loadingDetails"
-                            class="px-3 py-2 rounded border border-gray-600 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-50 cursor-pointer"
-                            title="Reload from server (discard local changes)"
-                        >
-                            <RefreshCw :size="14" :class="{ 'animate-spin': loadingDetails }" />
-                        </button>
-                    </div>
             </div>
         </section>
 

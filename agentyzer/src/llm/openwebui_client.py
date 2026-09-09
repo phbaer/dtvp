@@ -30,18 +30,26 @@ logger = logging.getLogger(__name__)
 _MAX_LOG_CHARS = 800
 _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 _TOOL_CALL_MODES = {"auto", "off"}
-_TOKEN_ESTIMATE_CHARS = 3
+_TOKEN_ESTIMATE_CHARS = 2
 _CONTEXT_SAFETY_MARGIN = 256
 _CONTEXT_RETRIES = 2
 _MIN_COMPLETION_TOKENS = 256
 _TRUNCATION_MARKER = (
     "\n\n...[truncated by Agentyzer to fit OpenWebUI context budget]...\n\n"
 )
-_CONTEXT_ERROR_RE = re.compile(
-    r"maximum context length is\s+(?P<max>\d+)\s+tokens.*?"
-    r"requested\s+(?P<requested>\d+)\s+output tokens.*?"
-    r"prompt contains at least\s+(?P<input>\d+)\s+input tokens",
-    re.IGNORECASE | re.DOTALL,
+_CONTEXT_ERROR_PATTERNS = (
+    re.compile(
+        r"maximum context length is\s+(?P<max>\d+)\s+tokens.*?"
+        r"requested\s+(?P<requested>\d+)\s+output tokens.*?"
+        r"prompt contains at least\s+(?P<input>\d+)\s+input tokens",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"request\s*\(\s*(?P<input>\d+)\s+tokens?\s*\)\s+exceeds\s+"
+        r"(?:the\s+)?available context size\s*"
+        r"\(\s*(?P<max>\d+)\s+tokens?\s*\)",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 
@@ -180,7 +188,12 @@ def _fit_payload_messages_to_input_budget(
         return []
 
     notes: list[str] = []
-    current_tokens = exact_input_tokens or _estimate_payload_input_tokens(payload)
+    exact_count = exact_input_tokens is not None
+    current_tokens = (
+        exact_input_tokens
+        if exact_input_tokens is not None
+        else _estimate_payload_input_tokens(payload)
+    )
     for _ in range(8):
         if current_tokens <= max_input_tokens:
             break
@@ -190,6 +203,7 @@ def _fit_payload_messages_to_input_budget(
             notes.append("context budget exceeded but no truncatable message was found")
             break
 
+        estimated_before = _estimate_payload_input_tokens(payload)
         message = dict(messages[index])
         content = str(message.get("content") or "")
         overage_tokens = max(1, current_tokens - max_input_tokens)
@@ -212,7 +226,12 @@ def _fit_payload_messages_to_input_budget(
             f"{message.get('role', 'message')} message {index} "
             f"from {len(content)} to {len(truncated)} chars"
         )
-        current_tokens = _estimate_payload_input_tokens(payload)
+        estimated_after = _estimate_payload_input_tokens(payload)
+        if exact_count:
+            estimated_removed = max(1, estimated_before - estimated_after)
+            current_tokens = max(0, current_tokens - estimated_removed)
+        else:
+            current_tokens = estimated_after
 
     return notes
 
@@ -229,10 +248,11 @@ def _apply_preflight_context_budget(
 
     notes: list[str] = []
     desired_completion = int(payload.get("max_tokens") or min_completion_tokens)
-    target_input_tokens = (
+    target_input_tokens = max(
+        1,
         context_window_tokens
-        - max(min_completion_tokens, 1)
-        - max(safety_margin_tokens, 0)
+        - max(desired_completion, min_completion_tokens, 1)
+        - max(safety_margin_tokens, 0),
     )
     notes.extend(
         _fit_payload_messages_to_input_budget(payload, target_input_tokens)
@@ -255,17 +275,20 @@ def _apply_preflight_context_budget(
 
 
 def _parse_context_length_error(reason: str) -> dict[str, int] | None:
-    match = _CONTEXT_ERROR_RE.search(reason or "")
-    if not match:
-        return None
-    try:
-        return {
-            "max_context_tokens": int(match.group("max")),
-            "requested_output_tokens": int(match.group("requested")),
-            "input_tokens": int(match.group("input")),
-        }
-    except (TypeError, ValueError):
-        return None
+    for pattern in _CONTEXT_ERROR_PATTERNS:
+        match = pattern.search(reason or "")
+        if not match:
+            continue
+        try:
+            groups = match.groupdict()
+            return {
+                "max_context_tokens": int(groups["max"]),
+                "requested_output_tokens": int(groups.get("requested") or 0),
+                "input_tokens": int(groups["input"]),
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
 
 
 def _adapt_payload_after_context_error(
@@ -293,7 +316,7 @@ def _adapt_payload_after_context_error(
                 "after OpenWebUI context-length rejection"
             ]
 
-    target_input_tokens = max_context - min_completion - safety
+    target_input_tokens = max(1, max_context - min_completion - safety)
     notes = _fit_payload_messages_to_input_budget(
         payload,
         target_input_tokens,
@@ -783,6 +806,18 @@ class OpenWebUIClient(LLMClient):
                             break
                     except OpenWebUIContextLengthError as e:
                         self.last_error = str(e)
+                        if e.max_context_tokens:
+                            self.context_window_tokens = min(
+                                value
+                                for value in (
+                                    self.context_window_tokens,
+                                    e.max_context_tokens,
+                                )
+                                if value
+                            )
+                            trace_entry["request"][
+                                "context_window_tokens"
+                            ] = self.context_window_tokens
                         if context_retry_count < max_context_retries:
                             adaptations = _adapt_payload_after_context_error(
                                 payload,

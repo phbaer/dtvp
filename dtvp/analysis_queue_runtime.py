@@ -367,6 +367,16 @@ class AnalysisQueue:
                 and queue_id not in self._hidden_order_ids
             ]
 
+    def list_all_for_cleanup(self) -> list[AnalysisQueueItem]:
+        """Return every queue record, including hidden cancelled entries."""
+        with self._lock:
+            self._refresh_positions_locked()
+            return [
+                self._items[queue_id]
+                for queue_id in self._order
+                if queue_id in self._items
+            ]
+
     def list_page(
         self,
         *,

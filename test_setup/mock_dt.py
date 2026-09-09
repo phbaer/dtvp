@@ -1,15 +1,75 @@
+import base64
+import hashlib
+import hmac
 import json
 import time
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode
 
 import uvicorn
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from jose import jwt
 from pydantic import BaseModel
 
 app = FastAPI()
+oidc_authorization_codes: dict[str, dict[str, str]] = {}
+_PKCE_VERIFIER_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+)
+_OIDC_SIGNING_KEY_ID = "mock-oidc-signing-key"
+_OIDC_SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _base64url_uint(value: int) -> str:
+    raw = value.to_bytes((value.bit_length() + 7) // 8, "big")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+_OIDC_PUBLIC_NUMBERS = _OIDC_SIGNING_KEY.public_key().public_numbers()
+_OIDC_PUBLIC_JWK = {
+    "kty": "RSA",
+    "kid": _OIDC_SIGNING_KEY_ID,
+    "use": "sig",
+    "alg": "RS256",
+    "n": _base64url_uint(_OIDC_PUBLIC_NUMBERS.n),
+    "e": _base64url_uint(_OIDC_PUBLIC_NUMBERS.e),
+}
+
+
+def _pkce_code_challenge(code_verifier: str) -> str:
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def _valid_pkce_code_verifier(code_verifier: str) -> bool:
+    return 43 <= len(code_verifier) <= 128 and all(
+        character in _PKCE_VERIFIER_CHARACTERS for character in code_verifier
+    )
+
+
+def create_mock_oidc_id_token(
+    *, username: str, issuer: str, audience: str, nonce: str
+) -> str:
+    now = int(time.time())
+    return jwt.encode(
+        {
+            "iss": issuer,
+            "sub": username,
+            "aud": audience,
+            "preferred_username": username,
+            "name": username.capitalize(),
+            "nonce": nonce,
+            "exp": now + 3600,
+            "iat": now,
+        },
+        _OIDC_SIGNING_KEY,
+        algorithm="RS256",
+        headers={"kid": _OIDC_SIGNING_KEY_ID},
+    )
 
 
 def check_auth(request: Request):
@@ -1208,14 +1268,16 @@ def openid_configuration(request: Request):
         "token_endpoint": f"{base_url}/auth/token",
         "userinfo_endpoint": f"{base_url}/auth/userinfo",
         "jwks_uri": f"{base_url}/auth/jwks",
-        "response_types_supported": ["code", "id_token"],
+        "response_types_supported": ["code"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["RS256"],
         "scopes_supported": ["openid", "profile", "email"],
         "token_endpoint_auth_methods_supported": [
             "client_secret_post",
             "client_secret_basic",
+            "none",
         ],
+        "code_challenge_methods_supported": ["S256"],
         "claims_supported": ["sub", "preferred_username", "email", "name"],
     }
 
@@ -1227,7 +1289,13 @@ def authorize(
     state: Optional[str] = None,
     scope: str = "openid",
     response_type: str = "code",
+    code_challenge: str = "",
+    code_challenge_method: str = "",
+    nonce: str = "",
 ):
+    if not code_challenge or code_challenge_method != "S256":
+        raise HTTPException(status_code=400, detail="S256 PKCE is required")
+
     return f"""
     <html>
         <head>
@@ -1242,6 +1310,10 @@ def authorize(
                     <form action="/auth/authorize" method="POST">
                         <input type="hidden" name="redirect_uri" value="{redirect_uri}">
                         <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="client_id" value="{client_id}">
+                        <input type="hidden" name="nonce" value="{nonce}">
+                        <input type="hidden" name="code_challenge" value="{code_challenge}">
+                        <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
                         <input type="hidden" name="username" value="analyst">
                         <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
                             Login as Analyst
@@ -1250,6 +1322,10 @@ def authorize(
                     <form action="/auth/authorize" method="POST">
                         <input type="hidden" name="redirect_uri" value="{redirect_uri}">
                         <input type="hidden" name="state" value="{state or ""}">
+                        <input type="hidden" name="client_id" value="{client_id}">
+                        <input type="hidden" name="nonce" value="{nonce}">
+                        <input type="hidden" name="code_challenge" value="{code_challenge}">
+                        <input type="hidden" name="code_challenge_method" value="{code_challenge_method}">
                         <input type="hidden" name="username" value="reviewer">
                         <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded transition-colors duration-200">
                             Login as Reviewer
@@ -1269,44 +1345,66 @@ def authorize(
 def authorize_post(
     username: str = Form(...),
     redirect_uri: str = Form(...),
+    client_id: str = Form(...),
     state: str = Form(""),
+    nonce: str = Form(""),
+    code_challenge: str = Form(...),
+    code_challenge_method: str = Form(...),
 ):
+    if not code_challenge or code_challenge_method != "S256":
+        raise HTTPException(status_code=400, detail="S256 PKCE is required")
+
     # Simulated auth code
-    code = f"mock_code_{username}_{int(time.time())}"
+    code = f"mock_code_{username}_{uuid.uuid4().hex}"
+    oidc_authorization_codes[code] = {
+        "code_challenge": code_challenge,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "username": username,
+        "nonce": nonce,
+    }
     sep = "&" if "?" in redirect_uri else "?"
-    url = f"{redirect_uri}{sep}code={code}"
+    callback_params = {"code": code}
     if state:
-        url += f"&state={state}"
+        callback_params["state"] = state
+    url = f"{redirect_uri}{sep}{urlencode(callback_params)}"
     return RedirectResponse(url=url, status_code=303)
+
+
+@app.get("/auth/jwks")
+def oidc_jwks():
+    return {"keys": [_OIDC_PUBLIC_JWK]}
 
 
 @app.post("/auth/token")
 def token(
+    request: Request,
     code: str = Form(...),
     grant_type: str = Form(...),
     redirect_uri: str = Form(...),
     client_id: Optional[str] = Form(None),
     client_secret: Optional[str] = Form(None),
+    code_verifier: str = Form(...),
 ):
-    # Extract username from code
-    username = "user"
-    if "mock_code_" in code:
-        username = code.split("_")[2]
+    authorization_code = oidc_authorization_codes.pop(code, None)
+    if (
+        authorization_code is None
+        or grant_type != "authorization_code"
+        or authorization_code["client_id"] != client_id
+        or authorization_code["redirect_uri"] != redirect_uri
+        or not _valid_pkce_code_verifier(code_verifier)
+        or not hmac.compare_digest(
+            authorization_code["code_challenge"],
+            _pkce_code_challenge(code_verifier),
+        )
+    ):
+        raise HTTPException(status_code=400, detail="Invalid PKCE code verifier")
 
-    # Create a dummy JWT (signed with something simple or just unverified)
-    # The production code uses jwt.get_unverified_claims, so we don't need a real signature.
-    import jose.jwt as jose_jwt
-
-    id_token = jose_jwt.encode(
-        {
-            "sub": username,
-            "preferred_username": username,
-            "name": username.capitalize(),
-            "exp": int(time.time()) + 3600,
-            "iat": int(time.time()),
-        },
-        "mock_secret",
-        algorithm="HS256",
+    id_token = create_mock_oidc_id_token(
+        username=authorization_code["username"],
+        issuer=str(request.base_url).rstrip("/"),
+        audience=authorization_code["client_id"],
+        nonce=authorization_code["nonce"],
     )
 
     return {

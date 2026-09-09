@@ -27,6 +27,9 @@ from src.pipeline.verdict_assembly import (
     build_developer_ticket_text as _build_developer_ticket_text,
 )
 from src.pipeline.verdict_assembly import (
+    build_executive_summary as _build_executive_summary,
+)
+from src.pipeline.verdict_assembly import (
     build_final_claims as _build_final_claims,
 )
 from src.pipeline.verdict_assembly import (
@@ -46,6 +49,191 @@ from src.pipeline.verdict_assembly import (
 class _DummyLLM:
     def __init__(self, last_usage=None):
         self.last_usage = last_usage
+
+
+def test_build_executive_summary_separates_advisory_from_final_assessment():
+    summary = _build_executive_summary(
+        vuln_id="GHSA-test-1234",
+        component_name="web-app",
+        final_state={
+            "advisory_relevant": True,
+            "advisories": {
+                "summary": "A template sanitizer bypass can allow script execution."
+            },
+            "dep_info": {
+                "component_name": "framework-core",
+                "presence_basis": "direct",
+                "declared_in": ["package.json"],
+                "lock_files": ["package-lock.json"],
+            },
+            "llm_analysis": {
+                "reachable": False,
+                "reasoning": "Templates use only static attribute names and values.",
+            },
+            "deep_analysis": {
+                "confirmed": False,
+                "exploitable": "NO",
+                "reasoning": "No attacker-controlled value reaches Angular's namespace handling.",
+            },
+        },
+        verdict_label="Not Affected",
+        confidence="High",
+        exposure="none",
+        reasoning="The locked version is outside the affected range.",
+        version_analysis={
+            "detected_version": "9.4.2",
+            "current_workspace_affected": False,
+        },
+        remediation_view={"status": "already_not_affected", "recommendations": []},
+        audit_view={"status": "pass", "consistency": "strong"},
+    )
+
+    assert summary["vulnerability"] == (
+        "GHSA-test-1234 · framework-core: "
+        "A template sanitizer bypass can allow script execution."
+    )
+    assert summary["assessment"].startswith(
+        "Disposition: Not Affected. Confidence: High. Exposure: none. "
+        "Audit: status pass; evidence consistency strong."
+    )
+    assert "outside the affected range" in summary["assessment"]
+    assert summary["why"] == [
+        "Advisory applicability: Applicable — the advisory matches the assessed dependency context.",
+        "Dependency evidence: framework-core is a direct dependency; declared in package.json; observed in package-lock.json.",
+        "Version evidence: current dependency version 9.4.2 is outside the advisory's affected range.",
+        "Direct reachability (current workspace): Not confirmed — no complete production path to the vulnerability-specific surface was established. Templates use only static attribute names and values.",
+        "Deep exploitability (current workspace): Exploitability: No; vulnerability-specific path: not confirmed. No attacker-controlled value reaches Angular's namespace handling.",
+        "Audit assurance: status pass; evidence consistency strong.",
+        "Assessment conclusion: The locked version is outside the affected range.",
+    ]
+
+
+def test_build_executive_summary_distinguishes_lookup_failure_from_project_target():
+    summary = _build_executive_summary(
+        vuln_id="GHSA-37CH-88JC-XWX2",
+        component_name="vp-auth-server",
+        final_state={
+            "advisories": {
+                "lookup_failures": ["OSV returned HTTP 404"],
+            },
+            "dep_info": {
+                "presence_basis": "unknown",
+                "reason": "The vulnerable package could not be resolved.",
+            },
+        },
+        verdict_label="Inconclusive",
+        confidence="Low",
+        exposure="unknown",
+        reasoning="Advisory evidence is incomplete.",
+        version_analysis=None,
+        remediation_view=None,
+        audit_view=None,
+    )
+
+    assert summary["vulnerability"] == (
+        "GHSA-37CH-88JC-XWX2 · the unresolved vulnerable dependency: "
+        "advisory details could not be retrieved; see the Advisory Lookup evidence."
+    )
+    assert "vp-auth-server" not in summary["vulnerability"]
+
+
+def test_build_executive_summary_includes_one_action_without_truncating_text():
+    advisory_summary = "impact " * 200 + "ADVISORY_END"
+    audit_basis = "version evidence " * 100 + "BASIS_END"
+    next_action = (
+        "Upgrade the vulnerable dependency "
+        + "carefully " * 50
+        + "ACTION_END"
+    )
+    summary = _build_executive_summary(
+        vuln_id="CVE-TEST",
+        component_name="service",
+        final_state={"advisories": {"summary": advisory_summary}},
+        verdict_label="Probably Affected",
+        confidence="Medium",
+        exposure="direct",
+        reasoning="evidence " * 200,
+        version_analysis=None,
+        remediation_view={
+            "status": "action_needed",
+            "recommendations": [
+                next_action,
+                "A second action is intentionally omitted.",
+            ],
+        },
+        audit_view={
+            "status": "review",
+            "consistency": "mixed",
+            "checks": [f"Concern: {audit_basis}"],
+        },
+    )
+
+    assert "Audit: status review; evidence consistency mixed." in summary["assessment"]
+    assert "ADVISORY_END" in summary["vulnerability"]
+    assert "BASIS_END" in summary["assessment"]
+    assert "ACTION_END" in summary["assessment"]
+    assert "A second action is intentionally omitted." not in summary["assessment"]
+    assert "evidence evidence" not in summary["assessment"]
+    assert "Required action: Upgrade the vulnerable dependency" in summary["assessment"]
+    assert "…" not in summary["vulnerability"]
+    assert "…" not in summary["assessment"]
+    assert "BASIS_END" in " ".join(summary["why"])
+
+
+def test_build_executive_summary_explains_affected_path_with_concrete_evidence():
+    summary = _build_executive_summary(
+        vuln_id="CVE-PATH",
+        component_name="web-service",
+        final_state={
+            "advisories": {"summary": "Crafted input can reach an unsafe parser."},
+            "dep_info": {
+                "component_name": "unsafe-parser",
+                "presence_basis": "transitive",
+                "lock_files": ["package-lock.json"],
+            },
+            "llm_analysis": {
+                "reachable": True,
+                "reasoning": "src/upload.ts passes request bodies to parseArchive().",
+            },
+            "deep_analysis": {
+                "confirmed": True,
+                "exploitable": "YES",
+                "reasoning": "The request body reaches the vulnerable parser without validation.",
+            },
+            "transitive_analysis": {
+                "reachable": "YES",
+                "reasoning": "upload-middleware calls unsafe-parser on the production route.",
+            },
+        },
+        verdict_label="Affected",
+        confidence="High",
+        exposure="transitive",
+        reasoning="The affected parser is reachable from an unauthenticated upload route.",
+        version_analysis={
+            "detected_version": "4.1.0",
+            "version_source": "lock file",
+            "current_workspace_affected": True,
+            "workspace_note": "4.1.0 falls in >=4.0.0, <4.1.2.",
+            "verified_affected_project_versions": ["7.2.0", "7.3.0"],
+        },
+        remediation_view={"status": "action_needed", "recommendations": []},
+        audit_view={"status": "pass", "consistency": "strong"},
+    )
+
+    why = "\n".join(summary["why"])
+    assert "Dependency evidence:" in why
+    assert "Version evidence:" in why
+    assert "Direct reachability (current workspace): Reachable" in why
+    assert "Deep exploitability (current workspace): Exploitability: Yes" in why
+    assert "Transitive reachability (current workspace): Classification: Reachable" in why
+    assert "Audit assurance: status pass; evidence consistency strong" in why
+    assert "unsafe-parser is a transitive dependency" in why
+    assert "4.1.0 (lock file) is inside" in why
+    assert "product versions 7.2.0, 7.3.0" in why
+    assert "src/upload.ts passes request bodies to parseArchive()" in why
+    assert "request body reaches the vulnerable parser without validation" in why
+    assert "upload-middleware calls unsafe-parser" in why
+    assert "unauthenticated upload route" in why
 
 
 async def _fake_analyze_with_llm(*args, **kwargs):
@@ -161,7 +349,7 @@ def test_repository_scan_branches_do_blocking_work_concurrently(monkeypatch, tmp
     state = {
         "repo_path": str(tmp_path),
         "component_name": "demo",
-        "scan_targets": [],
+        "scan_targets": ["demo"],
         "sbom_attributed": True,
         "advisories": {"vulnerable_symbols": [], "cwe": []},
         "archive_inspection": {},
@@ -240,6 +428,7 @@ def test_llm_analyze_code_step_report_includes_backend_error(monkeypatch):
             {
                 "ollama": _DummyLLM(),
                 "vuln_id": "GHSA-test",
+                "scan_targets": ["pkg"],
                 "advisories": {"summary": "summary", "affected_packages": ["npm:pkg"]},
                 "snippets": [{"file": "app.py", "line": 12, "snippet": "danger()"}],
             }
@@ -302,6 +491,7 @@ def test_llm_analyze_code_step_report_includes_usage(monkeypatch):
                     {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
                 ),
                 "vuln_id": "GHSA-test",
+                "scan_targets": ["pkg"],
                 "advisories": {"summary": "summary", "affected_packages": ["npm:pkg"]},
                 "snippets": [{"file": "app.py", "line": 12, "snippet": "danger()"}],
             }
@@ -405,7 +595,15 @@ def test_build_version_analysis_summary_marks_not_found_rows_unknown():
                         "source": "manifest",
                         "affected": "No",
                         "notes": "not found",
-                    }
+                    },
+                    {
+                        "ref": "WORKTREE",
+                        "ref_type": "worktree",
+                        "component_version": ">=2.0.0",
+                        "source": "manifest-constraint",
+                        "affected": "Unknown",
+                        "notes": "not a resolved installed version",
+                    },
                 ],
                 "worst_case": {"affected": False},
             },
@@ -415,6 +613,8 @@ def test_build_version_analysis_summary_marks_not_found_rows_unknown():
     assert summary is not None
     assert summary["checked_versions"][0]["affected"] is None
     assert summary["checked_versions"][0]["notes"] == "not found"
+    assert summary["checked_versions"][1]["affected"] is None
+    assert summary["checked_versions"][1]["version"] == ">=2.0.0"
 
 
 def test_build_version_analysis_summary_includes_product_version_coverage():
@@ -423,8 +623,11 @@ def test_build_version_analysis_summary_includes_product_version_coverage():
             "version_context": {
                 "affected": True,
                 "current_workspace_affected": False,
-                "affected_product_versions": ["1.0.0", "1.1.0"],
-                "affected_product_version_refs": {"1.0.0": ["v1.0.0"]},
+                "project_versions": ["1.0.0", "1.1.0"],
+                "project_version_refs": {"1.0.0": ["v1.0.0"]},
+                "covered_product_versions": ["1.0.0"],
+                "verified_affected_project_versions": ["1.0.0"],
+                "unmatched_project_versions": ["1.1.0"],
             },
             "version_inventory": {
                 "version_table": [
@@ -453,8 +656,11 @@ def test_build_version_analysis_summary_includes_product_version_coverage():
     )
 
     assert summary is not None
-    assert summary["affected_product_versions"] == ["1.0.0", "1.1.0"]
-    assert summary["affected_product_version_refs"] == {"1.0.0": ["v1.0.0"]}
+    assert summary["project_versions"] == ["1.0.0", "1.1.0"]
+    assert summary["project_version_refs"] == {"1.0.0": ["v1.0.0"]}
+    assert summary["covered_product_versions"] == ["1.0.0"]
+    assert summary["verified_affected_project_versions"] == ["1.0.0"]
+    assert summary["unmatched_project_versions"] == ["1.1.0"]
     assert summary["checked_versions"][0]["product_version"] == "1.0.0"
     assert summary["checked_versions"][1]["product_version"] == "1.1.0"
     assert summary["checked_versions"][1]["affected"] is None
@@ -602,6 +808,60 @@ def test_snapshot_node_inputs_filters_to_relevant_fields():
     )
 
     assert snapshot == {"vuln_id": "CVE-2024-49766"}
+
+
+def test_analyze_versions_passes_project_version_file_configuration(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        nodes.version_analyzer,
+        "select_component_affected_constraints",
+        lambda *_args, **_kwargs: {
+            "affected_ranges": [],
+            "affected_versions": [],
+            "fixed_versions": [],
+            "selected_range_count": 0,
+            "selected_version_count": 0,
+            "excluded_packages": [],
+        },
+    )
+
+    def fake_inventory(*_args, **kwargs):
+        captured.update(kwargs)
+        return {
+            "version_table": [],
+            "worst_case": {"affected": False},
+            "comparison_inputs": {},
+            "trace": [],
+        }
+
+    monkeypatch.setattr(nodes.version_analyzer, "inventory_versions", fake_inventory)
+
+    asyncio.run(
+        nodes.analyze_versions(
+            {
+                "component_name": "example-project",
+                "scan_target": "example-lib",
+                "component_cfg": {
+                    "project_version_files": [
+                        {
+                            "path": "config/release.json",
+                            "field": "project.release",
+                        }
+                    ]
+                },
+                "advisories": {},
+                "dep_info": {},
+                "repo_path": "/tmp/example-project",
+                "affected_product_versions": ["3.1.0"],
+            }
+        )
+    )
+
+    assert captured["affected_product_versions"] == ["3.1.0"]
+    assert captured["project_version_files"] == [
+        {"path": "config/release.json", "field": "project.release"}
+    ]
 
 
 def test_with_input_snapshot_skips_inputs_without_debug():
@@ -823,6 +1083,38 @@ def test_build_audit_view_allows_historical_only_not_affected_with_exclusion_evi
     )
 
 
+def test_build_audit_view_allows_deep_exclusion_after_generic_reachability():
+    audit_view = _build_audit_view(
+        final_state={
+            "dep_info": {"found": True},
+            "llm_analysis": {"reachable": True},
+            "deep_analysis": {"confirmed": False, "exploitable": "NO"},
+            "transitive_analysis": {"reachable": "NO"},
+        },
+        verdict_label="Not Affected",
+        affected=False,
+        reasoning=(
+            "The dependency is used, but full-source review excludes the "
+            "vulnerability-specific runtime template path."
+        ),
+        version_analysis={"affected": True, "current_workspace_affected": True},
+        adjusted_cvss={"adjusted_score": 0.0},
+    )
+
+    assert audit_view["status"] == "pass"
+    assert audit_view["consistency"] == "strong"
+    assert audit_view["downgrade_supported"] is True
+    assert audit_view["final_claims"]["issues"] == []
+    assert any(
+        "deep analysis affirmatively exclude" in check
+        for check in audit_view["checks"]
+    )
+    assert any(
+        "after generic dependency reachability" in check
+        for check in audit_view["checks"]
+    )
+
+
 def test_build_final_claims_flags_fixed_version_floor_contradiction():
     claims = _build_final_claims(
         result={
@@ -963,48 +1255,34 @@ def test_build_structured_details_marks_sbom_attributed_presence_without_repo_ma
     )
 
 
-def test_scan_dependencies_forwards_sbom_attribution_default_true(
+def test_scan_dependencies_keeps_presence_unknown_without_advisory_package(
     monkeypatch, tmp_path
 ):
-    captured: dict[str, object] = {}
-
-    def _fake_find_component(repo_path, component_name, *, sbom_attributed=False):
-        captured["repo_path"] = repo_path
-        captured["component_name"] = component_name
-        captured["sbom_attributed"] = sbom_attributed
-        return {
-            "found": True,
-            "repo_found": False,
-            "sbom_attributed": sbom_attributed,
-            "presence_basis": "sbom_attributed",
-            "direct": False,
-            "transitive": False,
-            "declared_in": [],
-            "locked_version": None,
-            "lock_files": [],
-        }
+    def _unexpected_find_component(*_args, **_kwargs):
+        pytest.fail("the assessed project must not be scanned as its own dependency")
 
     monkeypatch.setattr(
-        nodes.dependency_scanner, "find_component", _fake_find_component
+        nodes.dependency_scanner, "find_component", _unexpected_find_component
     )
 
     result = asyncio.run(
         nodes.scan_dependencies(
             {
                 "repo_path": str(tmp_path),
-                "component_name": "demo-component",
+                "component_name": "vp-auth-server",
                 "scan_targets": [],
             }
         )
     )
 
-    assert captured["repo_path"] == str(tmp_path)
-    assert captured["component_name"] == "demo-component"
-    assert captured["sbom_attributed"] is True
-    assert result["dep_info"]["sbom_attributed"] is True
+    assert result["scan_target"] == ""
+    assert result["dep_info"]["presence_basis"] == "unknown"
+    assert result["dep_info"]["component_name"] == ""
+    assert result["dep_info"]["requested_component"] == "vp-auth-server"
+    assert "was not scanned" in result["dep_info"]["reason"]
 
 
-def test_scan_dependencies_forwards_sbom_attribution_override_false(
+def test_scan_dependencies_does_not_transfer_sbom_attribution_to_another_package(
     monkeypatch, tmp_path
 ):
     captured: dict[str, object] = {}
@@ -1033,17 +1311,97 @@ def test_scan_dependencies_forwards_sbom_attribution_override_false(
         nodes.scan_dependencies(
             {
                 "repo_path": str(tmp_path),
-                "component_name": "demo-component",
-                "scan_targets": [],
-                "sbom_attributed": False,
+                "component_name": "vp-auth-server",
+                "scan_targets": ["path-to-regexp"],
+                "sbom_attributed": True,
             }
         )
     )
 
-    assert captured["repo_path"] == str(tmp_path)
-    assert captured["component_name"] == "demo-component"
-    assert captured["sbom_attributed"] is False
-    assert result["dep_info"]["sbom_attributed"] is False
+    assert captured == {
+        "repo_path": str(tmp_path),
+        "component_name": "path-to-regexp",
+        "sbom_attributed": False,
+    }
+    assert result["dep_info"]["presence_basis"] == "not_found"
+
+
+def test_scan_dependencies_selects_the_advisory_package_found_in_the_repo(
+    monkeypatch, tmp_path
+):
+    scanned: list[str] = []
+
+    def _fake_find_component(repo_path, component_name, *, sbom_attributed=False):
+        scanned.append(component_name)
+        repo_found = component_name == "target-package"
+        return {
+            "found": repo_found or sbom_attributed,
+            "repo_found": repo_found,
+            "sbom_attributed": sbom_attributed,
+            "presence_basis": "manifest" if repo_found else "sbom_attributed",
+            "direct": repo_found,
+            "transitive": False,
+            "declared_in": ["package.json"] if repo_found else [],
+            "locked_version": "3.2.1" if repo_found else None,
+            "lock_files": ["package-lock.json"] if repo_found else [],
+        }
+
+    monkeypatch.setattr(
+        nodes.dependency_scanner, "find_component", _fake_find_component
+    )
+
+    result = asyncio.run(
+        nodes.scan_dependencies(
+            {
+                "repo_path": str(tmp_path),
+                "component_name": "CVE-2026-1234",
+                "scan_targets": ["wrong-package", "target-package"],
+            }
+        )
+    )
+
+    assert scanned == ["wrong-package", "target-package"]
+    assert result["scan_target"] == "target-package"
+    assert result["dep_info"]["component_name"] == "target-package"
+    assert result["dep_info"]["locked_version"] == "3.2.1"
+
+
+def test_scan_dependencies_prefers_requested_component_without_repo_evidence(
+    monkeypatch, tmp_path
+):
+    scanned: list[str] = []
+
+    def _fake_find_component(repo_path, component_name, *, sbom_attributed=False):
+        scanned.append(component_name)
+        return {
+            "found": sbom_attributed,
+            "repo_found": False,
+            "sbom_attributed": sbom_attributed,
+            "presence_basis": "sbom_attributed",
+            "direct": False,
+            "transitive": False,
+            "declared_in": [],
+            "locked_version": None,
+            "lock_files": [],
+        }
+
+    monkeypatch.setattr(
+        nodes.dependency_scanner, "find_component", _fake_find_component
+    )
+
+    result = asyncio.run(
+        nodes.scan_dependencies(
+            {
+                "repo_path": str(tmp_path),
+                "component_name": "target-package",
+                "scan_targets": ["wrong-package", "target-package"],
+            }
+        )
+    )
+
+    assert scanned == ["target-package", "wrong-package"]
+    assert result["scan_target"] == "target-package"
+    assert result["dep_info"]["presence_basis"] == "sbom_attributed"
 
 
 def test_run_pipeline_defaults_sbom_attributed_true(monkeypatch, tmp_path):
@@ -1328,6 +1686,36 @@ def test_apply_audit_guardrail_promotes_historical_only_not_affected():
     )
 
 
+def test_apply_audit_guardrail_requires_package_and_version_advisory_evidence():
+    guarded = _apply_audit_guardrail(
+        {
+            "verdict": "Not Affected",
+            "affected": False,
+            "confidence": "High",
+            "exposure": "none",
+            "reasoning": "The selected project was not found as a dependency.",
+        },
+        {"status": "pass", "checks": []},
+        None,
+        {
+            "advisory_relevant": True,
+            "advisories": {
+                "affected_packages": [],
+                "affected_ranges": [],
+                "affected_versions": [],
+            },
+        },
+    )
+
+    assert guarded["verdict"] == "Inconclusive"
+    assert guarded["affected"] is False
+    assert guarded["confidence"] == "Low"
+    assert guarded["exposure"] == "unknown"
+    assert "INCOMPLETE ADVISORY" in guarded["reasoning"]
+    assert "affected package identity" in guarded["summary"]
+    assert "affected version constraints" in guarded["summary"]
+
+
 def test_apply_audit_guardrail_softens_fixed_version_floor_contradiction():
     guarded = _apply_audit_guardrail(
         {
@@ -1604,6 +1992,16 @@ def test_run_pipeline_promotes_unsupported_historical_only_not_affected(
             captured["initial_state"] = initial_state
             return {
                 **initial_state,
+                "advisories": {
+                    "affected_packages": ["npm:lodash"],
+                    "affected_ranges": [
+                        {
+                            "type": "SEMVER",
+                            "event": {"introduced": "0", "fixed": "4.17.22"},
+                            "package": "lodash",
+                        }
+                    ],
+                },
                 "dep_info": {"found": True, "transitive": True},
                 "version_inventory": {
                     "worst_case": {
@@ -1693,6 +2091,16 @@ def test_run_pipeline_keeps_not_affected_when_historical_only_but_unreachable(
         async def ainvoke(self, initial_state):
             return {
                 **initial_state,
+                "advisories": {
+                    "affected_packages": ["npm:lodash"],
+                    "affected_ranges": [
+                        {
+                            "type": "SEMVER",
+                            "event": {"introduced": "0", "fixed": "4.17.22"},
+                            "package": "lodash",
+                        }
+                    ],
+                },
                 "dep_info": {"found": True, "transitive": True},
                 "llm_analysis": {
                     "reachable": False,

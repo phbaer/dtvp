@@ -94,10 +94,16 @@ class _DashboardStatusCache:
                     self._inflight = None
         return value
 
+    def invalidate(self) -> None:
+        with self._lock:
+            self._value = None
+            self._expires_at = 0.0
+
 
 class CodeAnalysisAssessRequest(BaseModel):
     vuln_id: str
     component_name: str
+    project_name: Optional[str] = None
     cvss_vector: Optional[str] = None
     user_guidance: Optional[str] = None
     model: Optional[str] = None
@@ -105,7 +111,15 @@ class CodeAnalysisAssessRequest(BaseModel):
     llm_provider: Optional[str] = None
     focus_path: Optional[str] = None
     dependency_paths: Optional[list[list[str]]] = None
-    affected_product_versions: Optional[list[str]] = None
+    project_versions: Optional[list[str]] = Field(
+        default=None,
+        description="Processed project releases to intersect with versions represented by the repository.",
+    )
+    affected_product_versions: Optional[list[str]] = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated alias for project_versions.",
+    )
     debug: bool = False
 
 
@@ -115,11 +129,26 @@ class QueueSubmitRequest(BaseModel):
     project_name: Optional[str] = None
     cvss_vector: Optional[str] = None
     user_guidance: Optional[str] = None
-    affected_product_versions: Optional[list[str]] = None
+    project_versions: Optional[list[str]] = Field(
+        default=None,
+        description="Processed project releases to intersect with versions represented by the repository.",
+    )
+    affected_product_versions: Optional[list[str]] = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated alias for project_versions.",
+    )
     model: Optional[str] = None
     llm_backend: Optional[str] = None
     llm_provider: Optional[str] = None
     source: Optional[str] = None
+
+
+def _request_project_versions(request: BaseModel) -> Optional[list[str]]:
+    project_versions = getattr(request, "project_versions", None)
+    if project_versions is not None:
+        return project_versions
+    return request.__dict__.get("affected_product_versions")
 
 
 class CodeAnalysisBenchmarkRequest(BaseModel):
@@ -148,6 +177,15 @@ class QueueClearRequest(BaseModel):
     statuses: list[str] = Field(
         default_factory=lambda: ["completed", "failed", "cancelled"]
     )
+
+
+class CodeAnalysisCleanupRequest(BaseModel):
+    vulnerability_aliases: list[str] = Field(default_factory=list)
+    component_names: list[str] = Field(default_factory=list)
+    analysis_run_ids: list[str] = Field(default_factory=list)
+    remove_assessments: bool = True
+    remove_runs: bool = True
+    cancel_active: bool = False
 
 
 def _utc_now_iso() -> str:
@@ -257,6 +295,293 @@ def _extract_error_message(exc: Exception) -> str:
         if status_code:
             return f"HTTP {status_code}: {exc}"
     return str(exc)
+
+
+def _normalized_values(values: list[Any]) -> set[str]:
+    return {
+        text.lower()
+        for value in values
+        if (text := str(value or "").strip())
+    }
+
+
+def _cleanup_identifiers(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        getter = value.get
+    else:
+        getter = lambda key: getattr(value, key, None)
+    return _normalized_values(
+        [
+            getter("analysis_run_id"),
+            getter("queue_id"),
+            getter("job_id"),
+        ]
+    )
+
+
+def _matches_cleanup_scope(
+    value: Any,
+    *,
+    project_name: str,
+    vulnerability_ids: set[str],
+    component_names: set[str],
+    selected_ids: set[str],
+) -> bool:
+    if isinstance(value, dict):
+        getter = value.get
+    else:
+        getter = lambda key: getattr(value, key, None)
+    if selected_ids and not (_cleanup_identifiers(value) & selected_ids):
+        return False
+    project = str(getter("project_name") or "").strip().lower()
+    wanted_project = str(project_name or "").strip().lower()
+    if wanted_project and wanted_project != "_all_" and project != wanted_project:
+        return False
+    vulnerability = str(getter("vuln_id") or "").strip().lower()
+    if vulnerability not in vulnerability_ids:
+        return False
+    component = str(getter("component_name") or "").strip().lower()
+    return not component_names or component in component_names
+
+
+def _external_job_matches_cleanup_scope(
+    job: dict[str, Any],
+    *,
+    project_name: str,
+    vulnerability_ids: set[str],
+    component_names: set[str],
+    selected_ids: set[str],
+    known_job_ids: set[str],
+) -> bool:
+    job_id = str(job.get("job_id") or "").strip().lower()
+    if not job_id:
+        return False
+    if selected_ids:
+        return job_id in selected_ids or job_id in known_job_ids
+    if job_id in known_job_ids:
+        return True
+
+    request = job.get("request") if isinstance(job.get("request"), dict) else {}
+    vulnerability = str(request.get("vuln_id") or "").strip().lower()
+    if vulnerability not in vulnerability_ids:
+        return False
+    component = str(request.get("component_name") or "").strip().lower()
+    if component_names and component not in component_names:
+        return False
+    requested_project = str(request.get("project_name") or "").strip().lower()
+    wanted_project = str(project_name or "").strip().lower()
+    return (
+        not requested_project
+        or not wanted_project
+        or wanted_project == "_all_"
+        or requested_project == wanted_project
+    )
+
+
+def _is_not_found_error(exc: Exception) -> bool:
+    return getattr(getattr(exc, "response", None), "status_code", None) == 404
+
+
+async def _list_cleanup_result_records(
+    deps: CodeAnalysisRouteDeps,
+    *,
+    project_name: str,
+    vulnerability_ids: list[str],
+    component_names: list[str],
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = await asyncio.to_thread(
+            deps.result_store.list_result_metadata,
+            project_name=project_name,
+            vuln_ids=vulnerability_ids,
+            component_names=component_names or None,
+            limit=500,
+            offset=offset,
+        )
+        records.extend(page)
+        if len(page) < 500:
+            return records
+        offset += len(page)
+
+
+async def _cleanup_code_analysis_vulnerability(
+    deps: CodeAnalysisRouteDeps,
+    *,
+    project_name: str,
+    vuln_id: str,
+    request: CodeAnalysisCleanupRequest,
+) -> dict[str, Any]:
+    vulnerability_values = [vuln_id, *request.vulnerability_aliases]
+    vulnerability_ids = _normalized_values(vulnerability_values)
+    component_names = _normalized_values(request.component_names)
+    selected_ids = _normalized_values(request.analysis_run_ids)
+    result_records = await _list_cleanup_result_records(
+        deps,
+        project_name=project_name,
+        vulnerability_ids=list(vulnerability_ids),
+        component_names=list(component_names),
+    )
+    result_records = [
+        record
+        for record in result_records
+        if not selected_ids or _cleanup_identifiers(record) & selected_ids
+    ]
+
+    queue_items = (
+        deps.analysis_queue.list_all_for_cleanup()
+        if hasattr(deps.analysis_queue, "list_all_for_cleanup")
+        else deps.analysis_queue.list_all()
+    )
+    queue_items = [
+        item
+        for item in queue_items
+        if _matches_cleanup_scope(
+            item,
+            project_name=project_name,
+            vulnerability_ids=vulnerability_ids,
+            component_names=component_names,
+            selected_ids=selected_ids,
+        )
+    ]
+
+    known_job_ids = _normalized_values(
+        [
+            *[record.get("job_id") for record in result_records],
+            *[getattr(item, "job_id", None) for item in queue_items],
+        ]
+    )
+    external_jobs: list[dict[str, Any]] = []
+    external_job_ids_seen: set[str] = set()
+    removed_external_job_ids: set[str] = set()
+    external_inspected = False
+    warnings: list[str] = []
+    errors: list[dict[str, str]] = []
+
+    settings = deps.code_analysis_settings_cls()
+    if request.remove_runs and settings.enabled:
+        try:
+            async with deps.code_analysis_client_cls(settings) as client:
+                jobs_payload = await client.list_jobs()
+                jobs = (
+                    jobs_payload.get("jobs")
+                    if isinstance(jobs_payload, dict)
+                    else jobs_payload
+                )
+                external_inspected = True
+                external_jobs = [
+                    job
+                    for job in (jobs if isinstance(jobs, list) else [])
+                    if isinstance(job, dict)
+                    and _external_job_matches_cleanup_scope(
+                        job,
+                        project_name=project_name,
+                        vulnerability_ids=vulnerability_ids,
+                        component_names=component_names,
+                        selected_ids=selected_ids,
+                        known_job_ids=known_job_ids,
+                    )
+                ]
+                external_job_ids_seen = _normalized_values(
+                    [job.get("job_id") for job in external_jobs]
+                )
+                for job in external_jobs:
+                    job_id = str(job.get("job_id") or "").strip()
+                    status = str(job.get("status") or "").strip().lower()
+                    if status in {"pending", "running"} and not request.cancel_active:
+                        continue
+                    try:
+                        await client.delete_job(job_id)
+                        if status in {"pending", "running"}:
+                            try:
+                                await client.delete_job(job_id)
+                            except Exception as exc:
+                                if not _is_not_found_error(exc):
+                                    raise
+                        removed_external_job_ids.add(job_id.lower())
+                    except Exception as exc:
+                        errors.append(
+                            {
+                                "artifact": "agentyzer_job",
+                                "id": job_id,
+                                "detail": _extract_error_message(exc),
+                            }
+                        )
+        except Exception as exc:
+            errors.append(
+                {
+                    "artifact": "agentyzer_jobs",
+                    "id": vuln_id,
+                    "detail": _extract_error_message(exc),
+                }
+            )
+    elif request.remove_runs:
+        warnings.append(
+            "Agentyzer is not configured; external jobs could not be inspected or removed."
+        )
+
+    removed_queue_ids: list[str] = []
+    skipped_active_ids: list[str] = []
+    if request.remove_runs:
+        missing_external_job_ids = (
+            known_job_ids - external_job_ids_seen if external_inspected else set()
+        )
+        safe_active_job_ids = removed_external_job_ids | missing_external_job_ids
+        for item in queue_items:
+            queue_id = str(getattr(item, "queue_id", "") or "").strip()
+            status = str(getattr(item, "status", "") or "").strip().lower()
+            job_id = str(getattr(item, "job_id", "") or "").strip().lower()
+            if status in {"queued", "running"} and not request.cancel_active:
+                skipped_active_ids.append(queue_id)
+                continue
+            if status == "running":
+                if not job_id or job_id not in safe_active_job_ids:
+                    skipped_active_ids.append(queue_id)
+                    continue
+                deps.analysis_queue.request_abort(queue_id)
+                deps.analysis_queue.finish_running_cancelled(queue_id)
+            elif status == "queued":
+                deps.analysis_queue.cancel(queue_id)
+            if deps.analysis_queue.remove_finished(queue_id):
+                removed_queue_ids.append(queue_id)
+
+    removed_assessment_ids: list[str] = []
+    if request.remove_assessments:
+        run_ids = [
+            str(record.get("analysis_run_id") or "").strip()
+            for record in result_records
+            if str(record.get("analysis_run_id") or "").strip()
+        ]
+        removed_assessment_ids = await asyncio.to_thread(
+            deps.result_store.delete_many,
+            run_ids,
+        )
+
+    return {
+        "status": "partial" if warnings or errors or skipped_active_ids else "cleaned",
+        "scope": {
+            "project_name": project_name,
+            "vulnerability_ids": sorted(vulnerability_ids),
+            "analysis_run_ids": sorted(selected_ids),
+        },
+        "matched": {
+            "assessments": len(result_records),
+            "dtvp_runs": len(queue_items),
+            "agentyzer_jobs": len(external_jobs),
+        },
+        "removed": {
+            "assessments": len(removed_assessment_ids),
+            "dtvp_runs": len(removed_queue_ids),
+            "agentyzer_jobs": len(removed_external_job_ids),
+        },
+        "removed_assessment_ids": removed_assessment_ids,
+        "removed_queue_ids": removed_queue_ids,
+        "removed_job_ids": sorted(removed_external_job_ids),
+        "skipped_active_ids": skipped_active_ids,
+        "warnings": warnings,
+        "errors": errors,
+    }
 
 
 def _coerce_limit(value: int | None, *, default: int = 100) -> int:
@@ -746,6 +1071,7 @@ def _register_code_analysis_routes(
     ):
         if not await asyncio.to_thread(deps.result_store.delete, run_id):
             raise HTTPException(status_code=404, detail="Analysis result not found.")
+        dashboard_status_cache.invalidate()
         return {"status": "removed", "analysis_run_id": run_id}
 
     @router.post(
@@ -835,6 +1161,30 @@ def _register_code_analysis_routes(
         )
 
     @router.post(
+        "/projects/{project_name}/vulnerabilities/{vuln_id}/analysis-cleanup",
+    )
+    async def code_analysis_cleanup_project_vulnerability(
+        project_name: str,
+        vuln_id: str,
+        req: CodeAnalysisCleanupRequest,
+        *,
+        user: Annotated[str, Depends(current_user_dependency)],
+    ):
+        if not req.remove_assessments and not req.remove_runs:
+            raise HTTPException(
+                status_code=400,
+                detail="Select saved assessments, analysis runs, or both for cleanup.",
+            )
+        result = await _cleanup_code_analysis_vulnerability(
+            deps,
+            project_name=project_name,
+            vuln_id=vuln_id,
+            request=req,
+        )
+        dashboard_status_cache.invalidate()
+        return result
+
+    @router.post(
         "/code-analysis/assess",
         responses=deps.service_unavailable_response,
     )
@@ -859,6 +1209,7 @@ def _register_code_analysis_routes(
             return await client.start_assessment(
                 vuln_id=req.vuln_id,
                 component_name=req.component_name,
+                project_name=req.project_name,
                 cvss_vector=req.cvss_vector,
                 user_guidance=user_guidance,
                 model=req.model,
@@ -866,7 +1217,7 @@ def _register_code_analysis_routes(
                 llm_provider=req.llm_provider,
                 focus_path=req.focus_path,
                 dependency_paths=req.dependency_paths,
-                affected_product_versions=req.affected_product_versions,
+                project_versions=_request_project_versions(req),
                 debug=req.debug,
             )
 
@@ -996,7 +1347,7 @@ def _register_analysis_queue_routes(
                 submitted_by=user,
                 cvss_vector=req.cvss_vector,
                 user_guidance=user_guidance,
-                affected_product_versions=req.affected_product_versions,
+                affected_product_versions=_request_project_versions(req),
                 model=req.model,
                 llm_backend=req.llm_backend,
                 llm_provider=req.llm_provider,

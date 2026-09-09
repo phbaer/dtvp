@@ -4,7 +4,7 @@ set -e
 # Print the packaged project version before importing the application so it is
 # present in the container logs even when application initialization fails.
 AGENTYZER_VERSION=$(
-    /app/.venv/bin/python -c 'import tomllib; print(tomllib.load(open("/app/pyproject.toml", "rb"))["project"]["version"])' 2>/dev/null ||
+    /app/.venv/bin/python -c 'from importlib.metadata import version; print(version("agentyzer"))' 2>/dev/null ||
     true
 )
 AGENTYZER_VERSION=${AGENTYZER_VERSION:-unknown}

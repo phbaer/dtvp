@@ -97,8 +97,6 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
         return visibleOwnership.value.map(ownership => ownership.instance)
     })
 
-    const visibleInstanceSet = computed(() => new Set(visibleInstances.value))
-
     const effectiveTags = computed(() => {
         const derived = Array.from(new Set(
             instanceOwnership.value.flatMap(ownership => ownership.teams),
@@ -121,9 +119,6 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
 
     const sortedAffectedProjectVersions = computed(() => {
         const versions = (group.value.affected_versions || [])
-            .filter(version => !activeTeam.value || (version.components || []).some(component =>
-                visibleInstanceSet.value.has(component)
-            ))
             .map(version => version.project_version)
             .filter((version): version is string => !!version)
 

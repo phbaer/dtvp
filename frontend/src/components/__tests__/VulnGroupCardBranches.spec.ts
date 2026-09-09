@@ -53,6 +53,7 @@ vi.mock('lucide-vue-next', () => ({
     ClipboardList: { template: '<span />' },
     Bot: { template: '<span />' },
     Tags: { template: '<span />' },
+    Trash2: { template: '<span />' },
     X: { template: '<span />' }
 }))
 
@@ -149,14 +150,14 @@ describe('VulnGroupCard Branch Coverage', () => {
         })
         
         expect((wrapper.vm as any).displayState).toBe('INCOMPLETE')
-        expect((wrapper.vm as any).consensusButtonLabel).toBe('Sync all')
         ;(wrapper.vm as any).expanded = true
         await wrapper.vm.$nextTick()
         expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Unassessed findings')
         expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Missing global assessment')
+        expect(wrapper.get('[data-testid="sync-all-assessments"]').text()).toContain('Sync all')
         
-        // Trigger consensus
-        await (wrapper.vm as any).applyConsensusAssessment()
+        // Build the synchronization draft.
+        await (wrapper.vm as any).syncAllAssessments()
         
         expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
         // Details should be combined
@@ -190,8 +191,8 @@ describe('VulnGroupCard Branch Coverage', () => {
             }
         })
 
-        // Apply consensus so the form state reflects DT state + justification
-        await (wrapper.vm as any).applyConsensusAssessment()
+        // Build the synchronization draft so the form reflects DT state + justification.
+        await (wrapper.vm as any).syncAllAssessments()
         expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
         expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
 
@@ -230,7 +231,7 @@ describe('VulnGroupCard Branch Coverage', () => {
             }
         })
 
-        await (wrapper.vm as any).applyConsensusAssessment()
+        await (wrapper.vm as any).syncAllAssessments()
         expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
 
         await (wrapper.vm as any).handleUpdate(true)
@@ -276,7 +277,7 @@ describe('VulnGroupCard Branch Coverage', () => {
             }
         })
 
-        await (wrapper.vm as any).applyConsensusAssessment()
+        await (wrapper.vm as any).syncAllAssessments()
         expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
         expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
 
@@ -408,7 +409,7 @@ describe('VulnGroupCard Branch Coverage', () => {
         expect((wrapper.vm as any).justification).toBe('CODE_NOT_PRESENT')
     })
 
-    it('applies consensus (Apply worst assessment) for INCONSISTENT state', async () => {
+    it('keeps inconsistent assessments visible for manual resolution without a worst-assessment action', async () => {
         const group = {
             ...baseGroup,
             affected_versions: [
@@ -444,18 +445,18 @@ describe('VulnGroupCard Branch Coverage', () => {
         })
         
         expect((wrapper.vm as any).displayState).toBe('INCONSISTENT')
-        expect((wrapper.vm as any).consensusButtonLabel).toBe('Apply worst assessment')
         ;(wrapper.vm as any).expanded = true
         await wrapper.vm.$nextTick()
+        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Why manual resolution is needed')
         expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Analysis states differ')
         expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Exploitable, Not Affected')
-        
-        // Trigger consensus
-        await (wrapper.vm as any).applyConsensusAssessment()
-        
-        // EXPLOITABLE is worse than NOT_AFFECTED (priority 0 < priority 3)
-        expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
-        expect((wrapper.vm as any).details).toContain('[TeamA] Bad news')
-        expect((wrapper.vm as any).details).toContain('[TeamB] Good news')
+        expect(wrapper.find('[data-testid="sync-all-assessments"]').exists()).toBe(false)
+        expect(wrapper.text()).not.toContain('Apply worst assessment')
+
+        const initialState = (wrapper.vm as any).state
+        const initialDetails = (wrapper.vm as any).details
+        await (wrapper.vm as any).syncAllAssessments()
+        expect((wrapper.vm as any).state).toBe(initialState)
+        expect((wrapper.vm as any).details).toBe(initialDetails)
     })
 })

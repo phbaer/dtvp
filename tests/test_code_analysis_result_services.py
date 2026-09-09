@@ -105,6 +105,14 @@ def test_code_analysis_result_store_lists_assessments_from_dedicated_metadata(
                 "verdict": "Affected",
                 "analysis": "Reachable vulnerable call",
                 "confidence": "high",
+                "executive_summary": {
+                    "vulnerability": "CVE-2026-METADATA affects the request parser.",
+                    "assessment": "Affected because a production path reaches the parser.",
+                    "why": [
+                        "Version: the locked dependency is inside the affected range.",
+                        "Reachability: the request handler calls the vulnerable parser.",
+                    ],
+                },
                 "adjusted_cvss": {
                     "original_score": 8.1,
                     "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",
@@ -140,6 +148,14 @@ def test_code_analysis_result_store_lists_assessments_from_dedicated_metadata(
         "analysis": "Reachable vulnerable call",
         "confidence": "high",
         "verdict": "Affected",
+        "executive_summary": {
+            "vulnerability": "CVE-2026-METADATA affects the request parser.",
+            "assessment": "Affected because a production path reaches the parser.",
+            "why": [
+                "Version: the locked dependency is inside the affected range.",
+                "Reachability: the request handler calls the vulnerable parser.",
+            ],
+        },
         "adjusted_cvss": {
             "original_score": 8.1,
             "original_vector": "CVSS:3.1/AV:N/AC:L/C:H",

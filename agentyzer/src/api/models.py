@@ -158,6 +158,18 @@ ASSESS_RESPONSE_EXAMPLE = {
             ],
             "historical_affected": [],
         },
+        "executive_summary": {
+            "vulnerability": "CVE-2024-49766 · werkzeug: crafted multipart form data can trigger excessive resource consumption.",
+            "assessment": "Disposition: Affected. Confidence: High. Exposure: direct. Audit: status pass; evidence consistency strong. Basis: the current detected version remains within the affected range. Required action: upgrade werkzeug to a fixed release.",
+            "why": [
+                "Advisory applicability: Applicable — the advisory matches the assessed dependency context.",
+                "Dependency evidence: werkzeug is a direct dependency; declared in pyproject.toml; resolved from uv.lock.",
+                "Version evidence: current dependency version 2.0.0 (lock file) is inside the advisory's affected range.",
+                "Direct reachability (current workspace): Reachable — an evidence-backed production path to the dependency was identified. The vulnerable multipart parser is called by the request handler.",
+                "Deep exploitability (current workspace): Exploitability: Yes; vulnerability-specific path: confirmed.",
+                "Audit assurance: status pass; evidence consistency strong.",
+            ],
+        },
         "researcher_view": {
             "objective": "Find the weakness, determine exposure, and check whether the assessed application is actually affected.",
             "target_outcome": "Prefer an evidence-backed Not Affected / low-info outcome when the current codebase can be excluded.",
@@ -391,6 +403,11 @@ class AssessRequest(BaseModel):
         description="Logical component name from config/repos.yaml, or an ad-hoc name when focus_path is provided.",
         examples=["benchmark"],
     )
+    project_name: Optional[str] = Field(
+        default=None,
+        description="Optional caller project name used to correlate and selectively clean assessment jobs.",
+        examples=["ExampleApp"],
+    )
     focus_path: Optional[str] = Field(
         default=None,
         description="Optional absolute path to a local checkout to assess instead of cloning or resolving from config/repos.yaml.",
@@ -401,10 +418,15 @@ class AssessRequest(BaseModel):
         description="Optional dependency chains to bias transitive reachability analysis. Each nested list represents one path from a top-level dependency to the vulnerable package.",
         examples=[[["flask", "werkzeug"]]],
     )
+    project_versions: Optional[List[str]] = Field(
+        default=None,
+        description="Caller-supplied project/application releases for which the vulnerability was processed. These are repository-version candidates, not vulnerable dependency versions. The analyzer intersects them with repository tags, release branches, and configured default-branch version metadata before checking dependency versions.",
+        examples=[["1.0.0", "1.1.0", "2.0.0"]],
+    )
     affected_product_versions: Optional[List[str]] = Field(
         default=None,
-        description="Product/application versions that DTVP already knows are affected. The analyzer tries to map these to repository tags or branches and lists every version in the final version analysis.",
-        examples=[["1.0.0", "1.1.0", "2.0.0"]],
+        deprecated=True,
+        description="Deprecated alias for project_versions. Values are processed project releases, never vulnerable dependency versions.",
     )
     user_guidance: Optional[str] = Field(
         default=None,
@@ -647,7 +669,7 @@ class DependencyPresence(BaseModel):
         description="True when the dependency presence comes from upstream SBOM/input attribution.",
     )
     presence_basis: str = Field(
-        description="Primary presence source used for reporting (for example: direct, transitive, sbom_attributed, not_found).",
+        description="Primary presence source used for reporting (direct, transitive, sbom_attributed, not_found, or unknown).",
         examples=["sbom_attributed"],
     )
     direct: bool = Field(
@@ -667,6 +689,29 @@ class DependencyPresence(BaseModel):
     locked_version: Optional[str] = Field(
         default=None,
         description="Best-effort pinned version discovered in lock files.",
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Reason dependency presence remains unknown or otherwise needs qualification.",
+    )
+
+
+class ExecutiveSummary(BaseModel):
+    """Compact advisory, repository assessment, and decisive evidence."""
+
+    vulnerability: str = Field(
+        description="Brief description of the vulnerability and affected dependency."
+    )
+    assessment: str = Field(
+        description="Brief final assessment after version, reachability, and audit checks."
+    )
+    why: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Complete, audit-ready decision rationale drawn from labeled advisory "
+            "applicability, dependency, version, reachability, exploitability, "
+            "release, and assurance evidence."
+        ),
     )
 
 
@@ -697,7 +742,7 @@ class Assessment(BaseModel):
     )
     version_analysis: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Structured version evidence for the assessed component, including the detected version, advisory range summaries, and the per-ref version table used during verdicting.",
+        description="Structured version evidence, including covered product versions, the separately detected dependency/component version, advisory range summaries, and the per-ref version table used during verdicting.",
     )
     researcher_view: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -721,6 +766,14 @@ class Assessment(BaseModel):
     adjusted_cvss: Optional[CvssAdjustment] = Field(
         default=None,
         description="Rescored CVSS details when advisory scoring data is available.",
+    )
+    executive_summary: Optional[ExecutiveSummary] = Field(
+        default=None,
+        description=(
+            "Compact executive statements that separate the advisory's vulnerability "
+            "from the audited, repository-specific assessment and explain the "
+            "decision with concrete evidence."
+        ),
     )
     summary: str = Field(
         description="Short summary intended for human-readable reporting."

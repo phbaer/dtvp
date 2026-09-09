@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getConsensusAssessment, getAssessedTeams, hasOpenTeamAssessment, normalizeTags } from '../assessment-helpers';
+import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment, buildBulkSyncDetails, getGroupLifecycle, getGroupInconsistencyReasons, getAssessmentSyncDraft, getAssessedTeams, hasOpenTeamAssessment, normalizeTags } from '../assessment-helpers';
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
@@ -255,7 +255,7 @@ Details A`;
                 { team: 'TeamB', state: 'NOT_AFFECTED', user: 'UserB', details: 'y', justification: 'CODE_NOT_PRESENT' }
             ];
 
-            const result = getConsensusAssessment(blocks, 'INCOMPLETE', ['NOT_AFFECTED'], undefined);
+            const result = getAssessmentSyncDraft(blocks, ['NOT_AFFECTED'], undefined);
             expect(result.state).toBe('NOT_AFFECTED');
             expect(result.justification).toBe('CODE_NOT_PRESENT');
         });

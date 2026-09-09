@@ -18,6 +18,8 @@ from dtvp.auto_analysis_services import (
 from dtvp.analysis_queue_services import (
     AnalysisQueueServiceDeps,
     AnalysisQueueRuntimeDeps,
+    _extract_status_logs,
+    _merge_item_status_metadata,
     process_analysis_queue_item,
     run_analysis_queue_worker,
 )
@@ -141,6 +143,7 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     assert await client.start_assessment(
         vuln_id="CVE-2024-1000",
         component_name="libA",
+        project_name="ExampleApp",
         cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
         user_guidance="Please review",
         model="gpt-test",
@@ -148,7 +151,7 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
         llm_provider="OpenWebUI",
         focus_path="root>libA",
         dependency_paths=[["root", "libA"]],
-        affected_product_versions=["1.0.0", "1.1.0"],
+        project_versions=["1.0.0", "1.1.0"],
         debug=True,
     ) == {"job_id": "job-1"}
 
@@ -165,7 +168,7 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
     await client.close()
 
     first_post = dummy_client.post.await_args_list[0]
-    assert first_post.kwargs["json"]["affected_product_versions"] == [
+    assert first_post.kwargs["json"]["project_versions"] == [
         "1.0.0",
         "1.1.0",
     ]
@@ -177,6 +180,7 @@ async def test_agent_client_builds_payloads_and_calls_httpx(
         == "Please review"
     )
     payload = dummy_client.post.call_args_list[0].kwargs["json"]
+    assert payload["project_name"] == "ExampleApp"
     assert payload["model"] == "gpt-test"
     assert payload["llm_backend"] == "openwebui"
     assert payload["llm_provider"] == "OpenWebUI"
@@ -231,6 +235,7 @@ def test_code_analysis_endpoints_call_client_methods(client):
                     "user_guidance": "Please review",
                     "focus_path": "root>libA",
                     "dependency_paths": [["root", "libA"]],
+                    "project_versions": ["release-one"],
                     "debug": True,
                 },
             )
@@ -239,6 +244,9 @@ def test_code_analysis_endpoints_call_client_methods(client):
             assert response.json() == {"job_id": "job-1"}
             assess_mock.assert_awaited_once()
             assert assess_mock.await_args.kwargs["vuln_id"] == "CVE-2024-1000"
+            assert assess_mock.await_args.kwargs["project_versions"] == [
+                "release-one"
+            ]
 
         with patch(
             "dtvp.main.CodeAnalysisClient.get_job_status",
@@ -444,6 +452,78 @@ def test_code_analysis_dashboard_status_reuses_short_lived_snapshot(client):
     assert second.json() == first.json()
     assert health.await_count == 1
     assert list_jobs.await_count == 1
+
+
+def test_analysis_queue_uses_authoritative_logs_without_activity_duplicates():
+    status = {
+        "progress": {
+            "last_updated_at": "2026-08-12T06:22:50Z",
+            "logs": [
+                {
+                    "timestamp": "2026-08-12T06:22:50Z",
+                    "level": "info",
+                    "message": (
+                        "code_scanner: Waiting for model response during "
+                        "LLM Reachability Analysis (15s elapsed)"
+                    ),
+                }
+            ],
+            "current_agent": "code_scanner",
+            "current_activity": (
+                "Waiting for model response during LLM Reachability Analysis "
+                "(15s elapsed)"
+            ),
+            "active_agents": [
+                {
+                    "agent": "code_scanner",
+                    "activity": (
+                        "Waiting for model response during LLM Reachability Analysis "
+                        "(15s elapsed)"
+                    ),
+                    "status": "running",
+                }
+            ],
+        }
+    }
+
+    logs = _extract_status_logs(status)
+
+    assert logs == [
+        "2026-08-12T06:22:50Z info code_scanner: Waiting for model response "
+        "during LLM Reachability Analysis (15s elapsed)"
+    ]
+
+
+def test_analysis_queue_replaces_elapsed_model_wait_heartbeat():
+    item = MagicMock()
+    item.model = None
+    item.llm_backend = None
+    item.llm_provider = None
+    item.llm_metadata = {}
+    item.logs = [
+        "2026-08-12T06:22:50Z info code_scanner: Waiting for model response "
+        "during LLM Reachability Analysis (15s elapsed)"
+    ]
+    status = {
+        "progress": {
+            "logs": [
+                {
+                    "timestamp": "2026-08-12T06:23:05Z",
+                    "level": "info",
+                    "message": (
+                        "code_scanner: Waiting for model response during "
+                        "LLM Reachability Analysis (30s elapsed)"
+                    ),
+                }
+            ]
+        }
+    }
+
+    _merge_item_status_metadata(item, status)
+
+    wait_logs = [entry for entry in item.logs if "Waiting for model response" in entry]
+    assert len(wait_logs) == 1
+    assert "30s elapsed" in wait_logs[0]
 
 
 def test_code_analysis_dashboard_status_reports_queue_and_external_state(client):
@@ -657,6 +737,7 @@ def test_analysis_queue_submit_list_get_cancel(client):
             "project_name": "ExampleApp",
             "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
             "user_guidance": "Review this component",
+            "project_versions": ["release-one"],
         },
     )
     assert response.status_code == 200
@@ -665,6 +746,7 @@ def test_analysis_queue_submit_list_get_cancel(client):
     assert payload["status"] == "queued"
     assert payload["component_name"] == "libA"
     assert payload["project_name"] == "ExampleApp"
+    assert payload["affected_product_versions"] == ["release-one"]
 
     list_response = client.get("/api/analysis-queue")
     assert list_response.status_code == 200
@@ -844,6 +926,14 @@ def test_completed_analysis_queue_item_persists_result_history(client):
             "analysis": "NOT_AFFECTED",
             "justification": "CODE_NOT_PRESENT",
             "response": "NOT_SET",
+            "executive_summary": {
+                "vulnerability": "CVE-2026-PERSIST affects the upstream package and can expose a vulnerable parser path.",
+                "assessment": "Not Affected (High confidence; exposure: none). The affected package is absent.",
+                "why": [
+                    "Dependency: the affected package is absent from repository dependency evidence.",
+                    "Reachability: no production path reaches the vulnerable parser.",
+                ],
+            },
             "summary": "No vulnerable code path was found.",
             "reasoning": "The extension does not include the affected package.",
             "details": "Detailed evidence",
@@ -889,12 +979,25 @@ def test_completed_analysis_queue_item_persists_result_history(client):
     assert payload[0]["analysis_run_id"] == item.queue_id
     assert payload[0]["job_id"] == "job-persist"
     assert payload[0]["summary"]["verdict"] == "Not Affected"
+    assert payload[0]["summary"]["executive_summary"]["assessment"].startswith(
+        "Not Affected"
+    )
+    assert payload[0]["summary"]["executive_summary"]["why"] == [
+        "Dependency: the affected package is absent from repository dependency evidence.",
+        "Reachability: no production path reaches the vulnerable parser.",
+    ]
     assert "result" not in payload[0]
 
     detail_response = client.get(f"/api/code-analysis/results/{item.queue_id}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["result"]["assessment"]["summary"] == "No vulnerable code path was found."
+    assert detail["compact_context"]["executive_summary"]["vulnerability"].startswith(
+        "CVE-2026-PERSIST"
+    )
+    assert detail["compact_context"]["executive_summary"]["why"][1].startswith(
+        "Reachability:"
+    )
     assert detail["result"]["llm_conversation"][0]["messages"][1]["content"].endswith("Team note")
     assert detail["compact_context"]["target"]["component_name"] == "owned-api"
     assert detail["user_guidance_redacted"] is False
@@ -1108,6 +1211,205 @@ def test_code_analysis_result_can_be_deleted_from_history(client):
 
     second_delete = client.delete(f"/api/code-analysis/results/{item.queue_id}")
     assert second_delete.status_code == 404
+
+
+def test_code_analysis_cleanup_removes_correlated_vulnerability_data(client):
+    item = main.analysis_queue.submit(
+        vuln_id="CVE-2026-CLEAN",
+        component_name="owned-api",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+    )
+    item.status = "running"
+    item.job_id = "job-clean"
+    main.analysis_queue._finish_item(
+        item,
+        status="completed",
+        result={
+            "assessment": {
+                "affected": False,
+                "verdict": "Not Affected",
+                "summary": "No vulnerable path.",
+            },
+            "steps": [],
+        },
+    )
+
+    other = main.analysis_queue.submit(
+        vuln_id="CVE-2026-OTHER",
+        component_name="owned-api",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+    )
+    other.status = "failed"
+
+    jobs = {
+        "jobs": [
+            {
+                "job_id": "job-clean",
+                "status": "completed",
+                "request": {
+                    "project_name": "ExampleApp",
+                    "vuln_id": "CVE-2026-CLEAN",
+                    "component_name": "owned-api",
+                },
+            },
+            {
+                "job_id": "job-orphan",
+                "status": "failed",
+                "request": {
+                    "project_name": "ExampleApp",
+                    "vuln_id": "GHSA-CLEAN-ALIAS",
+                    "component_name": "removed-api",
+                },
+            },
+            {
+                "job_id": "job-other-project",
+                "status": "completed",
+                "request": {
+                    "project_name": "OtherApp",
+                    "vuln_id": "CVE-2026-CLEAN",
+                    "component_name": "owned-api",
+                },
+            },
+        ]
+    }
+    with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": "http://example.com"}):
+        with (
+            patch(
+                "dtvp.main.CodeAnalysisClient.list_jobs",
+                new=AsyncMock(return_value=jobs),
+            ),
+            patch(
+                "dtvp.main.CodeAnalysisClient.delete_job",
+                new=AsyncMock(return_value=None),
+            ) as delete_job,
+        ):
+            response = client.post(
+                "/api/projects/ExampleApp/vulnerabilities/CVE-2026-CLEAN/analysis-cleanup",
+                json={"vulnerability_aliases": ["GHSA-CLEAN-ALIAS"]},
+            )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cleaned"
+    assert response.json()["removed"] == {
+        "assessments": 1,
+        "dtvp_runs": 1,
+        "agentyzer_jobs": 2,
+    }
+    assert {call.args[0] for call in delete_job.await_args_list} == {
+        "job-clean",
+        "job-orphan",
+    }
+    assert main.analysis_queue.get(item.queue_id) is None
+    assert main.analysis_queue.get(other.queue_id) is other
+    assert main.code_analysis_result_store.get(item.queue_id) is None
+
+
+def test_code_analysis_cleanup_can_remove_only_selected_assessments(client):
+    selected = main.analysis_queue.submit(
+        vuln_id="CVE-2026-SELECTIVE",
+        component_name="owned-api",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+    )
+    selected.status = "running"
+    main.analysis_queue._finish_item(
+        selected,
+        status="completed",
+        result={"assessment": {"verdict": "Not Affected"}, "steps": []},
+    )
+    retained = main.analysis_queue.submit(
+        vuln_id="CVE-2026-SELECTIVE",
+        component_name="owned-worker",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+    )
+    retained.status = "running"
+    main.analysis_queue._finish_item(
+        retained,
+        status="completed",
+        result={"assessment": {"verdict": "Affected"}, "steps": []},
+    )
+
+    response = client.post(
+        "/api/projects/ExampleApp/vulnerabilities/CVE-2026-SELECTIVE/analysis-cleanup",
+        json={
+            "analysis_run_ids": [selected.queue_id],
+            "remove_assessments": True,
+            "remove_runs": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["removed"] == {
+        "assessments": 1,
+        "dtvp_runs": 0,
+        "agentyzer_jobs": 0,
+    }
+    assert main.code_analysis_result_store.get(selected.queue_id) is None
+    assert main.code_analysis_result_store.get(retained.queue_id) is not None
+    assert main.analysis_queue.get(selected.queue_id) is selected
+
+
+def test_code_analysis_cleanup_requires_opt_in_to_cancel_active_runs(client):
+    item = main.analysis_queue.submit(
+        vuln_id="CVE-2026-ACTIVE-CLEAN",
+        component_name="owned-api",
+        project_name="ExampleApp",
+        submitted_by="testuser",
+    )
+    item.status = "running"
+    item.job_id = "job-active-clean"
+    jobs = {
+        "jobs": [
+            {
+                "job_id": item.job_id,
+                "status": "running",
+                "request": {
+                    "project_name": "ExampleApp",
+                    "vuln_id": item.vuln_id,
+                    "component_name": item.component_name,
+                },
+            }
+        ]
+    }
+
+    with patch.dict(os.environ, {"DTVP_CODE_ANALYSIS_URL": "http://example.com"}):
+        with (
+            patch(
+                "dtvp.main.CodeAnalysisClient.list_jobs",
+                new=AsyncMock(return_value=jobs),
+            ),
+            patch(
+                "dtvp.main.CodeAnalysisClient.delete_job",
+                new=AsyncMock(return_value=None),
+            ) as delete_job,
+        ):
+            skipped = client.post(
+                f"/api/projects/ExampleApp/vulnerabilities/{item.vuln_id}/analysis-cleanup",
+                json={"remove_assessments": False, "remove_runs": True},
+            )
+            removed = client.post(
+                f"/api/projects/ExampleApp/vulnerabilities/{item.vuln_id}/analysis-cleanup",
+                json={
+                    "remove_assessments": False,
+                    "remove_runs": True,
+                    "cancel_active": True,
+                },
+            )
+
+    assert skipped.status_code == 200
+    assert skipped.json()["status"] == "partial"
+    assert skipped.json()["skipped_active_ids"] == [item.queue_id]
+    assert delete_job.await_count == 2
+    assert removed.status_code == 200
+    assert removed.json()["removed"] == {
+        "assessments": 0,
+        "dtvp_runs": 1,
+        "agentyzer_jobs": 1,
+    }
+    assert main.analysis_queue.get(item.queue_id) is None
 
 
 def test_code_analysis_result_store_can_redact_guidance(client, monkeypatch):
@@ -1595,7 +1897,7 @@ async def test_analysis_queue_worker_passes_user_guidance_to_client(monkeypatch)
     await process_analysis_queue_item(deps, item, finish_item)
 
     assert captured["user_guidance"] == "Check GHSA metadata gaps"
-    assert captured["affected_product_versions"] == ["1.0.0", "1.1.0"]
+    assert captured["project_versions"] == ["1.0.0", "1.1.0"]
     assert captured["model"] == "gpt-config"
     assert captured["llm_backend"] == "openwebui"
     assert captured["llm_provider"] == "OpenWebUI"

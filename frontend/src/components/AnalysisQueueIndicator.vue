@@ -472,8 +472,28 @@ watch(open, async (isOpen) => {
                                     {{ expandedResult.assessment.confidence }}
                                 </span>
                             </div>
-                            <!-- Summary -->
-                            <div class="text-[10px] text-gray-300 leading-relaxed">{{ expandedResult.assessment.summary }}</div>
+                            <!-- Executive summary -->
+                            <div v-if="expandedResult.assessment.executive_summary" class="space-y-1.5">
+                                <div>
+                                    <div class="text-[9px] font-semibold uppercase text-gray-500">Vulnerability</div>
+                                    <div class="text-[10px] text-gray-300 leading-relaxed">{{ expandedResult.assessment.executive_summary.vulnerability }}</div>
+                                </div>
+                                <div>
+                                    <div class="text-[9px] font-semibold uppercase text-gray-500">Assessment</div>
+                                    <div class="text-[10px] text-gray-300 leading-relaxed">{{ expandedResult.assessment.executive_summary.assessment }}</div>
+                                </div>
+                                <div v-if="expandedResult.assessment.executive_summary.why?.length">
+                                    <div class="text-[9px] font-semibold uppercase text-gray-500">Decision rationale</div>
+                                    <ul class="pl-4 text-[10px] text-gray-400 leading-relaxed list-disc space-y-0.5">
+                                        <li v-for="reason in expandedResult.assessment.executive_summary.why" :key="reason">{{ reason }}</li>
+                                    </ul>
+                                </div>
+                                <div v-else-if="expandedResult.assessment.reasoning">
+                                    <div class="text-[9px] font-semibold uppercase text-gray-500">Decision rationale</div>
+                                    <div class="text-[10px] text-gray-400 leading-relaxed">{{ expandedResult.assessment.reasoning }}</div>
+                                </div>
+                            </div>
+                            <div v-else class="text-[10px] text-gray-300 leading-relaxed">{{ expandedResult.assessment.summary }}</div>
                             <div v-if="expandedResult.versions_checked?.length" class="space-y-1">
                                 <div class="text-[9px] font-semibold uppercase text-gray-500">Versions Checked</div>
                                 <ul class="text-[10px] text-gray-400 list-disc list-inside space-y-0.5">

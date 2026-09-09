@@ -1,10 +1,55 @@
 import logging
+import os
 import re
 from typing import Any, Dict, List
 
 from src.http import async_client
 
 logger = logging.getLogger(__name__)
+
+
+def canonicalize_advisory_id(vuln_id: str) -> str:
+    """Return the source-compatible spelling of a supported advisory ID.
+
+    Dependency-Track and DTVP deliberately compare vulnerability identifiers
+    case-insensitively and commonly emit them in uppercase.  OSV's direct
+    vulnerability endpoint is case-sensitive, however, and GitHub advisory
+    identifiers conventionally use a lowercase payload after the ``GHSA-``
+    prefix.
+    """
+    value = str(vuln_id or "").strip()
+    if re.fullmatch(
+        r"GHSA-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}-[0-9A-Za-z]{4}",
+        value,
+        re.I,
+    ):
+        return "GHSA-" + value[5:].lower()
+    if re.fullmatch(r"CVE-\d{4}-\d+", value, re.I):
+        return value.upper()
+    return value
+
+
+def _github_headers() -> Dict[str, str]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = os.environ.get("AGENTYZER_GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _first_alias(*records: Any, prefix: str) -> str:
+    wanted = prefix.upper()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        candidates = [record.get("id"), *(record.get("aliases") or [])]
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.upper().startswith(wanted):
+                return canonicalize_advisory_id(candidate)
+    return ""
 
 # Map manifest/lock file patterns → OSV ecosystem names.
 _ECOSYSTEM_HINTS: dict[str, str] = {
@@ -193,27 +238,30 @@ def _score_from_vector(vector: str) -> float:
 
 
 async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
-    """Fetch advisory data from OSV and NVD (best-effort).
+    """Fetch advisory data from OSV, GitHub, and NVD (best-effort).
 
     Returns a normalized dict with keys used by the analyzer:
-      - id, sources, affected_packages, affected_ranges, fixed_versions,
+      - id, sources, affected_packages, affected_ranges, affected_versions,
+        affected_version_entries, fixed_versions, fixed_version_entries,
         cvss (list), cwe (list), vulnerable_symbols, raw
     """
+    requested_id = str(vuln_id or "").strip()
+    lookup_id = canonicalize_advisory_id(requested_id)
     results: Dict[str, Any] = {}
     async with async_client(timeout=20) as client:
         # OSV
         try:
-            logger.debug("Querying OSV for %s", vuln_id)
-            r = await client.get(f"https://api.osv.dev/v1/vulns/{vuln_id}")
+            logger.debug("Querying OSV for %s", lookup_id)
+            r = await client.get(f"https://api.osv.dev/v1/vulns/{lookup_id}")
             if r.status_code == 200:
                 results["osv"] = r.json()
-                logger.info("OSV: found advisory for %s", vuln_id)
+                logger.info("OSV: found advisory for %s", lookup_id)
             else:
                 results["osv_status"] = r.status_code
-                logger.info("OSV: %s returned HTTP %d", vuln_id, r.status_code)
+                logger.info("OSV: %s returned HTTP %d", lookup_id, r.status_code)
         except Exception as e:
             results["osv_error"] = str(e)
-            logger.warning("OSV error for %s: %s", vuln_id, e)
+            logger.warning("OSV error for %s: %s", lookup_id, e)
 
         # If the OSV entry has GHSA aliases but lacks ecosystem-specific
         # (SEMVER/ECOSYSTEM) ranges, also fetch the GHSA entry which often
@@ -228,48 +276,61 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
             )
             if not has_semver:
                 for alias in aliases:
-                    if alias.startswith("GHSA-"):
+                    if isinstance(alias, str) and alias.upper().startswith("GHSA-"):
+                        canonical_alias = canonicalize_advisory_id(alias)
                         try:
                             logger.debug(
                                 "Fetching GHSA alias %s (no SEMVER ranges in %s)",
-                                alias,
-                                vuln_id,
+                                canonical_alias,
+                                lookup_id,
                             )
                             gr = await client.get(
-                                f"https://api.osv.dev/v1/vulns/{alias}"
+                                f"https://api.osv.dev/v1/vulns/{canonical_alias}"
                             )
                             if gr.status_code == 200:
                                 results["osv_ghsa"] = gr.json()
                                 logger.info(
                                     "OSV: found GHSA alias %s for %s",
-                                    alias,
-                                    vuln_id,
+                                    canonical_alias,
+                                    lookup_id,
                                 )
+                            else:
+                                results["osv_ghsa_status"] = gr.status_code
                         except Exception as e:
-                            logger.warning("OSV GHSA alias %s error: %s", alias, e)
+                            results["osv_ghsa_error"] = str(e)
+                            logger.warning(
+                                "OSV GHSA alias %s error: %s", canonical_alias, e
+                            )
                         break  # only fetch the first GHSA alias
 
         # NVD 2.0 JSON API (best-effort)
-        try:
-            r2 = await client.get(
-                f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={vuln_id}"
-            )
-            if r2.status_code == 200:
-                results["nvd"] = r2.json()
-            else:
-                results["nvd_status"] = r2.status_code
-        except Exception as e:
-            results["nvd_error"] = str(e)
+        nvd_id = _first_alias(
+            results.get("osv"),
+            results.get("osv_ghsa"),
+            {"id": lookup_id},
+            prefix="CVE-",
+        )
+        if nvd_id:
+            try:
+                r2 = await client.get(
+                    f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={nvd_id}"
+                )
+                if r2.status_code == 200:
+                    results["nvd"] = r2.json()
+                else:
+                    results["nvd_status"] = r2.status_code
+            except Exception as e:
+                results["nvd_error"] = str(e)
 
         # GitHub Advisory (structured endpoint) for GHSA IDs.
         ghsa_ids: list[str] = []
-        if vuln_id.upper().startswith("GHSA-"):
-            ghsa_ids.append(vuln_id)
-        osv_for_aliases = results.get("osv")
-        if isinstance(osv_for_aliases, dict):
-            for alias in osv_for_aliases.get("aliases", []) or []:
-                if isinstance(alias, str) and alias.upper().startswith("GHSA-"):
-                    ghsa_ids.append(alias)
+        if lookup_id.upper().startswith("GHSA-"):
+            ghsa_ids.append(lookup_id)
+        for osv_for_aliases in (results.get("osv"), results.get("osv_ghsa")):
+            if isinstance(osv_for_aliases, dict):
+                for alias in osv_for_aliases.get("aliases", []) or []:
+                    if isinstance(alias, str) and alias.upper().startswith("GHSA-"):
+                        ghsa_ids.append(canonicalize_advisory_id(alias))
 
         # De-duplicate while preserving order.
         ghsa_ids = list(dict.fromkeys(ghsa_ids))
@@ -278,47 +339,91 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
             try:
                 ga = await client.get(
                     f"https://api.github.com/advisories/{ghsa_id}",
-                    headers={"Accept": "application/vnd.github+json"},
+                    headers=_github_headers(),
                 )
                 if ga.status_code == 200:
                     results["github_advisory"] = ga.json()
+                    results.pop("github_advisory_status", None)
+                    results.pop("github_advisory_error", None)
                     logger.info("GitHub Advisory: found structured data for %s", ghsa_id)
                     break
+                results["github_advisory_status"] = ga.status_code
                 logger.info(
                     "GitHub Advisory: %s returned HTTP %d",
                     ghsa_id,
                     ga.status_code,
                 )
             except Exception as e:
+                results["github_advisory_error"] = str(e)
                 logger.warning("GitHub Advisory error for %s: %s", ghsa_id, e)
 
-        # GitHub Advisory search fallback (rate-limited).
-        try:
-            gh = await client.get(f"https://api.github.com/search/issues?q={vuln_id}")
-            if gh.status_code == 200:
-                results["github_search"] = gh.json()
-            else:
-                results["github_status"] = gh.status_code
-        except Exception as e:
-            results["github_error"] = str(e)
+        # Last-resort search only when neither structured source returned an
+        # advisory.  Avoid spending one of GitHub's small unauthenticated search
+        # quotas on every successful lookup.
+        if not results.get("osv") and not results.get("github_advisory"):
+            try:
+                gh = await client.get(
+                    f"https://api.github.com/search/issues?q={lookup_id}",
+                    headers=_github_headers(),
+                )
+                if gh.status_code == 200:
+                    results["github_search"] = gh.json()
+                else:
+                    results["github_status"] = gh.status_code
+            except Exception as e:
+                results["github_error"] = str(e)
 
     # Normalize
     normalized: Dict[str, Any] = {
-        "id": vuln_id,
+        "id": requested_id,
+        "lookup_id": lookup_id,
         "summary": "",
-        "sources": list(results.keys()),
+        "sources": [
+            source
+            for source in (
+                "osv",
+                "osv_ghsa",
+                "github_advisory",
+                "nvd",
+                "github_search",
+            )
+            if isinstance(results.get(source), dict) and results[source]
+        ],
         "affected_packages": [],
         "affected_ranges": [],
         "affected_versions": [],
+        "affected_version_entries": [],
         "fixed_versions": [],
+        "fixed_version_entries": [],
         "cpe_entries": [],  # rich CPE data: {"part", "vendor", "product", "cpe"}
         "cvss": [],
         "cwe": [],
         "vulnerable_symbols": [],
         "exploit_preconditions": [],
+        "lookup_failures": [],
         "data_warnings": [],
         "raw": results,
     }
+
+    for label, status_key, error_key in (
+        ("OSV", "osv_status", "osv_error"),
+        ("OSV GHSA alias", "osv_ghsa_status", "osv_ghsa_error"),
+        ("NVD", "nvd_status", "nvd_error"),
+        (
+            "GitHub Advisory",
+            "github_advisory_status",
+            "github_advisory_error",
+        ),
+        ("GitHub search", "github_status", "github_error"),
+    ):
+        if status_key in results:
+            normalized["lookup_failures"].append(
+                f"{label} returned HTTP {results[status_key]}"
+            )
+        elif error_key in results:
+            normalized["lookup_failures"].append(
+                f"{label} request failed: {results[error_key]}"
+            )
 
     def _parse_osv_affected(
         osv: Dict[str, Any],
@@ -327,14 +432,32 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         """Extract package, range, and version info from an OSV affected block."""
         for a in osv.get("affected", []):
             pkg = a.get("package", {})
+            ecosystem = str(pkg.get("ecosystem") or "").strip()
+            package_name = str(pkg.get("name") or "").strip()
             if pkg and (pkg.get("name") or pkg.get("ecosystem")):
-                ecosystem = pkg.get("ecosystem")
-                name = pkg.get("name")
-                entry = f"{ecosystem}:{name}"
+                entry = f"{ecosystem}:{package_name}"
                 if entry not in normalized["affected_packages"]:
                     normalized["affected_packages"].append(entry)
 
-            # Pair introduced/fixed events within each range
+            def record_fixed_version(value: Any) -> None:
+                fixed = str(value or "").strip().lstrip("=")
+                if not fixed:
+                    return
+                if fixed not in normalized["fixed_versions"]:
+                    normalized["fixed_versions"].append(fixed)
+                fixed_entry = {
+                    "version": fixed,
+                    "source": source_label,
+                }
+                if package_name:
+                    fixed_entry["package"] = package_name
+                if ecosystem:
+                    fixed_entry["ecosystem"] = ecosystem
+                if fixed_entry not in normalized["fixed_version_entries"]:
+                    normalized["fixed_version_entries"].append(fixed_entry)
+
+            # Pair each introduced event with the next OSV terminating event.
+            # last_affected is inclusive; fixed and limit are exclusive.
             for r in a.get("ranges", []) or []:
                 typ = r.get("type")
                 events = r.get("events", []) or []
@@ -342,21 +465,38 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                 while i < len(events):
                     ev = events[i]
                     if "introduced" in ev:
-                        intro = ev["introduced"]
-                        fixed = None
-                        # Look ahead for a paired "fixed" event
-                        if i + 1 < len(events) and "fixed" in events[i + 1]:
-                            fixed = events[i + 1]["fixed"]
-                            i += 1
-                        combined = {"introduced": intro}
-                        if fixed:
-                            combined["fixed"] = fixed
-                        normalized["affected_ranges"].append(
-                            {"type": typ, "event": combined, "source": source_label}
-                        )
+                        combined = {"introduced": ev["introduced"]}
+                        if i + 1 < len(events):
+                            terminator = events[i + 1]
+                            for key in ("fixed", "last_affected", "limit"):
+                                if key in terminator:
+                                    combined[key] = terminator[key]
+                                    if key == "fixed" and typ in {
+                                        "SEMVER",
+                                        "ECOSYSTEM",
+                                    }:
+                                        record_fixed_version(terminator[key])
+                                    break
+                            if len(combined) > 1:
+                                i += 1
+                        range_entry = {
+                            "type": typ,
+                            "event": combined,
+                            "source": source_label,
+                        }
+                        if package_name:
+                            range_entry["package"] = package_name
+                        if ecosystem:
+                            range_entry["ecosystem"] = ecosystem
+                        normalized["affected_ranges"].append(range_entry)
                     elif "fixed" in ev:
-                        # Orphan fixed event (no preceding introduced)
-                        normalized["fixed_versions"].append(ev["fixed"])
+                        if typ in {"SEMVER", "ECOSYSTEM"}:
+                            record_fixed_version(ev["fixed"])
+                    elif "last_affected" in ev or "limit" in ev:
+                        normalized["data_warnings"].append(
+                            f"Advisory {source_label} contains an unpaired "
+                            f"{next(iter(ev))} version boundary"
+                        )
                     i += 1
 
             # Explicit affected versions list
@@ -365,6 +505,16 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                 clean = v.lstrip("v") if v.startswith("v") else v
                 if clean and clean not in normalized["affected_versions"]:
                     normalized["affected_versions"].append(clean)
+                version_entry = {
+                    "version": clean,
+                    "source": source_label,
+                }
+                if package_name:
+                    version_entry["package"] = package_name
+                if ecosystem:
+                    version_entry["ecosystem"] = ecosystem
+                if clean and version_entry not in normalized["affected_version_entries"]:
+                    normalized["affected_version_entries"].append(version_entry)
 
     # Parse OSV (primary)
     osv = results.get("osv")
@@ -443,20 +593,41 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
                     normalized["affected_packages"].append(entry)
 
             vuln_range = (vuln.get("vulnerable_version_range") or "").strip()
-            if vuln_range:
-                normalized["affected_ranges"].append(
-                    {
-                        "type": "ECOSYSTEM",
-                        "event": {"range": vuln_range},
-                        "source": "github_advisory",
-                    }
-                )
-
             fixed = (vuln.get("first_patched_version") or "").strip()
             if fixed:
                 fixed = fixed.lstrip("=")
+            if vuln_range:
+                range_event = {"range": vuln_range}
+                if fixed:
+                    # Keep the patched version attached to the release-line
+                    # range it terminates.  A package can have several
+                    # maintained release lines, and flattening their fixes
+                    # produces invalid downgrade recommendations.
+                    range_event["fixed"] = fixed
+                range_entry = {
+                    "type": "ECOSYSTEM",
+                    "event": range_event,
+                    "source": "github_advisory",
+                }
+                if name:
+                    range_entry["package"] = name
+                if ecosystem:
+                    range_entry["ecosystem"] = ecosystem
+                normalized["affected_ranges"].append(range_entry)
+
+            if fixed:
                 if fixed not in normalized["fixed_versions"]:
                     normalized["fixed_versions"].append(fixed)
+                fixed_entry = {
+                    "version": fixed,
+                    "source": "github_advisory",
+                }
+                if name:
+                    fixed_entry["package"] = name
+                if ecosystem:
+                    fixed_entry["ecosystem"] = ecosystem
+                if fixed_entry not in normalized["fixed_version_entries"]:
+                    normalized["fixed_version_entries"].append(fixed_entry)
 
             for fn_name in vuln.get("vulnerable_functions", []) or []:
                 if fn_name and fn_name not in normalized["vulnerable_symbols"]:
@@ -566,7 +737,8 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
         if not osv_summary and osv_details:
             # Take first paragraph (up to blank line) as the summary.
             osv_summary = osv_details.split("\n\n")[0].strip()
-        normalized["summary"] = osv_summary
+        if osv_summary:
+            normalized["summary"] = osv_summary
 
         desc = osv_summary or osv_details
         normalized["vulnerable_symbols"].extend(extract_symbols(desc))
@@ -629,12 +801,22 @@ async def fetch_advisory(vuln_id: str) -> Dict[str, Any]:
     if not normalized["affected_packages"]:
         normalized["data_warnings"].append(
             "Advisory has no ecosystem/package information — "
-            "affected package identification relies on the component name"
+            "the vulnerable dependency cannot be identified"
         )
     if not normalized["affected_ranges"] and not normalized["affected_versions"]:
         normalized["data_warnings"].append(
             "Advisory has no affected ranges or explicit version lists"
         )
+    if not normalized["summary"]:
+        if normalized["lookup_failures"]:
+            normalized["data_warnings"].append(
+                "Advisory lookup did not return a description: "
+                + "; ".join(normalized["lookup_failures"])
+            )
+        else:
+            normalized["data_warnings"].append(
+                "Retrieved advisory sources did not provide a description"
+            )
     normalized["data_warnings"] = list(dict.fromkeys(normalized["data_warnings"]))
 
     return normalized

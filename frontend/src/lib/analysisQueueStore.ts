@@ -271,7 +271,7 @@ async function submit(
     userGuidance?: string,
     onComplete?: CompletionCallback,
     onError?: (error: string) => void,
-    affectedProductVersions?: string[],
+    projectVersions?: string[],
     source: 'manual' | 'benchmark' | string = 'manual',
 ): Promise<AnalysisQueueItem> {
     const item = await analysisQueueSubmit({
@@ -280,7 +280,7 @@ async function submit(
         project_name: projectName,
         cvss_vector: cvssVector,
         user_guidance: userGuidance,
-        affected_product_versions: affectedProductVersions,
+        project_versions: projectVersions,
         source,
     })
     if (onComplete) completionCallbacks.set(item.queue_id, onComplete)

@@ -423,12 +423,10 @@ export function sanitizeAssessmentDetails(
 }
 
 /**
- * Calculates a consensus assessment from multiple blocks.
- * Used by "Sync all" (INCOMPLETE) and "Apply worst assessment" (INCONSISTENT).
+ * Builds the reviewer draft used to synchronize an incomplete assessment.
  */
-export function getConsensusAssessment(
+export function getAssessmentSyncDraft(
     blocks: AssessmentBlock[],
-    displayState: 'INCOMPLETE' | 'INCONSISTENT' | string,
     dependencyTrackStates: string[] = [],
     dependencyTrackJustification?: string
 ): { state: string, justification: string, details: string } {
@@ -475,16 +473,6 @@ export function getConsensusAssessment(
     } else if (dtJustification) {
         // No DT state, but DT still has a justification — keep it.
         justification = dtJustification
-    } else if (displayState === 'INCONSISTENT') {
-        const nonMissing = blocks.filter(b => b.state !== 'NOT_SET')
-        if (nonMissing.length > 0) {
-            const sorted = [...nonMissing].sort((a, b) => (STATE_PRIORITY[a.state] ?? 10) - (STATE_PRIORITY[b.state] ?? 10))
-            const worst = sorted[0]
-            if (worst) {
-                state = worst.state
-                justification = worst.justification || 'NOT_SET'
-            }
-        }
     } else {
         const firstActive = blocks.find(b => b.state !== 'NOT_SET')
         if (firstActive) {
@@ -493,16 +481,11 @@ export function getConsensusAssessment(
         }
     }
 
-    // 2. Combine all details.
-    // In INCONSISTENT mode ("Apply worst assessment"), skip the General block:
-    // it stores the previously derived combination, so including it would
-    // re-duplicate all team-block content on repeated applies.
-    // In INCOMPLETE mode ("Sync all"), the General block is a legitimate
-    // first-party assessment and should be included.
+    // 2. Combine all details. The General block is a legitimate first-party
+    // assessment during incomplete-assessment synchronization.
     const combinedParts: string[] = []
     const seenDetails = new Set<string>()
     for (const b of deduplicateAssessmentBlocks(blocks)) {
-        if (displayState === 'INCONSISTENT' && assessmentTeamKey(b.team) === 'general') continue
         const cleaned = (b.details || '')
             .replace(/\n\n\[Status: Pending Review\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')

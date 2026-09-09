@@ -50,6 +50,7 @@ vi.mock('lucide-vue-next', () => ({
     Send: { template: '<span />' },
     Ban: { template: '<span />' },
     FileText: { template: '<span />' },
+    Trash2: { template: '<span />' },
     X: { template: '<span />' }
 }))
 

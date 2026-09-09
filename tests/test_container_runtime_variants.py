@@ -18,15 +18,37 @@ def test_compose_gil_override_is_an_explicit_fallback():
     assert 'DTVP_REQUIRE_FREE_THREADED: "false"' in override
 
 
-def test_pipeline_publishes_free_threaded_primary_and_gil_fallback_tags():
+def test_pipeline_publishes_only_the_free_threaded_dtvp_image():
     workflow = (ROOT / ".github/workflows/build-publish.yml").read_text(
         encoding="utf-8"
     )
 
-    assert "Build and Push DTVP (free-threaded default)" in workflow
+    assert "Build and Push DTVP (free-threaded)" in workflow
     assert "file: Dockerfile.free-threaded" in workflow
-    assert "dtvp:latest-freethreaded" in workflow
-    assert "dtvp:dev-freethreaded" in workflow
-    assert "Build and Push DTVP (GIL fallback)" in workflow
-    assert "dtvp:latest-gil" in workflow
-    assert "dtvp:dev-gil" in workflow
+    assert "Build and Push DTVP (GIL fallback)" not in workflow
+    assert "file: Dockerfile\n" not in workflow
+    assert "-freethreaded" not in workflow
+    assert "-gil" not in workflow
+
+
+def test_image_publication_waits_for_all_test_suites_and_avoids_redundant_setup():
+    workflow = (ROOT / ".github/workflows/build-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "needs: [test-backend, test-frontend, test-e2e]" in workflow
+    assert "test-agentyzer:" not in workflow
+    assert workflow.count("uses: actions/setup-node@v6") == 3
+    assert workflow.count("node-version: 24") == 3
+    assert "docker/setup-qemu-action" not in workflow
+    assert "docker-buildx-plugin" not in workflow
+    assert "docker-compose-plugin" not in workflow
+    assert "uv add --dev cyclonedx-bom" not in workflow
+    assert "npm install --save-dev" not in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+
+
+def test_agentyzer_build_context_excludes_the_ci_virtual_environment():
+    dockerignore = (ROOT / "agentyzer" / ".dockerignore").read_text(encoding="utf-8")
+
+    assert ".venv" in dockerignore.splitlines()

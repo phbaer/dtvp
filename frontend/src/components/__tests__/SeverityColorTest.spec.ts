@@ -28,7 +28,8 @@ vi.mock('lucide-vue-next', () => ({
     GitBranch: { template: '<span />' },
     Eye: { template: '<span />' },
     ClipboardCopy: { template: '<span />' },
-    Plus: { template: '<span />' }
+    Plus: { template: '<span />' },
+    Trash2: { template: '<span />' }
 }))
 
 vi.mock('../../lib/api', () => ({

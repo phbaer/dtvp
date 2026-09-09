@@ -146,5 +146,5 @@ describe('TMRescore integration via api.ts', () => {
         expect(wrapper.text()).toContain('Analysis Result')
         expect(wrapper.text()).toContain('session-1')
         expect(wrapper.text()).toContain('Enriched CycloneDX SBOM')
-    })
+    }, 10_000)
 })

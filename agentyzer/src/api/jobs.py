@@ -112,9 +112,33 @@ def _progress_event_fields(event: Dict[str, Any]) -> tuple[str, str, str, str, s
     return phase, step, title, agent, activity
 
 
-def append_job_log(job: Job, message: str, *, level: str = "info") -> None:
+def append_job_log(
+    job: Job,
+    message: str,
+    *,
+    level: str = "info",
+    heartbeat_step: str | None = None,
+) -> None:
     """Append a recent live log entry to the job status snapshot."""
-    job.logs.append({"timestamp": _now_iso(), "level": level, "message": message})
+    entry: dict[str, Any] = {
+        "timestamp": _now_iso(),
+        "level": level,
+        "message": message,
+    }
+    if heartbeat_step:
+        entry["heartbeat_step"] = heartbeat_step
+        for index in range(len(job.logs) - 1, -1, -1):
+            existing = job.logs[index]
+            if (
+                isinstance(existing, dict)
+                and existing.get("heartbeat_step") == heartbeat_step
+            ):
+                job.logs[index] = entry
+                break
+        else:
+            job.logs.append(entry)
+    else:
+        job.logs.append(entry)
     del job.logs[:-200]
 
 
@@ -210,7 +234,11 @@ def _handle_progress_heartbeat(
     job.current_title = title
     job.current_agent = agent
     job.current_activity = activity
-    append_job_log(job, f"{agent}: {activity}")
+    append_job_log(
+        job,
+        f"{agent}: {activity}",
+        heartbeat_step=step,
+    )
     _recompute_job_progress(job)
 
 

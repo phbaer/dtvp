@@ -19,6 +19,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from .analysis_queue_services import (
     get_next_queued_item as get_next_queued_item_impl,
@@ -374,6 +375,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="DTVP", version=VERSION, lifespan=lifespan)
+context_path = normalize_context_path(auth_settings.CONTEXT_PATH)
 
 
 origins = build_cors_origins(
@@ -390,7 +392,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-context_path = normalize_context_path(auth_settings.CONTEXT_PATH)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=auth_settings.SESSION_SECRET_KEY,
+    session_cookie="oidc_state",
+    max_age=10 * 60,
+    path=auth_settings.oidc_cookie_path,
+    same_site="lax",
+    https_only=auth_settings.secure_cookies,
+)
 
 
 @app.middleware("http")

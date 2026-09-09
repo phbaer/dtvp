@@ -86,6 +86,9 @@ _SKIP_DIRS = frozenset(
     }
 )
 
+_MAX_LLM_AST_CONTEXT_CHARS = 48_000
+_LLM_AST_TRUNCATION_MARKER = "\n\n...[AST context omitted to fit analysis budget]...\n\n"
+
 
 def _build_lang_by_ext() -> dict[str, str]:
     from src.languages import registry as _lang_registry
@@ -393,11 +396,39 @@ def infer_symbols_from_cwe(cwe_ids: list[str]) -> list[str]:
     return patterns
 
 
-def format_for_llm(graph: SymbolGraph) -> str:
-    """Format AST analysis results as context for inclusion in an LLM prompt."""
+def _bounded_llm_context(text: str, limit: int) -> str:
+    """Bound generated AST context while retaining evidence from both ends."""
+    if limit <= 0 or len(text) <= limit:
+        return text
+    available = limit - len(_LLM_AST_TRUNCATION_MARKER)
+    if available <= 0:
+        return _LLM_AST_TRUNCATION_MARKER.strip()[:limit]
+    head_chars = max(1, int(available * 0.65))
+    tail_chars = max(1, available - head_chars)
+    return (
+        text[:head_chars].rstrip()
+        + _LLM_AST_TRUNCATION_MARKER
+        + text[-tail_chars:].lstrip()
+    )
+
+
+def format_for_llm(
+    graph: SymbolGraph,
+    *,
+    max_chars: int = _MAX_LLM_AST_CONTEXT_CHARS,
+) -> str:
+    """Format bounded AST evidence for inclusion in an LLM prompt."""
     if not graph.imports and not graph.calls:
         return ""
     sections: list[str] = []
+    if graph.resolved_symbols:
+        symbols = ", ".join(graph.resolved_symbols)
+        if len(symbols) > 1_000:
+            symbols = (
+                symbols[:960].rstrip(" ,")
+                + f", ... ({len(graph.resolved_symbols)} symbols total)"
+            )
+        sections.append(f"DISCOVERED SYMBOLS (from imports): {symbols}")
     if graph.imports:
         lines = ["IMPORT ANALYSIS (AST-resolved):"]
         for imp in graph.imports:
@@ -415,11 +446,7 @@ def format_for_llm(graph: SymbolGraph) -> str:
             lines.append(f"  {cs.file}:{cs.line} — {cs.symbol}() in {cs.enclosing}")
             lines.append(f"    {cs.context}")
         sections.append("\n".join(lines))
-    if graph.resolved_symbols:
-        sections.append(
-            f"DISCOVERED SYMBOLS (from imports): {', '.join(graph.resolved_symbols)}"
-        )
-    return "\n\n".join(sections)
+    return _bounded_llm_context("\n\n".join(sections), max_chars)
 
 
 # ================================================================== #

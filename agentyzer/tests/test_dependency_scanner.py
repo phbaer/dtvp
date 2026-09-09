@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 import subprocess
 from pathlib import Path
 
@@ -87,6 +89,48 @@ def test_find_component_extracts_gradle_lock_version_for_bare_java_name(tmp_path
     assert result["lock_files"] == ["gradle/dependency-locks/runtimeClasspath.lockfile"]
 
 
+def test_javascript_root_package_name_is_not_dependency_evidence(tmp_path):
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "vp-auth-server",
+                "version": "1.0.0",
+                "dependencies": {"path-to-regexp": "0.1.12"},
+            }
+        )
+    )
+    (tmp_path / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "name": "vp-auth-server",
+                "version": "1.0.0",
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "vp-auth-server", "version": "1.0.0"},
+                    "node_modules/path-to-regexp": {"version": "0.1.12"},
+                },
+            }
+        )
+    )
+
+    project = dependency_scanner.find_component(str(tmp_path), "vp-auth-server")
+    vulnerable_dependency = dependency_scanner.find_component(
+        str(tmp_path),
+        "path-to-regexp",
+    )
+
+    assert project["repo_found"] is False
+    assert project["direct"] is False
+    assert project["lock_files"] == []
+    assert project["locked_version"] is None
+    assert project["presence_basis"] == "not_found"
+    assert vulnerable_dependency["repo_found"] is True
+    assert vulnerable_dependency["direct"] is True
+    assert vulnerable_dependency["declared_in"] == ["package.json"]
+    assert vulnerable_dependency["lock_files"] == ["package-lock.json"]
+    assert vulnerable_dependency["locked_version"] == "0.1.12"
+
+
 def test_concurrent_prepare_uses_isolated_worktrees_and_one_shared_cache(
     monkeypatch,
     tmp_path,
@@ -119,6 +163,42 @@ def test_concurrent_prepare_uses_isolated_worktrees_and_one_shared_cache(
         assert not Path(second).exists()
 
     asyncio.run(scenario())
+
+
+def test_refresh_repo_cache_clones_and_fetches_without_leaving_a_worktree(
+    caplog,
+    monkeypatch,
+    tmp_path,
+):
+    source = _source_repository(tmp_path)
+    repos_dir = tmp_path / "repos"
+    monkeypatch.setattr(dependency_scanner, "_REPOS_DIR", str(repos_dir))
+    component_cfg = {"name": "demo", "url": source.as_uri()}
+    caplog.set_level(logging.INFO, logger=dependency_scanner.__name__)
+
+    first = asyncio.run(dependency_scanner.refresh_repo_cache(component_cfg))
+    cache_path = repos_dir / dependency_scanner._repo_key(source.as_uri())
+
+    assert first["repo_path"] == str(cache_path)
+    assert first["commit"] == _git(source, "rev-parse", "HEAD")
+    assert (cache_path / ".git").is_dir()
+    assert not (repos_dir / ".worktrees").exists()
+    assert "Cloning repository cache" in caplog.text
+    assert "Repository cache refresh complete" in caplog.text
+
+    (source / "version.txt").write_text("two\n")
+    _git(source, "add", "version.txt")
+    _git(source, "commit", "-q", "-m", "version two")
+
+    caplog.clear()
+    second = asyncio.run(dependency_scanner.refresh_repo_cache(component_cfg))
+
+    assert second["repo_path"] == str(cache_path)
+    assert second["commit"] == _git(source, "rev-parse", "HEAD")
+    assert second["commit"] != first["commit"]
+    assert not (repos_dir / ".worktrees").exists()
+    assert "Repository cache exists" in caplog.text
+    assert "fetching latest changes" in caplog.text
 
 
 def test_existing_worktree_remains_on_resolved_commit_while_cache_updates(

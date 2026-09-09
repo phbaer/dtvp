@@ -1,7 +1,6 @@
-# Primary CPython free-threaded image. Dockerfile remains the explicitly tagged
-# GIL-enabled fallback for rollback and platform compatibility.
+# Sole published DTVP image: CPython free-threaded with fail-closed validation.
 ARG PYTHON_VERSION=3.14t
-ARG UV_VERSION=0.11.32
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:alpine
 
 FROM node:lts-alpine AS frontend-build
 
@@ -17,7 +16,7 @@ COPY frontend/ ./
 COPY data/rescore_rules.json /app/data/rescore_rules.json
 RUN npm run build
 
-FROM ghcr.io/astral-sh/uv:${UV_VERSION}-alpine
+FROM ${UV_IMAGE}
 
 ARG BUILD_COMMIT=unknown
 ARG BUILD_NUMBER=unknown

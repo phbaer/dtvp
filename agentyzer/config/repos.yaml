@@ -1,1 +1,4 @@
+# project_version_files may be defined globally or per component as strings or
+# {path: <json path>, field: <dotted field>} objects. When omitted, Agentyzer
+# reads the version field from .project.json to identify main/master.
 components: {}

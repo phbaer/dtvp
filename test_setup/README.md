@@ -2,7 +2,8 @@
 
 This directory contains the mock service implementations used by the local pm2 development stack.
 
-- `mock_dt.py` provides the in-memory Dependency-Track API.
+- `mock_dt.py` provides the in-memory Dependency-Track API and an OIDC provider
+  with S256 PKCE and JWKS-signed ID tokens.
 - `mock_tmrescore.py` provides the in-memory tmrescore API.
 - `mock_code_analysis.py` provides locally hosted service mocks for analysis integrations.
 
@@ -37,7 +38,7 @@ uv run uvicorn mock_dt:app --host 127.0.0.1 --port 8081
 
 ## Files
 
-- `mock_dt.py`: In-memory Dependency-Track mock.
+- `mock_dt.py`: In-memory Dependency-Track and OIDC mock.
 - `mock_tmrescore.py`: In-memory tmrescore mock.
 - `mock_agentizer.py`: In-memory agentizer mock.
 - `mock_code_analysis.py`: In-memory code analysis mock.

@@ -9,11 +9,12 @@ const mocks = vi.hoisted(() => ({
     queueItems: { value: [] as any[] },
     listResults: vi.fn(),
     getResult: vi.fn(),
-    deleteResult: vi.fn(),
+    cleanupVulnerability: vi.fn(),
     getPrompts: vi.fn(),
     benchmarkResult: vi.fn(),
     fetchResult: vi.fn(),
     getCachedResult: vi.fn(),
+    refreshStatus: vi.fn(),
 }))
 
 const clipboardWriteText = vi.fn()
@@ -21,7 +22,7 @@ const windowOpen = vi.fn()
 
 vi.mock('../../lib/api', () => ({
     codeAnalysisBenchmarkResult: mocks.benchmarkResult,
-    codeAnalysisDeleteResult: mocks.deleteResult,
+    codeAnalysisCleanupVulnerability: mocks.cleanupVulnerability,
     codeAnalysisGetPrompts: mocks.getPrompts,
     codeAnalysisGetResult: mocks.getResult,
     codeAnalysisListVulnerabilityResults: mocks.listResults,
@@ -37,6 +38,7 @@ vi.mock('../../lib/analysisQueueStore', () => ({
         submit: mocks.submit,
         submitFollowUp: mocks.submitFollowUp,
         cancel: mocks.cancel,
+        refreshStatus: mocks.refreshStatus,
         fetchResult: mocks.fetchResult,
         getCachedResult: mocks.getCachedResult,
     },
@@ -88,7 +90,18 @@ describe('CodeAnalysisPanel', () => {
         ;(window as any).__env__ = { DTVP_JIRA_CREATE_URL: '' }
         mocks.queueItems.value = []
         mocks.listResults.mockResolvedValue([])
-        mocks.deleteResult.mockResolvedValue({ status: 'removed', analysis_run_id: 'run-1' })
+        mocks.cleanupVulnerability.mockResolvedValue({
+            status: 'cleaned',
+            matched: { assessments: 1, dtvp_runs: 1, agentyzer_jobs: 1 },
+            removed: { assessments: 1, dtvp_runs: 1, agentyzer_jobs: 1 },
+            removed_assessment_ids: ['run-1'],
+            removed_queue_ids: ['run-1'],
+            removed_job_ids: ['job-1'],
+            skipped_active_ids: [],
+            warnings: [],
+            errors: [],
+        })
+        mocks.refreshStatus.mockResolvedValue(undefined)
         mocks.benchmarkResult.mockResolvedValue({
             schema_version: 'dtvp.code-analysis-benchmark/v1',
             analysis_run_id: 'run-1',
@@ -265,6 +278,14 @@ describe('CodeAnalysisPanel', () => {
 
     it('offers an opened completed queue result as the combined draft while history persistence catches up', async () => {
         const queueResult = makeAnalysisResult('Fresh completed queue result')
+        ;(queueResult.assessment as any).executive_summary = {
+            vulnerability: 'CVE-2026-0001 affects the parser.',
+            assessment: 'Not Affected because the vulnerable path is excluded.',
+            why: [
+                'Version: the resolved dependency is outside the affected range.',
+                'Deep exploitability: request input cannot reach the vulnerable parser.',
+            ],
+        }
         mocks.queueItems.value = [{
             queue_id: 'queue-completed',
             vuln_id: 'CVE-2026-0001',
@@ -291,8 +312,13 @@ describe('CodeAnalysisPanel', () => {
         await wrapper.findAll('button').find(button => button.text().trim() === 'View')?.trigger('click')
         await flushPromises()
 
-        expect(wrapper.get('[data-testid="inline-analysis-outcome"]').text()).toContain('Fresh completed queue result')
+        expect(wrapper.get('[data-testid="inline-analysis-outcome"]').text()).toContain('Decision rationale')
+        expect(wrapper.get('[data-testid="inline-analysis-outcome"]').text()).toContain('request input cannot reach the vulnerable parser')
         expect(wrapper.get('[data-testid="combined-analysis-assessment"]').text()).toContain('owned-service')
+        const targetAssessment = wrapper.get('[data-testid="combined-target-assessment"]')
+        expect(targetAssessment.attributes('data-component')).toBe('owned-service')
+        expect(targetAssessment.text()).toContain('Version:')
+        expect(targetAssessment.text()).not.toContain('owned-service: Version:')
         expect(wrapper.find('[data-testid="apply-single-analysis-result"]').exists()).toBe(true)
         expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeUndefined()
         expect(wrapper.get('[data-testid="combined-analysis-assessment"]').classes()).toContain('order-2')
@@ -300,7 +326,7 @@ describe('CodeAnalysisPanel', () => {
         expect(wrapper.get('[data-testid="analysis-runs-section"]').element.contains(
             wrapper.get('[data-testid="new-analysis-section"]').element,
         )).toBe(true)
-        expect(wrapper.get('[data-testid="combined-assessment-preview"]').text()).toContain('Combined rationale')
+        expect(wrapper.get('[data-testid="combined-assessment-preview"]').text()).toContain('Decision rationale')
     })
 
     it('uses the mapped worst assessment in the combined preview even when a safer result has a higher score', async () => {
@@ -317,6 +343,22 @@ describe('CodeAnalysisPanel', () => {
         uncertain.assessment.verdict = 'Probably Affected'
         uncertain.assessment.exposure = 'possibly reachable'
         uncertain.assessment.reasoning = 'A runtime guard could not be confirmed.'
+        ;(safer.assessment as any).executive_summary = {
+            vulnerability: 'CVE-2026-0001 affects the shared parser.',
+            assessment: 'The worker resolves a patched dependency.',
+            why: [
+                'Dependency evidence: the parser is a direct dependency.',
+                'Version evidence: the resolved version is outside the affected range.',
+            ],
+        }
+        ;(uncertain.assessment as any).executive_summary = {
+            vulnerability: 'CVE-2026-0001 affects the shared parser.',
+            assessment: 'The service remains in triage because a runtime guard is unverified.',
+            why: [
+                'Dependency evidence: the parser is a transitive dependency.',
+                'Reachability: a complete production path was not established.',
+            ],
+        }
         ;(uncertain.assessment as any).adjusted_cvss = {
             original_score: 6.4,
             adjusted_score: 6.4,
@@ -359,7 +401,18 @@ describe('CodeAnalysisPanel', () => {
 
         const preview = wrapper.get('[data-testid="combined-assessment-preview"]')
         expect(preview.text()).toContain('Probably Affected')
-        expect(preview.text()).toContain('Worst-case verdict: Probably Affected (owned-service)')
+        expect(preview.text()).toContain('Latest coverage')
+        expect(preview.text()).toContain('Worst-case decision')
+        expect(preview.get('[data-testid="combined-decision-summary"]').text()).toContain('owned-service')
+        const targetAssessments = preview.findAll('[data-testid="combined-target-assessment"]')
+        expect(targetAssessments).toHaveLength(2)
+        const serviceAssessment = targetAssessments.find(card => card.attributes('data-component') === 'owned-service')
+        const workerAssessment = targetAssessments.find(card => card.attributes('data-component') === 'owned-worker')
+        expect(serviceAssessment?.text()).toContain('Reachability: a complete production path was not established.')
+        expect(serviceAssessment?.text()).not.toContain('owned-service: Reachability:')
+        expect(workerAssessment?.text()).toContain('Version evidence: the resolved version is outside the affected range.')
+        expect(workerAssessment?.text()).not.toContain('owned-worker: Version evidence:')
+        expect(preview.text().match(/CVE-2026-0001 affects the shared parser\./g)).toHaveLength(1)
         expect(preview.classes()).toContain('border-amber-500/70')
         expect((wrapper.vm as any).combinedAssessmentPreview.assessment.adjusted_cvss.adjusted_score).toBe(6.4)
     })
@@ -554,7 +607,7 @@ describe('CodeAnalysisPanel', () => {
             props: {
                 vulnId: 'CVE-2026-0001',
                 componentNames: ['owned-service'],
-                affectedProductVersions: ['1.0.0', '1.1.0'],
+                projectVersions: ['1.0.0', '1.1.0'],
             },
         })
 
@@ -1355,11 +1408,70 @@ describe('CodeAnalysisPanel', () => {
         await flushPromises()
 
         expect(confirmSpy).toHaveBeenCalledWith(
-            'Remove saved analysis run for owned-service? This cannot be undone.',
+            'Remove the saved assessment and all run records for owned-service? This cannot be undone.',
         )
-        expect(mocks.deleteResult).toHaveBeenCalledWith('run-delete')
+        expect(mocks.cleanupVulnerability).toHaveBeenCalledWith(
+            'ExampleApp',
+            'CVE-2026-0001',
+            {
+                vulnerability_aliases: [],
+                component_names: ['owned-service'],
+                analysis_run_ids: ['run-delete'],
+                remove_assessments: true,
+                remove_runs: true,
+            },
+        )
         expect(wrapper.text()).not.toContain('owned-service')
         expect(wrapper.text()).toContain('owned-worker')
+
+        confirmSpy.mockRestore()
+    })
+
+    it('cleans vulnerability assessments and runs independently', async () => {
+        mocks.listResults.mockResolvedValue([])
+        mocks.cleanupVulnerability.mockResolvedValue({
+            status: 'cleaned',
+            matched: { assessments: 2, dtvp_runs: 3, agentyzer_jobs: 3 },
+            removed: { assessments: 2, dtvp_runs: 3, agentyzer_jobs: 3 },
+            removed_assessment_ids: ['run-1', 'run-2'],
+            removed_queue_ids: ['queue-1', 'queue-2', 'queue-3'],
+            removed_job_ids: ['job-1', 'job-2', 'job-3'],
+            skipped_active_ids: [],
+            warnings: [],
+            errors: [],
+        })
+        const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001',
+                vulnAliases: ['GHSA-ALIAS'],
+                projectName: 'ExampleApp',
+                componentNames: ['owned-service'],
+            },
+        })
+        await flushPromises()
+
+        await wrapper.get('[data-testid="analysis-cleanup-toggle"]').trigger('click')
+        const checkboxes = wrapper.findAll('[data-testid="analysis-cleanup-panel"] input[type="checkbox"]')
+        await checkboxes[0].setValue(false)
+        await checkboxes[2].setValue(true)
+        await wrapper.get('[data-testid="analysis-cleanup-submit"]').trigger('click')
+        await flushPromises()
+
+        expect(mocks.cleanupVulnerability).toHaveBeenCalledWith(
+            'ExampleApp',
+            'CVE-2026-0001',
+            {
+                vulnerability_aliases: ['GHSA-ALIAS'],
+                remove_assessments: false,
+                remove_runs: true,
+                cancel_active: true,
+            },
+        )
+        expect(mocks.refreshStatus).toHaveBeenCalled()
+        expect(wrapper.get('[data-testid="analysis-cleanup-panel"]').text()).toContain(
+            '2 assessments, 3 DTVP runs, 3 Agentyzer jobs removed.',
+        )
 
         confirmSpy.mockRestore()
     })

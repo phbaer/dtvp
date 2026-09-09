@@ -367,7 +367,7 @@ def test_fix_contradictions_caps_version_only_affected_verdict():
     assert "affected-range dependency version" in result["reasoning"]
 
 
-def test_fix_contradictions_keeps_affected_with_direct_reachability():
+def test_fix_contradictions_caps_generic_reachability_when_deep_analysis_excludes_path():
     result = verdict._fix_contradictions(
         {
             "verdict": "Affected",
@@ -385,6 +385,34 @@ def test_fix_contradictions_keeps_affected_with_direct_reachability():
         current_workspace_affected=True,
     )
 
-    assert result["verdict"] == "Affected"
+    assert result["verdict"] == "Probably Affected"
     assert result["affected"] is True
-    assert result["confidence"] == "High"
+    assert result["confidence"] == "Medium"
+    assert "affected-range dependency version" in result["reasoning"]
+
+
+def test_fix_contradictions_preserves_deep_not_affected_exclusion():
+    result = verdict._fix_contradictions(
+        {
+            "verdict": "Not Affected",
+            "affected": False,
+            "confidence": "High",
+            "exposure": "none",
+            "reasoning": (
+                "Angular is used, but templates are static and the "
+                "vulnerability-specific runtime template path is absent."
+            ),
+        },
+        llm_reachable=True,
+        deep_confirmed=False,
+        deep_exploitable="NO",
+        dep_found=True,
+        dep_direct=True,
+        transitive_reachable="NO",
+        worst_affected=True,
+        current_workspace_affected=True,
+    )
+
+    assert result["verdict"] == "Not Affected"
+    assert result["affected"] is False
+    assert "SAFEGUARD" not in result["reasoning"]

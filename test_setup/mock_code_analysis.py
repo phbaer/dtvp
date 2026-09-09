@@ -398,6 +398,17 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
                 if cwe_id in cwe_descriptions
             },
             "adjusted_cvss": adjusted_cvss,
+            "executive_summary": {
+                "vulnerability": (
+                    f"{req.vuln_id} · {req.component_name}: "
+                    "mock vulnerable dependency surface."
+                ),
+                "assessment": (
+                    f"{verdict_template['verdict']} · "
+                    f"{verdict_template['confidence']} confidence · "
+                    f"{verdict_template['exposure']} exposure."
+                ),
+            },
             "summary": summary,
             "reasoning": reasoning,
         },

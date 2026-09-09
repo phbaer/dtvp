@@ -628,7 +628,7 @@ def _sorted_texts(values: Any) -> list[str]:
     )
 
 
-def _affected_product_versions(group: dict[str, Any]) -> list[str]:
+def _processed_project_versions(group: dict[str, Any]) -> list[str]:
     return _sorted_texts(
         version.get("project_version")
         for version in (group.get("affected_versions") or [])
@@ -642,13 +642,22 @@ def build_auto_analysis_context_summary(
     project_name: Optional[str],
     component_guidance: Optional[str] = None,
 ) -> dict[str, Any]:
-    instances = _iter_instances(group)
+    versioned_instances = [
+        (version, instance)
+        for version in (group.get("affected_versions") or [])
+        if isinstance(version, dict)
+        for instance in (version.get("components") or [])
+        if isinstance(instance, dict)
+    ]
+    instances = [instance for _version, instance in versioned_instances]
     component_rows: list[dict[str, Any]] = []
-    for instance in instances:
+    for version, instance in versioned_instances:
         component_rows.append(
             {
-                "project_name": instance.get("project_name"),
-                "project_version": instance.get("project_version"),
+                "project_name": instance.get("project_name")
+                or version.get("project_name"),
+                "project_version": instance.get("project_version")
+                or version.get("project_version"),
                 "component_name": instance.get("component_name"),
                 "component_group": instance.get("component_group"),
                 "component_version": instance.get("component_version"),
@@ -659,7 +668,7 @@ def build_auto_analysis_context_summary(
             }
         )
 
-    project_versions = _affected_product_versions(group)
+    project_versions = _processed_project_versions(group)
     guidance_text = _guidance_text(component_guidance)
     summary = {
         "project_name": project_name,
