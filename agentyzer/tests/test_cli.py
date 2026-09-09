@@ -9,10 +9,19 @@ def test_print_assessment_pretty_prints_debug_sections(capsys):
                 "verdict": "Affected",
                 "confidence": "High",
                 "exposure": "direct",
+                "executive_summary": {
+                    "vulnerability": "CVE-TEST affects werkzeug and can exhaust server resources.",
+                    "assessment": "Affected (High confidence; exposure: direct). The vulnerable path is reachable.",
+                    "why": [
+                        "Version: resolved 2.0.0 is inside the affected range.",
+                        "Reachability: the production upload handler invokes the vulnerable parser.",
+                    ],
+                },
                 "version_analysis": {
                     "detected_version": "2.0.0",
                     "version_source": "lock file",
                     "affected": True,
+                    "covered_product_versions": ["7.2.0", "7.3.0"],
                     "note": "version is in the explicit affected versions list",
                     "checked_versions": [
                         {
@@ -84,8 +93,15 @@ def test_print_assessment_pretty_prints_debug_sections(capsys):
     )
 
     out = capsys.readouterr().out
+    assert "Executive summary:" in out
+    assert "Vulnerability: CVE-TEST affects werkzeug" in out
+    assert "Assessment: Affected (High confidence; exposure: direct)" in out
+    assert "Decision rationale:" in out
+    assert "production upload handler invokes the vulnerable parser" in out
+    assert "Product versions covered: 7.2.0, 7.3.0" in out
+    assert "Product versions covered:\n" not in out
     assert "Version analysis: 2.0.0 (lock file, affected)" in out
-    assert "Project versions analyzed:" in out
+    assert "Dependency versions checked by repository ref:" in out
     assert (
         "- LOCKED (lock): 2.0.0 — AFFECTED (lock file — version is in the explicit affected versions list)"
         in out

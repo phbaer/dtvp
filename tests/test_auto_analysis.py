@@ -504,6 +504,56 @@ def test_open_unassessed_group_is_queued_once():
     assert queue.submissions[0]["affected_product_versions"] == ["1.0.0"]
 
 
+def test_each_analysis_target_receives_all_processed_project_versions():
+    group = make_group(component_name="vulnerable-lib")
+    group["affected_versions"][0]["components"][0]["dependency_chains"] = [
+        "vulnerable-lib -> legacy-config"
+    ]
+    group["affected_versions"].append(
+        {
+            "project_name": "ExampleApp",
+            "project_version": "2.0.0",
+            "components": [
+                {
+                    "project_name": "ExampleApp",
+                    "component_name": "vulnerable-lib",
+                    "component_version": "2.1.0",
+                    "analysis_state": "NOT_SET",
+                    "analysis_details": "",
+                    "dependency_chains": ["vulnerable-lib -> web-config"],
+                }
+            ],
+        }
+    )
+    queue = FakeAnalysisQueue()
+
+    queued = queue_open_vulnerabilities_for_analysis(
+        analysis_queue=queue,
+        grouped_vulns=[group],
+        team_mapping={"legacy-config": "Legacy", "web-config": "Web"},
+        enabled=True,
+    )
+
+    assert queued == 2
+    submissions = {
+        submission["component_name"]: submission
+        for submission in queue.submissions
+    }
+    assert submissions["legacy-config"]["affected_product_versions"] == [
+        "1.0.0",
+        "2.0.0",
+    ]
+    assert submissions["web-config"]["affected_product_versions"] == [
+        "1.0.0",
+        "2.0.0",
+    ]
+    assert submissions["web-config"]["context_summary"]["project_versions"] == [
+        "1.0.0",
+        "2.0.0"
+    ]
+    assert submissions["web-config"]["context_summary"]["instance_count"] == 2
+
+
 def test_modified_auto_analysis_guidance_replaces_queued_automatic_item():
     group = make_group(component_name="team-lib")
     queue = FakeAnalysisQueue()

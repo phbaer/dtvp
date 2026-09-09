@@ -140,15 +140,43 @@ def _extract_version_context(
         "current_workspace_affected": worst.get(
             "current_workspace_affected", worst.get("affected", False)
         ),
+        "tracked_ref_affected": worst.get("tracked_ref_affected", False),
+        "tracked_release_affected": worst.get("tracked_release_affected", False),
         "note": worst.get("note", ""),
         "workspace_note": "",
         "historical_affected": worst.get("historical_affected", []),
         "affected_ranges_summary": [],
-        "affected_product_versions": comparison_inputs.get(
-            "affected_product_versions", []
+        "project_versions": comparison_inputs.get(
+            "project_versions",
+            comparison_inputs.get("affected_product_versions", []),
         ),
-        "affected_product_version_refs": comparison_inputs.get(
-            "affected_product_version_refs", {}
+        "project_version_refs": comparison_inputs.get(
+            "project_version_refs",
+            comparison_inputs.get("affected_product_version_refs", {}),
+        ),
+        "covered_product_versions": comparison_inputs.get(
+            "covered_product_versions", []
+        ),
+        "verified_affected_project_versions": comparison_inputs.get(
+            "verified_affected_project_versions", []
+        ),
+        "verified_unaffected_project_versions": comparison_inputs.get(
+            "verified_unaffected_project_versions", []
+        ),
+        "unknown_project_versions": comparison_inputs.get(
+            "unknown_project_versions", []
+        ),
+        "unmatched_project_versions": comparison_inputs.get(
+            "unmatched_project_versions", []
+        ),
+        "primary_remote": comparison_inputs.get("primary_remote"),
+        "excluded_remotes": comparison_inputs.get("excluded_remotes", []),
+        "remotes_scanned": comparison_inputs.get("remotes_scanned", []),
+        "project_version_files": comparison_inputs.get(
+            "project_version_files", []
+        ),
+        "project_version_sources": comparison_inputs.get(
+            "project_version_sources", {}
         ),
         "comparison_inputs": {},
         "comparison_trace": [],
@@ -178,8 +206,8 @@ def _extract_version_context(
 
     # Summarise the affected ranges from the trace
     for line in trace:
-        if line.strip().startswith("SEMVER range:") or line.strip().startswith(
-            "GIT range:"
+        if line.strip().startswith(
+            ("SEMVER range:", "ECOSYSTEM range:", "GIT range:")
         ):
             ctx["affected_ranges_summary"].append(line.strip())
 
@@ -475,6 +503,8 @@ def _dependency_presence_label(dep_info: Dict[str, Any]) -> str:
         return "transitive (lock file only)"
     if basis == "sbom_attributed":
         return "sbom-attributed (not rediscovered locally)"
+    if basis == "unknown":
+        return "unknown (vulnerable package unresolved)"
     return "not found"
 
 
@@ -639,19 +669,20 @@ async def _llm_verdict(
     any_version_affected = version_ctx["affected"]
     historical_affected = worst.get("historical_affected", [])
     version_text = ""
-    affected_product_versions = version_ctx.get("affected_product_versions") or []
-    product_version_refs = version_ctx.get("affected_product_version_refs") or {}
-    if affected_product_versions:
+    project_versions = version_ctx.get("project_versions") or []
+    project_version_refs = version_ctx.get("project_version_refs") or {}
+    if project_versions:
         version_text += (
-            "\n- DTVP AFFECTED PRODUCT VERSIONS TO COVER: "
-            + ", ".join(str(version) for version in affected_product_versions)
+            "\n- PROCESSED PROJECT RELEASE CANDIDATES INTERSECTED WITH "
+            "REPOSITORY VERSIONS (NOT DEPENDENCY VERSIONS): "
+            + ", ".join(str(version) for version in project_versions)
         )
-        if product_version_refs:
-            version_text += "\n- PRODUCT VERSION REF MATCHES:"
-            for product_version in affected_product_versions:
-                refs = product_version_refs.get(product_version) or []
+        if project_version_refs:
+            version_text += "\n- PROJECT RELEASE REF MATCHES:"
+            for project_version in project_versions:
+                refs = project_version_refs.get(project_version) or []
                 version_text += (
-                    f"\n    {product_version}: "
+                    f"\n    {project_version}: "
                     + (", ".join(refs) if refs else "no matching tag/branch")
                 )
     if version_ctx["detected_version"]:
@@ -660,7 +691,9 @@ async def _llm_verdict(
             + f"\n- DETECTED COMPONENT VERSION (workspace): {version_ctx['detected_version']} "
             f"(source: {version_ctx['version_source']})"
             f"\n- WORKSPACE VERSION IN AFFECTED RANGE: {'YES' if current_ws_affected else 'NO'}"
-            f"\n- ANY TRACKED RELEASE IN AFFECTED RANGE: {'YES' if any_version_affected else 'NO'}"
+            "\n- ANY VERIFIED PROJECT RELEASE IN AFFECTED RANGE: "
+            + ("YES" if version_ctx.get("tracked_release_affected") else "NO")
+            + f"\n- ANY TRACKED DEPENDENCY VERSION IN AFFECTED RANGE: {'YES' if any_version_affected else 'NO'}"
         )
         if version_ctx["note"]:
             version_text += f"\n- VERSION CHECK NOTE: {version_ctx['note']}"
@@ -669,7 +702,9 @@ async def _llm_verdict(
             version_text
             + f"\n- DETECTED COMPONENT VERSION (workspace): {locked_version} (source: lock file)"
             f"\n- WORKSPACE VERSION IN AFFECTED RANGE: {'YES' if current_ws_affected else 'NO'}"
-            f"\n- ANY TRACKED RELEASE IN AFFECTED RANGE: {'YES' if any_version_affected else 'NO'}"
+            "\n- ANY VERIFIED PROJECT RELEASE IN AFFECTED RANGE: "
+            + ("YES" if version_ctx.get("tracked_release_affected") else "NO")
+            + f"\n- ANY TRACKED DEPENDENCY VERSION IN AFFECTED RANGE: {'YES' if any_version_affected else 'NO'}"
         )
     else:
         version_text += "\n- DETECTED COMPONENT VERSION: could not determine"
@@ -929,6 +964,10 @@ def _fix_contradictions(
     is_not_affected = v == "Not Affected"
     overrides: list[str] = []
     dep_info = dep_info or {}
+    deep_exploitable = str(deep_exploitable or "").upper()
+    deep_excludes_vulnerable_path = (
+        deep_exploitable == "NO" and not deep_confirmed
+    )
 
     # Rule 1: deep analysis confirmed exploitable → must be Affected
     if deep_confirmed and deep_exploitable in ("YES", "LIKELY") and is_not_affected:
@@ -941,7 +980,12 @@ def _fix_contradictions(
         )
 
     # Rule 2: LLM reachability + deep confirmed → at least Probably Affected
-    elif deep_confirmed and llm_reachable and is_not_affected:
+    elif (
+        deep_confirmed
+        and llm_reachable
+        and deep_exploitable != "NO"
+        and is_not_affected
+    ):
         verdict["verdict"] = "Probably Affected"
         verdict["affected"] = True
         verdict["confidence"] = "Medium"
@@ -951,7 +995,7 @@ def _fix_contradictions(
         )
 
     # Rule 3: LLM says reachable but verdict is Not Affected → Probably Affected
-    elif llm_reachable and is_not_affected:
+    elif llm_reachable and not deep_excludes_vulnerable_path and is_not_affected:
         verdict["verdict"] = "Probably Affected"
         verdict["affected"] = True
         verdict["confidence"] = "Medium"
@@ -999,7 +1043,7 @@ def _fix_contradictions(
         # one released version was affected, require explicit unreachability
         # evidence before accepting a weak verdict.
         unreachable_evidence = (
-            not llm_reachable
+            (not llm_reachable or deep_excludes_vulnerable_path)
             and not deep_confirmed
             and transitive_reachable not in ("YES", "LIKELY", "UNCERTAIN")
         )
@@ -1025,7 +1069,7 @@ def _fix_contradictions(
     # Probably Affected.
     if verdict.get("verdict") == "Affected" and not overrides:
         has_confirmed_path = (
-            llm_reachable
+            (llm_reachable and not deep_excludes_vulnerable_path)
             or (
                 deep_confirmed
                 and deep_exploitable in ("YES", "LIKELY")
@@ -1149,11 +1193,14 @@ def _heuristic_verdict(
         include_debug=debug,
     )
     exposure = "direct" if dep_direct else "transitive" if dep_transitive else "none"
+    if dep_info.get("presence_basis") == "unknown":
+        exposure = "unknown"
     if not dep_found:
         logger.info(
             "Component not rediscovered in local repo scan; treating absence as unproven and continuing heuristic verdict"
         )
-        exposure = "transitive"
+        if dep_info.get("presence_basis") != "unknown":
+            exposure = "transitive"
 
     # Prefer LLM reachability signal when available
     is_reachable = llm_reachable or reach in ("Reachable", "Potentially Reachable")

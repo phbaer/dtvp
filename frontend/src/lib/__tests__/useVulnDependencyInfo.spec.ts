@@ -108,7 +108,6 @@ describe('useVulnDependencyInfo', () => {
                 tag: 'TEAM-SHARED',
             },
         ])
-
         expect(info.uniqueComponents.value).toEqual([
             {
                 name: 'log4j-core',
@@ -139,7 +138,7 @@ describe('useVulnDependencyInfo', () => {
         expect(info.activeTeam.value).toBe('TEAM-SHARED')
         expect(info.visibleInstances.value.map(instance => instance.finding_uuid)).toEqual(['finding-1'])
         expect(info.dependencyRelationship.value).toBe('TRANSITIVE')
-        expect(info.sortedAffectedProjectVersions.value).toEqual(['1.5.0'])
+        expect(info.sortedAffectedProjectVersions.value).toEqual(['1.5.0', '2.0.0'])
         expect(info.uniqueComponents.value).toEqual([
             { name: 'slf4j-api', versions: ['1.7.36'] },
         ])

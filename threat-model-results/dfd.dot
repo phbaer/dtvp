@@ -1,0 +1,290 @@
+digraph tm {
+    graph [
+        fontname = Arial;
+        fontsize = 14;
+    ]
+    node [
+        fontname = Arial;
+        fontsize = 14;
+        rankdir = lr;
+    ]
+    edge [
+        shape = none;
+        arrowtail = onormal;
+        fontname = Arial;
+        fontsize = 12;
+    ]
+    labelloc = "t";
+    fontsize = 20;
+    nodesep = 1;
+
+    subgraph cluster_boundary_DTVPdeployment_acf3059e70 {
+        graph [
+            fontsize = 10;
+            fontcolor = black;
+            style = dashed;
+            color = black;
+            label = <<i>DTVP deployment</i>>;
+        ]
+
+        subgraph cluster_boundary_DTVPservice_88f2d9c06f {
+            graph [
+                fontsize = 10;
+                fontcolor = black;
+                style = dashed;
+                color = black;
+                label = <<i>DTVP service</i>>;
+            ]
+
+            server_DTVPingressorreverseproxy_2c440ebe53 [
+                shape = circle;
+                color = firebrick3; fillcolor="#b2222222"; style=filled ;
+                fontcolor = black;
+                label = "DTVP ingress or\nreverse proxy";
+                margin = 0.02;
+            ]
+
+            server_DTVPAPI_0291419f72 [
+                shape = circle;
+                color = gold; fillcolor="#ffd80022"; style=filled;
+                fontcolor = black;
+                label = "DTVP API";
+                margin = 0.02;
+            ]
+
+        }
+
+        subgraph cluster_boundary_Agentyzerservice_579e9aae81 {
+            graph [
+                fontsize = 10;
+                fontcolor = black;
+                style = dashed;
+                color = black;
+                label = <<i>Agentyzer service</i>>;
+            ]
+
+            server_AgentyzerAPI_c76a0a7067 [
+                shape = circle;
+                color = firebrick3; fillcolor="#b2222222"; style=filled ;
+                fontcolor = black;
+                label = "Agentyzer API";
+                margin = 0.02;
+            ]
+
+            agent_Agentyzerassessmentpipeline_c6f87088c2 [
+                shape = hexagon;
+                color = darkgreen; fillcolor="#00630022"; style=filled;
+                fontcolor = black;
+                label = "Agentyzer\nassessment\npipeline";
+                margin = 0.02;
+            ]
+
+        }
+
+        subgraph cluster_boundary_Localstatevolumes_f2eb7a3ff7 {
+            graph [
+                fontsize = 10;
+                fontcolor = black;
+                style = dashed;
+                color = black;
+                label = <<i>Local state\nvolumes</i>>;
+            ]
+
+            datastore_DTVPdurablestate_9345ab4c19 [
+                shape = none;
+                fixedsize = shape;
+                image = "/home/phbaer/src/dtvp/.venv/lib/python3.14/site-packages/pytm/images/datastore_gold.png";
+                imagescale = true;
+                color = gold; fillcolor="#ffd80022"; style=filled;
+                fontcolor = black;
+                xlabel = "DTVP durable state";
+                label = "";
+            ]
+
+            datastore_DisposableAgentyzerrepositoryandjobstate_86e4604564 [
+                shape = none;
+                fixedsize = shape;
+                image = "/home/phbaer/src/dtvp/.venv/lib/python3.14/site-packages/pytm/images/datastore_gold.png";
+                imagescale = true;
+                color = gold; fillcolor="#ffd80022"; style=filled;
+                fontcolor = black;
+                xlabel = "Disposable\nAgentyzer\nrepository and job\nstate";
+                label = "";
+            ]
+
+        }
+
+    }
+
+    subgraph cluster_boundary_Externalservices_d2006ce1bb {
+        graph [
+            fontsize = 10;
+            fontcolor = black;
+            style = dashed;
+            color = black;
+            label = <<i>External services</i>>;
+        ]
+
+        externalentity_OIDCidentityprovider_b2e5892d06 [
+            shape = square;
+            color = darkgreen; fillcolor="#00630022"; style=filled;
+            fontcolor = black;
+            label = "OIDC identity\nprovider";
+            margin = 0.02;
+        ]
+
+        externalentity_Vulnerabilitybackend_990b886585 [
+            shape = square;
+            color = darkgreen; fillcolor="#00630022"; style=filled;
+            fontcolor = black;
+            label = "Vulnerability\nbackend";
+            margin = 0.02;
+        ]
+
+        externalentity_vscorerthreatrescoringservice_9df04f8dae [
+            shape = square;
+            color = darkgreen; fillcolor="#00630022"; style=filled;
+            fontcolor = black;
+            label = "vscorer threat-\nrescoring service";
+            margin = 0.02;
+        ]
+
+        externalentity_ApprovedGithosts_65d0d57a00 [
+            shape = square;
+            color = darkgreen; fillcolor="#00630022"; style=filled;
+            fontcolor = black;
+            label = "Approved Git hosts";
+            margin = 0.02;
+        ]
+
+        externalentity_Publicresearchsites_a22abb380b [
+            shape = square;
+            color = darkgreen; fillcolor="#00630022"; style=filled;
+            fontcolor = black;
+            label = "Public research\nsites";
+            margin = 0.02;
+        ]
+
+        llm_ConfiguredLLMprovider_4c7b12dcc9 [
+            shape = hexagon;
+            color = gold; fillcolor="#ffd80022"; style=filled;
+            fontcolor = black;
+            label = "Configured LLM\nprovider";
+            margin = 0.02;
+        ]
+
+    }
+
+    actor_Revieweroranalyst_f8af758679 [
+        shape = square;
+        color = darkgreen; fillcolor="#00630022"; style=filled;
+        fontcolor = black;
+        label = "Reviewer or\nanalyst";
+        margin = 0.02;
+    ]
+
+    actor_Revieweroranalyst_f8af758679 -> server_DTVPingressorreverseproxy_2c440ebe53 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(1) Send\nauthenticated\nbrowser request
+    (2) Return browser\nresponse";
+    ]
+
+    server_DTVPingressorreverseproxy_2c440ebe53 -> server_DTVPAPI_0291419f72 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(3) Forward\nauthenticated\nreview request
+    (4) Return\nportfolio and\nmutation result";
+    ]
+
+    server_DTVPAPI_0291419f72 -> externalentity_OIDCidentityprovider_b2e5892d06 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(5) Discover\nprovider and\nexchange\nauthorization code
+    (6) Return\ndiscovery, JWKS,\nand signed tokens";
+    ]
+
+    server_DTVPAPI_0291419f72 -> externalentity_Vulnerabilitybackend_990b886585 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(7) Read findings\nand write\nauthorized\nassessments
+    (8) Return backend\nresources and\nmutation result";
+    ]
+
+    server_DTVPAPI_0291419f72 -> externalentity_vscorerthreatrescoringservice_9df04f8dae [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(9) Submit threat\nmodel and SBOM for\nrescoring
+    (10) Return\nimmediate result\nor asynchronous\ntask reference";
+    ]
+
+    server_DTVPAPI_0291419f72 -> externalentity_vscorerthreatrescoringservice_9df04f8dae [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(11) Poll\nasynchronous\nvscorer task
+    (12) Return\nvscorer task\nstatus or\ncompleted\nassessment";
+    ]
+
+    server_DTVPAPI_0291419f72 -> server_AgentyzerAPI_c76a0a7067 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(13) Submit scoped\ncode-analysis job
+    (14) Return job\nstatus and\nanalysis result";
+    ]
+
+    server_AgentyzerAPI_c76a0a7067 -> agent_Agentyzerassessmentpipeline_c6f87088c2 [
+        color = firebrick3; fillcolor="#b2222222"; style=filled ;
+        fontcolor = firebrick3; fillcolor="#b2222222"; style=filled ;
+        dir = both;
+        label = "(15) Dispatch\nadmitted\nassessment\npipeline
+    (16) Return\nevidence and\nverdict";
+    ]
+
+    agent_Agentyzerassessmentpipeline_c6f87088c2 -> externalentity_ApprovedGithosts_65d0d57a00 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(17) Clone or\nupdate approved\nrepository
+    (18) Return\nrepository objects";
+    ]
+
+    agent_Agentyzerassessmentpipeline_c6f87088c2 -> externalentity_Publicresearchsites_a22abb380b [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(19) Fetch\nallowlisted public\nresearch
+    (20) Return\nuntrusted research\ncontent";
+    ]
+
+    agent_Agentyzerassessmentpipeline_c6f87088c2 -> llm_ConfiguredLLMprovider_4c7b12dcc9 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(21) Submit\nsource-derived\nmodel prompt
+    (22) Return\nuntrusted model\noutput and tool\ncalls";
+    ]
+
+    server_DTVPAPI_0291419f72 -> datastore_DTVPdurablestate_9345ab4c19 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(23) Persist DTVP-\nowned state
+    (24) Read DTVP-\nowned state";
+    ]
+
+    agent_Agentyzerassessmentpipeline_c6f87088c2 -> datastore_DisposableAgentyzerrepositoryandjobstate_86e4604564 [
+        color = gold; fillcolor="#ffd80022"; style=filled;
+        fontcolor = gold; fillcolor="#ffd80022"; style=filled;
+        dir = both;
+        label = "(25) Persist\ndisposable clones,\nworktrees, and job\nrecords
+    (26) Read clones\nand job context";
+    ]
+
+}

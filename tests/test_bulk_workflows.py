@@ -1117,7 +1117,7 @@ def test_automatic_assessment_keeps_unowned_evidence_in_the_global_block():
     assert "[Automatic Assessment: run-api]" in details
 
 
-def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationales():
+def test_automatic_assessment_workflow_compacts_results_with_executive_summaries():
     records = []
     for index in range(1, 6):
         record = _automatic_record(
@@ -1129,6 +1129,18 @@ def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationale
         assessment = record["result"]["assessment"]
         assessment.update(
             {
+                "executive_summary": {
+                    "vulnerability": f"Executive vulnerability {index}",
+                    "assessment": f"Executive assessment {index}",
+                    "why": [
+                        f"Decision reason {index}",
+                        (
+                            "Complete decisive path evidence "
+                            + ("path context " * 50)
+                            + f"WHY_END_{index}"
+                        ),
+                    ],
+                },
                 "summary": (
                     f"Generated summary {index} "
                     + ("summary context " * 50)
@@ -1146,12 +1158,18 @@ def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationale
                 ),
                 "dependency_presence": {
                     "presence_basis": "direct",
+                    "locked_version": f"1.0.{index}",
                     "declared_in": [
                         f"manifest-{fact_index}.xml"
                         for fact_index in range(1, 11)
                     ],
                 },
                 "version_analysis": {
+                    "current_workspace_affected": False,
+                    "covered_product_versions": [
+                        f"release-{release_index}"
+                        for release_index in range(1, 11)
+                    ],
                     "note": (
                         "Complete version rationale "
                         + ("version context " * 50)
@@ -1167,6 +1185,7 @@ def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationale
                     ],
                 },
                 "remediation_view": {
+                    "status": "action_needed",
                     "recommendations": [
                         f"Recommendation {recommendation_index}"
                         + (
@@ -1176,6 +1195,13 @@ def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationale
                         )
                         for recommendation_index in range(1, 11)
                     ]
+                },
+                "audit_view": {
+                    "status": "review",
+                    "checks": [
+                        f"Concern: Review concern {index}",
+                        "Concern: Secondary concern",
+                    ],
                 },
                 "adjusted_cvss": {
                     "original_score": 8.1,
@@ -1220,20 +1246,38 @@ def test_automatic_assessment_workflow_preserves_semantic_analysis_and_rationale
     details = payloads[0][1]["details"]
 
     assert details.count("[Automatic Assessment: run-complete-") == 5
-    assert "SUMMARY_END_1" in details
-    assert "SUMMARY_END_5" in details
-    assert "RATIONALE_END_1" in details
-    assert "RATIONALE_END_5" in details
+    assert "Executive summary:" in details
+    assert "Vulnerability: Executive vulnerability 1" in details
+    assert "Assessment: Executive assessment 5" in details
+    assert "Decision rationale:" in details
+    assert "Decision reason 1" in details
+    assert "WHY_END_5" in details
+    assert "Direct dependency" in details
+    assert "Resolved version 1.0.1" in details
+    assert "Current dependency version affected: no" in details
+    assert (
+        "Product versions covered: release-1, release-2, release-3, release-4, "
+        "release-5, release-6, release-7, release-8, release-9, release-10"
+    ) in details
+    assert "Product versions covered:\n" not in details
+    assert "release-10" in details
+    assert "Review concern 1" not in details
+    assert "Recommendation 1" not in details
+    assert "Secondary concern" not in details
+    assert "SUMMARY_END_1" not in details
+    assert "SUMMARY_END_5" not in details
+    assert "RATIONALE_END_1" not in details
+    assert "RATIONALE_END_5" not in details
     assert "DETAILS_END_1" not in details
     assert "DETAILS_END_5" not in details
-    assert "Declared in: manifest-10.xml" in details
-    assert "VERSION_NOTE_END_1" in details
-    assert "VERSION_NOTE_END_5" in details
-    assert "Affected product versions: release-1, release-2" in details
-    assert "REMEDIATION_END" in details
-    assert "CVSS_SUMMARY_END" in details
-    assert "CVSS_REASON_END" in details
-    assert "COMPONENT_RATIONALE_END" in details
+    assert "Declared in: manifest-10.xml" not in details
+    assert "VERSION_NOTE_END_1" not in details
+    assert "VERSION_NOTE_END_5" not in details
+    assert "Caller-supplied affected project releases" not in details
+    assert "REMEDIATION_END" not in details
+    assert "CVSS_SUMMARY_END" not in details
+    assert "CVSS_REASON_END" not in details
+    assert "COMPONENT_RATIONALE_END" not in details
     assert "raw-ref-10" not in details
     assert "omitted for readability" not in details
     assert "Additional analyzer detail omitted" not in details

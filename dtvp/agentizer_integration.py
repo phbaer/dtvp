@@ -66,6 +66,7 @@ class AgenyzerClient:
         self,
         vuln_id: str,
         component_name: str,
+        project_name: Optional[str] = None,
         cvss_vector: Optional[str] = None,
         user_guidance: Optional[str] = None,
         model: Optional[str] = None,
@@ -73,12 +74,14 @@ class AgenyzerClient:
         llm_provider: Optional[str] = None,
         focus_path: Optional[str] = None,
         dependency_paths: Optional[list] = None,
-        affected_product_versions: Optional[list[str]] = None,
+        project_versions: Optional[list[str]] = None,
         debug: bool = False,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"component_name": component_name}
         if vuln_id:
             payload["vuln_id"] = vuln_id
+        if project_name:
+            payload["project_name"] = project_name
         if cvss_vector:
             payload["cvss_vector"] = cvss_vector
         if user_guidance:
@@ -96,8 +99,8 @@ class AgenyzerClient:
             payload["focus_path"] = focus_path
         if dependency_paths:
             payload["dependency_paths"] = dependency_paths
-        if affected_product_versions:
-            payload["affected_product_versions"] = affected_product_versions
+        if project_versions:
+            payload["project_versions"] = project_versions
         payload["debug"] = debug
 
         response = await self.client.post(
@@ -111,6 +114,7 @@ class AgenyzerClient:
         self,
         vuln_id: str,
         component_name: str,
+        project_name: Optional[str] = None,
         cvss_vector: Optional[str] = None,
         user_guidance: Optional[str] = None,
         model: Optional[str] = None,
@@ -118,12 +122,14 @@ class AgenyzerClient:
         llm_provider: Optional[str] = None,
         focus_path: Optional[str] = None,
         dependency_paths: Optional[list] = None,
-        affected_product_versions: Optional[list[str]] = None,
+        project_versions: Optional[list[str]] = None,
         debug: bool = False,
     ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"component_name": component_name}
         if vuln_id:
             payload["vuln_id"] = vuln_id
+        if project_name:
+            payload["project_name"] = project_name
         if cvss_vector:
             payload["cvss_vector"] = cvss_vector
         if user_guidance:
@@ -141,8 +147,8 @@ class AgenyzerClient:
             payload["focus_path"] = focus_path
         if dependency_paths:
             payload["dependency_paths"] = dependency_paths
-        if affected_product_versions:
-            payload["affected_product_versions"] = affected_product_versions
+        if project_versions:
+            payload["project_versions"] = project_versions
         payload["debug"] = debug
 
         response = await self.client.post(

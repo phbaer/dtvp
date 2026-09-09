@@ -1,4 +1,5 @@
 import asyncio
+import re
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,6 +37,11 @@ _PROVIDER_SETTING_ATTRS = (
     "DTVP_CODE_ANALYSIS_LLM_PROVIDER",
     "DTVP_AGENYZER_LLM_PROVIDER",
     "llm_provider",
+)
+_MODEL_WAIT_LOG_RE = re.compile(
+    r"Waiting for model response during (?P<title>.+?)"
+    r"(?: \(\d+s elapsed\))?$",
+    re.IGNORECASE,
 )
 
 
@@ -98,6 +104,7 @@ def _append_item_log(item: Any, message: str) -> None:
 
 def _extract_status_logs(status: dict[str, Any]) -> list[str]:
     candidates: list[Any] = []
+    has_progress_logs = False
     for key in ("logs", "log", "events", "messages"):
         if key in status:
             candidates.append(status[key])
@@ -106,22 +113,17 @@ def _extract_status_logs(status: dict[str, Any]) -> list[str]:
         for key in ("logs", "log", "events", "messages"):
             if key in progress:
                 candidates.append(progress[key])
-        activity = _string_value(progress.get("current_activity"))
-        if activity:
-            candidates.append(
-                {
-                    "timestamp": progress.get("last_updated_at"),
-                    "message": activity,
-                }
-            )
+                has_progress_logs = has_progress_logs or bool(progress[key])
         active_agents = progress.get("active_agents")
-        if isinstance(active_agents, list):
+        active_activities: set[str] = set()
+        if not has_progress_logs and isinstance(active_agents, list):
             for agent in active_agents:
                 if not isinstance(agent, dict):
                     continue
                 agent_name = _string_value(agent.get("agent"))
                 agent_activity = _string_value(agent.get("activity"))
                 if agent_activity:
+                    active_activities.add(agent_activity.casefold())
                     message = (
                         f"{agent_name}: {agent_activity}"
                         if agent_name
@@ -134,6 +136,18 @@ def _extract_status_logs(status: dict[str, Any]) -> list[str]:
                             "message": message,
                         }
                     )
+        activity = _string_value(progress.get("current_activity"))
+        if (
+            not has_progress_logs
+            and activity
+            and activity.casefold() not in active_activities
+        ):
+            candidates.append(
+                {
+                    "timestamp": progress.get("last_updated_at"),
+                    "message": activity,
+                }
+            )
 
     result: list[str] = []
     for candidate in candidates:
@@ -146,6 +160,16 @@ def _extract_status_logs(status: dict[str, Any]) -> list[str]:
             if normalized:
                 result.append(normalized)
     return result
+
+
+def _model_wait_log_key(entry: Any) -> Optional[str]:
+    normalized = _normalize_log_entry(entry)
+    if not normalized:
+        return None
+    match = _MODEL_WAIT_LOG_RE.search(normalized)
+    if not match:
+        return None
+    return match.group("title").strip().casefold()
 
 
 def _merge_item_status_metadata(item: Any, status: dict[str, Any]) -> None:
@@ -166,6 +190,13 @@ def _merge_item_status_metadata(item: Any, status: dict[str, Any]) -> None:
 
     existing_logs = list(getattr(item, "logs", None) or [])
     for entry in _extract_status_logs(status):
+        heartbeat_key = _model_wait_log_key(entry)
+        if heartbeat_key:
+            existing_logs = [
+                existing
+                for existing in existing_logs
+                if _model_wait_log_key(existing) != heartbeat_key
+            ]
         if entry not in existing_logs:
             existing_logs.append(entry)
     item.logs = existing_logs[-200:]
@@ -406,9 +437,10 @@ async def process_analysis_queue_item(
             return await client.start_assessment(
                 vuln_id=item.vuln_id,
                 component_name=item.component_name,
+                project_name=item.project_name,
                 cvss_vector=item.cvss_vector,
                 user_guidance=item.user_guidance,
-                affected_product_versions=getattr(
+                project_versions=getattr(
                     item,
                     "affected_product_versions",
                     [],

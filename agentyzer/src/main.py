@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated, Any, Dict
 
 import yaml
@@ -71,6 +71,7 @@ _CONFIG_DIR = str(get_config_dir())
 
 _DEFAULT_REPOS_CONFIG = "components: {}\n"
 _FOLLOW_UP_CONTEXT_PROMPT_LIMIT = 12_000
+_DEFAULT_REPO_REFRESH_SECONDS = 900
 
 _repos_config_path: str | None = None
 _repos_config_mtime: float = 0.0
@@ -86,6 +87,39 @@ def _get_max_concurrent_jobs() -> int:
             raw_value,
         )
         return 1
+
+
+def _get_repo_refresh_seconds() -> int:
+    raw_value = os.environ.get(
+        "AGENTYZER_REPO_REFRESH_SECONDS",
+        str(_DEFAULT_REPO_REFRESH_SECONDS),
+    )
+    try:
+        interval = int(raw_value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid AGENTYZER_REPO_REFRESH_SECONDS=%r, falling back to %d",
+            raw_value,
+            _DEFAULT_REPO_REFRESH_SECONDS,
+        )
+        return _DEFAULT_REPO_REFRESH_SECONDS
+    if interval == 0:
+        return 0
+    if interval < 60:
+        logger.warning(
+            "AGENTYZER_REPO_REFRESH_SECONDS=%r is below the 60-second minimum; "
+            "using 60",
+            raw_value,
+        )
+        return 60
+    return interval
+
+
+def _repository_refresh_interval_seconds() -> int:
+    try:
+        return int(app.state.repository_refresh_interval_seconds)
+    except (AttributeError, TypeError, ValueError):
+        return _get_repo_refresh_seconds()
 
 
 def _describe_llm_backend(client: object) -> str:
@@ -169,6 +203,104 @@ def _get_repos_config() -> Dict[str, Any]:
     return app.state.repos
 
 
+async def _refresh_configured_repository_caches(
+    repos: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Refresh each unique explicit repository URL without creating worktrees."""
+    current_repos = repos if repos is not None else _get_repos_config()
+    components = current_repos.get("components") or {}
+    candidates: list[tuple[str, Dict[str, Any]]] = []
+    seen_urls: set[str] = set()
+    skipped = 0
+    if isinstance(components, dict):
+        for component_name, raw_config in components.items():
+            if not isinstance(raw_config, dict) or not raw_config.get("url"):
+                skipped += 1
+                continue
+            url = str(raw_config["url"])
+            if url in seen_urls:
+                skipped += 1
+                continue
+            seen_urls.add(url)
+            config = dict(raw_config)
+            config["url"] = url
+            config.setdefault("name", str(component_name))
+            candidates.append((str(component_name), config))
+
+    if not candidates:
+        logger.warning(
+            "Repository cache refresh skipped: no explicit URL-backed components "
+            "are configured in %s",
+            _resolved_repos_config_path(),
+        )
+        return {
+            "configured": 0,
+            "refreshed": 0,
+            "failed": 0,
+            "skipped": skipped,
+            "completed_at": _now_iso(),
+        }
+
+    logger.info(
+        "Repository cache refresh cycle starting: repositories=%d interval=%ds",
+        len(candidates),
+        _repository_refresh_interval_seconds(),
+    )
+    refreshed = 0
+    failures: list[str] = []
+    for component_name, component_cfg in candidates:
+        try:
+            await dependency_scanner.refresh_repo_cache(component_cfg)
+            refreshed += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            failures.append(component_name)
+            logger.error(
+                "Repository cache refresh failed: component=%s error=%s",
+                component_name,
+                exc,
+            )
+
+    summary = {
+        "configured": len(candidates),
+        "refreshed": refreshed,
+        "failed": len(failures),
+        "skipped": skipped,
+        "failed_components": failures,
+        "completed_at": _now_iso(),
+    }
+    logger.info(
+        "Repository cache refresh cycle complete: refreshed=%d failed=%d skipped=%d",
+        refreshed,
+        len(failures),
+        skipped,
+    )
+    return summary
+
+
+async def _repository_cache_refresh_loop(interval_seconds: int) -> None:
+    """Continuously refresh explicit repository mappings until shutdown."""
+    while True:
+        try:
+            app.state.repository_refresh = (
+                await _refresh_configured_repository_caches()
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Repository cache refresh cycle failed: %s", exc)
+            app.state.repository_refresh = {
+                "configured": 0,
+                "refreshed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "failed_components": [],
+                "completed_at": _now_iso(),
+            }
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _repos_config_path, _repos_config_mtime
@@ -197,7 +329,38 @@ async def lifespan(app: FastAPI):
         logger.info(
             "LLM backend is reachable (%s)", _describe_llm_backend(app.state.ollama)
         )
-    yield
+    refresh_interval = _get_repo_refresh_seconds()
+    app.state.repository_refresh_interval_seconds = refresh_interval
+    app.state.repository_refresh = {
+        "configured": 0,
+        "refreshed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "completed_at": None,
+    }
+    refresh_task: asyncio.Task[Any] | None = None
+    if refresh_interval:
+        logger.info(
+            "Periodic repository cache refresh enabled: interval=%ds",
+            refresh_interval,
+        )
+        refresh_task = asyncio.create_task(
+            _repository_cache_refresh_loop(refresh_interval),
+            name="repository-cache-refresh",
+        )
+    else:
+        logger.warning(
+            "Periodic repository cache refresh disabled by "
+            "AGENTYZER_REPO_REFRESH_SECONDS=0"
+        )
+    app.state.repository_refresh_task = refresh_task
+    try:
+        yield
+    finally:
+        if refresh_task is not None:
+            refresh_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await refresh_task
 
 
 app = FastAPI(
@@ -284,6 +447,9 @@ def _service_configuration() -> ServiceConfiguration:
             "focus_path": True,
             "repository_archive_inspection": True,
             "repos_config_hot_reload": True,
+            "periodic_repository_refresh": (
+                _repository_refresh_interval_seconds() > 0
+            ),
             "context_compaction": True,
             "follow_up_assessments": True,
             "benchmark_comparisons": True,
@@ -318,6 +484,17 @@ def _backend_information() -> BackendInformation:
     status_counts = _job_status_counts()
     running_jobs = status_counts.get(JobStatus.running.value, 0)
     queued_jobs = status_counts.get(JobStatus.pending.value, 0)
+    refresh_interval = _repository_refresh_interval_seconds()
+    update_strategy = (
+        "periodic background clone/fetch every "
+        f"{refresh_interval} seconds plus a locked fetch immediately before "
+        "each assessment worktree"
+        if refresh_interval
+        else (
+            "periodic background refresh is disabled; a locked fetch still runs "
+            "immediately before each assessment worktree"
+        )
+    )
     return BackendInformation(
         llm=_llm_backend_info(),
         repositories=RepositoryBackendInfo(
@@ -326,10 +503,7 @@ def _backend_information() -> BackendInformation:
                 "stable control repository per sanitized URL plus a detached "
                 "worktree for each analysis"
             ),
-            update_strategy=(
-                "cross-process per-repository lock around atomic clone, fetch, "
-                "commit resolution, and worktree creation"
-            ),
+            update_strategy=update_strategy,
             parallel_safety=(
                 "execution is bounded by AGENTYZER_MAX_CONCURRENT_JOBS; different "
                 "or identical configured repository URLs use isolated worktrees; "
@@ -369,19 +543,34 @@ def _service_info_response() -> HealthResponse:
 def _build_inconclusive(
     reason: str,
     *,
+    vuln_id: str = "",
+    component_name: str = "",
     llm_conversation: list[dict[str, Any]] | None = None,
 ) -> AssessResponse:
+    target = component_name.strip() or "the assessed component"
+    identifier = vuln_id.strip() or "The advisory"
     return AssessResponse(
         assessment=Assessment(
             affected=False,
             verdict="Inconclusive",
             confidence="Low",
-            exposure="none",
+            exposure="unknown",
             advisory_relevance=None,
             version_analysis=None,
             researcher_view=None,
             remediation_view=None,
             audit_view=None,
+            executive_summary={
+                "vulnerability": (
+                    f"{identifier} · assessment target {target}: advisory processing "
+                    "did not complete."
+                ),
+                "assessment": (
+                    "Disposition: Inconclusive. Confidence: Low. Exposure: unknown. "
+                    f"Basis: {reason}"
+                ),
+                "why": [f"Assessment conclusion: {reason}"],
+            },
             summary="",
             reasoning=reason,
             analysis=AnalysisState.IN_TRIAGE,
@@ -434,9 +623,17 @@ async def _run_assessment(
         else:
             logger.warning("Component '%s' not found in repos.yaml", req.component_name)
             return _build_inconclusive(
-                "Component mapping not found in config/repos.yaml"
+                "Component mapping not found in config/repos.yaml",
+                vuln_id=req.vuln_id,
+                component_name=req.component_name,
             )
 
+    comp = dict(comp)
+    if (
+        "project_version_files" not in comp
+        and "project_version_files" in repos
+    ):
+        comp["project_version_files"] = repos["project_version_files"]
     comp.setdefault("name", req.component_name)
 
     active_llm_client = llm_client or _client_for_request(req)
@@ -447,7 +644,11 @@ async def _run_assessment(
             comp,
             ollama=active_llm_client,
             dependency_paths=req.dependency_paths,
-            affected_product_versions=req.affected_product_versions,
+            affected_product_versions=(
+                req.project_versions
+                if req.project_versions is not None
+                else req.__dict__.get("affected_product_versions")
+            ),
             focus_path=req.focus_path,
             user_guidance=req.user_guidance,
             cvss_vector=req.cvss_vector,
@@ -458,6 +659,8 @@ async def _run_assessment(
         logger.error("Repository error for '%s': %s", req.component_name, exc)
         return _build_inconclusive(
             f"Repository error: {exc}",
+            vuln_id=req.vuln_id,
+            component_name=req.component_name,
             llm_conversation=list(
                 getattr(active_llm_client, "conversation_trace", []) or []
             ),
@@ -467,6 +670,8 @@ async def _run_assessment(
         message = str(exc).strip() or exc.__class__.__name__
         return _build_inconclusive(
             f"Internal pipeline error: {message}",
+            vuln_id=req.vuln_id,
+            component_name=req.component_name,
             llm_conversation=list(
                 getattr(active_llm_client, "conversation_trace", []) or []
             ),
@@ -618,6 +823,9 @@ def _compact_job_context(job: Job) -> Dict[str, Any]:
             "response": assessment.get("response"),
         },
         "summary": _compact_text(assessment.get("summary"), 1600),
+        "executive_summary": _compact_mapping(
+            assessment.get("executive_summary"), max_text=600
+        ),
         "reasoning": _compact_text(assessment.get("reasoning"), 2400),
         "details": _compact_text(assessment.get("details"), 2400),
         "cvss": {
@@ -995,6 +1203,7 @@ async def follow_up_job(job_id: str, req: FollowUpRequest):
     follow_up_request = AssessRequest(
         vuln_id=req.vuln_id or parent_request.vuln_id,
         component_name=req.component_name or parent_request.component_name,
+        project_name=parent_request.project_name,
         cvss_vector=req.cvss_vector or parent_request.cvss_vector,
         focus_path=(
             req.focus_path

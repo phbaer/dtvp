@@ -1,12 +1,17 @@
-from typing import Optional
 import logging
-import uuid
+from functools import lru_cache
+from typing import Optional
+from urllib.parse import urlparse
+
+from authlib.integrations.base_client.errors import MismatchingStateError, OAuthError
+from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from jose import jwt
+from joserfc.errors import JoseError
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import httpx
-from jose import jwt
+
 from .logic import get_user_role
 
 logger = logging.getLogger(__name__)
@@ -67,98 +72,118 @@ class AuthSettings(BaseSettings):
 
         return f"{base}{path}/auth/callback"
 
+    @property
+    def oidc_cookie_path(self) -> str:
+        path = self.CONTEXT_PATH.strip("/")
+        return f"/{path}/auth" if path else "/auth"
+
+    @property
+    def application_cookie_path(self) -> str:
+        path = self.CONTEXT_PATH.strip("/")
+        return f"/{path}" if path else "/"
+
+    @property
+    def secure_cookies(self) -> bool:
+        return urlparse(self.redirect_uri).scheme.lower() == "https"
+
 
 auth_settings = AuthSettings()
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-_oidc_config_cache: Optional[dict] = None
+@lru_cache(maxsize=1)
+def _create_oidc_client(authority: str, client_id: str, client_secret: str):
+    oauth = OAuth()
+    return oauth.register(
+        name="oidc",
+        client_id=client_id,
+        client_secret=client_secret or None,
+        server_metadata_url=(
+            f"{authority.rstrip('/')}/.well-known/openid-configuration"
+        ),
+        client_kwargs={
+            "scope": "openid profile email",
+            "code_challenge_method": "S256",
+            "token_endpoint_auth_method": (
+                "client_secret_post" if client_secret else "none"
+            ),
+        },
+    )
 
 
-async def get_oidc_config():
-    global _oidc_config_cache
-    if _oidc_config_cache:
-        return _oidc_config_cache
-
+def get_oidc_client():
     authority = auth_settings.authority
     if not authority:
         raise HTTPException(status_code=500, detail="OIDC Authority not configured")
-
-    config_url = f"{authority.rstrip('/')}/.well-known/openid-configuration"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(config_url)
-        resp.raise_for_status()
-        _oidc_config_cache = resp.json()
-        return _oidc_config_cache
+    if not auth_settings.client_id:
+        raise HTTPException(status_code=500, detail="OIDC Client ID not configured")
+    return _create_oidc_client(
+        authority,
+        auth_settings.client_id,
+        auth_settings.client_secret,
+    )
 
 
 @router.get("/login")
-async def login(response: Response = None):
-    config = await get_oidc_config()
-    auth_endpoint = config["authorization_endpoint"]
-    return RedirectResponse(
-        f"{auth_endpoint}?"
-        f"client_id={auth_settings.client_id}&"
-        f"response_type=code&"
-        f"redirect_uri={auth_settings.redirect_uri}&"
-        f"state={uuid.uuid4() if 'uuid' in globals() else 'state'}&"
-        f"scope=openid profile email"
+async def login(request: Request):
+    return await get_oidc_client().authorize_redirect(
+        request,
+        auth_settings.redirect_uri,
     )
 
 
 @router.get("/callback")
-async def callback(code: str, response: Response):
-    config = await get_oidc_config()
-    token_endpoint = config["token_endpoint"]
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
-            token_endpoint,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": auth_settings.redirect_uri,
-                "client_id": auth_settings.client_id,
-                "client_secret": auth_settings.client_secret,
-            },
-        )
-        if token_resp.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to retrieve token")
+async def callback(request: Request):
+    try:
+        token = await get_oidc_client().authorize_access_token(request)
+    except MismatchingStateError as exc:
+        logger.info("OIDC callback rejected due to invalid state")
+        raise HTTPException(status_code=400, detail="Invalid OIDC login state") from exc
+    except OAuthError as exc:
+        logger.info("OIDC provider rejected the callback: %s", exc)
+        raise HTTPException(
+            status_code=400, detail="Failed to authenticate with OIDC provider"
+        ) from exc
+    except JoseError as exc:
+        logger.info("OIDC identity token validation failed: %s", exc)
+        raise HTTPException(
+            status_code=400, detail="Invalid OIDC identity token"
+        ) from exc
 
-        token_data = token_resp.json()
-        id_token = token_data.get("id_token")
+    claims = token.get("userinfo")
+    if not claims:
+        raise HTTPException(status_code=400, detail="OIDC identity token missing")
 
-        # Here we should validate the token signature against JWKS from issuer
-        # For simplicity in this slice, we assume provider is trusted if direct backchannel call succeeded.
-        # We can decode without verification to get user info or just use access token.
-
-        # Determine user info (simplified)
-        try:
-            claims = jwt.get_unverified_claims(id_token)
-            username = (
-                claims.get("sub")
-                or claims.get("preferred_username")
-                or claims.get("email")
-                or "user"
-            )
-        except Exception as e:
-            logger.error(f"Error parsing token: {e}")
-            username = "user"
-
-        # Create a session cookie
-        # In production, use a proper session backend or signed JWT
-        session_token = jwt.encode(
-            {"sub": username}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
+    username = (
+        claims.get("sub")
+        or claims.get("preferred_username")
+        or claims.get("email")
+    )
+    if not isinstance(username, str) or not username:
+        raise HTTPException(
+            status_code=400, detail="OIDC identity token has no user identifier"
         )
 
-        base = auth_settings.FRONTEND_URL.rstrip("/")
-        path = auth_settings.CONTEXT_PATH
-        if not path.startswith("/"):
-            path = "/" + path
-        target = f"{base}{path}"
+    session_token = jwt.encode(
+        {"sub": username}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
+    )
 
-        response = RedirectResponse(url=target)  # Redirect to dashboard
-        response.set_cookie(key="session_token", value=session_token, httponly=True)
-        return response
+    base = auth_settings.FRONTEND_URL.rstrip("/")
+    path = auth_settings.CONTEXT_PATH
+    if not path.startswith("/"):
+        path = "/" + path
+    target = f"{base}{path}"
+
+    response = RedirectResponse(url=target)
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        path=auth_settings.application_cookie_path,
+        secure=auth_settings.secure_cookies,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 @router.get("/logout")
@@ -173,7 +198,13 @@ async def logout(response: Response):
     target = f"{base}{path}{redirect_path}"
 
     response = RedirectResponse(url=target)
-    response.delete_cookie(key="session_token")
+    response.delete_cookie(
+        key="session_token",
+        path=auth_settings.application_cookie_path,
+        secure=auth_settings.secure_cookies,
+        httponly=True,
+        samesite="lax",
+    )
     return response
 
 

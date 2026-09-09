@@ -1352,6 +1352,8 @@ export interface CodeAnalysisAssessRequest {
     llm_provider?: string;
     focus_path?: string;
     dependency_paths?: string[][];
+    project_versions?: string[];
+    /** @deprecated Use project_versions. */
     affected_product_versions?: string[];
     debug?: boolean;
 }
@@ -1545,7 +1547,9 @@ export interface CodeAnalysisStepFindings {
 export interface CodeAnalysisVersionCheck {
     ref?: string | null;
     ref_type?: string | null;
+    ref_role?: string | null;
     product_version?: string | null;
+    project_version_sources?: Array<{ version: string; path: string; field: string }>;
     version?: string | null;
     source?: string | null;
     affected?: boolean | string | null;
@@ -1555,6 +1559,20 @@ export interface CodeAnalysisVersionCheck {
 export interface CodeAnalysisVersionAnalysis extends Record<string, any> {
     detected_version?: string | null;
     version_source?: string | null;
+    affected?: boolean | null;
+    current_workspace_affected?: boolean | null;
+    tracked_ref_affected?: boolean | null;
+    tracked_release_affected?: boolean | null;
+    project_versions?: string[];
+    project_version_refs?: Record<string, string[]>;
+    covered_product_versions?: string[];
+    verified_affected_project_versions?: string[];
+    verified_unaffected_project_versions?: string[];
+    unknown_project_versions?: string[];
+    unmatched_project_versions?: string[];
+    remotes_scanned?: string[];
+    project_version_files?: Array<{ path: string; field: string }>;
+    project_version_sources?: Record<string, Array<{ version: string; path: string; field: string }>>;
     checked_versions?: CodeAnalysisVersionCheck[];
 }
 
@@ -1575,6 +1593,11 @@ export interface CodeAnalysisAssessment {
     audit_view?: Record<string, any> | null;
     ticket_text?: string | null;
     adjusted_cvss?: CodeAnalysisCvssAdjustment;
+    executive_summary?: {
+        vulnerability: string;
+        assessment: string;
+        why?: string[];
+    } | null;
     summary: string;
     reasoning: string;
     advisory_sources?: string[];
@@ -1630,6 +1653,11 @@ export interface CodeAnalysisResultSummary {
     analysis?: string;
     justification?: string;
     response?: string;
+    executive_summary?: {
+        vulnerability?: string;
+        assessment?: string;
+        why?: string[];
+    };
     summary?: string;
     reasoning?: string;
     details?: string;
@@ -1647,6 +1675,11 @@ export interface CodeAnalysisResultSummary {
         verdict?: string;
         confidence?: string;
         exposure?: string;
+        executive_summary?: {
+            vulnerability?: string;
+            assessment?: string;
+            why?: string[];
+        };
         versions_checked?: string[];
     }>;
     step_count?: number;
@@ -1876,6 +1909,52 @@ export const codeAnalysisDeleteResult = async (
     return res.data;
 };
 
+export interface CodeAnalysisCleanupRequest {
+    vulnerability_aliases?: string[];
+    component_names?: string[];
+    analysis_run_ids?: string[];
+    remove_assessments?: boolean;
+    remove_runs?: boolean;
+    cancel_active?: boolean;
+}
+
+export interface CodeAnalysisCleanupResponse {
+    status: 'cleaned' | 'partial' | string;
+    scope: {
+        project_name: string;
+        vulnerability_ids: string[];
+        analysis_run_ids: string[];
+    };
+    matched: {
+        assessments: number;
+        dtvp_runs: number;
+        agentyzer_jobs: number;
+    };
+    removed: {
+        assessments: number;
+        dtvp_runs: number;
+        agentyzer_jobs: number;
+    };
+    removed_assessment_ids: string[];
+    removed_queue_ids: string[];
+    removed_job_ids: string[];
+    skipped_active_ids: string[];
+    warnings: string[];
+    errors: Array<{ artifact: string; id: string; detail: string }>;
+}
+
+export const codeAnalysisCleanupVulnerability = async (
+    projectName: string,
+    vulnId: string,
+    req: CodeAnalysisCleanupRequest,
+): Promise<CodeAnalysisCleanupResponse> => {
+    const res = await api.post(
+        `/projects/${encodeURIComponent(projectName)}/vulnerabilities/${encodeURIComponent(vulnId)}/analysis-cleanup`,
+        req,
+    );
+    return res.data;
+};
+
 export const codeAnalysisCompactResult = async (
     runId: string,
 ): Promise<Record<string, any>> => {
@@ -1937,6 +2016,7 @@ export interface AnalysisQueueItem {
     project_name?: string | null;
     cvss_vector?: string;
     user_guidance?: string;
+    project_versions?: string[];
     affected_product_versions?: string[];
     model?: string;
     llm_backend?: string;
@@ -1980,6 +2060,8 @@ export const analysisQueueSubmit = async (req: {
     project_name?: string;
     cvss_vector?: string;
     user_guidance?: string;
+    project_versions?: string[];
+    /** @deprecated Use project_versions. */
     affected_product_versions?: string[];
     model?: string;
     llm_backend?: string;

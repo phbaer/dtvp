@@ -5,6 +5,8 @@ import tempfile
 import textwrap
 
 from src.agents.ast_analyzer import (
+    CallSite,
+    ImportInfo,
     SymbolGraph,
     _component_variants,
     analyze_repository,
@@ -393,6 +395,38 @@ def test_format_for_llm_with_data():
     assert "CALL SITES" in text
     assert "DISCOVERED SYMBOLS" in text
     assert "compile" in text
+
+
+def test_format_for_llm_bounds_large_ast_context():
+    graph = SymbolGraph(
+        imports=[
+            ImportInfo(
+                file=f"src/module-{index}.ts",
+                line=index,
+                module="affected-package",
+                symbols=[f"symbol{index}"],
+            )
+            for index in range(200)
+        ],
+        calls=[
+            CallSite(
+                file=f"src/module-{index}.ts",
+                line=index,
+                symbol=f"symbol{index}",
+                context=f"return symbol{index}(request.payload);",
+                enclosing=f"handler{index}",
+            )
+            for index in range(200)
+        ],
+        resolved_symbols=[f"symbol{index}" for index in range(200)],
+    )
+
+    text = format_for_llm(graph, max_chars=2000)
+
+    assert len(text) <= 2000
+    assert "AST context omitted to fit analysis budget" in text
+    assert "IMPORT ANALYSIS" in text
+    assert "DISCOVERED SYMBOLS" in text
 
 
 # ------------------------------------------------------------------ #

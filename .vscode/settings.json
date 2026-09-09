@@ -9,5 +9,5 @@
         "**/.git/subtree-cache/**": true,
         "**/node_modules/*/**": true
     },
-    "python.defaultInterpreterPath": "/home/phbaer/src/dtvp-2/.venv/bin/python"
+    "python.defaultInterpreterPath": "/home/phbaer/src/dtvp/.venv/bin/python"
 }

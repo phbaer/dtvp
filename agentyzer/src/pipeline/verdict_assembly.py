@@ -62,21 +62,24 @@ def _checked_version_affected_value(row: Dict[str, Any]) -> bool | None:
         "not found" in notes or "no matching tag or branch" in notes
     ):
         return None
-    return row.get("affected") == "YES"
+    affected = row.get("affected")
+    if affected == "YES":
+        return True
+    if affected == "No":
+        return False
+    return None
 
 
 def _vulnerable_dependency_name(
     *,
     final_state: Dict[str, Any],
     dep_info: Dict[str, Any],
-    fallback_component: str,
 ) -> str:
     scan_targets = final_state.get("scan_targets") or []
     return _clean_text(
         dep_info.get("component_name")
         or (scan_targets[0] if scan_targets else "")
-        or fallback_component
-        or "the vulnerable dependency"
+        or "the unresolved vulnerable dependency"
     )
 
 
@@ -93,6 +96,8 @@ def dependency_presence_summary(dep_info: Dict[str, Any]) -> str:
         return "found as a transitive dependency"
     if basis == "sbom_attributed":
         return "present via SBOM attribution, but not rediscovered in local manifests or lock files"
+    if basis == "unknown":
+        return "unknown because the vulnerable package could not be resolved"
     return "vulnerable component not found in the assessed project"
 
 
@@ -104,6 +109,8 @@ def dependency_presence_detail(dep_info: Dict[str, Any]) -> str:
         return "found (transitive)"
     if basis == "sbom_attributed":
         return "found (sbom-attributed; not rediscovered locally)"
+    if basis == "unknown":
+        return "unknown (vulnerable package unresolved)"
     return "NOT found (not_found)"
 
 
@@ -118,6 +125,7 @@ def dependency_presence_payload(dep_info: Dict[str, Any]) -> Dict[str, Any]:
         "declared_in": list(dep_info.get("declared_in", [])),
         "lock_files": list(dep_info.get("lock_files", [])),
         "locked_version": dep_info.get("locked_version"),
+        "reason": dep_info.get("reason"),
     }
 
 
@@ -166,6 +174,349 @@ def map_to_dependency_track(
 # ----------------------------------------------------------------------- #
 
 
+def build_executive_summary(
+    *,
+    vuln_id: str,
+    component_name: str,
+    final_state: Dict[str, Any],
+    verdict_label: str,
+    confidence: str,
+    exposure: str,
+    reasoning: str,
+    version_analysis: Dict[str, Any] | None,
+    remediation_view: Dict[str, Any] | None,
+    audit_view: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    """Build compact advisory and final-assessment statements.
+
+    The two statements deliberately keep advisory facts separate from the
+    repository-specific conclusion.  They are assembled after the final audit
+    guardrail so the assessment sentence cannot preserve an earlier verdict.
+    """
+    advisories = final_state.get("advisories") or {}
+    dep_info = final_state.get("dep_info") or {}
+    vulnerable_dependency = _vulnerable_dependency_name(
+        final_state=final_state,
+        dep_info=dep_info,
+    )
+    advisory_summary = _clean_text(advisories.get("summary"))
+    identifier = _clean_text(vuln_id) or "The advisory"
+    vulnerability = f"{identifier} · {vulnerable_dependency}:"
+    if advisory_summary:
+        vulnerability += f" {advisory_summary}"
+    elif advisories.get("lookup_failures"):
+        vulnerability += (
+            " advisory details could not be retrieved; see the Advisory Lookup "
+            "evidence."
+        )
+    else:
+        vulnerability += " retrieved advisory sources supplied no description."
+
+    assessment_parts = [
+        f"Disposition: {_clean_text(verdict_label) or 'Inconclusive'}.",
+        f"Confidence: {_clean_text(confidence) or 'Low'}.",
+        f"Exposure: {_clean_text(exposure) or 'unknown'}.",
+    ]
+
+    audit_status = _clean_text((audit_view or {}).get("status"))
+    audit_consistency = _clean_text((audit_view or {}).get("consistency"))
+    if audit_status or audit_consistency:
+        audit_parts = []
+        if audit_status:
+            audit_parts.append(f"status {audit_status}")
+        if audit_consistency:
+            audit_parts.append(f"evidence consistency {audit_consistency}")
+        assessment_parts.append("Audit: " + "; ".join(audit_parts) + ".")
+
+    audit_checks = [
+        _clean_text(check)
+        for check in ((audit_view or {}).get("checks") or [])
+        if _clean_text(check)
+    ]
+    if audit_status in {"review", "fail"}:
+        basis = next(
+            (check for check in audit_checks if check.lower().startswith("concern:")),
+            "",
+        )
+    else:
+        basis = next(
+            (
+                check
+                for check in audit_checks
+                if check.lower().startswith("supports verdict:")
+            ),
+            "",
+        )
+    basis = re.sub(r"^(?:Supports verdict|Concern):\s*", "", basis, flags=re.I)
+    if not basis:
+        basis = _clean_text(
+            (version_analysis or {}).get("workspace_note")
+            or (version_analysis or {}).get("note")
+            or reasoning
+        )
+    if basis:
+        assessment_parts.append("Basis: " + basis.rstrip(".") + ".")
+
+    remediation = remediation_view or {}
+    recommendations = remediation.get("recommendations") or []
+    if remediation.get("status") == "action_needed" and recommendations:
+        next_action = _clean_text(recommendations[0])
+        if next_action:
+            assessment_parts.append("Required action: " + next_action)
+
+    return {
+        "vulnerability": _clean_text(vulnerability),
+        "assessment": _clean_text(" ".join(assessment_parts)),
+        "why": build_decision_reasons(
+            final_state=final_state,
+            reasoning=reasoning,
+            version_analysis=version_analysis,
+            audit_view=audit_view,
+        ),
+    }
+
+
+def _reason_with_detail(label: str, statement: str, detail: Any = "") -> str:
+    """Render one complete, labeled decision reason without cutting evidence."""
+    statement_text = _clean_text(statement).rstrip(".")
+    detail_text = _clean_text(detail)
+    if detail_text and detail_text.lower() not in statement_text.lower():
+        statement_text = f"{statement_text}. {detail_text.rstrip('.')}"
+    return f"{label}: {statement_text}." if statement_text else ""
+
+
+def build_decision_reasons(
+    *,
+    final_state: Dict[str, Any],
+    reasoning: str,
+    version_analysis: Dict[str, Any] | None,
+    audit_view: Dict[str, Any] | None,
+) -> list[str]:
+    """Explain the audited verdict with concrete dependency, version, and path facts.
+
+    The executive assessment stays short, while these naturally bounded evidence
+    categories retain the complete deciding statements produced by each analysis
+    stage.  No character or list-item truncation is applied here.
+    """
+    reasons: list[str] = []
+    dep_info = final_state.get("dep_info") or {}
+    dependency = _vulnerable_dependency_name(
+        final_state=final_state,
+        dep_info=dep_info,
+    )
+
+    filter_findings = (
+        ((final_state.get("step_reports") or {}).get("filter_advisory") or {}).get(
+            "findings"
+        )
+        or {}
+    )
+    advisory_relevant = final_state.get("advisory_relevant")
+    if isinstance(advisory_relevant, bool):
+        relevance_reasons = _unique_nonempty(filter_findings.get("reasons") or [])
+        applicability_statement = (
+            "Applicable — the advisory matches the assessed dependency context"
+            if advisory_relevant
+            else (
+                "Not applicable — the advisory does not match the assessed "
+                "dependency context"
+            )
+        )
+        reasons.append(
+            _reason_with_detail(
+                "Advisory applicability",
+                applicability_statement,
+                "; ".join(relevance_reasons),
+            )
+        )
+
+    basis = _clean_text(dep_info.get("presence_basis"))
+    if basis == "direct":
+        dependency_statement = f"{dependency} is a direct dependency"
+    elif basis == "transitive":
+        dependency_statement = f"{dependency} is a transitive dependency"
+    elif basis == "sbom_attributed":
+        dependency_statement = (
+            f"{dependency} is attributed by the SBOM but was not rediscovered "
+            "in repository manifests or lock files"
+        )
+    elif dep_info.get("found") is False:
+        dependency_statement = (
+            f"{dependency} was not found in repository dependency evidence"
+        )
+    else:
+        dependency_statement = f"the presence of {dependency} could not be resolved"
+    dependency_sources: list[str] = []
+    if dep_info.get("declared_in"):
+        dependency_sources.append(
+            "declared in " + ", ".join(_unique_nonempty(dep_info["declared_in"]))
+        )
+    if dep_info.get("lock_files"):
+        lock_label = "resolved from" if dep_info.get("locked_version") else "observed in"
+        dependency_sources.append(
+            lock_label + " " + ", ".join(_unique_nonempty(dep_info["lock_files"]))
+        )
+    if dependency_sources:
+        dependency_statement += "; " + "; ".join(dependency_sources)
+    reasons.append(
+        _reason_with_detail(
+            "Dependency evidence",
+            dependency_statement,
+            dep_info.get("reason", ""),
+        )
+    )
+
+    version = version_analysis or {}
+    detected_version = _clean_text(version.get("detected_version"))
+    version_source = _clean_text(version.get("version_source"))
+    workspace_affected = version.get("current_workspace_affected")
+    if workspace_affected is None and isinstance(version.get("affected"), bool):
+        workspace_affected = version.get("affected")
+    version_note = _clean_text(version.get("workspace_note") or version.get("note"))
+    if detected_version and isinstance(workspace_affected, bool):
+        source = f" ({version_source})" if version_source else ""
+        reasons.append(
+            _reason_with_detail(
+                "Version evidence",
+                f"current dependency version {detected_version}{source} is "
+                + ("inside" if workspace_affected else "outside")
+                + " the advisory's affected range",
+                version_note,
+            )
+        )
+    elif version_note:
+        reasons.append(_reason_with_detail("Version evidence", version_note))
+
+    release_facts: list[str] = []
+    affected_releases = _unique_nonempty(
+        version.get("verified_affected_project_versions") or []
+    )
+    unaffected_releases = _unique_nonempty(
+        version.get("verified_unaffected_project_versions") or []
+    )
+    unknown_releases = _unique_nonempty(version.get("unknown_project_versions") or [])
+    unmatched_releases = _unique_nonempty(
+        version.get("unmatched_project_versions") or []
+    )
+    if affected_releases:
+        release_facts.append(
+            "affected dependency verified in product versions "
+            + ", ".join(affected_releases)
+        )
+    if unaffected_releases:
+        release_facts.append(
+            "dependency outside the affected range in product versions "
+            + ", ".join(unaffected_releases)
+        )
+    if unknown_releases:
+        release_facts.append(
+            "dependency version unresolved in product versions "
+            + ", ".join(unknown_releases)
+        )
+    if unmatched_releases:
+        release_facts.append(
+            "requested product versions not found in repository refs and not assessed: "
+            + ", ".join(unmatched_releases)
+        )
+    if release_facts:
+        reasons.append(
+            _reason_with_detail("Product release evidence", "; ".join(release_facts))
+        )
+
+    llm_analysis = final_state.get("llm_analysis") or {}
+    if llm_analysis:
+        direct_statement = (
+            "Reachable — an evidence-backed production path to the dependency was identified"
+            if llm_analysis.get("reachable") is True
+            else "Not confirmed — no complete production path to the vulnerability-specific surface was established"
+        )
+        reasons.append(
+            _reason_with_detail(
+                "Direct reachability (current workspace)",
+                direct_statement,
+                llm_analysis.get("reasoning"),
+            )
+        )
+
+    deep_analysis = final_state.get("deep_analysis") or {}
+    if deep_analysis and not deep_analysis.get("skipped"):
+        deep_parts: list[str] = []
+        exploitable = _clean_text(deep_analysis.get("exploitable"))
+        if exploitable:
+            deep_labels = {
+                "YES": "Yes",
+                "NO": "No",
+                "LIKELY": "Likely",
+                "UNCERTAIN": "Uncertain",
+            }
+            deep_parts.append(
+                "Exploitability: "
+                + deep_labels.get(exploitable.upper(), exploitable)
+            )
+        if isinstance(deep_analysis.get("confirmed"), bool):
+            deep_parts.append(
+                "vulnerability-specific path: "
+                + ("confirmed" if deep_analysis["confirmed"] else "not confirmed")
+            )
+        reasons.append(
+            _reason_with_detail(
+                "Deep exploitability (current workspace)",
+                "; ".join(deep_parts) or "the vulnerable path was reviewed",
+                deep_analysis.get("reasoning"),
+            )
+        )
+
+    transitive_analysis = final_state.get("transitive_analysis") or {}
+    if transitive_analysis and not transitive_analysis.get("skipped"):
+        transitive_state = _clean_text(transitive_analysis.get("reachable"))
+        transitive_labels = {
+            "YES": "Reachable",
+            "LIKELY": "Potentially Reachable",
+            "NO": "Not Reachable",
+            "UNCERTAIN": "Unknown",
+        }
+        reasons.append(
+            _reason_with_detail(
+                "Transitive reachability (current workspace)",
+                (
+                    "Classification: "
+                    + transitive_labels.get(
+                        transitive_state.upper(), transitive_state
+                    )
+                    if transitive_state
+                    else "Classification: Unknown"
+                ),
+                transitive_analysis.get("reasoning"),
+            )
+        )
+
+    for check in (audit_view or {}).get("checks") or []:
+        check_text = _clean_text(check)
+        if check_text.lower().startswith(("concern:", "scope note:")):
+            reasons.append(_reason_with_detail("Audit caveat", check_text))
+
+    audit_status = _clean_text((audit_view or {}).get("status"))
+    audit_consistency = _clean_text((audit_view or {}).get("consistency"))
+    audit_parts: list[str] = []
+    if audit_status:
+        audit_parts.append(f"status {audit_status}")
+    if audit_consistency:
+        audit_parts.append(f"evidence consistency {audit_consistency}")
+    if (audit_view or {}).get("downgrade_target"):
+        audit_parts.append(
+            "downgrade supported "
+            + ("yes" if (audit_view or {}).get("downgrade_supported") else "no")
+        )
+    if audit_parts:
+        reasons.append(_reason_with_detail("Audit assurance", "; ".join(audit_parts)))
+
+    overall_reasoning = _clean_text(reasoning)
+    if overall_reasoning and overall_reasoning.lower() not in " ".join(reasons).lower():
+        reasons.append(_reason_with_detail("Assessment conclusion", overall_reasoning))
+
+    return _unique_nonempty(reasons)
+
+
 def build_advisory_relevance_summary(
     step_reports: Dict[str, Any],
 ) -> Dict[str, Any] | None:
@@ -207,7 +558,9 @@ def build_version_analysis_summary(result: Dict[str, Any]) -> Dict[str, Any] | N
             {
                 "ref": row.get("ref"),
                 "ref_type": row.get("ref_type"),
+                "ref_role": row.get("ref_role"),
                 "product_version": row.get("product_version"),
+                "project_version_sources": row.get("project_version_sources", []),
                 "version": row.get("component_version"),
                 "source": row.get("source"),
                 "affected": _checked_version_affected_value(row),
@@ -237,15 +590,38 @@ def build_version_analysis_summary(result: Dict[str, Any]) -> Dict[str, Any] | N
         "version_source": version_ctx.get("version_source"),
         "affected": version_ctx.get("affected"),
         "current_workspace_affected": version_ctx.get("current_workspace_affected"),
+        "tracked_ref_affected": version_ctx.get("tracked_ref_affected"),
+        "tracked_release_affected": version_ctx.get("tracked_release_affected"),
         "note": version_ctx.get("note", ""),
         "workspace_note": version_ctx.get("workspace_note", ""),
         "affected_ranges_summary": version_ctx.get("affected_ranges_summary", []),
         "comparison_inputs": version_ctx.get("comparison_inputs", {}),
         "comparison_trace": version_ctx.get("comparison_trace", []),
-        "affected_product_versions": version_ctx.get("affected_product_versions", []),
-        "affected_product_version_refs": version_ctx.get(
-            "affected_product_version_refs", {}
+        "project_versions": version_ctx.get(
+            "project_versions", version_ctx.get("affected_product_versions", [])
         ),
+        "project_version_refs": version_ctx.get(
+            "project_version_refs",
+            version_ctx.get("affected_product_version_refs", {}),
+        ),
+        "covered_product_versions": version_ctx.get(
+            "covered_product_versions", []
+        ),
+        "verified_affected_project_versions": version_ctx.get(
+            "verified_affected_project_versions", []
+        ),
+        "verified_unaffected_project_versions": version_ctx.get(
+            "verified_unaffected_project_versions", []
+        ),
+        "unknown_project_versions": version_ctx.get("unknown_project_versions", []),
+        "unmatched_project_versions": version_ctx.get(
+            "unmatched_project_versions", []
+        ),
+        "primary_remote": version_ctx.get("primary_remote"),
+        "excluded_remotes": version_ctx.get("excluded_remotes", []),
+        "remotes_scanned": version_ctx.get("remotes_scanned", []),
+        "project_version_files": version_ctx.get("project_version_files", []),
+        "project_version_sources": version_ctx.get("project_version_sources", {}),
         "checked_versions": checked_versions,
         "historical_affected": version_inventory.get("worst_case", {}).get(
             "historical_affected", []
@@ -436,10 +812,14 @@ def _build_evidence_claims(
     )
     direct_reachable = bool(llm_analysis.get("reachable"))
     deep_conflict = deep_exploitable in {"YES", "LIKELY"}
+    deep_exclusion = deep_exploitable == "NO" and not bool(
+        deep_analysis.get("confirmed")
+    )
+    effective_direct_reachable = direct_reachable and not deep_exclusion
     transitive_positive = transitive_reachable in {"YES", "LIKELY"}
     transitive_unexcluded = transitive_reachable in {"YES", "LIKELY", "UNCERTAIN"}
     workspace_exclusion_evidence = (
-        llm_analysis.get("reachable") is False
+        (llm_analysis.get("reachable") is False or deep_exclusion)
         and not deep_conflict
         and not transitive_unexcluded
     )
@@ -451,7 +831,7 @@ def _build_evidence_claims(
         dep_info.get("sbom_attributed") and upstream_platform_research
     )
     confirmed_affected_path = bool(
-        direct_reachable
+        effective_direct_reachable
         or (deep_analysis.get("confirmed") and deep_conflict)
         or transitive_positive
     )
@@ -465,9 +845,11 @@ def _build_evidence_claims(
         "current_workspace_affected": current_workspace_affected,
         "historical_only_affected": historical_only_affected,
         "version_excludes_all": version_excludes_all,
-        "direct_reachable": direct_reachable,
+        "direct_reachable": effective_direct_reachable,
+        "reported_direct_reachable": direct_reachable,
         "deep_confirmed": bool(deep_analysis.get("confirmed")),
         "deep_conflict": deep_conflict,
+        "deep_exclusion": deep_exclusion,
         "transitive_positive": transitive_positive,
         "transitive_unexcluded": transitive_unexcluded,
         "confirmed_affected_path": confirmed_affected_path,
@@ -886,7 +1268,6 @@ def build_remediation_view(
     vulnerable_dependency = _vulnerable_dependency_name(
         final_state=final_state,
         dep_info=dep_info,
-        fallback_component=final_state.get("component_name", ""),
     )
     score = adjusted_cvss.get("adjusted_score")
     severity = _score_severity_bucket(score)
@@ -986,7 +1367,6 @@ def build_developer_ticket_text(
     vulnerable_dependency = _vulnerable_dependency_name(
         final_state=final_state,
         dep_info=dep_info,
-        fallback_component=component,
     )
     advisory_summary = _clean_text(advisories.get("summary"))
     detected_version = _clean_text(
@@ -1000,8 +1380,11 @@ def build_developer_ticket_text(
     affected_ranges = _unique_nonempty(
         (version_analysis or {}).get("affected_ranges_summary", [])
     )
-    affected_product_versions = _unique_nonempty(
-        (version_analysis or {}).get("affected_product_versions", [])
+    project_versions = _unique_nonempty(
+        (version_analysis or {}).get(
+            "project_versions",
+            (version_analysis or {}).get("affected_product_versions", []),
+        )
     )
     llm_analysis = final_state.get("llm_analysis") or {}
     deep_analysis = final_state.get("deep_analysis") or {}
@@ -1088,10 +1471,13 @@ def build_developer_ticket_text(
     )
     if version_note:
         lines.append(f"- Version assessment: {version_note}")
-    if affected_product_versions:
-        shown_versions = ", ".join(affected_product_versions[:12])
-        suffix = " ..." if len(affected_product_versions) > 12 else ""
-        lines.append(f"- Product versions checked: {shown_versions}{suffix}")
+    if project_versions:
+        shown_versions = ", ".join(project_versions[:12])
+        suffix = " ..." if len(project_versions) > 12 else ""
+        lines.append(
+            "- Matched repository project releases checked "
+            f"(not dependency versions): {shown_versions}{suffix}"
+        )
     if priority:
         lines.extend(_bullet_list(priority, "No CVSS adjustment reported"))
 
@@ -1150,8 +1536,12 @@ def build_audit_view(
         and version_analysis.get("affected")
         and version_analysis.get("current_workspace_affected") is False
     )
+    deep_exclusion = (
+        str(deep_analysis.get("exploitable", "")).upper() == "NO"
+        and not bool(deep_analysis.get("confirmed"))
+    )
     workspace_exclusion_evidence = (
-        llm_analysis.get("reachable") is False
+        (llm_analysis.get("reachable") is False or deep_exclusion)
         and transitive_analysis.get("reachable") not in {"YES", "LIKELY", "UNCERTAIN"}
         and str(deep_analysis.get("exploitable", "")).upper() not in {"YES", "LIKELY"}
     )
@@ -1211,7 +1601,14 @@ def build_audit_view(
                 "Concern: transitive analysis did not fully exclude an intermediary path, so the downgrade remains weaker."
             )
             concerns += 1
-        if llm_analysis.get("reachable"):
+        if llm_analysis.get("reachable") and deep_exclusion:
+            checks.append(
+                "Supports verdict: full-source analysis excluded the "
+                "vulnerability-specific path after generic dependency "
+                "reachability was reported."
+            )
+            strengths += 1
+        elif llm_analysis.get("reachable"):
             checks.append(
                 "Concern: direct reachability was reported, which conflicts with a Not Affected outcome."
             )
@@ -1378,6 +1775,43 @@ def apply_audit_guardrail(
     final_state: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Run the final contradiction/consistency guard before emitting a verdict."""
+    state = final_state or {}
+    advisories = state.get("advisories") or {}
+    advisory_relevant = state.get("advisory_relevant")
+    missing_advisory_inputs: list[str] = []
+    if not advisories.get("affected_packages"):
+        missing_advisory_inputs.append("affected package identity")
+    if not advisories.get("affected_ranges") and not advisories.get(
+        "affected_versions"
+    ):
+        missing_advisory_inputs.append("affected version constraints")
+    if (
+        "advisories" in state
+        and advisory_relevant is not False
+        and missing_advisory_inputs
+    ):
+        guarded = dict(result)
+        gap = " and ".join(missing_advisory_inputs)
+        guarded["verdict"] = "Inconclusive"
+        guarded["affected"] = False
+        guarded["confidence"] = "Low"
+        guarded["exposure"] = "unknown"
+        guarded["summary"] = (
+            "Advisory evidence is incomplete: the analyzer could not establish "
+            f"the {gap}."
+        )
+        _prepend_guardrail_reasoning(
+            guarded,
+            "[AUDIT GUARDRAIL / INCOMPLETE ADVISORY: "
+            f"the {gap} could not be established, so dependency, version, and "
+            "reachability conclusions are not reliable]",
+        )
+        _restore_original_cvss(
+            guarded,
+            "incomplete advisory evidence prevents environment-specific rescoring",
+        )
+        return guarded
+
     final_claims = _final_claims_from_audit_view(
         audit_view,
         result=result,
@@ -1589,6 +2023,7 @@ def build_structured_details(
     advisories: Dict[str, Any],
     dep_info: Dict[str, Any],
     result: Dict[str, Any],
+    executive_summary: Dict[str, Any] | None = None,
     researcher_view: Dict[str, Any] | None = None,
     remediation_view: Dict[str, Any] | None = None,
     audit_view: Dict[str, Any] | None = None,
@@ -1602,6 +2037,18 @@ def build_structured_details(
     lines.append("=" * 60)
     lines.append("")
     _append_audit_details_emphasis(lines, audit_view)
+    if executive_summary:
+        lines.append("EXECUTIVE SUMMARY")
+        lines.append(
+            f"Vulnerability:   {executive_summary.get('vulnerability', '')}"
+        )
+        lines.append(f"Assessment:      {executive_summary.get('assessment', '')}")
+        why = executive_summary.get("why") or []
+        if why:
+            lines.append("Decision rationale:")
+            for reason in why:
+                lines.append(f"  - {_clean_text(reason)}")
+        lines.append("")
     lines.append(
         f"Date:            {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
     )

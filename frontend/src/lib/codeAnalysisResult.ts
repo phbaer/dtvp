@@ -125,6 +125,30 @@ const textList = (value: unknown): string[] => {
         .filter(Boolean))]
 }
 
+const coveredProductVersions = (version: Record<string, any>): string[] => {
+    if (Array.isArray(version.covered_product_versions)) {
+        return textList(version.covered_product_versions)
+    }
+
+    const matched = [
+        ...(
+            asRecord(version.project_version_refs)
+                ? Object.entries(version.project_version_refs)
+                    .filter(([, refs]) => Array.isArray(refs) && refs.length > 0)
+                    .map(([productVersion]) => productVersion)
+                : []
+        ),
+        ...textList(version.verified_affected_project_versions),
+        ...textList(version.verified_unaffected_project_versions),
+        ...textList(version.unknown_project_versions),
+    ]
+    const uniqueMatched = [...new Set(matched)]
+    const requested = textList(version.project_versions || version.affected_product_versions)
+    if (!requested.length) return uniqueMatched
+    const matchedKeys = new Set(uniqueMatched.map(value => value.toLocaleLowerCase()))
+    return requested.filter(value => matchedKeys.has(value.toLocaleLowerCase()))
+}
+
 const uniqueUnseen = (values: string[], seenValues: Set<string>): string[] => values.filter(value => {
     const text = normalizedText(value)
     const signature = text.toLocaleLowerCase()
@@ -148,17 +172,50 @@ const appendSection = (
     lines.push(...sectionBullets.map(value => `  - ${value}`))
 }
 
+const appendInlineList = (
+    lines: string[],
+    seenValues: Set<string>,
+    title: string,
+    values: string[],
+) => {
+    const entries = [...new Set(values.map(normalizedText).filter(Boolean))]
+    if (!entries.length) return
+    const rendered = `${title}: ${entries.join(', ')}`
+    const signature = rendered.toLocaleLowerCase()
+    if (seenValues.has(signature)) return
+    seenValues.add(signature)
+    lines.push('', rendered)
+}
+
 const generatedReport = (value: unknown): boolean => (
     normalizedText(value).toLocaleUpperCase().includes('VULNERABILITY ASSESSMENT REPORT')
 )
 
 const hasSemanticNarrative = (assessment: CodeAnalysisAssessResponse['assessment']): boolean => Boolean(
-    normalizedText(assessment.summary)
+    normalizedText(assessment.executive_summary?.vulnerability)
+    || normalizedText(assessment.executive_summary?.assessment)
+    || textList(assessment.executive_summary?.why).length
+    || normalizedText(assessment.summary)
     || normalizedText(assessment.reasoning)
     || assessment.researcher_view
     || assessment.remediation_view
     || assessment.audit_view
 )
+
+const hasExecutiveSummary = (assessment: CodeAnalysisAssessResponse['assessment']): boolean => Boolean(
+    normalizedText(assessment.executive_summary?.vulnerability)
+    || normalizedText(assessment.executive_summary?.assessment)
+    || textList(assessment.executive_summary?.why).length
+)
+
+const executiveVerdictReasons = (
+    assessment: CodeAnalysisAssessResponse['assessment'],
+): string[] => {
+    const structured = textList(assessment.executive_summary?.why)
+    if (structured.length) return structured
+    const legacyReasoning = normalizedText(assessment.reasoning)
+    return legacyReasoning ? [legacyReasoning] : []
+}
 
 const buildCweLines = (assessment: CodeAnalysisAssessResponse['assessment']): string[] => {
     const cweIds = [...new Set((assessment.cwe_ids || []).filter(Boolean))]
@@ -214,12 +271,14 @@ const buildAssessmentInformationLines = (
                 ? 'Found as a transitive dependency.'
                 : basis === 'sbom_attributed' || dependency.sbom_attributed === true
                     ? 'Present via SBOM attribution; not rediscovered in repository manifests or lock files.'
-                    : dependency.found === false
-                        ? 'The vulnerable component was not found in the assessed project.'
-                        : dependency.found === true
-                            ? 'The vulnerable component is present in the assessed project.'
-                            : ''
-        appendSection(lines, seenValues, 'Dependency evidence', [presence], [
+                    : basis === 'unknown'
+                        ? 'Dependency presence is unknown because the vulnerable package could not be resolved.'
+                        : dependency.found === false
+                            ? 'The vulnerable component was not found in the assessed project.'
+                            : dependency.found === true
+                                ? 'The vulnerable component is present in the assessed project.'
+                                : ''
+        appendSection(lines, seenValues, 'Dependency evidence', [presence, normalizedText(dependency.reason)], [
             dependency.locked_version ? `Resolved version: ${dependency.locked_version}` : '',
             ...textList(dependency.declared_in).map(value => `Declared in: ${value}`),
         ])
@@ -238,18 +297,38 @@ const buildAssessmentInformationLines = (
 
     const version = asRecord(assessment.version_analysis)
     if (version) {
+        appendInlineList(
+            lines,
+            seenValues,
+            'Product versions covered',
+            coveredProductVersions(version),
+        )
         const status = [
             version.detected_version && `Detected version: ${version.detected_version}`,
             version.version_source && `Source: ${version.version_source}`,
-            booleanText(version.affected) && `Affected releases found: ${booleanText(version.affected)}`,
-            booleanText(version.current_workspace_affected) && `Current workspace affected: ${booleanText(version.current_workspace_affected)}`,
+            booleanText(version.affected) && `Any tracked dependency version affected: ${booleanText(version.affected)}`,
+            booleanText(version.current_workspace_affected) && `Current dependency version affected: ${booleanText(version.current_workspace_affected)}`,
+            booleanText(version.tracked_release_affected) && `Verified project release affected: ${booleanText(version.tracked_release_affected)}`,
         ].filter(Boolean).join('; ')
-        const affectedProductVersions = textList(version.affected_product_versions)
+        const projectVersions = textList(version.project_versions || version.affected_product_versions)
+        const verifiedAffected = textList(version.verified_affected_project_versions)
+        const verifiedUnaffected = textList(version.verified_unaffected_project_versions)
+        const unknownVersions = textList(version.unknown_project_versions)
+        const unmatchedVersions = textList(version.unmatched_project_versions)
+        const releaseFacts = [
+            verifiedAffected.length ? `Verified project releases with an affected dependency: ${verifiedAffected.join(', ')}` : '',
+            verifiedUnaffected.length ? `Verified project releases outside the dependency range: ${verifiedUnaffected.join(', ')}` : '',
+            unknownVersions.length ? `Matched project releases with unresolved dependency versions: ${unknownVersions.join(', ')}` : '',
+            unmatchedVersions.length ? `Unmatched project releases (not assessed): ${unmatchedVersions.join(', ')}` : '',
+        ].filter(Boolean)
+        if (projectVersions.length && !releaseFacts.length) {
+            releaseFacts.push(`Processed project release candidates (not dependency versions): ${projectVersions.join(', ')}`)
+        }
         appendSection(lines, seenValues, 'Version evidence', [
             status,
             normalizedText(version.note),
             normalizedText(version.workspace_note),
-        ], affectedProductVersions.length ? [`Affected product versions: ${affectedProductVersions.join(', ')}`] : [])
+        ], releaseFacts)
     }
 
     const research = asRecord(assessment.researcher_view)
@@ -300,8 +379,67 @@ const buildAssessmentInformationLines = (
     return lines
 }
 
+const buildCompactAssessmentInformationLines = (
+    assessment: CodeAnalysisAssessResponse['assessment'],
+    seenValues: Set<string>,
+): string[] => {
+    const lines: string[] = []
+    const evidence: string[] = []
+    const dependency = asRecord(assessment.dependency_presence)
+    if (dependency) {
+        const basis = normalizedText(dependency.presence_basis)
+        if (basis === 'direct') evidence.push('Direct dependency')
+        else if (basis === 'transitive') evidence.push('Transitive dependency')
+        else if (basis === 'sbom_attributed' || dependency.sbom_attributed === true) evidence.push('SBOM-attributed; not rediscovered locally')
+        else if (basis === 'unknown') evidence.push('Dependency unknown; vulnerable package unresolved')
+        else if (dependency.found === false) evidence.push('Dependency not found')
+        if (dependency.reason) evidence.push(normalizedText(dependency.reason))
+        if (dependency.locked_version) evidence.push(`Resolved version ${dependency.locked_version}`)
+    }
+
+    const version = asRecord(assessment.version_analysis)
+    if (version) {
+        appendInlineList(
+            lines,
+            seenValues,
+            'Product versions covered',
+            coveredProductVersions(version),
+        )
+        if (version.detected_version && !dependency?.locked_version) {
+            evidence.push(`Detected version ${version.detected_version}`)
+        }
+        if (typeof version.current_workspace_affected === 'boolean') {
+            evidence.push(`Current dependency version affected: ${booleanText(version.current_workspace_affected)}`)
+        } else if (typeof version.affected === 'boolean') {
+            evidence.push(`Affected release found: ${booleanText(version.affected)}`)
+        }
+    }
+    const advisory = asRecord(assessment.advisory_relevance)
+    if (advisory) {
+        const relevance = typeof advisory.relevant === 'boolean'
+            ? advisory.relevant ? 'relevant' : 'not relevant'
+            : 'unclear'
+        const source = normalizedText(advisory.source)
+        evidence.push(`Advisory applicability: ${relevance}${source ? ` (${source})` : ''}`)
+    }
+    const audit = asRecord(assessment.audit_view)
+    if (audit) {
+        const assurance = [
+            audit.status && `status ${audit.status}`,
+            audit.consistency && `evidence consistency ${audit.consistency}`,
+            typeof audit.downgrade_supported === 'boolean'
+                ? `downgrade supported ${booleanText(audit.downgrade_supported)}`
+                : '',
+        ].filter(Boolean).join('; ')
+        if (assurance) evidence.push(`Audit assurance: ${assurance}`)
+    }
+    appendSection(lines, seenValues, 'Evidence', [], evidence)
+    return lines
+}
+
 const buildCvssLines = (
     assessment: CodeAnalysisAssessResponse['assessment'],
+    compact = false,
 ): string[] => {
     const cvss = assessment.adjusted_cvss
     if (!cvss) return []
@@ -309,8 +447,8 @@ const buildCvssLines = (
         '',
         `CVSS: ${cvss.original_score.toFixed(1)} → ${cvss.adjusted_score.toFixed(1)}`,
         ...(cvss.adjusted_vector ? [`Adjusted Vector: ${cvss.adjusted_vector}`] : []),
-        ...(cvss.summary ? [`CVSS Summary: ${normalizedText(cvss.summary)}`] : []),
-        ...(cvss.reasons.length ? [
+        ...(!compact && cvss.summary ? [`CVSS Summary: ${normalizedText(cvss.summary)}`] : []),
+        ...(!compact && cvss.reasons.length ? [
             'CVSS Reasons:',
             ...cvss.reasons.map(reason => `  - ${normalizedText(reason)}`),
         ] : []),
@@ -324,19 +462,32 @@ const buildComponentSection = (
     const versionsChecked = [...new Set((componentResult.versions_checked || []).filter(Boolean))]
     const lines = [
         `[Component: ${componentResult.component}]`,
-        `Verdict: ${componentResult.assessment.verdict} (${componentResult.assessment.confidence} confidence)`,
+        `Disposition: ${componentResult.assessment.verdict}`,
+        `Confidence: ${componentResult.assessment.confidence}`,
         `Exposure: ${componentResult.assessment.exposure}`,
+        ...(componentResult.assessment.analysis ? [`VEX analysis state: ${componentResult.assessment.analysis}`] : []),
+        ...(componentResult.assessment.justification ? [`VEX justification: ${componentResult.assessment.justification}`] : []),
         ...buildAdvisorySourceLines(componentResult.assessment),
     ]
 
-    appendSection(lines, seenValues, 'Summary', [normalizedText(componentResult.assessment.summary)])
-    appendSection(lines, seenValues, 'Rationale', [normalizedText(componentResult.assessment.reasoning)])
+    const executiveSummary = componentResult.assessment.executive_summary
+    const compact = hasExecutiveSummary(componentResult.assessment)
+    appendSection(lines, seenValues, 'Executive summary', [], [
+        executiveSummary?.vulnerability ? `Vulnerability: ${executiveSummary.vulnerability}` : '',
+        executiveSummary?.assessment ? `Assessment: ${executiveSummary.assessment}` : '',
+    ])
+    appendSection(lines, seenValues, 'Decision rationale', [], executiveVerdictReasons(componentResult.assessment))
+    if (compact) {
+        lines.push(...buildCompactAssessmentInformationLines(componentResult.assessment, seenValues))
+    } else {
+        appendSection(lines, seenValues, 'Summary', [normalizedText(componentResult.assessment.summary)])
+        appendSection(lines, seenValues, 'Rationale', [normalizedText(componentResult.assessment.reasoning)])
+        lines.push(...buildAssessmentInformationLines(componentResult.assessment, seenValues))
+        lines.push(...buildCweLines(componentResult.assessment))
+    }
+    lines.push(...buildCvssLines(componentResult.assessment, compact))
 
-    lines.push(...buildAssessmentInformationLines(componentResult.assessment, seenValues))
-    lines.push(...buildCweLines(componentResult.assessment))
-    lines.push(...buildCvssLines(componentResult.assessment))
-
-    if (versionsChecked.length) {
+    if (versionsChecked.length && !compact) {
         lines.push(`Versions: ${versionsChecked.join(', ')}`)
     }
 
@@ -354,9 +505,23 @@ export const buildCodeAnalysisDetails = (
     const componentResults = allComponentResults
         .filter(componentResult => requestedComponents.size === 0 || requestedComponents.has(componentResult.component.toLowerCase()))
     const scopedToComponents = requestedComponents.size > 0 && allComponentResults.length > 0
-    const justificationLine = justification === 'NOT_SET' ? [] : [`Justification: ${justification}`]
+    const justificationLine = justification === 'NOT_SET' ? [] : [`VEX justification: ${justification}`]
+    const executiveSummary = result.assessment.executive_summary
+    const compact = hasExecutiveSummary(result.assessment)
+    const verdictReasons = executiveVerdictReasons(result.assessment)
+    const executiveSummaryLines = !scopedToComponents && compact && executiveSummary
+        ? [
+            '',
+            'Executive summary:',
+            ...(executiveSummary.vulnerability ? [`  - Vulnerability: ${normalizedText(executiveSummary.vulnerability)}`] : []),
+            ...(executiveSummary.assessment ? [`  - Assessment: ${normalizedText(executiveSummary.assessment)}`] : []),
+            ...(verdictReasons.length
+                ? ['', 'Decision rationale:', ...verdictReasons.map(reason => `  - ${reason}`)]
+                : []),
+        ]
+        : []
     const seenValues = new Set<string>()
-    if (!scopedToComponents) {
+    if (!scopedToComponents && !compact) {
         seenValues.add(normalizedText(result.assessment.summary).toLocaleLowerCase())
         if (result.assessment.reasoning) {
             seenValues.add(normalizedText(result.assessment.reasoning).toLocaleLowerCase())
@@ -365,26 +530,31 @@ export const buildCodeAnalysisDetails = (
     const lines = [
         '[Code Analysis]',
         ...(scopedToComponents ? [`Scope: ${componentResults.map(item => item.component).join(', ') || 'Selected components'}`] : []),
-        `Overall Verdict: ${result.assessment.verdict} (${result.assessment.confidence} confidence)`,
+        `Overall Verdict: ${result.assessment.verdict}`,
+        `Confidence: ${result.assessment.confidence}`,
         `Exposure: ${result.assessment.exposure}`,
+        ...(result.assessment.analysis ? [`VEX analysis state: ${result.assessment.analysis}`] : []),
         ...buildAdvisorySourceLines(result.assessment),
         ...justificationLine,
-        ...(!scopedToComponents && versionsChecked.length
+        ...executiveSummaryLines,
+        ...(!scopedToComponents && !compact && versionsChecked.length
             ? [
                 '',
                 'Versions Checked:',
                 ...versionsChecked.map(version => `  - ${version}`),
             ]
             : []),
-        ...(!scopedToComponents ? ['', 'Summary:', normalizedText(result.assessment.summary)] : []),
-        ...(!scopedToComponents && result.assessment.reasoning
+        ...(!scopedToComponents && !compact ? ['', 'Summary:', normalizedText(result.assessment.summary)] : []),
+        ...(!scopedToComponents && !compact && result.assessment.reasoning
             ? ['', 'Rationale:', normalizedText(result.assessment.reasoning)]
             : []),
         ...(!scopedToComponents
-            ? buildAssessmentInformationLines(result.assessment, seenValues)
+            ? compact
+                ? buildCompactAssessmentInformationLines(result.assessment, seenValues)
+                : buildAssessmentInformationLines(result.assessment, seenValues)
             : []),
-        ...(!scopedToComponents ? buildCweLines(result.assessment) : []),
-        ...(!scopedToComponents ? buildCvssLines(result.assessment) : []),
+        ...(!scopedToComponents && !compact ? buildCweLines(result.assessment) : []),
+        ...(!scopedToComponents ? buildCvssLines(result.assessment, compact) : []),
         ...(componentResults.length
             ? [
                 '',

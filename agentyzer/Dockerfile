@@ -2,6 +2,8 @@ FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
 WORKDIR /app
 
 ARG BUILD_NUMBER=unknown
+ARG AGENTYZER_BUILD_VERSION
+ENV AGENTYZER_BUILD_VERSION=$AGENTYZER_BUILD_VERSION
 
 RUN apt-get update && apt-get install -y --no-install-recommends git unrar-free && rm -rf /var/lib/apt/lists/*
 
@@ -13,7 +15,8 @@ RUN --mount=type=secret,id=ca-certs,target=/tmp/ca-certs.crt \
     fi
 
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev
+COPY src/__init__.py src/build_version.py ./src/
+RUN test -n "$AGENTYZER_BUILD_VERSION" && uv sync --frozen --no-dev
 
 COPY config ./config
 COPY src ./src

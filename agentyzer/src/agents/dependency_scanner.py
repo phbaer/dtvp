@@ -168,6 +168,43 @@ async def prepare_repo(
     )
 
 
+async def refresh_repo_cache(component_cfg: Dict[str, Any]) -> Dict[str, str]:
+    """Clone or fetch one configured repository without creating a worktree.
+
+    This keeps the persistent control repository current independently of an
+    assessment run.  ``prepare_repo`` still performs the same refresh under the
+    repository lock immediately before resolving a per-run worktree.
+    """
+    url = component_cfg.get("url")
+    if not url:
+        raise RepoError("No url in component config")
+
+    safe_url = _sanitize(url)
+    authenticated_url = _auth_url(url, component_cfg.get("auth") or {})
+    dest = _repo_dir(url)
+    os.makedirs(_REPOS_DIR, exist_ok=True)
+    component_name = str(component_cfg.get("name") or "unlabeled").strip()
+    logger.info(
+        "Repository cache refresh starting: component=%s url=%s",
+        component_name,
+        safe_url,
+    )
+    commit = await asyncio.to_thread(
+        _refresh_control_repository,
+        url,
+        authenticated_url,
+        safe_url,
+        dest,
+    )
+    logger.info(
+        "Repository cache refresh complete: component=%s cache=%s commit=%s",
+        component_name,
+        dest,
+        commit,
+    )
+    return {"repo_path": dest, "commit": commit}
+
+
 async def cleanup_repo_worktree(
     component_cfg: Dict[str, Any],
     *,
@@ -210,6 +247,18 @@ def _prepare_worktree(
 
     logger.info("Prepared isolated worktree %s at %s", worktree, commit)
     return worktree
+
+
+def _refresh_control_repository(
+    url: str,
+    authenticated_url: str,
+    safe_url: str,
+    dest: str,
+) -> str:
+    """Synchronize one control repository and return its resolved commit."""
+    with _repository_lock(url):
+        _repo, commit = _sync_repo(authenticated_url, safe_url, dest)
+    return commit
 
 
 def _cleanup_worktree_for_run(url: str, workspace_id: str) -> None:
@@ -423,7 +472,7 @@ def find_component(
     Returns a dict with:
             - found: True if present via repo evidence or SBOM attribution
             - repo_found: True if mentioned in repo manifests or lock files
-            - sbom_attributed: True if upstream attribution already placed the component in the project SBOM
+            - sbom_attributed: True if upstream attribution already placed this exact component in the project SBOM
             - presence_basis: one of direct, transitive, sbom_attributed, not_found
       - direct: True if declared in a top-level manifest
       - transitive: True if only found in lock / resolved files

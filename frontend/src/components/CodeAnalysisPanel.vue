@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, Eye, History, Ban, FileText, Copy, ExternalLink } from 'lucide-vue-next'
+import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, Eye, History, Ban, FileText, Copy, ExternalLink, Trash2 } from 'lucide-vue-next'
 import {
     codeAnalysisBenchmarkResult,
-    codeAnalysisDeleteResult,
+    codeAnalysisCleanupVulnerability,
     codeAnalysisGetPrompts,
     codeAnalysisGetResult,
     codeAnalysisListVulnerabilityResults,
@@ -28,6 +28,8 @@ const props = defineProps<{
     componentTeams?: Record<string, string>
     teamScope?: string
     teamScopeAliases?: string[]
+    projectVersions?: string[]
+    /** @deprecated Use projectVersions. */
     affectedProductVersions?: string[]
     assessedTeams?: Set<string>
     analysisGuidance?: string
@@ -73,6 +75,12 @@ const followUpComponent = ref('')
 const followUpSubmitting = ref(false)
 const queueActionIds = ref<Set<string>>(new Set())
 const deletingRunIds = ref<Set<string>>(new Set())
+const cleanupOpen = ref(false)
+const cleanupBusy = ref(false)
+const cleanupAssessments = ref(true)
+const cleanupRuns = ref(true)
+const cleanupActive = ref(false)
+const cleanupMessage = ref('')
 const applyingAll = ref(false)
 const combinedHydrating = ref(false)
 const combinedHydrationError = ref<string | null>(null)
@@ -730,8 +738,26 @@ function mergeResults(results: { component: string; response: CodeAnalysisAssess
     const ticketParts = results
         .map(r => stringifyTicketValue(r.response.assessment.ticket_text))
         .filter(Boolean)
+    const vulnerabilitySummary = worstAssessment.executive_summary?.vulnerability
+        || results.map(({ response }) => response.assessment.executive_summary?.vulnerability).find(Boolean)
+    const executiveReasons = [...new Set(results.flatMap(({ component, response }) => {
+        const reasons = response.assessment.executive_summary?.why?.length
+            ? response.assessment.executive_summary.why
+            : [response.assessment.reasoning || response.assessment.summary].filter(Boolean)
+        return reasons.map(reason => `${component}: ${reason}`)
+    }))]
+    const worstTargetSummary = worstComponents.length
+        ? ` Controlling target(s): ${worstComponents.join(', ')}.`
+        : ''
     worstAssessment = {
         ...worstAssessment,
+        ...(vulnerabilitySummary ? {
+            executive_summary: {
+                vulnerability: vulnerabilitySummary,
+                assessment: `Disposition: ${worstAssessment.verdict}. Confidence: ${worstAssessment.confidence}. Exposure: ${worstAssessment.exposure}. Scope: combined assessment of ${results.length} targets.${worstTargetSummary}`,
+                why: executiveReasons,
+            },
+        } : {}),
         summary: `Combined analysis for ${results.length} components. ${summaryParts.join('; ')}`,
         reasoning: [
             `Worst-case verdict: ${worstAssessment.verdict}${worstComponents.length ? ` (${worstComponents.join(', ')})` : ''}.`,
@@ -845,7 +871,7 @@ const startAnalysis = async () => {
                 buildLaunchGuidance(),
                 (res, item) => handleComponentComplete(batchId, comp, res, item),
                 (err) => handleComponentError(batchId, comp, err),
-                props.affectedProductVersions,
+                props.projectVersions || props.affectedProductVersions,
                 'manual',
             )
             pendingQueueIds.value.push(item.queue_id)
@@ -1057,6 +1083,44 @@ const combinedAssessmentPreview = computed<CodeAnalysisAssessResponse | null>(()
     }))
     return entries.length ? mergeResults(entries) : null
 })
+const combinedTargetResults = computed(() => combinedAssessmentPreview.value?.component_results || [])
+const combinedControllingTargets = computed(() => {
+    const verdict = combinedAssessmentPreview.value?.assessment.verdict
+    if (!verdict) return []
+    return combinedTargetResults.value
+        .filter(result => result.assessment.verdict === verdict)
+        .map(result => result.component)
+})
+const allCombinedTargetsControlDecision = computed(() => (
+    combinedTargetResults.value.length > 1
+    && combinedControllingTargets.value.length === combinedTargetResults.value.length
+))
+const combinedMissingCandidates = computed(() => {
+    const loaded = new Set(combinedCandidateRuns.value.map(run => run.component.toLocaleLowerCase()))
+    return applyAllCandidates.value.filter(candidate => !loaded.has(candidate.component.toLocaleLowerCase()))
+})
+
+const combinedTargetReasons = (result: CodeAnalysisComponentResult): string[] => {
+    const reasons = result.assessment.executive_summary?.why?.length
+        ? result.assessment.executive_summary.why
+        : [result.assessment.reasoning].filter(Boolean)
+    const componentPrefix = `${result.component}:`.toLocaleLowerCase()
+    return reasons.map(reason => {
+        const text = String(reason || '').trim()
+        return text.toLocaleLowerCase().startsWith(componentPrefix)
+            ? text.slice(componentPrefix.length).trim()
+            : text
+    }).filter(Boolean)
+}
+
+const combinedTargetVerdictClass = (assessment: CodeAnalysisAssessment): string => {
+    const verdict = assessment.verdict.trim().toLocaleLowerCase().replaceAll('_', ' ').replaceAll('-', ' ')
+    if (assessment.affected || verdict === 'affected') return 'text-red-300'
+    if (verdict.includes('probably') || verdict.includes('uncertain') || verdict.includes('inconclusive')) {
+        return 'text-amber-300'
+    }
+    return 'text-green-300'
+}
 const combinedAssessmentPreviewState = computed(() => combinedAssessmentPreview.value
     ? codeAnalysisAssessmentState(combinedAssessmentPreview.value)
     : 'NOT_SET'
@@ -1431,7 +1495,7 @@ const removePersistedResult = async (record: CodeAnalysisResultRecord) => {
     const runId = record.analysis_run_id
     if (!runId || isDeletingRun(runId)) return
     const label = record.component_name || runId
-    if (!window.confirm(`Remove saved analysis run for ${label}? This cannot be undone.`)) return
+    if (!window.confirm(`Remove the saved assessment and all run records for ${label}? This cannot be undone.`)) return
 
     const next = new Set(deletingRunIds.value)
     next.add(runId)
@@ -1439,10 +1503,29 @@ const removePersistedResult = async (record: CodeAnalysisResultRecord) => {
     error.value = null
     historyError.value = null
     try {
-        await codeAnalysisDeleteResult(runId)
+        const cleanup = await codeAnalysisCleanupVulnerability(
+            props.projectName || '_all_',
+            props.vulnId,
+            {
+                vulnerability_aliases: props.vulnAliases || [],
+                component_names: [record.component_name],
+                analysis_run_ids: [runId],
+                remove_assessments: true,
+                remove_runs: true,
+            },
+        )
         persistedResults.value = persistedResults.value.filter(candidate =>
             !recordMatchesRunId(candidate, runId)
         )
+        await analysisQueueStore.refreshStatus()
+        if (cleanup.errors.length || cleanup.skipped_active_ids.length) {
+            historyError.value = [
+                ...cleanup.errors.map(issue => issue.detail),
+                cleanup.skipped_active_ids.length
+                    ? `${cleanup.skipped_active_ids.length} active run(s) were left in place.`
+                    : '',
+            ].filter(Boolean).join(' ')
+        }
         if (selectedRunId.value === runId) {
             const replacement = persistedResults.value[0] || null
             if (replacement) {
@@ -1466,6 +1549,59 @@ const removePersistedResult = async (record: CodeAnalysisResultRecord) => {
         const after = new Set(deletingRunIds.value)
         after.delete(runId)
         deletingRunIds.value = after
+    }
+}
+
+const cleanupVulnerability = async () => {
+    if (cleanupBusy.value || (!cleanupAssessments.value && !cleanupRuns.value)) return
+    const selected = [
+        cleanupAssessments.value ? 'saved assessments' : '',
+        cleanupRuns.value ? 'DTVP and Agentyzer run records' : '',
+    ].filter(Boolean).join(' and ')
+    const activeNotice = cleanupRuns.value && cleanupActive.value
+        ? ' Active runs will be cancelled.'
+        : ''
+    if (!window.confirm(`Remove all ${selected} for ${props.vulnId} in this project?${activeNotice} This cannot be undone.`)) return
+
+    cleanupBusy.value = true
+    cleanupMessage.value = ''
+    historyError.value = null
+    try {
+        const cleanup = await codeAnalysisCleanupVulnerability(
+            props.projectName || '_all_',
+            props.vulnId,
+            {
+                vulnerability_aliases: props.vulnAliases || [],
+                remove_assessments: cleanupAssessments.value,
+                remove_runs: cleanupRuns.value,
+                cancel_active: cleanupActive.value,
+            },
+        )
+        await analysisQueueStore.refreshStatus()
+        await loadPersistedResults()
+        selectedRunId.value = null
+        selectedFullRecord.value = null
+        result.value = null
+        activeResultRunIds.value = []
+        analyzedComponents.value = []
+        collectedResults.value = []
+        cleanupMessage.value = [
+            `${cleanup.removed.assessments} assessment${cleanup.removed.assessments === 1 ? '' : 's'}`,
+            `${cleanup.removed.dtvp_runs} DTVP run${cleanup.removed.dtvp_runs === 1 ? '' : 's'}`,
+            `${cleanup.removed.agentyzer_jobs} Agentyzer job${cleanup.removed.agentyzer_jobs === 1 ? '' : 's'}`,
+        ].join(', ') + ' removed.'
+        const issues = [
+            ...cleanup.warnings,
+            ...cleanup.errors.map(issue => `${issue.id}: ${issue.detail}`),
+            cleanup.skipped_active_ids.length
+                ? `${cleanup.skipped_active_ids.length} active run(s) were left in place; enable active-run cancellation to remove them.`
+                : '',
+        ].filter(Boolean)
+        if (issues.length) historyError.value = issues.join(' ')
+    } catch (err: any) {
+        historyError.value = err?.response?.data?.detail || err?.message || 'Unable to clean code analysis data.'
+    } finally {
+        cleanupBusy.value = false
     }
 }
 
@@ -3042,8 +3178,59 @@ watch(combinedCandidateRuns, runs => {
                         <History v-else :size="10" />
                         {{ historyLoaded ? 'Refresh' : 'Load history' }}
                     </button>
+                    <button
+                        type="button"
+                        data-testid="analysis-cleanup-toggle"
+                        class="inline-flex items-center gap-1 rounded border border-red-900/60 px-2 py-1 text-[10px] font-bold uppercase text-red-300 transition-colors hover:bg-red-950/25"
+                        :aria-expanded="cleanupOpen ? 'true' : 'false'"
+                        @click="cleanupOpen = !cleanupOpen"
+                    >
+                        <Trash2 :size="10" />
+                        Clean up
+                    </button>
                 </div>
             </template>
+
+            <div
+                v-if="cleanupOpen"
+                data-testid="analysis-cleanup-panel"
+                class="space-y-2 rounded border border-red-900/50 bg-red-950/10 p-3 text-xs"
+            >
+                <div>
+                    <div class="font-semibold text-red-200">Clean {{ vulnId }} code-analysis data</div>
+                    <p class="mt-0.5 text-[10px] leading-relaxed text-gray-500">
+                        Choose either store independently, or remove both for a complete cleanup. The trash action on an individual row cleans only that run.
+                    </p>
+                </div>
+                <div class="flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-gray-300">
+                    <label class="inline-flex items-center gap-1.5">
+                        <input v-model="cleanupAssessments" type="checkbox" class="accent-red-500" />
+                        Saved assessments
+                    </label>
+                    <label class="inline-flex items-center gap-1.5">
+                        <input v-model="cleanupRuns" type="checkbox" class="accent-red-500" />
+                        DTVP and Agentyzer runs
+                    </label>
+                    <label class="inline-flex items-center gap-1.5" :class="cleanupRuns ? '' : 'opacity-50'">
+                        <input v-model="cleanupActive" type="checkbox" class="accent-red-500" :disabled="!cleanupRuns" />
+                        Cancel active runs too
+                    </label>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        data-testid="analysis-cleanup-submit"
+                        class="inline-flex items-center gap-1 rounded bg-red-700 px-2.5 py-1.5 text-[10px] font-bold uppercase text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="cleanupBusy || (!cleanupAssessments && !cleanupRuns)"
+                        @click="cleanupVulnerability"
+                    >
+                        <Loader2 v-if="cleanupBusy" :size="11" class="animate-spin" />
+                        <Trash2 v-else :size="11" />
+                        Clean selected data
+                    </button>
+                    <span v-if="cleanupMessage" class="text-[10px] text-emerald-300">{{ cleanupMessage }}</span>
+                </div>
+            </div>
 
             <div
                 role="list"
@@ -3394,7 +3581,17 @@ watch(combinedCandidateRuns, runs => {
                             </span>
                             <span class="text-[10px] text-gray-500">{{ componentResult.assessment.confidence }} confidence</span>
                         </div>
-                        <p class="mt-2 text-xs leading-relaxed text-gray-400">{{ componentResult.assessment.summary }}</p>
+                        <div v-if="componentResult.assessment.executive_summary" class="mt-2 space-y-1.5">
+                            <p class="text-xs leading-relaxed text-gray-400">{{ componentResult.assessment.executive_summary.vulnerability }}</p>
+                            <p class="text-xs leading-relaxed text-gray-300">{{ componentResult.assessment.executive_summary.assessment }}</p>
+                            <ul v-if="componentResult.assessment.executive_summary.why?.length" class="space-y-1 pl-4 text-xs leading-relaxed text-gray-400 list-disc">
+                                <li v-for="reason in componentResult.assessment.executive_summary.why" :key="reason">{{ reason }}</li>
+                            </ul>
+                            <p v-else-if="componentResult.assessment.reasoning" class="text-xs leading-relaxed text-gray-400">
+                                {{ componentResult.assessment.reasoning }}
+                            </p>
+                        </div>
+                        <p v-else class="mt-2 text-xs leading-relaxed text-gray-400">{{ componentResult.assessment.summary }}</p>
                     </div>
                 </div>
             </section>
@@ -4021,26 +4218,102 @@ watch(combinedCandidateRuns, runs => {
 
             <div
                 v-if="combinedAssessmentPreview"
-                class="border-l-2 px-3 py-2.5"
+                class="border-l-2 px-3 py-3"
                 :class="combinedAssessmentPreviewBorderClass"
                 data-testid="combined-assessment-preview"
             >
-                <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Worst assessment</span>
-                    <span
-                        class="text-sm font-bold"
-                        :class="combinedAssessmentPreviewTextClass"
-                    >
-                        {{ combinedAssessmentPreview.assessment.verdict }}
-                    </span>
+                <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Latest coverage</span>
                     <span class="text-[10px] text-gray-500">
-                        {{ combinedCandidateRuns.length }}/{{ applyAllCandidates.length }} latest targets loaded
+                        {{ combinedCandidateRuns.length }} of {{ applyAllCandidates.length }} latest targets loaded
                     </span>
                 </div>
-                <p class="mt-1 text-xs leading-relaxed text-gray-300">{{ combinedAssessmentPreview.assessment.summary }}</p>
-                <div v-if="combinedAssessmentPreview.assessment.reasoning" class="mt-2">
-                    <div class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Combined rationale</div>
-                    <p class="mt-0.5 text-xs leading-relaxed text-gray-400">{{ combinedAssessmentPreview.assessment.reasoning }}</p>
+
+                <div class="mt-3 space-y-3">
+                    <div v-if="combinedAssessmentPreview.assessment.executive_summary?.vulnerability">
+                        <p class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Advisory</p>
+                        <p class="mt-0.5 text-xs leading-relaxed text-gray-300">
+                            {{ combinedAssessmentPreview.assessment.executive_summary.vulnerability }}
+                        </p>
+                    </div>
+
+                    <div class="rounded border border-gray-800/80 bg-gray-950/25 p-2.5" data-testid="combined-decision-summary">
+                        <p class="text-[9px] font-bold uppercase tracking-wider text-gray-500">Worst-case decision</p>
+                        <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-xs md:grid-cols-4">
+                            <div>
+                                <dt class="text-[9px] font-semibold uppercase tracking-wide text-gray-600">Disposition</dt>
+                                <dd class="mt-0.5 font-semibold" :class="combinedAssessmentPreviewTextClass">
+                                    {{ combinedAssessmentPreview.assessment.verdict }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-[9px] font-semibold uppercase tracking-wide text-gray-600">Confidence</dt>
+                                <dd class="mt-0.5 text-gray-300">{{ combinedAssessmentPreview.assessment.confidence }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-[9px] font-semibold uppercase tracking-wide text-gray-600">Exposure</dt>
+                                <dd class="mt-0.5 text-gray-300">{{ combinedAssessmentPreview.assessment.exposure }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-[9px] font-semibold uppercase tracking-wide text-gray-600">Scope</dt>
+                                <dd class="mt-0.5 text-gray-300">
+                                    {{ combinedTargetResults.length }} target{{ combinedTargetResults.length === 1 ? '' : 's' }}
+                                </dd>
+                            </div>
+                        </dl>
+                        <div v-if="combinedControllingTargets.length" class="mt-2 flex flex-wrap items-center gap-1.5 border-t border-gray-800/70 pt-2">
+                            <span class="text-[9px] font-semibold uppercase tracking-wide text-gray-600">
+                                Controlling target{{ combinedControllingTargets.length === 1 ? '' : 's' }}
+                            </span>
+                            <span v-if="allCombinedTargetsControlDecision" class="text-[10px] text-gray-300">
+                                All {{ combinedTargetResults.length }} targets
+                            </span>
+                            <template v-else>
+                                <span
+                                    v-for="component in combinedControllingTargets"
+                                    :key="component"
+                                    class="rounded border border-gray-700/70 bg-gray-950/50 px-1.5 py-0.5 font-mono text-[10px] text-gray-300"
+                                >
+                                    {{ component }}
+                                </span>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div v-if="combinedTargetResults.length" data-testid="combined-target-assessments">
+                        <div class="flex items-center justify-between gap-2">
+                            <p class="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Target assessments</p>
+                            <span class="text-[10px] text-gray-600">Latest completed result per target</span>
+                        </div>
+                        <div class="mt-1.5 grid gap-2 xl:grid-cols-2">
+                            <article
+                                v-for="target in combinedTargetResults"
+                                :key="target.component"
+                                :data-component="target.component"
+                                data-testid="combined-target-assessment"
+                                class="rounded border border-gray-800 bg-gray-950/35 p-3"
+                            >
+                                <header class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-gray-800/70 pb-2">
+                                    <h4 class="font-mono text-xs font-semibold text-gray-200">{{ target.component }}</h4>
+                                    <span class="text-[10px] font-bold uppercase" :class="combinedTargetVerdictClass(target.assessment)">
+                                        {{ target.assessment.verdict }}
+                                    </span>
+                                    <span class="text-[10px] text-gray-500">
+                                        {{ target.assessment.confidence }} confidence · {{ target.assessment.exposure }}
+                                    </span>
+                                </header>
+                                <div v-if="combinedTargetReasons(target).length" class="mt-2">
+                                    <p class="text-[9px] font-semibold uppercase tracking-wide text-gray-600">Decision rationale</p>
+                                    <ul class="mt-1 space-y-1 pl-4 text-xs leading-relaxed text-gray-400 list-disc">
+                                        <li v-for="reason in combinedTargetReasons(target)" :key="reason">{{ reason }}</li>
+                                    </ul>
+                                </div>
+                                <p v-else class="mt-2 text-xs leading-relaxed text-gray-400">
+                                    {{ target.assessment.summary }}
+                                </p>
+                            </article>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -4052,9 +4325,10 @@ watch(combinedCandidateRuns, runs => {
                 {{ combinedHydrationError }}
             </div>
 
-            <div v-if="applyAllCandidates.length" class="divide-y divide-gray-800/70">
+            <div v-if="combinedMissingCandidates.length" class="divide-y divide-gray-800/70">
+                <p class="px-1 pb-1 text-[9px] font-semibold uppercase tracking-wide text-gray-600">Awaiting target details</p>
                 <div
-                    v-for="candidate in applyAllCandidates"
+                    v-for="candidate in combinedMissingCandidates"
                     :key="candidate.record.analysis_run_id"
                     class="flex items-center justify-between gap-3 px-1 py-1.5"
                 >
@@ -4067,7 +4341,7 @@ watch(combinedCandidateRuns, runs => {
                     </span>
                 </div>
             </div>
-            <div v-else class="rounded border border-gray-800 bg-gray-950/25 px-3 py-3 text-xs text-gray-500">
+            <div v-else-if="!applyAllCandidates.length" class="rounded border border-gray-800 bg-gray-950/25 px-3 py-3 text-xs text-gray-500">
                 No completed target results are available to combine yet. Run analysis above or wait for queued work to finish.
             </div>
 

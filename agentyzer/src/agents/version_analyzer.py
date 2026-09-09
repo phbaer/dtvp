@@ -34,6 +34,10 @@ _SKIP_DIRS = {
     "__pycache__",
 }
 
+_DEFAULT_PROJECT_VERSION_FILES = (
+    {"path": ".project.json", "field": "version"},
+)
+
 
 def list_tags(repo_path: str) -> List[str]:
     try:
@@ -55,6 +59,90 @@ def _normalize_product_versions(product_versions: List[str] | None) -> List[str]
         seen.add(text)
         result.append(text)
     return result
+
+
+def _normalize_project_version_files(value: Any) -> List[Dict[str, str]]:
+    """Normalize repository project-version metadata file configuration."""
+    if value is None:
+        raw_specs: List[Any] = list(_DEFAULT_PROJECT_VERSION_FILES)
+    elif isinstance(value, (str, dict)):
+        raw_specs = [value]
+    elif isinstance(value, list):
+        raw_specs = value
+    else:
+        raw_specs = []
+
+    specs: List[Dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in raw_specs:
+        if isinstance(raw, str):
+            path = raw
+            field = "version"
+        elif isinstance(raw, dict):
+            path = raw.get("path") or raw.get("file") or ""
+            field = raw.get("field") or raw.get("key") or "version"
+        else:
+            continue
+        path = str(path or "").strip().replace("\\", "/")
+        field = str(field or "version").strip()
+        parts = [part for part in path.split("/") if part not in ("", ".")]
+        if not parts or path.startswith("/") or ".." in parts or not field:
+            continue
+        normalized = "/".join(parts)
+        key = (normalized, field)
+        if key in seen:
+            continue
+        seen.add(key)
+        specs.append({"path": normalized, "field": field})
+    return specs
+
+
+def _json_field_value(payload: Any, field: str) -> Any:
+    current = payload
+    for part in field.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _project_versions_at_ref(
+    repo: Repo,
+    ref: str,
+    project_version_files: Any,
+) -> List[Dict[str, str]]:
+    versions: List[Dict[str, str]] = []
+    for spec in _normalize_project_version_files(project_version_files):
+        try:
+            payload = json.loads(repo.git.show(f"{ref}:{spec['path']}"))
+        except Exception:
+            continue
+        value = _json_field_value(payload, spec["field"])
+        version = str(value or "").strip()
+        if not version:
+            continue
+        versions.append(
+            {
+                "version": version,
+                "path": spec["path"],
+                "field": spec["field"],
+            }
+        )
+    return versions
+
+
+def _metadata_product_version_matches(
+    discovered: List[Dict[str, str]],
+    product_versions: List[str],
+) -> List[str]:
+    discovered_versions = {
+        entry["version"].lower().removeprefix("v") for entry in discovered
+    }
+    return [
+        version
+        for version in product_versions
+        if version.lower().removeprefix("v") in discovered_versions
+    ]
 
 
 def _major_minor_version(value: str) -> str | None:
@@ -91,13 +179,36 @@ def _product_version_ref_candidates(version: str) -> set[str]:
     return {candidate.lower() for candidate in candidates}
 
 
-def _display_ref_name(name: str) -> str:
+def _primary_remote_scope(repo: Repo) -> tuple[str | None, list[str]]:
+    """Return the preferred display remote and the remaining remote names."""
+    remote_names = [str(remote.name) for remote in repo.remotes]
+    if not remote_names:
+        return None, []
+
+    if "origin" in remote_names:
+        primary = "origin"
+    else:
+        primary = None
+        try:
+            tracking = repo.active_branch.tracking_branch()
+            if tracking is not None:
+                candidate = str(tracking).split("/", 1)[0]
+                if candidate in remote_names:
+                    primary = candidate
+        except Exception:
+            pass
+        if primary is None:
+            primary = remote_names[0]
+    return primary, sorted(name for name in remote_names if name != primary)
+
+
+def _display_ref_name(name: str, primary_remote: str | None = "origin") -> str:
     display = str(name or "").strip()
     for prefix in ("refs/remotes/", "refs/heads/", "remotes/"):
         if display.startswith(prefix):
             display = display[len(prefix) :]
-    if display.startswith("origin/"):
-        display = display[len("origin/") :]
+    if primary_remote and display.startswith(f"{primary_remote}/"):
+        display = display[len(primary_remote) + 1 :]
     return display
 
 
@@ -128,23 +239,22 @@ def _target_ref_matches(name: str, product_versions: List[str]) -> List[str]:
 def list_release_refs(
     repo_path: str,
     product_versions: List[str] | None = None,
+    project_version_files: Any = None,
 ) -> List[Dict[str, Any]]:
     """List git tags, default branches, and release branches as release references.
 
     Returns a list of dicts ``{"ref": str, "type": "tag"|"branch"}``
     where *ref* is the name usable with ``git show ref:path``.
 
-    Tags are included as-is.  The default branch (``main`` or ``master``)
-    is included first.  Remote branches matching ``release/<semver>``
-    (or ``origin/release/<semver>``) are included with the display name
-    ``release/<semver>``.
-
-    When *product_versions* are provided, non-release branches that look
-    like a listed product version are included too.  This lets DTVP scan
-    exact versions already known from the vulnerability card.
+    Tags and ``release/*`` branches from every available remote are eligible.
+    When *product_versions* are provided, only refs representing one of those
+    caller-supplied releases are returned.  The default branch is matched by
+    reading configured project-version metadata files (``.project.json`` and
+    its ``version`` field by default).
     """
     refs: List[Dict[str, Any]] = []
     seen: set[str] = set()
+    seen_matched_targets: set[tuple[str, tuple[str, ...]]] = set()
     product_versions = _normalize_product_versions(product_versions)
 
     def add_ref(
@@ -153,10 +263,16 @@ def list_release_refs(
         *,
         display: str | None = None,
         product_matches: List[str] | None = None,
+        ref_role: str | None = None,
+        project_version_sources: List[Dict[str, str]] | None = None,
     ) -> None:
         display_name = display or _display_ref_name(ref)
         key = f"{ref_type}:{display_name}"
-        matches = product_matches or _target_ref_matches(display_name, product_versions)
+        matches = (
+            product_matches
+            if product_matches is not None
+            else _target_ref_matches(display_name, product_versions)
+        )
         for existing in refs:
             existing_key = f"{existing.get('type')}:{existing.get('display', existing.get('ref'))}"
             if existing_key != key:
@@ -171,51 +287,114 @@ def list_release_refs(
                     )
                 )
                 existing["product_versions"] = merged
+            if ref_role and not existing.get("ref_role"):
+                existing["ref_role"] = ref_role
+            if project_version_sources:
+                existing["project_version_sources"] = project_version_sources
             return
         entry: Dict[str, Any] = {"ref": ref, "type": ref_type}
         if display_name != ref:
             entry["display"] = display_name
         if matches:
             entry["product_versions"] = list(dict.fromkeys(matches))
+        if ref_role:
+            entry["ref_role"] = ref_role
+        if project_version_sources:
+            entry["project_version_sources"] = project_version_sources
         refs.append(entry)
         seen.add(display_name)
 
     try:
         repo = Repo(repo_path, search_parent_directories=True)
-        remote_ref_names = [str(r) for r in repo.refs]
+        primary_remote, _ = _primary_remote_scope(repo)
+        eligible_refs = list(repo.refs)
+        remote_ref_names = [str(ref) for ref in eligible_refs]
 
         # Default branch (main/master) — check first so it appears at the top
         for default_name in ("main", "master"):
-            remote_ref_name = f"origin/{default_name}"
+            remote_ref_name = (
+                f"{primary_remote}/{default_name}"
+                if primary_remote
+                else default_name
+            )
             if remote_ref_name not in seen:
                 # Check if this remote ref actually exists
                 if remote_ref_name in remote_ref_names:
-                    add_ref(remote_ref_name, "branch", display=default_name)
+                    version_sources = _project_versions_at_ref(
+                        repo,
+                        remote_ref_name,
+                        project_version_files,
+                    )
+                    product_matches = _metadata_product_version_matches(
+                        version_sources,
+                        product_versions,
+                    )
+                    if product_versions and not product_matches:
+                        continue
+                    if product_versions:
+                        seen_matched_targets.add(
+                            (
+                                repo.commit(remote_ref_name).hexsha,
+                                tuple(sorted(product_matches)),
+                            )
+                        )
+                    add_ref(
+                        remote_ref_name,
+                        "branch",
+                        display=default_name,
+                        product_matches=product_matches,
+                        ref_role="default",
+                        project_version_sources=version_sources,
+                    )
                     seen.add(default_name)
 
         for t in repo.tags:
-            add_ref(t.name, "tag", display=t.name)
-        # Remote-tracking release branches and product-version branches
-        for remote_ref in repo.refs:
-            name = str(remote_ref)
-            display = _display_ref_name(name)
-            product_matches = _target_ref_matches(display, product_versions)
-            # Match origin/release/X.Y.Z or release/X.Y.Z
-            is_release_branch = False
-            for prefix in ("origin/release/", "release/"):
-                if name.startswith(prefix) or name.endswith("/" + prefix.rstrip("/")):
-                    is_release_branch = True
-                    break
-            if not is_release_branch:
-                # Also check the short name
-                if not display.startswith("release/") and not product_matches:
+            product_matches = _target_ref_matches(t.name, product_versions)
+            if product_versions and not product_matches:
+                continue
+            if product_versions:
+                signature = (
+                    repo.commit(t.name).hexsha,
+                    tuple(sorted(product_matches)),
+                )
+                if signature in seen_matched_targets:
                     continue
+                seen_matched_targets.add(signature)
+            add_ref(
+                t.name,
+                "tag",
+                display=t.name,
+                product_matches=product_matches,
+                ref_role="release",
+            )
+        # Local and remote-tracking release branches from every remote.
+        for remote_ref in eligible_refs:
+            name = str(remote_ref)
+            display = _display_ref_name(name, primary_remote)
+            product_matches = _target_ref_matches(display, product_versions)
+            is_release_branch = display.startswith("release/") or bool(
+                re.search(r"(?:^|/)release/", display)
+            )
+            if not is_release_branch or (product_versions and not product_matches):
+                continue
+            if product_versions:
+                try:
+                    signature = (
+                        repo.commit(name).hexsha,
+                        tuple(sorted(product_matches)),
+                    )
+                except Exception:
+                    signature = (name, tuple(sorted(product_matches)))
+                if signature in seen_matched_targets:
+                    continue
+                seen_matched_targets.add(signature)
             if display not in seen:
                 add_ref(
                     name,
                     "branch",
                     display=display,
                     product_matches=product_matches,
+                    ref_role="release",
                 )
     except Exception:
         pass
@@ -234,6 +413,7 @@ def gather_component_versions(
     repo_path: str,
     component_name: str,
     product_versions: List[str] | None = None,
+    project_version_files: Any = None,
 ) -> List[Dict[str, Any]]:
     """Gather versions of a component across release refs and current worktree.
 
@@ -253,6 +433,7 @@ def gather_component_versions(
         repo_path,
         component_name,
         product_versions=product_versions,
+        project_version_files=project_version_files,
     )
     return results
 
@@ -261,6 +442,7 @@ def _gather_component_versions_with_metadata(
     repo_path: str,
     component_name: str,
     product_versions: List[str] | None = None,
+    project_version_files: Any = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     product_versions = _normalize_product_versions(product_versions)
@@ -269,6 +451,13 @@ def _gather_component_versions_with_metadata(
         "ref_lock_files": {},
         "processed_lock_files": {"WORKTREE": []},
         "any_lock_files_found": False,
+        "primary_remote": None,
+        "excluded_remotes": [],
+        "remotes_scanned": [],
+        "project_version_files": _normalize_project_version_files(
+            project_version_files
+        ),
+        "project_version_sources": {},
         "product_versions_requested": product_versions,
         "product_versions_matched": {},
     }
@@ -310,13 +499,24 @@ def _gather_component_versions_with_metadata(
         repo = Repo(repo_path, search_parent_directories=True)
     except Exception:
         return results, metadata
+    primary_remote, _ = _primary_remote_scope(repo)
+    metadata["primary_remote"] = primary_remote
+    metadata["remotes_scanned"] = sorted(str(remote.name) for remote in repo.remotes)
 
-    release_refs = list_release_refs(repo_path, product_versions=product_versions)
+    release_refs = list_release_refs(
+        repo_path,
+        product_versions=product_versions,
+        project_version_files=project_version_files,
+    )
     for entry in release_refs:
         git_ref = entry["ref"]
         ref_type = entry["type"]
+        ref_role = entry.get("ref_role")
         display = entry.get("display", git_ref)
         matched_product_versions = list(entry.get("product_versions") or [])
+        project_version_sources = list(entry.get("project_version_sources") or [])
+        if project_version_sources:
+            metadata["project_version_sources"][display] = project_version_sources
         for product_version in matched_product_versions:
             metadata["product_versions_matched"].setdefault(product_version, [])
             metadata["product_versions_matched"][product_version].append(display)
@@ -347,6 +547,8 @@ def _gather_component_versions_with_metadata(
                     "versions": list(dict.fromkeys(lock_versions)),
                     "source": "lock",
                     "product_versions": matched_product_versions,
+                    "ref_role": ref_role,
+                    "project_version_sources": project_version_sources,
                 }
             )
             continue
@@ -365,6 +567,8 @@ def _gather_component_versions_with_metadata(
                 "versions": list(dict.fromkeys(manifest_versions)),
                 "source": "manifest",
                 "product_versions": matched_product_versions,
+                "ref_role": ref_role,
+                "project_version_sources": project_version_sources,
             }
         )
 
@@ -392,7 +596,7 @@ def _component_versions_at_ref(
                 versions.append(ver)
         else:
             versions.extend(_scan_manifests_in_texts({path: txt}, component_name))
-    return versions
+    return list(dict.fromkeys(versions))
 
 
 def _read_files_from_fs(repo_path: str) -> Dict[str, str]:
@@ -569,15 +773,16 @@ def _scan_manifests_in_texts(files: Dict[str, str], component_name: str) -> List
                             ):
                                 parts = entry.split()
                                 if len(parts) > 1:
-                                    versions.append(parts[-1])
+                                    expression = "".join(parts[1:])
+                                    versions.append(expression)
                                 else:
                                     # PEP 508: "pkg>=1.0", "pkg[extra]~=2.0"
                                     m = re.search(
-                                        r"[><=~!]+\s*([0-9][0-9a-zA-Z.\-_]*)",
+                                        r"([><=~!]+\s*[0-9][0-9a-zA-Z.\-_]*)",
                                         entry,
                                     )
                                     if m:
-                                        versions.append(m.group(1))
+                                        versions.append(re.sub(r"\s+", "", m.group(1)))
                     elif isinstance(deps, dict):
                         for name, ver in deps.items():
                             if name.lower() == component_name.lower():
@@ -647,11 +852,12 @@ def _scan_manifests_in_texts(files: Dict[str, str], component_name: str) -> List
                     data = json.loads(txt)
                     for dep in data.get("dependencies", []):
                         name = dep if isinstance(dep, str) else dep.get("name", "")
-                        ver = (
-                            None
-                            if isinstance(dep, str)
-                            else dep.get("version>=", dep.get("version", ""))
-                        )
+                        ver = None
+                        if not isinstance(dep, str):
+                            if dep.get("version>="):
+                                ver = f">={dep['version>=']}"
+                            else:
+                                ver = dep.get("version", "")
                         if name.lower() == component_name.lower() and ver:
                             versions.append(ver)
                     # Also check overrides
@@ -741,14 +947,16 @@ def _scan_manifests_in_texts(files: Dict[str, str], component_name: str) -> List
                     if m:
                         versions.append(m.group(1))
                         continue
-                    # name >= or ~= or <= or simple version
+                    # Preserve range operators so a lower bound cannot later
+                    # be presented as a concrete installed version.
                     m = re.search(
-                        rf"{component_name}[^\n]*?([0-9]+\.[0-9a-zA-Z\.\-_]+)",
+                        rf"{component_name}[^\n]*?([><=~^!]+)\s*"
+                        r"([0-9]+\.[0-9a-zA-Z\.\-_]+)",
                         line,
                         re.I,
                     )
                     if m:
-                        versions.append(m.group(1))
+                        versions.append(f"{m.group(1)}{m.group(2)}")
                         continue
                     # JSON style: "name": "1.2.3"
                     m = re.search(
@@ -760,7 +968,125 @@ def _scan_manifests_in_texts(files: Dict[str, str], component_name: str) -> List
                         versions.append(m.group(1))
         except Exception:
             continue
-    return versions
+    return list(dict.fromkeys(versions))
+
+
+def _normalized_package_name(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def select_component_affected_constraints(
+    component_name: str,
+    affected_ranges: List[Dict[str, Any]],
+    affected_versions: List[str] | None = None,
+    affected_version_entries: List[Dict[str, Any]] | None = None,
+    fixed_versions: List[str] | None = None,
+    fixed_version_entries: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    """Select only advisory constraints belonging to the scanned package.
+
+    Older normalized advisories did not retain package provenance. Their
+    unscoped constraints remain usable, while current package-scoped records
+    are never mixed across packages in the same CVE or GHSA.
+    """
+    target = _normalized_package_name(component_name)
+    scoped_ranges = [r for r in affected_ranges if r.get("package")]
+    unscoped_ranges = [r for r in affected_ranges if not r.get("package")]
+    matching_ranges = [
+        r
+        for r in scoped_ranges
+        if _normalized_package_name(r.get("package")) == target
+    ]
+    selected_ranges = [*unscoped_ranges, *matching_ranges]
+    if not scoped_ranges:
+        selected_ranges = list(affected_ranges)
+
+    entries = [
+        entry
+        for entry in (affected_version_entries or [])
+        if isinstance(entry, dict) and str(entry.get("version") or "").strip()
+    ]
+    scoped_entries = [entry for entry in entries if entry.get("package")]
+    unscoped_entries = [entry for entry in entries if not entry.get("package")]
+    matching_entries = [
+        entry
+        for entry in scoped_entries
+        if _normalized_package_name(entry.get("package")) == target
+    ]
+    if entries:
+        selected_entries = [*unscoped_entries, *matching_entries]
+        selected_versions = list(
+            dict.fromkeys(str(entry["version"]).strip() for entry in selected_entries)
+        )
+    else:
+        selected_versions = list(
+            dict.fromkeys(
+                str(version).strip()
+                for version in (affected_versions or [])
+                if str(version).strip()
+            )
+        )
+
+    fixed_entries = [
+        entry
+        for entry in (fixed_version_entries or [])
+        if isinstance(entry, dict) and str(entry.get("version") or "").strip()
+    ]
+    scoped_fixed_entries = [entry for entry in fixed_entries if entry.get("package")]
+    unscoped_fixed_entries = [
+        entry for entry in fixed_entries if not entry.get("package")
+    ]
+    matching_fixed_entries = [
+        entry
+        for entry in scoped_fixed_entries
+        if _normalized_package_name(entry.get("package")) == target
+    ]
+    if fixed_entries:
+        selected_fixed_entries = [*unscoped_fixed_entries, *matching_fixed_entries]
+        selected_fixed_versions = list(
+            dict.fromkeys(
+                str(entry["version"]).strip() for entry in selected_fixed_entries
+            )
+        )
+    else:
+        selected_fixed_versions = list(
+            dict.fromkeys(
+                str(version).strip()
+                for version in (fixed_versions or [])
+                if str(version).strip()
+            )
+        )
+
+    excluded_packages = sorted(
+        {
+            str(item.get("package") or "").strip()
+            for item in [*scoped_ranges, *scoped_entries, *scoped_fixed_entries]
+            if item.get("package")
+            and _normalized_package_name(item.get("package")) != target
+        }
+    )
+    return {
+        "component_name": component_name,
+        "affected_ranges": selected_ranges,
+        "affected_versions": selected_versions,
+        "fixed_versions": selected_fixed_versions,
+        "package_scoped": bool(
+            scoped_ranges or scoped_entries or scoped_fixed_entries
+        ),
+        "selected_range_count": len(selected_ranges),
+        "excluded_range_count": len(affected_ranges) - len(selected_ranges),
+        "selected_version_count": len(selected_versions),
+        "excluded_version_count": max(
+            0,
+            len(affected_versions or []) - len(selected_versions),
+        ),
+        "selected_fixed_version_count": len(selected_fixed_versions),
+        "excluded_fixed_version_count": max(
+            0,
+            len(fixed_versions or []) - len(selected_fixed_versions),
+        ),
+        "excluded_packages": excluded_packages,
+    }
 
 
 def version_in_affected_ranges(
@@ -799,8 +1125,9 @@ def version_in_affected_ranges(
     ]
     git_ranges = [item for item in affected_ranges if item.get("type") == "GIT"]
 
-    parsed_version = _parse_packaging_version(normalized_ver or ver)
-    if semver_ranges and parsed_version is not None:
+    if semver_ranges:
+        usable_range_count = 0
+        skipped_range_count = 0
         for item in semver_ranges:
             event = item.get("event") or {}
             source = item.get("source", "?")
@@ -810,49 +1137,89 @@ def version_in_affected_ranges(
             # standard OSV event["introduced"] / event["fixed"] keys.
             prebuilt_range = event.get("range", "").strip()
             if prebuilt_range:
-                try:
-                    spec = SpecifierSet(prebuilt_range)
-                except Exception:
+                range_result = _version_in_range_string(
+                    normalized_ver or ver,
+                    prebuilt_range,
+                    item,
+                )
+                if range_result is None:
+                    skipped_range_count += 1
                     trace.append(
                         f"version={ver}: skipped unparseable range string "
                         f"'{prebuilt_range}' (source={source})"
                     )
                     continue
-                if parsed_version in spec:
+                usable_range_count += 1
+                if range_result:
                     trace.append(
-                        f"version={ver}: MATCH in affected range {spec} (source={source})"
+                        f"version={ver}: MATCH in affected range "
+                        f"{prebuilt_range} (source={source})"
                     )
-                    return True, f"version falls in affected range {spec}", trace
+                    return (
+                        True,
+                        f"version falls in affected range {prebuilt_range}",
+                        trace,
+                    )
                 trace.append(
-                    f"version={ver}: outside affected range {spec} (source={source})"
+                    f"version={ver}: outside affected range "
+                    f"{prebuilt_range} (source={source})"
                 )
                 continue
 
             introduced = _normalize_version_string(event.get("introduced"))
             fixed = _normalize_version_string(event.get("fixed"))
-            spec = _specifier_from_event(introduced, fixed)
-            if not spec:
+            last_affected = _normalize_version_string(event.get("last_affected"))
+            limit = _normalize_version_string(event.get("limit"))
+            range_result, range_description = _version_in_event_range(
+                normalized_ver or ver,
+                item,
+                introduced,
+                fixed,
+                last_affected=last_affected,
+                limit=limit,
+            )
+            if range_result is None:
+                skipped_range_count += 1
                 trace.append(
                     f"version={ver}: skipped unusable {item.get('type', '?')} range "
-                    f"introduced={introduced or '?'} fixed={fixed or 'none'} (source={source})"
+                    f"introduced={introduced or '?'} fixed={fixed or 'none'} "
+                    f"last_affected={last_affected or 'none'} "
+                    f"limit={limit or 'none'} (source={source})"
                 )
                 continue
-            if parsed_version in spec:
+            usable_range_count += 1
+            if range_result:
                 trace.append(
-                    f"version={ver}: MATCH in affected range {spec} (source={source})"
+                    f"version={ver}: MATCH in affected range "
+                    f"{range_description} (source={source})"
                 )
-                return True, f"version falls in affected range {spec}", trace
+                return (
+                    True,
+                    f"version falls in affected range {range_description}",
+                    trace,
+                )
             trace.append(
-                f"version={ver}: outside affected range {spec} (source={source})"
+                f"version={ver}: outside affected range "
+                f"{range_description} (source={source})"
             )
 
-        return False, "version is outside the affected ranges", trace
+        if skipped_range_count:
+            trace.append(
+                f"version={ver}: {skipped_range_count} advisory range(s) could "
+                "not be evaluated — assuming affected"
+            )
+            return (
+                True,
+                "assumed affected (one or more advisory ranges could not be evaluated)",
+                trace,
+            )
+        if usable_range_count:
+            return False, "version is outside the affected ranges", trace
 
-    if semver_ranges and parsed_version is None:
         trace.append(
-            f"version={ver}: could not parse version for semver comparison — assuming affected"
+            f"version={ver}: no usable semver ranges remained — assuming affected"
         )
-        return True, "assumed affected (version could not be parsed)", trace
+        return True, "assumed affected (no usable version constraints)", trace
 
     if git_ranges:
         trace.append(f"version={ver}: only GIT ranges available — assuming affected")
@@ -878,9 +1245,24 @@ def summarize_ranges_for_debug(
     summaries: List[str] = []
     for item in affected_ranges:
         event = item.get("event") or {}
+        package = f", package={item['package']}" if item.get("package") else ""
+        if event.get("range"):
+            summaries.append(
+                f"{item.get('type', '?')} range: {event['range']} "
+                f"(source={item.get('source', '?')}{package})"
+            )
+            continue
+        bounds = [
+            f"introduced={event.get('introduced', '?')}",
+            f"fixed={event.get('fixed', 'none')}",
+        ]
+        if event.get("last_affected") is not None:
+            bounds.append(f"last_affected={event['last_affected']}")
+        if event.get("limit") is not None:
+            bounds.append(f"limit={event['limit']}")
         summaries.append(
-            f"{item.get('type', '?')} range: introduced={event.get('introduced', '?')} "
-            f"fixed={event.get('fixed', 'none')} (source={item.get('source', '?')})"
+            f"{item.get('type', '?')} range: {' '.join(bounds)} "
+            f"(source={item.get('source', '?')}{package})"
         )
     if affected_versions:
         summaries.append(f"Explicit affected versions: {len(affected_versions)} listed")
@@ -894,6 +1276,7 @@ def inventory_versions(
     locked_version: str | None = None,
     affected_versions: List[str] | None = None,
     affected_product_versions: List[str] | None = None,
+    project_version_files: Any = None,
 ) -> Dict[str, Any]:
     """Produce a version inventory across all release refs.
 
@@ -935,20 +1318,11 @@ def inventory_versions(
         all_trace.append(f"  Explicit affected versions: {affected_versions}")
     if affected_product_versions:
         all_trace.append(
-            f"  DTVP affected product versions: {affected_product_versions}"
+            "  Caller-supplied processed project releases for repository "
+            f"intersection (not dependency versions): {affected_product_versions}"
         )
-    for r in semver_ranges:
-        ev = r.get("event", {})
-        prebuilt_range = str(ev.get("range", "")).strip()
-        if prebuilt_range:
-            all_trace.append(
-                f"  SEMVER range: {prebuilt_range} (source={r.get('source', '?')})"
-            )
-        else:
-            all_trace.append(
-                f"  SEMVER range: introduced={ev.get('introduced')} "
-                f"fixed={ev.get('fixed')} (source={r.get('source', '?')})"
-            )
+    for summary in summarize_ranges_for_debug(semver_ranges):
+        all_trace.append(f"  {summary}")
     for r in git_ranges:
         ev = r.get("event", {})
         all_trace.append(
@@ -971,6 +1345,7 @@ def inventory_versions(
                 "affected": "YES" if is_aff else "No",
                 "ref": "LOCKED",
                 "ref_type": "lock",
+                "ref_role": "current",
                 "notes": f"lock file — {note}",
             }
         )
@@ -983,6 +1358,7 @@ def inventory_versions(
         repo_path,
         component_name,
         product_versions=affected_product_versions,
+        project_version_files=project_version_files,
     )
 
     for entry in gathered:
@@ -990,7 +1366,9 @@ def inventory_versions(
         ref_type = entry.get("ref_type", "tag")
         vers = entry.get("versions") or []
         source = entry.get("source", "manifest")
+        ref_role = entry.get("ref_role")
         product_versions_for_ref = list(entry.get("product_versions") or [])
+        project_version_sources = list(entry.get("project_version_sources") or [])
         product_version = ", ".join(product_versions_for_ref)
         if not vers:
             rows.append(
@@ -999,25 +1377,55 @@ def inventory_versions(
                     "affected": "No",
                     "ref": ref,
                     "ref_type": ref_type,
+                    "ref_role": ref_role,
                     "source": source,
                     "product_version": product_version,
+                    "product_versions": product_versions_for_ref,
+                    "project_version_sources": project_version_sources,
                     "notes": "not found",
                 }
             )
             continue
         for ver in vers:
+            comparison_version = ver
+            if source == "manifest":
+                comparison_version = _resolved_manifest_version(ver)
+                if comparison_version is None:
+                    note = (
+                        f"manifest declaration {ver!r} is a version constraint, "
+                        "not a resolved installed version"
+                    )
+                    rows.append(
+                        {
+                            "component_version": ver,
+                            "affected": "Unknown",
+                            "ref": ref,
+                            "ref_type": ref_type,
+                            "ref_role": ref_role,
+                            "source": "manifest-constraint",
+                            "product_version": product_version,
+                            "product_versions": product_versions_for_ref,
+                            "project_version_sources": project_version_sources,
+                            "notes": note,
+                        }
+                    )
+                    all_trace.append(f"ref={ref}: {note}")
+                    continue
             is_aff, note, trace = version_in_affected_ranges(
-                ver, affected_ranges, affected_versions
+                comparison_version, affected_ranges, affected_versions
             )
             all_trace.extend(trace)
             rows.append(
                 {
-                    "component_version": ver,
+                    "component_version": comparison_version,
                     "affected": "YES" if is_aff else "No",
                     "ref": ref,
                     "ref_type": ref_type,
+                    "ref_role": ref_role,
                     "source": source,
                     "product_version": product_version,
+                    "product_versions": product_versions_for_ref,
+                    "project_version_sources": project_version_sources,
                     "notes": note,
                 }
             )
@@ -1029,26 +1437,32 @@ def inventory_versions(
         str(version)
         for version in gather_meta.get("product_versions_matched", {}).keys()
     }
-    for product_version in affected_product_versions:
-        if product_version in matched_product_versions:
-            continue
+    unmatched_product_versions = [
+        version
+        for version in affected_product_versions
+        if version not in matched_product_versions
+    ]
+    for product_version in unmatched_product_versions:
         rows.append(
             {
                 "component_version": "-",
-                "affected": "No",
+                "affected": "Unknown",
                 "ref": product_version,
                 "ref_type": "product-version",
+                "ref_role": "unmatched",
                 "source": "dtvp",
                 "product_version": product_version,
+                "product_versions": [product_version],
                 "notes": (
-                    "DTVP reported this affected product version, but no matching "
-                    "tag or branch was found in the repository"
+                    "caller supplied this project release for repository matching, "
+                    "but no matching tag, release branch, or configured "
+                    "default-branch project version was found"
                 ),
             }
         )
         all_trace.append(
-            "DTVP affected product version "
-            f"{product_version}: no matching tag or branch found"
+            "Caller-supplied project release "
+            f"{product_version}: no matching repository project version found"
         )
 
     # ---- 3. Build worst-case summary ----
@@ -1069,25 +1483,49 @@ def inventory_versions(
         warnings.append(warning)
         all_trace.append(warning)
 
-    # Overall affected = any tracked ref (worktree, tags, release branches).
+    # Overall affected = any tracked ref (worktree, default branch, tags, or
+    # release branches).
     # A project is considered affected if ANY released or current version
     # shipped the vulnerable component.  Reachability analysis (workspace
     # only) can down-score the finding, but cannot alone clear it.
     overall_affected = any_affected if component_found else False
 
+    tracked_affected = [
+        row
+        for row in rows
+        if row.get("affected") == "YES"
+        and row.get("ref") not in ("LOCKED", "WORKTREE")
+    ]
+    historical = [
+        row
+        for row in tracked_affected
+        if row.get("ref_role") in {"release", "product-release"}
+        or (
+            row.get("ref_role") == "default"
+            and bool(row.get("product_versions"))
+        )
+    ]
+
     if current_affected:
         note = "current workspace version is in the affected range"
-    elif overall_affected:
+    elif historical:
         note = (
             "current workspace version is outside the affected range, "
             "but one or more tracked releases shipped an affected version"
         )
+    elif overall_affected:
+        note = (
+            "current workspace version is outside the affected range, "
+            "but another tracked repository ref contains an affected version"
+        )
     else:
-        note = "no tracked version (workspace or releases) is in the affected range"
+        note = "no tracked dependency version is in the affected range"
 
     worst_case: Dict[str, Any] = {
         "affected": overall_affected,
         "current_workspace_affected": current_affected,
+        "tracked_ref_affected": bool(tracked_affected),
+        "tracked_release_affected": bool(historical),
         "note": note,
     }
     if warnings:
@@ -1100,12 +1538,8 @@ def inventory_versions(
     if affected_refs:
         worst_case["affected_refs"] = list(dict.fromkeys(affected_refs))
 
-    # Historical summary: which past releases were affected?
-    historical = [
-        r
-        for r in rows
-        if r["affected"] == "YES" and r.get("ref") not in ("LOCKED", "WORKTREE")
-    ]
+    # Historical summary: which project release refs were actually resolved
+    # and found to contain an affected dependency version?
     if historical:
         worst_case["historical_affected"] = [
             {
@@ -1115,6 +1549,31 @@ def inventory_versions(
             }
             for r in historical
         ]
+
+    product_version_states: dict[str, set[str]] = {
+        version: set() for version in matched_product_versions
+    }
+    for row in rows:
+        for product_version in row.get("product_versions") or []:
+            if product_version in product_version_states:
+                product_version_states[product_version].add(str(row.get("affected")))
+    verified_affected_product_versions = [
+        version
+        for version in affected_product_versions
+        if "YES" in product_version_states.get(version, set())
+    ]
+    unknown_product_versions = [
+        version
+        for version in affected_product_versions
+        if version in matched_product_versions
+        and "YES" not in product_version_states.get(version, set())
+        and "Unknown" in product_version_states.get(version, set())
+    ]
+    verified_unaffected_product_versions = [
+        version
+        for version in affected_product_versions
+        if product_version_states.get(version) == {"No"}
+    ]
 
     return {
         "version_table": rows,
@@ -1148,14 +1607,30 @@ def inventory_versions(
                 affected_versions,
             ),
             "affected_versions_count": len(affected_versions or []),
-            "affected_product_versions": affected_product_versions,
-            "affected_product_versions_count": len(affected_product_versions),
-            "affected_product_version_refs": {
+            "project_versions": affected_product_versions,
+            "project_versions_count": len(affected_product_versions),
+            "project_version_refs": {
                 version: sorted(refs)
                 for version, refs in sorted(
                     gather_meta.get("product_versions_matched", {}).items()
                 )
             },
+            "covered_product_versions": [
+                version
+                for version in affected_product_versions
+                if version in gather_meta.get("product_versions_matched", {})
+            ],
+            "verified_affected_project_versions": verified_affected_product_versions,
+            "verified_unaffected_project_versions": verified_unaffected_product_versions,
+            "unknown_project_versions": unknown_product_versions,
+            "unmatched_project_versions": unmatched_product_versions,
+            "primary_remote": gather_meta.get("primary_remote"),
+            "excluded_remotes": gather_meta.get("excluded_remotes", []),
+            "remotes_scanned": gather_meta.get("remotes_scanned", []),
+            "project_version_files": gather_meta.get("project_version_files", []),
+            "project_version_sources": gather_meta.get(
+                "project_version_sources", {}
+            ),
         },
     }
 
@@ -1207,6 +1682,7 @@ def analyze_what_if(
             if (
                 row.get("ref") == "WORKTREE"
                 and row.get("component_version", "-") != "-"
+                and row.get("affected") in {"YES", "No"}
             ):
                 current_version = row["component_version"]
                 current_affected = row.get("affected") == "YES"
@@ -1214,14 +1690,49 @@ def analyze_what_if(
                 break
 
     # --- Collect fixed versions from advisory ranges ---
-    all_fixed: list[str] = list(fixed_versions or [])
+    # Prefer fixes attached to ranges that contain the current version.  A
+    # single advisory can describe several maintained release lines, whose
+    # other fixes are not valid upgrade targets for this installation.
+    applicable_fixed: list[str] = []
+    range_specific_fixes = False
     for r in affected_ranges:
+        if r.get("type") not in {"SEMVER", "ECOSYSTEM"}:
+            continue
         ev = r.get("event", {})
         fixed = ev.get("fixed")
-        if fixed and fixed not in all_fixed:
-            all_fixed.append(fixed)
+        if not fixed:
+            continue
+        range_specific_fixes = True
+        if current_version:
+            range_affected, _, _ = version_in_affected_ranges(
+                current_version,
+                [r],
+            )
+            if range_affected and fixed not in applicable_fixed:
+                applicable_fixed.append(fixed)
+
+    if current_version and range_specific_fixes:
+        all_fixed = applicable_fixed
+    else:
+        all_fixed = list(fixed_versions or [])
+        for r in affected_ranges:
+            if r.get("type") not in {"SEMVER", "ECOSYSTEM"}:
+                continue
+            fixed = (r.get("event") or {}).get("fixed")
+            if fixed and fixed not in all_fixed:
+                all_fixed.append(fixed)
     # Deduplicate preserving order
     all_fixed = list(dict.fromkeys(all_fixed))
+
+    # Never describe an older release line as an upgrade.  If advisory data
+    # lacks range/fix association, retaining only forward moves is safer than
+    # recommending a vulnerable downgrade.
+    if current_version:
+        all_fixed = [
+            fixed
+            for fixed in all_fixed
+            if _version_order(current_version, fixed) in {None, -1}
+        ]
 
     # --- Build remediation options ---
     remediation: list[Dict[str, Any]] = []
@@ -1240,10 +1751,21 @@ def analyze_what_if(
         if table
         else True
     )
+    component_declared_without_resolution = bool(
+        not component_not_found
+        and current_version is None
+        and any(row.get("source") == "manifest-constraint" for row in table)
+    )
 
     # --- Summary ---
     if component_not_found:
         summary = "Component not found in project — no remediation needed."
+    elif component_declared_without_resolution:
+        summary = (
+            "The component is declared by a version constraint, but no resolved "
+            "current version was found; compare a lock file or deployed artifact "
+            "before choosing a remediation version."
+        )
     elif not current_affected:
         summary = (
             f"Current version {current_version} ({current_source}) is "
@@ -1266,6 +1788,7 @@ def analyze_what_if(
         "current_source": current_source,
         "current_affected": current_affected,
         "component_not_found": component_not_found,
+        "component_declared_without_resolution": component_declared_without_resolution,
         "fixed_versions": all_fixed,
         "remediation": remediation,
         "summary": summary,
@@ -1282,6 +1805,8 @@ def _describe_version_delta(from_ver: str, to_ver: str) -> str:
     f_major, f_minor, f_patch = from_parts
     t_major, t_minor, t_patch = to_parts
 
+    if (t_major, t_minor, t_patch) < (f_major, f_minor, f_patch):
+        return f"{from_ver} → {to_ver} (downgrade)"
     if t_major > f_major:
         return f"{from_ver} → {to_ver} (major upgrade)"
     elif t_minor > f_minor:
@@ -1290,8 +1815,23 @@ def _describe_version_delta(from_ver: str, to_ver: str) -> str:
         return f"{from_ver} → {to_ver} (patch upgrade)"
     elif (t_major, t_minor, t_patch) == (f_major, f_minor, f_patch):
         return f"{from_ver} → {to_ver} (same version)"
-    else:
-        return f"{from_ver} → {to_ver} (downgrade)"
+    return f"{from_ver} → {to_ver} (downgrade)"
+
+
+def _version_order(left: str, right: str) -> int | None:
+    """Compare version strings, preferring SemVer and falling back to PEP 440."""
+    left_semver = _parse_semver(left)
+    right_semver = _parse_semver(right)
+    if left_semver is not None and right_semver is not None:
+        return _compare_semver(left_semver, right_semver)
+
+    left_packaging = _parse_packaging_version(left)
+    right_packaging = _parse_packaging_version(right)
+    if left_packaging is None or right_packaging is None:
+        return None
+    if left_packaging == right_packaging:
+        return 0
+    return -1 if left_packaging < right_packaging else 1
 
 
 def _parse_semver_loose(ver: str) -> tuple[int, int, int] | None:
@@ -1319,6 +1859,22 @@ def _normalize_version_string(ver: Any) -> str | None:
     return text[1:] if text.startswith("v") else text
 
 
+def _resolved_manifest_version(expression: Any) -> str | None:
+    """Return an exact manifest pin, never a range boundary."""
+    text = str(expression or "").strip()
+    if not text:
+        return None
+    if text.startswith("==="):
+        text = text[3:].strip()
+    elif text.startswith("=="):
+        text = text[2:].strip()
+    elif re.search(r"[<>=~^!*|,;\s]", text):
+        return None
+    if not text or "*" in text:
+        return None
+    return text
+
+
 def _parse_packaging_version(ver: str | None) -> Version | None:
     if not ver:
         return None
@@ -1328,8 +1884,190 @@ def _parse_packaging_version(ver: str | None) -> Version | None:
         return None
 
 
+_SEMVER_PATTERN = re.compile(
+    r"^[vV]?(0|[1-9]\d*)"
+    r"(?:\.(0|[1-9]\d*))?"
+    r"(?:\.(0|[1-9]\d*))?"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+_SEMVER_COMPARATOR_PATTERN = re.compile(
+    r"(<=|>=|<|>|==|=)?\s*"
+    r"([vV]?(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){0,2}"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)"
+)
+
+
+def _parse_semver(
+    value: str | None,
+) -> tuple[int, int, int, tuple[str, ...] | None] | None:
+    """Parse a SemVer value without applying PEP 440 normalization.
+
+    npm advisories commonly use prereleases such as ``21.0.0-next.0``.
+    Those are valid SemVer but invalid PEP 440, so ``packaging.Version``
+    cannot be the only parser used for ecosystem advisory ranges.
+    """
+    if not value:
+        return None
+    match = _SEMVER_PATTERN.fullmatch(str(value).strip())
+    if not match:
+        return None
+    prerelease = tuple(match.group(4).split(".")) if match.group(4) else None
+    return (
+        int(match.group(1)),
+        int(match.group(2) or 0),
+        int(match.group(3) or 0),
+        prerelease,
+    )
+
+
+def _compare_semver(
+    left: tuple[int, int, int, tuple[str, ...] | None],
+    right: tuple[int, int, int, tuple[str, ...] | None],
+) -> int:
+    left_core = left[:3]
+    right_core = right[:3]
+    if left_core != right_core:
+        return -1 if left_core < right_core else 1
+
+    left_pre = left[3]
+    right_pre = right[3]
+    if left_pre is None or right_pre is None:
+        if left_pre is right_pre:
+            return 0
+        return 1 if left_pre is None else -1
+
+    for left_id, right_id in zip(left_pre, right_pre):
+        if left_id == right_id:
+            continue
+        left_numeric = left_id.isdigit()
+        right_numeric = right_id.isdigit()
+        if left_numeric and right_numeric:
+            return -1 if int(left_id) < int(right_id) else 1
+        if left_numeric != right_numeric:
+            return -1 if left_numeric else 1
+        return -1 if left_id < right_id else 1
+    if len(left_pre) == len(right_pre):
+        return 0
+    return -1 if len(left_pre) < len(right_pre) else 1
+
+
+def _semver_comparator_matches(
+    version: tuple[int, int, int, tuple[str, ...] | None],
+    operator: str,
+    boundary: tuple[int, int, int, tuple[str, ...] | None],
+) -> bool:
+    comparison = _compare_semver(version, boundary)
+    return {
+        "": comparison == 0,
+        "=": comparison == 0,
+        "==": comparison == 0,
+        "<": comparison < 0,
+        "<=": comparison <= 0,
+        ">": comparison > 0,
+        ">=": comparison >= 0,
+    }[operator]
+
+
+def _semver_range_clause(
+    clause: str,
+) -> list[tuple[str, tuple[int, int, int, tuple[str, ...] | None]]] | None:
+    comparisons: list[
+        tuple[str, tuple[int, int, int, tuple[str, ...] | None]]
+    ] = []
+    cursor = 0
+    for match in _SEMVER_COMPARATOR_PATTERN.finditer(clause):
+        if not re.fullmatch(r"[\s,]*", clause[cursor : match.start()]):
+            return None
+        boundary = _parse_semver(match.group(2))
+        if boundary is None:
+            return None
+        comparisons.append((match.group(1) or "", boundary))
+        cursor = match.end()
+    if not comparisons or not re.fullmatch(r"[\s,]*", clause[cursor:]):
+        return None
+    return comparisons
+
+
+def _version_in_semver_range(version: str, range_text: str) -> bool | None:
+    parsed_version = _parse_semver(version)
+    if parsed_version is None:
+        return None
+
+    parsed_any_clause = False
+    for clause in range_text.split("||"):
+        comparisons = _semver_range_clause(clause.strip())
+        if comparisons is None:
+            return None
+        parsed_any_clause = True
+        if all(
+            _semver_comparator_matches(parsed_version, operator, boundary)
+            for operator, boundary in comparisons
+        ):
+            return True
+    return False if parsed_any_clause else None
+
+
+def _uses_semver_rules(item: Dict[str, Any]) -> bool:
+    return item.get("type") == "SEMVER" or str(item.get("ecosystem") or "").lower() in {
+        "npm",
+    }
+
+
+def _version_in_range_string(
+    version: str,
+    range_text: str,
+    item: Dict[str, Any],
+) -> bool | None:
+    if _uses_semver_rules(item):
+        semver_result = _version_in_semver_range(version, range_text)
+        if semver_result is not None:
+            return semver_result
+
+    parsed_version = _parse_packaging_version(version)
+    if parsed_version is None:
+        return None
+    # GitHub emits whitespace after comparison operators, while PEP 440
+    # specifiers require the operator and version to be adjacent.
+    pep440_range = re.sub(r"(<=|>=|==|!=|~=|<|>)\s+", r"\1", range_text)
+    try:
+        return parsed_version in SpecifierSet(pep440_range)
+    except Exception:
+        return None
+
+
+def _version_in_event_range(
+    version: str,
+    item: Dict[str, Any],
+    introduced: str | None,
+    fixed: str | None,
+    *,
+    last_affected: str | None = None,
+    limit: str | None = None,
+) -> tuple[bool | None, str]:
+    parts: list[str] = []
+    if introduced and introduced not in {"0", "0.0", "0.0.0"}:
+        parts.append(f">={introduced}")
+    if fixed:
+        parts.append(f"<{fixed}")
+    elif last_affected:
+        parts.append(f"<={last_affected}")
+    elif limit:
+        parts.append(f"<{limit}")
+    if not parts and not introduced:
+        return None, "unusable range"
+
+    range_text = ",".join(parts) or ">=0.0.0"
+    return _version_in_range_string(version, range_text, item), range_text
+
+
 def _specifier_from_event(
-    introduced: str | None, fixed: str | None
+    introduced: str | None,
+    fixed: str | None,
+    *,
+    last_affected: str | None = None,
+    limit: str | None = None,
 ) -> SpecifierSet | None:
     """Convert normalized OSV event bounds into a packaging specifier set."""
     parts: list[str] = []
@@ -1337,7 +2075,11 @@ def _specifier_from_event(
         parts.append(f">={introduced}")
     if fixed:
         parts.append(f"<{fixed}")
-    if not parts:
+    elif last_affected:
+        parts.append(f"<={last_affected}")
+    elif limit:
+        parts.append(f"<{limit}")
+    if not parts and not introduced:
         return None
     try:
         return SpecifierSet(",".join(parts))

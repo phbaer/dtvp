@@ -88,8 +88,8 @@ Assessment request
     ├── filter_advisory
     ├── prepare_repo
     ├── inspect_archives
+    ├── scan_dependencies
     ├── parallel branch A
-    │   ├── scan_dependencies
     │   ├── analyze_versions
     │   └── what_if_remediation
     ├── parallel branch B
@@ -142,14 +142,14 @@ The implemented step order is defined in `src/pipeline/graph.py` and runs as fol
 3. `filter_advisory`: determine whether the advisory is relevant to the assessed component before spending time on deeper analysis.
 4. `prepare_repo`: resolve the configured repository or local focus path and prepare the checkout for scanning.
 5. `inspect_archives`: discover supported archives inside the checkout, safely expand them into an isolated per-run workspace, and expose their manifests and source files to the normal scanners.
-6. `scan_dependencies`: inspect repository and extracted-archive manifests and lock files for direct or transitive presence of the vulnerable package.
-7. `scan_code`: search repository and extracted-archive source for imports, symbol usage, and vulnerable API references.
+6. `scan_dependencies`: inspect repository and extracted-archive manifests and lock files for every package named by the advisory, then select the package backed by repository evidence.
+7. `scan_code`: search repository and extracted-archive source for imports, symbol usage, and vulnerable API references for the selected package.
 8. `llm_analyze_code`: send code snippets, archive provenance, and surrounding context to the LLM to estimate reachability.
 9. `llm_deep_analyze`: perform a deeper LLM pass over the relevant code neighborhood to judge exploitability more carefully.
 10. `analyze_versions`: compare discovered versions against the advisory's explicit versions and normalized version ranges.
 11. `what_if_remediation`: compute candidate upgrade or mitigation directions based on the detected version state.
 12. `check_transitive_paths`: analyze dependency chains and intermediary packages for transitive exposure.
-13. `aggregate_verdict`: merge all evidence into the final assessment, including summary, reasoning, remediation, audit view, and CVSS adjustments.
+13. `aggregate_verdict`: merge all evidence into the final assessment, including summary, reasoning, remediation, audit view, executive summary, and CVSS adjustments.
 
 If `filter_advisory` concludes the advisory is not relevant, the pipeline can short-circuit directly to verdict aggregation.
 
@@ -160,23 +160,28 @@ The pipeline above is the execution order. The actual assessment algorithm is th
 In simplified form, Agentyzer does this:
 
 1. Normalize the advisory.
-   Extract affected packages, affected version ranges, explicit affected versions, vulnerable symbols, and CVSS data from OSV, GHSA, and supplemental sources.
+   Canonicalize source-sensitive identifiers (including lowercase GHSA payloads for OSV and GitHub), follow CVE aliases before querying NVD, and extract affected packages, affected version ranges, explicit affected versions, vulnerable symbols, and CVSS data from OSV, GHSA, and supplemental sources. Package provenance remains attached to affected ranges, explicit versions, and fixed versions so a multi-package advisory cannot mix one package's constraints into another package's analysis. OSV `fixed`, inclusive `last_affected`, and exclusive `limit` boundaries are preserved. GitHub advisory requests use `AGENTYZER_GITHUB_TOKEN` when configured; lookup failures remain explicit evidence and are not described as a source that merely omitted a description.
 
 2. Confirm dependency presence.
-   Scan manifests and lock files to determine whether the vulnerable package is present directly, transitively, only via SBOM attribution, or not rediscovered locally.
+   Scan manifests and lock files to determine whether the vulnerable package is present directly, transitively, only via matching SBOM attribution, or not rediscovered locally. The configured repository/component name identifies the assessment target and is never substituted for an unresolved advisory package. Upstream SBOM attribution applies only when the selected component identity matches the advisory package; it is not transferred to another dependency name. npm manifests and package locks are parsed structurally, excluding the root package's own `name` field from dependency evidence.
 
 3. Inventory versions across the repo history.
    Collect the vulnerable package version from the current workspace, lock files, tags, and release branches.
-   When callers provide `affected_product_versions` (for example, DTVP's affected project versions), Agentyzer tries to match each product version to exact or release-style tags/branches such as `v1.2.3`, `1.2.3`, `release/1.2.3`, or `release/1.2`; tag matching treats the leading `v` as optional. Unmatched product versions are kept as explicit `not found` rows in `version_analysis.checked_versions`.
+   Manifest ranges such as `^1.2.3`, `>=2.0`, or `~=3.1` are declarations, not resolved installed versions. Without a lock-file or artifact version they remain explicit unknown evidence and are not reported as concrete affected versions.
+   When callers provide `project_versions`, Agentyzer treats them as processed project-release candidates, not as vulnerable dependency versions. The deprecated `affected_product_versions` input alias remains accepted. Agentyzer analyzes the intersection with versions represented by exact or release-style tags/branches such as `v1.2.3`, `1.2.3`, `release/1.2.3`, or `release/1.2`; tag matching treats the leading `v` as optional, and `release/*` branches from every available remote are eligible. The `main` or `master` branch joins the intersection only when configured project-version metadata identifies it as one of the supplied releases. Unmatched project releases remain explicit unknown rows in `version_analysis.checked_versions`, while verified affected and unaffected project releases are reported separately.
 
 4. Apply worst-case version matching.
    Compare every discovered version against the advisory ranges.
+   Ecosystem ranges use their own version semantics: npm `SEMVER`/`ECOSYSTEM` ranges support prerelease identifiers such as `21.0.0-next.0` instead of being forced through the Python/PEP 440 parser. Any range that still cannot be evaluated is treated conservatively as possibly affected rather than silently skipped.
    If any tracked version is affected, the component is treated as version-affected overall.
    This is intentionally conservative: a patched workspace does not erase the fact that historical shipped releases were vulnerable.
+
+   Remediation candidates stay attached to the advisory range that supplied them. When an advisory lists fixes for multiple maintained release lines, Agentyzer recommends only the fix for the line containing the detected version and never describes an older release line as an upgrade.
 
 5. Run code and reachability analysis on the current workspace only.
    Source scanning, LLM reachability analysis, deep exploitability review, and transitive call-path analysis are all workspace-scoped.
    The system does not attempt historical code reachability analysis for old tags or release branches.
+   Generic dependency usage from the first reachability pass is not treated as a confirmed vulnerable path when the later full-source review explicitly reports that the vulnerability-specific path is not exploitable.
 
 6. Combine version evidence with workspace reachability.
    This is the key rule set:
@@ -187,10 +192,10 @@ In simplified form, Agentyzer does this:
   - If historical versions are affected and the current workspace does not provide affirmative exclusion evidence, the result remains `Probably Affected` rather than `Not Affected`.
 
 7. Apply contradiction safeguards.
-   The final verdict logic cross-checks the LLM verdict against hard evidence. For example, a `Not Affected` verdict is overridden when reachable code or exploitability evidence contradicts it. Conversely, a historical-only affected result can remain `Not Affected` only when the workspace evidence clearly excludes runtime exploitability.
+   The final verdict logic cross-checks the LLM verdict against hard evidence. For example, a `Not Affected` verdict is overridden when reachable code or exploitability evidence contradicts it. Conversely, a historical-only affected result can remain `Not Affected` only when the workspace evidence clearly excludes runtime exploitability. Missing affected-package identity or affected version constraints forces an Inconclusive result because dependency, version, and reachability conclusions cannot be tied to the advisory.
 
 8. Rescore CVSS and format the final response.
-   Once the final verdict is stable, Agentyzer rescales the advisory CVSS vector to reflect the assessed environment and emits a structured response with the verdict, reasoning, audit view, remediation hints, and Dependency-Track compatible fields.
+   Once the final verdict is stable, Agentyzer rescales the advisory CVSS vector to reflect the assessed environment and emits a structured response with the verdict, reasoning, audit view, remediation hints, and Dependency-Track compatible fields. It also deterministically builds `executive_summary.vulnerability` and `executive_summary.assessment` statements from the final post-audit facts. The assessment uses formal disposition, confidence, exposure, basis, required-action, and audit-assurance language. `executive_summary.why` adds complete labeled advisory-applicability, dependency, version, release, current-workspace reachability, exploitability, transitive-path, and audit facts without character or item-count truncation.
 
 The practical interpretation is:
 
@@ -296,6 +301,8 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 | `AGENTYZER_CONFIG_DIR` | `config` | Alternate config directory containing `repos.yaml` and prompts. |
 | `AGENTYZER_REPOS_DIR` | `repos` | Base directory for cached or reused repository workspaces. |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | `1` | Maximum number of async or sync assessment pipelines allowed to execute at the same time. Extra async jobs remain `pending` until a slot opens. |
+| `AGENTYZER_REPO_REFRESH_SECONDS` | `900` | Background clone/fetch interval for every explicit URL-backed component in `repos.yaml`. The first pass starts with the service; `0` disables periodic refresh and positive values have a 60-second minimum. |
+| `AGENTYZER_GITHUB_TOKEN` | empty | Optional GitHub token for authenticated advisory API requests and higher rate limits. |
 | `AGENTYZER_ARCHIVE_MAX_INPUT_BYTES` | `1073741824` | Maximum compressed or uncompressed input size accepted for one repository archive. |
 | `AGENTYZER_ARCHIVE_MAX_ARCHIVES` | `25` | Maximum number of top-level and nested archives inspected in one analysis. |
 | `AGENTYZER_ARCHIVE_MAX_NESTING` | `2` | Maximum nested-archive depth inspected after the top-level archive. |
@@ -317,10 +324,18 @@ uv run agentyzer assess --component benchmark --vuln CVE-2024-49766 --sync
 Example:
 
 ```yaml
+project_version_files:
+  - path: ".project.json"
+    field: "version"
 components:
   benchmark:
     url: "https://git.example.com/org/benchmark.git"
     clone: true
+    project_version_files:
+      - path: ".project.json"
+        field: "version"
+      - path: "config/release.json"
+        field: "project.release"
     auth:
       type: basic
       username: "user"
@@ -330,6 +345,8 @@ components:
 Notes:
 
 - If `focus_path` is provided, the analyzer can work against an existing local checkout instead of cloning.
+- Explicit URL-backed components are cloned or fetched in a background pass when the service starts and every `AGENTYZER_REPO_REFRESH_SECONDS` thereafter. This pass reloads `repos.yaml`, deduplicates identical repository URLs, and continues refreshing other repositories if one fails. An assessment also performs a locked fetch immediately before resolving its detached worktree, so the scan uses a current immutable commit. Defaults templates cannot be prefetched until a concrete component name is requested.
+- `project_version_files` lists JSON metadata used to identify the project release on `main` or `master`. It can be set globally and overridden per component. A string entry reads that file's `version` field; object entries accept `path` and a dotted `field`. When omitted, Agentyzer reads `.project.json` and `version`; use an empty list to disable default-branch version matching.
 - The service reloads `config/repos.yaml` when the file modification time changes.
 
 ## API Capabilities
@@ -417,7 +434,7 @@ The configuration payload is intentionally sanitized. It does not return reposit
 
 `AssessResponse` contains two top-level sections:
 
-- `assessment`: the final verdict, confidence, exposure, reasoning, CVSS output, Dependency-Track compatible fields, and optional researcher, remediation, audit, advisory relevance, and version-analysis views.
+- `assessment`: the final verdict, confidence, exposure, compact executive summary with concrete verdict reasons, reasoning, CVSS output, Dependency-Track compatible fields, and optional researcher, remediation, audit, advisory relevance, and version-analysis views.
 - `steps`: ordered pipeline step findings with structured findings plus evidence strings.
 
 Important assessment payload capabilities:
@@ -425,6 +442,8 @@ Important assessment payload capabilities:
 - Verdict classification through `affected`, `verdict`, `confidence`, and `exposure`.
 - Advisory filtering output through `advisory_relevance`.
 - Version matching evidence through `version_analysis`.
+- Compact executive reporting through `executive_summary.vulnerability`, `executive_summary.assessment`, and `executive_summary.why`; this is produced after verdict guardrails, uses formal assessment terminology, selects one assessment basis and at most one required action, and then retains every naturally bounded evidence category needed to explain why the result is affected, affirmatively excluded, or still uncertain. Human renderers label the list **Decision rationale**, keep path claims scoped to the current workspace, and render covered product versions on one comma-separated line. The assessment payload does not character-cut or item-cut those statements. Separately generated follow-up prompt context remains bounded to the model's input budget.
+- Explicit product-release coverage through `version_analysis.covered_product_versions`, containing only repository versions matched from the supplied product-release candidates; dependency/component versions stay in the separately labeled detected and checked-version fields.
 - Human-targeted reporting through `summary` and `reasoning`.
 - Machine-consumable Dependency-Track style fields through `analysis`, `justification`, `response`, `cvss_vector`, and `cvss_score`.
 - CVSS adjustment explanation through `adjusted_cvss`, including comparison traces and reasons.
@@ -448,7 +467,7 @@ Job status responses include:
 - Progress metrics: completed steps, total steps, percent complete.
 - Current step, agent, and activity labels.
 - Parallel branch visibility through `active_agents` and `step_statuses`.
-- Recent live log entries in `logs`, plus request metadata and LLM metadata (`model`, `llm_backend`, `llm_provider`, `llm`) when known. Single-job status responses also include service configuration and backend information.
+- Recent live log entries in `logs`, plus request metadata and LLM metadata (`model`, `llm_backend`, `llm_provider`, `llm`) when known. Model-wait heartbeats update one entry per pipeline step instead of growing the log every 15 seconds. Single-job status responses also include service configuration and backend information.
 
 ### API usage examples
 
@@ -562,6 +581,10 @@ Representative completed result excerpt:
     "verdict": "Not Affected",
     "confidence": "Low",
     "exposure": "transitive",
+    "executive_summary": {
+      "vulnerability": "CVE-2024-49766 affects werkzeug. Crafted multipart form data can trigger excessive resource consumption.",
+      "assessment": "Not Affected (Low confidence; exposure: transitive). Audit: fail/weak. Current exclusion evidence is insufficient."
+    },
     "summary": "AUDIT FAILURE: the downgrade to Not Affected / low-info is not supported by the available evidence. Werkzeug safe_join not safe on Windows",
     "analysis": "NOT_AFFECTED",
     "justification": "CODE_NOT_REACHABLE",
@@ -675,7 +698,7 @@ The pipeline state contract lives in `src/pipeline/state.py` and carries:
 - Final output in `result`.
 - Structured `step_reports` and append-only `evidence` for auditing.
 
-The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. Persisted `llm_conversation` turns include request/response timestamps and directional token usage when the provider reports it; Ollama also retains its native evaluation-duration metrics. With OpenWebUI and `OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`, `clone_repository`); Agentyzer executes them locally through allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` and `CLONE_REPOSITORY` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
+The graph wiring in `src/pipeline/graph.py` also records step metadata such as title, agent name, and current activity. Those labels are surfaced in async job progress responses. LLM-bound stages emit model-wait heartbeat progress while the backend is waiting for OpenWebUI or Ollama, so API clients can distinguish slow model generation from a stalled job. Each stage retains only its latest heartbeat log entry while its current activity continues to update. Persisted `llm_conversation` turns include request/response timestamps and directional token usage when the provider reports it; Ollama also retains its native evaluation-duration metrics. With OpenWebUI and `OPENWEBUI_TOOL_CALLS=auto`, research-capable LLM calls advertise bounded OpenAI-style tools (`search_web`, `fetch_url`, `fetch_package`, `fetch_source`, `clone_repository`); Agentyzer executes them locally through allowlisted handlers, records assistant tool calls plus returned `tool` messages in `llm_conversation`, and falls back to text `FETCH_*` and `CLONE_REPOSITORY` directives when native tool calls are unavailable. The OpenWebUI backend retries one transient remote stream disconnect before reporting the model call as unavailable.
 
 `clone_repository` fills the gap between a dependency-chain name and the
 implementation evidence needed to judge reachability. The model supplies a
@@ -715,23 +738,32 @@ All LLM prompts are managed as YAML bundles in `config/prompts/`. Prompt bundles
 
 OpenWebUI context limits are handled in two ways. If OpenWebUI rejects a request
 with a context-length error, Agentyzer parses the reported model limit and input
-token count, then retries with a lower completion budget or a compacted prompt.
+or request token count, then retries with a lower completion budget or a
+compacted prompt. The reported limit is retained for later calls, including the
+`request (…) exceeds the available context size (…)` response emitted by some
+OpenWebUI model backends.
 For models with a known window, set `OPENWEBUI_CONTEXT_WINDOW` to enable
-preflight prompt compaction before the request is sent. For example, a model
-with a 131072-token context can use `OPENWEBUI_CONTEXT_WINDOW=131072`.
+preflight prompt compaction before the request is sent. The estimate is
+conservative for code, reserves the requested completion budget, and generated
+AST evidence is independently capped with an explicit omission marker. Full AST
+scan counts remain in pipeline evidence. For example, a model with a
+131072-token context can use `OPENWEBUI_CONTEXT_WINDOW=131072`.
 
 ## Parallel Project Runs And Workspace Reuse
 
 Multiple async jobs can be submitted to the FastAPI process. Accepted jobs are kept in the in-memory job store; at most `AGENTYZER_MAX_CONCURRENT_JOBS` pipelines run at the same time, and the rest stay `pending` until an execution slot opens. The default is `1` because DTVP's packaged deployment usually points Agentyzer at one LLM backend. Increase the value only when the model backend, CPU/disk resources, and repository workspace strategy can support parallel scans.
 
-Inside one running pipeline, Agentyzer still exposes parallel branch visibility through `progress.active_agents` and `progress.step_statuses`; the pipeline graph fans out into dependency/version and code/LLM branches after archive inspection. Filesystem-heavy dependency, AST, usage, and structure scans run off the async event loop so both branches make progress concurrently. Usage hits are reused for snippet collection instead of walking the source tree a second time.
+Inside one running pipeline, Agentyzer still exposes parallel branch visibility through `progress.active_agents` and `progress.step_statuses`. After archive inspection, the dependency scan selects the affected advisory package found in the repository; the graph then fans out into version and code/LLM branches using that same package. Filesystem-heavy dependency, AST, usage, and structure scans run off the async event loop so both branches make progress concurrently. Usage hits are reused for snippet collection instead of walking the source tree a second time.
 
 Repository data is reused across runs without sharing a mutable scan directory.
 `src/agents/dependency_scanner.py` maps each repository URL to a stable control
 repository under `AGENTYZER_REPOS_DIR` (default: `repos`) using the repo name
 plus a SHA-256 hash of the sanitized URL. Initial clones are built in a
 temporary directory and atomically moved into place. Existing caches are
-fetched without resetting their working trees.
+fetched without resetting their working trees. A background task performs that
+clone/fetch pass at service startup and at the configured refresh interval,
+even when no assessment reaches repository preparation. Logs identify refresh
+cycle start/completion and each component's cache and resolved commit.
 
 Repository preparation takes a filesystem-backed, per-repository advisory
 lock before cloning or fetching, resolving the remote default branch to a

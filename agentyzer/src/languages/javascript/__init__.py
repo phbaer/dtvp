@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -137,6 +138,69 @@ class JavaScriptPlugin(LanguagePlugin):
             "bun.lock",
         ]
 
+    @staticmethod
+    def _dependency_names(data: Any) -> set[str]:
+        if not isinstance(data, dict):
+            return set()
+        names: set[str] = set()
+        for key in (
+            "dependencies",
+            "devDependencies",
+            "peerDependencies",
+            "optionalDependencies",
+        ):
+            dependencies = data.get(key)
+            if isinstance(dependencies, dict):
+                names.update(str(name).lower() for name in dependencies)
+        for key in ("bundledDependencies", "bundleDependencies"):
+            bundled = data.get(key)
+            if isinstance(bundled, list):
+                names.update(str(name).lower() for name in bundled)
+        return names
+
+    def manifest_mentions_component(
+        self,
+        text: str,
+        filename: str,
+        component_name: str,
+    ) -> bool:
+        """Match dependency declarations, never the package's own name field."""
+        try:
+            data = json.loads(text)
+        except (TypeError, ValueError):
+            return False
+        return component_name.lower() in self._dependency_names(data)
+
+    def lockfile_mentions_component(
+        self,
+        text: str,
+        filename: str,
+        component_name: str,
+    ) -> bool:
+        base = filename.rsplit("/", 1)[-1] if "/" in filename else filename
+        if base in ("package-lock.json", "npm-shrinkwrap.json"):
+            try:
+                data = json.loads(text)
+            except (TypeError, ValueError):
+                return False
+            wanted = component_name.lower()
+            dependencies = data.get("dependencies")
+            if isinstance(dependencies, dict) and any(
+                str(name).lower() == wanted for name in dependencies
+            ):
+                return True
+            packages = data.get("packages")
+            if isinstance(packages, dict):
+                package_suffix = f"node_modules/{wanted}"
+                return any(
+                    str(path).lower() == package_suffix
+                    or str(path).lower().endswith("/" + package_suffix)
+                    for path in packages
+                    if path
+                )
+            return False
+        return self.extract_locked_version(text, component_name, filename) is not None
+
     # ------------------------------------------------------------------
     # Lock file version extraction
     # ------------------------------------------------------------------
@@ -150,9 +214,31 @@ class JavaScriptPlugin(LanguagePlugin):
         base = filename.rsplit("/", 1)[-1] if "/" in filename else filename
 
         if base in ("package-lock.json", "npm-shrinkwrap.json"):
-            pattern = rf'"(?:node_modules/)?{re.escape(component_name)}":\s*\{{\s*"version":\s*"([^"]+)"'
-            m = re.search(pattern, text)
-            return m.group(1) if m else None
+            try:
+                data = json.loads(text)
+            except (TypeError, ValueError):
+                return None
+            wanted = component_name.lower()
+            packages = data.get("packages")
+            if isinstance(packages, dict):
+                package_suffix = f"node_modules/{wanted}"
+                for path, package in packages.items():
+                    normalized_path = str(path).lower()
+                    if not (
+                        normalized_path == package_suffix
+                        or normalized_path.endswith("/" + package_suffix)
+                    ):
+                        continue
+                    if isinstance(package, dict) and package.get("version"):
+                        return str(package["version"])
+            dependencies = data.get("dependencies")
+            if isinstance(dependencies, dict):
+                for name, dependency in dependencies.items():
+                    if str(name).lower() != wanted or not isinstance(dependency, dict):
+                        continue
+                    if dependency.get("version"):
+                        return str(dependency["version"])
+            return None
 
         if base == "pnpm-lock.yaml":
             pattern = rf'"{re.escape(component_name)}":\s*\{{\s*"version":\s*"([^"]+)"'
@@ -187,8 +273,6 @@ class JavaScriptPlugin(LanguagePlugin):
         filename: str,
         component_name: str,
     ) -> list[str]:
-        import json
-
         versions: list[str] = []
         try:
             data = json.loads(text)

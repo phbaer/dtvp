@@ -32,7 +32,9 @@ class PipelineState(TypedDict, total=False):
     ollama: LLMClient | None
     dependency_paths: List[List[str]]
     affected_product_versions: List[str]
-    sbom_attributed: bool  # treat incoming vuln/component tuple as SBOM-attributed
+    # Treat the incoming component as SBOM-attributed. This applies to an
+    # advisory package only when its identity matches the component.
+    sbom_attributed: bool
     user_guidance: str  # optional analyst context; empty string when not provided
     cvss_vector: (
         str  # optional caller-provided CVSS vector; empty string when not provided
@@ -44,6 +46,7 @@ class PipelineState(TypedDict, total=False):
     discovered_vulns: List[Dict[str, Any]]
     advisories: Dict[str, Any]
     advisory_relevant: bool  # set by filter_advisory; False → skip analysis
+    scan_target: str  # affected package selected after repository dependency scan
     summary: str
     repo_path: str
     archive_inspection: Dict[str, Any]

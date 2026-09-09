@@ -13,7 +13,7 @@ NON_FINAL_ASSESSMENT_STATUSES = {
     "canceled",
     "aborted",
 }
-ASSESSMENT_METADATA_VERSION = 2
+ASSESSMENT_METADATA_VERSION = 4
 
 
 def text(value: Any) -> str:
@@ -407,6 +407,16 @@ def build_record_assessment_metadata(record: dict[str, Any]) -> dict[str, Any]:
         if assessment is not None
         and assessment.get(key) not in (None, "", [], {})
     }
+    executive_summary = mapping(
+        assessment.get("executive_summary") if assessment is not None else None
+    )
+    compact_executive_summary = {
+        key: executive_summary.get(key)
+        for key in ("vulnerability", "assessment", "why")
+        if executive_summary.get(key) not in (None, "", [], {})
+    }
+    if compact_executive_summary:
+        assessment_data["executive_summary"] = compact_executive_summary
     adjusted_cvss = mapping(
         assessment.get("adjusted_cvss") if assessment is not None else None
     )

@@ -16,6 +16,14 @@ describe('codeAnalysisResult', () => {
                 'CWE-79': 'Improper Neutralization of Input During Web Page Generation',
                 'CWE-94': 'Improper Control of Generation of Code',
             },
+            executive_summary: {
+                vulnerability: 'GHSA-example affects the parser and can enable code execution.',
+                assessment: 'Not Affected (high confidence; exposure: none). The vulnerable path is unreachable.',
+                why: [
+                    'Version: resolved 3.2.1 is outside the affected range.',
+                    'Deep exploitability: attacker input cannot reach the vulnerable parser.',
+                ],
+            },
             summary: 'The vulnerable path is not reachable.',
             reasoning: 'Static analysis found no invocation path into the sink.',
             adjusted_cvss: {
@@ -39,20 +47,28 @@ describe('codeAnalysisResult', () => {
         ],
     })
 
-    it('formats the code analysis details block with justification, cvss, and steps', () => {
+    it('uses the executive summary as a compact assessment record', () => {
         const details = buildCodeAnalysisDetails(createResponse(), 'CODE_NOT_PRESENT')
 
         expect(details).toContain('[Code Analysis]')
-        expect(details).toContain('Verdict: not affected (high confidence)')
+        expect(details).toContain('Overall Verdict: not affected')
+        expect(details).toContain('Confidence: high')
         expect(details).toContain('Advisory Sources: GHSA, NVD')
-        expect(details).toContain('Justification: CODE_NOT_PRESENT')
-        expect(details).toContain('Versions Checked:')
-        expect(details).toContain('  - 2.0.0')
-        expect(details).toContain('  - 2.1.0')
-        expect(details).toContain('CWEs:')
-        expect(details).toContain('  - CWE-79: Improper Neutralization of Input During Web Page Generation')
+        expect(details).toContain('VEX justification: CODE_NOT_PRESENT')
+        expect(details).toContain('Executive summary:')
+        expect(details).toContain('Vulnerability: GHSA-example affects the parser')
+        expect(details).toContain('Assessment: Not Affected (high confidence; exposure: none)')
+        expect(details).toContain('Decision rationale:')
+        expect(details).toContain('Version: resolved 3.2.1 is outside the affected range.')
+        expect(details).toContain('Deep exploitability: attacker input cannot reach the vulnerable parser.')
         expect(details).toContain('CVSS: 8.1 → 3.2')
         expect(details).toContain('Adjusted Vector: CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N')
+        expect(details).not.toContain('Versions Checked:')
+        expect(details).not.toContain('CWEs:')
+        expect(details).not.toContain('Summary:\nThe vulnerable path')
+        expect(details).not.toContain('Rationale:')
+        expect(details).not.toContain('CVSS Summary:')
+        expect(details).not.toContain('CVSS Reasons:')
         expect(details).not.toContain('[Rescored:')
         expect(details).not.toContain('[Rescored Vector:')
         expect(details).not.toContain('Pipeline Steps:')
@@ -75,32 +91,89 @@ describe('codeAnalysisResult', () => {
             justification: 'CODE_NOT_PRESENT',
             response: 'WILL_NOT_FIX',
             details: 'The package is present in the SBOM but absent from source.',
-            dependency_presence: { sbom_attributed: true, repo_found: false },
+            dependency_presence: { presence_basis: 'sbom_attributed', sbom_attributed: true, repo_found: false, locked_version: '2.1.0' },
             advisory_relevance: { applies_to_detected_version: false },
-            version_analysis: { detected_version: '2.1.0' },
+            version_analysis: {
+                detected_version: '2.1.0',
+                current_workspace_affected: false,
+                project_versions: ['6.15.5', '7.2.0', '7.3.0'],
+                covered_product_versions: ['7.2.0', '7.3.0'],
+                unmatched_project_versions: ['6.15.5'],
+            },
             researcher_view: { conclusion: 'No vulnerable path.' },
-            remediation_view: { recommendations: ['Keep monitoring.'] },
-            audit_view: { conclusion: 'Evidence is sufficient.' },
+            remediation_view: { status: 'action_needed', recommendations: ['Keep monitoring.', 'Second action.'] },
+            audit_view: { status: 'review', checks: ['Concern: exclusion evidence is incomplete.', 'Second concern.'] },
             ticket_text: 'No remediation ticket required.',
         })
 
         const details = buildCodeAnalysisDetails(response, 'CODE_NOT_PRESENT')
 
-        expect(details).toContain('Analyzer state: NOT_AFFECTED')
-        expect(details).toContain('Suggested response: WILL_NOT_FIX')
-        expect(details).toContain('Additional analysis:\nThe package is present in the SBOM but absent from source.')
-        expect(details).toContain('Dependency evidence:\nPresent via SBOM attribution; not rediscovered in repository manifests or lock files.')
-        expect(details).toContain('Advisory relevance:\nApplies to detected version: no')
-        expect(details).toContain('Version evidence:\nDetected version: 2.1.0')
-        expect(details).toContain('No vulnerable path.')
-        expect(details).toContain('Keep monitoring.')
-        expect(details).toContain('Evidence is sufficient.')
+        expect(details).toContain('Evidence:\n  - SBOM-attributed; not rediscovered locally')
+        expect(details).toContain('Product versions covered: 7.2.0, 7.3.0')
+        expect(details).not.toContain('Product versions covered: 2.1.0')
+        expect(details).not.toContain('Product versions covered:\n')
+        expect(details).toContain('  - Resolved version 2.1.0')
+        expect(details).toContain('  - Current dependency version affected: no')
+        expect(details).not.toContain('Review note:')
+        expect(details).not.toContain('Action:')
+        expect(details).not.toContain('Analyzer state: NOT_AFFECTED')
+        expect(details).not.toContain('Second action.')
+        expect(details).not.toContain('Second concern.')
+        expect(details).not.toContain('Additional analysis:')
+        expect(details).not.toContain('Research conclusion:')
         expect(details).not.toContain('sbom_attributed')
         expect(details).not.toContain('Ticket Draft')
     })
 
+    it('reports an unresolved advisory package as unknown dependency evidence', () => {
+        const response = createResponse()
+        response.assessment.dependency_presence = {
+            found: false,
+            repo_found: false,
+            sbom_attributed: false,
+            presence_basis: 'unknown',
+            reason: 'Advisory lookup did not identify the vulnerable package.',
+        }
+
+        const details = buildCodeAnalysisDetails(response, 'NOT_SET')
+
+        expect(details).toContain('Dependency unknown; vulnerable package unresolved')
+        expect(details).toContain('Advisory lookup did not identify the vulnerable package.')
+        expect(details).not.toContain('Dependency not found')
+    })
+
+    it('never truncates executive-summary text at a character limit', () => {
+        const response = createResponse()
+        const vulnerability = `${'Advisory detail '.repeat(100)}VULNERABILITY_END`
+        const assessment = `${'Assessment basis '.repeat(100)}ASSESSMENT_END`
+        const why = `${'Concrete path evidence '.repeat(100)}WHY_END`
+        response.assessment.executive_summary = { vulnerability, assessment, why: [why] }
+
+        const details = buildCodeAnalysisDetails(response, 'CODE_NOT_PRESENT')
+
+        expect(details).toContain('VULNERABILITY_END')
+        expect(details).toContain('ASSESSMENT_END')
+        expect(details).toContain('WHY_END')
+        expect(details).not.toContain('…')
+    })
+
+    it('uses full reasoning as the verdict explanation for older executive summaries', () => {
+        const response = createResponse()
+        response.assessment.executive_summary = {
+            vulnerability: 'Legacy vulnerability summary.',
+            assessment: 'Legacy audited assessment.',
+        }
+        response.assessment.reasoning = 'Legacy full rationale with the deciding source-to-sink evidence.'
+
+        const details = buildCodeAnalysisDetails(response, 'CODE_NOT_REACHABLE')
+
+        expect(details).toContain('Decision rationale:')
+        expect(details).toContain('Legacy full rationale with the deciding source-to-sink evidence.')
+    })
+
     it('uses structured conclusions instead of copying the generated raw report', () => {
         const response = createResponse()
+        response.assessment.executive_summary = null
         response.assessment.details = [
             'VULNERABILITY ASSESSMENT REPORT',
             'Repository inventory and raw version table',
@@ -119,6 +192,7 @@ describe('codeAnalysisResult', () => {
 
     it('keeps the generated report as a fallback when no semantic narrative exists', () => {
         const response = createResponse()
+        response.assessment.executive_summary = null
         response.assessment.summary = ''
         response.assessment.reasoning = ''
         response.assessment.details = 'VULNERABILITY ASSESSMENT REPORT\nOnly available analysis.'
@@ -131,6 +205,7 @@ describe('codeAnalysisResult', () => {
 
     it('does not truncate summaries, rationales, or decision-relevant result collections', () => {
         const response = createResponse()
+        response.assessment.executive_summary = null
         response.assessment.summary = `Generated summary ${'s'.repeat(700)} SUMMARY_END`
         response.assessment.reasoning = `Generated rationale ${'r'.repeat(700)} RATIONALE_END`
         response.assessment.details = `Detailed report ${'d'.repeat(700)} DETAILS_END`
@@ -162,6 +237,7 @@ describe('codeAnalysisResult', () => {
             component: `component-${index + 1}`,
             assessment: {
                 ...createResponse().assessment,
+                executive_summary: null,
                 summary: `Component ${index + 1} summary${index === 9 ? ' COMPONENT_SUMMARY_END' : ''}`,
                 reasoning: `Component ${index + 1} rationale${index === 9 ? ' COMPONENT_RATIONALE_END' : ''}`,
             },
@@ -210,6 +286,10 @@ describe('codeAnalysisResult', () => {
                 component: 'lib-a',
                 assessment: {
                     ...createResponse().assessment,
+                    executive_summary: {
+                        vulnerability: 'GHSA-example affects the parser.',
+                        assessment: 'Not affected for lib-a.',
+                    },
                     summary: 'No vulnerable path is reachable.',
                     reasoning: 'No invocation reaches the sink.',
                 },
@@ -222,6 +302,10 @@ describe('codeAnalysisResult', () => {
                     affected: true,
                     verdict: 'affected',
                     exposure: 'high',
+                    executive_summary: {
+                        vulnerability: 'GHSA-example affects the parser.',
+                        assessment: 'Affected for lib-b.',
+                    },
                     summary: 'A vulnerable path is reachable.',
                     reasoning: 'Execution reaches the vulnerable method.',
                 },
@@ -233,12 +317,14 @@ describe('codeAnalysisResult', () => {
 
         expect(details).toContain('Components:')
         expect(details).toContain('[Component: lib-a]')
-        expect(details).toContain('Summary:\nNo vulnerable path is reachable.')
+        expect(details).toContain('Assessment: Not affected for lib-a.')
         expect(details).toContain('Advisory Sources: GHSA, NVD')
-        expect(details).toContain('Versions: 2.0.0')
+        expect(details).not.toContain('Versions: 2.0.0')
         expect(details).toContain('[Component: lib-b]')
-        expect(details).toContain('Verdict: affected (high confidence)')
-        expect(details).toContain('Rationale:\nExecution reaches the vulnerable method.')
+        expect(details).toContain('Disposition: affected')
+        expect(details).toContain('Confidence: high')
+        expect(details).toContain('Assessment: Affected for lib-b.')
+        expect(details).not.toContain('Rationale:')
         expect(details).not.toContain('Pipeline Steps:')
     })
 
@@ -274,11 +360,11 @@ describe('codeAnalysisResult', () => {
 
         const details = buildCodeAnalysisDetails(response, 'CODE_NOT_PRESENT')
 
-        expect(details).toContain('Summary:\nThe workspace is not affected')
-        expect(details).toContain('Rationale:\nThe dependency is SBOM-attributed')
-        expect(details).toContain('Current workspace affected: no')
-        expect(details).toContain('Affected product versions: 6.15.5, 7.1.1')
-        expect(details).toContain('Upgrade the upstream runtime')
+        expect(details).not.toContain('Summary:\nThe workspace is not affected')
+        expect(details).not.toContain('Rationale:\nThe dependency is SBOM-attributed')
+        expect(details).toContain('Current dependency version affected: no')
+        expect(details).not.toContain('Caller-supplied affected project releases')
+        expect(details).not.toContain('Upgrade the upstream runtime')
         expect(details).not.toContain('Checked Versions')
         expect(details).not.toContain('Affected Product Version Refs')
         expect(details).not.toContain('range-one')
@@ -313,6 +399,10 @@ describe('codeAnalysisResult', () => {
                 component: 'shared-lib',
                 assessment: {
                     ...response.assessment,
+                    executive_summary: {
+                        vulnerability: 'GHSA-example affects shared-lib.',
+                        assessment: 'TEAM_EXECUTIVE_ASSESSMENT',
+                    },
                     summary: 'Only the shared-lib path was analyzed.',
                     reasoning: `The shared-lib sink is unreachable. ${'r'.repeat(700)} TEAM_RATIONALE_END`,
                     researcher_view: { conclusion: 'TEAM_RESEARCH_CONCLUSION' },
@@ -343,9 +433,11 @@ describe('codeAnalysisResult', () => {
 
         expect(prepared.firstTeam).toBe('TEAM-APP')
         expect(prepared.detailsText).toContain('[Component: shared-lib]')
+        expect(prepared.detailsText).toContain('TEAM_EXECUTIVE_ASSESSMENT')
+        expect(prepared.detailsText).toContain('Decision rationale:')
         expect(prepared.detailsText).toContain('TEAM_RATIONALE_END')
-        expect(prepared.detailsText).toContain('TEAM_RESEARCH_CONCLUSION')
-        expect(prepared.detailsText).toContain('TEAM_AUDIT_CONCLUSION')
+        expect(prepared.detailsText).not.toContain('TEAM_RESEARCH_CONCLUSION')
+        expect(prepared.detailsText).not.toContain('TEAM_AUDIT_CONCLUSION')
         expect(prepared.detailsText).not.toContain('[Component: other-lib]')
         expect(prepared.teamDrafts[0]?.details).toContain('[Component: shared-lib]')
         expect(prepared.teamDrafts[0]?.details).not.toContain('[Component: other-lib]')
@@ -498,6 +590,10 @@ describe('codeAnalysisResult', () => {
             response.assessment.affected = verdict.toLowerCase() === 'affected'
             response.assessment.summary = `Summary for ${component}.`
             response.assessment.reasoning = `Reasoning for ${component}.`
+            response.assessment.executive_summary = {
+                vulnerability: `Advisory for ${component}.`,
+                assessment: `Executive assessment for ${component}.`,
+            }
             if (adjustedScore == null) {
                 delete response.assessment.adjusted_cvss
             } else {
@@ -533,8 +629,8 @@ describe('codeAnalysisResult', () => {
                 expect.objectContaining({ team: 'TEAM-B', state: 'EXPLOITABLE' }),
                 expect.objectContaining({ team: 'TEAM-C', state: 'IN_TRIAGE' }),
             ])
-            expect(prepared.teamDrafts[0]?.details).toContain('Summary for lib-a.')
-            expect(prepared.teamDrafts[0]?.details).not.toContain('Summary for lib-b.')
+            expect(prepared.teamDrafts[0]?.details).toContain('Executive assessment for lib-a.')
+            expect(prepared.teamDrafts[0]?.details).not.toContain('Executive assessment for lib-b.')
             expect(prepared.globalState).toBe('EXPLOITABLE')
             expect(prepared.globalJustification).toBe('NOT_SET')
             expect(prepared.adjustedScore).toBe(9.1)
@@ -559,8 +655,8 @@ describe('codeAnalysisResult', () => {
             expect(prepared.teamDrafts).toHaveLength(1)
             expect(prepared.teamDrafts[0]?.team).toBe('TEAM-A')
             expect(prepared.teamDrafts[0]?.state).toBe('IN_TRIAGE')
-            expect(prepared.teamDrafts[0]?.details).toContain('Summary for lib-a.')
-            expect(prepared.teamDrafts[0]?.details).toContain('Summary for lib-b.')
+            expect(prepared.teamDrafts[0]?.details).toContain('Executive assessment for lib-a.')
+            expect(prepared.teamDrafts[0]?.details).toContain('Executive assessment for lib-b.')
             expect(prepared.globalState).toBe('IN_TRIAGE')
             expect(prepared.adjustedScore).toBe(6.0)
         })

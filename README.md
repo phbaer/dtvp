@@ -30,8 +30,9 @@ Copilot instructions, and `skills/*/SKILL.md` as short entry points back here.
 
 ## Quick Start
 
-Requirements: Python 3.14+, Node.js 22+, `uv`, `npm`, and `pm2`. Docker and
-Docker Compose are needed only for the packaged deployment.
+Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)
+or a newer supported Node.js release. Docker and Docker Compose are needed
+only for the packaged deployment.
 
 ```bash
 uv sync --dev
@@ -78,7 +79,6 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Benchmark grouped-query concurrency | `uv run python scripts/benchmark_group_queries.py` |
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
-| Start the GIL-enabled fallback deployment | `docker compose -f compose.yml -f compose.gil.yml up -d --build` |
 
 The root pytest configuration uses importlib import mode so `uv run pytest`
 can collect the DTVP and nested Agentyzer suites together even when both suites
@@ -89,6 +89,24 @@ The CI end-to-end job uses the Playwright container image in
 resolved `@playwright/test` version in `frontend/package-lock.json`; update both
 in the same change. The regular, manual, and real-stack Playwright
 configurations cover Chromium, Firefox, and WebKit desktop browsers.
+The Vitest configuration keeps local TypeScript config imports explicit so it
+also loads with Vite's native config loader. It caps the process pool at four
+workers so jsdom-heavy component tests do not contend past their per-test
+timeouts; validate config changes with
+`cd frontend && npx vitest --run --configLoader native`.
+CI uses `setup-uv`'s direct latest-release path, which avoids the remote version
+manifest that range resolution requires. `Dockerfile.free-threaded` likewise
+uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
+argument to a versioned tag or digest when a reproducible external build needs
+an explicit override. Pull-request runs cancel superseded workflow executions,
+and image publication waits for Python (including Agentyzer), frontend, and
+browser tests. Frontend jobs select Node.js 24 and reuse npm's download cache.
+The single-platform image builds reuse inline cache metadata from the `dev`
+images and exclude CI virtual environments from their build contexts. SBOM
+generation is reproducible and consumes frozen dependency state without
+rewriting project manifests or lockfiles in CI.
+The committed frontend lockfile resolves packages only from the default
+`registry.npmjs.org` registry; do not persist private registry or mirror URLs.
 
 ## Repository And Architecture
 
@@ -499,8 +517,8 @@ The detail workspace provides:
 | Tab | Purpose |
 | :--- | :--- |
 | Context | Four ordered sections: advisory and references; finding/team/component scope with affected components visible to analysts and reviewers; dependency context; existing assessment evidence |
-| Code Evidence | A semantic run list with an expandable new-analysis control; selected rows own indented outcome and evidence disclosures; worst-case combined assessment |
-| Assessment | Consistent scope and decision/rationale sections; analyzer proposals for team decisions; reviewer-only effective team summary and global CVSS/rescoring controls |
+| Code Evidence | A semantic run list with an expandable new-analysis control; selected rows own indented outcome and evidence disclosures; a worst-case combined decision with the shared advisory shown once and rationale grouped into per-target cards |
+| Assessment | Consistent scope and decision/rationale sections with Save/Submit and reload controls in the second section header; CVSS vector or score edits enable saving; analyzer proposals for team decisions; reviewer-only synchronization for incomplete coverage; inconsistent team decisions remain explicit for manual resolution; global CVSS/rescoring controls |
 | Team Mapping | Reviewer-only ownership editor |
 
 Compact vulnerability rows expose the current workflow state, such as mapping
@@ -518,13 +536,15 @@ Assessment so the score and assessment can be evaluated and saved together.
 Team subviews omit global rescoring controls. Analysts see mapped ownership and
 triggering components in Context and can launch analysis for owned targets.
 Each team subview shows the latest scoped analyzer assessment as a proposal,
-including its state, summary, and rationale. A user can copy that proposal into
-the editable draft, but a saved or manually edited team assessment remains
-authoritative. Reviewers use the latest analyzer result only as a fallback for
-a team without a manual assessment; the effective summary and Global draft use
-the worst state across those per-team sources. This source precedence is
-intentional rather than timestamp-based, so a newer automated run cannot
-silently replace a team's considered decision.
+including its state, summary, and rationale. The subview identifies the mapped
+repository component or components for the selected team and provides a direct
+copy action when the analyzer supplied a remediation ticket. A user can copy
+that proposal into the editable draft, but a saved or manually edited team
+assessment remains authoritative. Reviewers use the latest analyzer result only
+as a fallback for a team without a manual assessment; the effective summary and
+Global draft use the worst state across those per-team sources. This source
+precedence is intentional rather than timestamp-based, so a newer automated run
+cannot silently replace a team's considered decision.
 An active Team filter establishes the card's assessment context immediately.
 Analysts see and edit only that team's Assessment subview. Reviewers start in
 the same focused view, retain direct access to Global, and can explicitly show
@@ -643,13 +663,14 @@ higher. When the global state has a configured rescore transition, that rule
 produces the written vector and score, so `Repair Rescoring Definitions` reports
 nothing right after an apply. Components that no team owns keep their evidence
 in the global block and are listed in the preview row. Applied details retain
-every relevant run, the analyzer-generated summary and rationale verbatim, and
-all decision-relevant advisory conclusions, version notes, research findings,
-remediation recommendations, audit checks, and CVSS reasons without arbitrary
-character or item limits. Assessment details use sectioned prose and bullets;
-raw scan inventories, process prompts, and the analyzer's generated report are
-not copied into the rationale when their conclusions are already represented
-semantically. Ticket drafts remain separate from assessment details.
+every relevant run as a compact decision record: target, verdict, the two
+executive lines (including the decisive concern or action when applicable), up
+to three dependency/version facts, and the CVSS score change. Repeated raw
+summary, rationale, research, audit, remediation, CWE, version-list, and CVSS-
+reason sections remain in the saved full result instead of being copied into
+Dependency-Track. Legacy results without an executive summary keep the older
+semantic fallback so existing evidence is not silently dropped. Ticket drafts
+remain separate from assessment details.
 Application provenance prevents
 successfully applied or queued run/finding pairs from being offered again.
 Previews use only compact metadata; apply and document export hydrate full
@@ -697,22 +718,99 @@ misrepresented as current inventory.
 
 Set `DTVP_CODE_ANALYSIS_URL` to enable reachability/exploitability analysis.
 DTVP queues requests containing the vulnerability, selected owned target, CVSS
-vector, affected product versions, dependency context, reviewer/static
-guidance, optional tmrescore context, and optional LLM metadata.
+vector, processed project releases, dependency context,
+reviewer/static guidance, optional tmrescore context, and optional LLM metadata.
+DTVP sends every project release represented in the processed vulnerability
+group. Agentyzer intersects those candidates with versions the selected
+repository actually contains: matching Git tags, `release/*` branches from all
+available remotes, and `main`/`master` when configured project-version metadata
+identifies the branch's release. The request field is `project_versions`
+(`affected_product_versions` remains a deprecated input alias). These values
+remain explicitly distinct from vulnerable dependency versions read from
+manifests and lock files.
+
+Advisory lookup canonicalizes source-sensitive identifiers (including lowercase
+GHSA payloads for OSV and GitHub), follows CVE aliases for NVD, and can use an
+optional `AGENTYZER_GITHUB_TOKEN` for authenticated GitHub advisory requests.
+The repository target remains separate from the vulnerable package identity:
+if advisory lookup cannot establish the package and affected constraints, the
+analysis stays Inconclusive instead of scanning the target as its own
+dependency. For npm repositories, dependency evidence is read from structured
+manifest and lockfile entries, so a root `package.json` or `package-lock.json`
+`name` field is not reported as a direct or locked dependency.
 
 Final results pass through a deterministic claim audit that aligns verdict and
 reasoning, flags unsupported claims or downgrades, and restores original CVSS
 when a downgrade is rejected. Version presence alone is capped at Probably
 Affected unless reachability, exploitability, or a positive transitive path is
-confirmed. Static guidance is never evidence by itself.
+confirmed. A generic dependency-usage reachability result does not override a
+later full-source analysis that affirmatively excludes the
+vulnerability-specific path. Static guidance is never evidence by itself.
+
+Each completed assessment also carries a compact `executive_summary` with two
+separate statements: `vulnerability` briefly describes the advisory and its
+affected dependency, while `assessment` states the final repository-specific
+verdict, confidence, exposure, audit state, key basis, and at most one next
+action. The assessment uses formal disposition, confidence, exposure, basis,
+required-action, and audit-assurance language. A structured `why` list is
+rendered as the **Decision rationale** and retains the complete deciding facts
+from advisory applicability, dependency presence, current and product-release
+versions, direct reachability, deep exploitability, transitive paths, and audit
+caveats. Path
+claims are explicitly scoped to the current workspace; a missing path remains
+"not confirmed" unless affirmative evidence supports "not reachable". This
+gives Affected, Not Affected, and Inconclusive results an audit-ready evidence
+record without restoring the old raw report in the primary view. Compactness
+comes from separating these evidence categories; the assessment payload and
+human-facing statements never cut them at a character or item-count limit. It is
+assembled after the deterministic audit guardrails, retained in lightweight
+result metadata and shown in assessment drafts and run outcomes. The separate
+follow-up prompt context remains bounded to the model's input budget.
+Human-facing assessment text also lists every covered product version from the
+repository intersection on one comma-separated `Product versions covered:`
+line; dependency/component versions remain separately labeled evidence. The
+complete summary, reasoning, role views, version
+inventory, audit checks, and pipeline evidence remain available in the saved
+run payload.
+
+When the latest results for several targets are combined, the Code Evidence
+view renders the vulnerability and worst-case decision once, followed by one
+card per target. Each card uses the component name as its heading and lists the
+target's rationale without repeating that name on every evidence line. The
+separate target-status list is shown only for results whose full details are
+still loading.
+
+Agentyzer retains package provenance for affected ranges, explicit affected
+versions, and fixed versions. For advisories covering multiple packages, it
+selects the package found in the analyzed repository and excludes constraints
+belonging to the other packages. OSV `fixed`, `last_affected`, and `limit`
+boundaries keep their exclusive or inclusive semantics. npm advisory ranges
+use SemVer precedence, including prereleases that are not valid PEP 440; a
+range that cannot be evaluated is treated conservatively instead of being
+reported as safe. Repository history includes tags and `release/*` branches
+from every available remote. When project releases are supplied, only their
+intersection with those repository versions is analyzed. The default branch
+uses `.project.json` and its `version` field unless the component's
+global or component-level `project_version_files` repository configuration
+supplies another list of JSON paths and dotted fields. Version evidence
+separately reports the current dependency version, verified project release
+refs, metadata sources, and unmatched caller-supplied project releases. Fixed
+versions remain associated with their affected release line so remediation
+does not suggest cross-line downgrades.
+Manifest ranges such as `^1.2.3` and `>=2.0` remain unresolved constraints
+unless a lock file or artifact supplies a concrete version, so range boundaries
+are not presented as installed affected versions.
 
 #### Results, Dedupe, And Follow-Ups
 
 Completed results are stored in SQLite at `DTVP_CODE_ANALYSIS_RESULTS_PATH`.
 The store retains full payloads separately from lightweight assessment metadata,
 plus run/job IDs, parent links, model metadata, target context, and application
-provenance. Numbered migrations live in `dtvp/migrations/code_analysis_results`;
-a legacy sibling JSON cache imports on first use.
+provenance. Analyzer requests also carry the DTVP project name so external jobs
+can be correlated without conflating the same vulnerability and component in
+different projects. Numbered migrations live in
+`dtvp/migrations/code_analysis_results`; a legacy sibling JSON cache imports on
+first use.
 
 Automatic scans deduplicate against saved results and the live queue using a
 fingerprint of the vulnerability, target, versions, components, dependency
@@ -738,6 +836,14 @@ Result APIs:
 - `POST /api/code-analysis/results/{run_id}/compact`
 - `POST /api/code-analysis/results/{run_id}/benchmark`
 - `GET /api/projects/{project}/vulnerabilities/{vuln_id}/analysis-results`
+- `POST /api/projects/{project}/vulnerabilities/{vuln_id}/analysis-cleanup`
+
+Vulnerability cleanup can independently remove saved analyzer assessments or
+run records. Run cleanup reconciles DTVP queue entries with Agentyzer jobs,
+including orphaned records that exist in only one store. It skips queued and
+running work unless active cancellation is explicitly selected. The project
+workspace exposes complete vulnerability cleanup plus per-run cleanup, while
+the existing result deletion API remains available for assessment-only clients.
 
 #### Project Workspace And Dashboard
 
@@ -746,13 +852,20 @@ For analysts, the target-oriented runs section leads; reviewers start with the
 Combined assessment because it is their primary decision input. The expandable
 `Run new analysis` control sits inside the runs section above its compact latest-
 run list. Each target row keeps View, Use as draft, Earlier runs, and Delete
-actions on the right. View reveals a dismissible inline outcome with summary,
-rationale, and follow-up question context directly beneath that row. The list
+actions on the right. View reveals a dismissible inline outcome with the
+vulnerability and assessment executive summaries plus follow-up question
+context directly beneath that row. Legacy results without an executive summary
+fall back to their rationale. The list
 indents the complete selected-run detail region—including every disclosure—so
 the owning row remains visually unambiguous. Assessment draft, benchmark,
 component results, ticket, version coverage, LLM conversation, and pipeline
 evidence are peer disclosures in the same run context and start collapsed.
 Derivative benchmark records do not replace a target's latest analysis row.
+Live analyzer logs treat the analyzer-provided progress log as authoritative;
+the current-activity and active-agent snapshots are fallback state rather than
+additional log records. Repeated model-wait heartbeats replace the prior entry
+for the same analysis stage, so a slow model call appears as one elapsed-time
+status instead of three new rows every 15 seconds.
 The LLM conversation opens in a taller vertically resizable viewer and can move
 into an accessible near-full-screen dialog without changing renderers or losing
 context. Each captured turn is a numbered request/tool/response timeline with
@@ -779,9 +892,10 @@ received it. Saved queue guidance without a matching trace is labeled as not
 verifiable, while storage-policy redaction is called out explicitly. Static
 component guidance is resolved for both initial and follow-up runs against the
 component actually selected for that request.
-The Combined assessment displays the worst latest target verdict plus a
-rationale that preserves the component-level reasoning before a draft is
-staged. Preview and draft preparation share the same verdict-to-assessment
+The Combined assessment displays the worst latest target verdict and a compact
+cross-component executive summary before a draft is staged. Full component
+reasoning remains in each saved run. Preview and draft preparation share the
+same verdict-to-assessment
 ordering (`EXPLOITABLE`, `IN_TRIAGE`, then `NOT_AFFECTED`) and use analyzer CVSS
 only to break ties within the same state.
 
@@ -947,14 +1061,23 @@ Deployment rules:
 - Compose starts Agentyzer and persists control repositories, worktree locks,
   and transient detached worktrees in the `agentyzer-repos` volume. Populate
   or override the sanitized `agentyzer/config/repos.yaml` before enabling
-  automatic scans; never commit repository credentials.
+  automatic scans; never commit repository credentials. Agentyzer immediately
+  clones or fetches every explicit URL-backed mapping on startup, refreshes
+  those control repositories every `AGENTYZER_REPO_REFRESH_SECONDS`, and fetches
+  again immediately before creating an assessment worktree. The periodic pass
+  is independent of advisory filtering, so references remain current even when
+  an assessment exits before repository preparation.
 - Internal services use Compose names and container ports. DTVP reaches
   Dependency-Track at `http://dtrack-apiserver:8080` and Agentyzer at
   `http://agentyzer:8000` unless overridden.
 - If proxies are configured, list exact internal hostnames/IPs in `NO_PROXY`;
   do not rely only on CIDR entries.
-- DTVP OIDC is independent of Dependency-Track browser sessions. Backend calls
-  use `DTVP_DT_API_KEY` and never forward browser credentials.
+- DTVP delegates OIDC discovery, state and nonce handling, the authorization-
+  code flow with S256 PKCE, token exchange, and JWKS-backed ID-token validation
+  to Authlib. Its transient login state lives in a signed, HttpOnly cookie that
+  expires after ten minutes. Set a strong `DTVP_SESSION_SECRET_KEY` in every
+  deployment. This login is independent of Dependency-Track browser sessions:
+  backend calls use `DTVP_DT_API_KEY` and never forward browser credentials.
 - API `401` responses move the SPA to sign-in and preserve the current route for
   the OIDC return. Reviewer authorization failures remain `403` errors and do
   not incorrectly log the user out.
@@ -1015,24 +1138,19 @@ for the interpreter guarantees and `3.14t` selector.
 
 Free threading lets DTVP's dedicated CPU worker pools execute Python code on
 multiple cores. It does not make Dependency-Track/network I/O faster, and the
-free-threaded interpreter has some single-thread overhead. The pipeline retains
-GIL-enabled rollback tags with a `-gil` suffix, and local deployments can use:
+free-threaded interpreter has some single-thread overhead. The pipeline builds
+and publishes only this validated free-threaded DTVP image. Its canonical tags
+are `latest`, release versions, `dev`, and PR tags; no GIL-enabled or duplicate
+variant tags are published.
 
-```bash
-docker compose -f compose.yml -f compose.gil.yml up -d --build
-```
-
-Published primary tags (`latest`, release versions, `dev`, and PR tags) use
-free threading and also receive explicit `-freethreaded` aliases. The fallback
-build receives corresponding `-gil` tags.
-
-DTVP and Agentyzer release in lockstep from this monorepo. Their
-`pyproject.toml` versions must match before the workflow creates a Git tag, and
-a manually pushed `v*` tag must match both packaged versions before either
-container is published. An existing release tag is accepted only when both
-version files inside its tagged commit match the tag. The single Git tag
-identifies the shared source commit; the workflow publishes that version tag
-and `latest` to both the `dtvp` and `agentyzer` container packages. Agentyzer's
+DTVP and Agentyzer release in lockstep from this monorepo. The root
+`pyproject.toml` is the single release-version source: Agentyzer derives its
+dynamic package metadata from that value, and its container build receives the
+same derived value as a build argument. Regenerate both lockfiles after changing
+the root version. A manually pushed `v*` tag must match the root packaged
+version before either container is published. The single Git tag identifies the
+shared source commit; the workflow publishes that version tag and `latest` to
+both the `dtvp` and `agentyzer` container packages. Agentyzer's
 health/configuration responses read the installed package metadata instead of
 a hard-coded API version.
 
@@ -1093,7 +1211,7 @@ means the integration or override is disabled.
 | :--- | :--- | :--- |
 | `DTVP_OIDC_AUTHORITY` | OIDC authority URL | unset |
 | `DTVP_OIDC_CLIENT_ID` | OIDC client ID | unset |
-| `DTVP_OIDC_CLIENT_SECRET` | OIDC client secret | unset |
+| `DTVP_OIDC_CLIENT_SECRET` | Optional OIDC client secret for confidential clients | unset |
 | `DTVP_OIDC_REDIRECT_URI` | OIDC callback | derived from frontend URL/context path |
 | `DTVP_SESSION_SECRET_KEY` | Session signing key | `change_me` |
 | `DTVP_DEV_DISABLE_AUTH` | Resolve local requests as `devuser` | `false` |
@@ -1163,6 +1281,8 @@ means the integration or override is disabled.
 | `AGENTYZER_PORT` | Compose host port | `8095` |
 | `AGENTYZER_LOG_LEVEL` | Service log level | `INFO` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
+| `AGENTYZER_REPO_REFRESH_SECONDS` | Background refresh interval for explicit URL-backed repository mappings; `0` disables and positive values have a 60-second minimum | `900` |
+| `AGENTYZER_GITHUB_TOKEN` | Optional GitHub token for authenticated advisory lookups and higher API limits | unset |
 | `AGENTYZER_ARCHIVE_MAX_INPUT_BYTES` | Maximum input size for one repository archive | `1073741824` |
 | `AGENTYZER_ARCHIVE_MAX_ARCHIVES` | Maximum archives inspected per analysis | `25` |
 | `AGENTYZER_ARCHIVE_MAX_NESTING` | Maximum nested-archive depth | `2` |
@@ -1185,6 +1305,15 @@ means the integration or override is disabled.
 | `AGENTYZER_RESEARCH_CLONE_MAX_REPOSITORY_MB` | Maximum cached research-clone disk use | `256` |
 | `AGENTYZER_RESEARCH_CLONE_MAX_FILE_BYTES` | Maximum committed file size inspected | `256000` |
 | `AGENTYZER_RESEARCH_CLONE_CACHE_TTL_SECONDS` | Freshness window before a research repository is cloned again | `3600` |
+
+When the OpenWebUI context window is configured, Agentyzer uses a conservative
+code-oriented token estimate, reserves the requested completion budget, and
+pre-compacts oversized messages. If the provider's tokenizer still rejects a
+request, both supported OpenWebUI context-error formats are parsed; the reported
+limit and request size drive a bounded retry and the learned limit is reused by
+later calls. Reachability prompts also cap generated AST evidence at 48,000
+characters with an explicit omission marker while retaining complete scan
+counts in pipeline evidence.
 
 ## SBOM, Documentation, And License
 

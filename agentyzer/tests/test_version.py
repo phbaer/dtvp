@@ -3,24 +3,28 @@ from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from unittest.mock import patch
 
+from src import build_version
 from src import version
 
 
-def test_get_app_version_reads_agentyzer_pyproject_without_package_metadata():
-    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    with pyproject_path.open("rb") as handle:
-        expected_version = tomllib.load(handle)["project"]["version"]
-
+def test_get_app_version_uses_the_derived_build_version_without_package_metadata():
     with (
         patch.object(version, "version", side_effect=PackageNotFoundError),
-        patch.object(version, "_find_pyproject_path", return_value=pyproject_path),
+        patch.object(build_version, "__version__", "release-version"),
     ):
-        assert version.get_app_version() == expected_version
+        assert version.get_app_version() == "release-version"
 
 
-def test_get_app_version_falls_back_when_metadata_and_pyproject_are_missing():
-    with (
-        patch.object(version, "version", side_effect=PackageNotFoundError),
-        patch.object(version, "_find_pyproject_path", return_value=None),
-    ):
-        assert version.get_app_version() == "0.0.0"
+def test_build_version_prefers_the_container_build_value(monkeypatch):
+    monkeypatch.setenv("AGENTYZER_BUILD_VERSION", "release-version")
+
+    assert build_version.get_build_version() == "release-version"
+
+
+def test_build_version_reads_the_monorepo_release_version(monkeypatch):
+    monkeypatch.delenv("AGENTYZER_BUILD_VERSION", raising=False)
+    root_pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    with root_pyproject.open("rb") as handle:
+        expected = tomllib.load(handle)["project"]["version"]
+
+    assert build_version.get_build_version() == expected

@@ -18,19 +18,21 @@ Topology
          │
    inspect_archives
          │
-     ┌───┴───┐
-     │       │               (parallel branches)
-     ▼       ▼
-  scan_deps  scan_code
-     │       │
-     ▼       ▼
-  versions   llm_analyze
-     │       │
-     ▼       ▼
-  what_if    deep_analyze
-     │       │
-     └───┬───┘
-         ▼
+     scan_deps
+         │
+     ┌───┴──────┐            (parallel branches)
+     │          │
+     ▼          ▼
+  versions   scan_code
+     │          │
+     ▼          ▼
+  what_if    llm_analyze
+     │          │
+     │          ▼
+     │       deep_analyze
+     │          │
+     └────┬─────┘
+          ▼
   check_transitive_paths
          │
     aggregate_verdict
@@ -58,6 +60,7 @@ from src.pipeline.verdict_assembly import (
     build_audit_summary_emphasis,
     build_audit_view,
     build_developer_ticket_text,
+    build_executive_summary,
     build_remediation_view,
     build_researcher_view,
     build_structured_details,
@@ -186,6 +189,7 @@ NODE_INPUT_KEYS: Dict[str, tuple[str, ...]] = {
         "advisories",
         "component_name",
         "scan_targets",
+        "scan_target",
         "repo_path",
         "archive_inspection",
     ),
@@ -210,7 +214,9 @@ NODE_INPUT_KEYS: Dict[str, tuple[str, ...]] = {
     "analyze_versions": (
         "advisories",
         "component_name",
+        "component_cfg",
         "scan_targets",
+        "scan_target",
         "repo_path",
         "dep_info",
         "affected_product_versions",
@@ -221,6 +227,7 @@ NODE_INPUT_KEYS: Dict[str, tuple[str, ...]] = {
         "repo_path",
         "component_name",
         "scan_targets",
+        "scan_target",
         "advisories",
         "ollama",
         "dependency_paths",
@@ -238,10 +245,17 @@ NODE_INPUT_KEYS: Dict[str, tuple[str, ...]] = {
         "llm_analysis",
         "deep_analysis",
         "transitive_analysis",
+        "scan_target",
         "user_guidance",
         "cvss_vector",
     ),
-    "what_if_remediation": ("version_inventory", "advisories"),
+    "what_if_remediation": (
+        "version_inventory",
+        "advisories",
+        "component_name",
+        "scan_targets",
+        "scan_target",
+    ),
 }
 
 
@@ -453,7 +467,7 @@ def build_graph() -> Any:
     # Inspect packaged source before the regular scanners fan out.
     g.add_edge("prepare_repo", "inspect_archives")
     g.add_edge("inspect_archives", "scan_dependencies")
-    g.add_edge("inspect_archives", "scan_code")
+    g.add_edge("scan_dependencies", "scan_code")
 
     # Branch A: dependency → version inventory → what-if remediation
     g.add_edge("scan_dependencies", "analyze_versions")
@@ -714,6 +728,18 @@ async def _run_pipeline_with_workspace(
         exposure=exposure,
         audit_view=audit_view,
     )
+    executive_summary = build_executive_summary(
+        vuln_id=final_state.get("vuln_id", vuln_id or ""),
+        component_name=component_cfg.get("name", ""),
+        final_state=final_state,
+        verdict_label=verdict_label,
+        confidence=result.get("confidence", "Low"),
+        exposure=exposure,
+        reasoning=reasoning,
+        version_analysis=version_analysis,
+        remediation_view=remediation_view,
+        audit_view=audit_view,
+    )
     assessment_summary = build_audit_summary_emphasis(
         audit_view,
         result.get("summary", ""),
@@ -737,6 +763,7 @@ async def _run_pipeline_with_workspace(
         advisories=final_state.get("advisories", {}),
         dep_info=final_state.get("dep_info", {}),
         result=result,
+        executive_summary=executive_summary,
         researcher_view=researcher_view,
         remediation_view=remediation_view,
         audit_view=audit_view,
@@ -768,6 +795,7 @@ async def _run_pipeline_with_workspace(
             "exposure": exposure,
             "dependency_presence": dependency_presence_payload(dep_info),
             "adjusted_cvss": adj_cvss or None,
+            "executive_summary": executive_summary,
             "summary": assessment_summary,
             "reasoning": reasoning,
             "advisory_relevance": advisory_relevance,

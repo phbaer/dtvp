@@ -5,6 +5,8 @@ import VulnGroupCard from '../VulnGroupCard.vue'
 import CodeAnalysisPanel from '../CodeAnalysisPanel.vue'
 import defaultRescoreRules from '../../../../data/rescore_rules.json'
 
+const clipboardWriteText = vi.fn()
+
 // Mock API
 vi.mock('../../lib/api', () => ({
     updateAssessment: vi.fn((payload: any) => {
@@ -97,7 +99,7 @@ describe('VulnGroupCard', () => {
         ]
     }
 
-    const analyzerResult = (verdict: string, summary: string, reasoning: string) => ({
+    const analyzerResult = (verdict: string, summary: string, reasoning: string, ticketText = '') => ({
         assessment: {
             affected: verdict === 'Affected',
             verdict,
@@ -105,6 +107,7 @@ describe('VulnGroupCard', () => {
             exposure: verdict === 'Affected' ? 'reachable' : 'not reachable',
             summary,
             reasoning,
+            ...(ticketText ? { ticket_text: ticketText } : {}),
         },
         steps: [],
         versions_checked: ['1.0'],
@@ -112,6 +115,11 @@ describe('VulnGroupCard', () => {
 
     beforeEach(() => {
         vi.clearAllMocks()
+        clipboardWriteText.mockResolvedValue(undefined)
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText: clipboardWriteText },
+        })
     })
 
     it('renders vulnerability details', () => {
@@ -643,7 +651,12 @@ describe('VulnGroupCard', () => {
         wrapper.getComponent(CodeAnalysisPanel).vm.$emit('proposals-change', [{
             component: 'lib',
             runId: 'auto-security',
-            result: analyzerResult('Affected', 'Reachable parser use.', 'The request path reaches the parser.'),
+            result: analyzerResult(
+                'Affected',
+                'Reachable parser use.',
+                'The request path reaches the parser.',
+                'Title: Remediate CVE-2023-1234 in lib',
+            ),
         }])
         await wrapper.vm.$nextTick()
 
@@ -652,10 +665,17 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
 
         const proposal = wrapper.get('[data-testid="automatic-assessment-proposal"]')
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component for Security:')
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('lib')
         expect(proposal.text()).toContain('Analyzer proposal')
         expect(proposal.text()).toContain('Reachable parser use.')
         expect(proposal.text()).toContain('The request path reaches the parser.')
         expect((wrapper.vm as any).state).toBe('NOT_SET')
+
+        await proposal.get('[data-testid="copy-team-ticket"]').trigger('click')
+        await flushPromises()
+        expect(clipboardWriteText).toHaveBeenCalledWith('Title: Remediate CVE-2023-1234 in lib')
+        expect(proposal.get('[data-testid="copy-team-ticket"]').text()).toContain('Ticket copied')
 
         await proposal.get('[data-testid="use-automatic-assessment-proposal"]').trigger('click')
         expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
@@ -837,6 +857,11 @@ describe('VulnGroupCard', () => {
         expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text()))
             .toEqual(['Security', 'Runtime'])
         expect(wrapper.findAll('button').some(button => button.text().trim() === 'Global')).toBe(true)
+        await wrapper.findAll('[data-testid="review-team-tab"]')
+            .find(tab => tab.text() === 'Runtime')
+            ?.trigger('click')
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('Component for Runtime:')
+        expect(wrapper.get('[data-testid="assessment-team-components"]').text()).toContain('worker')
 
         await wrapper.get('[data-testid="toggle-assessment-team-scope"]').trigger('click')
         await wrapper.vm.$nextTick()
@@ -938,6 +963,43 @@ describe('VulnGroupCard', () => {
 
         expect(wrapper.find('[data-testid="global-cvss-rescoring"]').exists()).toBe(false)
         expect(wrapper.text()).toContain('Team Assessment: Security')
+    })
+
+    it('enables the assessment header action when the CVSS vector or score changes', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, tags: ['Security'] } },
+            global: {
+                provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) },
+                stubs: { teleport: true },
+            },
+        })
+
+        await openReviewTab(wrapper)
+        await flushPromises()
+
+        const decisionSection = wrapper.get('[data-testid="assessment-decision-section"]')
+        const actions = decisionSection.get('[data-testid="assessment-decision-actions"]')
+        const saveButton = actions.get('[data-testid="assessment-submit-button"]')
+        expect(decisionSection.get('header').element.contains(saveButton.element)).toBe(true)
+        expect(wrapper.findAll('[data-testid="assessment-submit-button"]')).toHaveLength(1)
+        expect(saveButton.attributes('disabled')).toBeDefined()
+
+        const vectorInput = decisionSection.get('#cvss-vector-input')
+        await vectorInput.setValue('CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L')
+        expect((wrapper.vm as any).formTouched).toBe(true)
+        expect(saveButton.attributes('disabled')).toBeUndefined()
+
+        ;(wrapper.vm as any).updateFormFromGroup(true)
+        ;(wrapper.vm as any).isManualBaseMode = true
+        await wrapper.vm.$nextTick()
+        expect(saveButton.attributes('disabled')).toBeDefined()
+
+        const scoreInput = decisionSection.get('#cvss-score-input')
+        expect(scoreInput.attributes('readonly')).toBeUndefined()
+        await scoreInput.setValue('8.7')
+        expect((wrapper.vm as any).pendingScore).toBe(8.7)
+        expect((wrapper.vm as any).formTouched).toBe(true)
+        expect(saveButton.attributes('disabled')).toBeUndefined()
     })
 
     it('keeps ticket reference optional when only the original score is critical', async () => {

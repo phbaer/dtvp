@@ -13,7 +13,7 @@ from .sqlite_migration_services import run_sqlite_migrations
 
 CODE_ANALYSIS_RESULT_SCHEMA_VERSION = "dtvp.code-analysis-result/v1"
 CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE = "code_analysis_results"
-CODE_ANALYSIS_ASSESSMENT_METADATA_VERSION = 2
+CODE_ANALYSIS_ASSESSMENT_METADATA_VERSION = 4
 FOLLOW_UP_CONTEXT_PROMPT_LIMIT = 12_000
 
 
@@ -63,6 +63,16 @@ def _utc_now_iso() -> str:
 
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _normalize_text_items(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [
+        normalized
+        for item in value
+        if (normalized := _normalize_text(item))
+    ]
 
 
 def _lower(value: Any) -> str:
@@ -233,6 +243,7 @@ def summarize_code_analysis_result(result: Any) -> dict[str, Any]:
     result_dict = _as_dict(result)
     assessment = _as_dict(result_dict.get("assessment"))
     adjusted_cvss = _as_dict(assessment.get("adjusted_cvss"))
+    executive_summary = _as_dict(assessment.get("executive_summary"))
     component_results = [
         {
             "component": _normalize_text(component_result.get("component")),
@@ -245,6 +256,29 @@ def summarize_code_analysis_result(result: Any) -> dict[str, Any]:
             "exposure": _normalize_text(
                 _as_dict(component_result.get("assessment")).get("exposure")
             ),
+            "executive_summary": {
+                "vulnerability": _normalize_text(
+                    _as_dict(
+                        _as_dict(component_result.get("assessment")).get(
+                            "executive_summary"
+                        )
+                    ).get("vulnerability")
+                ),
+                "assessment": _normalize_text(
+                    _as_dict(
+                        _as_dict(component_result.get("assessment")).get(
+                            "executive_summary"
+                        )
+                    ).get("assessment")
+                ),
+                "why": _normalize_text_items(
+                    _as_dict(
+                        _as_dict(component_result.get("assessment")).get(
+                            "executive_summary"
+                        )
+                    ).get("why")
+                ),
+            },
             "versions_checked": [
                 _normalize_text(version)
                 for version in component_result.get("versions_checked", [])
@@ -263,6 +297,13 @@ def summarize_code_analysis_result(result: Any) -> dict[str, Any]:
         "analysis": _normalize_text(assessment.get("analysis")),
         "justification": _normalize_text(assessment.get("justification")),
         "response": _normalize_text(assessment.get("response")),
+        "executive_summary": {
+            "vulnerability": _normalize_text(
+                executive_summary.get("vulnerability")
+            ),
+            "assessment": _normalize_text(executive_summary.get("assessment")),
+            "why": _normalize_text_items(executive_summary.get("why")),
+        },
         "summary": _normalize_text(assessment.get("summary")),
         "reasoning": _normalize_text(assessment.get("reasoning")),
         "details": _normalize_text(assessment.get("details")),
@@ -336,6 +377,7 @@ def build_compact_analysis_context(record: dict[str, Any]) -> dict[str, Any]:
             "response": summary.get("response"),
         },
         "summary": _compact_text(summary.get("summary"), 1600),
+        "executive_summary": _compact_mapping(summary.get("executive_summary")),
         "reasoning": _compact_text(summary.get("reasoning"), 2400),
         "details": _compact_text(summary.get("details"), 2400),
         "cvss": {
@@ -835,32 +877,54 @@ class CodeAnalysisResultStore:
         return [records[run_id] for run_id in normalized_ids if run_id in records]
 
     def delete(self, run_id: str) -> bool:
-        normalized = _normalize_text(run_id)
-        if not normalized:
-            return False
+        return bool(self.delete_many([run_id]))
+
+    def delete_many(self, run_ids: list[str]) -> list[str]:
+        normalized_ids = list(
+            dict.fromkeys(
+                normalized
+                for value in run_ids
+                if (normalized := _normalize_text(value))
+            )
+        )
+        if not normalized_ids:
+            return []
+        deleted_ids: list[str] = []
         with self._lock:
             self._ensure_loaded()
             with closing(self._connect()) as connection:
                 with connection:
-                    connection.execute(
-                        """
-                        DELETE FROM code_analysis_result_applications
-                        WHERE analysis_run_id = ?
-                        """,
-                        (normalized,),
-                    )
-                    cursor = connection.execute(
-                        """
-                        DELETE FROM code_analysis_results
-                        WHERE analysis_run_id = ?
-                        """,
-                        (normalized,),
-                    )
+                    for start in range(0, len(normalized_ids), 500):
+                        batch = normalized_ids[start : start + 500]
+                        placeholders = ",".join("?" for _ in batch)
+                        rows = connection.execute(
+                            f"""
+                            SELECT analysis_run_id
+                            FROM code_analysis_results
+                            WHERE analysis_run_id IN ({placeholders})
+                            """,
+                            batch,
+                        ).fetchall()
+                        deleted_ids.extend(str(row[0]) for row in rows)
+                        connection.execute(
+                            f"""
+                            DELETE FROM code_analysis_result_applications
+                            WHERE analysis_run_id IN ({placeholders})
+                            """,
+                            batch,
+                        )
+                        connection.execute(
+                            f"""
+                            DELETE FROM code_analysis_results
+                            WHERE analysis_run_id IN ({placeholders})
+                            """,
+                            batch,
+                        )
                     self._prune_locked(connection)
-                    deleted = cursor.rowcount > 0
-            if deleted:
+            if deleted_ids:
                 self._invalidate_assessment_metadata_cache_locked()
-            return deleted
+        deleted_set = set(deleted_ids)
+        return [run_id for run_id in normalized_ids if run_id in deleted_set]
 
     def record_application(
         self,

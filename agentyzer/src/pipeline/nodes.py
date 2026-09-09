@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 
 from src.agents import (
     archive_extractor,
@@ -224,14 +225,17 @@ def _list_project_manifests(repo_path: str | None) -> list[str]:
 def _get_scan_target(state: PipelineState) -> str:
     """Return the package name to scan for in the repo's dependencies.
 
-    Prefers the advisory-derived ``scan_targets`` over ``component_name``
-    so that we search for the **vulnerable package**, not the project's
-    own name.
+    Returns only an advisory-derived or dependency-scan-selected package.  A
+    logical ``component_name`` identifies the repository being assessed and
+    must not be treated as a dependency when advisory package discovery fails.
     """
+    selected = str(state.get("scan_target") or "").strip()
+    if selected:
+        return selected
     targets = state.get("scan_targets") or []
     if targets:
         return targets[0]
-    return state["component_name"]
+    return ""
 
 
 # ----------------------------------------------------------------------- #
@@ -390,6 +394,7 @@ async def fetch_advisory(state: PipelineState) -> dict:
     sym_count = len(advisories.get("vulnerable_symbols", []))
     ver_count = len(advisories.get("affected_versions", []))
     data_warnings = advisories.get("data_warnings", [])
+    lookup_failures = advisories.get("lookup_failures", [])
     summary = advisories.get("summary", "")
     logger.info(
         "[fetch_advisory] sources=%d, affected_ranges=%d, affected_versions=%d, "
@@ -433,6 +438,8 @@ async def fetch_advisory(state: PipelineState) -> dict:
             f"CWEs: {', '.join(advisories.get('cwe', [])) or 'none'}",
         ]
     )
+    for failure in lookup_failures:
+        evidence_lines.append(f"LOOKUP FAILURE: {failure}")
     for w in data_warnings:
         evidence_lines.append(f"WARNING: {w}")
 
@@ -450,6 +457,9 @@ async def fetch_advisory(state: PipelineState) -> dict:
             scan_targets.append(name)
     # De-duplicate while preserving order
     scan_targets = list(dict.fromkeys(scan_targets))
+    advisory_complete = bool(
+        summary and scan_targets and (range_count or ver_count)
+    )
 
     if scan_targets:
         logger.info(
@@ -458,7 +468,7 @@ async def fetch_advisory(state: PipelineState) -> dict:
     else:
         logger.warning(
             "[fetch_advisory] Advisory has no identifiable affected packages — "
-            "dependency scan will fall back to component_name"
+            "dependency and version analysis will remain unresolved"
         )
 
     return {
@@ -468,7 +478,7 @@ async def fetch_advisory(state: PipelineState) -> dict:
         "step_reports": {
             "fetch_advisory": {
                 "title": "Advisory Lookup",
-                "status": "ok" if summary else "partial",
+                "status": "ok" if advisory_complete else "partial",
                 "findings": {
                     "summary": summary
                     or f"No summary available for {state['vuln_id']}",
@@ -477,6 +487,7 @@ async def fetch_advisory(state: PipelineState) -> dict:
                     "affected_versions_count": ver_count,
                     "vulnerable_symbols": advisories.get("vulnerable_symbols", []),
                     "cwes": advisories.get("cwe", []),
+                    "lookup_failures": lookup_failures,
                     "data_warnings": data_warnings,
                 },
                 "evidence": evidence_lines,
@@ -956,23 +967,125 @@ async def inspect_archives(state: PipelineState) -> dict:
 # scan_dependencies
 # ----------------------------------------------------------------------- #
 async def scan_dependencies(state: PipelineState) -> dict:
-    scan_target = _get_scan_target(state)
+    scan_targets = list(
+        dict.fromkeys(
+            str(target).strip()
+            for target in (state.get("scan_targets") or [])
+            if str(target).strip()
+        )
+    )
+    if not scan_targets:
+        reason = (
+            "Advisory lookup did not identify the vulnerable package; the assessed "
+            f"project name {state['component_name']!r} was not scanned as though it "
+            "were one of its own dependencies."
+        )
+        dep_info = {
+            "found": False,
+            "repo_found": False,
+            "sbom_attributed": False,
+            "presence_basis": "unknown",
+            "direct": False,
+            "transitive": False,
+            "declared_in": [],
+            "locked_version": None,
+            "lock_files": [],
+            "repo_path": state["repo_path"],
+            "component_name": "",
+            "requested_component": state["component_name"],
+            "advisory_package_candidates": [],
+            "scanned_package_candidates": [],
+            "reason": reason,
+        }
+        logger.warning("[scan_dependencies] %s", reason)
+        return {
+            "scan_target": "",
+            "dep_info": dep_info,
+            "step_reports": {
+                "scan_dependencies": {
+                    "title": "Dependency Scan",
+                    "status": "unknown",
+                    "findings": {
+                        "found": False,
+                        "repo_found": False,
+                        "sbom_attributed": False,
+                        "dependency_type": "unknown",
+                        "component_name": "",
+                        "requested_component": state["component_name"],
+                        "advisory_package_candidates": [],
+                        "scanned_package_candidates": [],
+                        "declared_in": [],
+                        "lock_files": [],
+                        "locked_version": None,
+                        "reason": reason,
+                    },
+                    "evidence": [reason],
+                },
+            },
+            "evidence": [reason],
+        }
+    requested_component = str(state["component_name"] or "").strip().lower()
+
+    def matches_requested_component(candidate: str) -> bool:
+        normalized = candidate.lower()
+        if normalized == requested_component:
+            return True
+        candidate_leaf = re.split(r"[:/]", normalized)[-1]
+        requested_leaf = re.split(r"[:/]", requested_component)[-1]
+        return bool(candidate_leaf and candidate_leaf == requested_leaf)
+
+    matching_target = next(
+        (target for target in scan_targets if matches_requested_component(target)),
+        None,
+    )
+    if matching_target and scan_targets[0] != matching_target:
+        scan_targets.remove(matching_target)
+        scan_targets.insert(0, matching_target)
     sbom_attributed = bool(state.get("sbom_attributed", True))
     logger.info(
-        "[scan_dependencies] Scanning for '%s' in %s (component=%s, sbom_attributed=%s)",
-        scan_target,
+        "[scan_dependencies] Scanning %d advisory package candidate(s) in %s "
+        "(component=%s, sbom_attributed=%s)",
+        len(scan_targets),
         state["repo_path"],
         state["component_name"],
         sbom_attributed,
     )
-    dep_info = await asyncio.to_thread(
-        dependency_scanner.find_component,
-        state["repo_path"],
-        scan_target,
-        sbom_attributed=sbom_attributed,
-    )
+    dep_info: dict | None = None
+    scan_target = scan_targets[0]
+    scanned_targets: list[str] = []
+    for candidate in scan_targets:
+        # The incoming SBOM attribution describes the selected component.  It
+        # proves presence for an advisory package only when their identities
+        # match; it cannot be transferred to a different dependency name.
+        candidate_sbom_attributed = sbom_attributed and matches_requested_component(
+            candidate
+        )
+        candidate_info = await asyncio.to_thread(
+            dependency_scanner.find_component,
+            state["repo_path"],
+            candidate,
+            sbom_attributed=candidate_sbom_attributed,
+        )
+        scanned_targets.append(candidate)
+        if dep_info is None:
+            dep_info = candidate_info
+            scan_target = candidate
+        if candidate_info.get("repo_found"):
+            dep_info = candidate_info
+            scan_target = candidate
+            break
+    if dep_info is None:
+        dep_info = {
+            "found": False,
+            "repo_found": False,
+            "declared_in": [],
+            "lock_files": [],
+            "locked_version": None,
+        }
     dep_info["repo_path"] = state["repo_path"]
     dep_info["component_name"] = scan_target
+    dep_info["advisory_package_candidates"] = scan_targets
+    dep_info["scanned_package_candidates"] = scanned_targets
     dep_type = dep_info.get("presence_basis", "not_found")
     logger.info(
         "[scan_dependencies] found=%s, repo_found=%s, sbom_attributed=%s, type=%s, declared_in=%s, lock_files=%s, locked_version=%s",
@@ -993,6 +1106,7 @@ async def scan_dependencies(state: PipelineState) -> dict:
         f"locked_version={dep_info.get('locked_version')}"
     ]
     return {
+        "scan_target": scan_target,
         "dep_info": dep_info,
         "step_reports": {
             "scan_dependencies": {
@@ -1003,6 +1117,9 @@ async def scan_dependencies(state: PipelineState) -> dict:
                     "repo_found": dep_info.get("repo_found", False),
                     "sbom_attributed": dep_info.get("sbom_attributed", False),
                     "dependency_type": dep_type,
+                    "component_name": scan_target,
+                    "advisory_package_candidates": scan_targets,
+                    "scanned_package_candidates": scanned_targets,
                     "declared_in": dep_info["declared_in"],
                     "lock_files": dep_info.get("lock_files", []),
                     "locked_version": dep_info.get("locked_version"),
@@ -1022,6 +1139,39 @@ async def scan_code(state: PipelineState) -> dict:
     component = _get_scan_target(state)
     cwe_ids = state["advisories"].get("cwe", [])
     repo_path = state["repo_path"]
+    if not component:
+        reason = (
+            "Code scan skipped because advisory lookup did not identify the "
+            "vulnerable package."
+        )
+        logger.warning("[scan_code] %s", reason)
+        return {
+            "usage": [],
+            "snippets": [],
+            "structure": "",
+            "ast_context": "",
+            "step_reports": {
+                "scan_code": {
+                    "title": "Code Scan",
+                    "status": "skipped",
+                    "findings": {
+                        "reason": reason,
+                        "search_terms": [],
+                        "hit_count": 0,
+                        "files_with_hits": [],
+                        "snippet_count": 0,
+                        "ast_imports": 0,
+                        "ast_calls": 0,
+                        "discovered_symbols": [],
+                        "archives_inspected": len(
+                            state.get("archive_inspection", {}).get("archives", [])
+                        ),
+                    },
+                    "evidence": [reason],
+                },
+            },
+            "evidence": [reason],
+        }
     logger.info(
         "[scan_code] Scanning for %d symbols + '%s' (component=%s)",
         len(symbols),
@@ -1164,6 +1314,38 @@ async def scan_code(state: PipelineState) -> dict:
 # ----------------------------------------------------------------------- #
 async def llm_analyze_code(state: PipelineState) -> dict:
     """Send collected source snippets to the LLM for reachability analysis."""
+    if not _get_scan_target(state):
+        reason = (
+            "Reachability analysis skipped because the vulnerable package is "
+            "unresolved."
+        )
+        analysis = {
+            "reachable": False,
+            "skipped": True,
+            "reasoning": reason,
+            "risk_areas": [],
+            "invocation_paths": [],
+        }
+        return {
+            "llm_analysis": analysis,
+            "step_reports": {
+                "llm_analyze_code": {
+                    "title": "LLM Reachability Analysis",
+                    "status": "skipped",
+                    "findings": {
+                        "reachable": False,
+                        "risk_areas": [],
+                        "invocation_paths": [],
+                        "reasoning": reason,
+                        "error": "",
+                        "analyzed_files": [],
+                        "llm_usage": {},
+                    },
+                    "evidence": [reason],
+                },
+            },
+            "evidence": [reason],
+        }
     ollama = state.get("ollama")
     snippets = state.get("snippets", [])
     advisories = state.get("advisories", {})
@@ -1393,13 +1575,65 @@ async def llm_deep_analyze(state: PipelineState) -> dict:
 # ----------------------------------------------------------------------- #
 async def analyze_versions(state: PipelineState) -> dict:
     scan_target = _get_scan_target(state)
-    affected_ranges = state["advisories"].get("affected_ranges", [])
-    affected_versions = state["advisories"].get("affected_versions", []) or None
+    if not scan_target:
+        reason = (
+            "Version analysis could not start because advisory lookup did not "
+            "identify the vulnerable package."
+        )
+        inventory = {
+            "unresolved_component": True,
+            "version_table": [],
+            "worst_case": {
+                "affected": False,
+                "current_workspace_affected": None,
+                "tracked_ref_affected": False,
+                "tracked_release_affected": False,
+                "note": reason,
+                "warnings": [reason],
+            },
+            "trace": [reason],
+            "comparison_inputs": {
+                "component_name": "",
+                "project_versions": state.get("affected_product_versions") or [],
+            },
+        }
+        logger.warning("[analyze_versions] %s", reason)
+        return {
+            "version_inventory": inventory,
+            "step_reports": {
+                "analyze_versions": {
+                    "title": "Version Analysis",
+                    "status": "unknown",
+                    "findings": {
+                        "reason": reason,
+                        "locked_version": None,
+                        "affected_ranges": [],
+                        "worst_case_affected": None,
+                        "version_table": [],
+                    },
+                    "evidence": [reason],
+                },
+            },
+            "evidence": [reason],
+        }
+    constraint_selection = version_analyzer.select_component_affected_constraints(
+        scan_target,
+        state["advisories"].get("affected_ranges", []),
+        state["advisories"].get("affected_versions", []),
+        state["advisories"].get("affected_version_entries", []),
+        fixed_versions=state["advisories"].get("fixed_versions", []),
+        fixed_version_entries=state["advisories"].get(
+            "fixed_version_entries", []
+        ),
+    )
+    affected_ranges = constraint_selection["affected_ranges"]
+    affected_versions = constraint_selection["affected_versions"] or None
     affected_product_versions = state.get("affected_product_versions") or []
     locked_version = state.get("dep_info", {}).get("locked_version")
     logger.info(
         "[analyze_versions] %d affected ranges, %d explicit versions, "
-        "%d affected product versions for '%s' (component=%s), locked_version=%s",
+        "%d processed project releases to intersect with '%s' "
+        "(component=%s), locked_version=%s",
         len(affected_ranges),
         len(affected_versions or []),
         len(affected_product_versions),
@@ -1414,6 +1648,21 @@ async def analyze_versions(state: PipelineState) -> dict:
         locked_version=locked_version,
         affected_versions=affected_versions,
         affected_product_versions=affected_product_versions,
+        project_version_files=(state.get("component_cfg") or {}).get(
+            "project_version_files"
+        ),
+    )
+    inventory.setdefault("comparison_inputs", {})["constraint_selection"] = {
+        key: value
+        for key, value in constraint_selection.items()
+        if key not in {"affected_ranges", "affected_versions", "fixed_versions"}
+    }
+    inventory.setdefault("trace", []).insert(
+        0,
+        "Selected advisory constraints for "
+        f"{scan_target}: {constraint_selection['selected_range_count']} ranges, "
+        f"{constraint_selection['selected_version_count']} explicit versions; "
+        f"excluded packages={constraint_selection['excluded_packages'] or 'none'}",
     )
     worst = inventory.get("worst_case", {})
     logger.info(
@@ -1436,7 +1685,8 @@ async def analyze_versions(state: PipelineState) -> dict:
 
     evidence_lines = [
         f"Locked version: {locked_version or 'unknown'}",
-        "DTVP affected product versions: "
+        "Processed project releases supplied for repository intersection "
+        "(not dependency versions): "
         + (", ".join(affected_product_versions) if affected_product_versions else "none provided"),
         f"Worst-case affected: {worst_affected}",
         f"Release refs analysed: {len(table)} "
@@ -1473,7 +1723,7 @@ async def analyze_versions(state: PipelineState) -> dict:
                         affected_ranges,
                         affected_versions,
                     ),
-                    "affected_product_versions": affected_product_versions,
+                    "project_versions": affected_product_versions,
                     "lock_files_found_by_ref": found_lockfiles,
                     "lock_files_processed_by_ref": processed_lockfiles,
                     "worst_case_affected": worst_affected,
@@ -1493,9 +1743,53 @@ async def analyze_versions(state: PipelineState) -> dict:
 async def what_if_remediation(state: PipelineState) -> dict:
     """Determine remediation options: which fixed version resolves the CVE."""
     inventory = state.get("version_inventory", {})
-    affected_ranges = state["advisories"].get("affected_ranges", [])
-    fixed_versions = state["advisories"].get("fixed_versions", [])
-    affected_versions = state["advisories"].get("affected_versions", []) or None
+    if inventory.get("unresolved_component"):
+        reason = (
+            "Remediation analysis is unavailable until the advisory's vulnerable "
+            "package and affected ranges are resolved."
+        )
+        what_if = {
+            "current_version": None,
+            "current_source": None,
+            "current_affected": None,
+            "component_not_found": False,
+            "unresolved_component": True,
+            "fixed_versions": [],
+            "remediation": [],
+            "summary": reason,
+        }
+        return {
+            "what_if": what_if,
+            "step_reports": {
+                "what_if_remediation": {
+                    "title": "What-If Remediation",
+                    "status": "unknown",
+                    "findings": {
+                        "current_version": None,
+                        "current_affected": None,
+                        "component_not_found": False,
+                        "unresolved_component": True,
+                        "fixed_versions": [],
+                        "remediation": [],
+                    },
+                    "evidence": [reason],
+                },
+            },
+            "evidence": [reason],
+        }
+    constraint_selection = version_analyzer.select_component_affected_constraints(
+        _get_scan_target(state),
+        state["advisories"].get("affected_ranges", []),
+        state["advisories"].get("affected_versions", []),
+        state["advisories"].get("affected_version_entries", []),
+        fixed_versions=state["advisories"].get("fixed_versions", []),
+        fixed_version_entries=state["advisories"].get(
+            "fixed_version_entries", []
+        ),
+    )
+    affected_ranges = constraint_selection["affected_ranges"]
+    fixed_versions = constraint_selection["fixed_versions"]
+    affected_versions = constraint_selection["affected_versions"] or None
 
     what_if = version_analyzer.analyze_what_if(
         inventory,
@@ -1795,7 +2089,15 @@ async def aggregate_verdict(state: PipelineState) -> dict:
                 )
             )
             verdict_evidence.append(
-                "  Any tracked release in affected range: "
+                "  Any verified project release in affected range: "
+                + (
+                    "YES"
+                    if version_ctx.get("tracked_release_affected", False)
+                    else "NO"
+                )
+            )
+            verdict_evidence.append(
+                "  Any tracked dependency version in affected range: "
                 + ("YES" if version_ctx.get("affected") else "NO")
             )
             if version_ctx.get("note"):
@@ -1818,7 +2120,15 @@ async def aggregate_verdict(state: PipelineState) -> dict:
             )
         )
         verdict_evidence.append(
-            "Any tracked release in affected range: "
+            "Any verified project release in affected range: "
+            + (
+                "YES"
+                if version_ctx.get("tracked_release_affected", False)
+                else "NO"
+            )
+        )
+        verdict_evidence.append(
+            "Any tracked dependency version in affected range: "
             + ("YES" if version_ctx.get("affected") else "NO")
         )
         if version_ctx.get("note"):

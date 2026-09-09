@@ -1,6 +1,6 @@
 [project]
 name = "dtvp"
-version = "1.0.21"
+version = "1.0.22"
 authors = ["phbaer <git@ph.baer.one>"]
 urls = { "Homepage" = "https://baer.one", "Main repo" = "https://git.baer.one/phbaer/dtvp", "GitHub" = "https://github.com/phbaer/dtvp", "Mastodon" = "https://baer.im/@phbaer" }
 description = "A vulnerability management platform for dependency track"
@@ -10,17 +10,19 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "httpx",
+    "httpx2>=2.0.0,<3",
     "python-jose[cryptography]",
     "pydantic-settings",
     "python-multipart",
-    "cvss>=3.6"
+    "cvss>=3.6",
+    "authlib>=1.8.0,<2",
+    "itsdangerous>=2.2,<3",
 ]
 
 [dependency-groups]
 dev = [
     "agentyzer",
     "httpx>=0.28.1",
-    "httpx2>=2.0.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",

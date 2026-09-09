@@ -476,6 +476,40 @@ def _text_list(value: Any) -> list[str]:
     )
 
 
+def _covered_product_versions(version: dict[str, Any]) -> list[str]:
+    """Return matched product releases without mixing in dependency versions."""
+    if "covered_product_versions" in version:
+        return _text_list(version.get("covered_product_versions"))
+
+    matched = _text_list(
+        [
+            key
+            for key, refs in (version.get("project_version_refs") or {}).items()
+            if refs
+        ]
+        if isinstance(version.get("project_version_refs"), dict)
+        else []
+    )
+    matched.extend(
+        value
+        for field in (
+            "verified_affected_project_versions",
+            "verified_unaffected_project_versions",
+            "unknown_project_versions",
+        )
+        for value in _text_list(version.get(field))
+    )
+    matched = list(dict.fromkeys(matched))
+    requested = _text_list(
+        version.get("project_versions")
+        or version.get("affected_product_versions")
+    )
+    if not requested:
+        return matched
+    matched_keys = {value.casefold() for value in matched}
+    return [value for value in requested if value.casefold() in matched_keys]
+
+
 def _append_section(
     lines: list[str],
     seen_values: set[str],
@@ -502,17 +536,56 @@ def _append_section(
     lines.extend(f"  - {value}" for value in section_bullets)
 
 
+def _append_inline_list(
+    lines: list[str],
+    seen_values: set[str],
+    title: str,
+    values: list[str],
+) -> None:
+    entries = list(dict.fromkeys(_text(value) for value in values if _text(value)))
+    if not entries:
+        return
+    rendered = f"{title}: {', '.join(entries)}"
+    signature = rendered.casefold()
+    if signature in seen_values:
+        return
+    seen_values.add(signature)
+    lines.extend(["", rendered])
+
+
 def _is_generated_report(value: Any) -> bool:
     return "VULNERABILITY ASSESSMENT REPORT" in _text(value).upper()
 
 
 def _has_semantic_narrative(assessment: dict[str, Any]) -> bool:
+    executive_summary = assessment.get("executive_summary")
     return bool(
-        _text(assessment.get("summary"))
+        (
+            isinstance(executive_summary, dict)
+            and (
+                any(
+                    _text(executive_summary.get(key))
+                    for key in ("vulnerability", "assessment")
+                )
+                or bool(_text_list(executive_summary.get("why")))
+            )
+        )
+        or _text(assessment.get("summary"))
         or _text(assessment.get("reasoning"))
         or assessment.get("researcher_view")
         or assessment.get("remediation_view")
         or assessment.get("audit_view")
+    )
+
+
+def _has_executive_summary(assessment: dict[str, Any]) -> bool:
+    executive_summary = assessment.get("executive_summary")
+    return isinstance(executive_summary, dict) and (
+        any(
+            _text(executive_summary.get(key))
+            for key in ("vulnerability", "assessment")
+        )
+        or bool(_text_list(executive_summary.get("why")))
     )
 
 
@@ -521,6 +594,106 @@ def _assessment_content_lines(
     seen_values: set[str],
 ) -> list[str]:
     lines: list[str] = []
+    executive_summary = assessment.get("executive_summary")
+    if isinstance(executive_summary, dict):
+        _append_section(
+            lines,
+            seen_values,
+            "Executive summary",
+            bullets=[
+                f"Vulnerability: {_text(executive_summary.get('vulnerability'))}"
+                if _text(executive_summary.get("vulnerability"))
+                else "",
+                f"Assessment: {_text(executive_summary.get('assessment'))}"
+                if _text(executive_summary.get("assessment"))
+                else "",
+            ],
+        )
+        verdict_reasons = _text_list(executive_summary.get("why"))
+        if not verdict_reasons and _text(assessment.get("reasoning")):
+            verdict_reasons = [_text(assessment.get("reasoning"))]
+        _append_section(
+            lines,
+            seen_values,
+            "Decision rationale",
+            bullets=verdict_reasons,
+        )
+    compact_version = assessment.get("version_analysis")
+    if isinstance(compact_version, dict):
+        _append_inline_list(
+            lines,
+            seen_values,
+            "Product versions covered",
+            _covered_product_versions(compact_version),
+        )
+    if _has_executive_summary(assessment):
+        evidence: list[str] = []
+        dependency = assessment.get("dependency_presence")
+        if isinstance(dependency, dict):
+            basis = _text(dependency.get("presence_basis"))
+            if basis == "direct":
+                evidence.append("Direct dependency")
+            elif basis == "transitive":
+                evidence.append("Transitive dependency")
+            elif (
+                basis == "sbom_attributed"
+                or dependency.get("sbom_attributed") is True
+            ):
+                evidence.append("SBOM-attributed; not rediscovered locally")
+            elif basis == "unknown":
+                evidence.append("Dependency unknown; vulnerable package unresolved")
+            elif dependency.get("found") is False:
+                evidence.append("Dependency not found")
+            if reason := _text(dependency.get("reason")):
+                evidence.append(reason)
+            if locked_version := _text(dependency.get("locked_version")):
+                evidence.append(f"Resolved version {locked_version}")
+
+        if isinstance(compact_version, dict):
+            if not any(item.startswith("Resolved version ") for item in evidence):
+                if detected_version := _text(compact_version.get("detected_version")):
+                    evidence.append(f"Detected version {detected_version}")
+            workspace_affected = _boolean_text(
+                compact_version.get("current_workspace_affected")
+            )
+            if workspace_affected:
+                evidence.append(
+                    f"Current dependency version affected: {workspace_affected}"
+                )
+            elif affected := _boolean_text(compact_version.get("affected")):
+                evidence.append(f"Affected release found: {affected}")
+        advisory = assessment.get("advisory_relevance")
+        if isinstance(advisory, dict):
+            relevant = advisory.get("relevant")
+            relevance = (
+                "relevant"
+                if relevant is True
+                else "not relevant"
+                if relevant is False
+                else "unclear"
+            )
+            source = _text(advisory.get("source"))
+            evidence.append(
+                f"Advisory applicability: {relevance}"
+                + (f" ({source})" if source else "")
+            )
+        audit = assessment.get("audit_view")
+        if isinstance(audit, dict):
+            assurance = []
+            if status := _text(audit.get("status")):
+                assurance.append(f"status {status}")
+            if consistency := _text(audit.get("consistency")):
+                assurance.append(f"evidence consistency {consistency}")
+            if isinstance(audit.get("downgrade_supported"), bool):
+                assurance.append(
+                    "downgrade supported "
+                    + _boolean_text(audit.get("downgrade_supported"))
+                )
+            if assurance:
+                evidence.append("Audit assurance: " + "; ".join(assurance))
+        _append_section(lines, seen_values, "Evidence", bullets=evidence)
+        return lines
+
     _append_section(
         lines,
         seen_values,
@@ -562,6 +735,11 @@ def _assessment_content_lines(
                 "Present via SBOM attribution; not rediscovered in repository "
                 "manifests or lock files."
             )
+        elif basis == "unknown":
+            presence = (
+                "Dependency presence is unknown because the vulnerable package "
+                "could not be resolved."
+            )
         elif dependency.get("found") is False:
             presence = "The vulnerable component was not found in the assessed project."
         elif dependency.get("found") is True:
@@ -569,6 +747,8 @@ def _assessment_content_lines(
         else:
             presence = ""
         dependency_facts = []
+        if reason := _text(dependency.get("reason")):
+            dependency_facts.append(reason)
         if locked_version := _text(dependency.get("locked_version")):
             dependency_facts.append(f"Resolved version: {locked_version}")
         dependency_facts.extend(
@@ -610,12 +790,59 @@ def _assessment_content_lines(
         if source := _text(version.get("version_source")):
             status_parts.append(f"Source: {source}")
         if affected := _boolean_text(version.get("affected")):
-            status_parts.append(f"Affected releases found: {affected}")
+            status_parts.append(
+                f"Any tracked dependency version affected: {affected}"
+            )
         if workspace_affected := _boolean_text(
             version.get("current_workspace_affected")
         ):
-            status_parts.append(f"Current workspace affected: {workspace_affected}")
-        product_versions = _text_list(version.get("affected_product_versions"))
+            status_parts.append(
+                f"Current dependency version affected: {workspace_affected}"
+            )
+        if release_affected := _boolean_text(
+            version.get("tracked_release_affected")
+        ):
+            status_parts.append(
+                f"Verified project release affected: {release_affected}"
+            )
+        project_versions = _text_list(
+            version.get("project_versions")
+            or version.get("affected_product_versions")
+        )
+        verified_affected = _text_list(
+            version.get("verified_affected_project_versions")
+        )
+        verified_unaffected = _text_list(
+            version.get("verified_unaffected_project_versions")
+        )
+        unknown_versions = _text_list(version.get("unknown_project_versions"))
+        unmatched_versions = _text_list(version.get("unmatched_project_versions"))
+        release_facts = []
+        if verified_affected:
+            release_facts.append(
+                "Verified project releases with an affected dependency: "
+                + ", ".join(verified_affected)
+            )
+        if verified_unaffected:
+            release_facts.append(
+                "Verified project releases outside the dependency range: "
+                + ", ".join(verified_unaffected)
+            )
+        if unknown_versions:
+            release_facts.append(
+                "Matched project releases with unresolved dependency versions: "
+                + ", ".join(unknown_versions)
+            )
+        if unmatched_versions:
+            release_facts.append(
+                "Unmatched project releases (not assessed): "
+                + ", ".join(unmatched_versions)
+            )
+        if project_versions and not release_facts:
+            release_facts.append(
+                "Processed project release candidates "
+                f"(not dependency versions): {', '.join(project_versions)}"
+            )
         _append_section(
             lines,
             seen_values,
@@ -625,9 +852,7 @@ def _assessment_content_lines(
                 _text(version.get("note")),
                 _text(version.get("workspace_note")),
             ],
-            [f"Affected product versions: {', '.join(product_versions)}"]
-            if product_versions
-            else [],
+            release_facts,
         )
 
     researcher = assessment.get("researcher_view")
@@ -703,45 +928,76 @@ def _assessment_record_lines(
         or _text(target.get("component_name"))
         or "Unknown"
     )
-    lines = [
-        f"[Automatic Assessment: {run_id}]",
-        f"Project: {project}",
-        f"Component: {component}",
-        f"Verdict: {_text(assessment.get('verdict')) or 'Inconclusive'}",
-        f"Confidence: {_text(assessment.get('confidence')) or 'unknown'}",
-        f"Exposure: {_text(assessment.get('exposure')) or 'unknown'}",
-    ]
+    compact = _has_executive_summary(assessment)
+    if compact:
+        lines = [
+            f"[Automatic Assessment: {run_id}]",
+            f"Target: {project} / {component}",
+            f"Disposition: {_text(assessment.get('verdict')) or 'Inconclusive'}",
+            f"Confidence: {_text(assessment.get('confidence')) or 'unknown'}",
+            f"Exposure: {_text(assessment.get('exposure')) or 'unknown'}",
+        ]
+    else:
+        lines = [
+            f"[Automatic Assessment: {run_id}]",
+            f"Project: {project}",
+            f"Component: {component}",
+            f"Verdict: {_text(assessment.get('verdict')) or 'Inconclusive'}",
+            f"Confidence: {_text(assessment.get('confidence')) or 'unknown'}",
+            f"Exposure: {_text(assessment.get('exposure')) or 'unknown'}",
+        ]
     seen_values: set[str] = set()
     lines.append(f"Run Source: {_text(record.get('source')) or 'legacy'}")
+    if completed_at := _text(
+        record.get("finished_at") or record.get("recorded_at")
+    ):
+        lines.append(f"Completed: {completed_at}")
+    if analysis_state := _text(assessment.get("analysis")):
+        lines.append(f"VEX Analysis State: {analysis_state}")
+    if assessment_justification := _text(assessment.get("justification")):
+        lines.append(f"VEX Justification: {assessment_justification}")
     if target_team := _text(context_summary.get("target_team")):
         lines.append(f"Target Team: {target_team}")
 
     adjusted_cvss = assessment.get("adjusted_cvss")
     if isinstance(adjusted_cvss, dict):
-        if adjusted_cvss.get("adjusted_score") is not None:
-            lines.append(
-                f"Adjusted CVSS score: {float(adjusted_cvss['adjusted_score']):.1f}"
+        if compact:
+            original_score = adjusted_cvss.get("original_score")
+            adjusted_score = adjusted_cvss.get("adjusted_score")
+            if original_score is not None and adjusted_score is not None:
+                lines.append(
+                    f"CVSS: {float(original_score):.1f} -> "
+                    f"{float(adjusted_score):.1f}"
+                )
+            elif adjusted_score is not None:
+                lines.append(f"CVSS: {float(adjusted_score):.1f}")
+        else:
+            if adjusted_cvss.get("adjusted_score") is not None:
+                lines.append(
+                    f"Adjusted CVSS score: {float(adjusted_cvss['adjusted_score']):.1f}"
+                )
+            if _text(adjusted_cvss.get("adjusted_vector")):
+                lines.append(
+                    "Adjusted CVSS vector: "
+                    f"{_text(adjusted_cvss.get('adjusted_vector'))}"
+                )
+            original_score = adjusted_cvss.get("original_score")
+            adjusted_score = adjusted_cvss.get("adjusted_score")
+            if original_score is not None and adjusted_score is not None:
+                lines.append(
+                    f"CVSS: {float(original_score):.1f} -> {float(adjusted_score):.1f}"
+                )
+            _append_section(
+                lines,
+                seen_values,
+                "CVSS rationale",
+                [_text(adjusted_cvss.get("summary"))],
+                _text_list(adjusted_cvss.get("reasons")),
             )
-        if _text(adjusted_cvss.get("adjusted_vector")):
-            lines.append(
-                "Adjusted CVSS vector: "
-                f"{_text(adjusted_cvss.get('adjusted_vector'))}"
-            )
-        original_score = adjusted_cvss.get("original_score")
-        adjusted_score = adjusted_cvss.get("adjusted_score")
-        if original_score is not None and adjusted_score is not None:
-            lines.append(
-                f"CVSS: {float(original_score):.1f} -> {float(adjusted_score):.1f}"
-            )
-        _append_section(
-            lines,
-            seen_values,
-            "CVSS rationale",
-            [_text(adjusted_cvss.get("summary"))],
-            _text_list(adjusted_cvss.get("reasons")),
-        )
 
     lines.extend(_assessment_content_lines(assessment, seen_values))
+    if compact:
+        return lines
 
     advisory_sources = _text_list(assessment.get("advisory_sources"))
     if advisory_sources:

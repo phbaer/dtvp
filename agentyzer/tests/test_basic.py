@@ -22,6 +22,8 @@ from src.llm import prompt_registry
 from src.llm.ollama_client import OllamaClient
 from src.llm.openwebui_client import OpenWebUIClient
 from src.main import (
+    _get_repo_refresh_seconds,
+    _refresh_configured_repository_caches,
     app,
 )
 from src.version import VERSION
@@ -51,6 +53,7 @@ def test_health_exposes_service_configuration_and_backend(client):
     assert configuration["features"]["request_model_override"] is True
     assert configuration["features"]["local_repository_research"] is True
     assert configuration["features"]["repository_archive_inspection"] is True
+    assert configuration["features"]["periodic_repository_refresh"] is True
 
     repositories = configuration["repositories"]
     assert repositories["workspace_dir"]
@@ -64,10 +67,59 @@ def test_health_exposes_service_configuration_and_backend(client):
     assert backend["jobs"]["available_slots"] >= 0
     assert "running" in backend["jobs"]["status_counts"]
     assert "AGENTYZER_MAX_CONCURRENT_JOBS" in backend["repositories"]["parallel_safety"]
+    assert "immediately before each assessment" in backend["repositories"]["update_strategy"]
 
     config_r = client.get("/configuration")
     assert config_r.status_code == 200
     assert config_r.json()["configuration"] == configuration
+
+
+def test_repo_refresh_interval_validation(monkeypatch):
+    monkeypatch.setenv("AGENTYZER_REPO_REFRESH_SECONDS", "0")
+    assert _get_repo_refresh_seconds() == 0
+
+    monkeypatch.setenv("AGENTYZER_REPO_REFRESH_SECONDS", "15")
+    assert _get_repo_refresh_seconds() == 60
+
+    monkeypatch.setenv("AGENTYZER_REPO_REFRESH_SECONDS", "invalid")
+    assert _get_repo_refresh_seconds() == 900
+
+
+def test_configured_repository_refresh_deduplicates_urls_and_reports_failures(
+    monkeypatch,
+):
+    refreshed: list[str] = []
+
+    async def _fake_refresh(component_cfg):
+        refreshed.append(component_cfg["name"])
+        if component_cfg["name"] == "broken":
+            raise RuntimeError("fetch failed")
+        return {"repo_path": "/tmp/cache", "commit": "abc123"}
+
+    monkeypatch.setattr(
+        "src.main.dependency_scanner.refresh_repo_cache",
+        _fake_refresh,
+    )
+
+    summary = asyncio.run(
+        _refresh_configured_repository_caches(
+            {
+                "components": {
+                    "first": {"url": "https://example.invalid/one.git"},
+                    "duplicate": {"url": "https://example.invalid/one.git"},
+                    "local-only": {"path": "/tmp/repo"},
+                    "broken": {"url": "https://example.invalid/two.git"},
+                }
+            }
+        )
+    )
+
+    assert refreshed == ["first", "broken"]
+    assert summary["configured"] == 2
+    assert summary["refreshed"] == 1
+    assert summary["failed"] == 1
+    assert summary["skipped"] == 2
+    assert summary["failed_components"] == ["broken"]
 
 
 def test_prompt_inspection_endpoint_is_opt_in_for_values(client):
@@ -351,16 +403,36 @@ def test_job_status_response_updates_model_wait_heartbeat():
             "activity": "Waiting for model response during LLM Reachability Analysis",
         },
     )
+    _apply_progress_event(
+        job,
+        {
+            "phase": "heartbeat",
+            "step": "llm_analyze_code",
+            "title": "LLM Reachability Analysis",
+            "agent": "code_scanner",
+            "activity": (
+                "Waiting for model response during LLM Reachability Analysis "
+                "(15s elapsed)"
+            ),
+        },
+    )
 
     response = _job_status_response(job)
 
     assert response.progress.current_activity == (
-        "Waiting for model response during LLM Reachability Analysis"
+        "Waiting for model response during LLM Reachability Analysis (15s elapsed)"
     )
     assert response.progress.active_agents[0].activity.startswith(
         "Waiting for model response"
     )
     assert response.progress.step_statuses["llm_analyze_code"] == "running"
+    wait_logs = [
+        entry
+        for entry in response.progress.logs
+        if "Waiting for model response" in str(entry.get("message", ""))
+    ]
+    assert len(wait_logs) == 1
+    assert "15s elapsed" in wait_logs[0]["message"]
 
 
 def test_job_status_response_adjusts_total_steps_for_filtered_advisory():
@@ -645,6 +717,48 @@ def test_openwebui_client_retries_with_smaller_output_on_context_error(monkeypat
     assert capture["requests"][1]["max_tokens"] == 3839
     request_trace = client.conversation_trace[0]["request"]
     assert request_trace["max_tokens"] == 3839
+    assert "context_adaptations" in request_trace
+
+
+def test_openwebui_client_compacts_and_retries_reported_request_size_error(
+    monkeypatch,
+):
+    capture = {}
+    context_error = (
+        "request (269100 tokens) exceeds the available context size "
+        "(262144 tokens), try increasing it."
+    )
+    responses = [
+        _FakeOpenWebUIResponse(status_code=400, json_data={"detail": context_error}),
+        _FakeOpenWebUIResponse(status_code=200),
+    ]
+
+    def fake_async_client(**kwargs):
+        return _FakeOpenWebUIClient(responses, capture)
+
+    monkeypatch.setattr("src.llm.openwebui_client.async_client", fake_async_client)
+
+    client = OpenWebUIClient(
+        host="https://webui.vp.apps.ge-healthcare.net",
+        model="mistral",
+        api_key="secret",
+        context_window_tokens=262144,
+    )
+    prompt = "source-line with symbols and punctuation\n" * 3000
+
+    result = asyncio.run(client.generate(prompt, num_predict=4096))
+
+    assert result == "ok"
+    assert len(capture["requests"]) == 2
+    assert len(capture["requests"][1]["messages"][0]["content"]) < len(prompt)
+    assert "truncated by Agentyzer" in capture["requests"][1]["messages"][0][
+        "content"
+    ]
+    assert capture["requests"][1]["max_tokens"] == 256
+    assert client.context_window_tokens == 262144
+    request_trace = client.conversation_trace[0]["request"]
+    assert request_trace["attempts"] == 2
+    assert request_trace["context_window_tokens"] == 262144
     assert "context_adaptations" in request_trace
 
 
