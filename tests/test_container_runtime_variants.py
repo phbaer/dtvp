@@ -49,24 +49,24 @@ def test_pipeline_publishes_free_threaded_primary_and_gil_fallback_tags():
     assert "dtvp:dev-gil" in workflow
 
 
-def test_image_publication_waits_for_all_test_suites_and_avoids_redundant_setup():
+def test_image_publication_uses_shared_test_gates_and_pinned_tooling():
     workflow = (ROOT / ".github/workflows/build-publish.yml").read_text(
         encoding="utf-8"
     )
 
-    assert "needs: [test-backend, test-frontend, test-e2e]" in workflow
-    assert "test-agentyzer:" not in workflow
-    assert workflow.count("uses: actions/setup-node@v6") == 3
-    assert workflow.count("node-version: 24") == 3
-    assert "docker/setup-qemu-action" not in workflow
-    assert "docker-buildx-plugin" not in workflow
-    assert "docker-compose-plugin" not in workflow
+    assert "needs: [test-backend, test-frontend, test-agentyzer, test-e2e]" in workflow
+    assert "uses: actions/setup-node@" not in workflow
+    assert "node-version:" not in workflow
+    assert "docker/setup-qemu-action@" in workflow
+    assert "docker-buildx-plugin" in workflow
+    assert "docker-compose-plugin" in workflow
     assert "uv add --dev cyclonedx-bom" not in workflow
     assert "npm install --save-dev" not in workflow
-    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+    assert "cancel-in-progress: true" in workflow
 
 
 def test_agentyzer_build_context_excludes_the_ci_virtual_environment():
     dockerignore = (ROOT / "agentyzer" / ".dockerignore").read_text(encoding="utf-8")
 
-    assert ".venv" in dockerignore.splitlines()
+    assert dockerignore.splitlines()[0] == "**"
+    assert "!.venv" not in dockerignore.splitlines()

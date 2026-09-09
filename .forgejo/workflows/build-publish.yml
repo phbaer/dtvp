@@ -130,7 +130,7 @@ jobs:
     runs-on: node
     timeout-minutes: 30
     container:
-      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install dependencies
@@ -397,6 +397,7 @@ jobs:
             VERSION="v$DTVP_VERSION"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "PACKAGE_VERSION=$DTVP_VERSION" >> $GITHUB_OUTPUT
       - name: Generate CHANGELOG.md for Docker
         run: |
           uv run git-cliff -o CHANGELOG.md
@@ -455,6 +456,7 @@ jobs:
           context: ./agentyzer
           build-args: |
             BUILD_NUMBER=${{ github.run_number }}
+            AGENTYZER_BUILD_VERSION=${{ steps.get_version.outputs.PACKAGE_VERSION }}
       - name: Build and Push backup scheduler
         id: build_backup_scheduler
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7

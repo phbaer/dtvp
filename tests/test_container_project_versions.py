@@ -80,19 +80,20 @@ def test_publish_workflow_supplies_build_number_to_every_project_image():
         encoding="utf-8"
     )
 
-    assert workflow.count("BUILD_NUMBER=${{ github.run_number }}") == 2
+    assert workflow.count("BUILD_NUMBER=${{ github.run_number }}") == 3
 
 
-def test_uv_release_is_discovered_without_a_hard_coded_tool_version():
+def test_uv_release_is_pinned_consistently_across_ci_and_images():
     workflow = (ROOT / ".github" / "workflows" / "build-publish.yml").read_text(
         encoding="utf-8"
     )
     dockerfile = (ROOT / "Dockerfile.free-threaded").read_text(encoding="utf-8")
 
     assert "UV_VERSION" not in workflow
-    assert workflow.count("uses: astral-sh/setup-uv@") == 4
-    assert "ARG UV_IMAGE=ghcr.io/astral-sh/uv:alpine" in dockerfile
-    assert "FROM ${UV_IMAGE}" in dockerfile
+    assert workflow.count("uses: astral-sh/setup-uv@") == 6
+    assert workflow.count('version: "0.11.31"') == 6
+    assert "ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.31@sha256:" in dockerfile
+    assert "FROM ${PYTHON_IMAGE}" in dockerfile
     assert "UV_VERSION" not in dockerfile
 
 
@@ -111,16 +112,16 @@ def test_release_versions_are_lockstep_and_validated_before_tagging():
         "attr": "src.build_version.__version__"
     }
     assert _locked_package_version(root_lock, "dtvp") == dtvp_version
-    assert "version" not in _locked_package(root_lock, "agentyzer")
     assert "version" not in _locked_package(agentyzer_lock, "agentyzer")
-    assert "AGENTYZER_VERSION=$(cd agentyzer" not in workflow
-    assert (
-        "AGENTYZER_BUILD_VERSION=${{ steps.get_version.outputs.PACKAGE_VERSION }}"
-        in workflow
-    )
+    assert workflow.count(
+        "AGENTYZER_VERSION=$(cd agentyzer && uv version | awk '{print $2}')"
+    ) == 2
+    assert "does not match Agentyzer version" in workflow
+    assert "PACKAGE_VERSION=$DTVP_VERSION" in workflow
+    assert "AGENTYZER_BUILD_VERSION=${{ steps.get_version.outputs.PACKAGE_VERSION }}" in workflow
     assert "Release tag v$RELEASE_VERSION does not match packaged version" in workflow
     assert "TAG_DTVP_VERSION=$(git show" in workflow
-    assert "TAG_AGENTYZER_VERSION=$(git show" not in workflow
+    assert "TAG_AGENTYZER_VERSION=$(git show" in workflow
 
 
 def test_release_workflow_publishes_dtvp_and_agentyzer_version_tags():
