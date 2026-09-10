@@ -18,7 +18,7 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: node
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install uv
         uses: astral-sh/setup-uv@v10.0.1
       - name: Install dependencies
@@ -47,7 +47,7 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: node
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Set up Node.js LTS
         uses: actions/setup-node@v6
         with:
@@ -77,7 +77,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.63.0-noble
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Set up Node.js LTS
         uses: actions/setup-node@v6
         with:
@@ -110,7 +110,7 @@ jobs:
       tag: ${{ steps.get_version.outputs.TAG }}
       tag_exists: ${{ steps.check_tag.outputs.TAG_EXISTS }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install uv
@@ -146,7 +146,7 @@ jobs:
     runs-on: node
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
@@ -166,7 +166,7 @@ jobs:
     runs-on: node
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
@@ -297,7 +297,7 @@ jobs:
     runs-on: node
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.RUNNER_PACKAGE_PUSH_TOKEN }}
           fetch-depth: 0
