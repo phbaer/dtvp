@@ -117,6 +117,7 @@ export interface GroupedVulnListMetadata {
     lifecycle?: string;
     inconsistency_reasons?: InconsistencyReason[];
     is_pending?: boolean;
+    is_approval_ready?: boolean;
     is_open?: boolean;
     is_assessed?: boolean;
     technical_state?: string;

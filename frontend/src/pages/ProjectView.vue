@@ -553,12 +553,13 @@ const listGroupLookup = computed(() => listBaseIndex.value.groupLookup)
 const showFilterDrawer = ref(false)
 
 const LIFECYCLE_OPTIONS = [
-    { value: 'OPEN', label: 'Open', color: 'bg-red-500', description: 'No global assessment AND at least one team assessment is missing' },
-    { value: 'ASSESSED', label: 'Assessed', color: 'bg-green-600', description: 'Approved assessments with a global assessment' },
+    { value: 'OPEN', label: 'Open', color: 'bg-red-500', description: 'No assessment has been recorded yet' },
+    { value: 'ASSESSED', label: 'Assessed', color: 'bg-green-600', description: 'Approved globally or covered by all required team assessments' },
     { value: 'ASSESSED_LEGACY', label: 'Assessed (Legacy)', color: 'bg-sky-600', description: 'Legacy assessments without structured DTvP format' },
     { value: 'INCOMPLETE', label: 'Incomplete', color: 'bg-amber-500', description: 'Some assessment for some version is missing, the others are identical' },
     { value: 'INCONSISTENT', label: 'Inconsistent', color: 'bg-indigo-500', description: 'Assessment states, team blocks, details, or rescoring metadata disagree' },
-    { value: 'NEEDS_APPROVAL', label: 'Needs Approval', color: 'bg-purple-500', description: 'When there\'s a need for an approval (flag)' }
+    { value: 'NEEDS_APPROVAL', label: 'Needs Approval', color: 'bg-purple-500', description: 'Assessment is awaiting reviewer approval' },
+    { value: 'READY_FOR_APPROVAL', label: 'Ready for Approval', color: 'bg-violet-500', description: 'All required assessments are documented and only reviewer approval remains' }
 ]
 
 const ANALYSIS_OPTIONS = [

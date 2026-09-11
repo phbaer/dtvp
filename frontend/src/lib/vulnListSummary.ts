@@ -2,7 +2,6 @@ import type { AffectedVersion, GroupedVuln, Instance } from '../types'
 import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
-    hasGlobalAssessmentForGroup,
     normalizeTags,
 } from './assessment-helpers'
 import { classifyGroup } from './group-classifier'
@@ -56,10 +55,8 @@ export const summarizeGroupForList = (
     teamMapping: Record<string, any>,
 ): GroupedVuln => {
     const classification = classifyGroup(group, teamMapping)
-    const isAssessed = (
-        hasGlobalAssessmentForGroup(group) &&
-        !classification.isPending
-    ) || classification.lifecycle === 'ASSESSED_LEGACY'
+    const isAssessed = classification.lifecycle === 'ASSESSED'
+        || classification.lifecycle === 'ASSESSED_LEGACY'
     const inconsistencyReasons = getGroupInconsistencyReasons(group)
 
     return {
@@ -84,6 +81,7 @@ export const summarizeGroupForList = (
             lifecycle: classification.lifecycle,
             inconsistency_reasons: inconsistencyReasons,
             is_pending: classification.isPending,
+            is_approval_ready: classification.isApprovalReady,
             is_open: classification.isOpen,
             is_assessed: isAssessed,
             technical_state: classification.technicalState,

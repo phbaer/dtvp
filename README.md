@@ -17,7 +17,8 @@ Copilot instructions, and `skills/*/SKILL.md` as short entry points back here.
 
 - Groups the same vulnerability across project versions and components.
 - Distinguishes open, assessed, incomplete, inconsistent, and approval-needed
-  lifecycle states.
+  lifecycle states, including a Ready for Approval filter for complete pending
+  assessments.
 - Supports global and team-specific assessments, CVSS rescoring, bulk repair,
   and audit-backed recovery of lost rescoring metadata.
 - Optionally integrates threat-model rescoring through tmrescore/vscorer.
@@ -363,6 +364,15 @@ aggregate state follows these rules:
   `FALSE_POSITIVE`, and `NOT_AFFECTED`.
 - A non-`NOT_SET` General assessment takes precedence; otherwise DTVP chooses
   the worst team state using the priority in `dtvp/logic.py`.
+- A reviewer-approved, non-pending General assessment is terminal and makes
+  the vulnerability `ASSESSED`, even if team-specific blocks were not all
+  recorded before approval. Without an approved General result, the
+  `ASSESSED` lifecycle requires a non-`NOT_SET` assessment block for every
+  normalized team tag. Legacy unstructured assessments retain their separate
+  `ASSESSED_LEGACY` classification.
+- Pending review with missing team or finding coverage remains `INCOMPLETE`;
+  pending review with all required assessments documented remains
+  `NEEDS_APPROVAL` and matches the overlapping `READY_FOR_APPROVAL` filter.
 - Inconsistency reasons are indexed separately: missing rescoring metadata,
   differing analysis states, differing structured team blocks, and differing
   substantive details. Selected reasons use OR semantics; filter categories
@@ -490,15 +500,23 @@ configured aliases; legacy component-scoped runs without that metadata remain
 visible for compatibility. Team mappings are compiled and component ownership
 is resolved once per card scope so switching filters does not repeatedly scan
 the full mapping. Advisory metadata remains vulnerability-wide context. An
-approved General assessment remains authoritative across teams; otherwise the
-tab badges and Next action state use assessment coverage from the selected
-team's visible findings. The card reports how many findings are inside the
+approved General assessment remains the authoritative aggregate state and makes
+the vulnerability done once approved, even when team coverage is incomplete.
+Before approval, a pending item with missing team or finding coverage is
+classified as `INCOMPLETE`, while complete-but-pending work remains
+`NEEDS_APPROVAL`. The overlapping `READY_FOR_APPROVAL` filter selects only the
+complete pending subset; the broader Needs Approval filter still includes
+incomplete pending work. The tab badges
+and Next action state use assessment coverage from the selected team's visible findings.
+The card reports how many findings are inside the
 active team scope, and stale asynchronous history loads are discarded when the
 selected scope changes. The top search result count is the final number of
 grouped vulnerabilities after every active filter, independent of how many
 paginated rows are currently loaded. When filters reduce the task, it is shown
 relative to the unfiltered task total. Every filter-chip count and the Team
 open/assessed breakdown is calculated from that same final filtered result.
+Pending-review groups remain on the open side of that breakdown until they are
+approved, even when their currently visible team blocks are populated.
 Complete task-wide facets remain available as filter choices even when their
 current filtered count is zero. Overlapping properties such as teams and
 inconsistency reasons can therefore have counts whose sum exceeds the final

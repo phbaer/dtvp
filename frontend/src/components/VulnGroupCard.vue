@@ -6,7 +6,7 @@ import { marked } from 'marked'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot } from 'lucide-vue-next'
 
-import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, hasGlobalAssessment, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
@@ -512,9 +512,7 @@ const isPendingReview = computed(() => {
 })
 
 const isAssessed = computed(() => {
-    return (
-        hasGlobalAssessment(mergedAssessmentData.value.blocks) && !isPendingReview.value
-    ) || displayState.value === 'ASSESSED_LEGACY'
+    return displayState.value === 'ASSESSED' || displayState.value === 'ASSESSED_LEGACY'
 })
 
 const assessedFoldClass = computed(() => {

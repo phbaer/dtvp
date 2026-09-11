@@ -609,8 +609,14 @@ describe('vulnListIndex', () => {
         })
         const item = buildVulnListItem(pending, {}, {})
 
+        expect(item.lifecycle).toBe('INCOMPLETE')
+        expect(item.isApprovalReady).toBe(false)
+        expect(matchesLifecycleFilter(item, ['INCOMPLETE'])).toBe(true)
         expect(matchesLifecycleFilter(item, ['NEEDS_APPROVAL'])).toBe(true)
+        expect(matchesLifecycleFilter(item, ['READY_FOR_APPROVAL'])).toBe(false)
         expect(matchesLifecycleFilter(item, ['OPEN'])).toBe(false)
+        expect(item.isOpen).toBe(true)
+        expect(item.isAssessed).toBe(false)
         expect(matchesStateFilters(item, {
             lifecycleFilters: ['NEEDS_APPROVAL'],
             analysisFilters: ['NOT_SET'],
@@ -636,6 +642,19 @@ describe('vulnListIndex', () => {
         })
         expect(matchesCompiledLifecycleFilter(item, emptyAnalysis)).toBe(true)
         expect(matchesCompiledStateFilters(item, emptyAnalysis)).toBe(false)
+
+        const ready = buildVulnListItem(makeGroup({
+            list_metadata: {
+                lifecycle: 'NEEDS_APPROVAL',
+                is_pending: true,
+                is_approval_ready: true,
+                is_open: true,
+                is_assessed: false,
+                technical_state: 'NOT_AFFECTED',
+            },
+        }), {}, {})
+        expect(ready.isApprovalReady).toBe(true)
+        expect(matchesLifecycleFilter(ready, ['READY_FOR_APPROVAL'])).toBe(true)
     })
 
     it('computes sidebar counts from indexed items', () => {

@@ -376,6 +376,20 @@ def _derive_group_lifecycle(
     ):
         return "INCONSISTENT"
 
+    missing_teams = [
+        team
+        for team in required_teams
+        if team not in summary["assessed_teams"]
+    ]
+
+    # Pending review always wins over legacy detection. If coverage is also
+    # incomplete, keep the lifecycle in INCOMPLETE; the pending flag still
+    # exposes the item through the separate NEEDS_APPROVAL filter.
+    if summary["is_pending_review"]:
+        if missing_teams or summary["has_missing_component"]:
+            return "INCOMPLETE"
+        return "NEEDS_APPROVAL"
+
     if not blocks and has_any:
         return "ASSESSED_LEGACY"
 
@@ -387,12 +401,15 @@ def _derive_group_lifecycle(
     ):
         return "ASSESSED_LEGACY"
 
-    if summary["is_pending_review"]:
-        return "NEEDS_APPROVAL"
+    # A reviewer-approved General assessment is terminal. It may have been
+    # approved before every team-specific block was recorded, but it still
+    # means the vulnerability is done rather than incomplete.
+    if has_global:
+        return "ASSESSED"
 
-    if not has_global and any(
-        team not in summary["assessed_teams"] for team in required_teams
-    ):
+    # Without an approved General result, every required team must have an
+    # assessment before the vulnerability can be considered complete.
+    if missing_teams:
         return "INCOMPLETE" if has_any else "OPEN"
 
     version_states = []
@@ -425,9 +442,6 @@ def _derive_group_lifecycle(
     if has_missing and has_any:
         return "INCOMPLETE" if len(set(non_empty_states)) <= 1 else "INCONSISTENT"
 
-    if has_global:
-        return "ASSESSED"
-
     if instances and not has_global:
         return "INCOMPLETE" if has_any else "OPEN"
 
@@ -454,26 +468,32 @@ def _build_group_list_metadata(
     normalized_tags = _normalize_group_tags(group.get("tags") or [], team_mapping)
     summary = _build_assessment_summary(group)
     inconsistency_reasons = _derive_group_inconsistency_reasons(group, summary)
+    # The wildcard mapping uses Unassigned as an ownership fallback. It is a
+    # reporting label, not a team that can provide an independent assessment.
+    required_teams = [
+        team for team in normalized_tags if team.casefold() != "unassigned"
+    ]
     lifecycle = _derive_group_lifecycle(
         group,
         summary,
-        normalized_tags,
+        required_teams,
         inconsistency_reasons,
     )
-    is_open = lifecycle == "OPEN" or (
-        summary["is_pending_review"]
-        and _has_open_team_assessment(summary, normalized_tags)
+    # Pending review is not done, even when all currently visible team blocks
+    # are populated. Lifecycle filters still keep NEEDS_APPROVAL separate from
+    # OPEN; this flag drives the two-way team open/assessed counters.
+    is_open = lifecycle == "OPEN" or summary["is_pending_review"]
+    is_approval_ready = (
+        summary["is_pending_review"] and lifecycle == "NEEDS_APPROVAL"
     )
 
     return {
         "lifecycle": lifecycle,
         "inconsistency_reasons": inconsistency_reasons,
         "is_pending": summary["is_pending_review"],
+        "is_approval_ready": is_approval_ready,
         "is_open": is_open,
-        "is_assessed": (
-            summary["has_global_assessment"] and not summary["is_pending_review"]
-        )
-        or lifecycle == "ASSESSED_LEGACY",
+        "is_assessed": lifecycle in {"ASSESSED", "ASSESSED_LEGACY"},
         "technical_state": summary["technical_state"],
         "assessed_teams": sorted(summary["assessed_teams"]),
         "component_names": _unique_non_empty_strings(

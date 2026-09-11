@@ -65,7 +65,7 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
     cvssVersionMismatchOnly: false,
     attributionAgeDays: null,
     attributionAgeMode: 'older',
-    lifecycleFilters: ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL'],
+    lifecycleFilters: ['OPEN', 'ASSESSED', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL', 'READY_FOR_APPROVAL'],
     analysisFilters: ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED'],
     sortBy: 'score',
     sortOrder: 'desc',
@@ -212,6 +212,7 @@ describe('vulnListViewModel', () => {
                 lifecycle: 'NEEDS_APPROVAL',
                 is_open: true,
                 is_pending: true,
+                is_approval_ready: true,
                 is_assessed: false,
                 technical_state: 'NOT_AFFECTED',
                 assessed_teams: ['team-a'],
@@ -241,6 +242,7 @@ describe('vulnListViewModel', () => {
         expect(view.filterCounts.ASSESSED).toBe(1)
         expect(view.filterCounts.INCOMPLETE).toBe(1)
         expect(view.filterCounts.NEEDS_APPROVAL).toBe(1)
+        expect(view.filterCounts.READY_FOR_APPROVAL).toBe(1)
         expect(view.analysisCounts.FALSE_POSITIVE).toBe(1)
         expect(view.analysisCounts.IN_TRIAGE).toBe(1)
         expect(view.teamTagCounts).toEqual({

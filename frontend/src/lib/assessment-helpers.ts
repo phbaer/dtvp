@@ -679,10 +679,14 @@ const hasOpenTeamAssessmentFromSummary = (
     const requiredTeams = teamMapping
         ? normalizeTags(requiredTeamsOrTags, teamMapping)
         : (requiredTeamsOrTags || []).map(tagToString).filter(Boolean);
+    const assessableTeams = requiredTeams.filter(team => assessmentTeamKey(team) !== 'unassigned');
 
-    if (requiredTeams.length > 0) {
-        const missingAssessment = requiredTeams.some(team => !summary.assessedTeams.has(team));
-        if (missingAssessment) return true;
+    if (assessableTeams.length > 0) {
+        const missingAssessment = assessableTeams.some(team => !summary.assessedTeams.has(team));
+        const singleTeamGlobalAssessment = assessableTeams.length === 1
+            && summary.hasGlobalAssessment
+            && summary.assessedTeams.size === 0;
+        if (missingAssessment && !singleTeamGlobalAssessment) return true;
     }
 
     if (summary.hasMissingComponent) return true;
@@ -787,11 +791,22 @@ const getGroupLifecycleFromSummary = (
     const requiredTeams = teamMapping
         ? normalizeTags(requiredTeamsOrTags, teamMapping)
         : (requiredTeamsOrTags || []).map(tagToString).filter(Boolean);
+    const assessableTeams = requiredTeams.filter(team => assessmentTeamKey(team) !== 'unassigned');
     const { allInstances, hasAnyAssessment, hasMissingComponent, blocks, hasGlobalAssessment: hasGlobal, isPendingReview } = summary;
     if (allInstances.length === 0) return 'OPEN';
 
     if (getGroupInconsistencyReasonsFromSummary(group, summary).length > 0) {
         return 'INCONSISTENT';
+    }
+
+    const missingTeams = (assessableTeams || []).filter((t: string) => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
+
+    // Pending review always wins over legacy detection. If coverage is also
+    // incomplete, keep the lifecycle in INCOMPLETE; the pending flag still
+    // exposes the item through the separate NEEDS_APPROVAL filter.
+    if (isPendingReview) {
+        if (missingTeams.length > 0 || hasMissingComponent) return 'INCOMPLETE';
+        return 'NEEDS_APPROVAL';
     }
 
     // If there are no structured assessment blocks but the system has a technical
@@ -813,12 +828,16 @@ const getGroupLifecycleFromSummary = (
         return 'ASSESSED_LEGACY';
     }
 
-    if (isPendingReview) return 'NEEDS_APPROVAL';
+    // A reviewer-approved General assessment is terminal. It may have been
+    // approved before every team-specific block was recorded, but it still
+    // means the vulnerability is done rather than incomplete.
+    if (hasGlobal) return 'ASSESSED';
 
-    const missingTeams = (requiredTeams || []).filter((t: string) => !blocks.some(b => b.team === t && b.state !== 'NOT_SET'));
+    // Without an approved General result, every required team must have an
+    // assessment before the vulnerability can be considered complete.
     // OPEN should only mean nothing is assessed yet. If a technical state exists but
-    // required team/global assessments are missing, classify it as INCOMPLETE.
-    if (!hasGlobal && missingTeams.length > 0) {
+    // required team assessments are missing, classify it as INCOMPLETE.
+    if (missingTeams.length > 0) {
         return hasAnyAssessment ? 'INCOMPLETE' : 'OPEN';
     }
 
@@ -848,8 +867,6 @@ const getGroupLifecycleFromSummary = (
         }
         return 'INCONSISTENT';
     }
-
-    if (hasGlobal) return 'ASSESSED';
 
     // Fallback: if we have components but no global, it's either INCONSISTENT, INCOMPLETE,
     // or if we specifically lack global and a team, it's OPEN.
@@ -949,7 +966,8 @@ export function matchesFilters(
                            (lifecycleFilters.includes('ASSESSED_LEGACY') && state === 'ASSESSED_LEGACY') ||
                            (lifecycleFilters.includes('INCOMPLETE') && state === 'INCOMPLETE') ||
                            (lifecycleFilters.includes('INCONSISTENT') && state === 'INCONSISTENT') ||
-                           (lifecycleFilters.includes('NEEDS_APPROVAL') && isPending);
+                           (lifecycleFilters.includes('NEEDS_APPROVAL') && isPending) ||
+                           (lifecycleFilters.includes('READY_FOR_APPROVAL') && isPending && state === 'NEEDS_APPROVAL');
 
     if (!lifecycleMatch) return false;
 

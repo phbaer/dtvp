@@ -4,7 +4,6 @@ import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
     hasCvssVersionMismatch,
-    hasGlobalAssessmentForGroup,
     normalizeTags,
     tagToString,
 } from './assessment-helpers'
@@ -67,6 +66,7 @@ export interface VulnListItem {
     inconsistencyReasons: InconsistencyReason[]
     lifecycle: string
     isPending: boolean
+    isApprovalReady: boolean
     isOpen: boolean
     isAssessed: boolean
     technicalState: string
@@ -347,6 +347,8 @@ const lifecycleAlias = (value: string): string | null => {
         NEEDS_REVIEW: 'NEEDS_APPROVAL',
         PENDING: 'NEEDS_APPROVAL',
         PENDING_REVIEW: 'NEEDS_APPROVAL',
+        READY_FOR_APPROVAL: 'READY_FOR_APPROVAL',
+        APPROVAL_READY: 'READY_FOR_APPROVAL',
     }
     return aliases[normalized] || null
 }
@@ -696,11 +698,17 @@ export function buildVulnListItem(
     const classification = {
         lifecycle: metadata?.lifecycle || fallbackClassification?.lifecycle || 'OPEN',
         isPending: metadata?.is_pending ?? fallbackClassification?.isPending ?? false,
+        isApprovalReady: metadata?.is_approval_ready
+            ?? (metadata
+                ? metadata.is_pending === true && metadata.lifecycle === 'NEEDS_APPROVAL'
+                : undefined)
+            ?? fallbackClassification?.isApprovalReady
+            ?? false,
         isOpen: metadata?.is_open ?? fallbackClassification?.isOpen ?? false,
         technicalState: metadata?.technical_state || fallbackClassification?.technicalState || 'NOT_SET',
     }
     const isAssessed = metadata?.is_assessed ?? (
-        (hasGlobalAssessmentForGroup(group) && !classification.isPending) ||
+        classification.lifecycle === 'ASSESSED' ||
         classification.lifecycle === 'ASSESSED_LEGACY'
     )
     const instanceCount = metadataNumber(metadata?.instance_count) ?? (group.affected_versions || [])
@@ -768,6 +776,7 @@ export function buildVulnListItem(
         inconsistencyReasons,
         lifecycle: classification.lifecycle,
         isPending: classification.isPending,
+        isApprovalReady: classification.isApprovalReady,
         isOpen: classification.isOpen,
         isAssessed,
         technicalState: classification.technicalState,
@@ -1085,7 +1094,8 @@ export function matchesLifecycleFilter(item: VulnListItem, lifecycleFilters: Fil
         (filters.includes('ASSESSED_LEGACY') && item.lifecycle === 'ASSESSED_LEGACY') ||
         (filters.includes('INCOMPLETE') && item.lifecycle === 'INCOMPLETE') ||
         (filters.includes('INCONSISTENT') && item.lifecycle === 'INCONSISTENT') ||
-        (filters.includes('NEEDS_APPROVAL') && item.isPending)
+        (filters.includes('NEEDS_APPROVAL') && item.isPending) ||
+        (filters.includes('READY_FOR_APPROVAL') && item.isApprovalReady)
     )
 }
 
@@ -1112,7 +1122,8 @@ export function matchesCompiledLifecycleFilter(
         (filters.lifecycleFilterSet.has('ASSESSED_LEGACY') && item.lifecycle === 'ASSESSED_LEGACY') ||
         (filters.lifecycleFilterSet.has('INCOMPLETE') && item.lifecycle === 'INCOMPLETE') ||
         (filters.lifecycleFilterSet.has('INCONSISTENT') && item.lifecycle === 'INCONSISTENT') ||
-        (filters.lifecycleFilterSet.has('NEEDS_APPROVAL') && item.isPending)
+        (filters.lifecycleFilterSet.has('NEEDS_APPROVAL') && item.isPending) ||
+        (filters.lifecycleFilterSet.has('READY_FOR_APPROVAL') && item.isApprovalReady)
     )
 }
 
@@ -1152,6 +1163,7 @@ export function computeListFilterCounts(
         FALSE_POSITIVE: 0,
         NOT_AFFECTED: 0,
         NEEDS_APPROVAL: 0,
+        READY_FOR_APPROVAL: 0,
     }
     const lifecycleFilters = normalizeFilterSelection(activeLifecycleFilters)
 
@@ -1162,6 +1174,7 @@ export function computeListFilterCounts(
         if (item.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++
         if (item.lifecycle === 'INCONSISTENT') counts.INCONSISTENT++
         if (item.isPending) counts.NEEDS_APPROVAL++
+        if (item.isApprovalReady) counts.READY_FOR_APPROVAL++
 
         if (lifecycleFilters.length === 0 || matchesLifecycleFilter(item, lifecycleFilters)) {
             counts[item.technicalState] = (counts[item.technicalState] || 0) + 1

@@ -275,6 +275,85 @@ def test_summary_list_metadata_includes_row_rollups():
     assert "dependency_chains" not in component
 
 
+def test_summary_approved_global_assessment_is_terminal_before_team_coverage():
+    group = {
+        "id": "CVE-2026-TEAM-COVERAGE",
+        "tags": ["TeamA", "TeamB"],
+        "affected_versions": [
+            {
+                "project_version": "1.0.0",
+                "components": [
+                    {
+                        "analysis_state": "NOT_AFFECTED",
+                        "analysis_details": (
+                            "--- [Team: General] [State: NOT_AFFECTED] ---\n"
+                            "--- [Team: TeamA] [State: NOT_AFFECTED] ---"
+                        ),
+                    }
+                ],
+            }
+        ],
+    }
+
+    assessed = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    assert assessed["lifecycle"] == "ASSESSED"
+    assert assessed["is_assessed"] is True
+    assert assessed["is_approval_ready"] is False
+    assert assessed["assessed_teams"] == ["TeamA"]
+
+    group["affected_versions"][0]["components"][0]["analysis_details"] += (
+        "\n[Status: Pending Review]"
+    )
+    pending = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    assert pending["lifecycle"] == "INCOMPLETE"
+    assert pending["is_approval_ready"] is False
+    assert pending["is_open"] is True
+    assert pending["is_assessed"] is False
+
+    group["affected_versions"][0]["components"][0]["analysis_details"] += (
+        "\n--- [Team: TeamB] [State: NOT_AFFECTED] ---"
+    )
+    pending_complete = summarize_grouped_vulnerabilities(
+        [group], {}
+    )[0]["list_metadata"]
+    assert pending_complete["lifecycle"] == "NEEDS_APPROVAL"
+    assert pending_complete["is_approval_ready"] is True
+    assert pending_complete["is_open"] is True
+    assert pending_complete["is_assessed"] is False
+
+    legacy_pending = {
+        **group,
+        "tags": ["TeamA"],
+        "affected_versions": [
+            {
+                "project_version": "1.0.0",
+                "components": [
+                    {
+                        "analysis_state": "NOT_AFFECTED",
+                        "analysis_details": "Legacy analyst assessment\n[Status: Pending Review]",
+                    }
+                ],
+            }
+        ],
+    }
+    legacy_pending_metadata = summarize_grouped_vulnerabilities(
+        [legacy_pending], {}
+    )[0]["list_metadata"]
+    assert legacy_pending_metadata["lifecycle"] == "INCOMPLETE"
+    assert legacy_pending_metadata["is_approval_ready"] is False
+    assert legacy_pending_metadata["is_open"] is True
+    assert legacy_pending_metadata["is_assessed"] is False
+
+    # Without an approved General result, missing team coverage remains
+    # incomplete until every required team records an assessment.
+    group["affected_versions"][0]["components"][0]["analysis_details"] = (
+        "--- [Team: TeamA] [State: NOT_AFFECTED] ---"
+    )
+    incomplete = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    assert incomplete["lifecycle"] == "INCOMPLETE"
+    assert incomplete["is_assessed"] is False
+
+
 def test_summary_list_metadata_identifies_multiple_inconsistency_reasons():
     shared_prefix = "--- [Team: team-a] [State: NOT_AFFECTED] ---\n"
     summaries = summarize_grouped_vulnerabilities(
@@ -481,6 +560,7 @@ def test_task_group_query_counts_needs_approval_once_per_group():
                 "lifecycle": "NEEDS_APPROVAL",
                 "is_open": False,
                 "is_pending": True,
+                "is_approval_ready": False,
                 "technical_state": "NOT_AFFECTED",
                 "component_names": ["library-a"],
                 "versions": ["1.0.0"],
@@ -499,6 +579,7 @@ def test_task_group_query_counts_needs_approval_once_per_group():
                 "lifecycle": "NEEDS_APPROVAL",
                 "is_open": False,
                 "is_pending": True,
+                "is_approval_ready": True,
                 "technical_state": "FALSE_POSITIVE",
                 "component_names": ["library-b"],
                 "versions": ["1.0.0"],
@@ -554,6 +635,34 @@ def test_task_group_query_counts_needs_approval_once_per_group():
     assert response["counts"]["filtered"]["lifecycle"]["NEEDS_APPROVAL"] == 2
     assert [item["id"] for item in response["items"]] == [
         "CVE-2026-PENDING-1",
+        "CVE-2026-PENDING-2",
+    ]
+
+    ready_response = query_task_groups(
+        build_task_group_query_index(groups),
+        q="",
+        lifecycle=["READY_FOR_APPROVAL"],
+        analysis=[],
+        tag="",
+        vuln_id="",
+        component="",
+        assignee="",
+        dependency=[],
+        versions=[],
+        cvss_mismatch=False,
+        attributed_before_days=None,
+        attribution_mode="older",
+        tmrescore=[],
+        tmrescore_proposal_ids=[],
+        sort_by="id",
+        sort_order="asc",
+        offset=0,
+        limit=10,
+    )
+
+    assert ready_response["counts"]["all"]["lifecycle"]["READY_FOR_APPROVAL"] == 1
+    assert ready_response["filtered"] == 1
+    assert [item["id"] for item in ready_response["items"]] == [
         "CVE-2026-PENDING-2",
     ]
 
