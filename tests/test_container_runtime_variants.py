@@ -48,7 +48,8 @@ def test_image_publication_waits_for_all_test_suites_and_avoids_redundant_setup(
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
 
 
-def test_agentyzer_build_context_excludes_the_ci_virtual_environment():
-    dockerignore = (ROOT / "agentyzer" / ".dockerignore").read_text(encoding="utf-8")
+def test_compose_uses_a_standalone_agentyzer_image():
+    compose = (ROOT / "compose.yml").read_text(encoding="utf-8")
 
-    assert ".venv" in dockerignore.splitlines()
+    assert "image: ${AGENTYZER_IMAGE:-agentyzer:dev}" in compose
+    assert "context: ./agentyzer" not in compose

@@ -71,8 +71,8 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Install frontend dependencies | `cd frontend && npm ci --include=optional` |
 | Start the full mock stack | `pm2 start ecosystem.config.js --update-env` |
 | Inspect or tail the stack | `pm2 list` / `pm2 logs` |
-| Run all Python tests, including Agentyzer | `uv run pytest` |
-| Run Agentyzer tests only | `cd agentyzer && uv run pytest` |
+| Run DTVP Python tests | `uv run pytest` |
+| Run Agentyzer tests | `cd ../agentyzer && uv run pytest` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |
@@ -81,9 +81,9 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 | Capture README screenshots | `cd frontend && npm run test:ui:docs` |
 | Start the packaged deployment | `cp .env.dist .env && docker compose up -d` |
 
-The root pytest configuration uses importlib import mode so `uv run pytest`
-can collect the DTVP and nested Agentyzer suites together even when both suites
-contain test modules with the same filename.
+The Agentyzer service is maintained in the sibling `../agentyzer` repository
+and has its own lockfile, test suite, CI pipeline, image, and release version.
+Run its tests from that repository when changing analyzer code.
 
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml`. Its image tag must exactly match the
@@ -100,8 +100,9 @@ manifest that range resolution requires. `Dockerfile.free-threaded` likewise
 uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
 argument to a versioned tag or digest when a reproducible external build needs
 an explicit override. Pull-request runs cancel superseded workflow executions,
-and image publication waits for Python (including Agentyzer), frontend, and
-browser tests. Frontend jobs select Node.js 24 and reuse npm's download cache.
+and image publication waits for DTVP's Python, frontend, and browser tests.
+Agentyzer image publication is handled by its standalone repository. Frontend
+jobs select Node.js 24 and reuse npm's download cache.
 The single-platform image builds reuse inline cache metadata from the `dev`
 images and exclude CI virtual environments from their build contexts. SBOM
 generation is reproducible and consumes frozen dependency state without
@@ -116,7 +117,7 @@ The committed frontend lockfile resolves packages only from the default
 | Path | Purpose |
 | :--- | :--- |
 | `dtvp/` | FastAPI routes, services, domain logic, runtime wiring, and integrations |
-| `agentyzer/` | Bundled code-analysis service and assessment pipeline |
+| `../agentyzer/` | Standalone code-analysis service and assessment pipeline |
 | `frontend/` | Vue 3, Vite, and Tailwind single-page application |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `tests/` | Backend pytest suite |
@@ -136,7 +137,7 @@ Browser
   -> Vue SPA (Vite in development, FastAPI/nginx in production)
   -> FastAPI backend
   -> Dependency-Track API + local cache
-  -> optional tmrescore and code-analysis services
+  -> optional tmrescore and external code-analysis services
 ```
 
 Important backend components:
@@ -963,12 +964,15 @@ reasoning. If the analyzer is unavailable, DTVP returns a labeled deterministic
 fallback. No benchmark is shown for `NOT_SET` assessments. Ratings are 1/F
 (contradiction) through 5/A (strong agreement).
 
-Bundled Agentyzer lives in `agentyzer/`, runs at `http://agentyzer:8000` in
-Compose, and exposes host port `8095` by default. PM2 uses the mock analyzer on
+Agentyzer lives in the sibling `../agentyzer` repository and runs at
+`http://agentyzer:8000` in Compose when the configured standalone image is
+available; the host port is `8095` by default. PM2 uses the mock analyzer on
 that port. DTVP optionally uses Agentyzer's compact, follow-up, and prompt
-inspection endpoints; persisted DTVP context remains the fallback.
+inspection endpoints; persisted DTVP context remains the fallback. Build the
+local image with `docker build -t agentyzer:dev ../agentyzer` or set
+`AGENTYZER_IMAGE` to a published image.
 
-Agentyzer prompt bundles live under `agentyzer/config/prompts/`. They enforce
+Agentyzer prompt bundles live under `../agentyzer/config/prompts/`. They enforce
 structured, conservative assessment contracts and support native tool calls or
 text directive fallbacks for allowlisted web/package/source research. The
 `clone_repository` / `CLONE_REPOSITORY` tool can additionally shallow-clone a
@@ -1076,10 +1080,11 @@ Deployment rules:
 
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
   archives survive container restarts.
-- Compose starts Agentyzer and persists control repositories, worktree locks,
-  and transient detached worktrees in the `agentyzer-repos` volume. Populate
-  or override the sanitized `agentyzer/config/repos.yaml` before enabling
-  automatic scans; never commit repository credentials. Agentyzer immediately
+- Compose starts the configured standalone Agentyzer image and persists control
+  repositories, worktree locks, and transient detached worktrees in the
+  `agentyzer-repos` volume. Configure the sanitized `repos.yaml` in the
+  standalone Agentyzer repository or image before enabling automatic scans;
+  never commit repository credentials. Agentyzer immediately
   clones or fetches every explicit URL-backed mapping on startup, refreshes
   those control repositories every `AGENTYZER_REPO_REFRESH_SECONDS`, and fetches
   again immediately before creating an assessment worktree. The periodic pass
@@ -1161,16 +1166,10 @@ and publishes only this validated free-threaded DTVP image. Its canonical tags
 are `latest`, release versions, `dev`, and PR tags; no GIL-enabled or duplicate
 variant tags are published.
 
-DTVP and Agentyzer release in lockstep from this monorepo. The root
-`pyproject.toml` is the single release-version source: Agentyzer derives its
-dynamic package metadata from that value, and its container build receives the
-same derived value as a build argument. Regenerate both lockfiles after changing
-the root version. A manually pushed `v*` tag must match the root packaged
-version before either container is published. The single Git tag identifies the
-shared source commit; the workflow publishes that version tag and `latest` to
-both the `dtvp` and `agentyzer` container packages. Agentyzer's
-health/configuration responses read the installed package metadata instead of
-a hard-coded API version.
+DTVP and Agentyzer are released independently. DTVP's workflow publishes the
+DTVP image, while the standalone Agentyzer workflow owns its package version,
+container tags, SBOM, and release tag. DTVP's `AGENTYZER_IMAGE` setting selects
+which analyzer image the Compose deployment consumes.
 
 Archive imports require read, BOM upload, and vulnerability-analysis update
 permissions in Dependency-Track. Scheduled snapshots and expanded Git trees
@@ -1244,7 +1243,7 @@ means the integration or override is disabled.
 | `DTVP_DEFAULT_PROJECT_FILTER` | Dashboard default project filter | empty |
 | `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` | Attribution-age presets | `7d,14d,28d` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
-| `BUILD_NUMBER` | Compose image build number, baked into DTVP and Agentyzer startup logs | `unknown` |
+| `BUILD_NUMBER` | Compose image build number, baked into DTVP startup logs | `unknown` |
 
 ### Project Archives
 
@@ -1296,6 +1295,7 @@ means the integration or override is disabled.
 
 | Variable | Purpose | Default |
 | :--- | :--- | :--- |
+| `AGENTYZER_IMAGE` | Standalone analyzer image consumed by Compose | `agentyzer:dev` |
 | `AGENTYZER_PORT` | Compose host port | `8095` |
 | `AGENTYZER_LOG_LEVEL` | Service log level | `INFO` |
 | `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
@@ -1336,9 +1336,10 @@ counts in pipeline evidence.
 ## SBOM, Documentation, And License
 
 The DTVP image contains CycloneDX frontend/backend SBOMs. The app exposes the
-combined document at `/api/sbom` and `/api/sbom/html`; CI publishes a separate
-Agentyzer SBOM. Production dependencies come from `frontend/package*.json`,
-`pyproject.toml`, and `uv.lock`; test/development dependencies are excluded.
+combined document at `/api/sbom` and `/api/sbom/html`. Agentyzer owns its own
+SBOM in the standalone repository. Production dependencies come from
+`frontend/package*.json`, `pyproject.toml`, and `uv.lock`; test/development
+dependencies are excluded.
 
 Documentation entry points:
 

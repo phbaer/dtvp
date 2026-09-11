@@ -1,6 +1,6 @@
 [project]
 name = "dtvp"
-version = "1.0.23"
+version = "1.0.24"
 authors = ["phbaer <git@ph.baer.one>"]
 urls = { "Homepage" = "https://baer.one", "Main repo" = "https://git.baer.one/phbaer/dtvp", "GitHub" = "https://github.com/phbaer/dtvp", "Mastodon" = "https://baer.im/@phbaer" }
 description = "A vulnerability management platform for dependency track"
@@ -21,7 +21,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "agentyzer",
     "httpx>=0.28.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
@@ -30,9 +29,6 @@ dev = [
     "git-cliff>=2.7.0",
     "cyclonedx-bom>=7.2.2",
 ]
-
-[tool.uv.sources]
-agentyzer = { path = "agentyzer", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

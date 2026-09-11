@@ -87,10 +87,7 @@ services:
     restart: unless-stopped
 
   agentyzer:
-    build:
-      context: ./agentyzer
-      args:
-        BUILD_NUMBER: ${BUILD_NUMBER:-unknown}
+    image: ${AGENTYZER_IMAGE:-agentyzer:dev}
     env_file:
       - path: .env
         required: false
@@ -123,7 +120,6 @@ services:
       - "${AGENTYZER_PORT:-8095}:8000"
     volumes:
       - agentyzer-repos:/app/repos
-      - ./agentyzer/config/repos.yaml:/app/config/repos.yaml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
