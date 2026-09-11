@@ -20,8 +20,8 @@ Local `.python-version` preferences are ignored by Git. Docker images currently
 use Python 3.14.
 
 The root pytest configuration uses importlib import mode and collects only
-`tests/`, so `uv run pytest` runs DTVP's suite independently of the legacy
-Agentyzer source directory.
+`tests/`. Agentyzer lives in its own repository and is not part of this
+checkout.
 
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml`. Its image tag must exactly match the

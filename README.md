@@ -171,7 +171,6 @@ Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
 | :--- | :--- |
 | `dtvp/` | Backend routes, domain logic, integrations, and migrations |
 | `frontend/` | Vue pages, components, API client, and browser tests |
-| `agentyzer/` | Legacy service checkout; independent of DTVP's Python environment |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `tests/` | Backend tests |
 | `data/` | Local mappings, rules, caches, and archives |
