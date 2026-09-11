@@ -61,8 +61,9 @@ strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
 `DTVP_HTTP_PORT` controls the host port. Persistent data lives in `./data`.
 
 The published DTVP image uses Python 3.14 free threading. Compose also starts
-Agentyzer; configure its repository mappings before enabling automatic scans.
-See [Deployment](docs/deployment.md) for networking, authentication, runtime
+Agentyzer; its source, image, and release are maintained in the sibling
+`../agentyzer` repository. Configure its repository mappings before enabling
+automatic scans. See [Deployment](docs/deployment.md) for networking, authentication, runtime
 checks, and release details, and [Configuration](docs/configuration.md) for
 all environment variables.
 
@@ -73,8 +74,8 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 
 | Task | Command |
 | :--- | :--- |
-| Run all Python tests, including Agentyzer | `uv run pytest` |
-| Run Agentyzer tests only | `cd agentyzer && uv run pytest` |
+| Run DTVP Python tests | `uv run pytest` |
+| Run Agentyzer tests | `cd ../agentyzer && uv run pytest` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- --run ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |
@@ -149,7 +150,7 @@ Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
 | :--- | :--- |
 | `dtvp/` | Backend routes, domain logic, integrations, and migrations |
 | `frontend/` | Vue pages, components, API client, and browser tests |
-| `agentyzer/` | Bundled code-analysis service |
+| `../agentyzer/` | Standalone code-analysis service and assessment pipeline |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `tests/` | Backend tests |
 | `data/` | Local mappings, rules, caches, and archives |
@@ -196,4 +197,5 @@ as routing hints; the generic entry point is `skills/project-entrypoint/SKILL.md
 ## License And SBOM
 
 [MIT License](LICENSE). The DTVP image includes CycloneDX frontend/backend SBOMs,
-served at `/api/sbom` and `/api/sbom/html`; CI also publishes an Agentyzer SBOM.
+served at `/api/sbom` and `/api/sbom/html`. Agentyzer publishes its own SBOM
+from its standalone repository.

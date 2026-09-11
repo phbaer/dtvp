@@ -73,7 +73,9 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 
 DTVP expects the Code Analysis backend to expose the following endpoints under its configured base URL (`DTVP_CODE_ANALYSIS_URL`):
 
-The repository includes Agentyzer under `agentyzer/` as the first-party implementation of this API. Docker Compose starts it as service `agentyzer` and points DTVP at `http://agentyzer:8000` by default.
+The standalone Agentyzer repository is the first-party implementation of this
+API. Docker Compose starts the configured `agentyzer` image as service
+`agentyzer` and points DTVP at `http://agentyzer:8000` by default.
 
 - `GET /health`
   - Returns service readiness and health.

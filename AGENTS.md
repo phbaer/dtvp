@@ -9,5 +9,9 @@ This repository uses a generic AI agent entry framework:
 - Do not maintain a second architecture overview in agent-specific files. `AGENTS.md` and `skills/*/SKILL.md` are routing hints that point agents back to the README.
 - The generic project skill entry point is `skills/project-entrypoint/SKILL.md`; `skills/dtvp-project-memory/SKILL.md` remains as a DTVP-named compatibility entry point.
 - Use `uv` for Python/backend work from the repository root. Use `npm` for the Node/frontend part from `frontend/`.
+- The standalone Agentyzer repository is at `../agentyzer`:
+  https://git.baer.one/phbaer/agentyzer. When checking the latest Agentyzer API
+  shape or analyzer behavior, inspect that repository rather than expecting a
+  nested copy in DTVP.
 
 The `.codex` and `.agents` directories in this checkout are mounted read-only, so the skillset lives in the normal repository tree.
