@@ -159,7 +159,7 @@ const lifecycleTooltip = computed(() => {
         ? `Lifecycle: Inconsistent — ${labels.join('; ')}`
         : 'Lifecycle: Inconsistent — assessments disagree across findings'
     }
-    case 'ASSESSED': return 'Lifecycle: Assessed — all required teams have completed their assessment'
+    case 'ASSESSED': return 'Lifecycle: Assessed — approved globally or all required teams have completed their assessment'
     case 'ASSESSED_LEGACY': return 'Lifecycle: Assessed (Legacy) — assessed before the multi-team workflow was introduced'
     case 'NEEDS_APPROVAL': return 'Lifecycle: Needs Approval — analyst assessment awaiting reviewer sign-off'
     default: return `Lifecycle: ${displayState.value}`

@@ -10,7 +10,6 @@ import type { GroupedVuln } from '../types'
 import {
     getGroupLifecycle,
     isPendingReview,
-    hasOpenTeamAssessment,
     getGroupTechnicalState,
     normalizeTags,
     matchesFilters,
@@ -21,8 +20,9 @@ export interface GroupClassification {
     lifecycle: string
     /** Whether the group is pending review */
     isPending: boolean
-    /** Whether this group has open team work.
-     *  True when lifecycle is OPEN, or when it's a pending group with open team assessments. */
+    /** Whether all required assessments are documented and approval is pending */
+    isApprovalReady: boolean
+    /** Whether this group is open/not done for the open/assessed counters. */
     isOpen: boolean
     /** The technical analysis state (EXPLOITABLE, IN_TRIAGE, NOT_SET, etc.) */
     technicalState: string
@@ -39,12 +39,16 @@ export function classifyGroup(
     const tags = group.tags || []
     const lifecycle = getGroupLifecycle(group, tags, teamMapping)
     const isPending = isPendingReview(group)
-    const openPendingWithOpenTeam = isPending && hasOpenTeamAssessment(group, tags, teamMapping)
-    const isOpen = lifecycle === 'OPEN' || openPendingWithOpenTeam
+    const isApprovalReady = isPending && lifecycle === 'NEEDS_APPROVAL'
+    // Pending review is not done even when no individual team currently has
+    // an open block. Keep the existing separate semantics for incomplete and
+    // inconsistent lifecycle counters.
+    const isOpen = lifecycle === 'OPEN' || isPending
 
     return {
         lifecycle,
         isPending,
+        isApprovalReady,
         isOpen,
         technicalState: getGroupTechnicalState(group),
     }
@@ -63,6 +67,7 @@ export interface FilterCounts {
     FALSE_POSITIVE: number
     NOT_AFFECTED: number
     NEEDS_APPROVAL: number
+    READY_FOR_APPROVAL: number
     [key: string]: number
 }
 
@@ -87,6 +92,7 @@ export function computeFilterCounts(
         FALSE_POSITIVE: 0,
         NOT_AFFECTED: 0,
         NEEDS_APPROVAL: 0,
+        READY_FOR_APPROVAL: 0,
     }
 
     for (const g of groups) {
@@ -99,12 +105,14 @@ export function computeFilterCounts(
         if (c.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++
         if (c.lifecycle === 'INCONSISTENT') counts.INCONSISTENT++
         if (c.isPending) counts.NEEDS_APPROVAL++
+        if (c.isApprovalReady) counts.READY_FOR_APPROVAL++
 
         // Analysis counts: only count when the group matches the active lifecycle filters
         const lifecycleActiveMatch =
             activeLifecycleFilters.length === 0 ||
             activeLifecycleFilters.includes(c.lifecycle) ||
-            (activeLifecycleFilters.includes('NEEDS_APPROVAL') && c.isPending)
+            (activeLifecycleFilters.includes('NEEDS_APPROVAL') && c.isPending) ||
+            (activeLifecycleFilters.includes('READY_FOR_APPROVAL') && c.isApprovalReady)
 
         if (lifecycleActiveMatch) {
             counts[c.technicalState]++

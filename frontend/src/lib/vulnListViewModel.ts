@@ -135,6 +135,7 @@ export const deriveVulnListResultCounts = (
             INCOMPLETE: 0,
             INCONSISTENT: 0,
             NEEDS_APPROVAL: 0,
+            READY_FOR_APPROVAL: 0,
         },
         inconsistency_reason: createInconsistencyReasonCounts(),
         analysis: createAnalysisCounts(),
@@ -166,6 +167,7 @@ export const deriveVulnListResultCounts = (
             counts.lifecycle[item.lifecycle]++
         }
         if (item.isPending) counts.lifecycle.NEEDS_APPROVAL++
+        if (item.isApprovalReady) counts.lifecycle.READY_FOR_APPROVAL++
 
         incrementResultCount(counts.analysis, item.technicalState)
         counts.dependency_relationship[item.dependencyRelationship.toLowerCase() as keyof RelationshipCounts]++
@@ -244,6 +246,7 @@ const createFilterCounts = (): FilterCounts => ({
     FALSE_POSITIVE: 0,
     NOT_AFFECTED: 0,
     NEEDS_APPROVAL: 0,
+    READY_FOR_APPROVAL: 0,
 })
 
 const createRelationshipCounts = (): RelationshipCounts => ({
@@ -310,6 +313,7 @@ const updateStaticFilterCounts = (
     if (item.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++
     if (item.lifecycle === 'INCONSISTENT') counts.INCONSISTENT++
     if (item.isPending) counts.NEEDS_APPROVAL++
+    if (item.isApprovalReady) counts.READY_FOR_APPROVAL++
 }
 
 const updateTechnicalStateCounts = (

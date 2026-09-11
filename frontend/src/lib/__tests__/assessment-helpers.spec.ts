@@ -63,6 +63,59 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
         });
 
+        it('should treat an approved General assessment as terminal', () => {
+            const group: any = {
+                id: 'CVE-GLOBAL-BEFORE-TEAMS',
+                tags: ['team-a', 'team-b'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                analysis_state: 'FALSE_POSITIVE',
+                                analysis_details: [
+                                    '--- [Team: General] [State: FALSE_POSITIVE] ---',
+                                    '--- [Team: team-a] [State: FALSE_POSITIVE] ---',
+                                ].join('\n'),
+                            },
+                        ],
+                    },
+                ],
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('ASSESSED');
+
+            group.affected_versions[0].components[0].analysis_details +=
+                '\n[Status: Pending Review]';
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
+
+            group.affected_versions[0].components[0].analysis_details +=
+                '\n--- [Team: team-b] [State: FALSE_POSITIVE] ---';
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('NEEDS_APPROVAL');
+
+            group.affected_versions[0].components[0].analysis_details =
+                '--- [Team: team-a] [State: FALSE_POSITIVE] ---';
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
+        });
+
+        it('should not classify pending legacy assessments as assessed', () => {
+            const group: any = {
+                id: 'CVE-PENDING-LEGACY',
+                tags: ['team-a'],
+                affected_versions: [
+                    {
+                        components: [
+                            {
+                                analysis_state: 'FALSE_POSITIVE',
+                                analysis_details: 'Legacy analyst assessment\n[Status: Pending Review]',
+                            },
+                        ],
+                    },
+                ],
+            };
+
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
+        });
+
         it('should return INCONSISTENT when multiple distinct component states exist but no assessment blocks', () => {
             const group: any = {
                 id: 'CVE-INCONSISTENT',

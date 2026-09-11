@@ -12,7 +12,7 @@ from .inconsistency import INCONSISTENCY_REASONS
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 7
+TASK_GROUP_QUERY_INDEX_VERSION = 8
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -255,6 +255,7 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         },
         "is_open": bool(metadata.get("is_open")),
         "is_pending": bool(metadata.get("is_pending")),
+        "is_approval_ready": bool(metadata.get("is_approval_ready")),
         "technical_state": str(metadata.get("technical_state") or "NOT_SET"),
         "dependency_relationship": _dependency_relationship_for_group(group),
         "cvss_version_mismatch": bool(metadata.get("cvss_version_mismatch")),
@@ -280,6 +281,7 @@ def _matches_lifecycle(fields: dict[str, Any], filters: set[str]) -> bool:
         or ("INCOMPLETE" in filters and lifecycle == "INCOMPLETE")
         or ("INCONSISTENT" in filters and lifecycle == "INCONSISTENT")
         or ("NEEDS_APPROVAL" in filters and fields["is_pending"])
+        or ("READY_FOR_APPROVAL" in filters and fields["is_approval_ready"])
     )
 
 
@@ -504,6 +506,7 @@ def _empty_lifecycle_counts() -> dict[str, int]:
         "INCOMPLETE": 0,
         "INCONSISTENT": 0,
         "NEEDS_APPROVAL": 0,
+        "READY_FOR_APPROVAL": 0,
     }
 
 
@@ -718,6 +721,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             lifecycle_counts[fields["lifecycle"]] += 1
         if fields["is_pending"]:
             lifecycle_counts["NEEDS_APPROVAL"] += 1
+        if fields["is_approval_ready"]:
+            lifecycle_counts["READY_FOR_APPROVAL"] += 1
 
         _increment(analysis_counts, fields["technical_state"])
         relationship_key = fields["dependency_relationship"].lower()
