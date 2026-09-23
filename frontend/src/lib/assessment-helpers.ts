@@ -1,7 +1,10 @@
 import type { GroupedVuln, InconsistencyReason, Tags, TagValue } from '../types';
 import { normalizeInconsistencyReasons } from './inconsistency';
+import { maskSsvcDetails, ssvcDetailsPattern, stripSsvcDetails } from './ssvc';
 
 export interface AssessmentBlock {
+    ssvc?: string;
+    ssvcDetails?: string;
     team: string; // 'General' or specific team name
     state: string;
     user: string;
@@ -167,7 +170,7 @@ const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary
         hasAnyAssessment: componentStates.some(state => state !== 'NOT_SET'),
         hasMissingComponent: componentStates.includes('NOT_SET'),
         hasGlobalAssessment: blocks.some(block => block.team === 'General' && block.state !== 'NOT_SET'),
-        isPendingReview: allInstances.some(instance => getInstanceAssessmentDetails(instance).includes('[Status: Pending Review]')),
+        isPendingReview: allInstances.some(instance => stripSsvcDetails(getInstanceAssessmentDetails(instance)).includes('[Status: Pending Review]')),
         technicalState,
     };
 };
@@ -204,6 +207,8 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         return cloneAssessmentBlocks(cached);
     }
 
+    const originalText = fullText;
+    fullText = maskSsvcDetails(fullText);
     // Split by team headers: --- [Team: Name] [State: State] ... ---
     const firstHeaderIndex = fullText.indexOf('--- [Team:');
 
@@ -274,6 +279,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
 
         // Extract [Assigned: ...] from the header (captured in the .*? wildcard)
         const headerText = match[0];
+        const ssvc = headerText.match(/\[SSVC:\s*([^\]]+)\]/)?.[1];
         const assignedMatch = headerText.match(/\[Assigned:\s*([^\]]+)\]/);
         const assigned: string[] = assignedMatch
             ? assignedMatch[1].split(',').map(u => u.trim()).filter(u => u.length > 0)
@@ -291,7 +297,9 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         const nextMatch = nextHeaderRegex.exec(fullText);
 
         const endOfContent = nextMatch ? nextMatch.index : fullText.length;
-        const rawContent = fullText.slice(startOfContent, endOfContent).trim();
+        const originalContent = originalText.slice(startOfContent, endOfContent).trim();
+        const ssvcDetails = [...originalContent.matchAll(ssvcDetailsPattern())].map(match => match[0].trimStart()).join('\n\n');
+        const rawContent = stripSsvcDetails(originalContent).trim();
 
         // Clean up redundant metadata from the display text
         let content = rawContent
@@ -313,6 +321,8 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
 
         blocks.push({
             team,
+            ssvc,
+            ssvcDetails,
             state,
             user,
             details: content,
@@ -325,7 +335,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         });
     }
 
-    setBoundedCacheEntry(parsedAssessmentBlocksCache, fullText, cloneAssessmentBlocks(blocks), MAX_PARSE_CACHE_ENTRIES);
+    setBoundedCacheEntry(parsedAssessmentBlocksCache, originalText, cloneAssessmentBlocks(blocks), MAX_PARSE_CACHE_ENTRIES);
     return blocks;
 }
 
@@ -349,9 +359,11 @@ export function constructAssessmentDetails(
         const evidenceStr = b.evidenceReviewed ? ' [Evidence Reviewed: yes]' : '';
         const versionCoverageStr = b.versionCoverageChecked ? ' [Version Coverage: yes]' : '';
         const ticketStr = b.ticket?.trim() ? ` [Ticket: ${formatAssessmentHeaderValue(b.ticket)}]` : '';
-        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr} ---`;
+        const ssvcStr = b.ssvc ? ` [SSVC: ${b.ssvc}]` : '';
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr}${ssvcStr} ---`;
         parts.push(header);
         if (b.details) parts.push(b.details);
+        if (b.ssvcDetails) parts.push(b.ssvcDetails);
     }
 
     // Calculate Aggregated State
@@ -410,13 +422,14 @@ export function sanitizeAssessmentDetails(
     });
 
     // Extract shared tags
+    const prose = stripSsvcDetails(fullText);
     const tags: string[] = [];
-    const rescoredMatch = fullText.match(/\[Rescored:\s*[\d\.]+\]/);
+    const rescoredMatch = prose.match(/\[Rescored:\s*[\d\.]+\]/);
     if (rescoredMatch) tags.push(rescoredMatch[0]);
-    const vectorMatch = fullText.match(/\[Rescored Vector:\s*[^\]]+\]/);
+    const vectorMatch = prose.match(/\[Rescored Vector:\s*[^\]]+\]/);
     if (vectorMatch) tags.push(vectorMatch[0]);
 
-    const isPending = fullText.includes('[Status: Pending Review]');
+    const isPending = prose.includes('[Status: Pending Review]');
 
     const result = constructAssessmentDetails(dedupedBlocks, tags, isPending);
     return { ...result, blocks: dedupedBlocks };
@@ -531,7 +544,7 @@ export function mergeTeamAssessment(
     const finalEvidenceReviewed = reviewMetadata?.evidenceReviewed ?? existingBlock?.evidenceReviewed ?? false;
     const finalVersionCoverageChecked = reviewMetadata?.versionCoverageChecked ?? existingBlock?.versionCoverageChecked ?? false;
     const finalTicket = reviewMetadata?.ticket !== undefined ? reviewMetadata.ticket.trim() : (existingBlock?.ticket || '');
-    const hasReviewMetadata = finalEvidenceReviewed || finalVersionCoverageChecked || Boolean(finalTicket);
+    const hasReviewMetadata = finalEvidenceReviewed || finalVersionCoverageChecked || Boolean(finalTicket) || Boolean(existingBlock?.ssvc);
     const isCleared = newState === 'NOT_SET' && !newDetails.trim() && (!newJustification || newJustification === 'NOT_SET') && !hasAssignees && !hasReviewMetadata;
 
     if (isCleared) {
@@ -545,6 +558,8 @@ export function mergeTeamAssessment(
         const finalAssigned = newAssigned !== undefined ? newAssigned : (existingAssigned || []);
 
         const newBlock: AssessmentBlock = {
+            ssvc: existingBlock?.ssvc,
+            ssvcDetails: existingBlock?.ssvcDetails,
             team: team,
             state: newState,
             user: user,
@@ -570,10 +585,11 @@ export function mergeTeamAssessment(
         tags = rescoredTags;
     } else {
         // Simple regex for now - assumes they are at the very start
-        const rescoredMatch = currentFullText.match(/\[Rescored:\s*[\d\.]+\]/);
+        const prose = stripSsvcDetails(currentFullText);
+        const rescoredMatch = prose.match(/\[Rescored:\s*[\d\.]+\]/);
         if (rescoredMatch) tags.push(rescoredMatch[0]);
 
-        const vectorMatch = currentFullText.match(/\[Rescored Vector:\s*[^\]]+\]/);
+        const vectorMatch = prose.match(/\[Rescored Vector:\s*[^\]]+\]/);
         if (vectorMatch) tags.push(vectorMatch[0]);
     }
 

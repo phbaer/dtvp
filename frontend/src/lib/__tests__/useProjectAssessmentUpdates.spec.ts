@@ -98,6 +98,19 @@ const mountHarness = (options: {
 }
 
 describe('useProjectAssessmentUpdates', () => {
+    it('uses per-finding details for mixed SSVC instead of copying the first result', () => {
+        const group = makeGroup()
+        const first = group.affected_versions[0]!.components[0]!
+        group.affected_versions[0]!.components.push({ ...first, finding_uuid: 'finding-2' })
+        const record = { model: 'ssvc:DT_DP', version: '1.0.0', answers: {}, rationale: '', outcome: null, assessor: 'reviewer', assessed_at: '2026-09-21' }
+        const details = `--- [Team: General] [State: NOT_SET] [SSVC: ${encodeURIComponent(JSON.stringify(record))}] ---`
+        const updated = applyAssessmentDataToGroup(group, {
+            analysis_details: details,
+            dtvp_results: [{ uuid: first.finding_uuid, new_details: details }, { uuid: 'finding-2', new_details: 'No SSVC' }],
+        })
+        expect(updated.affected_versions[0]!.components[1]!.analysis_details).toBe('No SSVC')
+        expect(updated.ssvc_summary).toMatchObject({ status: 'INCOMPLETE', assessed: 1, missing: 1 })
+    })
     it('applies assessment data to every component instance', () => {
         const group = makeGroup()
         const updated = applyAssessmentDataToGroup(group, {

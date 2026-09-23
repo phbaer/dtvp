@@ -19,7 +19,7 @@ vi.mock('../../lib/api', () => ({
     getKnownUsers: vi.fn(() => Promise.resolve([]))
 }))
 
-vi.mock('lucide-vue-next', () => ({
+vi.mock('@lucide/vue', () => ({
     ChevronDown: { template: '<span />' },
     ChevronUp: { template: '<span />' },
     Shield: { template: '<span />' },

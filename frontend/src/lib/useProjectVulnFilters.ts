@@ -27,7 +27,7 @@ export const DEFAULT_REVIEWER_LIFECYCLE_FILTERS = [
     'NEEDS_APPROVAL',
     'READY_FOR_APPROVAL',
 ]
-export const DEFAULT_ANALYST_LIFECYCLE_FILTERS = ['OPEN']
+export const DEFAULT_ANALYST_LIFECYCLE_FILTERS = ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
 export const DEFAULT_ANALYSIS_FILTERS = [
     'NOT_SET',
     'EXPLOITABLE',
@@ -71,6 +71,9 @@ const FILTER_QUERY_KEYS = new Set([
     'lifecycle',
     'analysis',
     'inconsistency_reason',
+    'original_severity',
+    'ssvc',
+    'evidence',
     'tag',
     'id',
     'cve',
@@ -126,6 +129,9 @@ export function useProjectVulnFilters({
     const lifecycleFilters = ref<string[]>([])
     const inconsistencyReasonFilters = ref<InconsistencyReason[]>([])
     const analysisFilters = ref<string[]>([])
+    const originalSeverityFilters = ref<string[]>([])
+    const ssvcFilters = ref<string[]>([])
+    const evidenceFilters = ref<string[]>([])
     const filtersReady = ref(false)
     const sortBy = ref('rescored-severity')
     const sortOrder = ref<'asc' | 'desc'>('desc')
@@ -159,6 +165,9 @@ export function useProjectVulnFilters({
     )
 
     const resetFilters = () => {
+        originalSeverityFilters.value = []
+        ssvcFilters.value = []
+        evidenceFilters.value = []
         analysisFilters.value = [...DEFAULT_ANALYSIS_FILTERS]
         lifecycleFilters.value = currentUserRole.value === 'REVIEWER'
             ? [...DEFAULT_REVIEWER_LIFECYCLE_FILTERS]
@@ -192,6 +201,9 @@ export function useProjectVulnFilters({
 
     const hydrateFiltersFromQuery = () => {
         const q = route.query
+        originalSeverityFilters.value = queryStringList(q.original_severity).flatMap(v => v.split(',')).map(v => v.trim().toUpperCase()).filter(Boolean)
+        ssvcFilters.value = queryStringList(q.ssvc).flatMap(v => v.split(',')).map(v => v.trim().toUpperCase()).filter(Boolean)
+        evidenceFilters.value = queryStringList(q.evidence).flatMap(v => v.split(',')).map(v => v.trim().toUpperCase()).filter(Boolean)
         if (!hasFilterQueryParams(q)) {
             resetFilters()
             flushSmartSearchFilter()
@@ -273,6 +285,12 @@ export function useProjectVulnFilters({
         const query: Record<string, string | string[]> = {
             ...(route.query as Record<string, string | string[]>),
         }
+        if (originalSeverityFilters.value.length) query.original_severity = originalSeverityFilters.value
+        else delete query.original_severity
+        if (ssvcFilters.value.length) query.ssvc = ssvcFilters.value
+        else delete query.ssvc
+        if (evidenceFilters.value.length) query.evidence = evidenceFilters.value
+        else delete query.evidence
 
         if (selectedDependencyFilters.value.length > 0) query.dependency = selectedDependencyFilters.value
         else delete query.dependency
@@ -349,6 +367,12 @@ export function useProjectVulnFilters({
 
     const syncFilterQueryToUrl = () => {
         const query = { ...route.query }
+        if (originalSeverityFilters.value.length) query.original_severity = originalSeverityFilters.value
+        else delete query.original_severity
+        if (ssvcFilters.value.length) query.ssvc = ssvcFilters.value
+        else delete query.ssvc
+        if (evidenceFilters.value.length) query.evidence = evidenceFilters.value
+        else delete query.evidence
 
         if (smartSearchInput.value.trim()) query.q = smartSearchInput.value.trim()
         else delete query.q
@@ -418,6 +442,9 @@ export function useProjectVulnFilters({
     }
 
     const filterState = computed<FilterState>(() => ({
+        originalSeverityFilters: originalSeverityFilters.value,
+        ssvcFilters: ssvcFilters.value,
+        evidenceFilters: evidenceFilters.value,
         sortBy: sortBy.value,
         sortOrder: sortOrder.value,
         dependencyFilter: selectedDependencyFilters.value,
@@ -439,6 +466,9 @@ export function useProjectVulnFilters({
     }))
 
     const handleFilterUpdate = (newFilters: FilterState) => {
+        originalSeverityFilters.value = newFilters.originalSeverityFilters || []
+        ssvcFilters.value = newFilters.ssvcFilters || []
+        evidenceFilters.value = newFilters.evidenceFilters || []
         sortBy.value = newFilters.sortBy
         sortOrder.value = newFilters.sortOrder
         dependencyFilter.value = newFilters.dependencyFilter
@@ -472,6 +502,9 @@ export function useProjectVulnFilters({
     })
 
     watch([
+        originalSeverityFilters,
+        ssvcFilters,
+        evidenceFilters,
         smartSearchInput,
         lifecycleFilters,
         inconsistencyReasonFilters,
@@ -510,6 +543,9 @@ export function useProjectVulnFilters({
 
     return {
         smartSearchInput,
+        originalSeverityFilters,
+        ssvcFilters,
+        evidenceFilters,
         appliedSmartSearchInput,
         flushSmartSearchFilter,
         parsedSmartSearch,

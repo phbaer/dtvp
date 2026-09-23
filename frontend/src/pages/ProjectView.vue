@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { EVIDENCE_UPDATED_EVENT } from '../lib/evidence'
 import { ref, watch, computed, inject, provide, onMounted, onUnmounted, onActivated, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -68,7 +69,7 @@ import VulnDetailInspector from '../components/VulnDetailInspector.vue'
 import BulkWorkflowModal from '../components/BulkWorkflowModal.vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 import StatsSidebar from '../components/StatsSidebar.vue'
-import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from 'lucide-vue-next'
+import { Archive, BarChart3, Download, Loader2, Plus, Search, SlidersHorizontal, X } from '@lucide/vue'
 
 const TASK_LIST_WINDOW_LIMIT = 250
 
@@ -257,6 +258,7 @@ const fetchTMRescoreProposals = async () => {
 onMounted(() => {
     fetchTeamMapping()
     fetchRescoreRules()
+    globalThis.addEventListener(EVIDENCE_UPDATED_EVENT, refreshEvidenceFilters)
 })
 
 onActivated(() => {
@@ -466,6 +468,7 @@ watch(() => viewMode.value, (newMode) => {
 })
 
 onUnmounted(() => {
+    globalThis.removeEventListener(EVIDENCE_UPDATED_EVENT, refreshEvidenceFilters)
     listItemCache.clear()
     projectHeaderState.bulkWorkflowHandler.value = null
 })
@@ -503,6 +506,9 @@ const {
     attributionAgeMode,
     lifecycleFilters,
     inconsistencyReasonFilters,
+    originalSeverityFilters,
+    ssvcFilters,
+    evidenceFilters,
     analysisFilters,
     filtersReady,
     sortBy,
@@ -588,6 +594,9 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     filtersReady: filtersReady.value,
     lifecycleFilters: lifecycleFilters.value,
     inconsistencyReasonFilters: inconsistencyReasonFilters.value,
+    originalSeverityFilters: originalSeverityFilters.value,
+    ssvcFilters: ssvcFilters.value,
+    evidenceFilters: evidenceFilters.value,
     defaultLifecycleFilters: defaultLifecycleFilters.value,
     analysisFilters: analysisFilters.value,
     defaultAnalysisFilters,
@@ -701,6 +710,9 @@ const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
     automaticAssessmentOutcomeFilter: selectedAutomaticAssessmentOutcomeFilters.value,
     automaticAssessmentRescoreFilter: selectedAutomaticAssessmentRescoreFilters.value,
     inconsistencyReasonFilter: inconsistencyReasonFilters.value,
+    originalSeverityFilters: originalSeverityFilters.value,
+    ssvcFilters: ssvcFilters.value,
+    evidenceFilters: evidenceFilters.value,
     versionFilterList: versionFilterList.value,
     cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
     attributionAgeDays: attributionAgeDays.value,
@@ -910,6 +922,10 @@ const refreshActiveTaskWindowAndDetails = async () => {
     if (selectedGroupId.value) {
         await refreshTaskGroupDetail(selectedGroupId.value, { showLoading: false })
     }
+}
+
+function refreshEvidenceFilters() {
+    if (isAnalysisViewActive.value && currentVulnTaskId.value) void loadTaskGroupWindow({ reset: true })
 }
 
 const selectedGroupHasAutomaticAssessment = computed(() =>
@@ -1167,6 +1183,9 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     lifecycleOptions: LIFECYCLE_OPTIONS,
     inconsistencyReasonFilters: inconsistencyReasonFilters.value,
     inconsistencyReasonOptions: INCONSISTENCY_REASON_OPTIONS,
+    originalSeverityFilters: originalSeverityFilters.value,
+    ssvcFilters: ssvcFilters.value,
+    evidenceFilters: evidenceFilters.value,
     analysisFilters: analysisFilters.value,
     analysisOptions: ANALYSIS_OPTIONS,
     dependencyFilters: selectedDependencyFilters.value,
@@ -1190,6 +1209,9 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
 }))
 
 const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
+    if (key === 'originalSeverity') { originalSeverityFilters.value = []; return }
+    if (key === 'ssvc') { ssvcFilters.value = []; return }
+    if (key === 'evidence') { evidenceFilters.value = []; return }
     switch (key) {
         case 'lifecycle':
             lifecycleFilters.value = allLifecycleFilterValues.value
@@ -1241,6 +1263,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
 }
 
 const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
+    originalSeverityFilters: originalSeverityFilters.value,
+    ssvcFilters: ssvcFilters.value,
+    evidenceFilters: evidenceFilters.value,
     smartSearchInput: smartSearchInput.value,
     idFilter: idFilter.value,
     tagFilter: tagFilter.value,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChevronLeft, ShieldCheck, Upload } from 'lucide-vue-next'
+import { ChevronLeft, ShieldCheck, Upload } from '@lucide/vue'
 import {
   getTMRescoreContext,
   getTMRescoreProjectState,

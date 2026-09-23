@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, Eye, History, Ban, FileText, Copy, ExternalLink, Trash2 } from 'lucide-vue-next'
+import { Zap, Loader2, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Clock, ClipboardCheck, Eye, History, Ban, FileText, Copy, ExternalLink, Trash2 } from '@lucide/vue'
 import {
     codeAnalysisBenchmarkResult,
     codeAnalysisCleanupVulnerability,

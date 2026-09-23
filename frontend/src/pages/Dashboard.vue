@@ -3,7 +3,7 @@ import { computed, inject, ref, watch } from 'vue'
 import { getProjectArchiveTaskDownloadUrl, getProjects, startProjectArchiveExport, waitForProjectArchiveTask } from '../lib/api'
 import { getRuntimeConfig } from '../lib/env'
 import type { Project, ProjectArchiveTask } from '../types'
-import { Archive, Download, Loader2, Search } from 'lucide-vue-next'
+import { Archive, Download, Loader2, Search } from '@lucide/vue'
 
 const query = ref(getRuntimeConfig('DTVP_DEFAULT_PROJECT_FILTER', '')) // Kept for client-side filtering
 const cveFilter = ref('') // Optional global CVE filter

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, toRefs, inject, type Ref } from 'vue'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown } from '@lucide/vue'
 import DependencyChainViewer from './DependencyChainViewer.vue'
 import { updateTeamMapping } from '../lib/api'
 import {

@@ -9,10 +9,14 @@ from datetime import datetime
 from typing import Any
 
 from .inconsistency import INCONSISTENCY_REASONS
+from .severity_services import SEVERITIES, group_original_severity
+from .ssvc_services import FILTER_VALUES as SSVC_FILTER_VALUES
+from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
+from .evidence_services import evidence_sources, evidence_counts
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 8
+TASK_GROUP_QUERY_INDEX_VERSION = 9
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -263,6 +267,8 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "base_score": _score_value(base_score),
         "rescored_score": _score_value(rescored_score),
         "base_severity_rank": _score_severity_rank(base_score),
+        "original_severity": group_original_severity(group),
+        "ssvc": (group.get("ssvc_summary") or {}).get("status", "UNASSESSED"),
         "rescored_severity_rank": _score_severity_rank(rescored_score),
         "assessment_restore_count": assessment_restore_count,
         "assessment_restore_recoverable_count": assessment_restore_recoverable_count,
@@ -402,6 +408,8 @@ def _matches_task_group_fields(
     lifecycle: set[str],
     inconsistency_reason: set[str],
     analysis: set[str],
+    original_severity: set[str],
+    ssvc: set[str],
     tag_terms: tuple[str, ...],
     team: str,
     vuln_id_terms: tuple[str, ...],
@@ -428,6 +436,10 @@ def _matches_task_group_fields(
     if not _matches_inconsistency_reason(fields, inconsistency_reason):
         return False
     if analysis and fields["technical_state"] not in analysis:
+        return False
+    if original_severity and fields["original_severity"] not in original_severity:
+        return False
+    if ssvc and fields["ssvc"] not in ssvc:
         return False
     if tag_terms and not _matches_all_terms(fields["tags_lower"], tag_terms):
         return False
@@ -697,6 +709,8 @@ def _automatic_assessment_facets_cache_key(
 
 
 def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    original_severity_counts = dict.fromkeys(SEVERITIES, 0)
+    ssvc_counts = dict.fromkeys(SSVC_FILTER_VALUES, 0)
     lifecycle_counts = _empty_lifecycle_counts()
     analysis_counts = _empty_analysis_counts()
     dependency_counts = _empty_dependency_counts()
@@ -712,6 +726,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     for row in rows:
         fields = row["fields"]
+        _increment(original_severity_counts, fields["original_severity"])
+        _increment(ssvc_counts, fields["ssvc"])
         if fields["lifecycle"] == "OPEN":
             lifecycle_counts["OPEN"] += 1
         if fields["lifecycle"] in lifecycle_counts and fields["lifecycle"] not in {
@@ -767,6 +783,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "total": len(rows),
+        "original_severity": original_severity_counts,
+        "ssvc": ssvc_counts,
         "lifecycle": lifecycle_counts,
         "analysis": analysis_counts,
         "dependency_relationship": dependency_counts,
@@ -848,6 +866,8 @@ def _team_group_counts(
 def _copy_counts(counts: dict[str, Any]) -> dict[str, Any]:
     return {
         **counts,
+        "original_severity": dict(counts.get("original_severity", {})),
+        "ssvc": dict(counts.get("ssvc", {})),
         "lifecycle": dict(counts.get("lifecycle", {})),
         "inconsistency_reason": dict(counts.get("inconsistency_reason", {})),
         "analysis": dict(counts.get("analysis", {})),
@@ -1035,6 +1055,8 @@ def _query_cache_key(
     lifecycle: list[str],
     inconsistency_reason: list[str],
     analysis: list[str],
+    original_severity: list[str],
+    ssvc: list[str],
     tag: str,
     team: str,
     vuln_id: str,
@@ -1082,6 +1104,8 @@ def _query_cache_key(
         _normalized_upper_tuple(lifecycle),
         _normalized_upper_tuple(inconsistency_reason),
         _normalized_upper_tuple(analysis),
+        _normalized_upper_tuple(original_severity),
+        _normalized_upper_tuple(ssvc),
         _lower(tag),
         _lower(team),
         _lower(vuln_id),
@@ -1303,6 +1327,9 @@ def query_task_groups(
     team_groups: dict[str, list[str]] | None = None,
     team_group_structure: dict[str, dict[str, list[str]]] | None = None,
     inconsistency_reason: list[str] | None = None,
+    original_severity: list[str] | None = None,
+    ssvc: list[str] | None = None,
+    evidence: list[str] | None = None,
     team: str = "",
     include_counts: bool = True,
     dynamic_context_key: str = "",
@@ -1316,11 +1343,15 @@ def query_task_groups(
         groups = groups_or_index if isinstance(groups_or_index, list) else []
         index = build_task_group_query_index(groups)
     rows = index["rows"]
+    evidence_snapshot = get_ssvc_enrichment_service().filter_snapshot()
+    evidence_set = _normalized_upper_set(evidence or [])
     cache_key = _query_cache_key(
         q=q,
         lifecycle=lifecycle,
         inconsistency_reason=inconsistency_reason or [],
         analysis=analysis,
+        original_severity=original_severity or [],
+        ssvc=ssvc or [],
         tag=tag,
         team=team,
         vuln_id=vuln_id,
@@ -1346,6 +1377,7 @@ def query_task_groups(
         sort_order=sort_order,
         now_ms=now_ms,
     )
+    cache_key += (tuple(sorted(evidence_set)), evidence_snapshot["revision"])
     while True:
         cached, pending, owns_reservation = _reserve_query_cache_entry(
             index,
@@ -1370,6 +1402,8 @@ def query_task_groups(
                 inconsistency_reason or []
             )
             analysis_set = _normalized_upper_set(analysis)
+            original_severity_set = _normalized_upper_set(original_severity or [])
+            ssvc_set = _normalized_upper_set(ssvc or [])
             tag_terms = tuple(_lower(tag).split())
             team_filter = _lower(team)
             vuln_id_terms = tuple(_lower(vuln_id).split())
@@ -1408,6 +1442,9 @@ def query_task_groups(
                 or lifecycle_set
                 or inconsistency_reason_set
                 or analysis_set
+                or original_severity_set
+                or ssvc_set
+                or evidence_set
                 or tag_terms
                 or team_filter
                 or vuln_id_terms
@@ -1433,12 +1470,15 @@ def query_task_groups(
                 matching_indices = [
                     row_index
                     for row_index in candidate_indices
-                    if _matches_task_group_fields(
+                    if (not evidence_set or evidence_set.intersection(evidence_sources(rows[row_index]["fields"], evidence_snapshot)))
+                    and _matches_task_group_fields(
                         rows[row_index]["fields"],
                         q_terms=q_terms,
                         lifecycle=lifecycle_set,
                         inconsistency_reason=inconsistency_reason_set,
                         analysis=analysis_set,
+                        original_severity=original_severity_set,
+                        ssvc=ssvc_set,
                         tag_terms=tag_terms,
                         team=team_filter,
                         vuln_id_terms=vuln_id_terms,
@@ -1515,6 +1555,9 @@ def query_task_groups(
                         attribution_mode=normalized_mode,
                         now_ms=now_ms,
                     )
+                all_counts["evidence"] = evidence_counts(rows, evidence_snapshot)
+                if filtered_counts is not all_counts:
+                    filtered_counts["evidence"] = evidence_counts(filtered_rows, evidence_snapshot)
                 counts = {
                     "all": all_counts,
                     "filtered": filtered_counts,
@@ -1548,7 +1591,7 @@ def query_task_groups(
         else None
     )
     response = {
-        "items": [row["group"] for row in window],
+        "items": [{**row["group"], "evidence_sources": evidence_sources(row["fields"], evidence_snapshot)} for row in window],
         "total": index["total"],
         "filtered": filtered_count,
         "offset": effective_offset,

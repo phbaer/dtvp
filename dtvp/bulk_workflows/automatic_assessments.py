@@ -4,6 +4,7 @@ import hashlib
 import re
 from typing import Any
 
+from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..code_analysis_assessment_services import (
     discover_assessment_metadata,
     lower as _lower,
@@ -1476,7 +1477,10 @@ def build_automatic_assessment_payloads(
                         "component_uuid": instance["component_uuid"],
                         "vulnerability_uuid": instance["vulnerability_uuid"],
                         "state": item["target_state"],
-                        "details": item["target_details"],
+                        "details": preserve_ssvc_record(
+                            item["target_details"],
+                            instance.get("analysis_details") or instance.get("analysisDetails") or "",
+                        ),
                         "justification": item["target_justification"],
                         "suppressed": False,
                     },

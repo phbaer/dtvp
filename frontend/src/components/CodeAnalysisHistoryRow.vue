@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckCircle, ChevronDown, ChevronUp, Eye, History, Loader2, Trash2 } from 'lucide-vue-next'
+import { CheckCircle, ChevronDown, ChevronUp, Eye, History, Loader2, Trash2 } from '@lucide/vue'
 import type { CodeAnalysisResultRecord } from '../lib/api'
 
 defineProps<{

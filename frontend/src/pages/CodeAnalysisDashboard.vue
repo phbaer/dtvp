@@ -17,7 +17,7 @@ import {
     Trash2,
     XCircle,
     Zap,
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import {
     analysisQueueCancel,
     analysisQueueCancelQueued,

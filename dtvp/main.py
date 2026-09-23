@@ -146,6 +146,7 @@ from .runtime_value_services import (
     parse_iso_timestamp as parse_iso_timestamp_impl,
 )
 from .settings_routes import create_settings_router
+from .ssvc_enrichment_services import run_kev_refresh_loop
 from .startup_services import (
     StartupRuntimeTasks,
     start_application_runtime,
@@ -320,6 +321,9 @@ async def _initialize_application_runtime() -> None:
         # invalidate a deployment that explicitly requires free threading.
         validate_python_runtime()
         _runtime_tasks = await start_application_runtime(startup_service_deps)
+        kev_refresh_task = asyncio.create_task(run_kev_refresh_loop())
+        background_tasks.add(kev_refresh_task)
+        kev_refresh_task.add_done_callback(background_tasks.discard)
         snapshot_task = asyncio.create_task(run_project_archive_snapshot_loop())
         background_tasks.add(snapshot_task)
         snapshot_task.add_done_callback(background_tasks.discard)

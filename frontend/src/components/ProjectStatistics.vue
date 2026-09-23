@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue'
 import type { Statistics } from '../types'
-import { ShieldAlert, CheckCircle2, Info } from 'lucide-vue-next'
+import { ShieldAlert, CheckCircle2, Info } from '@lucide/vue'
 import { sortVersions } from '../lib/version'
 
 const props = withDefaults(defineProps<{

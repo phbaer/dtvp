@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
-import { Zap, X, Loader2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, AlertTriangle, Activity, RefreshCw } from 'lucide-vue-next'
+import { Zap, X, Loader2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, AlertTriangle, Activity, RefreshCw } from '@lucide/vue'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 import {
     codeAnalysisRunAutoSweep,

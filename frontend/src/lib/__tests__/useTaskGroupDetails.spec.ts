@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTaskGroupDetails } from '../useTaskGroupDetails'
 import type { GroupedVuln } from '../../types'
@@ -41,6 +41,21 @@ const createHarness = (
 }
 
 describe('useTaskGroupDetails', () => {
+    it('refreshes evidence without changing group identity or resetting assessment drafts', async () => {
+        const api = await import('../api')
+        const full = { ...group('CVE-2026-1234'), evidence_sources: ['NOT_CHECKED'] }
+        vi.mocked(api.getTaskVulnGroup).mockResolvedValue(full)
+        const { details, listGroups } = createHarness({ [full.id]: group(full.id, true) })
+        await details.ensureFullGroup(full.id)
+        const original = details.selectedGroup.value
+        listGroups.value[full.id] = { ...group(full.id, true), evidence_sources: ['KEV'] }
+        await nextTick()
+        expect(details.selectedGroup.value).toBe(original)
+        expect(details.selectedGroup.value?.evidence_sources).toEqual(['KEV'])
+        expect(details.selectedGroup.value?.title).toBe('full')
+        expect(details.fullGroupCache.value[full.id]?.evidence_sources).toEqual(['KEV'])
+        expect(api.getTaskVulnGroup).toHaveBeenCalledTimes(1)
+    })
     beforeEach(() => {
         vi.clearAllMocks()
     })

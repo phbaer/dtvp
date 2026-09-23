@@ -1360,6 +1360,29 @@ class CacheManager:
             "dtvpSyncError": overlay.get("last_error"),
         }
 
+    def get_cached_assessment_details(self, instances: List[Dict[str, Any]]) -> List[str]:
+        """Read trusted metadata without fetching Dependency-Track on the write path."""
+        finding_analyses: dict[str, dict[tuple[str, str, str], dict]] = {}
+        result = []
+        for instance in instances:
+            key = tuple(instance[name] for name in (
+                "project_uuid", "component_uuid", "vulnerability_uuid"
+            ))
+            analysis = self.get_assessment_overlay(*key)
+            if analysis is None:
+                analysis = self._load_project_cache(self._analysis_path(*key), None)
+            if analysis is None:
+                project_uuid = key[0]
+                if project_uuid not in finding_analyses:
+                    findings = self._load_project_cache(self._findings_path(project_uuid), []) or []
+                    finding_analyses[project_uuid] = {
+                        self._finding_analysis_key(project_uuid, finding): finding.get("analysis") or {}
+                        for finding in findings
+                    }
+                analysis = finding_analyses[project_uuid].get(key, {})
+            result.append(analysis.get("analysisDetails") or analysis.get("analysis_details") or "")
+        return result
+
     def _finding_cache_identity(
         self, finding: Dict[str, Any]
     ) -> Optional[Tuple[str, Tuple[str, ...]]]:

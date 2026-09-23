@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { AlertTriangle, CheckCircle, Copy, Download, ExternalLink, Layers, Loader2, X } from 'lucide-vue-next'
+import { AlertTriangle, CheckCircle, Copy, Download, ExternalLink, Layers, Loader2, X } from '@lucide/vue'
 import {
     applyBulkWorkflow,
     buildBulkWorkflowDocument,

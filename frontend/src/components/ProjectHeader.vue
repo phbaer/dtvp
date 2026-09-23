@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { BarChart3, Calculator, Layers, LayoutList, ChevronRight } from 'lucide-vue-next'
+import { BarChart3, Calculator, Layers, LayoutList, ChevronRight } from '@lucide/vue'
 
 const { projectName, viewMode, isAllProjects, userRole, incompleteCount, assessmentRestoreCount } = defineProps<{
     projectName: string

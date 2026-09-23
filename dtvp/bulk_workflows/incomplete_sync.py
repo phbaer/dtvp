@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..logic import STATE_PRIORITY, calculate_aggregated_state
 from .assessment_restore import selected_groups
 from .base import BulkWorkflowContext, BulkWorkflowPlugin
@@ -169,7 +170,10 @@ def build_incomplete_sync_payloads(
                         "component_uuid": instance["component_uuid"],
                         "vulnerability_uuid": instance["vulnerability_uuid"],
                         "state": change["target_state"],
-                        "details": change["target_details"],
+                        "details": preserve_ssvc_record(
+                            change["target_details"],
+                            instance.get("analysis_details") or instance.get("analysisDetails") or "",
+                        ),
                         "justification": instance.get("justification"),
                         "suppressed": False,
                     },

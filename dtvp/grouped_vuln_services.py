@@ -558,6 +558,8 @@ def summarize_grouped_vulnerabilities(
                 "title",
                 "description",
                 "severity",
+                "original_severity",
+                "ssvc_summary",
                 "cvss",
                 "cvss_score",
                 "cvss_vector",

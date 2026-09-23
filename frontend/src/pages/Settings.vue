@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, inject, watch } from 'vue'
-import { Archive, Download, RefreshCw, Upload, X } from 'lucide-vue-next'
+import { Archive, Download, RefreshCw, Upload, X } from '@lucide/vue'
 import {
     applyProjectArchiveImport,
     getProjectArchiveSnapshotDownloadUrl,

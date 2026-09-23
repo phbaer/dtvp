@@ -25,6 +25,7 @@ const filters = (): FilterState => ({
 })
 
 const resultCounts: TaskVulnGroupListCounts = {
+    evidence: { KEV: 2, CISA_SSVC: 1, NOT_CHECKED: 1 },
     total: 2,
     lifecycle: { INCONSISTENT: 2 },
     inconsistency_reason: {
@@ -77,6 +78,28 @@ const mountSidebar = () => mount(StatsSidebar, {
 })
 
 describe('StatsSidebar inconsistency reasons', () => {
+    it('shows evidence counts and toggles each selection without changing lifecycle', async () => {
+        const wrapper = mountSidebar()
+        const buttons = wrapper.get('[data-testid="evidenceFilters"]').findAll('button')
+        const kev = buttons.find(button => button.text().includes('KEV listed'))!
+        const cisa = buttons.find(button => button.text().includes('CISA SSVC available'))!
+        expect(kev.text()).toContain('2')
+        expect(cisa.text()).toContain('1')
+        expect(wrapper.text()).toContain('Unchecked is not')
+        await kev.trigger('click')
+        let update = wrapper.emitted('update:filters')!.at(-1)![0] as FilterState
+        expect(update.evidenceFilters).toEqual(['KEV'])
+        expect(update.lifecycleFilters).toEqual([])
+        await wrapper.setProps({ filters: update })
+        expect(kev.attributes('aria-pressed')).toBe('true')
+        await cisa.trigger('click')
+        update = wrapper.emitted('update:filters')!.at(-1)![0] as FilterState
+        expect(update.evidenceFilters).toEqual(['KEV', 'CISA_SSVC'])
+        await wrapper.setProps({ filters: update })
+        await kev.trigger('click')
+        expect((wrapper.emitted('update:filters')!.at(-1)![0] as FilterState).evidenceFilters).toEqual(['CISA_SSVC'])
+        wrapper.unmount()
+    })
     it('adds the inconsistent lifecycle and clears reasons when it is removed', async () => {
         const wrapper = mountSidebar()
         const reasonButton = wrapper.findAll('button')

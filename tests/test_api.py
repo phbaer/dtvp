@@ -1378,6 +1378,44 @@ def test_get_task_group_details_window_returns_full_groups(client):
     assert full_component["dependency_chains"] == ["root > library-a"]
 
 
+def test_evidence_filters_and_metadata_on_all_task_group_routes(client, monkeypatch, tmp_path):
+    from dtvp import general_api_routes, task_group_query_services
+    from dtvp.ssvc_enrichment_services import SsvcEnrichmentService
+
+    service = SsvcEnrichmentService(str(tmp_path / "evidence.sqlite3"))
+    service._cache("kev", {"checked": service.clock(), "data": {"CVE-2026-1234": {"value": "A"}}})
+    service._cache("CVE-2026-5678", {"checked": service.clock(), "data": {"value": "P"}})
+    for module in (general_api_routes, task_group_query_services):
+        monkeypatch.setattr(module, "get_ssvc_enrichment_service", lambda: service)
+    groups = [
+        {"id": "GHSA-alias", "aliases": ["CVE-2026-1234"], "affected_versions": []},
+        {"id": "CVE-2026-5678", "affected_versions": []},
+        {"id": "CVE-2026-9999", "affected_versions": []},
+    ]
+    task_id = "evidence-filters"
+    main.tasks[task_id] = {
+        "_owner": "testuser", "status": "completed", "result_mode": "summary",
+        "result": groups, "_full_result_by_id": {group["id"]: group for group in groups},
+    }
+    try:
+        for route in ("groups", "group-details"):
+            response = client.get(f"/api/tasks/{task_id}/{route}", params={"evidence": ["KEV", "CISA_SSVC"]})
+            assert response.status_code == 200
+            result = response.json()
+            assert result["filtered"] == 2
+            assert {item["id"] for item in result["items"]} == {group["id"] for group in groups[:2]}
+            assert all(item["evidence_sources"] for item in result["items"])
+            assert result["counts"]["filtered"]["evidence"]["KEV"] == 1
+            response = client.get(f"/api/tasks/{task_id}/{route}?evidence=KEV,CISA_SSVC")
+            assert response.json()["filtered"] == 2
+        response = client.get(f"/api/tasks/{task_id}/groups/GHSA-alias")
+        assert response.status_code == 200
+        assert response.json()["evidence_sources"] == ["KEV", "NOT_CHECKED"]
+        assert all("evidence_sources" not in group for group in groups)
+    finally:
+        main.tasks.pop(task_id, None)
+
+
 def test_get_task_groups_filters_by_tmrescore_proposal_ids_and_aliases(client):
     task_id = "task-list-query-tmrescore"
     main.tasks[task_id] = {

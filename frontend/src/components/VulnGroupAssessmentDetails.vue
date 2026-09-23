@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { History, ClipboardCopy, Plus } from 'lucide-vue-next'
+import { History, ClipboardCopy, Plus } from '@lucide/vue'
 import { parseAssessmentBlocks, type AssessmentBlock } from '../lib/assessment-helpers'
 import VulnGroupCardDependencies from './VulnGroupCardDependencies.vue'
 

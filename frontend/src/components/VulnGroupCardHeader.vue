@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, toRefs } from 'vue'
-import { CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from 'lucide-vue-next'
+import { CalendarClock, CheckCircle, ChevronDown, ChevronUp, AlertTriangle, CircleDot, Search, ShieldCheck, ShieldOff, Bug, GitBranch, Layers, Eye, Package, User } from '@lucide/vue'
 import type { GroupedVuln } from '../types'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 import { getGroupInconsistencyReasons } from '../lib/assessment-helpers'
 import { inconsistencyReasonLabel } from '../lib/inconsistency'
+import { ssvcLabel } from '../lib/ssvc'
+import { evidenceSources, evidenceLabel } from '../lib/evidence'
 
 const props = defineProps<{
   group: GroupedVuln
@@ -296,6 +298,13 @@ const componentSummary = computed(() => {
         </span>
         <!-- Close lifecycle pill if no analysis state -->
         <span v-else class="-ml-1.5"></span>
+
+        <span v-if="group.ssvc_summary && group.ssvc_summary.status !== 'UNASSESSED'" data-testid="ssvc-badge" class="rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-200" title="SSVC deployment priority (independent of CVSS)">SSVC: {{ ssvcLabel(group.ssvc_summary.status) }}</span>
+        <span v-for="source in evidenceSources(group).filter(value => ['KEV', 'CISA_SSVC'].includes(value))" :key="source" data-testid="evidence-badge"
+          class="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-200"
+          :title="`Cached official evidence, independent of saved SSVC. ${evidenceSources(group).map(evidenceLabel).join('; ')}`">
+          {{ source === 'KEV' ? 'KEV' : 'CISA SSVC' }}
+        </span>
 
         <span class="w-px h-3.5 bg-gray-700 mx-0.5 shrink-0"></span>
 

@@ -1,5 +1,7 @@
 import type { GroupedVuln, InconsistencyReason, TMRescoreProposal } from '../types'
 import type { CodeAnalysisAssessmentIndexRecord } from './api'
+import { ORIGINAL_SEVERITIES } from './ssvc'
+import { evidenceSources } from './evidence'
 import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
@@ -86,6 +88,9 @@ export interface VulnListItem {
 }
 
 export interface VulnListFilterInput {
+    originalSeverityFilters?: readonly string[]
+    ssvcFilters?: readonly string[]
+    evidenceFilters?: readonly string[]
     smartSearch?: ParsedVulnSearchQuery | string
     tagFilter?: string
     idFilter?: string
@@ -104,6 +109,9 @@ export interface VulnListFilterInput {
 }
 
 export interface CompiledVulnListFilters {
+    originalSeverityFilterSet: Set<string>
+    ssvcFilterSet: Set<string>
+    evidenceFilterSet: Set<string>
     smartSearch?: ParsedVulnSearchQuery | string
     dependencyFilter: DependencyRelationship[]
     dependencyFilterSet: Set<DependencyRelationship>
@@ -795,9 +803,10 @@ export function buildVulnListItem(
         stableRescoredScore,
         hasStableRescore,
         isRescoredOrModified,
-        originalSeverity: baseScoreValue != null && !Number.isNaN(Number(baseScoreValue))
-            ? scoreSeverity(Number(baseScoreValue))
-            : 'UNKNOWN',
+        originalSeverity: ORIGINAL_SEVERITIES.includes(group.original_severity || '') ? group.original_severity!
+            : typeof baseScoreValue === 'number' && Number.isFinite(baseScoreValue) && baseScoreValue >= 0 && baseScoreValue <= 10
+                ? scoreSeverity(baseScoreValue)
+                : group.rescored_cvss == null && ORIGINAL_SEVERITIES.includes(group.severity?.toUpperCase() || '') ? group.severity!.toUpperCase() : 'UNKNOWN',
         rescoredSeverity,
     }
 }
@@ -865,6 +874,9 @@ export function compileVulnListFilters(
 
     return {
         smartSearch: filters.smartSearch,
+        originalSeverityFilterSet: new Set((filters.originalSeverityFilters || []).map(v => v.toUpperCase())),
+        ssvcFilterSet: new Set((filters.ssvcFilters || []).map(v => v.toUpperCase())),
+        evidenceFilterSet: new Set((filters.evidenceFilters || []).map(v => v.toUpperCase())),
         dependencyFilter,
         dependencyFilterSet: new Set(dependencyFilter),
         tmrescoreProposalFilter,
@@ -1021,6 +1033,9 @@ export function matchesCompiledListFilters(
     if (!matchesCompiledTMRescoreSelection(item, filters)) {
         return false
     }
+    if (filters.originalSeverityFilterSet.size && !filters.originalSeverityFilterSet.has(item.originalSeverity)) return false
+    if (filters.ssvcFilterSet.size && !filters.ssvcFilterSet.has(item.group.ssvc_summary?.status || 'UNASSESSED')) return false
+    if (filters.evidenceFilterSet.size && !evidenceSources(item.group).some(value => filters.evidenceFilterSet.has(value))) return false
 
     if (!matchesCompiledAutomaticAssessmentSelection(item, filters)) {
         return false

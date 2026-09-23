@@ -14,7 +14,7 @@ vi.mock('../VulnGroupCard.vue', () => ({
     },
 }))
 
-vi.mock('lucide-vue-next', () => ({
+vi.mock('@lucide/vue', () => ({
     GripHorizontal: { template: '<span data-testid="grip-icon" />' },
     Minus: { template: '<span data-testid="minus-icon" />' },
     X: { template: '<span data-testid="x-icon" />' },

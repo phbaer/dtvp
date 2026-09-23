@@ -64,6 +64,7 @@ const automaticAssessmentRescoreOptions = [
 describe('projectVulnFilterChips', () => {
     it('builds labels for only the active non-default filters', () => {
         const chips = buildActiveFilterChips({
+            evidenceFilters: ['KEV', 'CISA_SSVC'],
             lifecycleFilters: ['OPEN'],
             lifecycleOptions,
             inconsistencyReasonFilters: ['ANALYSIS_STATE_MISMATCH'],
@@ -91,6 +92,7 @@ describe('projectVulnFilterChips', () => {
         })
 
         expect(chips).toEqual([
+            { key: 'evidence', label: 'Evidence: KEV listed, CISA SSVC available' },
             { key: 'lifecycle', label: 'Lifecycle: Open' },
             { key: 'inconsistencyReason', label: 'Inconsistency: Analysis states differ' },
             { key: 'dependency', label: 'Dependency: Direct, Unknown' },
@@ -137,6 +139,7 @@ describe('projectVulnFilterChips', () => {
         }
 
         expect(hasCustomProjectVulnFilterState(defaultInput)).toBe(false)
+        expect(hasCustomProjectVulnFilterState({ ...defaultInput, evidenceFilters: ['KEV'] })).toBe(true)
         expect(hasCustomProjectVulnFilterState({
             ...defaultInput,
             sortBy: 'id',

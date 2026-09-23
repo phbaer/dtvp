@@ -73,6 +73,19 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
 })
 
 describe('vulnListViewModel', () => {
+    it('filters and counts cached evidence independently of saved SSVC', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'CVE-2026-1234', evidence_sources: ['KEV', 'STALE'] }),
+            makeGroup({ id: 'CVE-2026-5678', evidence_sources: ['CISA_SSVC'] }),
+            makeGroup({ id: 'GHSA-unchecked', aliases: ['CVE-2026-9999'] }),
+            makeGroup({ id: 'GHSA-no-cve' }),
+        ], {})
+        expect(deriveVulnListResultCounts(items).evidence).toEqual({ KEV: 1, STALE: 1, CISA_SSVC: 1, NOT_CHECKED: 1, NO_CVE: 1 })
+        expect(deriveVulnListFilterModel(items, baseFilters({ evidenceFilters: ['KEV', 'CISA_SSVC'] })).matchingItems.map(item => item.id)).toEqual(['CVE-2026-1234', 'CVE-2026-5678'])
+        expect(deriveVulnListFilterModel(items, baseFilters({ evidenceFilters: ['KEV'], ssvcFilters: ['IMMEDIATE'] })).matchingItems).toEqual([])
+        expect(deriveVulnListFilterModel(items, baseFilters({ evidenceFilters: ['NOT_CHECKED'] })).matchingItems.map(item => item.id)).toEqual(['GHSA-unchecked'])
+        expect(deriveVulnListFilterModel(items, baseFilters({ evidenceFilters: ['NO_DATA'] })).matchingItems).toEqual([])
+    })
     beforeEach(() => {
         vi.useFakeTimers()
         vi.setSystemTime(nowMs)
