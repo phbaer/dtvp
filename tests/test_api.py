@@ -551,6 +551,8 @@ def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(clie
         ),
         {
             "assessment": {
+                "application_eligible": True,
+                "rescoring_eligible": True,
                 "affected": True,
                 "verdict": "Probably Affected",
                 "confidence": "High",
@@ -615,7 +617,7 @@ def test_bulk_automatic_assessment_preview_includes_reviewer_started_result(clie
     assert preview["items"][0]["rescore"]["proposed_severity"] == "LOW"
 
 
-def test_bulk_automatic_assessment_preview_imports_source_less_legacy_result(client):
+def test_bulk_automatic_assessment_preview_excludes_unverified_legacy_result(client):
     group = {
         "id": "CVE-2026-LEGACY-RUN",
         "title": "Unclassified legacy analyzer result",
@@ -718,24 +720,15 @@ def test_bulk_automatic_assessment_preview_imports_source_less_legacy_result(cli
 
     assert index_response.status_code == 200
     index = index_response.json()
-    assert index["records"] == [
-        {
-            "analysis_run_id": "source-less-legacy-run",
-            "vuln_id": group["id"].lower(),
-            "project_names": ["exampleapp"],
-            "component_names": ["owning-service", "vulnerable-library"],
-            "source_kind": "unknown",
-        }
-    ]
-    assert index["summary"]["indexed_assessment_results"] == 1
+    assert index["records"] == []
+    assert index["summary"]["indexed_assessment_results"] == 0
     assert response.status_code == 200
     preview = response.json()
-    assert preview["selectable_group_ids"] == [group["id"]]
-    assert preview["items"][0]["run_ids"] == ["source-less-legacy-run"]
-    assert preview["items"][0]["verdict_bucket"] == "NOT_AFFECTED"
+    assert preview["selectable_group_ids"] == []
+    assert preview["items"] == []
     assert preview["summary"]["stored_analysis_results"] == 1
-    assert preview["summary"]["usable_assessment_results"] == 1
-    assert preview["summary"]["matched_analysis_results"] == 1
+    assert preview["summary"]["usable_assessment_results"] == 0
+    assert main.code_analysis_result_store.get("source-less-legacy-run") is not None
 
 
 def test_rescore_rule_sync_preview_and_apply(client, mock_dt_client):
@@ -1655,6 +1648,8 @@ def test_get_task_groups_filters_and_annotates_from_persisted_assessment_metadat
         ),
         {
             "assessment": {
+                "application_eligible": True,
+                "rescoring_eligible": True,
                 "affected": False,
                 "verdict": "Not Affected",
                 "analysis": "No reachable path",

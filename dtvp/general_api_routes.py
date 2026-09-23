@@ -63,6 +63,7 @@ from .code_analysis_assessment_services import (
     assessment_status_for_group,
     build_assessment_match_index,
     discover_assessment_metadata,
+    record_application_eligible,
     records_for_group,
     record_vulnerability_id,
 )
@@ -2701,6 +2702,22 @@ def _register_assessment_routes(
                     validate_ssvc_evidence(req.ssvc)
                 except ValueError as exc:
                     raise HTTPException(status_code=422, detail=str(exc)) from exc
+        run_ids = set(req.analysis_run_ids)
+        for instance in req.instances:
+            instance_run_ids = instance.get("analysis_run_ids") or []
+            if not isinstance(instance_run_ids, list) or any(
+                not isinstance(run_id, str) for run_id in instance_run_ids
+            ):
+                raise HTTPException(status_code=422, detail="analysis_run_ids must be a list of strings")
+            run_ids.update(instance_run_ids)
+        for run_id in run_ids:
+            store = deps.code_analysis_result_store
+            record = store.get(run_id) if store is not None else None
+            if not record or not record_application_eligible(record):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Analyzer result is unverified or ineligible; rerun analysis before applying it.",
+                )
         payloads = deps.build_assessment_payloads(req, user, role)
         if "ssvc" not in req.model_fields_set:
             # Never trust client-supplied original_analysis/headers as authority

@@ -46,6 +46,8 @@ vi.mock('../../lib/analysisQueueStore', () => ({
 
 const makeAnalysisResult = (summary: string) => ({
     assessment: {
+        application_eligible: true,
+        rescoring_eligible: true,
         affected: false,
         verdict: 'Not Affected',
         confidence: 'High',
@@ -78,6 +80,7 @@ const expandDisclosure = async (wrapper: ReturnType<typeof mount>, label: string
 describe('CodeAnalysisPanel', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mocks.getResult.mockReset()
         clipboardWriteText.mockResolvedValue(undefined)
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
@@ -175,7 +178,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: index < 4 ? 'owned-service' : 'owned-worker',
             project_name: 'ExampleApp',
             source: 'manual',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: `2026-07-06T12:0${index}:00Z`,
         }))
         records[5].source = 'follow-up'
@@ -246,7 +249,7 @@ describe('CodeAnalysisPanel', () => {
                 project_name: 'ExampleApp',
                 source: 'benchmark',
                 status: 'completed',
-                summary: { verdict: 'Benchmark' },
+                summary: { application_eligible: true, verdict: 'Benchmark' },
                 finished_at: '2026-07-06T13:00:00Z',
             },
             {
@@ -256,7 +259,7 @@ describe('CodeAnalysisPanel', () => {
                 project_name: 'ExampleApp',
                 source: 'manual',
                 status: 'completed',
-                summary: { verdict: 'Not Affected' },
+                summary: { application_eligible: true, verdict: 'Not Affected' },
                 finished_at: '2026-07-06T12:00:00Z',
             },
         ])
@@ -374,7 +377,7 @@ describe('CodeAnalysisPanel', () => {
                 component_name: 'owned-worker',
                 project_name: 'ExampleApp',
                 source: 'automatic',
-                summary: { affected: false, verdict: 'Not Affected' },
+                summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
                 result: safer,
                 finished_at: '2026-07-06T12:00:00Z',
             },
@@ -384,7 +387,7 @@ describe('CodeAnalysisPanel', () => {
                 component_name: 'owned-service',
                 project_name: 'ExampleApp',
                 source: 'automatic',
-                summary: { affected: false, verdict: 'Probably Affected' },
+                summary: { application_eligible: true, affected: false, verdict: 'Probably Affected' },
                 result: uncertain,
                 finished_at: '2026-07-06T12:00:00Z',
             },
@@ -427,7 +430,7 @@ describe('CodeAnalysisPanel', () => {
                 source: 'automatic',
                 status: 'completed',
                 context_summary: { target_team: 'Security' },
-                summary: { verdict: 'Not Affected' },
+                summary: { application_eligible: true, verdict: 'Not Affected' },
                 result: makeAnalysisResult('Security assessment'),
             },
             {
@@ -438,7 +441,7 @@ describe('CodeAnalysisPanel', () => {
                 source: 'manual',
                 status: 'completed',
                 context_summary: { target_team: 'Runtime' },
-                summary: { verdict: 'Affected' },
+                summary: { application_eligible: true, verdict: 'Affected' },
             },
             {
                 analysis_run_id: 'security-alias-run',
@@ -448,7 +451,7 @@ describe('CodeAnalysisPanel', () => {
                 source: 'manual',
                 status: 'completed',
                 context_summary: { target_team: 'Sec Alias' },
-                summary: { verdict: 'Uncertain' },
+                summary: { application_eligible: true, verdict: 'Uncertain' },
             },
             {
                 analysis_run_id: 'legacy-run',
@@ -457,7 +460,7 @@ describe('CodeAnalysisPanel', () => {
                 project_name: 'ExampleApp',
                 source: 'manual',
                 status: 'completed',
-                summary: { verdict: 'Uncertain' },
+                summary: { application_eligible: true, verdict: 'Uncertain' },
             },
         ])
 
@@ -509,7 +512,7 @@ describe('CodeAnalysisPanel', () => {
             source: 'automatic',
             status: 'completed',
             context_summary: { target_team: 'Runtime' },
-            summary: { verdict: 'Affected' },
+            summary: { application_eligible: true, verdict: 'Affected' },
         }])
 
         const wrapper = mount(CodeAnalysisPanel, {
@@ -530,6 +533,40 @@ describe('CodeAnalysisPanel', () => {
         expect(wrapper.get('[data-testid="new-analysis-section"]').attributes('open')).toBeDefined()
     })
 
+    it.each([undefined, false])('keeps ineligible history readable without offering drafts (%s)', async eligible => {
+        const result = makeAnalysisResult('Unverified historical analysis')
+        Object.assign(result.assessment, { application_eligible: eligible })
+        const record = {
+            analysis_run_id: 'legacy-run',
+            vuln_id: 'CVE-2026-0001',
+            component_name: 'owned-service',
+            project_name: 'ExampleApp',
+            source: 'automatic',
+            status: 'completed',
+            summary: { application_eligible: eligible, verdict: 'Not Affected' },
+            result,
+        }
+        mocks.listResults.mockResolvedValue([record])
+        mocks.getResult.mockResolvedValue(record)
+        const wrapper = mount(CodeAnalysisPanel, {
+            props: {
+                vulnId: 'CVE-2026-0001', projectName: 'ExampleApp',
+                componentNames: ['owned-service'], componentTeams: { 'owned-service': 'Security' },
+                teamScope: 'Security', assessmentStatus: 'auto',
+            },
+        })
+        await flushPromises()
+        expect(wrapper.findAll('[data-testid="analysis-history-row"]')).toHaveLength(1)
+        expect(wrapper.text()).not.toContain('Automatic assessment available')
+        expect(wrapper.emitted('scope-results-change')?.at(-1)).toEqual([false])
+        await viewHistoryRun(wrapper, 'legacy-run')
+        expect(wrapper.text()).toContain('This result cannot be applied')
+        const applyButton = wrapper.findAll('button').find(button => button.text().includes('Use as draft'))
+        expect(applyButton?.attributes('disabled')).toBeDefined()
+        expect(wrapper.emitted('apply-result')).toBeUndefined()
+        wrapper.unmount()
+    })
+
     it('ignores history returned for an obsolete component scope', async () => {
         let resolveObsolete: (records: any[]) => void = () => {}
         mocks.listResults
@@ -543,7 +580,7 @@ describe('CodeAnalysisPanel', () => {
                 component_name: 'current-service',
                 project_name: 'ExampleApp',
                 source: 'manual',
-                summary: { affected: false, verdict: 'Not Affected' },
+                summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
                 finished_at: '2026-07-06T12:00:00Z',
             }])
 
@@ -564,7 +601,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'obsolete-service',
             project_name: 'ExampleApp',
             source: 'manual',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: '2026-07-06T11:00:00Z',
         }])
         await flushPromises()
@@ -636,7 +673,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'manual',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: '2026-07-06T12:00:00Z',
         }
         const queueItem = {
@@ -1109,7 +1146,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'manual',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: '2026-07-06T12:00:00Z',
         }
         mocks.listResults.mockResolvedValue([traceRecord])
@@ -1261,7 +1298,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'automatic',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: '2026-07-06T12:00:00Z',
         }
         mocks.listResults.mockResolvedValue([summaryRecord])
@@ -1305,7 +1342,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'automatic',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: '2026-07-06T12:00:00Z',
         }
         mocks.listResults.mockResolvedValue([summaryRecord])
@@ -1340,7 +1377,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'automatic',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: '2026-07-06T12:00:00Z',
         }
         mocks.listResults.mockResolvedValue([record])
@@ -1374,7 +1411,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'manual',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             result: firstResult,
             finished_at: '2026-07-06T12:00:00Z',
         }
@@ -1385,7 +1422,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-worker',
             project_name: 'ExampleApp',
             source: 'automatic',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             result: makeAnalysisResult('Second stored assessment'),
             finished_at: '2026-07-06T12:05:00Z',
         }
@@ -1486,7 +1523,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'manual',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             result: parentResult,
             finished_at: '2026-07-06T12:00:00Z',
         }
@@ -1499,7 +1536,7 @@ describe('CodeAnalysisPanel', () => {
             component_name: 'owned-service',
             project_name: 'ExampleApp',
             source: 'follow-up',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             result: followUpResult,
             finished_at: '2026-07-06T12:05:00Z',
         }
@@ -1680,7 +1717,7 @@ describe('CodeAnalysisPanel', () => {
             vuln_id: 'CVE-2026-0001',
             project_name: 'ExampleApp',
             source: 'automatic',
-            summary: { affected: false, verdict: 'Not Affected' },
+            summary: { application_eligible: true, affected: false, verdict: 'Not Affected' },
             finished_at: '2026-07-06T12:00:00Z',
             ...overrides,
         })

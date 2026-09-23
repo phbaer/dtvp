@@ -16,6 +16,23 @@ and applies consistent decisions across releases.
 [Commands](#command-reference) · [Review workflow](#review-workflow) ·
 [Architecture](#repository-and-architecture) · [Documentation](#documentation)
 
+## Analyzer result validity
+
+Applying Agentyzer results requires explicit `assessment.application_eligible=true`.
+Copying analyzer CVSS additionally requires `rescoring_eligible=true`. DTVP enforces
+eligibility in individual and combined drafts, saved-result reuse, bulk workflows,
+and assessment writes carrying analyzer run IDs. Unverified historical results
+remain readable but must be rerun before application. Metadata indexes are rebuilt
+to exclude them from automatic proposals; unverified results do not suppress new
+automatic scans. Combined results require every component to be eligible. The local
+mock analyzer emits the same eligibility fields. Failed runs preserve existing
+scores and assessment states, including state-driven rescoring rules.
+
+Agentyzer reports required LLM failures as HTTP 502 for synchronous requests or
+failed async jobs with a string `error` and structured `error_details`. Deploy the
+updated standalone analyzer together with this client contract. Configure
+`AGENTYZER_IMAGE` for Compose to use an image with these eligibility checks.
+
 ## Quick Start
 
 Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)

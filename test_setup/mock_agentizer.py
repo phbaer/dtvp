@@ -261,6 +261,8 @@ def _build_assessment(req: AssessRequest) -> Dict[str, Any]:
 
     return {
         "assessment": {
+            "application_eligible": True,
+            "rescoring_eligible": bool(adjusted_cvss),
             "affected": affected,
             "verdict": verdict_template["verdict"],
             "confidence": verdict_template["confidence"],

@@ -6,6 +6,7 @@ from typing import Any
 
 from ..ssvc_services import preserve_record as preserve_ssvc_record
 from ..code_analysis_assessment_services import (
+    record_application_eligible,
     discover_assessment_metadata,
     lower as _lower,
     mapping as _mapping,
@@ -120,6 +121,8 @@ def _vulnerability_rescore(
     candidates: list[dict[str, Any]] = []
     for entry in assessment_entries:
         if entry["verdict_bucket"] != worst_verdict:
+            continue
+        if entry["assessment"].get("rescoring_eligible") is not True:
             continue
         adjusted_cvss = entry["assessment"].get("adjusted_cvss")
         if not isinstance(adjusted_cvss, dict):
@@ -260,7 +263,7 @@ def automatic_assessment_filter_facets(
     assessment_entries: list[dict[str, Any]] = []
     for record in records:
         assessment = _record_assessment(record)
-        if assessment is None:
+        if assessment is None or not record_application_eligible(record):
             continue
         assessment_entries.append(
             {
@@ -1259,7 +1262,7 @@ def _build_group_item(
     assessment_entries: list[dict[str, Any]] = []
     for record in records:
         assessment = _record_assessment(record)
-        if assessment is None:
+        if assessment is None or not record_application_eligible(record):
             continue
         verdict = normalize_verdict(assessment)
         assessment_entries.append(

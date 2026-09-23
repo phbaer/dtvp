@@ -12,7 +12,7 @@ import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
 import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
-import { buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
+import { isCodeAnalysisApplicable, buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
 import { calculateScoreFromVector } from '../lib/cvss'
 import { buildTeamAliasGroups } from '../lib/team-mapping'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
@@ -1042,12 +1042,14 @@ const handleApplyAllCodeAnalysisResults = async (runs: CodeAnalysisComponentRun[
 }
 
 const handleCodeAnalysisResultChange = (result: CodeAnalysisAssessResponse | null, components: string[]) => {
-    latestCodeAnalysisCvssAdjustment.value = result?.assessment.adjusted_cvss ?? null
-    latestCodeAnalysisCvssComponents.value = result?.assessment.adjusted_cvss ? components : []
+    const adjustment = isCodeAnalysisApplicable(result) && result?.assessment.rescoring_eligible === true
+        ? result.assessment.adjusted_cvss ?? null : null
+    latestCodeAnalysisCvssAdjustment.value = adjustment
+    latestCodeAnalysisCvssComponents.value = adjustment ? components : []
 }
 
 const handleCodeAnalysisProposalsChange = (runs: CodeAnalysisComponentRun[]) => {
-    codeAnalysisProposalRuns.value = runs
+    codeAnalysisProposalRuns.value = runs.filter(run => isCodeAnalysisApplicable(run.result))
 }
 
 const applySelectedAutomaticProposal = () => {

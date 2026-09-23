@@ -572,6 +572,8 @@ def _automatic_record(
     adjusted_cvss=None,
 ):
     assessment = {
+        "application_eligible": True,
+        "rescoring_eligible": True,
         "verdict": verdict,
         "affected": verdict == "Affected",
         "confidence": "High",
@@ -1239,6 +1241,7 @@ def test_automatic_assessment_workflow_compacts_results_with_executive_summaries
                 {
                     "component": f"nested-component-{component_index}",
                     "assessment": {
+                        "application_eligible": True,
                         "summary": f"Nested summary {component_index}",
                         "reasoning": (
                             f"Nested rationale {component_index}"
@@ -1339,6 +1342,8 @@ def test_automatic_assessment_workflow_hydrates_only_selected_full_results():
         "source_kind": "auto",
         "has_assessment": True,
         "assessment": {
+            "application_eligible": True,
+            "rescoring_eligible": True,
             "affected": True,
             "verdict": "Affected",
             "adjusted_cvss": adjusted_cvss,
@@ -1488,7 +1493,7 @@ def test_code_assessment_status_distinguishes_source_and_component_coverage():
     assert assessment_status_for_group(group, [unclassified]) == "manual"
 
 
-def test_automatic_assessment_workflow_accepts_source_less_legacy_summary_results():
+def test_automatic_assessment_workflow_rejects_unverified_legacy_summary_results():
     record = {
         "analysis_run_id": "run-unclassified",
         "compact_context": {
@@ -1533,15 +1538,10 @@ def test_automatic_assessment_workflow_accepts_source_less_legacy_summary_result
         ["CVE-2026-AUTO"],
     )
 
-    assert preview["items"][0]["run_ids"] == ["run-unclassified"]
-    assert preview["items"][0]["verdict_bucket"] == "PROBABLY_AFFECTED"
+    assert preview["items"] == []
     assert preview["summary"]["stored_analysis_results"] == 1
-    assert preview["summary"]["usable_assessment_results"] == 1
-    assert preview["summary"]["matched_analysis_results"] == 1
-    assert {payload[1]["state"] for payload in payloads} == {"IN_TRIAGE"}
-    assert "Run Source: legacy" in payloads[0][1]["details"]
-    assert "Versions Checked:" in payloads[0][1]["details"]
-    assert "Versions Checked:\n  - 1.2.3" in payloads[0][1]["details"]
+    assert preview["summary"]["usable_assessment_results"] == 0
+    assert payloads == []
 
 
 def test_automatic_assessment_workflow_recognizes_legacy_run_markers_and_project_scope():
@@ -1925,3 +1925,38 @@ def test_team_takeover_does_not_duplicate_a_current_team_alias():
         team_mapping={"component": ["TeamB", "TeamA"]},
     )
     assert build_team_takeover_preview(context)["items"] == []
+
+@pytest.mark.parametrize("eligible", [None, False])
+def test_invalid_analyzer_result_never_triggers_bulk_rescoring(eligible):
+    record = _automatic_record(
+        "invalid-run", "owned-api", "Not Affected", adjusted_cvss={"adjusted_score": 0.0},
+    )
+    assessment = record["result"]["assessment"]
+    assessment.pop("application_eligible")
+    if eligible is not None:
+        assessment["application_eligible"] = eligible
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[_automatic_group()], user="reviewer",
+        result_store=_AutomaticResultStore([record]),
+        rescore_rules={"NOT_AFFECTED": {"score": 0}},
+    )
+    preview = build_automatic_assessment_preview(context)
+    payloads, _ = build_automatic_assessment_payloads(context, ["CVE-2026-AUTO"])
+    assert preview["items"] == []
+    assert payloads == []
+
+
+def test_eligible_assessment_cannot_copy_ineligible_cvss():
+    record = _automatic_record(
+        "valid-run", "owned-api", "Affected", adjusted_cvss={"adjusted_score": 0.0},
+    )
+    record["result"]["assessment"]["rescoring_eligible"] = False
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[_automatic_group()], user="reviewer",
+        result_store=_AutomaticResultStore([record]),
+    )
+    preview = build_automatic_assessment_preview(context)
+    assert preview["items"][0]["rescore"] is None
+    payloads, _ = build_automatic_assessment_payloads(context, ["CVE-2026-AUTO"])
+    assert payloads
+    assert all("[Rescored: 0.0]" not in payload["details"] for _, payload in payloads)

@@ -1,6 +1,17 @@
 import type { CodeAnalysisAssessResponse, CodeAnalysisComponentResult } from './api'
 import { assessmentTeamKey, STATE_PRIORITY } from './assessment-helpers'
 
+export const isCodeAnalysisApplicable = (result: CodeAnalysisAssessResponse | null | undefined): boolean => (
+    result?.assessment?.application_eligible === true
+    && (result.component_results || []).every(entry => entry?.assessment?.application_eligible === true)
+)
+
+const requireApplicable = (result: CodeAnalysisAssessResponse): void => {
+    if (!isCodeAnalysisApplicable(result)) {
+        throw new Error('Analyzer result is unverified or ineligible; rerun analysis before applying it.')
+    }
+}
+
 export interface CodeAnalysisTaggedComponent {
     name: string
     tag: string
@@ -611,6 +622,7 @@ export const prepareCodeAnalysisResult = (
     taggedComponents: CodeAnalysisTaggedComponent[],
     assignedUsers: string[],
 ): PreparedCodeAnalysisResult => {
+    requireApplicable(result)
     const { targetState, targetJustification } = mapVerdictToAssessment(result)
     const detailsText = buildCodeAnalysisDetails(result, targetJustification)
     const teamComponents = groupComponentsByTeam(components, taggedComponents)
@@ -630,8 +642,8 @@ export const prepareCodeAnalysisResult = (
         detailsText: selectedDetailsText,
         teamDrafts,
         firstTeam: teamDrafts[0]?.team ?? null,
-        adjustedVector: result.assessment.adjusted_cvss?.adjusted_vector,
-        adjustedScore: result.assessment.adjusted_cvss?.adjusted_score,
+        adjustedVector: result.assessment.rescoring_eligible === true ? result.assessment.adjusted_cvss?.adjusted_vector : undefined,
+        adjustedScore: result.assessment.rescoring_eligible === true ? result.assessment.adjusted_cvss?.adjusted_score : undefined,
     }
 }
 
@@ -751,6 +763,7 @@ export const prepareCodeAnalysisResults = (
     taggedComponents: CodeAnalysisTaggedComponent[],
     assignedUsers: string[],
 ): PreparedCodeAnalysisResults => {
+    runs.forEach(run => requireApplicable(run.result))
     const seenComponents = new Set<string>()
     const analyzed: AnalyzedComponent[] = []
 
@@ -764,7 +777,7 @@ export const prepareCodeAnalysisResults = (
 
         const { targetState, targetJustification } = mapVerdictToAssessment(run.result)
         const tagged = taggedComponents.find(candidate => candidate.name.toLowerCase() === componentKey)
-        const adjustedCvss = run.result.assessment.adjusted_cvss
+        const adjustedCvss = run.result.assessment.rescoring_eligible === true ? run.result.assessment.adjusted_cvss : undefined
 
         analyzed.push({
             component,

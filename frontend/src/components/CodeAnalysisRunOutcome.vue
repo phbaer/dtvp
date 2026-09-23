@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { AlertTriangle, CheckCircle, Loader2, Send, X } from '@lucide/vue'
+import { isCodeAnalysisApplicable } from '../lib/codeAnalysisResult'
 import type { CodeAnalysisAssessResponse } from '../lib/api'
 
 defineProps<{
@@ -35,6 +36,9 @@ const emit = defineEmits<{
             ? 'border-red-500/70 bg-red-950/15'
             : 'border-green-500/70 bg-green-950/10'"
     >
+        <p v-if="!isCodeAnalysisApplicable(result)" class="mb-2 text-xs text-amber-300">
+            This result cannot be applied. Rerun analysis to obtain a validated assessment.
+        </p>
         <div class="flex flex-wrap items-start justify-between gap-2">
             <div class="flex min-w-0 items-start gap-2.5">
                 <component
@@ -97,7 +101,8 @@ const emit = defineEmits<{
                 <button
                     type="button"
                     class="inline-flex items-center gap-1 rounded bg-cyan-700/80 px-2.5 py-1.5 text-[10px] font-bold text-white transition-colors hover:bg-cyan-600"
-                    @click="emit('apply')"
+                    :disabled="!isCodeAnalysisApplicable(result)"
+                    @click="isCodeAnalysisApplicable(result) && emit('apply')"
                 >
                     <CheckCircle :size="11" />
                     Use as draft
