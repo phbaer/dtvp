@@ -271,3 +271,58 @@ def test_update_assessment_rejects_stale_local_revision(
     assert "First update" in conflict["current"]["analysisDetails"]
     assert mock_client.get_analysis.await_count == 0
     assert mock_client.update_analysis.await_count == 0
+
+
+@pytest.mark.parametrize("eligible", [None, False])
+def test_invalid_analyzer_result_cannot_write_assessment(override_deps, mock_client, eligible):
+    assessment = {"verdict": "Not Affected", "adjusted_cvss": {"adjusted_score": 0.0}}
+    if eligible is not None:
+        assessment["application_eligible"] = eligible
+    record = {"status": "completed", "result": {"assessment": assessment}}
+    payload = {
+        "instances": [{"project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1", "finding_uuid": "f1"}],
+        "state": "NOT_AFFECTED", "details": "Invalid analyzer proposal", "justification": "CODE_NOT_REACHABLE",
+        "analysis_run_ids": ["invalid-run"], "rescored_cvss": 0.0,
+    }
+    with patch.object(main.code_analysis_result_store, "get", return_value=record), patch.object(main.cache_manager, "persist_assessment_updates", new_callable=AsyncMock) as persist:
+        response = TestClient(main.app).post("/api/assessment", json=payload)
+    assert response.status_code == 422
+    persist.assert_not_called()
+    mock_client.update_analysis.assert_not_called()
+
+
+@pytest.mark.parametrize("run_ids", ["invalid-run", [{"run": "invalid-run"}], 42])
+def test_invalid_instance_run_ids_return_validation_error(override_deps, mock_client, run_ids):
+    payload = {
+        "instances": [{
+            "project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1",
+            "finding_uuid": "f1", "analysis_run_ids": run_ids,
+        }],
+        "state": "NOT_AFFECTED", "details": "Invalid provenance",
+    }
+    with patch.object(main.cache_manager, "persist_assessment_updates", new_callable=AsyncMock) as persist:
+        response = TestClient(main.app).post("/api/assessment", json=payload)
+    assert response.status_code == 422
+    persist.assert_not_called()
+
+
+def test_ineligible_component_blocks_assessment_write(override_deps, mock_client):
+    record = {
+        "result": {
+            "assessment": {"application_eligible": True},
+            "component_results": [{"assessment": {"application_eligible": False}}],
+        },
+    }
+    payload = {
+        "instances": [{
+            "project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1",
+            "finding_uuid": "f1", "analysis_run_ids": ["invalid-run"],
+        }],
+        "state": "NOT_AFFECTED", "details": "Invalid component result",
+    }
+    with patch.object(main.code_analysis_result_store, "get", return_value=record), patch.object(
+        main.cache_manager, "persist_assessment_updates", new_callable=AsyncMock,
+    ) as persist:
+        response = TestClient(main.app).post("/api/assessment", json=payload)
+    assert response.status_code == 422
+    persist.assert_not_called()

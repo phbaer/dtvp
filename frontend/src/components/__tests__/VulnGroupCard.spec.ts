@@ -105,6 +105,8 @@ describe('VulnGroupCard', () => {
 
     const analyzerResult = (verdict: string, summary: string, reasoning: string, ticketText = '') => ({
         assessment: {
+            application_eligible: true,
+            rescoring_eligible: false,
             affected: verdict === 'Affected',
             verdict,
             confidence: 'High',
@@ -529,6 +531,8 @@ describe('VulnGroupCard', () => {
         await flushPromises()
         const analysisResult = {
             assessment: {
+                application_eligible: true,
+                rescoring_eligible: false,
                 affected: false,
                 verdict: 'Not Affected',
                 confidence: 'High',

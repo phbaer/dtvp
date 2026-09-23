@@ -13,7 +13,7 @@ NON_FINAL_ASSESSMENT_STATUSES = {
     "canceled",
     "aborted",
 }
-ASSESSMENT_METADATA_VERSION = 4
+ASSESSMENT_METADATA_VERSION = 6
 
 
 def text(value: Any) -> str:
@@ -139,7 +139,34 @@ def record_assessment(record: dict[str, Any]) -> dict[str, Any] | None:
     if not direct:
         direct = mapping(record.get("assessment"))
     assessment = {**_summary_assessment(record), **direct}
+    if direct:
+        # A cached summary must never authorize an unverified full result.
+        for key in ("application_eligible", "rescoring_eligible"):
+            assessment[key] = direct.get(key) is True
     return assessment or None
+
+
+def assessment_application_eligible(assessment: dict[str, Any] | None) -> bool:
+    return bool(assessment and assessment.get("application_eligible") is True)
+
+
+def result_application_eligible(result: dict[str, Any]) -> bool:
+    return assessment_application_eligible(mapping(result.get("assessment"))) and all(
+        assessment_application_eligible(mapping(mapping(entry).get("assessment")))
+        for entry in (result.get("component_results") or [])
+    )
+
+
+def record_application_eligible(record: dict[str, Any]) -> bool:
+    return (
+        lower(record.get("status")) not in NON_FINAL_ASSESSMENT_STATUSES
+        and "benchmark" not in record_source(record)
+        and assessment_application_eligible(record_assessment(record))
+        and all(
+            assessment_application_eligible(mapping(mapping(entry).get("assessment")))
+            for entry in (record_result(record).get("component_results") or [])
+        )
+    )
 
 
 def record_project_names(record: dict[str, Any]) -> set[str]:
@@ -225,7 +252,7 @@ def discover_assessment_records(
             continue
         if lower(record.get("status")) in NON_FINAL_ASSESSMENT_STATUSES:
             continue
-        if not record_run_id(record) or record_assessment(record) is None:
+        if not record_run_id(record) or not record_application_eligible(record):
             continue
         projects = sorted(record_project_names(record))
         key = (
@@ -252,7 +279,11 @@ def discover_assessment_metadata(
         result = result_store.list_assessment_metadata(project_name=project_name)
         latest: dict[tuple[str, str, str], dict[str, Any]] = {}
         for record in result.get("records") or []:
-            if not isinstance(record, dict) or not record.get("has_assessment"):
+            if (
+                not isinstance(record, dict)
+                or not record.get("has_assessment")
+                or not record_application_eligible(record)
+            ):
                 continue
             projects = sorted(record_project_names(record))
             key = (
@@ -389,15 +420,12 @@ def record_source_kind(
 
 def build_record_assessment_metadata(record: dict[str, Any]) -> dict[str, Any]:
     assessment = record_assessment(record)
-    usable = bool(
-        record_run_id(record)
-        and assessment is not None
-        and "benchmark" not in record_source(record)
-        and lower(record.get("status")) not in NON_FINAL_ASSESSMENT_STATUSES
-    )
+    usable = bool(record_run_id(record) and record_application_eligible(record))
     assessment_data = {
         key: assessment.get(key)
         for key in (
+            "application_eligible",
+            "rescoring_eligible",
             "affected",
             "verdict",
             "analysis",
@@ -407,6 +435,11 @@ def build_record_assessment_metadata(record: dict[str, Any]) -> dict[str, Any]:
         if assessment is not None
         and assessment.get(key) not in (None, "", [], {})
     }
+    # Compact history omits component results; retain their aggregate validity.
+    assessment_data["application_eligible"] = usable
+    assessment_data["rescoring_eligible"] = bool(
+        usable and assessment and assessment.get("rescoring_eligible") is True
+    )
     executive_summary = mapping(
         assessment.get("executive_summary") if assessment is not None else None
     )
@@ -474,7 +507,7 @@ def build_record_assessment_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "component_names": sorted(record_component_names(record)),
         "scan_target": record_scan_target(record),
         "source_kind": record_source_kind(record),
-        "assessment": assessment_data if usable else {},
+        "assessment": assessment_data,
         "record": record_data,
     }
 

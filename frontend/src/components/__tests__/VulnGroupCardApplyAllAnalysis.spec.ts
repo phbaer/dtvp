@@ -26,6 +26,8 @@ import { updateAssessment } from '../../lib/api'
 
 const makeResult = (component: string, verdict: string, adjusted?: { score: number, vector: string }): CodeAnalysisAssessResponse => ({
     assessment: {
+        application_eligible: true,
+        rescoring_eligible: true,
         affected: verdict.toLowerCase() === 'affected',
         verdict,
         confidence: 'high',

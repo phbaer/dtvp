@@ -8,12 +8,17 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .code_analysis_assessment_services import (
+    ASSESSMENT_METADATA_VERSION,
+    record_application_eligible,
+    result_application_eligible,
+)
 from .sqlite_migration_services import run_sqlite_migrations
 
 
 CODE_ANALYSIS_RESULT_SCHEMA_VERSION = "dtvp.code-analysis-result/v1"
 CODE_ANALYSIS_RESULT_MIGRATION_NAMESPACE = "code_analysis_results"
-CODE_ANALYSIS_ASSESSMENT_METADATA_VERSION = 4
+CODE_ANALYSIS_ASSESSMENT_METADATA_VERSION = ASSESSMENT_METADATA_VERSION
 FOLLOW_UP_CONTEXT_PROMPT_LIMIT = 12_000
 
 
@@ -290,6 +295,11 @@ def summarize_code_analysis_result(result: Any) -> dict[str, Any]:
     ]
 
     return {
+        "application_eligible": result_application_eligible(result_dict),
+        "rescoring_eligible": (
+            result_application_eligible(result_dict)
+            and assessment.get("rescoring_eligible") is True
+        ),
         "affected": assessment.get("affected"),
         "verdict": _normalize_text(assessment.get("verdict")),
         "confidence": _normalize_text(assessment.get("confidence")),
@@ -1271,7 +1281,7 @@ class CodeAnalysisResultStore:
                     "finished_at": str(row[6] or ""),
                     "submitted_at": str(row[7] or ""),
                     "recorded_at": str(row[8] or ""),
-                    "status": "completed",
+                    "status": record_data.get("status") or "completed",
                     "has_assessment": has_assessment,
                     "assessment": assessment,
                     "summary": assessment,
@@ -1343,6 +1353,7 @@ class CodeAnalysisResultStore:
         context_fingerprint: Optional[str] = None,
         freshness_days: Optional[int] = None,
         include_result: bool = False,
+        applicable_only: bool = False,
     ) -> Optional[dict[str, Any]]:
         freshness = (
             get_code_analysis_result_freshness_days()
@@ -1355,14 +1366,20 @@ class CodeAnalysisResultStore:
             component_name=component_name,
             source=source,
             limit=500,
-            include_result=include_result,
+            include_result=include_result or applicable_only,
         )
         normalized_fingerprint = _normalize_text(context_fingerprint)
         for record in records:
+            if applicable_only and not record_application_eligible(record):
+                continue
             if normalized_fingerprint and _normalize_text(record.get("context_fingerprint")) != normalized_fingerprint:
                 continue
             if not _record_within_freshness(record, freshness):
                 continue
+            if not include_result:
+                record.pop("result", None)
+                record.pop("user_guidance", None)
+                record.pop("follow_up_user_guidance", None)
             return record
         return None
 

@@ -10,7 +10,7 @@
     "license": {
       "name": "Proprietary"
     },
-    "version": "1.0.22"
+    "version": "1.0.25"
   },
   "paths": {
     "/health": {
@@ -239,6 +239,8 @@
                     "summary": "Completed synchronous assessment",
                     "value": {
                       "assessment": {
+                        "application_eligible": true,
+                        "rescoring_eligible": true,
                         "affected": true,
                         "verdict": "Affected",
                         "confidence": "High",
@@ -425,7 +427,7 @@
                       "poll_url": "/jobs/9f7e2c4b5a6d",
                       "configuration": {
                         "service_name": "Agentic Vulnerability Analyzer",
-                        "service_version": "1.0.22",
+                        "service_version": "1.0.25",
                         "config_dir": "config",
                         "repos_config_path": "config/repos.yaml",
                         "repositories": {
@@ -488,6 +490,9 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "Required LLM call failed; no assessment or rescoring is available. The body includes detail and error_details (code, message, retryable)."
           },
           "422": {
             "description": "Validation Error",
@@ -1234,6 +1239,7 @@
             },
             "affected": true,
             "analysis": "EXPLOITABLE",
+            "application_eligible": true,
             "audit_view": {
               "checks": [
                 "Supports verdict: the current detected version remains within the affected range.",
@@ -1290,6 +1296,7 @@
               "status": "action_needed",
               "summary": "The current assessment does not yet justify a low/info outcome. Use the recommended changes to eliminate reachability or move the assessed version outside the affected range."
             },
+            "rescoring_eligible": true,
             "researcher_view": {
               "conclusion": "The dependency is present, the locked version is inside the advisory range, and the vulnerable API is reachable from application code.",
               "findings": [
@@ -1368,6 +1375,18 @@
       },
       "Assessment": {
         "properties": {
+          "application_eligible": {
+            "type": "boolean",
+            "title": "Application Eligible",
+            "description": "True only for a validated assessment supported by the final audit. Missing or false blocks applying this result.",
+            "default": false
+          },
+          "rescoring_eligible": {
+            "type": "boolean",
+            "title": "Rescoring Eligible",
+            "description": "True only when validated analysis and audit support the emitted CVSS adjustment.",
+            "default": false
+          },
           "affected": {
             "type": "boolean",
             "title": "Affected",
@@ -1869,7 +1888,7 @@
           "presence_basis": {
             "type": "string",
             "title": "Presence Basis",
-            "description": "Primary presence source used for reporting (for example: direct, transitive, sbom_attributed, not_found).",
+            "description": "Primary presence source used for reporting (direct, transitive, sbom_attributed, not_found, or unknown).",
             "examples": [
               "sbom_attributed"
             ]
@@ -1911,6 +1930,18 @@
             ],
             "title": "Locked Version",
             "description": "Best-effort pinned version discovered in lock files."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Reason dependency presence remains unknown or otherwise needs qualification."
           }
         },
         "type": "object",
@@ -2270,7 +2301,7 @@
               "workspace_dir": "repos"
             },
             "service_name": "Agentic Vulnerability Analyzer",
-            "service_version": "1.0.22"
+            "service_version": "1.0.25"
           },
           "llm_backend": "http://localhost:11434",
           "llm_provider": "ollama",
@@ -2548,6 +2579,19 @@
             ],
             "title": "Finished At",
             "description": "RFC 3339 timestamp for when the job finished, if available."
+          },
+          "error_details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Details",
+            "description": "Structured failure code, sanitized message, and retryability."
           },
           "error": {
             "anyOf": [
@@ -2870,7 +2914,7 @@
               "workspace_dir": "repos"
             },
             "service_name": "Agentic Vulnerability Analyzer",
-            "service_version": "1.0.22"
+            "service_version": "1.0.25"
           },
           "job_id": "9f7e2c4b5a6d",
           "poll_url": "/jobs/9f7e2c4b5a6d",
@@ -2889,7 +2933,7 @@
               }
             ],
             "title": "Provider",
-            "description": "Configured LLM provider label, such as ollama or openwebui."
+            "description": "Configured LLM provider label, such as ollama, openwebui, or litellm."
           },
           "backend": {
             "anyOf": [

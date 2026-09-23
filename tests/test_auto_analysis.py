@@ -647,6 +647,7 @@ def test_auto_analysis_skips_fresh_persisted_result_with_matching_context():
     assert queued == 0
     assert queue.submissions == []
     assert store.calls[0]["context_fingerprint"] == fingerprint
+    assert store.calls[0]["applicable_only"] is True
 
 
 def test_auto_analysis_requeues_when_persisted_result_context_is_stale():
