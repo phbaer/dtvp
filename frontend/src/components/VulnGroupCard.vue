@@ -4,7 +4,7 @@ import { updateAssessment, getAssessmentDetails, getKnownUsers } from '../lib/ap
 import { marked } from 'marked'
 
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
-import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot } from '@lucide/vue'
 
 import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
@@ -24,6 +24,8 @@ import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
 import VulnGroupAssessmentDetails from './VulnGroupAssessmentDetails.vue'
 import VulnGroupCardDependencies from './VulnGroupCardDependencies.vue'
 import CalculatorModal from './CalculatorModal.vue'
+import SsvcCalculator from './SsvcCalculator.vue'
+import { summarizeSsvc, ssvcReviewText, stripSsvcDocumentation, type SsvcSelection } from '../lib/ssvc'
 import ConflictResolutionModal from './ConflictResolutionModal.vue'
 import GenericModal from './GenericModal.vue'
 import AssessmentReviewModal from './AssessmentReviewModal.vue'
@@ -426,6 +428,8 @@ defineExpose({
 })
 
 const discardUnsavedDraft = () => {
+    ssvcTouched.value = false
+    pendingSsvc.value = savedSsvc.value.record
     teamDrafts.value.clear()
     formTouched.value = false
     rawDetailsTouched.value = false
@@ -468,6 +472,17 @@ const unscopedDependencyInfo = useVulnDependencyInfo({
 })
 
 const allInstances = dependencyInfo.allInstances
+const savedSsvc = computed(() => summarizeSsvc(allInstances.value.map(instance => instance.analysis_details || instance.analysisDetails || '')))
+const pendingSsvc = ref<SsvcSelection | null>(null)
+const ssvcTouched = ref(false)
+watch(savedSsvc, summary => {
+    if (!ssvcTouched.value) pendingSsvc.value = summary.record
+}, { immediate: true })
+const changeSsvc = (selection: SsvcSelection | null) => {
+    pendingSsvc.value = selection
+    ssvcTouched.value = true
+    assessmentSubmitted.value = false
+}
 const visibleInstances = dependencyInfo.visibleInstances
 const visibleInstanceSet = computed(() => new Set(visibleInstances.value))
 const activeTeamScope = dependencyInfo.activeTeam
@@ -1439,7 +1454,7 @@ const updateFormFromGroup = (force = true) => {
         })
 
         state.value = formValues.state
-        details.value = formValues.details
+        details.value = stripSsvcDocumentation(formValues.details).trim()
         justification.value = formValues.justification
 
         // Initialize assigned users from the current team block
@@ -1512,7 +1527,7 @@ const handleApplyAllAssessment = async (assessmentDetails: string, assessmentSta
     const blocks = parseAssessmentBlocks(assessmentDetails)
     const generalBlock = blocks.find(b => b.team === 'General')
     if (generalBlock) {
-        details.value = stripPendingReviewStatus(generalBlock.details || '').trim()
+        details.value = stripPendingReviewStatus(stripSsvcDocumentation(generalBlock.details || '')).trim()
         state.value = generalBlock.state || assessmentState || 'NOT_SET'
         justification.value = generalBlock.justification || assessmentJustification || 'NOT_SET'
     } else {
@@ -1548,7 +1563,7 @@ const handleAdoptTeamBlock = async (block: AssessmentBlock) => {
     // Only copy the team's details text (not a full structured document).
     state.value = block.state || 'NOT_SET'
     justification.value = block.justification || 'NOT_SET'
-    details.value = stripPendingReviewStatus(block.details || '').trim()
+    details.value = stripPendingReviewStatus(stripSsvcDocumentation(block.details || '')).trim()
     formTouched.value = true
 
     // Same as syncAllAssessments: the adopted state owns the rescore even
@@ -1834,13 +1849,23 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
         }
         const finalState = preparedSubmission.finalState
 
-        if (!await confirmAssessmentReview(force, preparedSubmission.reviewText)) {
+        const reviewText = ssvcTouched.value && !selectedTeam.value
+            ? ssvcReviewText(preparedSubmission.reviewText, pendingSsvc.value)
+            : preparedSubmission.reviewText
+        if (!await confirmAssessmentReview(force, reviewText)) {
             return
         }
 
         const finalText = preparedSubmission.finalText
         const payload: AssessmentPayload = {
             ...preparedSubmission.payload,
+            ...(ssvcTouched.value && !selectedTeam.value ? { ssvc: pendingSsvc.value && {
+                model: pendingSsvc.value.model,
+                version: pendingSsvc.value.version,
+                answers: pendingSsvc.value.answers,
+                rationale: pendingSsvc.value.rationale,
+                exploitation_evidence: pendingSsvc.value.exploitation_evidence,
+            } } : {}),
             details: finalText,
             state: finalState,
             analysis_run_ids: [...codeAnalysisRunIds.value],
@@ -1980,7 +2005,7 @@ const assessmentScoreTitle = computed(() => {
     const vector = pendingVector.value || props.group.rescored_vector || props.group.cvss_vector || ''
     return vector ? `CVSS vector: ${vector}` : 'No CVSS vector available'
 })
-const hasUnsavedDraft = computed(() => formTouched.value || rawDetailsTouched.value)
+const hasUnsavedDraft = computed(() => formTouched.value || rawDetailsTouched.value || ssvcTouched.value)
 const assessmentMissingFields = computed(() => {
     if (isReviewer.value) return []
     const missing: string[] = []
@@ -1996,7 +2021,7 @@ const canApplyAssessment = computed(() => (
     !updating.value
     && !loadingDetails.value
     && totalTargeted.value > 0
-    && hasUnsavedDraft.value
+    && (formTouched.value || rawDetailsTouched.value || (ssvcTouched.value && !selectedTeam.value))
     && assessmentMissingFields.value.length === 0
 ))
 const assessmentActionLabel = computed(() => {
@@ -2530,6 +2555,7 @@ const assessedTeams = computed(() => {
 })
 
 const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalState: string, finalText: string) => {
+    if (!selectedTeam.value && results.every(result => result.status === 'success')) ssvcTouched.value = false
     const savedResult = buildSavedAssessmentResultState({
         success,
         isReviewer: isReviewer.value,
@@ -3262,6 +3288,7 @@ const teamBlockStateColor = (state?: string): string => {
                             </div>
                         </div>
                     </div>
+                    <p v-if="ssvcTouched && selectedTeam" class="mb-3 text-xs text-amber-300">Unsaved SSVC changes: return to the global assessment to save them.</p>
                     <div :class="isReviewer && !selectedTeam ? 'grid items-start gap-4 xl:grid-cols-2' : ''">
                         <section
                             v-if="isReviewer && !selectedTeam"
@@ -3271,10 +3298,14 @@ const teamBlockStateColor = (state?: string): string => {
                             <div class="flex flex-wrap items-center justify-between gap-2">
                                 <h5 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-300">
                                     <Calculator :size="13" class="text-purple-300" />
-                                    CVSS & Rescoring
+                                    CVSS & SSVC
                                 </h5>
                                 <span class="text-[10px] text-gray-500">Applied with the global assessment</span>
                             </div>
+
+                            <SsvcCalculator :model-value="pendingSsvc" :summary="savedSsvc" :disabled="updating || loadingDetails"
+                                :cves="[group.id, ...(group.aliases || [])]" :active="activeDetailTab === 'review'"
+                                :allow-autofill="!ssvcTouched && savedSsvc.status === 'UNASSESSED'" @update:model-value="changeSsvc" />
 
                             <div class="rounded border border-gray-700 bg-gray-800 p-3">
                                 <h6 class="mb-2 flex items-center gap-2 text-xs font-bold text-gray-300">

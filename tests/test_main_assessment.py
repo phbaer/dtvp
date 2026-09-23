@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dtvp import main
+from dtvp.ssvc_services import SsvcInput, new_record, read_record, write_record
 
 
 # Override dependencies
@@ -65,6 +66,63 @@ def test_update_assessment_appends_user(override_deps, mock_client):
         assert "[Reviewed By: testuser]" in queued_payload["details"]
         # Ensure pending flag NOT added for Reviewer
         assert "[Status: Pending Review]" not in queued_payload["details"]
+
+
+def test_ssvc_rules_and_reviewer_only_write_preservation(override_deps, mock_client):
+    client = TestClient(main.app)
+    models = client.get("/api/ssvc/models")
+    assert models.status_code == 200
+    assert len(models.json()["models"][0]["mapping"]) == 72
+    selection = {"model": "ssvc:DT_DP", "version": "1.0.0", "answers": {}, "rationale": "To assess"}
+    instance = {"project_uuid": "p1", "component_uuid": "c1", "vulnerability_uuid": "v1", "finding_uuid": "f1"}
+    payload = {"instances": [instance], "state": "NOT_SET", "details": "Assessment", "ssvc": selection}
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        assert client.post("/api/assessment", json=payload).status_code == 403
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        assert client.post("/api/assessment", json={**payload, "team": "Team A"}).status_code == 403
+        assert client.post("/api/assessment", json={**payload, "ssvc": {**selection, "version": "unknown"}}).status_code == 422
+        assert client.post("/api/assessment", json={**payload, "ssvc": {**selection, "exploitation_evidence": "forged"}}).status_code == 422
+        saved = client.post("/api/assessment", json=payload)
+        assert saved.status_code == 200
+        record = read_record(saved.json()[0]["new_details"])
+        assert record["assessor"] == "testuser"
+        assert record["outcome"] is None
+        assert record["priority"] == "Incomplete"
+        assert "[SSVC: INCOMPLETE]" in saved.json()[0]["new_details"]
+        assert '[SSVC Details]\n{\n' in saved.json()[0]["new_details"]
+        assert "SSVC priority: Incomplete" in saved.json()[0]["new_details"]
+    # Client metadata cannot forge or clear reviewer-owned SSVC, even in REPLACE mode.
+    forged = write_record("", new_record(SsvcInput(**{**selection, "rationale": "Forged"}), "attacker"))
+    with patch("dtvp.main.get_user_role", return_value="ANALYST"):
+        for details in ("Team update", forged):
+            updated = client.post("/api/assessment", json={
+                "instances": [{**instance, "analysis_details": forged}],
+                "state": "IN_TRIAGE", "details": details, "team": "Team A", "comparison_mode": "REPLACE",
+                "original_analysis": {"f1": {"analysisDetails": forged}},
+            })
+            assert updated.status_code == 200
+            assert read_record(updated.json()[0]["new_details"]) == record
+            assert updated.json()[0]["new_details"].count("SSVC priority: Incomplete") == 1
+    with patch("dtvp.main.get_user_role", return_value="REVIEWER"):
+        cleared = client.post("/api/assessment", json={**payload, "ssvc": None})
+        assert cleared.status_code == 200
+        assert read_record(cleared.json()[0]["new_details"]) is None
+        assert "SSVC priority:" not in cleared.json()[0]["new_details"]
+        assert "[SSVC Details]" not in cleared.json()[0]["new_details"]
+    mock_client.get_analysis.assert_not_called()
+
+
+def test_ssvc_exploitation_route_validates_and_forwards_refresh(override_deps):
+    client = TestClient(main.app)
+    assert client.get("/api/ssvc/exploitation?cve=invalid").status_code == 422
+    assert client.get("/api/ssvc/exploitation?cve=CVE-2024-25522").json()["enabled"] is False
+    with patch("dtvp.general_api_routes.get_ssvc_enrichment_service") as get_service:
+        get_service.return_value.lookup = AsyncMock(return_value={"sources": [], "suggestion": None})
+        response = client.get("/api/ssvc/exploitation?cve=CVE-2024-25522&cve=CVE-2024-4947&refresh=true")
+        assert response.status_code == 200
+        get_service.return_value.lookup.assert_awaited_once_with(["CVE-2024-25522", "CVE-2024-4947"], force=True)
+    main.app.dependency_overrides.pop(main.get_current_user)
+    assert client.get("/api/ssvc/exploitation?cve=CVE-2024-25522").status_code == 401
 
 
 def test_update_assessment_analyst_pending_flag(override_deps, mock_client):

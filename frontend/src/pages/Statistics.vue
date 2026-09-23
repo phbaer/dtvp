@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { getStatistics } from '../lib/api'
 import type { Statistics } from '../types'
-import { BarChart3, ListFilter } from 'lucide-vue-next'
+import { BarChart3, ListFilter } from '@lucide/vue'
 import ProjectStatistics from '../components/ProjectStatistics.vue'
 
 const route = useRoute()

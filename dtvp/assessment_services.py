@@ -9,6 +9,7 @@ import httpx
 
 from .dt_client import DTClient
 from .general_api_routes import AssessmentRequest
+from .ssvc_services import new_record, preserve_record, write_record
 
 
 ASSESSMENT_WRITE_RETRY_STATUS_CODES = frozenset(
@@ -224,6 +225,14 @@ def build_assessment_payloads(
     role: str,
 ) -> List[tuple[dict, dict]]:
     payloads: List[tuple[dict, dict]] = []
+    change_ssvc = "ssvc" in req.model_fields_set
+    if change_ssvc and (
+        role.upper() != "REVIEWER" or (req.team and req.team.casefold() != "general")
+    ):
+        raise ValueError("SSVC changes require a reviewer Global assessment")
+    ssvc_record = (
+        new_record(req.ssvc, user) if change_ssvc and req.ssvc is not None else None
+    )
     for instance in req.instances:
         finding_uuid = instance.get("finding_uuid")
         original_analysis = (
@@ -231,7 +240,9 @@ def build_assessment_payloads(
             if req.original_analysis and isinstance(finding_uuid, str)
             else None
         )
-        existing_details = ""
+        existing_details = (
+            instance.get("analysis_details") or instance.get("analysisDetails") or ""
+        )
         if original_analysis:
             existing_details = (
                 original_analysis.get("analysisDetails")
@@ -253,6 +264,10 @@ def build_assessment_payloads(
                 assigned=req.assigned,
             )
 
+        final_details_str = (
+            write_record(final_details_str, ssvc_record)
+            if change_ssvc else preserve_record(final_details_str, existing_details)
+        )
         payload = {
             "project_uuid": instance["project_uuid"],
             "component_uuid": instance["component_uuid"],

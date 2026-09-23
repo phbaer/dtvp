@@ -4,7 +4,7 @@ import DependencyPathList from '../DependencyPathList.vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 
 // Mock icons
-vi.mock('lucide-vue-next', () => ({
+vi.mock('@lucide/vue', () => ({
     ChevronDown: { template: '<span />' },
     ChevronUp: { template: '<span />' },
     Shield: { template: '<span />' },

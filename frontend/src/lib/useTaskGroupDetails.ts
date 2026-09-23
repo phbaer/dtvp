@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { getTaskVulnGroup } from './api'
 import { isSummaryGroupedVuln } from './vulnListSummary'
 import type { GroupedVuln } from '../types'
@@ -42,6 +42,12 @@ export function useTaskGroupDetails({
         if (cached) return cached
         const listGroup = selectedListGroup.value
         return isSummaryGroupedVuln(listGroup) ? null : listGroup
+    })
+
+    watch(() => selectedListGroup.value?.evidence_sources, sources => {
+        const cached = selectedGroupId.value ? fullGroupCache.value[selectedGroupId.value] : null
+        // Preserve group identity: replacing it would reset the assessment form.
+        if (cached && sources) cached.evidence_sources = sources
     })
 
     const ensureFullGroup = async (

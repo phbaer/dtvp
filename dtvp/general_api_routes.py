@@ -14,6 +14,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .ssvc_services import (
+    SsvcInput,
+    evaluate as evaluate_ssvc,
+    get_models as get_ssvc_models,
+    preserve_record as preserve_ssvc_record,
+    summarize_group as summarize_ssvc_group,
+    validate_evidence as validate_ssvc_evidence,
+)
+from .ssvc_enrichment_services import get_service as get_ssvc_enrichment_service
+from .evidence_services import evidence_sources
+
 from .assessment_outbox_services import (
     AssessmentRevisionConflictError,
     assessment_key,
@@ -93,6 +104,7 @@ class AssessmentRequest(BaseModel):
     force: bool = False
     comparison_mode: Optional[str] = "MERGE"
     analysis_run_ids: list[str] = Field(default_factory=list)
+    ssvc: SsvcInput | None = None
 
 
 class AssessmentDetailsRequest(BaseModel):
@@ -105,6 +117,9 @@ class AssessmentRestoreRequest(BaseModel):
 
 
 class BulkWorkflowFilters(BaseModel):
+    original_severity: list[str] = Field(default_factory=list)
+    ssvc: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
     q: str = ""
     lifecycle: list[str] = Field(default_factory=list)
     inconsistency_reason: list[str] = Field(default_factory=list)
@@ -410,6 +425,7 @@ def _apply_assessment_payload_to_group(
 
 def _refresh_group_rescoring_metadata(group: dict[str, Any]) -> None:
     """Rebuild aggregate rescoring fields after component detail updates."""
+    group["ssvc_summary"] = summarize_ssvc_group(group)
     best_score: float | None = None
     best_vector: str | None = None
     fallback_vector: str | None = None
@@ -888,6 +904,9 @@ def _register_task_routes(
         q: str = "",
         lifecycle: list[str] | None = Query(default=None),
         inconsistency_reason: list[str] | None = Query(default=None),
+        original_severity: list[str] | None = Query(default=None),
+        ssvc: list[str] | None = Query(default=None),
+        evidence: list[str] | None = Query(default=None),
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
         team: str = "",
@@ -936,6 +955,9 @@ def _register_task_routes(
                     "inconsistency_reason": split_query_values(
                         inconsistency_reason
                     ),
+                    "original_severity": split_query_values(original_severity),
+                    "ssvc": split_query_values(ssvc),
+                    "evidence": split_query_values(evidence),
                     "analysis": split_query_values(analysis),
                     "tag": tag,
                     "team": team,
@@ -1010,6 +1032,9 @@ def _register_task_routes(
         q: str = "",
         lifecycle: list[str] | None = Query(default=None),
         inconsistency_reason: list[str] | None = Query(default=None),
+        original_severity: list[str] | None = Query(default=None),
+        ssvc: list[str] | None = Query(default=None),
+        evidence: list[str] | None = Query(default=None),
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
         team: str = "",
@@ -1053,6 +1078,9 @@ def _register_task_routes(
                     "inconsistency_reason": split_query_values(
                         inconsistency_reason
                     ),
+                    "original_severity": split_query_values(original_severity),
+                    "ssvc": split_query_values(ssvc),
+                    "evidence": split_query_values(evidence),
                     "analysis": split_query_values(analysis),
                     "tag": tag,
                     "team": team,
@@ -1134,6 +1162,7 @@ def _register_task_routes(
 
         def hydrate_group_detail() -> dict[str, Any]:
             hydrated = copy.deepcopy(group)
+            hydrated["evidence_sources"] = evidence_sources(hydrated, get_ssvc_enrichment_service().filter_snapshot())
             populate_group_dependency_chains(
                 hydrated,
                 task.get("_bom_cache_map") or {},
@@ -1461,7 +1490,7 @@ def _query_task_group_window(
     if hydrate_full:
         full_by_id = task.get("_full_result_by_id") or {}
         response["items"] = [
-            dict(full_by_id.get(item.get("id"), item))
+            {**full_by_id.get(item.get("id"), item), "evidence_sources": item.get("evidence_sources", [])}
             if isinstance(item, dict)
             else item
             for item in response["items"]
@@ -1496,6 +1525,9 @@ def _filter_bulk_workflow_groups(
         q=filters.q,
         lifecycle=filters.lifecycle,
         inconsistency_reason=filters.inconsistency_reason,
+        original_severity=filters.original_severity,
+        ssvc=filters.ssvc,
+        evidence=filters.evidence,
         analysis=filters.analysis,
         tag=filters.tag,
         team=filters.team,
@@ -2407,6 +2439,21 @@ def _register_assessment_routes(
     current_user_dependency: Callable[..., Any],
     client_dependency: Callable[..., Any],
 ) -> None:
+    @router.get("/ssvc/models")
+    async def ssvc_models(user: Annotated[str, Depends(current_user_dependency)]):
+        return {"models": get_ssvc_models()}
+
+    @router.get("/ssvc/exploitation")
+    async def ssvc_exploitation(
+        user: Annotated[str, Depends(current_user_dependency)],
+        cve: Annotated[list[str], Query(max_length=20)] = [],
+        refresh: bool = False,
+    ):
+        try:
+            return await get_ssvc_enrichment_service().lookup(cve, force=refresh)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     def load_rescore_rules_or_raise() -> dict[str, Any]:
         rules = deps.load_rescore_rules()
         if not rules:
@@ -2607,7 +2654,29 @@ def _register_assessment_routes(
                 )
 
         role = deps.get_user_role(user)
+        if "ssvc" in req.model_fields_set:
+            if role.upper() != "REVIEWER" or (
+                req.team and req.team.casefold() != "general"
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="SSVC changes require a reviewer Global assessment",
+                )
+            if req.ssvc is not None:
+                try:
+                    evaluate_ssvc(req.ssvc)
+                    validate_ssvc_evidence(req.ssvc)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
         payloads = deps.build_assessment_payloads(req, user, role)
+        if "ssvc" not in req.model_fields_set:
+            # Never trust client-supplied original_analysis/headers as authority
+            # for reviewer-only SSVC. Preserve each finding's stored record.
+            stored_details = await asyncio.to_thread(
+                deps.cache_manager.get_cached_assessment_details, req.instances
+            )
+            for (_instance, payload), existing in zip(payloads, stored_details):
+                payload["details"] = preserve_ssvc_record(payload["details"], existing)
         raw_payloads = [payload for _instance, payload in payloads]
         try:
             persisted = await deps.cache_manager.persist_assessment_updates(

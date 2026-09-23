@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import CustomSelect from './CustomSelect.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
-import { Copy } from 'lucide-vue-next'
+import { Copy } from '@lucide/vue'
 import type { InconsistencyReason } from '../types'
 import type {
     AutomaticAssessmentOutcome,
@@ -10,6 +10,9 @@ import type {
 } from '../lib/automaticAssessmentFilters'
 
 export interface FilterState {
+    originalSeverityFilters?: string[]
+    ssvcFilters?: string[]
+    evidenceFilters?: string[]
     sortBy: string
     sortOrder: 'asc' | 'desc'
     dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>

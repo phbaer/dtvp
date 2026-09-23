@@ -3,12 +3,16 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 import VulnGroupCard from '../VulnGroupCard.vue'
 import CodeAnalysisPanel from '../CodeAnalysisPanel.vue'
+import SsvcCalculator from '../SsvcCalculator.vue'
 import defaultRescoreRules from '../../../../data/rescore_rules.json'
+import ssvcModel from '../../../../dtvp/resources/ssvc/deployer-1.0.0.json'
 
 const clipboardWriteText = vi.fn()
 
 // Mock API
 vi.mock('../../lib/api', () => ({
+    getSsvcModels: vi.fn(() => Promise.resolve([ssvcModel])),
+    getSsvcExploitation: vi.fn(() => Promise.resolve({ enabled: true, sources: [], suggestion: null, auto_fill: false, retry_after: 0 })),
     updateAssessment: vi.fn((payload: any) => {
         // Sophisticated mock for per-team aggregation
         const results = payload.instances.map((inst: any) => ({
@@ -34,7 +38,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 // Mock Icons
-vi.mock('lucide-vue-next', async (importOriginal) => {
+vi.mock('@lucide/vue', async (importOriginal) => {
     const actual = await importOriginal() as any
     return {
         ...actual,
@@ -140,6 +144,17 @@ describe('VulnGroupCard', () => {
 
         const versionChips = wrapper.findAll('[data-testid="assessment-version-chip"]')
         expect(versionChips.length).toBe(0) // not expanded yet
+    })
+
+    it('shows cached source badges without requiring a saved SSVC assessment', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, evidence_sources: ['KEV', 'CISA_SSVC', 'STALE'] } },
+        })
+        expect(wrapper.findAll('[data-testid="evidence-badge"]').map(badge => badge.text())).toEqual(['KEV', 'CISA SSVC'])
+        expect(wrapper.get('[data-testid="evidence-badge"]').attributes('title')).toContain('Stale cached data')
+        await wrapper.setProps({ group: { ...mockGroup, evidence_sources: ['NOT_CHECKED'] } })
+        expect(wrapper.findAll('[data-testid="evidence-badge"]')).toHaveLength(0)
+        wrapper.unmount()
     })
 
     it('renders the criticality badge as a fixed overlay marker', () => {
@@ -377,7 +392,7 @@ describe('VulnGroupCard', () => {
             .toBeDefined()
 
         ;(wrapper.vm as any).state = 'NOT_AFFECTED'
-        await wrapper.find('textarea').setValue('The vulnerable code is absent.')
+        await wrapper.get('#analysis-details-textarea').setValue('The vulnerable code is absent.')
         await wrapper.vm.$nextTick()
 
         expect(wrapper.get('[data-testid="assessment-completeness"]').text())
@@ -432,7 +447,7 @@ describe('VulnGroupCard', () => {
         ;(wrapper.vm as any).state = 'NOT_AFFECTED'
         ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
         await wrapper.vm.$nextTick()
-        await wrapper.find('textarea').setValue('False positive')
+        await wrapper.get('#analysis-details-textarea').setValue('False positive')
 
         // Click Apply
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
@@ -562,7 +577,7 @@ describe('VulnGroupCard', () => {
 
         ;(wrapper.vm as any).state = 'NOT_AFFECTED'
         ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
-        await wrapper.find('textarea').setValue('Updated team details')
+        await wrapper.get('#analysis-details-textarea').setValue('Updated team details')
 
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         await applyBtn.trigger('click')
@@ -606,7 +621,7 @@ describe('VulnGroupCard', () => {
         await reviewTab?.trigger('click')
         await wrapper.vm.$nextTick()
 
-        expect(wrapper.text()).toContain('CVSS & Rescoring')
+        expect(wrapper.text()).toContain('CVSS & SSVC')
         expect(wrapper.text()).toContain('Threat Model Proposal')
         expect(wrapper.text()).toContain('Use Proposal Draft')
         expect(wrapper.text()).toContain('Threat model reduces exposure for the reviewed deployment.')
@@ -943,6 +958,31 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
     }
 
+    it('tracks SSVC-only edits and sends an explicit global selection', async () => {
+        const wrapper = mount(VulnGroupCard, {
+            props: { group: { ...mockGroup, tags: ['Security'] } },
+            global: { provide: { user: ref({ role: 'REVIEWER', username: 'tester' }) }, stubs: { teleport: true } },
+        })
+        await openReviewTab(wrapper)
+        const selection = { model: 'ssvc:DT_DP', version: '1.0.0', answers: { 'ssvc:E:1.1.0': 'A' }, rationale: 'Review deployment', exploitation_evidence: 'signed-evidence' }
+        wrapper.getComponent(SsvcCalculator).vm.$emit('update:modelValue', selection)
+        await wrapper.vm.$nextTick()
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled')).toBeUndefined()
+        ;(wrapper.vm as any).selectedTeam = 'Security'
+        await wrapper.vm.$nextTick()
+        expect(wrapper.text()).toContain('Unsaved SSVC changes')
+        ;(wrapper.vm as any).selectedTeam = ''
+        await wrapper.vm.$nextTick()
+        const saving = (wrapper.vm as any).handleUpdate(false)
+        await flushPromises()
+        expect((wrapper.vm as any).reviewModal.blocks.find((block: any) => block.team === 'General').details).toContain('SSVC priority: Incomplete')
+        ;(wrapper.vm as any).handleReviewConfirm()
+        await saving
+        expect(updateAssessment).toHaveBeenLastCalledWith(expect.objectContaining({ ssvc: selection }))
+        expect((wrapper.vm as any).ssvcTouched).toBe(false)
+        wrapper.unmount()
+    })
+
     it('keeps CVSS and rescoring in the reviewer global review only', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: { group: { ...mockGroup, tags: ['Security'] } },
@@ -954,7 +994,7 @@ describe('VulnGroupCard', () => {
 
         await openReviewTab(wrapper)
 
-        expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).not.toContain('CVSS & Rescoring')
+        expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).not.toContain('CVSS & SSVC')
         expect(wrapper.get('[data-testid="global-cvss-rescoring"]').isVisible()).toBe(true)
         expect(wrapper.get('[data-testid="global-cvss-rescoring"]').text()).toContain('Applied with the global assessment')
 
@@ -1054,7 +1094,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
         ;(wrapper.vm as any).state = 'EXPLOITABLE'
         await wrapper.vm.$nextTick()
-        await wrapper.find('textarea').setValue('Validated exploitable path')
+        await wrapper.get('#analysis-details-textarea').setValue('Validated exploitable path')
 
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         await applyBtn.trigger('click')
@@ -1129,7 +1169,7 @@ describe('VulnGroupCard', () => {
         ;(wrapper.vm as any).selectedTeam = 'Security'
         ;(wrapper.vm as any).state = 'EXPLOITABLE'
         await wrapper.vm.$nextTick()
-        await wrapper.find('textarea').setValue('Draft that should remain local')
+        await wrapper.get('#analysis-details-textarea').setValue('Draft that should remain local')
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         await applyBtn.trigger('click')
         await flushPromises()
@@ -1222,7 +1262,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
         ;(wrapper.vm as any).state = 'EXPLOITABLE'
         await wrapper.vm.$nextTick()
-        await wrapper.find('textarea').setValue('Validated exploitable path')
+        await wrapper.get('#analysis-details-textarea').setValue('Validated exploitable path')
 
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         await applyBtn.trigger('click')
@@ -1319,7 +1359,7 @@ describe('VulnGroupCard', () => {
         expect(wrapper.text()).toContain('Justification')
         ;(wrapper.vm as any).justification = 'CODE_NOT_PRESENT'
         await wrapper.vm.$nextTick()
-        await wrapper.find('textarea').setValue('Vulnerable code is not present')
+        await wrapper.get('#analysis-details-textarea').setValue('Vulnerable code is not present')
 
         // Apply bulk update
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
@@ -1352,7 +1392,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
         await flushPromises()
 
-        await wrapper.find('textarea').setValue('False positive mock')
+        await wrapper.get('#analysis-details-textarea').setValue('False positive mock')
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         await applyBtn.trigger('click')
         await flushPromises()
@@ -1542,7 +1582,7 @@ describe('VulnGroupCard', () => {
         await wrapper.vm.$nextTick()
         await flushPromises()
 
-        await wrapper.find('textarea').setValue('Analyst no rescore')
+        await wrapper.get('#analysis-details-textarea').setValue('Analyst no rescore')
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
         await applyBtn.trigger('click')
         await flushPromises()
@@ -1604,7 +1644,7 @@ describe('VulnGroupCard', () => {
 
         ;(wrapper.vm as any).state = 'EXPLOITABLE'
         await wrapper.vm.$nextTick()
-        await wrapper.find('textarea').setValue('Security confirmed exploitable')
+        await wrapper.get('#analysis-details-textarea').setValue('Security confirmed exploitable')
 
         // Click Apply
         const applyBtn = wrapper.get('[data-testid="assessment-submit-button"]')
@@ -1701,16 +1741,15 @@ describe('VulnGroupCard', () => {
 
         await wrapper.find('.cursor-pointer').trigger('click')
 
-        // Global view - find the Analysis Details textarea (it's the first one)
-        const textareas = wrapper.findAll('textarea')
-        expect((textareas[0]?.element as HTMLTextAreaElement).value).toBe('Global info')
+        // The SSVC rationale is a separate textarea.
+        expect((wrapper.get('#analysis-details-textarea').element as HTMLTextAreaElement).value).toBe('Global info')
 
         // Switch to Security
         ;(wrapper.vm as any).selectedTeam = 'Security'
         await wrapper.vm.$nextTick()
 
         // Team view
-        expect((textareas[0]?.element as HTMLTextAreaElement).value).toBe('This is urgent')
+        expect((wrapper.get('#analysis-details-textarea').element as HTMLTextAreaElement).value).toBe('This is urgent')
         expect((wrapper.vm as any).state).toBe('EXPLOITABLE')
     })
 

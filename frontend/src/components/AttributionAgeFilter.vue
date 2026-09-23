@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, nextTick } from 'vue'
-import { Clock, X, ChevronDown } from 'lucide-vue-next'
+import { Clock, X, ChevronDown } from '@lucide/vue'
 import { getAttributionAgeFilterDays } from '../lib/attributionAgePresets'
 
 const props = defineProps<{

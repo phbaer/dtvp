@@ -95,6 +95,14 @@ also loads with Vite's native config loader. It caps the process pool at four
 workers so jsdom-heavy component tests do not contend past their per-test
 timeouts; validate config changes with
 `cd frontend && npx vitest --run --configLoader native`.
+Frontend dependencies track stable releases compatible with the build and test
+toolchain. The September 2026 refresh uses Vue 3.5.43, Vite 8.3.0, and Vitest
+5.0.1. Icons use the maintained `@lucide/vue` package instead of the deprecated
+`lucide-vue-next`; component imports and test mocks must use the new package name.
+TypeScript stays on 6.0.3: the current `vue-tsc` 3.3.11 loads
+`typescript/lib/tsc`, which TypeScript 7's native compiler no longer exports.
+Revisit that constraint when Vue's type checker supports the native compiler;
+do not bypass Vue component type checking to upgrade TypeScript.
 CI uses `setup-uv`'s direct latest-release path, which avoids the remote version
 manifest that range resolution requires. `Dockerfile.free-threaded` likewise
 uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
@@ -370,6 +378,12 @@ aggregate state follows these rules:
   `ASSESSED` lifecycle requires a non-`NOT_SET` assessment block for every
   normalized team tag. Legacy unstructured assessments retain their separate
   `ASSESSED_LEGACY` classification.
+- Analyst default filters include `OPEN`, `INCOMPLETE`, `INCONSISTENT`, and
+  `NEEDS_APPROVAL`: unassessed findings, missing assessment coverage, conflicting
+  assessments, and pending reviewer sign-off. Completed `ASSESSED` and
+  `ASSESSED_LEGACY` findings stay excluded. Reset restores these defaults;
+  explicit lifecycle filters in existing/shared URLs are respected. Reviewer
+  defaults are unchanged.
 - Pending review with missing team or finding coverage remains `INCOMPLETE`;
   pending review with all required assessments documented remains
   `NEEDS_APPROVAL` and matches the overlapping `READY_FOR_APPROVAL` filter.
@@ -402,6 +416,134 @@ a bulk apply — the rule is layered on top of the proposed vector and the base
 metrics of the Dependency-Track vector are restored, so an analyzer proposal
 contributes only its extra metrics. States without a transition keep the
 analyzer's proposed vector and score unchanged.
+
+### SSVC And Original Severity
+
+SSVC is independent of CVSS and assessment state: it records deployment priority,
+not a numerical severity or an automatic analysis-state transition. The initial
+model is CERT/CC **Deployer Patch Application Priority 1.0.0**, with Defer,
+Scheduled, Out-of-Cycle, and Immediate outcomes (not CISA's distinct tree).
+
+Reviewers use the embedded SSVC calculator beside CVSS in the global
+assessment's Decision & rationale section. Questions, definitions, and the
+live result come from the bundled model; links open the official documentation
+and calculator. Save through the existing assessment action; clear explicitly
+to remove SSVC. No values are inferred from CVSS. Official-source evidence can
+prefill unanswered Exploitation as described below. Unsaved SSVC
+edits survive team-tab switches but must be saved from the global assessment.
+Vulnerability rows display saved SSVC priority; sidebar original-severity and
+SSVC filters include counts, removable chips, and shareable URL state.
+
+The question definitions and all 72 decision rules are bundled in
+`dtvp/resources/ssvc/deployer-1.0.0.json`, pinned to the CERT/CC SSVC `2026.7.0`
+release, with upstream URLs and the MIT(SEI) license alongside. Authenticated
+`GET /api/ssvc/models` serves these resources; calculation needs no external
+service. Both the model and its rules are versioned. Keep historical resources
+when adding a revision, retain attribution, and test exhaustive input coverage
+and expected outcomes before shipping rule changes. The backend rejects
+incomplete or duplicate rule tables.
+Frontend summaries validate saved decisions against the same canonical JSON,
+bundled at build time, and tests exercise every rule. Both Docker frontend build
+stages copy this resource directory for the build and type-checking.
+
+`POST /api/assessment` accepts optional `ssvc: {model, version, answers, rationale,
+exploitation_evidence?}`
+for reviewer global assessments. The server validates answers and calculates
+the outcome; omitted answers mean incomplete, never a default decision.
+Omitting `ssvc` preserves each finding's stored record; `null` clears it.
+The General header stores an atomic `[SSVC: IMMEDIATE]` tag (or `DEFER`,
+`SCHEDULED`, `OUT_OF_CYCLE`, `INCOMPLETE`). A separate body block delimited by
+`[SSVC Details]` and `[/SSVC Details]` contains pretty-printed JSON: model/version,
+answers, outcome code (`D`/`S`/`O`/`I`, or `null` for incomplete), readable priority,
+rationale, assessor, UTC timestamp, and any selected source-evidence snapshot.
+Consumers can parse the JSON directly without URL decoding. Ordinary JSON string
+escaping protects reserved assessment delimiters in free text; the decoded
+values are unchanged. Header and JSON outcomes are validated against the rules.
+Older percent-encoded `[SSVC: ...]` records remain readable and migrate on their
+next save, without changing their assessor, timestamp, or evidence. Invalid and
+unsupported records are retained for explicit correction, not silently dropped.
+The grouped API continues to expose the decoded record as `ssvc_summary.record`.
+The General body also
+contains a managed `[SSVC Summary]` section with the **SSVC priority**, inputs,
+rationale, source reference, source assessment/check dates, and assessor.
+Incomplete assessments explicitly document `SSVC priority: Incomplete`.
+The save-review preview includes changed SSVC priority and inputs. Ordinary
+edits preserve/regenerate the summary; explicit clear removes it and metadata.
+This travels with existing Dependency-Track assessment and archive workflows.
+Team edits, CVSS changes, and bulk assessment workflows preserve SSVC per finding.
+Grouped `ssvc_summary` reports coverage and explicitly distinguishes unassessed,
+incomplete, mixed, and invalid/unsupported records; it never picks one result
+from differing assessments.
+
+Grouped `original_severity` is calculated before local rescoring, using the
+original CVSS score (including zero), falling back to the source severity label
+when no valid score exists. Alias/version groups retain the highest original
+severity. Missing source data is `UNKNOWN`; effective rescored severity is
+never used as the fallback. Task group/window and bulk filters accept
+`original_severity` and `ssvc` arrays, with matching facet counts: selected
+values use OR, filter categories use AND, and an empty selection means all.
+
+#### Official Exploitation Evidence
+
+The backend proactively downloads the [CISA KEV catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+at startup and refreshes it hourly. Opening the global review's calculator
+also checks [CISA Vulnrichment](https://github.com/cisagov/vulnrichment) for the
+vulnerability's CVE identifiers/aliases, caching each result (including 404s)
+for 24 hours. The authenticated `GET /api/ssvc/exploitation?cve=CVE-...` endpoint
+accepts up to 20 CVEs. `refresh=true` bypasses freshness, subject to a shared
+60-second per-source/CVE cooldown. Fetching never saves an assessment.
+
+`dtvp/resources/ssvc-sources.json` defines source URLs, supported source
+versions, TTLs, and value mappings. KEV inclusion means **Active**; absence is
+unknown, never **None**. Only the authoritative CISA ADP container's explicit
+Vulnrichment Exploitation (`none`, `poc`, `active`, SSVC version 2.0.3) is mapped
+to the Deployer input. Its other coordinator decisions are not imported.
+Positive evidence takes precedence across aliases; a None suggestion requires
+an explicit assessment for every supplied CVE. EPSS is not exploitation evidence.
+
+Only fresh, conclusive evidence can automatically fill an unanswered, previously
+unassessed field. Existing saved/manual answers and cleared drafts are not
+overwritten: use **Use suggestion** explicitly. **Refresh evidence**, beside
+Exploitation, checks again without persisting anything. The calculator displays
+source links, assessment/check dates, missing data, and errors. Failed refreshes
+retain the last good snapshot marked stale; stale evidence requires explicit
+acceptance. Manual Exploitation edits detach source evidence; other edits keep it.
+Save validates a server-signed evidence token and stores its historical snapshot;
+later refreshes never rewrite documented assessments. Rotating the session secret
+requires refreshing/reselecting evidence before editing and re-saving old SSVC.
+
+The bounded SQLite cache defaults to `DTVP_DT_CACHE_PATH/ssvc_enrichment.sqlite3`
+(`data/dt_cache/ssvc_enrichment.sqlite3` without configuration); override with
+`DTVP_SSVC_CACHE_PATH`. It retains at most 4096 CVE entries plus the shared KEV
+catalog, survives restarts, and bounds concurrent fetches and response sizes.
+
+The sidebar's **KEV / CISA evidence** filters and list badges use this cache,
+independently of saved SSVC assessments. **KEV listed** matches catalog inclusion;
+**CISA SSVC available** matches an explicit CISA Exploitation assessment, including
+`none`. Any CVE identifier or alias can match. Selecting multiple evidence values
+uses OR; other filters (including the analyst lifecycle defaults) still use AND.
+Task list/detail responses expose `evidence_sources`; task-window and bulk queries
+accept an `evidence` array, with per-group counts under `counts.*.evidence`.
+Shareable URLs support e.g. `evidence=KEV&evidence=CISA_SSVC`.
+
+Available values are `KEV`, `CISA_SSVC`, `NOT_CHECKED`, `NO_DATA`, `STALE`,
+`UNAVAILABLE`, and `NO_CVE`. Coverage flags can overlap source matches.
+`NO_DATA` requires fresh negative checks for both sources across all CVE aliases;
+unchecked, failed, expired, or evicted lookups never imply no data. Positive stale
+evidence remains searchable. KEV covers the cached whole catalog; CISA coverage
+is partial until individual CVEs are checked by opening/refreshing the global
+SSVC calculator. Filtering never triggers external requests or a project-wide
+crawl. Cache updates and freshness expiry invalidate query results/counts without
+rebuilding the vulnerability task; calculator lookups refresh the visible window.
+
+Set `DTVP_SSVC_ENRICHMENT_ENABLED=false` to disable background and on-demand
+external requests. Default is enabled: whole-catalog requests go to `www.cisa.gov`,
+and on-demand CVE-specific requests go to `raw.githubusercontent.com`; no local
+assessment text or deployment context is sent. Manual calculation/saving works
+without either source or network access.
+TLS verification stays enabled. For deployments behind a TLS-inspecting proxy,
+configure HTTPX's `SSL_CERT_FILE` with a trusted CA bundle (for example the system
+CA store); do not disable certificate verification.
 
 ### Team Mapping And Analyzer Guidance
 

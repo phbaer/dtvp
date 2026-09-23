@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Minus, X, GripHorizontal } from 'lucide-vue-next'
+import { Minus, X, GripHorizontal } from '@lucide/vue'
 import type { VulnModalEntry } from '../lib/useVulnModals'
 import { useVulnModals } from '../lib/useVulnModals'
 import VulnGroupCard from './VulnGroupCard.vue'

@@ -9,6 +9,7 @@ from dtvp.dt_client import DTClient
 
 @pytest.fixture(autouse=True)
 def reset_cache_manager(tmp_path, monkeypatch):
+    monkeypatch.setenv("DTVP_SSVC_ENRICHMENT_ENABLED", "false")
     cache_dir = tmp_path / "dt_cache"
     analysis_results_path = tmp_path / "code_analysis_results.json"
     monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))

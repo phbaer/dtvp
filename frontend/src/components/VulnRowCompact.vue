@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { GroupedVuln } from '../types'
 import type { VulnListItem } from '../lib/vulnListIndex'
 import VulnGroupCardHeader from './VulnGroupCardHeader.vue'
-import { CheckCircle, RefreshCw } from 'lucide-vue-next'
+import { CheckCircle, RefreshCw } from '@lucide/vue'
 import { analysisQueueStore } from '../lib/analysisQueueStore'
 
 const props = defineProps<{

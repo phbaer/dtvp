@@ -1,11 +1,15 @@
 import type { AutomaticAssessmentFilter, DependencyRelationship, TMRescoreProposalFilter } from './vulnListIndex'
 import type { InconsistencyReason } from '../types'
+import { evidenceLabel } from './evidence'
 import type {
     AutomaticAssessmentOutcome,
     AutomaticAssessmentRescoreState,
 } from './automaticAssessmentFilters'
 
 export type ActiveFilterChipKey =
+    | 'originalSeverity'
+    | 'ssvc'
+    | 'evidence'
     | 'lifecycle'
     | 'analysis'
     | 'inconsistencyReason'
@@ -33,6 +37,9 @@ export interface ProjectVulnFilterOption {
 }
 
 export interface BuildActiveFilterChipsInput {
+    originalSeverityFilters?: readonly string[]
+    ssvcFilters?: readonly string[]
+    evidenceFilters?: readonly string[]
     lifecycleFilters: readonly string[]
     lifecycleOptions: readonly ProjectVulnFilterOption[]
     inconsistencyReasonFilters?: readonly InconsistencyReason[]
@@ -60,6 +67,9 @@ export interface BuildActiveFilterChipsInput {
 }
 
 export interface HasCustomProjectVulnFilterStateInput {
+    originalSeverityFilters?: readonly string[]
+    ssvcFilters?: readonly string[]
+    evidenceFilters?: readonly string[]
     smartSearchInput: string
     idFilter: string
     tagFilter: string
@@ -118,6 +128,9 @@ const hasAllOptionsSelected = (
 }
 
 export function buildActiveFilterChips({
+    originalSeverityFilters = [],
+    ssvcFilters = [],
+    evidenceFilters = [],
     lifecycleFilters,
     lifecycleOptions,
     inconsistencyReasonFilters = [],
@@ -144,6 +157,9 @@ export function buildActiveFilterChips({
     attributionAgeMode,
 }: BuildActiveFilterChipsInput): ActiveFilterChip[] {
     const chips: ActiveFilterChip[] = []
+    if (originalSeverityFilters.length) chips.push({ key: 'originalSeverity', label: `Original severity: ${originalSeverityFilters.join(', ')}` })
+    if (ssvcFilters.length) chips.push({ key: 'ssvc', label: `SSVC: ${ssvcFilters.map(v => v.replaceAll('_', ' ')).join(', ')}` })
+    if (evidenceFilters.length) chips.push({ key: 'evidence', label: `Evidence: ${evidenceFilters.map(evidenceLabel).join(', ')}` })
 
     if (!hasAllOptionsSelected(lifecycleFilters, lifecycleOptions)) {
         chips.push({ key: 'lifecycle', label: `Lifecycle: ${summarizedSelection(lifecycleFilters, lifecycleOptions, 'All lifecycle')}` })
@@ -194,6 +210,9 @@ export function buildActiveFilterChips({
 }
 
 export function hasCustomProjectVulnFilterState({
+    originalSeverityFilters = [],
+    ssvcFilters = [],
+    evidenceFilters = [],
     smartSearchInput,
     idFilter,
     tagFilter,
@@ -221,6 +240,9 @@ export function hasCustomProjectVulnFilterState({
     defaultAutomaticAssessmentRescoreFilters,
 }: HasCustomProjectVulnFilterStateInput): boolean {
     return !!smartSearchInput.trim()
+        || originalSeverityFilters.length > 0
+        || ssvcFilters.length > 0
+        || evidenceFilters.length > 0
         || !!idFilter
         || !!tagFilter
         || !!componentFilter

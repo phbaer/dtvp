@@ -1,4 +1,5 @@
 import type { FilterCounts, TeamCounts } from './group-classifier'
+import { evidenceSources } from './evidence'
 import type { TaskVulnGroupListCounts } from './api'
 import type { InconsistencyReason } from '../types'
 import type { VulnListFacets } from './vulnListFacets'
@@ -32,6 +33,9 @@ import type {
 } from './automaticAssessmentFilters'
 
 export interface VulnListViewFilters {
+    originalSeverityFilters?: string[]
+    ssvcFilters?: string[]
+    evidenceFilters?: string[]
     smartSearch?: ParsedVulnSearchQuery | string
     tagFilter?: string
     idFilter?: string
@@ -127,6 +131,9 @@ export const deriveVulnListResultCounts = (
     items: readonly VulnListItem[],
 ): TaskVulnGroupListCounts => {
     const counts: TaskVulnGroupListCounts = {
+        original_severity: {},
+        ssvc: {},
+        evidence: {},
         total: items.length,
         lifecycle: {
             OPEN: 0,
@@ -171,6 +178,9 @@ export const deriveVulnListResultCounts = (
 
         incrementResultCount(counts.analysis, item.technicalState)
         counts.dependency_relationship[item.dependencyRelationship.toLowerCase() as keyof RelationshipCounts]++
+        incrementResultCount(counts.original_severity!, item.originalSeverity)
+        incrementResultCount(counts.ssvc!, item.group.ssvc_summary?.status || 'UNASSESSED')
+        incrementUniqueResultCounts(counts.evidence!, evidenceSources(item.group))
         if (item.cvssVersionMismatch) counts.cvss_version_mismatch++
 
         incrementUniqueResultCounts(counts.ids!, [item.id, ...(item.group.aliases || [])])
@@ -511,6 +521,9 @@ export const deriveVulnListFilterModel = (
     let attributionAgeCount = 0
 
     const listFilterInput = compileVulnListFilters({
+        originalSeverityFilters: filters.originalSeverityFilters,
+        ssvcFilters: filters.ssvcFilters,
+        evidenceFilters: filters.evidenceFilters,
         smartSearch: filters.smartSearch,
         tagFilter: filters.tagFilter,
         idFilter: filters.idFilter,

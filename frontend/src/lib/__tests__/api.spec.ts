@@ -3,6 +3,7 @@ import {
     drainTaskVulnGroupDetails,
     drainTaskVulnGroups,
     getProjects,
+    getSsvcExploitation,
     getGroupedVulns,
     getTaskStatus,
     getTaskStatistics,
@@ -41,6 +42,7 @@ import {
     uploadProjectArchiveImport,
     waitForProjectArchiveTask,
 } from '../api'
+import { EVIDENCE_UPDATED_EVENT } from '../evidence'
 
 const mocks = vi.hoisted(() => ({
     get: vi.fn(),
@@ -68,6 +70,23 @@ vi.mock('axios', () => {
 })
 
 describe('api.ts', () => {
+    it('announces successful evidence lookups for list refresh without saving', async () => {
+        const listener = vi.fn()
+        globalThis.addEventListener(EVIDENCE_UPDATED_EVENT, listener)
+        try {
+            const result = { sources: [], suggestion: null }
+            mocks.get.mockResolvedValueOnce({ data: result })
+            await expect(getSsvcExploitation(['CVE-2026-1234'], true)).resolves.toBe(result)
+            expect(listener).toHaveBeenCalledTimes(1)
+            expect(mocks.get.mock.lastCall?.[1].params.toString()).toBe('cve=CVE-2026-1234&refresh=true')
+            expect(mocks.post).not.toHaveBeenCalled()
+            mocks.get.mockRejectedValueOnce(new Error('offline'))
+            await expect(getSsvcExploitation(['CVE-2026-1234'])).rejects.toThrow('offline')
+            expect(listener).toHaveBeenCalledTimes(1)
+        } finally {
+            globalThis.removeEventListener(EVIDENCE_UPDATED_EVENT, listener)
+        }
+    })
     beforeEach(() => {
         vi.clearAllMocks()
         vi.useRealTimers()

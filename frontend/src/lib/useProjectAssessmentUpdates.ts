@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import type { GroupedVuln } from '../types'
 import { isSummaryGroupedVuln, summarizeGroupForList } from './vulnListSummary'
+import { summarizeSsvc } from './ssvc'
 
 export interface ProjectAssessmentUpdate {
     id: string
@@ -19,32 +20,39 @@ interface UseProjectAssessmentUpdatesOptions {
     refreshTaskWindow?: () => Promise<unknown> | unknown
 }
 
-export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): GroupedVuln => ({
-    ...group,
-    rescored_cvss: data.rescored_cvss,
-    rescored_vector: data.rescored_vector,
-    assignees: data.assignees !== undefined ? data.assignees : group.assignees,
-    affected_versions: group.affected_versions.map((version: any) => ({
-        ...version,
-        components: version.components.map((instance: any) => {
-            const persistenceResult = data.dtvp_results?.find(
-                (result: any) => result.uuid === instance.finding_uuid,
-            )
-            return {
-                ...instance,
-                analysis_state: data.analysis_state,
-                analysis_details: data.analysis_details,
-                is_suppressed: data.is_suppressed,
-                justification: data.justification,
-                dtvp_revision: persistenceResult?.revision ?? instance.dtvp_revision,
-                dtvp_sync_status: persistenceResult?.sync_status
-                    || (persistenceResult?.queued ? 'pending' : instance.dtvp_sync_status),
-                dtvp_update_id: persistenceResult?.update_id ?? instance.dtvp_update_id,
-                dtvp_sync_error: persistenceResult ? null : instance.dtvp_sync_error,
-            }
-        }),
-    })),
-})
+export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): GroupedVuln => {
+    const updated: GroupedVuln = {
+        ...group,
+        rescored_cvss: data.rescored_cvss,
+        rescored_vector: data.rescored_vector,
+        assignees: data.assignees !== undefined ? data.assignees : group.assignees,
+        affected_versions: group.affected_versions.map(version => ({
+            ...version,
+            components: version.components.map(instance => {
+                const persistenceResult = data.dtvp_results?.find(
+                    (result: any) => result.uuid === instance.finding_uuid,
+                )
+                if (data.dtvp_results && !persistenceResult) return instance
+                return {
+                    ...instance,
+                    analysis_state: persistenceResult?.new_state ?? data.analysis_state,
+                    analysis_details: persistenceResult?.new_details ?? data.analysis_details,
+                    is_suppressed: data.is_suppressed,
+                    justification: data.justification,
+                    dtvp_revision: persistenceResult?.revision ?? instance.dtvp_revision,
+                    dtvp_sync_status: persistenceResult?.sync_status
+                        || (persistenceResult?.queued ? 'pending' : instance.dtvp_sync_status),
+                    dtvp_update_id: persistenceResult?.update_id ?? instance.dtvp_update_id,
+                    dtvp_sync_error: persistenceResult ? null : instance.dtvp_sync_error,
+                }
+            }),
+        })),
+    }
+    updated.ssvc_summary = summarizeSsvc(updated.affected_versions.flatMap(version =>
+        version.components.map(instance => instance.analysis_details || instance.analysisDetails || ''),
+    ))
+    return updated
+}
 
 export function useProjectAssessmentUpdates({
     groups,

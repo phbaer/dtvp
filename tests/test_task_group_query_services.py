@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from dtvp import general_api_routes
 from dtvp import task_group_query_services as query_services
 from dtvp.general_api_routes import _query_task_group_window, _task_for_user
+from dtvp.ssvc_enrichment_services import SOURCES, SsvcEnrichmentService
 
 
 def _group(index: int) -> dict:
@@ -89,6 +90,60 @@ def test_identical_concurrent_queries_share_one_computation(monkeypatch):
 
     assert call_count == len(groups)
     assert first_result == second_result
+
+
+def test_evidence_filters_counts_bulk_and_cache_invalidation(tmp_path, monkeypatch):
+    now = [1_800_000_000.0]
+    service = SsvcEnrichmentService(str(tmp_path / "sources.sqlite3"), clock=lambda: now[0])
+    monkeypatch.setattr(query_services, "get_ssvc_enrichment_service", lambda: service)
+    groups = [_group(i) for i in range(4)]
+    groups[0].update(id="GHSA-alias", aliases=["CVE-2026-1000", "CVE-2026-1000"])
+    index = query_services.build_task_group_query_index(groups)
+    assert _query(index, evidence=["KEV"])["filtered"] == 0
+    service._cache("kev", {"checked": now[0], "data": {"CVE-2026-1000": {"value": "A"}}})
+    service._cache(groups[1]["id"], {"checked": now[0], "data": {"value": "N"}})
+    service._cache(groups[2]["id"], {"checked": now[0], "data": None})
+    result = _query(index, evidence=["kev", "CISA_SSVC"], limit=1)
+    assert result["filtered"] == 2
+    assert result["items"][0]["id"] == groups[1]["id"]
+    assert result["items"][0]["evidence_sources"] == ["CISA_SSVC"]
+    assert result["counts"]["all"]["evidence"] == {
+        "KEV": 1, "CISA_SSVC": 1, "NOT_CHECKED": 2, "NO_DATA": 1,
+        "STALE": 0, "UNAVAILABLE": 0, "NO_CVE": 0,
+    }
+    assert result["counts"]["filtered"]["evidence"]["NO_DATA"] == 0
+    assert _query(index, evidence=["KEV"], ssvc=["UNASSESSED"])["filtered"] == 1
+    assert _query(index, evidence=["KEV"], ssvc=["IMMEDIATE"])["filtered"] == 0
+    assert _query(index, evidence=["KEV", "CISA_SSVC"], offset=1)["items"][0]["id"] == groups[0]["id"]
+    assert "evidence_sources" not in groups[0]
+    bulk = general_api_routes._filter_bulk_workflow_groups(
+        index, general_api_routes.BulkWorkflowFilters(evidence=["KEV", "CISA_SSVC"])
+    )
+    assert {item["id"] for item in bulk} == {groups[0]["id"], groups[1]["id"]}
+    now[0] += SOURCES["kev"]["ttl_seconds"]
+    assert _query(index, evidence=["NO_DATA"])["filtered"] == 0
+    assert _query(index, evidence=["KEV"])["items"][0]["evidence_sources"] == ["KEV", "NOT_CHECKED", "STALE"]
+    service._cache(groups[3]["id"], {"checked": now[0], "data": {"value": "P"}})
+    assert _query(index, evidence=["CISA_SSVC"])["filtered"] == 2
+
+
+def test_original_severity_and_ssvc_facets_filter_before_pagination_and_cache():
+    groups = [
+        {**_group(1), "cvss_score": 9.8, "severity": "LOW", "rescored_cvss": 1, "ssvc_summary": {"status": "IMMEDIATE"}},
+        {**_group(2), "original_severity": "HIGH", "ssvc_summary": {"status": "SCHEDULED"}},
+        {**_group(3), "cvss_score": 0},
+    ]
+    index = query_services.build_task_group_query_index(groups)
+    first = _query(index, original_severity=["critical", "HIGH"], ssvc=["IMMEDIATE"], limit=1)
+    assert [group["id"] for group in first["items"]] == [groups[0]["id"]]
+    assert first["filtered"] == 1
+    assert first["counts"]["all"]["original_severity"]["INFO"] == 1
+    assert first["counts"]["filtered"]["ssvc"]["IMMEDIATE"] == 1
+    assert first["counts"]["filtered"]["original_severity"]["CRITICAL"] == 1
+    second = _query(index, original_severity=["INFO"], ssvc=["UNASSESSED"])
+    assert [group["id"] for group in second["items"]] == [groups[2]["id"]]
+    assert _query(index, original_severity=["LOW"])["filtered"] == 0
+    assert _query(index)["total"] == 3
 
 
 def test_unfiltered_queries_reuse_the_same_sort_order(monkeypatch):

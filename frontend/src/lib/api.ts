@@ -21,6 +21,21 @@ import type {
 } from '../types';
 import { getRuntimeConfig } from './env';
 import { notifyAuthExpired } from './authSession';
+import type { SsvcEnrichment, SsvcModel } from './ssvc';
+import { EVIDENCE_UPDATED_EVENT } from './evidence';
+
+export async function getSsvcExploitation(cves: string[], refresh = false): Promise<SsvcEnrichment> {
+    const params = new URLSearchParams();
+    cves.forEach(cve => params.append('cve', cve));
+    if (refresh) params.set('refresh', 'true');
+    const result = (await api.get<SsvcEnrichment>('/ssvc/exploitation', { params })).data;
+    globalThis.dispatchEvent?.(new Event(EVIDENCE_UPDATED_EVENT));
+    return result;
+}
+
+export async function getSsvcModels(): Promise<SsvcModel[]> {
+    return (await api.get<{ models: SsvcModel[] }>('/ssvc/models')).data.models;
+}
 
 const envApiUrl = getRuntimeConfig('DTVP_API_URL', '').replace(/\/$/, '');
 const envFrontendUrl = getRuntimeConfig('DTVP_FRONTEND_URL', '').replace(/\/$/, '');
@@ -279,6 +294,9 @@ export interface GroupedVulnRequestOptions {
 }
 
 export interface TaskVulnGroupListQuery {
+    original_severity?: string[];
+    ssvc?: string[];
+    evidence?: string[];
     q?: string;
     lifecycle?: string[];
     inconsistency_reason?: string[];
@@ -372,6 +390,9 @@ export type BulkWorkflowProgressHandler = (
 ) => void | Promise<void>;
 
 export interface TaskVulnGroupListCounts {
+    original_severity?: Record<string, number>;
+    ssvc?: Record<string, number>;
+    evidence?: Record<string, number>;
     total: number;
     lifecycle: Record<string, number>;
     inconsistency_reason?: Record<string, number>;

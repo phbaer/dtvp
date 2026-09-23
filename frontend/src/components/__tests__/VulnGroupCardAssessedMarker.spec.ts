@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import VulnGroupCard from '../VulnGroupCard.vue'
-import { CheckCircle } from 'lucide-vue-next'
+import { CheckCircle } from '@lucide/vue'
 
 // Mock dependencies
 vi.mock('../../lib/api', () => ({
@@ -19,7 +19,7 @@ vi.mock('../../lib/assessment-helpers', async (importOriginal) => {
 })
 
 // Mock Icons
-vi.mock('lucide-vue-next', () => ({
+vi.mock('@lucide/vue', () => ({
     CheckCircle: { template: '<span class="icon-check-circle" />' },
     ChevronDown: { template: '<span class="icon-down" />' },
     ChevronUp: { template: '<span class="icon-up" />' },

@@ -15,6 +15,9 @@ import type {
 export const NO_MATCH_FILTER = '__NO_MATCH__'
 
 export interface BuildTaskVulnGroupListQueryInput {
+    originalSeverityFilters?: readonly string[]
+    ssvcFilters?: readonly string[]
+    evidenceFilters?: readonly string[]
     parsedSearch: ParsedVulnSearchQuery
     filtersReady: boolean
     lifecycleFilters: readonly string[]
@@ -97,6 +100,9 @@ export function buildMeaningfulTMRescoreProposalIds(
 }
 
 export function buildTaskVulnGroupListQuery({
+    originalSeverityFilters = [],
+    ssvcFilters = [],
+    evidenceFilters = [],
     parsedSearch,
     filtersReady,
     lifecycleFilters,
@@ -152,6 +158,9 @@ export function buildTaskVulnGroupListQuery({
 
     return {
         q: parsedSearch.textTerms.join(' '),
+        original_severity: [...originalSeverityFilters],
+        ssvc: [...ssvcFilters],
+        evidence: [...evidenceFilters],
         lifecycle,
         inconsistency_reason: [...inconsistencyReasonFilters],
         analysis,

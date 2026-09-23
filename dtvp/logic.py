@@ -9,6 +9,11 @@ from .assessment_restore_services import (
     refresh_group_restore_metadata,
 )
 from .team_mapping import compile_team_mapping, get_team_mapping_tags
+from .severity_services import SEVERITIES, original_severity
+from .ssvc_services import (
+    DETAILS as SSVC_DETAILS, mask_details as mask_ssvc_details,
+    strip_details as strip_ssvc_details, summarize_group as summarize_ssvc_group,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -858,14 +863,11 @@ def group_vulnerabilities(
             root = ds.find(raw_id.upper())
             canonical_id = root_to_canonical.get(root, raw_id.upper())
 
-            new_cvss_score = (
-                vuln.get("cvssV4")
-                or vuln.get("cvssV4BaseScore")
-                or vuln.get("cvssV3")
-                or vuln.get("cvssV3BaseScore")
-                or vuln.get("cvssV2")
-                or vuln.get("cvssV2BaseScore")
-            )
+            new_cvss_score = next((vuln[key] for key in (
+                "cvssV4", "cvssV4BaseScore", "cvssV3", "cvssV3BaseScore",
+                "cvssV2", "cvssV2BaseScore",
+            ) if vuln.get(key) is not None), None)
+            source_severity = original_severity(new_cvss_score, vuln.get("severity"))
             new_cvss_vector = (
                 vuln.get("cvssV4Vector")
                 or vuln.get("cvssV3Vector")
@@ -878,6 +880,7 @@ def group_vulnerabilities(
                     "title": vuln.get("title"),
                     "description": vuln.get("description"),
                     "severity": vuln.get("severity"),
+                    "original_severity": source_severity,
                     "cvss_score": new_cvss_score,
                     "cvss_vector": new_cvss_vector,
                     "rescored_cvss": None,
@@ -893,6 +896,8 @@ def group_vulnerabilities(
                     "assessment_restore_status": None,
                 }
             else:
+                if SEVERITIES.index(source_severity) < SEVERITIES.index(groups[canonical_id]["original_severity"]):
+                    groups[canonical_id]["original_severity"] = source_severity
                 # Update base CVSS to maximum
                 curr_score = groups[canonical_id].get("cvss_score")
                 if new_cvss_score is not None:
@@ -1093,6 +1098,7 @@ def group_vulnerabilities(
         )
         g["aliases"] = sorted(list(g.get("aliases", [])))
         refresh_group_restore_metadata(g)
+        g["ssvc_summary"] = summarize_ssvc_group(g)
         result.append(g)
 
     # Sort final result: Severity (asc rank), then Score (desc), then ID (asc)
@@ -1227,11 +1233,13 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
 
     blocks = []
 
-    # Split into potential blocks using the header prefix
-    raw_blocks = re.split(r"---(?=\s*\[Team:)", details)
-    shared_text = raw_blocks[0].strip() if raw_blocks else ""
+    # JSON is a separate payload, never assessment prose or team headers.
+    headers = list(re.finditer(r"---(?=\s*\[Team:)", mask_ssvc_details(details)))
+    shared_text = details[:headers[0].start()].strip() if headers else details.strip()
 
-    for rb in raw_blocks[1:]:
+    for index, match in enumerate(headers):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(details)
+        rb = details[match.end():end]
         # Find the header ends with '---'
         header_end = rb.find("---")
         if header_end == -1:
@@ -1239,6 +1247,8 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
 
         header = rb[:header_end]
         content = rb[header_end + 3 :].strip()
+        ssvc_details = "\n\n".join(match[0].lstrip() for match in SSVC_DETAILS.finditer(content))
+        content = strip_ssvc_details(content)
 
         # Clean metadata from content to prevent leakage
         content = re.sub(
@@ -1291,6 +1301,8 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
                     "justification": parsed_tags.get("Justification", "NOT_SET"),
                     "rescored": rescored_val,
                     "vector": parsed_tags.get("Rescored Vector"),
+                    "ssvc": parsed_tags.get("SSVC"),
+                    "ssvc_details": ssvc_details,
                     "assigned": assigned_list,
                     "timestamp": timestamp,
                     "details": content,
@@ -1345,6 +1357,7 @@ def process_assessment_details(
     """
     role = role.upper() if role else "ANALYST"
     target_team = team if team else "General"
+    new_details = strip_ssvc_details(new_details)
 
     # 1. Parse Existing Blocks
     shared_text, parsed_blocks = _parse_assessment_blocks(existing_details)
@@ -1477,6 +1490,7 @@ def process_assessment_details(
             _assessment_team_key(b["team"]) != target_key
             and b["state"] == "NOT_SET"
             and not b.get("details")
+            and not b.get("ssvc")
         ):
             continue
 
@@ -1491,11 +1505,16 @@ def process_assessment_details(
             h_parts.append(f"[Rescored: {b['rescored']}]")
         if b.get("vector"):
             h_parts.append(f"[Rescored Vector: {b['vector']}]")
+        if b.get("ssvc"):
+            h_parts.append(f"[SSVC: {b['ssvc']}]")
         if b.get("assigned"):
             h_parts.append(f"[Assigned: {', '.join(b['assigned'])}]")
 
         header = "--- " + " ".join(h_parts) + " ---"
-        final_parts.append(f"{header}\n{b.get('details') or ''}")
+        body = b.get('details') or ''
+        if b.get("ssvc_details"):
+            body += "\n\n" + b["ssvc_details"]
+        final_parts.append(f"{header}\n{body}")
 
     final_str = "\n\n".join(final_parts).strip()
 

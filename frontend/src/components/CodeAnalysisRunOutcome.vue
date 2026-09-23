@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, CheckCircle, Loader2, Send, X } from 'lucide-vue-next'
+import { AlertTriangle, CheckCircle, Loader2, Send, X } from '@lucide/vue'
 import type { CodeAnalysisAssessResponse } from '../lib/api'
 
 defineProps<{

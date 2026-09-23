@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from dtvp.ssvc_services import SsvcInput, new_record, read_record, write_record
 
 from dtvp.bulk_workflows.base import (
     BulkWorkflowContext,
@@ -486,6 +487,23 @@ def test_incomplete_sync_builds_backend_preview_and_payloads():
     assert len(payloads) == 2
     assert skipped == {"not_incomplete": 0, "missing_identity": 0}
     assert {payload["state"] for _instance, payload in payloads} == {"NOT_AFFECTED"}
+
+
+@pytest.mark.parametrize("workflow", ["incomplete", "automatic"])
+def test_bulk_assessments_preserve_ssvc_per_finding(workflow):
+    group = _automatic_group()
+    group["list_metadata"] = {"lifecycle": "INCOMPLETE"}
+    instances = [instance for version in group["affected_versions"] for instance in version["components"]]
+    record = new_record(SsvcInput(model="ssvc:DT_DP", version="1.0.0", answers={}, rationale="Local context"), "reviewer")
+    instances[0]["analysis_details"] = write_record(instances[0].get("analysis_details") or "", record)
+    if workflow == "incomplete":
+        payloads, _ = build_incomplete_sync_payloads([group], [group["id"]])
+    else:
+        context = BulkWorkflowContext(task_id="task", groups=[group], user="reviewer", result_store=_AutomaticResultStore([_automatic_record("run-api", "owned-api", "Not Affected", exposure="none")]))
+        payloads, _ = build_automatic_assessment_payloads(context, [group["id"]])
+    assert len(payloads) == len(instances)
+    for instance, payload in payloads:
+        assert read_record(payload["details"]) == read_record(instance.get("analysis_details") or "")
 
 
 def test_incomplete_sync_removes_legacy_general_team_summary_without_duplication():

@@ -150,6 +150,9 @@ export interface AssessmentRestoreCandidate {
 }
 
 export interface GroupedVuln {
+    original_severity?: string;
+    ssvc_summary?: import('./lib/ssvc').SsvcSummary;
+    evidence_sources?: string[];
     id: string; // CVE/VulnID
     code_assessment_status?: 'auto' | 'manual' | 'mixed' | 'partial' | null;
     automatic_assessment_outcome?: 'AFFECTED' | 'PROBABLY_AFFECTED' | 'NOT_AFFECTED' | 'INCONCLUSIVE' | null;
@@ -175,6 +178,7 @@ export interface GroupedVuln {
 }
 
 export interface AssessmentPayload {
+    ssvc?: import('./lib/ssvc').SsvcSelection | null;
     instances: Instance[];
     state: string;
     details: string;

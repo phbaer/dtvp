@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { GripHorizontal, Maximize2, Minimize2, X } from 'lucide-vue-next'
+import { GripHorizontal, Maximize2, Minimize2, X } from '@lucide/vue'
 
 const expanded = ref(false)
 const dialog = ref<HTMLElement | null>(null)

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { LayoutList, Copy } from 'lucide-vue-next'
+import { LayoutList, Copy } from '@lucide/vue'
 import CustomSelect from './CustomSelect.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
+import { ORIGINAL_SEVERITIES, SSVC_STATUSES, ssvcLabel } from '../lib/ssvc'
+import { EVIDENCE_OPTIONS, evidenceLabel } from '../lib/evidence'
 import type { CacheStatus, InconsistencyReason } from '../types'
 import type { TaskVulnGroupListCounts } from '../lib/api'
 import type {
@@ -31,6 +33,9 @@ export interface FilterOption {
 }
 
 export interface FilterState {
+    originalSeverityFilters?: string[]
+    ssvcFilters?: string[]
+    evidenceFilters?: string[]
     sortBy: string
     sortOrder: 'asc' | 'desc'
     dependencyFilter: Array<'DIRECT' | 'TRANSITIVE' | 'UNKNOWN'>
@@ -79,6 +84,16 @@ const emit = defineEmits<{
     'update:filters': [filters: FilterState]
     'copy-filter-url': []
 }>()
+
+const priorityFacets = [
+    { key: 'originalSeverityFilters' as const, countKey: 'original_severity' as const, label: 'Original severity', values: ORIGINAL_SEVERITIES },
+    { key: 'ssvcFilters' as const, countKey: 'ssvc' as const, label: 'SSVC priority', values: SSVC_STATUSES },
+    { key: 'evidenceFilters' as const, countKey: 'evidence' as const, label: 'KEV / CISA evidence', values: EVIDENCE_OPTIONS.map(option => option.value) },
+]
+function togglePriorityFilter(key: 'originalSeverityFilters' | 'ssvcFilters' | 'evidenceFilters', value: string) {
+    const selected = props.filters[key] || []
+    updateFilter(key, selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value])
+}
 
 const activeTab = ref<'scope-search' | 'statistics'>('scope-search')
 const copiedStats = ref(false)
@@ -703,6 +718,16 @@ const handleCopy = () => {
                                 </div>
 
                                 <div class="space-y-0.5">
+                                    <div v-for="facet in priorityFacets" :key="facet.key" class="mb-3 space-y-1" :data-testid="facet.key">
+                                        <h4 class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">{{ facet.label }}</h4>
+                                        <p class="text-[10px] text-gray-500">None selected = all</p>
+                                        <p v-if="facet.countKey === 'evidence'" class="text-[10px] text-gray-400">Cached sources; either selected source matches. CISA is checked when opening the global SSVC calculator. Unchecked is not “no data”; stale matches remain included. Other filters still apply.</p>
+                                        <div class="flex flex-wrap gap-1.5">
+                                            <button v-for="value in facet.values" :key="value" type="button" :aria-pressed="(props.filters[facet.key] || []).includes(value)" class="rounded-full border px-2 py-1 text-[10px]" :class="(props.filters[facet.key] || []).includes(value) ? 'border-purple-400/50 bg-purple-500/20 text-purple-200' : 'border-white/10 text-gray-400'" @click="togglePriorityFilter(facet.key, value)">
+                                                {{ facet.countKey === 'evidence' ? evidenceLabel(value) : ssvcLabel(value) }} <span class="text-gray-500">{{ countLabel(props.resultCounts[facet.countKey]?.[value]) }}</span>
+                                            </button>
+                                        </div>
+                                    </div>
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Analysis State</label>
                                     <div class="flex flex-wrap gap-1.5 items-center">
                                         <button

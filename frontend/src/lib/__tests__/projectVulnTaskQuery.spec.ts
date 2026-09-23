@@ -9,6 +9,7 @@ import {
 import { parseVulnSearchQuery } from '../vulnListIndex'
 import {
     DEFAULT_ANALYSIS_FILTERS,
+    DEFAULT_ANALYST_LIFECYCLE_FILTERS,
     DEFAULT_REVIEWER_LIFECYCLE_FILTERS,
 } from '../useProjectVulnFilters'
 
@@ -59,6 +60,13 @@ const proposal = (overrides: Partial<TMRescoreProposal>): TMRescoreProposal => (
 })
 
 describe('projectVulnTaskQuery', () => {
+    it('passes evidence selections to server and bulk queries', () => {
+        expect(buildTaskVulnGroupListQuery(baseInput({ evidenceFilters: ['KEV', 'CISA_SSVC'] }))).toMatchObject({ evidence: ['KEV', 'CISA_SSVC'] })
+        expect(buildTaskVulnGroupListQuery(baseInput())).toMatchObject({ evidence: [] })
+    })
+    it('passes original severity and SSVC through to server and bulk queries', () => {
+        expect(buildTaskVulnGroupListQuery(baseInput({ originalSeverityFilters: ['CRITICAL'], ssvcFilters: ['IMMEDIATE', 'MIXED'] }))).toMatchObject({ original_severity: ['CRITICAL'], ssvc: ['IMMEDIATE', 'MIXED'] })
+    })
     it('combines sidebar filters and smart-search tokens into a backend task-window query', () => {
         const query = buildTaskVulnGroupListQuery(baseInput({
             parsedSearch: parseVulnSearchQuery('urgent lifecycle:open analysis:resolved team:platform id:CVE-2026-9999 component:spring assignee:alice version:2.0.0 dependency:direct tm:with has:cvss_mismatch'),
@@ -109,6 +117,15 @@ describe('projectVulnTaskQuery', () => {
 
         expect(query.lifecycle).toEqual(DEFAULT_REVIEWER_LIFECYCLE_FILTERS)
         expect(query.analysis).toEqual(DEFAULT_ANALYSIS_FILTERS)
+    })
+
+    it.each([false, true])('passes all unfinished analyst lifecycles before and after hydration (%s)', (filtersReady) => {
+        const query = buildTaskVulnGroupListQuery(baseInput({
+            filtersReady,
+            defaultLifecycleFilters: DEFAULT_ANALYST_LIFECYCLE_FILTERS,
+            lifecycleFilters: filtersReady ? DEFAULT_ANALYST_LIFECYCLE_FILTERS : [],
+        }))
+        expect(query.lifecycle).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL'])
     })
 
     it('keeps the open lifecycle restriction when searching by vulnerability ID', () => {

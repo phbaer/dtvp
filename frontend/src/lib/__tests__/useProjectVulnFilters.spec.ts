@@ -3,6 +3,7 @@ import { computed, defineComponent, nextTick, reactive, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     DEFAULT_ANALYSIS_FILTERS,
+    DEFAULT_ANALYST_LIFECYCLE_FILTERS,
     DEFAULT_REVIEWER_LIFECYCLE_FILTERS,
     useProjectVulnFilters,
 } from '../useProjectVulnFilters'
@@ -40,6 +41,40 @@ const mountHarness = (options: {
 }
 
 describe('useProjectVulnFilters', () => {
+    it('roundtrips evidence filters through URLs, sidebar updates and reset', async () => {
+        vi.useFakeTimers()
+        const { filters, wrapper, router } = mountHarness({ query: { evidence: ['kev,cisa_ssvc', 'not_checked'] } })
+        expect(filters.evidenceFilters.value).toEqual(['KEV', 'CISA_SSVC', 'NOT_CHECKED'])
+        expect(filters.filterUrl.value).toContain('evidence=KEV')
+        filters.handleFilterUpdate({ ...filters.filterState.value, evidenceFilters: ['STALE'] })
+        await nextTick()
+        await vi.advanceTimersByTimeAsync(250)
+        expect(router.replace).toHaveBeenLastCalledWith(expect.objectContaining({ query: expect.objectContaining({ evidence: ['STALE'] }) }))
+        filters.resetFilters()
+        expect(filters.evidenceFilters.value).toEqual([])
+        expect(filters.filterUrl.value).not.toContain('evidence=')
+        await nextTick()
+        await vi.advanceTimersByTimeAsync(250)
+        expect(router.replace.mock.lastCall?.[0].query).not.toHaveProperty('evidence')
+        wrapper.unmount()
+    })
+    it('roundtrips original severity and SSVC filters and resets them to unrestricted', async () => {
+        vi.useFakeTimers()
+        const { filters, wrapper, router } = mountHarness({ query: { original_severity: 'critical,high', ssvc: ['immediate', 'mixed'] } })
+        expect(filters.originalSeverityFilters.value).toEqual(['CRITICAL', 'HIGH'])
+        expect(filters.ssvcFilters.value).toEqual(['IMMEDIATE', 'MIXED'])
+        expect(filters.filterUrl.value).toContain('original_severity=CRITICAL')
+        expect(filters.filterUrl.value).toContain('ssvc=MIXED')
+        filters.handleFilterUpdate({ ...filters.filterState.value, originalSeverityFilters: ['INFO'], ssvcFilters: ['UNASSESSED'] })
+        await nextTick()
+        await vi.advanceTimersByTimeAsync(250)
+        expect(router.replace).toHaveBeenLastCalledWith(expect.objectContaining({ query: expect.objectContaining({ original_severity: ['INFO'], ssvc: ['UNASSESSED'] }) }))
+        filters.resetFilters()
+        expect(filters.originalSeverityFilters.value).toEqual([])
+        expect(filters.ssvcFilters.value).toEqual([])
+        expect(filters.filterUrl.value).not.toContain('ssvc=')
+        wrapper.unmount()
+    })
     afterEach(() => {
         vi.useRealTimers()
         vi.clearAllMocks()
@@ -132,7 +167,7 @@ describe('useProjectVulnFilters', () => {
         const { filters, role, wrapper } = mountHarness({ role: 'ANALYST' })
         await nextTick()
 
-        expect(filters.lifecycleFilters.value).toEqual(['OPEN'])
+        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
         expect(filters.analysisFilters.value).toEqual(DEFAULT_ANALYSIS_FILTERS)
 
         role.value = 'REVIEWER'
@@ -142,6 +177,23 @@ describe('useProjectVulnFilters', () => {
         expect(filters.analysisFilters.value).toEqual(DEFAULT_ANALYSIS_FILTERS)
 
         wrapper.unmount()
+    })
+
+    it('defaults and resets analysts to all unfinished assessments, without overriding explicit URLs', () => {
+        const { filters, wrapper } = mountHarness()
+        expect(filters.lifecycleFilters.value).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL'])
+        // Default values need not be repeated in the shareable URL.
+        expect(filters.filterUrl.value).not.toContain('lifecycle=')
+        filters.lifecycleFilters.value = ['ASSESSED']
+        filters.resetFilters()
+        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
+        wrapper.unmount()
+        const explicit = mountHarness({ query: { lifecycle: ['OPEN'] } })
+        expect(explicit.filters.lifecycleFilters.value).toEqual(['OPEN'])
+        explicit.wrapper.unmount()
+        const otherFilter = mountHarness({ query: { tag: 'Security' } })
+        expect(otherFilter.filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
+        otherFilter.wrapper.unmount()
     })
 
     it('debounces URL synchronization after filter changes', async () => {

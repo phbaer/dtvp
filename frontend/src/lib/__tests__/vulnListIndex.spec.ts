@@ -73,6 +73,16 @@ const makeProposal = (overrides: Partial<TMRescoreProposal>): TMRescoreProposal 
 })
 
 describe('vulnListIndex', () => {
+    it('filters original severity independently of rescoring and combines SSVC', () => {
+        const item = buildVulnListItem(makeGroup({ cvss_score: 9.8, rescored_cvss: 0, severity: 'INFO', ssvc_summary: { status: 'IMMEDIATE', assessed: 1, missing: 0, invalid: 0, record: null } }), {})
+        const filters = { dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'] as const, tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'] as const }
+        expect(item.originalSeverity).toBe('CRITICAL')
+        expect(matchesListFilters(item, { ...filters, originalSeverityFilters: ['CRITICAL', 'HIGH'], ssvcFilters: ['IMMEDIATE'] })).toBe(true)
+        expect(matchesListFilters(item, { ...filters, originalSeverityFilters: ['INFO'] })).toBe(false)
+        expect(matchesListFilters(item, { ...filters, ssvcFilters: ['UNASSESSED'] })).toBe(false)
+        expect(buildVulnListItem(makeGroup({ cvss_score: 0 }), {}).originalSeverity).toBe('INFO')
+        expect(buildVulnListItem(makeGroup({ cvss_score: undefined, severity: 'HIGH' }), {}).originalSeverity).toBe('HIGH')
+    })
     it('classifies complete and partial code-assessment coverage', () => {
         const group = makeGroup({
             aliases: ['GHSA-ASSESSMENT'],
