@@ -14,6 +14,7 @@ describe('VulnGroupCardDependencies.vue', () => {
             component_name: 'log4j-core',
             component_version: '2.17.0',
             component_uuid: 'comp-1',
+            tags: ['TEAM-A'],
             project_uuid: 'project-1',
             project_name: 'Test Project',
             dependency_chains: ['log4j-core -> some-dep -> Test Project'],
@@ -92,7 +93,7 @@ describe('VulnGroupCardDependencies.vue', () => {
         expect(wrapper.findAll('button').some((btn) => btn.text() === 'Edit tag')).toBe(true)
     })
 
-    it('shows a mapped team from dependency paths when the direct component is not mapped', () => {
+    it('shows the backend owner of an indirect dependency', () => {
         const wrapper = mount(VulnGroupCardDependencies, {
             props: {
                 instances: [
@@ -102,6 +103,7 @@ describe('VulnGroupCardDependencies.vue', () => {
                         component_uuid: 'comp-2',
                         project_uuid: 'project-1',
                         project_name: 'Test Project',
+                        tags: ['TEAM-B'],
                         dependency_chains: ['unmapped-comp -> some-dep -> Test Project'],
                         is_direct_dependency: true,
                     },
@@ -120,7 +122,7 @@ describe('VulnGroupCardDependencies.vue', () => {
         expect(wrapper.text()).not.toContain('none')
     })
 
-    it('shows only the first mapped team from each dependency chain', () => {
+    it('uses saved ownership even when path-name mappings disagree', () => {
         const wrapper = mount(VulnGroupCardDependencies, {
             props: {
                 instances: [
@@ -130,6 +132,7 @@ describe('VulnGroupCardDependencies.vue', () => {
                         component_uuid: 'comp-2',
                         project_uuid: 'project-1',
                         project_name: 'Test Project',
+                        tags: ['TEAM-A'],
                         dependency_chains: ['unmapped-comp -> dep-a -> dep-b -> Test Project'],
                         is_direct_dependency: true,
                     },
@@ -138,7 +141,7 @@ describe('VulnGroupCardDependencies.vue', () => {
             global: {
                 provide: {
                     user: { role: 'REVIEWER' },
-                    teamMapping: ref({ 'dep-a': ['TEAM-A'], 'dep-b': ['TEAM-B'] }),
+                    teamMapping: ref({ 'dep-a': ['TEAM-B'], 'dep-b': ['TEAM-A'] }),
                 },
                 stubs: { DependencyChainViewer: true },
             },

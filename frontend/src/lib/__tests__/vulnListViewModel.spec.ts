@@ -6,6 +6,7 @@ import {
     deriveVulnListGroupLookup,
     deriveVulnListFilterModel,
     deriveVulnListResultCounts,
+    deriveVulnListFacetCounts,
     deriveVulnListStaticStats,
     deriveVulnListViewModel,
     sortVulnListItems,
@@ -73,6 +74,94 @@ const baseFilters = (overrides: Partial<VulnListViewFilters> = {}): VulnListView
 })
 
 describe('vulnListViewModel', () => {
+    it('finds documented team work across global lifecycles and keeps Missing separate', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'incomplete', tags: ['Security', 'Platform', 'Sec'],
+                list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: ['Security'], is_pending: true } }),
+            makeGroup({ id: 'conflicting', tags: ['Security', 'Platform', 'Sec'],
+                list_metadata: { lifecycle: 'INCONSISTENT', assessed_teams: ['Security'] } }),
+            makeGroup({ id: 'complete', tags: ['Security', 'Platform', 'Sec'],
+                list_metadata: { lifecycle: 'ASSESSED', assessed_teams: ['Security', 'Platform'] } }),
+            makeGroup({ id: 'open', tags: ['Security', 'Platform', 'Sec'],
+                list_metadata: { lifecycle: 'OPEN', assessed_teams: [] } }),
+        ], { library: ['Security', 'Sec'] })
+        const find = (overrides: Partial<VulnListViewFilters>) => deriveVulnListFilterModel(items,
+            baseFilters(overrides)).matchingItems.map(item => item.id)
+        expect(find({ tagFilter: 'Security', teamAssessmentFilter: 'DOCUMENTED' })).toEqual(['incomplete', 'conflicting', 'complete'])
+        expect(find({ smartSearch: 'Sec', teamAssessmentFilter: 'DOCUMENTED' })).toEqual(['incomplete', 'conflicting', 'complete', 'open'])
+        expect(find({ teamFilters: ['Security'], smartSearch: 'state:incomplete', teamAssessmentFilter: 'DOCUMENTED' })).toEqual(['incomplete', 'conflicting'])
+        expect(find({ tagFilter: 'Security', lifecycleFilters: ['INCOMPLETE'], teamAssessmentFilter: 'DOCUMENTED' })).toEqual(['incomplete', 'conflicting'])
+        expect(find({ tagFilter: 'Security', teamAssessmentFilter: 'MISSING' })).toEqual(['open'])
+        expect(find({ teamAssessmentFilter: 'DOCUMENTED' })).toEqual(['incomplete', 'conflicting', 'complete', 'open'])
+        expect(find({ teamFilters: ['Security', 'Platform'], teamAssessmentFilter: 'DOCUMENTED' })).toEqual(['complete'])
+        expect(find({ tagFilter: 'Security', lifecycleFilters: ['INCOMPLETE'] })).toEqual(['incomplete', 'conflicting'])
+    })
+
+    it('scopes Missing team assessments independently of the global Incomplete count', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'awaiting-b', tags: ['Team A', 'Team B', 'Alias A'],
+                list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: ['Team A'], is_pending: true } }),
+            makeGroup({ id: 'awaiting-a', tags: ['Team A', 'Team B', 'Alias A'],
+                list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: ['Team B'] } }),
+            makeGroup({ id: 'finding-gap', tags: ['Team A', 'Team B'],
+                list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: ['Team A', 'Team B'] } }),
+        ], { library: ['Team A', 'Alias A'] })
+        for (const [scope, expected] of [
+            [{}, ['awaiting-b', 'awaiting-a', 'finding-gap']],
+            [{ tagFilter: 'TEAM A' }, ['awaiting-a']],
+            [{ teamFilters: ['Team A'] }, ['awaiting-a']],
+            [{ smartSearch: 'Team A' }, ['awaiting-b', 'awaiting-a', 'finding-gap']],
+            [{ smartSearch: 'Alias' }, ['awaiting-b', 'awaiting-a']],
+            [{ teamFilters: ['Team A', 'Team B'] }, ['awaiting-b', 'awaiting-a']],
+            [{ tagFilter: 'Team B' }, ['awaiting-b']],
+            [{ teamFilters: ['Team A'], smartSearch: 'state:incomplete' }, ['awaiting-a']],
+            [{ smartSearch: 'team:Team' }, []], // Wait for explicit disambiguation.
+            [{ tagFilter: 'missing' }, []],
+        ] as [Partial<VulnListViewFilters>, string[]][]) {
+            const result = deriveVulnListFilterModel(items, baseFilters({ lifecycleFilters: ['INCOMPLETE'], teamAssessmentFilter: 'MISSING', ...scope }))
+            expect(result.matchingItems.map(item => item.id)).toEqual(expected)
+            expect(result.filterCounts.INCOMPLETE).toBe(3)
+        }
+        const filter = { lifecycleFilters: ['INCOMPLETE'], tagFilter: 'Team A', teamAssessmentFilter: 'ANY' }
+        const initial = deriveVulnListFilterModel(items, baseFilters(filter))
+        expect(initial.matchingItems.map(item => item.id)).toEqual(['awaiting-b', 'awaiting-a', 'finding-gap'])
+        deriveVulnListFilterModel(items, baseFilters({ ...filter, teamAssessmentFilter: 'MISSING' }))
+        expect(deriveVulnListFilterModel(items, baseFilters(filter)).matchingItems).toEqual(initial.matchingItems)
+        expect(items[0]!.lifecycle).toBe('INCOMPLETE')
+    })
+
+    it('facet counts exclude their own selection but preserve the other filters', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'missing', tags: ['Security'], list_metadata: { lifecycle: 'OPEN', assessed_teams: [] } }),
+            makeGroup({ id: 'recorded', tags: ['Security'], list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: ['Security'] } }),
+            makeGroup({ id: 'other', tags: ['Platform'], list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: [] } }),
+        ], {})
+        const filters = baseFilters({ teamFilters: ['Security'], teamAssessmentFilter: 'MISSING', lifecycleFilters: ['INCOMPLETE'] })
+        expect(deriveVulnListFilterModel(items, filters).matchingItems).toHaveLength(0)
+        const counts = deriveVulnListFacetCounts(items, filters, deriveVulnListStaticStats(items))
+        expect(counts.lifecycle.OPEN).toBe(1)
+        expect(counts.lifecycle.INCOMPLETE).toBe(0)
+        expect(counts.team_assessment).toEqual({ MISSING: 0, DOCUMENTED: 1 })
+        expect(counts.dependency_relationship.direct).toBe(0)
+        const all = deriveVulnListFacetCounts(items, baseFilters(), deriveVulnListStaticStats(items))
+        expect(all.dependency_relationship.direct).toBe(3)
+        expect(all.tmrescore?.WITHOUT_PROPOSAL).toBe(3)
+        expect(all.automatic_assessment?.WITHOUT_AUTOMATIC_ASSESSMENT).toBe(3)
+        const searchCounts = deriveVulnListFacetCounts(items, { ...filters, smartSearch: 'state:incomplete' }, deriveVulnListStaticStats(items))
+        expect(searchCounts.lifecycle.OPEN).toBe(1)
+    })
+
+    it('ignores unrelated selected teams when checking recorded assessments', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'owned-a', tags: ['Security'], list_metadata: { lifecycle: 'INCOMPLETE', assessed_teams: ['Security'] } }),
+            makeGroup({ id: 'owned-b', tags: ['Platform'], list_metadata: { lifecycle: 'OPEN', assessed_teams: [] } }),
+            makeGroup({ id: 'unrelated', tags: ['Other'], list_metadata: { lifecycle: 'OPEN', assessed_teams: [] } }),
+        ], {})
+        const filter = baseFilters({ teamFilters: ['Security', 'Platform'], teamAssessmentFilter: 'DOCUMENTED' })
+        expect(deriveVulnListFilterModel(items, filter).matchingItems.map(item => item.id)).toEqual(['owned-a'])
+        expect(deriveVulnListFilterModel(items, { ...filter, teamAssessmentFilter: 'MISSING' }).matchingItems.map(item => item.id)).toEqual(['owned-b'])
+    })
+
     it('filters and counts cached evidence independently of saved SSVC', () => {
         const items = buildVulnListItems([
             makeGroup({ id: 'CVE-2026-1234', evidence_sources: ['KEV', 'STALE'] }),

@@ -3,10 +3,10 @@
 This guide describes the application screens covered by the documentation screenshot set. Regenerate the images from the repository root with:
 
 ```bash
-cd frontend && npm run test:ui:docs
+cd frontend && npm run test:ui:docs -- --project=chromium
 ```
 
-The capture flow uses mocked API fixtures so the screenshots stay deterministic and show the same reviewer-focused examples on every run.
+The capture flow uses mocked API fixtures and Chromium for a consistent screenshot set. Project examples explicitly select all five lifecycle categories; reviewers normally start with Ready for approval.
 
 ## Entry And Project Navigation
 
@@ -32,7 +32,7 @@ The project review page is the main vulnerability workflow. It combines grouped 
 
 ![Lifecycle badges](screenshots/lifecycle-badges.png)
 
-The lifecycle view shows the project list with open, incomplete, inconsistent, needs-approval, assessed, and rescored states visible together.
+The lifecycle view shows Open, Incomplete, Conflicting, Ready for approval, and Assessed categories, alongside rescored CVSS values.
 
 ## Vulnerability Review Details
 
@@ -72,9 +72,9 @@ The expanded assessment form supports assigning users with known-user suggestion
 
 The Assessment tab uses the same section hierarchy as Context and Code Evidence: first confirm the Global or team scope, then complete the decision and rationale. With a Team filter, analysts see only that team's subview; reviewers start focused on it and can explicitly reveal Global and all-team controls. Team subviews present the latest scoped analyzer result as an optional proposal, while saved or manually edited team assessments remain authoritative. The reviewer-only Global subview summarizes the worst effective state across team decisions and analyzer fallbacks, and also contains CVSS and rescoring so the score and assessment can be evaluated together. Ticket references are marked required only when the current rescored severity is High or Critical.
 
-### Inconsistent Assessment
+### Conflicting Assessment
 
-![Inconsistent assessment](screenshots/inconsistent-assessment.png)
+![Conflicting assessment](screenshots/inconsistent-assessment.png)
 
 Existing assessment evidence in Context shows conflicting team blocks so reviewers can compare states and resolve the mismatch in Assessment.
 

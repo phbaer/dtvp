@@ -31,6 +31,30 @@ def _group(index: int) -> dict:
     }
 
 
+def test_visible_lifecycle_categories_partition_results_and_include_legacy():
+    states = ["OPEN", "INCOMPLETE", "INCONSISTENT", "NEEDS_APPROVAL", "ASSESSED", "ASSESSED_LEGACY"]
+    groups = []
+    for number, state in enumerate(states):
+        group = _group(number)
+        group["list_metadata"].update({
+            "lifecycle": state,
+            "is_pending": state in {"INCOMPLETE", "INCONSISTENT", "NEEDS_APPROVAL"},
+            "is_approval_ready": state == "NEEDS_APPROVAL",
+        })
+        groups.append(group)
+    index = query_services.build_task_group_query_index(groups)
+    categories = ["OPEN", "INCOMPLETE", "INCONSISTENT", "READY_FOR_APPROVAL", "ASSESSED"]
+    all_counts = _query(index)["counts"]["all"]["lifecycle"]
+    assert sum(all_counts[category] for category in categories) == len(groups)
+    seen = []
+    for category in categories:
+        result = _query(index, lifecycle=[category])
+        assert result["filtered"] == all_counts[category]
+        seen.extend(item["id"] for item in result["items"])
+    assert len(seen) == len(set(seen)) == len(groups)
+    assert all_counts["ASSESSED"] == 2
+
+
 def _query(index: dict, **overrides) -> dict:
     options = {
         "q": "finding",
@@ -568,3 +592,124 @@ def test_group_window_query_enforces_task_ownership_and_returns_local_items():
     }
     response["items"][0]["title"] = "request-local change"
     assert groups[0]["title"] == "Concurrent finding 1"
+
+
+def test_incomplete_is_global_with_any_team_coverage_and_counts_are_stable():
+    groups = [_group(i) for i in range(3)]
+    for group, assessed in zip(groups, [["Team A"], ["Team B"], ["Team A", "Team B"]]):
+        group["tags"] = ["Team A", "Team B", "Alias A"]
+        group["list_metadata"].update(lifecycle="INCOMPLETE", assessed_teams=assessed)
+    index = query_services.build_task_group_query_index(groups)
+    for scope in [{"team": "Team A"}, {"tag": "Alias"}, {"tag": "Team A"}, {"q": "Team A"}]:
+        def query(coverage):
+            return _query(index, lifecycle=["INCOMPLETE"], team_assessment=coverage,
+                          team_aliases={"alias a": "Team A"}, **scope)
+        initial = query("ANY")
+        assert initial["filtered"] == 3
+        assert initial["counts"]["all"]["lifecycle"]["INCOMPLETE"] == 3
+        assert initial["counts"]["filtered"]["lifecycle"]["INCOMPLETE"] == 3
+        assert query("MISSING")["filtered"] == (1 if "team" in scope else 3)
+        assert query("DOCUMENTED")["filtered"] == (2 if "team" in scope else 3)
+        assert query("ANY") == initial
+    bulk = general_api_routes._filter_bulk_workflow_groups(
+        index, general_api_routes.BulkWorkflowFilters(team="Team A", lifecycle=["INCOMPLETE"])
+    )
+    assert [item["id"] for item in bulk] == [group["id"] for group in groups]
+
+
+def test_plain_team_search_does_not_change_incomplete_lifecycle():
+    groups = [_group(i) for i in range(3)]
+    for group in groups:
+        group["tags"] = ["Security", "Platform"]
+        group["list_metadata"].update(lifecycle="INCOMPLETE", assessed_teams=["Security"])
+    groups[1]["list_metadata"]["assessed_teams"] = ["Platform"]
+    groups[2]["tags"] = ["Other"]
+    groups[2]["title"] = "Security issue"
+    index = query_services.build_task_group_query_index(groups)
+    result = _query(index, q="Security", lifecycle=["INCOMPLETE"])
+    assert result["filtered"] == 3
+    assert result["counts"]["filtered"]["lifecycle"]["INCOMPLETE"] == 3
+    assert _query(index, q="Security", lifecycle=["INCOMPLETE"], team_assessment="MISSING")["filtered"] == 3
+
+
+def test_team_documentation_is_independent_of_lifecycle_and_pagination():
+    groups = [_group(i) for i in range(6)]
+    for group, lifecycle in zip(groups, ["INCOMPLETE", "NEEDS_APPROVAL", "INCONSISTENT", "OPEN", "ASSESSED", "ASSESSED_LEGACY"]):
+        group["tags"] = ["Security", "Platform", "Sec"]
+        group["list_metadata"].update(
+            lifecycle=lifecycle, assessed_teams=["Security"], is_pending=True,
+        )
+    groups[3]["list_metadata"]["assessed_teams"] = []
+    groups[4]["list_metadata"]["assessed_teams"] = ["Security", "Platform"]
+    groups[5]["tags"] = ["Unassigned"]
+    groups[5]["list_metadata"]["assessed_teams"] = []
+    index = query_services.build_task_group_query_index(groups)
+    aliases = {"sec": "Security"}
+    def query(**kwargs):
+        return _query(index, team_aliases=aliases, **kwargs)
+
+    result = query(team="Security", team_assessment="DOCUMENTED", limit=2)
+    assert result["filtered"] == 4
+    assert result["counts"]["filtered"]["team_assessment"] == {"MISSING": 0, "DOCUMENTED": 4}
+    assert result["counts"]["all"]["team_assessment"] == {"MISSING": 1, "DOCUMENTED": 4}
+    assert [item["id"] for item in result["items"]] == [groups[0]["id"], groups[1]["id"]]
+    next_page = query(team="Security", team_assessment="DOCUMENTED", cursor=result["next_cursor"], limit=2)
+    assert [item["id"] for item in next_page["items"]] == [groups[2]["id"], groups[4]["id"]]
+    assert query(team="Security", team_assessment="DOCUMENTED", lifecycle=["INCOMPLETE"])["filtered"] == 1
+    assert query(q="Security", team_assessment="DOCUMENTED")["filtered"] == 5
+    assert query(tag="Sec", team_assessment="DOCUMENTED")["filtered"] == 5
+    assert query(team="Security", team_assessment="MISSING")["filtered"] == 1
+    assert query(team="Platform", team_assessment="MISSING")["filtered"] == 4
+    assert query(teams=["Security", "Platform"], team_assessment="DOCUMENTED")["filtered"] == 1
+    assert query(team_assessment="DOCUMENTED")["filtered"] == 6
+    assert query(team="Unassigned", team_assessment="DOCUMENTED")["filtered"] == 0
+    assert query(team="Unassigned", team_assessment="ANY")["filtered"] == 1
+    assert query(team="Security", team_assessment="ANY")["filtered"] == 5
+    assert query(team="Security", lifecycle=["INCOMPLETE"])["filtered"] == 1
+    bulk = general_api_routes._filter_bulk_workflow_groups(
+        index, general_api_routes.BulkWorkflowFilters(teams=["Security"], team_assessment="DOCUMENTED"),
+        team_aliases=aliases,
+    )
+    assert [item["id"] for item in bulk] == [groups[i]["id"] for i in [0, 1, 2, 4]]
+
+
+def test_multiple_teams_use_only_responsible_teams_and_bulk_matches():
+    groups = [_group(i) for i in range(4)]
+    for group, tags, assessed in zip(groups,
+        [["Sec"], ["Platform"], ["Security", "Platform"], ["Other"]],
+        [["Security"], [], ["Security"], []],
+    ):
+        group["tags"] = tags
+        group["list_metadata"].update(lifecycle="INCOMPLETE", assessed_teams=assessed)
+    index = query_services.build_task_group_query_index(groups)
+    options = dict(teams=["SECURITY", "Platform"], team_aliases={"sec": "Security"})
+    recorded = _query(index, **options, team_assessment="DOCUMENTED")
+    assert [item["id"] for item in recorded["items"]] == [groups[0]["id"]]
+    missing = _query(index, **options, team_assessment="MISSING")
+    assert [item["id"] for item in missing["items"]] == [groups[1]["id"], groups[2]["id"]]
+    assert recorded["counts"]["facets"]["team_assessment"] == {"MISSING": 2, "DOCUMENTED": 1}
+    bulk = general_api_routes._filter_bulk_workflow_groups(index,
+        general_api_routes.BulkWorkflowFilters(teams=options["teams"], team_assessment="DOCUMENTED"),
+        team_aliases=options["team_aliases"],
+    )
+    assert [item["id"] for item in bulk] == [groups[0]["id"]]
+    assert _query(index, **options, team_assessment="DOCUMENTED") == recorded
+
+
+def test_facet_counts_exclude_own_filter_and_preserve_other_filters():
+    groups = [_group(i) for i in range(3)]
+    for group, team, lifecycle, assessed in zip(groups,
+        ["Security", "Security", "Platform"],
+        ["OPEN", "INCOMPLETE", "INCOMPLETE"],
+        [[], ["Security"], []],
+    ):
+        group["tags"] = [team]
+        group["list_metadata"].update(lifecycle=lifecycle, assessed_teams=assessed)
+    index = query_services.build_task_group_query_index(groups)
+    result = _query(index, teams=["Security"], lifecycle=["INCOMPLETE"], team_assessment="MISSING")
+    assert result["filtered"] == 0
+    facets = result["counts"]["facets"]
+    assert facets["lifecycle"]["OPEN"] == 1
+    assert facets["lifecycle"]["INCOMPLETE"] == 0
+    assert facets["team_assessment"] == {"MISSING": 0, "DOCUMENTED": 1}
+    assert facets["dependency_relationship"]["direct"] == 0

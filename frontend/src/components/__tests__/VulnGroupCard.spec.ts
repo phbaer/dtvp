@@ -411,6 +411,41 @@ describe('VulnGroupCard', () => {
             .toBe('Submit Security for review')
     })
 
+    it('lets the current team use a former owner assessment as an unsaved draft', async () => {
+        const group = {
+            ...mockGroup,
+            affected_versions: [{
+                ...mockGroup.affected_versions[0],
+                components: [{
+                    ...mockComponents[0],
+                    analysis_state: 'NOT_AFFECTED',
+                    analysis_details: '--- [Team: Former] [State: NOT_AFFECTED] [Assessed By: alice] [Justification: CODE_NOT_PRESENT] [Assigned: alice] [Evidence Reviewed: yes] ---\nFormer rationale',
+                }],
+            }],
+        }
+        const wrapper = mount(VulnGroupCard, {
+            props: { group, activeTeamFilter: 'Security' },
+            global: {
+                provide: {
+                    user: ref({ role: 'ANALYST', username: 'bob' }),
+                    teamMapping: ref({ lib: ['Security'] }),
+                },
+            },
+        })
+        await wrapper.find('.cursor-pointer').trigger('click')
+        await wrapper.findAll('[role="tab"]').find(tab => tab.text().includes('Assessment'))?.trigger('click')
+        await wrapper.vm.$nextTick()
+        expect(wrapper.findAll('[data-testid="review-team-tab"]').map(tab => tab.text())).toEqual(['Security'])
+        expect(wrapper.get('[data-testid="previous-team-assessments"]').text()).toContain('Former')
+        await wrapper.get('[data-testid="use-previous-team-Former"]').trigger('click')
+        await wrapper.vm.$nextTick()
+        expect((wrapper.vm as any).state).toBe('NOT_AFFECTED')
+        expect((wrapper.vm as any).details).toBe('Former rationale')
+        expect((wrapper.vm as any).currentAssigned).toEqual([])
+        expect((wrapper.vm as any).evidenceReviewed).toBe(false)
+        expect(wrapper.get('[data-testid="assessment-submit-button"]').attributes('disabled')).toBeUndefined()
+    })
+
     it('renders advisory descriptions as markdown', async () => {
         const wrapper = mount(VulnGroupCard, {
             props: {
@@ -835,6 +870,7 @@ describe('VulnGroupCard', () => {
             component_name: 'worker',
             component_uuid: 'c2',
             finding_uuid: 'f2',
+            tags: ['Runtime'],
         }
         const wrapper = mount(VulnGroupCard, {
             props: {

@@ -57,6 +57,65 @@ describe('BulkWorkflowModal', () => {
         mocks.buildBulkWorkflowDocument.mockResolvedValue('# Ticket drafts\n')
     })
 
+    it('requires a source-to-target mapping before previewing team takeover', async () => {
+        const takeover = {
+            ...workflow,
+            id: 'team-takeover',
+            label: 'Take over team assessments',
+        }
+        mocks.getBulkWorkflowSummary.mockResolvedValue({
+            task_id: 'task-1',
+            workflows: [{ ...takeover, candidate_count: null, summary: {} }],
+            team_takeover_component_options: ['@gehc/nest-back-pack'],
+        })
+        mocks.previewBulkWorkflow.mockResolvedValue({
+            task_id: 'task-1',
+            workflow: takeover,
+            preview_token: 'takeover-preview',
+            selectable_group_ids: ['CVE-2026-1'],
+            items: [{
+                group_id: 'CVE-2026-1',
+                finding_count: 2,
+                eligible_finding_count: 1,
+                skipped: { target_exists: 1 },
+            }],
+            summary: { groups: 1, eligible_findings: 1 },
+        })
+        const wrapper = mount(BulkWorkflowModal, {
+            props: { show: false, taskId: 'task-1', query: { teams: ['TeamB'] } },
+        })
+        await wrapper.setProps({ show: true })
+        await flushPromises()
+        await wrapper.get('[data-testid="bulk-workflow-team-takeover"]').trigger('click')
+        expect(mocks.previewBulkWorkflow).not.toHaveBeenCalled()
+        expect((wrapper.get('[data-testid="team-takeover-to"]').element as HTMLInputElement).value).toBe('TeamB')
+        await wrapper.get('[data-testid="team-takeover-from"]').setValue('TeamA')
+        expect(wrapper.get('[data-testid="team-takeover-preview"]').attributes('disabled')).toBeDefined()
+        expect(wrapper.text()).toContain('Mapped owner components')
+        expect(wrapper.text()).not.toContain('library-a')
+        await wrapper.get('[data-testid="team-takeover-component-@gehc/nest-back-pack"]').setValue(true)
+        await wrapper.get('[data-testid="team-takeover-preview"]').trigger('click')
+        await flushPromises()
+        expect(mocks.previewBulkWorkflow).toHaveBeenCalledWith(
+            'team-takeover',
+            'task-1',
+            { teams: ['TeamB'], takeover_from: 'TeamA', takeover_to: 'TeamB', takeover_components: ['@gehc/nest-back-pack'] },
+            expect.any(Function),
+        )
+        expect(wrapper.text()).toContain('1 ready of 2 findings')
+        await wrapper.get('[data-testid="bulk-workflow-apply"]').trigger('click')
+        await flushPromises()
+        expect(mocks.applyBulkWorkflow).toHaveBeenCalledWith(
+            'team-takeover',
+            'task-1',
+            { teams: ['TeamB'], takeover_from: 'TeamA', takeover_to: 'TeamB', takeover_components: ['@gehc/nest-back-pack'] },
+            ['CVE-2026-1'],
+            'takeover-preview',
+            expect.any(Function),
+        )
+        wrapper.unmount()
+    })
+
     it('freezes active filters, previews one workflow, and applies its selection', async () => {
         const wrapper = mount(BulkWorkflowModal, {
             props: {

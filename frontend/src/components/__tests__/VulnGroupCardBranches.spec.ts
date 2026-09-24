@@ -153,7 +153,7 @@ describe('VulnGroupCard Branch Coverage', () => {
         ;(wrapper.vm as any).expanded = true
         await wrapper.vm.$nextTick()
         expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Unassessed findings')
-        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).toContain('Missing global assessment')
+        expect(wrapper.get('[data-testid="assessment-sync-reasons"]').text()).not.toContain('Missing global assessment')
         expect(wrapper.get('[data-testid="sync-all-assessments"]').text()).toContain('Sync all')
         
         // Build the synchronization draft.

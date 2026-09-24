@@ -667,6 +667,32 @@ describe('vulnListIndex', () => {
         expect(matchesLifecycleFilter(ready, ['READY_FOR_APPROVAL'])).toBe(true)
     })
 
+    it('partitions visible lifecycle categories and includes legacy in Assessed', () => {
+        const states = ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL', 'ASSESSED', 'ASSESSED_LEGACY']
+        const items = states.map((lifecycle, index) => buildVulnListItem(makeGroup({
+            id: `CVE-${index}`,
+            list_metadata: {
+                lifecycle,
+                is_pending: ['INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL'].includes(lifecycle),
+                is_approval_ready: lifecycle === 'NEEDS_APPROVAL',
+                technical_state: 'NOT_AFFECTED',
+            },
+        }), {}, {}))
+        const categories = ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'READY_FOR_APPROVAL', 'ASSESSED']
+        const counts = computeListFilterCounts(items, categories)
+        expect(counts.ASSESSED).toBe(2)
+        for (const item of items) {
+            expect(categories.filter(category => matchesLifecycleFilter(item, [category]))).toHaveLength(1)
+            expect(categories.filter(category => matchesCompiledLifecycleFilter(item, compileVulnStateFilters({
+                lifecycleFilters: [category], analysisFilters: [],
+            })))).toHaveLength(1)
+        }
+        expect(parseVulnSearchQuery('lifecycle:conflicting').lifecycleTerms).toEqual(['INCONSISTENT'])
+        expect(parseVulnSearchQuery('lifecycle:inconsistent').chips[0]?.label).toBe('Lifecycle: conflicting')
+        expect(parseVulnSearchQuery('lifecycle:needs_approval').lifecycleTerms).toEqual(['READY_FOR_APPROVAL'])
+        expect(parseVulnSearchQuery('lifecycle:legacy').lifecycleTerms).toEqual(['ASSESSED'])
+    })
+
     it('computes sidebar counts from indexed items', () => {
         const open = makeGroup({ id: 'CVE-2026-0001', tags: ['team-a'] })
         const assessed = makeGroup({

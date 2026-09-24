@@ -687,6 +687,7 @@ def test_tagging_no_bom():
     cache = BOMAnalysisCache(bom, mapping)
     tags = cache.get_tags_only(comp_uuid, comp_name)
     assert tags == ["TeamA"]
+    assert cache.get_owner_mapping_keys(comp_uuid, comp_name) == ["libA"]
 
 
 def test_tagging_bom_ref_mismatch():
@@ -1110,6 +1111,70 @@ def test_tagging_group_name_key_matches_component_with_group():
     cache = BOMAnalysisCache(bom, mapping)
     tags = cache.get_tags_only("u1", "core")
     assert tags == ["FrontendTeam"]
+
+
+def test_scoped_package_mapping_uses_nearest_grouped_ancestor():
+    bom = {
+        "components": [
+            {"bom-ref": "a", "uuid": "u-a", "name": "vulnerable-lib"},
+            {"bom-ref": "b", "uuid": "u-b", "name": "nest-back-pack", "group": "@gehc"},
+            {"bom-ref": "c", "uuid": "u-c", "name": "datastudio-be"},
+        ],
+        "dependencies": [
+            {"ref": "c", "dependsOn": ["b"]},
+            {"ref": "b", "dependsOn": ["a"]},
+        ],
+    }
+    cache = BOMAnalysisCache(bom, {
+        "@gehc/nest-back-pack": "TeamB",
+        "nest-back-pack": "OtherTeam",
+        "datastudio-be": "TeamC",
+    })
+
+    assert cache.get_tags_only("u-b", "nest-back-pack") == ["TeamB"]
+    assert cache.get_tags_only("u-a", "vulnerable-lib") == ["TeamB"]
+    assert cache.get_dependency_paths("u-a", "vulnerable-lib") == [
+        "vulnerable-lib -> nest-back-pack -> datastudio-be"
+    ]
+
+
+def test_tagging_mapped_child_shadows_ancestor_across_bypass_path():
+    # The vulnerable library is reached through both the mapped child and a
+    # bypass to its mapped parent, as in CVE-2026-82333's dependency graph.
+    bom = {
+        "components": [
+            {"bom-ref": "vuln", "uuid": "u-vuln", "name": "multer"},
+            {"bom-ref": "express", "uuid": "u-express", "name": "platform-express"},
+            {"bom-ref": "child", "uuid": "u-child", "name": "nest-back-pack", "group": "@gehc"},
+            {"bom-ref": "parent", "uuid": "u-parent", "name": "datastudio-be"},
+        ],
+        "dependencies": [
+            {"ref": "express", "dependsOn": ["vuln"]},
+            {"ref": "child", "dependsOn": ["express"]},
+            {"ref": "parent", "dependsOn": ["express", "child"]},
+        ],
+    }
+    cache = BOMAnalysisCache(bom, {
+        "@gehc/nest-back-pack": ["3rd Party", "3P"],
+        "datastudio-be": "Phoenix",
+    })
+
+    assert sorted(cache.get_tags_only("u-vuln", "multer")) == ["3P", "3rd Party"]
+    assert cache.get_owner_mapping_keys("u-vuln", "multer") == ["@gehc/nest-back-pack"]
+
+    grouped = group_vulnerabilities(
+        [{
+            "version": {"uuid": "project", "name": "Project", "version": "1.0"},
+            "vulnerabilities": [{
+                "vulnerability": {"vulnId": "CVE-2026-82333"},
+                "component": {"uuid": "u-vuln", "name": "multer"},
+            }],
+        }],
+        processed_boms={"project": cache},
+        include_dependency_paths=False,
+    )
+    instance = grouped[0]["affected_versions"][0]["components"][0]
+    assert instance["owner_mapping_keys"] == ["@gehc/nest-back-pack"]
 
 
 def test_tagging_name_only_key_matches_component_without_group():

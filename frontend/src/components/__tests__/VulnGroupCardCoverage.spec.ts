@@ -99,6 +99,7 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
                         component_uuid: 'c1',
                         component_name: 'log4j-core',
                         component_version: '2.0',
+                        tags: ['TEAM-A'],
                         dependency_chains: ['log4j-core -> team-a-comp -> team-b-comp -> Vulnerable Project'],
                     }
                 ]
@@ -132,6 +133,7 @@ describe('VulnGroupCard Coverage Edge Cases', () => {
                         component_uuid: 'c1',
                         component_name: 'log4j-core',
                         component_version: '2.0',
+                        tags: ['TEAM-B'],
                         dependency_chains: ['log4j-core -> team-b-comp -> team-a-comp -> Vulnerable Project'],
                     }
                 ]

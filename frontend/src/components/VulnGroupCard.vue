@@ -6,7 +6,7 @@ import { marked } from 'marked'
 import type { GroupedVuln, AssessmentPayload, TMRescoreProposal } from '../types'
 import { ChevronDown, ChevronUp, Shield, RefreshCw, AlertTriangle, Calculator, ExternalLink, CheckCircle, RotateCcw, Zap, X, Loader2, FileText, Bot, ShieldCheck, Tags, ArrowRight, CircleDot } from '@lucide/vue'
 
-import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
+import { parseAssessmentBlocks, getAssessmentSyncDraft, parseJustificationFromText, getAssessedTeams, isPendingReview as isPendingReviewHelper, getGroupLifecycle, getGroupTechnicalState, sanitizeAssessmentDetails, normalizeTags, STATE_PRIORITY, type AssessmentBlock } from '../lib/assessment-helpers'
 import { cleanStructuredAssessmentDetails, resolveAssessmentFormValues, resolveDependencyTrackConsensusInput, stripPendingReviewStatus } from '../lib/assessmentFormState'
 import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { buildRescoredVectorForState, normalizeCvssVectorInstance, type CvssVersion } from '../lib/cvssRescore'
@@ -14,7 +14,6 @@ import { buildMergedAssessmentData } from '../lib/mergedAssessmentData'
 import { buildSavedAssessmentResultState, buildSavedOriginalAnalysis, prepareAssessmentSubmission } from '../lib/assessmentSubmission'
 import { buildCodeAnalysisGlobalReferenceDraft, codeAnalysisAssessmentState, prepareCodeAnalysisResult, prepareCodeAnalysisResults, type CodeAnalysisComponentRun, type CodeAnalysisTeamDraft } from '../lib/codeAnalysisResult'
 import { calculateScoreFromVector } from '../lib/cvss'
-import { getDerivedGroupTags } from '../lib/dependency-team-selection'
 import { buildTeamAliasGroups } from '../lib/team-mapping'
 import { useVulnDependencyInfo } from '../lib/useVulnDependencyInfo'
 import { Cvss2, Cvss3P0, Cvss3P1, Cvss4P0 } from 'ae-cvss-calculator'
@@ -214,6 +213,7 @@ type AssessmentDraftState = {
     ticket: string
 }
 const teamDrafts = ref<Map<string, AssessmentDraftState>>(new Map())
+const takeoverSources = ref<Map<string, string>>(new Map())
 const refreshCounter = ref(0)
 const formTouched = ref(false)
 const codeAnalysisDraftApplied = ref(false)
@@ -431,6 +431,7 @@ const discardUnsavedDraft = () => {
     ssvcTouched.value = false
     pendingSsvc.value = savedSsvc.value.record
     teamDrafts.value.clear()
+    takeoverSources.value.clear()
     formTouched.value = false
     rawDetailsTouched.value = false
     codeAnalysisDraftApplied.value = false
@@ -1589,6 +1590,10 @@ watch(selectedTeam, (_newTeam, oldTeam) => {
     updateFormFromGroup()
 })
 
+watch(() => props.group.id, () => {
+    takeoverSources.value.clear()
+})
+
 watch(() => props.group, () => {
     assessmentSubmitted.value = false
     updateFormFromGroup(true)
@@ -1814,6 +1819,7 @@ const handleUpdate = async (force: boolean = false, isApprove: boolean = false) 
             versionCoverageChecked: versionCoverageChecked.value,
             ticket: ticketReference.value,
             teamDrafts: teamDrafts.value,
+            takeoverSources: takeoverSources.value,
             isReviewer: isReviewer.value,
             pendingVector: pendingVector.value,
             pendingScore: pendingScore.value,
@@ -1887,27 +1893,9 @@ const handleUseServerState = () => {
     showConflictModal.value = false
 }
 
-const buildUpdatedGroup = (): GroupedVuln => {
-    const affectedVersions = props.group.affected_versions.map(version => ({
-        ...version,
-        components: version.components.map(component => ({ ...component })),
-    }))
-
-    const derivedTags = getDerivedGroupTags(
-        affectedVersions.flatMap(version => version.components),
-        teamMapping?.value || {},
-    )
-
-    return {
-        ...props.group,
-        affected_versions: affectedVersions,
-        tags: derivedTags,
-    }
-}
-
 const handleMappingUpdated = async () => {
     await refreshDetails()
-    emit('update', buildUpdatedGroup())
+    emit('update')
 }
 
 const originalSeverity = computed(() => {
@@ -2122,6 +2110,28 @@ const allAssessmentTeams = computed(() => {
     }
     return teams
 })
+const previousTeamAssessments = computed(() => {
+    const currentTeams = new Set(allAssessmentTeams.value.map(team => team.toLocaleLowerCase()))
+    return mergedAssessmentData.value.blocks.filter(block =>
+        block.team.toLocaleLowerCase() !== 'general'
+        && !currentTeams.has((normalizeTags([block.team], teamMapping?.value || {})[0] || block.team).toLocaleLowerCase())
+        && block.state !== 'NOT_SET'
+    )
+})
+
+const usePreviousTeamAssessment = (block: AssessmentBlock) => {
+    if (!selectedTeam.value || !previousTeamAssessments.value.includes(block)) return
+    state.value = block.state
+    justification.value = block.justification || 'NOT_SET'
+    details.value = stripPendingReviewStatus(stripSsvcDocumentation(block.details || '')).trim()
+    currentAssigned.value = []
+    evidenceReviewed.value = false
+    versionCoverageChecked.value = false
+    ticketReference.value = ''
+    takeoverSources.value.set(selectedTeam.value, block.team)
+    formTouched.value = true
+}
+
 const preparedAutomaticProposals = computed(() => prepareCodeAnalysisResults(
     codeAnalysisProposalRuns.value,
     triggeringTaggedComponents.value,
@@ -2593,6 +2603,7 @@ const applySuccessfulAssessmentUpdate = (success: any, results: any[], finalStat
         results,
     }))
     teamDrafts.value.clear()
+    takeoverSources.value.clear()
     formTouched.value = false
     rawDetailsTouched.value = false
     codeAnalysisDraftApplied.value = false
@@ -3152,6 +3163,23 @@ const teamBlockStateColor = (state?: string): string => {
                             <span v-if="selectedAssessmentTeamComponents.length === 0" class="text-amber-300">
                                 No mapped component
                             </span>
+                        </div>
+
+                        <div
+                            v-if="selectedTeam && previousTeamAssessments.length && !teamBlockMeta(selectedTeam)"
+                            data-testid="previous-team-assessments"
+                            class="mt-3 rounded border border-amber-700/40 bg-amber-950/20 p-3 text-xs"
+                        >
+                            <div class="font-semibold text-amber-100">Previous team assessments</div>
+                            <p class="mt-1 text-amber-200/75">Use an earlier decision as a draft. Check the evidence and version scope before submitting for {{ selectedTeam }}.</p>
+                            <div v-for="block in previousTeamAssessments" :key="block.team" class="mt-2 flex items-start justify-between gap-3 border-t border-amber-700/30 pt-2">
+                                <div class="min-w-0 text-amber-100">
+                                    <strong>{{ block.team }}</strong> · {{ block.state.replaceAll('_', ' ') }}
+                                    <span v-if="block.user" class="text-amber-200/60"> · {{ block.user }}</span>
+                                    <p class="mt-0.5 line-clamp-2 text-amber-200/70">{{ block.details }}</p>
+                                </div>
+                                <button type="button" :data-testid="`use-previous-team-${block.team}`" class="shrink-0 rounded border border-amber-500/40 px-2 py-1 font-semibold text-amber-100 hover:bg-amber-500/15" @click="usePreviousTeamAssessment(block)">Use as draft</button>
+                            </div>
                         </div>
 
                         <!-- Block header metadata (read-only) -->

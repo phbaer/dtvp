@@ -2,7 +2,6 @@ import { computed, type ComputedRef, type Ref } from 'vue'
 import type { GroupedVuln, Instance } from '../types'
 import {
     findTeamMappingEntryForComponent,
-    getAffectedTeamsFromPaths,
     getFirstMappedTeamOnPath,
     getPathParts,
     normalizeLegacyTags,
@@ -60,14 +59,19 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
                 'component_group' in instance,
                 instance.component_purl,
             )
-            const directTeam = directMapping?.tags[0] || ''
+            const mappedDirectTeam = directMapping?.tags[0] || ''
+            // Grouped findings already carry ownership resolved from the full
+            // BOM, including parent group and PURL identities. Path strings
+            // contain names only and cannot reliably redo that resolution.
+            const teams = normalizeLegacyTags(instance.tags, mapping)
+            const directTeam = teams.some(team => team.toLocaleLowerCase() === mappedDirectTeam.toLocaleLowerCase())
+                ? mappedDirectTeam
+                : ''
             return {
                 instance,
                 key: getInstanceTeamKey(instance, index),
                 directTeam,
-                teams: directTeam
-                    ? [directTeam]
-                    : getAffectedTeamsFromPaths(instance.dependency_chains, mapping),
+                teams,
             }
         })
     })
@@ -162,11 +166,14 @@ export function useVulnDependencyInfo({ group, teamMapping, refreshCounter, team
         const taggedComponents = new Map<string, { versions: Set<string>; tag: string }>()
         const paths = visibleInstances.value.flatMap(instance => instance.dependency_chains || [])
         const selectedPaths = selectRepresentativePaths(paths, teamMapping.value, 100)
+        const ownerTeams = new Set(visibleOwnership.value.flatMap(ownership =>
+            ownership.teams.map(team => team.toLocaleLowerCase())
+        ))
 
         for (const selectedPath of selectedPaths) {
             const parts = getPathParts(selectedPath)
             const firstMapped = getFirstMappedTeamOnPath(parts, teamMapping.value)
-            if (!firstMapped) continue
+            if (!firstMapped || !ownerTeams.has(firstMapped.team.toLocaleLowerCase())) continue
 
             const triggerName = firstMapped.component || 'Unknown'
             if (!taggedComponents.has(triggerName)) {

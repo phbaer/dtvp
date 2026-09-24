@@ -1276,6 +1276,19 @@ def test_get_task_groups_team_filter_matches_the_complete_name(client):
             f"/api/tasks/{task_id}/groups",
             params={"team": "platform"},
         )
+        multiple = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params=[("teams", "platform"), ("teams", "Platform Security"), ("team_assessment", "MISSING")],
+        )
+        assert multiple.status_code == 200
+        assert multiple.json()["filtered"] == 2
+        assert multiple.json()["counts"]["facets"]["team_assessment"] == {"MISSING": 2, "DOCUMENTED": 0}
+        recorded = client.get(
+            f"/api/tasks/{task_id}/groups",
+            params={"teams": "platform", "team_assessment": "DOCUMENTED"},
+        )
+        assert recorded.status_code == 200
+        assert recorded.json()["filtered"] == 0
     finally:
         main.tasks.pop(task_id, None)
 

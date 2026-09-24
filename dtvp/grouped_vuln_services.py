@@ -217,8 +217,9 @@ def _build_assessment_summary(group: Dict[str, Any]) -> Dict[str, Any]:
 
     for instance in instances:
         _shared, parsed_blocks = _parse_assessment_blocks(_instance_details(instance))
-        instance_blocks.append(parsed_blocks)
-        blocks.extend(parsed_blocks)
+        active_blocks = [block for block in parsed_blocks if not block.get("historical")]
+        instance_blocks.append(active_blocks)
+        blocks.extend(active_blocks)
 
     assessed_teams = {
         block.get("team")
@@ -442,10 +443,8 @@ def _derive_group_lifecycle(
     if has_missing and has_any:
         return "INCOMPLETE" if len(set(non_empty_states)) <= 1 else "INCONSISTENT"
 
-    if instances and not has_global:
-        return "INCOMPLETE" if has_any else "OPEN"
-
-    return "OPEN"
+    # Complete, consistent team coverage does not require a General block.
+    return "ASSESSED" if has_any else "OPEN"
 
 
 def _build_group_list_metadata(
@@ -540,6 +539,7 @@ def _summarize_component(component: Dict[str, Any]) -> Dict[str, Any]:
         "is_suppressed": component.get("is_suppressed", False),
         "is_direct_dependency": component.get("is_direct_dependency"),
         "tags": component.get("tags", []),
+        "owner_mapping_keys": component.get("owner_mapping_keys", []),
         "assessment_restore": component.get("assessment_restore"),
     }
 

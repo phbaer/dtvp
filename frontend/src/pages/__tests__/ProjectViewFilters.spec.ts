@@ -52,7 +52,7 @@ describe('ProjectView Filters', () => {
             ]
         mountProjectViewRoute = async () => {
             const { wrapper } = await mountWithRouter(ProjectView, {
-                initialPath: '/projects/p1/TestProject',
+                initialPath: '/projects/p1/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED',
                 routes,
                 mountOptions: {
                     global: {
@@ -215,7 +215,7 @@ describe('ProjectView Filters', () => {
         (getGroupedVulns as any).mockResolvedValue(mockData)
         const wrapper = await mountProjectViewRoute()
 
-        // Default for REVIEWER: All Lifecycle + All Analysis.
+        // Explicit URL selection: All Lifecycle + All Analysis.
         // Shows V1, V2, V3, V8
         let cards = wrapper.findAll('.vuln-card')
         expect(cards.length).toBe(4)
@@ -262,7 +262,7 @@ describe('ProjectView Filters', () => {
         ])
 
         const { wrapper, router } = await mountWithRouter(ProjectView, {
-            initialPath: '/project/TestProject',
+            initialPath: '/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED',
             routes: [
                 { path: '/code-analysis', component: { template: '<div />' } },
                 { path: '/project/:name', component: ProjectView },
@@ -631,13 +631,12 @@ describe('ProjectView Filters', () => {
             return parseInt(btn?.find('span').text() || '0')
         }
 
-        // Global Lifecycle counts: Open=1 (V1), Assessed=1 (V2), Incomplete=1 (V3), Inconsistent=1 (V8)
+        // Incomplete includes the conflicting V8 while its card retains its badge.
         expect(getCount('Open')).toBe(1)
         expect(getCount('Assessed')).toBe(1)
-        expect(getCount('Incomplete')).toBe(1)
-        expect(getCount('Inconsistent')).toBe(1)
+        expect(getCount('Incomplete')).toBe(2)
 
-        // Default Lifecycle selection for Reviewer is ALL.
+        // The URL explicitly selects every lifecycle category.
         // Analysis counts should be global then.
         expect(getCount('Not Set')).toBe(1) // V1 is NOT_SET
         expect(getCount('False Positive')).toBe(2) // V2 and V3 are FALSE_POSITIVE

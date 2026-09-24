@@ -5,6 +5,7 @@ import type { GroupedVuln } from '../types'
 import { parseAttributionTimestamp, type AutomaticAssessmentStatus } from '../lib/vulnListIndex'
 import { getGroupInconsistencyReasons } from '../lib/assessment-helpers'
 import { inconsistencyReasonLabel } from '../lib/inconsistency'
+import { getGroupAssessmentSyncIssues } from '../lib/assessmentSyncIssues'
 import { ssvcLabel } from '../lib/ssvc'
 import { evidenceSources, evidenceLabel } from '../lib/evidence'
 
@@ -120,10 +121,10 @@ const lifecycleLabel = computed(() => {
     case 'OPEN':
     case 'NOT_SET': return 'Open'
     case 'INCOMPLETE': return 'Incomplete'
-    case 'INCONSISTENT': return 'Inconsistent'
+    case 'INCONSISTENT': return 'Conflicting'
     case 'ASSESSED': return 'Assessed'
-    case 'ASSESSED_LEGACY': return 'Assessed (Legacy)'
-    case 'NEEDS_APPROVAL': return 'Needs Approval'
+    case 'ASSESSED_LEGACY': return 'Assessed'
+    case 'NEEDS_APPROVAL': return 'Ready for approval'
     default: return displayState.value
   }
 })
@@ -154,16 +155,18 @@ const lifecycleTooltip = computed(() => {
   switch (displayState.value) {
     case 'OPEN':
     case 'NOT_SET': return 'Lifecycle: Open — no assessment has been started'
-    case 'INCOMPLETE': return 'Lifecycle: Incomplete — some teams have assessed, others have not'
+    case 'INCOMPLETE': return `Lifecycle: Incomplete — ${getGroupAssessmentSyncIssues(group.value, {
+      lifecycle: 'INCOMPLETE', requiredTeamsOrTags: normalizedTags.value,
+    }).map(issue => issue.detail).join(' ')}`
     case 'INCONSISTENT': {
       const labels = getGroupInconsistencyReasons(group.value).map(inconsistencyReasonLabel)
       return labels.length > 0
-        ? `Lifecycle: Inconsistent — ${labels.join('; ')}`
-        : 'Lifecycle: Inconsistent — assessments disagree across findings'
+        ? `Lifecycle: Conflicting — ${labels.join('; ')}`
+        : 'Lifecycle: Conflicting — assessments disagree across findings'
     }
     case 'ASSESSED': return 'Lifecycle: Assessed — approved globally or all required teams have completed their assessment'
     case 'ASSESSED_LEGACY': return 'Lifecycle: Assessed (Legacy) — assessed before the multi-team workflow was introduced'
-    case 'NEEDS_APPROVAL': return 'Lifecycle: Needs Approval — analyst assessment awaiting reviewer sign-off'
+    case 'NEEDS_APPROVAL': return 'Lifecycle: Ready for approval — all required assessments complete; reviewer sign-off pending'
     default: return `Lifecycle: ${displayState.value}`
   }
 })
@@ -298,6 +301,7 @@ const componentSummary = computed(() => {
         </span>
         <!-- Close lifecycle pill if no analysis state -->
         <span v-else class="-ml-1.5"></span>
+        <span v-if="displayState === 'ASSESSED_LEGACY'" data-testid="legacy-assessment-badge" class="rounded border border-sky-500/30 px-1.5 py-0.5 text-[10px] text-sky-300" title="Assessed before the structured team workflow">Legacy</span>
 
         <span v-if="group.ssvc_summary && group.ssvc_summary.status !== 'UNASSESSED'" data-testid="ssvc-badge" class="rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-200" title="SSVC deployment priority (independent of CVSS)">SSVC: {{ ssvcLabel(group.ssvc_summary.status) }}</span>
         <span v-for="source in evidenceSources(group).filter(value => ['KEV', 'CISA_SSVC'].includes(value))" :key="source" data-testid="evidence-badge"

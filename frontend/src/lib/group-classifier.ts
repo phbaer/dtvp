@@ -100,7 +100,7 @@ export function computeFilterCounts(
 
         // Lifecycle counts
         if (c.lifecycle === 'OPEN') counts.OPEN++
-        if (c.lifecycle === 'ASSESSED') counts.ASSESSED++
+        if (['ASSESSED', 'ASSESSED_LEGACY'].includes(c.lifecycle)) counts.ASSESSED++
         if (c.lifecycle === 'ASSESSED_LEGACY') counts.ASSESSED_LEGACY++
         if (c.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++
         if (c.lifecycle === 'INCONSISTENT') counts.INCONSISTENT++
@@ -111,6 +111,7 @@ export function computeFilterCounts(
         const lifecycleActiveMatch =
             activeLifecycleFilters.length === 0 ||
             activeLifecycleFilters.includes(c.lifecycle) ||
+            (activeLifecycleFilters.includes('ASSESSED') && c.lifecycle === 'ASSESSED_LEGACY') ||
             (activeLifecycleFilters.includes('NEEDS_APPROVAL') && c.isPending) ||
             (activeLifecycleFilters.includes('READY_FOR_APPROVAL') && c.isApprovalReady)
 

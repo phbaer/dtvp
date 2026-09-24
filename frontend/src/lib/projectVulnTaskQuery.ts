@@ -1,4 +1,5 @@
 import type { TaskVulnGroupListQuery } from './api'
+import { expandLifecycleSelection } from './projectLifecycleFilters'
 import type { InconsistencyReason, TMRescoreProposal } from '../types'
 import {
     isMeaningfulTMRescoreProposalCandidate,
@@ -21,10 +22,12 @@ export interface BuildTaskVulnGroupListQueryInput {
     parsedSearch: ParsedVulnSearchQuery
     filtersReady: boolean
     lifecycleFilters: readonly string[]
+    teamAssessmentFilter?: string
     inconsistencyReasonFilters?: readonly InconsistencyReason[]
     defaultLifecycleFilters: readonly string[]
     analysisFilters: readonly string[]
     defaultAnalysisFilters: readonly string[]
+    teamFilters?: readonly string[]
     tagFilter: string
     idFilter: string
     componentFilter: string
@@ -106,11 +109,13 @@ export function buildTaskVulnGroupListQuery({
     parsedSearch,
     filtersReady,
     lifecycleFilters,
+    teamAssessmentFilter = 'ANY',
     inconsistencyReasonFilters = [],
     defaultLifecycleFilters,
     analysisFilters,
     defaultAnalysisFilters,
     tagFilter,
+    teamFilters,
     idFilter,
     componentFilter,
     assigneeFilter,
@@ -138,7 +143,9 @@ export function buildTaskVulnGroupListQuery({
     const analysisBase = analysisFilters.length > 0 || filtersReady
         ? analysisFilters
         : defaultAnalysisFilters
-    const lifecycle = noMatchWhenEmpty(intersectIfRestricted(lifecycleBase, parsedSearch.lifecycleTerms))
+    const lifecycle = noMatchWhenEmpty(intersectIfRestricted(
+        expandLifecycleSelection(lifecycleBase), expandLifecycleSelection(parsedSearch.lifecycleTerms),
+    ))
     const analysis = noMatchWhenEmpty(intersectIfRestricted(analysisBase, parsedSearch.analysisTerms))
     const dependency = noMatchWhenEmpty(intersectIfRestricted(dependencyFilters, parsedSearch.dependencyTerms))
     const tmrescore = noMatchWhenEmpty(intersectIfRestricted(tmrescoreFilters, parsedSearch.tmrescoreTerms))
@@ -161,11 +168,13 @@ export function buildTaskVulnGroupListQuery({
         original_severity: [...originalSeverityFilters],
         ssvc: [...ssvcFilters],
         evidence: [...evidenceFilters],
-        lifecycle,
+        lifecycle: parsedSearch.teamTerms.length ? ['__NO_MATCH__'] : lifecycle,
         inconsistency_reason: [...inconsistencyReasonFilters],
         analysis,
-        tag: joinSearchTerms(parsedSearch.teamTerms),
-        team: tagFilter,
+        tag: '',
+        team: teamFilters ? '' : tagFilter,
+        teams: teamFilters ? [...teamFilters] : undefined,
+        team_assessment: (teamFilters?.length || tagFilter) ? teamAssessmentFilter : 'ANY',
         id: joinSearchTerms([idFilter, ...parsedSearch.idTerms]),
         component: joinSearchTerms([componentFilter, ...parsedSearch.componentTerms]),
         assignee: joinSearchTerms([assigneeFilter, ...parsedSearch.assigneeTerms]),

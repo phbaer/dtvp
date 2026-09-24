@@ -43,6 +43,22 @@ const processing = ref(false)
 const error = ref('')
 const workflows = ref<BulkWorkflowSummaryItem[]>([])
 const selectedWorkflowId = ref('')
+const takeoverFrom = ref('')
+const takeoverTo = ref('')
+const takeoverComponents = ref<Set<string>>(new Set())
+const takeoverComponentOptions = ref<string[]>([])
+const takeoverComponentSearch = ref('')
+const visibleTakeoverComponents = computed(() => takeoverComponentOptions.value.filter(component =>
+    component.toLocaleLowerCase().includes(takeoverComponentSearch.value.trim().toLocaleLowerCase())
+))
+const toggleTakeoverComponent = (component: string) => {
+    const next = new Set(takeoverComponents.value)
+    if (next.has(component)) next.delete(component)
+    else next.add(component)
+    takeoverComponents.value = next
+}
+const takeoverValid = computed(() => Boolean(takeoverFrom.value.trim() && takeoverTo.value.trim() && takeoverComponents.value.size)
+    && takeoverFrom.value.trim().toLocaleLowerCase() !== takeoverTo.value.trim().toLocaleLowerCase())
 const preview = ref<BulkWorkflowPreviewResponse | null>(null)
 const selectedIds = ref<Set<string>>(new Set())
 const appliedResult = ref<BulkWorkflowApplyResponse | null>(null)
@@ -84,8 +100,9 @@ const selectedFindingCount = computed(() =>
             || 0
         ), 0)
 )
-const activeFilterCount = computed(() => Object.values(activeFilters.value).filter(value =>
-    Array.isArray(value) ? value.length > 0 : value !== '' && value != null && value !== false
+const activeFilterCount = computed(() => Object.entries(activeFilters.value).filter(([key, value]) =>
+    !key.startsWith('takeover_')
+    && (Array.isArray(value) ? value.length > 0 : value !== '' && value != null && value !== false)
 ).length)
 
 const itemSelectable = (item: BulkWorkflowPreviewItem) =>
@@ -140,6 +157,7 @@ const itemStatus = (item: BulkWorkflowPreviewItem) => {
         return verdict === 'INCONCLUSIVE' ? 'UNCERTAIN' : verdict.replaceAll('_', ' ')
     }
     if (selectedWorkflowId.value === 'incomplete-sync') return item.target_state || 'Ready'
+    if (selectedWorkflowId.value === 'team-takeover') return item.eligible_finding_count > 0 ? 'Ready' : 'Review'
     if (selectedWorkflowId.value === 'assessment-restore') {
         return item.recoverable_finding_count > 0 ? 'Ready' : (item.status || 'Review')
     }
@@ -178,6 +196,11 @@ const itemDetail = (item: BulkWorkflowPreviewItem) => {
     }
     if (selectedWorkflowId.value === 'incomplete-sync') {
         return `${item.finding_count || 0} findings · ${item.block_count || 0} assessment blocks`
+    }
+    if (selectedWorkflowId.value === 'team-takeover') {
+        const skipped = Object.entries(item.skipped || {})
+            .map(([reason, count]) => `${count} ${reason.replaceAll('_', ' ')}`)
+        return [`${item.eligible_finding_count || 0} ready of ${item.finding_count || 0} findings`, (item.components || []).join(', '), ...skipped].filter(Boolean).join(' · ')
     }
     if (selectedWorkflowId.value === 'assessment-restore') {
         return `${item.recoverable_finding_count || 0} recoverable of ${item.finding_count || 0} findings`
@@ -220,6 +243,21 @@ const loadPreview = async (workflowId: string) => {
     operationMessage.value = ''
     operationProgress.value = 0
     resetAutomaticAssessmentFilters()
+    if (workflowId === 'team-takeover') {
+        if (!takeoverValid.value) {
+            loading.value = false
+            return
+        }
+        activeFilters.value = {
+            ...activeFilters.value,
+            takeover_from: takeoverFrom.value.trim(),
+            takeover_to: takeoverTo.value.trim(),
+            takeover_components: [...takeoverComponents.value].sort(),
+        }
+    } else {
+        const { takeover_from: _from, takeover_to: _to, takeover_components: _components, ...filters } = activeFilters.value
+        activeFilters.value = filters
+    }
     const cached = previewCache.get(workflowId)
     if (cached) {
         loading.value = false
@@ -263,6 +301,13 @@ const loadWorkflows = async () => {
     loading.value = true
     error.value = ''
     activeFilters.value = bulkWorkflowFilters(props.query)
+    takeoverFrom.value = ''
+    takeoverComponents.value = new Set()
+    takeoverComponentOptions.value = []
+    takeoverComponentSearch.value = ''
+    takeoverTo.value = props.query.teams?.length === 1
+        ? props.query.teams[0] || ''
+        : props.query.team || props.query.tag || ''
     workflows.value = []
     selectedWorkflowId.value = ''
     preview.value = null
@@ -275,6 +320,7 @@ const loadWorkflows = async () => {
     try {
         const response = await getBulkWorkflowSummary(props.taskId, activeFilters.value)
         workflows.value = response.workflows
+        takeoverComponentOptions.value = response.team_takeover_component_options || []
     } catch (err: any) {
         error.value = err?.response?.data?.detail || err?.message || 'Unable to load bulk workflows.'
     } finally {
@@ -406,6 +452,15 @@ const close = () => {
     if (!processing.value) emit('close')
 }
 
+watch([takeoverFrom, takeoverTo, takeoverComponents], () => {
+    previewCache.delete('team-takeover')
+    if (selectedWorkflowId.value === 'team-takeover') {
+        preview.value = null
+        selectedIds.value = new Set()
+        previewRequestId += 1
+    }
+})
+
 watch(() => props.show, show => {
     if (show) void loadWorkflows()
 })
@@ -453,6 +508,32 @@ watch(() => props.show, show => {
                 </aside>
 
                 <main class="flex min-h-0 flex-col gap-4 overflow-hidden p-6">
+                    <div v-if="selectedWorkflowId === 'team-takeover'" class="rounded-xl border border-amber-400/20 bg-amber-500/5 p-3" data-testid="team-takeover-mapping">
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <label class="space-y-1 text-xs text-slate-300">Previous team
+                                <input v-model.trim="takeoverFrom" type="text" autocomplete="off" data-testid="team-takeover-from" class="block w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" placeholder="TeamA" />
+                            </label>
+                            <label class="space-y-1 text-xs text-slate-300">Current team
+                                <input v-model.trim="takeoverTo" type="text" autocomplete="off" data-testid="team-takeover-to" class="block w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" placeholder="TeamB" />
+                            </label>
+                        </div>
+                        <div class="mt-3">
+                            <label for="team-takeover-component-search" class="text-xs text-slate-300">Mapped owner components ({{ takeoverComponents.size }} selected)</label>
+                            <input id="team-takeover-component-search" v-model="takeoverComponentSearch" type="search" autocomplete="off" data-testid="team-takeover-component-search" class="mt-1 block w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm text-white" placeholder="Find components" />
+                            <div role="group" aria-label="Mapped owner components" class="mt-2 max-h-32 overflow-y-auto rounded-lg border border-white/10 bg-black/20 p-2">
+                                <label v-for="component in visibleTakeoverComponents" :key="component" class="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs text-slate-200 hover:bg-white/5">
+                                    <input type="checkbox" :checked="takeoverComponents.has(component)" :data-testid="`team-takeover-component-${component}`" @change="toggleTakeoverComponent(component)" />
+                                    <span>{{ component }}</span>
+                                </label>
+                                <p v-if="!visibleTakeoverComponents.length" class="px-1 py-2 text-xs text-slate-500">{{ takeoverComponentOptions.length ? 'No matching components.' : 'No mapped owner components in this task.' }}</p>
+                            </div>
+                            <p v-if="takeoverComponents.size" class="mt-2 text-[11px] text-amber-200/80">Selected: {{ [...takeoverComponents].join(', ') }}</p>
+                        </div>
+                        <div class="mt-3 flex items-center justify-between gap-3">
+                            <p class="text-[11px] text-slate-400">Includes vulnerable libraries beneath each selected owner. Only findings currently owned by the target team and missing its assessment can be copied.</p>
+                            <button type="button" class="shrink-0 rounded-lg bg-blue-500 px-3 py-2 text-xs font-bold text-slate-950 disabled:opacity-50" :disabled="!takeoverValid || loading || processing" data-testid="team-takeover-preview" @click="loadPreview('team-takeover')">Preview mapping</button>
+                        </div>
+                    </div>
                     <div v-if="loading" class="flex flex-1 items-center justify-center gap-3 text-sm font-semibold text-blue-200">
                         <Loader2 :size="22" class="animate-spin" />
                         {{ operationMessage || 'Preparing workflow preview' }}
@@ -470,8 +551,8 @@ watch(() => props.show, show => {
                     </div>
                     <div v-else-if="!preview" data-testid="bulk-workflow-empty-state" class="flex flex-1 flex-col items-center justify-center text-center">
                         <Layers :size="40" class="text-blue-300" />
-                        <h3 class="mt-3 font-bold text-white">Select a bulk workflow</h3>
-                        <p class="mt-1 max-w-md text-xs text-slate-500">A preview is prepared only for the workflow you choose. Active vulnerability filters remain in effect.</p>
+                        <h3 class="mt-3 font-bold text-white">{{ selectedWorkflowId === 'team-takeover' ? 'Define a team mapping' : 'Select a bulk workflow' }}</h3>
+                        <p class="mt-1 max-w-md text-xs text-slate-500">{{ selectedWorkflowId === 'team-takeover' ? 'Choose the previous team, current team, and components, then preview the candidate findings.' : 'A preview is prepared only for the workflow you choose. Active vulnerability filters remain in effect.' }}</p>
                     </div>
                     <template v-else-if="preview && selectedWorkflow">
                         <div class="flex items-start justify-between gap-4">
@@ -673,6 +754,9 @@ watch(() => props.show, show => {
                             <AlertTriangle :size="18" class="shrink-0" />
                             <span v-if="selectedWorkflowId === 'automatic-assessments'">
                                 This applies the shown states, assessment details, and CVSS rescores for {{ selectedIds.size }} vulnerability group{{ selectedIds.size === 1 ? '' : 's' }} to approximately {{ selectedFindingCount }} findings. The preview is revalidated before writing.
+                            </span>
+                            <span v-else-if="selectedWorkflowId === 'team-takeover'">
+                                This creates pending {{ takeoverTo }} assessments on {{ selectedFindingCount }} findings for {{ [...takeoverComponents].join(', ') }}, retains {{ takeoverFrom }} as historical, and revalidates the preview before writing.
                             </span>
                             <span v-else>
                                 This applies {{ selectedIds.size }} vulnerability group{{ selectedIds.size === 1 ? '' : 's' }} and approximately {{ selectedFindingCount }} findings. The preview is revalidated before writing.

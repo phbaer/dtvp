@@ -140,14 +140,14 @@ test.describe('Per-Team Assessment UI Flow', () => {
     });
 
     test('should render team-oriented vulnerability row state', async ({ page }) => {
-        await page.goto('/project/TestProject');
+        await page.goto('/project/TestProject?lifecycle=OPEN');
 
         // Ensure vulnerability card is visible in compact list
         const vulnCard = page.locator('.vuln-card').filter({ hasText: 'CVE-TEAM-TEST' }).first();
         await expect(vulnCard).toBeVisible({ timeout: 30000 });
 
         await expect(vulnCard.getByText(/Backend|Frontend/i).first()).toBeVisible();
-        await expect(vulnCard.getByTestId('lifecycle-badge')).toHaveText(/Open|Incomplete|Assessed|Inconsistent|Needs Approval/);
+        await expect(vulnCard.getByTestId('lifecycle-badge')).toHaveText('Open');
         await expect(vulnCard.getByTestId('instance-count')).toBeVisible();
     });
 });

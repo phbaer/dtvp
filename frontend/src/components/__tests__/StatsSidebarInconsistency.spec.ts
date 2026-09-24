@@ -100,23 +100,23 @@ describe('StatsSidebar inconsistency reasons', () => {
         expect((wrapper.emitted('update:filters')!.at(-1)![0] as FilterState).evidenceFilters).toEqual(['CISA_SSVC'])
         wrapper.unmount()
     })
-    it('adds the inconsistent lifecycle and clears reasons when it is removed', async () => {
+    it('preserves lifecycle when reasons change and preserves reasons when lifecycle changes', async () => {
         const wrapper = mountSidebar()
         const reasonButton = wrapper.findAll('button')
             .find(button => button.text().includes('Analysis states differ'))
         await reasonButton?.trigger('click')
 
         const firstUpdate = wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState
-        expect(firstUpdate.lifecycleFilters).toContain('INCONSISTENT')
+        expect(firstUpdate.lifecycleFilters).toEqual([])
         expect(firstUpdate.inconsistencyReasonFilters).toEqual(['ANALYSIS_STATE_MISMATCH'])
 
-        await wrapper.setProps({ filters: firstUpdate })
+        await wrapper.setProps({ filters: { ...firstUpdate, lifecycleFilters: ['INCONSISTENT'] } })
         const lifecycleButton = wrapper.findAll('button')
             .find(button => button.text().includes('Inconsistent'))
         await lifecycleButton?.trigger('click')
 
         const secondUpdate = wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState
         expect(secondUpdate.lifecycleFilters).not.toContain('INCONSISTENT')
-        expect(secondUpdate.inconsistencyReasonFilters).toEqual([])
+        expect(secondUpdate.inconsistencyReasonFilters).toEqual(['ANALYSIS_STATE_MISMATCH'])
     })
 })

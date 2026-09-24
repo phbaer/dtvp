@@ -91,6 +91,7 @@ export interface Instance {
     dependency_chains?: string[];
     justification?: string;
     tags?: string[];
+    owner_mapping_keys?: string[];
     assessment_restore?: AssessmentRestoreCandidate;
     dtvp_revision?: number;
     dtvp_sync_status?: string;

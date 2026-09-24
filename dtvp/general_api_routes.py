@@ -8,7 +8,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Annotated, Any, Awaitable, Callable, Optional
+from typing import Annotated, Any, Awaitable, Callable, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
@@ -54,6 +54,10 @@ from .bulk_workflows.base import (
     build_preview_token,
 )
 from .bulk_workflows.incomplete_sync import create_incomplete_sync_workflow
+from .bulk_workflows.team_takeover import (
+    create_team_takeover_workflow,
+    team_takeover_component_options,
+)
 from .bulk_workflows.rescore_rule_sync import create_rescore_rule_sync_workflow
 from .code_analysis_assessment_services import (
     assessment_status_for_group,
@@ -126,6 +130,11 @@ class BulkWorkflowFilters(BaseModel):
     analysis: list[str] = Field(default_factory=list)
     tag: str = ""
     team: str = ""
+    teams: list[str] = Field(default_factory=list)
+    team_assessment: Literal["ANY", "MISSING", "DOCUMENTED"] = "ANY"
+    takeover_from: str = ""
+    takeover_to: str = ""
+    takeover_components: list[str] = Field(default_factory=list)
     id: str = ""
     component: str = ""
     assignee: str = ""
@@ -910,6 +919,8 @@ def _register_task_routes(
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
         team: str = "",
+        teams: list[str] | None = Query(default=None),
+        team_assessment: str = Query("ANY", pattern="^(ANY|MISSING|DOCUMENTED)$"),
         vuln_id: str = Query("", alias="id"),
         component: str = "",
         assignee: str = "",
@@ -961,6 +972,8 @@ def _register_task_routes(
                     "analysis": split_query_values(analysis),
                     "tag": tag,
                     "team": team,
+                    "teams": teams or [],
+                    "team_assessment": team_assessment,
                     "vuln_id": vuln_id,
                     "component": component,
                     "assignee": assignee,
@@ -1038,6 +1051,8 @@ def _register_task_routes(
         analysis: list[str] | None = Query(default=None),
         tag: str = "",
         team: str = "",
+        teams: list[str] | None = Query(default=None),
+        team_assessment: str = Query("ANY", pattern="^(ANY|MISSING|DOCUMENTED)$"),
         vuln_id: str = Query("", alias="id"),
         component: str = "",
         assignee: str = "",
@@ -1084,6 +1099,8 @@ def _register_task_routes(
                     "analysis": split_query_values(analysis),
                     "tag": tag,
                     "team": team,
+                    "teams": teams or [],
+                    "team_assessment": team_assessment,
                     "vuln_id": vuln_id,
                     "component": component,
                     "assignee": assignee,
@@ -1519,10 +1536,12 @@ def _query_task_group_window(
 def _filter_bulk_workflow_groups(
     groups: list[dict[str, Any]] | dict[str, Any],
     filters: BulkWorkflowFilters,
+    team_aliases: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     result = query_task_groups(
         groups,
         q=filters.q,
+        team_aliases=team_aliases,
         lifecycle=filters.lifecycle,
         inconsistency_reason=filters.inconsistency_reason,
         original_severity=filters.original_severity,
@@ -1531,6 +1550,8 @@ def _filter_bulk_workflow_groups(
         analysis=filters.analysis,
         tag=filters.tag,
         team=filters.team,
+        teams=filters.teams,
+        team_assessment=filters.team_assessment,
         vuln_id=filters.id,
         component=filters.component,
         assignee=filters.assignee,
@@ -1594,7 +1615,11 @@ def _filter_bulk_workflow_task_groups(
             "automatic_assessment_rescore": [],
         }
     )
-    filtered_summaries = _filter_bulk_workflow_groups(summary_index, base_filters)
+    load_team_mapping = getattr(deps, "load_team_mapping", None)
+    team_mapping = load_team_mapping() if callable(load_team_mapping) else {}
+    filtered_summaries = _filter_bulk_workflow_groups(
+        summary_index, base_filters, team_aliases=_team_alias_map(team_mapping),
+    )
     full_group_lookup = task.get("_full_result_by_id")
     if not isinstance(full_group_lookup, dict):
         full_group_lookup = {
@@ -1673,6 +1698,7 @@ def _bulk_workflow_registry(
         [
             create_automatic_assessment_workflow(),
             create_incomplete_sync_workflow(),
+            create_team_takeover_workflow(),
             create_assessment_restore_workflow(),
             create_rescore_rule_sync_workflow(load_rescore_rules_or_raise),
         ]
@@ -1710,6 +1736,9 @@ def _bulk_workflow_context(
             assessment_records,
         ),
         user=user,
+        takeover_from=req.filters.takeover_from,
+        takeover_to=req.filters.takeover_to,
+        takeover_components=req.filters.takeover_components,
         team_mapping=deps.load_team_mapping(),
         rescore_rules=_configured_rescore_rules(deps),
         result_store=deps.code_analysis_result_store,
@@ -2152,7 +2181,7 @@ def _register_bulk_workflow_routes(
         user: Annotated[str, Depends(current_user_dependency)],
     ):
         require_reviewer(user)
-        _completed_task_full_groups(deps, req.task_id, user)
+        groups = _completed_task_full_groups(deps, req.task_id, user)
         workflows = [
             {
                 **plugin.metadata(),
@@ -2161,7 +2190,11 @@ def _register_bulk_workflow_routes(
             }
             for plugin in registry.all()
         ]
-        return {"task_id": req.task_id, "workflows": workflows}
+        return {
+            "task_id": req.task_id,
+            "workflows": workflows,
+            "team_takeover_component_options": team_takeover_component_options(groups),
+        }
 
     @router.post("/bulk-workflows/{workflow_id}/preview")
     async def preview_bulk_workflow(

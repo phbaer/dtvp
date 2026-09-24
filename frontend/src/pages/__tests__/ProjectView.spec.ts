@@ -112,7 +112,9 @@ describe('ProjectView.vue', () => {
             configurable: true
         })
         vi.mocked(useRoute).mockReturnValue({
-            params: { name: 'TestProject' }, query: {}
+            params: { name: 'TestProject' },
+            // These list/sort tests explicitly include every lifecycle category.
+            query: { lifecycle: ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'READY_FOR_APPROVAL', 'ASSESSED'] }
         } as any)
     })
 
@@ -469,7 +471,7 @@ describe('ProjectView.vue', () => {
         expect(getStatistics).not.toHaveBeenCalled()
     })
 
-    it('updates only the local group on team mapping update without refetching vulnerabilities', async () => {
+    it('reloads backend ownership after a team mapping update', async () => {
         const mockGroup = {
             id: '1',
             title: 'Vuln 1',
@@ -482,21 +484,18 @@ describe('ProjectView.vue', () => {
                 }
             ]
         }
-        vi.mocked(getGroupedVulns).mockResolvedValue([mockGroup] as any)
+        vi.mocked(getGroupedVulns)
+            .mockResolvedValueOnce([mockGroup] as any)
+            .mockResolvedValueOnce([{ ...mockGroup, tags: ['NewTeam'] }] as any)
 
         const wrapper = await mountProjectView({ routeName: 'TestProject' })
         expect(getGroupedVulns).toHaveBeenCalledTimes(1)
 
-        const updatedGroup = {
-            ...mockGroup,
-            tags: ['NewTeam'],
-        }
-
-        await (wrapper.vm as any).handleTeamMappingUpdated(updatedGroup)
+        await (wrapper.vm as any).handleTeamMappingUpdated()
         await flushPromises()
 
         expect((wrapper.vm as any).groups[0].tags).toEqual(['NewTeam'])
-        expect(getGroupedVulns).toHaveBeenCalledTimes(1)
+        expect(getGroupedVulns).toHaveBeenCalledTimes(2)
     })
 
     it('loads the first backend task window instead of draining all groups', async () => {
