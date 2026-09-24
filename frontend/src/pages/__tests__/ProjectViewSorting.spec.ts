@@ -36,7 +36,9 @@ describe('ProjectView.vue Sorting', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         vi.mocked(useRoute).mockReturnValue({
-            params: { name: 'TestProject' }, query: {}
+            params: { name: 'TestProject' },
+            // These list/sort tests explicitly include every lifecycle category.
+            query: { lifecycle: ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'READY_FOR_APPROVAL', 'ASSESSED'] }
         } as any)
     })
 

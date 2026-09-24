@@ -965,7 +965,7 @@ watch(() => activeTab.value, (newTab) => {
         <div class="mb-6">
              <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Structured Editor</h4>
              <p class="text-gray-400 mb-2 text-xs">
-                Configure component mappings using deterministic SBOM selectors: name, group:name, purl::pkg:type/namespace/name for package URLs, cs::name for case-sensitive matches, nogroup::name for known components without a group, and cs,nogroup::name for both. Single-colon keys such as cs:name and nogroup:name are normal group:name selectors. More specific selectors win. Aliases are only used to recognize legacy team tags and are not shown in the vulnerability header.
+                Configure component mappings using deterministic SBOM selectors: name, group:name or group/name, purl::pkg:type/namespace/name for package URLs, cs::name for case-sensitive matches, nogroup::name for known components without a group, and cs,nogroup::name for both. Single-colon keys such as cs:name and nogroup:name are normal group:name selectors. More specific selectors win. Aliases are only used to recognize legacy team tags and are not shown in the vulnerability header.
             </p>
             <div class="space-y-2 mb-4">
                 <div v-for="(row, index) in mappingRows" :key="row.id" class="grid gap-2 md:grid-cols-[2fr_1fr_1fr_auto] items-end">
@@ -974,7 +974,7 @@ watch(() => activeTab.value, (newTab) => {
                         <input
                             v-model="row.component"
                             :data-testid="`team-mapping-component-${row.id}`"
-                            placeholder="name, group:name, purl::pkg:type/namespace/name"
+                            placeholder="name, group:name, group/name, purl::pkg:type/namespace/name"
                             class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-xs text-gray-100"
                         />
                     </div>
@@ -1326,7 +1326,7 @@ watch(() => activeTab.value, (newTab) => {
             <div>
                 <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Code Analysis Guidance</h4>
                 <p class="text-gray-400 mb-2 text-xs">
-                    Configure static prompt additions for automatic scans and manual vulnerability-card analyses. Use a default entry for all scan targets and component-specific entries under <code>components</code>; component keys use the same name, group:name, and purl:: selectors as team mapping.
+                    Configure static prompt additions for automatic scans and manual vulnerability-card analyses. Use a default entry for all scan targets and component-specific entries under <code>components</code>; component keys use the same name, group:name, group/name, and purl:: selectors as team mapping.
                 </p>
                 <pre class="mb-3 overflow-x-auto rounded border border-gray-700 bg-gray-950 p-3 text-xs text-gray-400">{
   "default": "Always verify runtime reachability against code evidence.",

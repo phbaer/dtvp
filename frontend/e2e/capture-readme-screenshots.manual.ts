@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import ssvcModel from '../../dtvp/resources/ssvc/deployer-1.0.0.json' with { type: 'json' }
 
 const mockProjects = [
     { name: 'TestProject', uuid: 'p1', version: '2.0.0', classifier: 'APPLICATION' },
@@ -102,6 +103,10 @@ async function captureWithPadding(
     padding = 24,
 ) {
     await locator.waitFor({ state: 'visible', timeout: 10000 })
+    const ssvc = locator.getByTestId('ssvc-calculator')
+    if (await ssvc.isVisible()) {
+        await expect(ssvc.getByText(/^CERT\/CC /)).toBeVisible()
+    }
     await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => undefined)
     await locator.evaluate((element, { background, capturePadding }) => {
         const htmlElement = element as HTMLElement
@@ -455,6 +460,12 @@ async function selectDetailTab(card: Locator, name: string) {
 
 async function mockCommonShell(page: Page) {
     await page.setViewportSize({ width: 1800, height: 1400 })
+
+    await page.route('**/api/ssvc/models', route => route.fulfill({ json: { models: [ssvcModel] } }))
+    await page.route('**/api/ssvc/exploitation**', route => route.fulfill({ json: {
+        enabled: true, auto_fill: false, retry_after: 0, suggestion: null, sources: [],
+    } }))
+    await page.route('**/api/settings/team-groups', route => route.fulfill({ json: {} }))
 
     await page.route('**/auth/me', async (route) => {
         await route.fulfill({
@@ -1063,15 +1074,16 @@ async function mockCommonShell(page: Page) {
     const docsGroupCounts = {
         total: docsGroupedVulns.length,
         lifecycle: {
-            OPEN: 2,
+            OPEN: 1,
             ASSESSED: 2,
             ASSESSED_LEGACY: 0,
             INCOMPLETE: 1,
-            INCONSISTENT: 1,
+            INCONSISTENT: 2,
             NEEDS_APPROVAL: 1,
+            READY_FOR_APPROVAL: 1,
         },
         analysis: {
-            NOT_SET: 2,
+            NOT_SET: 1,
             EXPLOITABLE: 0,
             IN_TRIAGE: 3,
             RESOLVED: 0,
@@ -1080,7 +1092,7 @@ async function mockCommonShell(page: Page) {
         },
         dependency_relationship: {
             direct: 4,
-            transitive: 4,
+            transitive: 3,
             unknown: 0,
         },
         cvss_version_mismatch: 0,
@@ -1301,7 +1313,8 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture project view screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
@@ -1310,7 +1323,7 @@ test.describe('Capture README screenshots', () => {
         await expect(card.getByRole('tab', { name: 'CVSS & Rescoring' })).toHaveCount(0)
         await expect(card.getByRole('tab', { name: 'Team Mapping' })).toBeVisible({ timeout: 10000 })
         await expect(card.getByTestId('vuln-description')).toBeVisible({ timeout: 10000 })
-        await expect(page.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
+        await expect(card.getByText('PlatformTeam', { exact: true }).first()).toBeVisible({ timeout: 10000 })
 
         const chainsButton = page.getByRole('button', { name: /^chains$/ }).first()
         await chainsButton.click()
@@ -1325,21 +1338,20 @@ test.describe('Capture README screenshots', () => {
             await expect(page.getByText('gateway-facade').first()).toBeVisible({ timeout: 10000 })
         }
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/vuln-card-overview.png')
     })
 
     test('capture global review CVSS and rescoring screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.setViewportSize({ width: 2200, height: 2600 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-6004')
         await selectDetailTab(card, 'Assessment')
         await expect(card.getByText('CVSS Calculator')).toBeVisible({ timeout: 10000 })
-        await expect(card.getByRole('heading', { name: 'CVSS & Rescoring' })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByRole('heading', { name: 'CVSS & SSVC', exact: true })).toBeVisible({ timeout: 10000 })
         await expect(card.locator('#cvss-vector-input')).toBeVisible({ timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/vuln-card-cvss-rescoring.png')
     })
 
@@ -1374,6 +1386,7 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture threat-model rescoring screenshot', async ({ page }) => {
+        await page.setViewportSize({ width: 2200, height: 1800 })
         await page.goto('/project/TestProject/tmrescore')
         await page.waitForLoadState('networkidle')
 
@@ -1381,12 +1394,11 @@ test.describe('Capture README screenshots', () => {
         await expect(page.getByTestId('scope-merged_versions')).toBeVisible({ timeout: 10000 })
         await expect(page.getByTestId('analysis-sbom-summary-components')).toHaveText('42', { timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/tmrescore.png')
     })
 
     test('capture lifecycle badges screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         // Wait for all cards to render (we have 7 vulns now)
@@ -1399,7 +1411,7 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture assignee chips and approve button screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         // CVE-2024-3001 has assignees ['analyst', 'dev_lead'] and NEEDS_APPROVAL state
@@ -1408,13 +1420,13 @@ test.describe('Capture README screenshots', () => {
 
         // Verify assignee chips are visible on the card header
         await expect(needsApprovalCard.locator('[data-testid="assignee-chip"]').first()).toBeVisible({ timeout: 5000 })
-        await expect(needsApprovalCard.getByText('Needs Approval')).toBeVisible({ timeout: 5000 })
+        await expect(needsApprovalCard.getByText('Ready for approval', { exact: true })).toBeVisible({ timeout: 5000 })
 
         await captureWithPadding(needsApprovalCard, '../docs/screenshots/assignee-chips-approve.png')
     })
 
     test('capture rescored CVSS display screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         // CVE-2024-6004 has rescored_cvss: 4.1 (base: 7.2)
@@ -1429,7 +1441,8 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture user assignment form screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.setViewportSize({ width: 2200, height: 2600 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         // Expand the NEEDS_APPROVAL card to see the assignment form
@@ -1448,12 +1461,11 @@ test.describe('Capture README screenshots', () => {
         await page.waitForTimeout(500)
 
         // Capture with the suggestion dropdown visible
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/user-assignment-form.png')
     })
 
     test('capture statistics sidebar tab screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
@@ -1476,7 +1488,7 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture assignee filter screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
@@ -1493,7 +1505,7 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture automatic assessment filter screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const autoCard = page.locator('.vuln-card').filter({ hasText: /CVE-2024-4002/ }).first()
@@ -1516,7 +1528,8 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture expanded card with assessment details screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         // Expand the inconsistent card to show conflicting team assessments
@@ -1529,12 +1542,11 @@ test.describe('Capture README screenshots', () => {
         // Should show the conflicting team blocks (PlatformTeam: IN_TRIAGE vs EdgeTeam: NOT_AFFECTED)
         await expect(page.getByText('PlatformTeam').first()).toBeVisible({ timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/inconsistent-assessment.png')
     })
 
     test('capture CVSS calculator modal screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         // Expand the rescored card to access the calculator
@@ -1597,7 +1609,7 @@ test.describe('Capture README screenshots', () => {
             }),
         }))
 
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
 
@@ -1611,7 +1623,7 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture conflict resolution modal screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
         await expect(page.locator('.vuln-card').first()).toBeVisible({ timeout: 20000 })
         await page.waitForTimeout(500)
@@ -1670,7 +1682,8 @@ test.describe('Capture README screenshots', () => {
     })
 
     test('capture review context screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.setViewportSize({ width: 2200, height: 2600 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
@@ -1678,12 +1691,12 @@ test.describe('Capture README screenshots', () => {
         await expect(card.getByText('Review Context')).toBeVisible({ timeout: 10000 })
         await expect(card.getByTestId('ticket-requirement-badge')).toHaveText('Required', { timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/vuln-card-review-context.png')
     })
 
     test('capture team mapping screenshot', async ({ page }) => {
-        await page.goto('/project/TestProject')
+        await page.setViewportSize({ width: 2200, height: 1800 })
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
@@ -1692,11 +1705,11 @@ test.describe('Capture README screenshots', () => {
         await expect(card.getByTestId('component-team-mapping-row').first()).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('platform-gateway').first()).toBeVisible({ timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/vuln-card-team-mapping.png')
     })
 
     test('capture code analysis dashboard screenshot', async ({ page }) => {
+        await page.setViewportSize({ width: 2200, height: 1900 })
         await page.goto('/code-analysis')
         await page.waitForLoadState('networkidle')
 
@@ -1708,11 +1721,11 @@ test.describe('Capture README screenshots', () => {
         await expect(page.getByTestId('queue-log-panel-docs-dashboard-running')).toBeVisible({ timeout: 10000 })
         await expect(page.getByText('ReachabilityAgent', { exact: true }).first()).toBeVisible({ timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1900 })
         await captureWithPadding(page.locator('main > div').first(), '../docs/screenshots/code-analysis-dashboard.png')
     })
 
     test('capture code analysis running screenshot', async ({ page }) => {
+        await page.setViewportSize({ width: 2200, height: 1800 })
         await mockAnalysisQueue(page, {
             items: [
                 {
@@ -1748,7 +1761,7 @@ test.describe('Capture README screenshots', () => {
             ],
         })
 
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
@@ -1756,11 +1769,11 @@ test.describe('Capture README screenshots', () => {
         await expect(card.getByText('Analyzing…')).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('running', { exact: true })).toBeVisible({ timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 1800 })
         await captureWithPadding(card, '../docs/screenshots/code-analysis-running.png')
     })
 
     test('capture code analysis result screenshot', async ({ page }) => {
+        await page.setViewportSize({ width: 2200, height: 3400 })
         await mockAnalysisQueue(page, {
             items: [
                 {
@@ -1813,7 +1826,7 @@ test.describe('Capture README screenshots', () => {
             },
         })
 
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const card = await openProjectCard(page, 'CVE-2024-9999')
@@ -1822,13 +1835,12 @@ test.describe('Capture README screenshots', () => {
         await card.getByRole('button', { name: 'View', exact: true }).click()
         await expect(card.getByTestId('inline-analysis-outcome').getByText('platform-gateway exposes a reachable parser initialization path used by external requests.')).toBeVisible({ timeout: 10000 })
         await expect(card.getByText('Use as draft').first()).toBeVisible({ timeout: 10000 })
-        await expect(card.getByTestId('combined-analysis-assessment').getByText('platform-gateway', { exact: true })).toBeVisible({ timeout: 10000 })
-        await expect(card.getByTestId('combined-assessment-preview').getByText('Combined rationale')).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('combined-analysis-assessment').getByRole('heading', { name: 'platform-gateway', exact: true })).toBeVisible({ timeout: 10000 })
+        await expect(card.getByTestId('combined-assessment-preview').getByText('Decision rationale', { exact: true })).toBeVisible({ timeout: 10000 })
 
         await card.getByRole('button', { name: /Pipeline Evidence/ }).click()
         await expect(card.getByText('Reachability scan')).toBeVisible({ timeout: 10000 })
 
-        await page.setViewportSize({ width: 2200, height: 3400 })
         await captureWithPadding(card, '../docs/screenshots/code-analysis-result.png')
     })
 
@@ -1899,7 +1911,7 @@ test.describe('Capture README screenshots', () => {
             },
         })
 
-        await page.goto('/project/TestProject')
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=INCOMPLETE&lifecycle=INCONSISTENT&lifecycle=READY_FOR_APPROVAL&lifecycle=ASSESSED')
         await page.waitForLoadState('networkidle')
 
         const queueButton = page.getByTestId('analysis-queue-trigger')

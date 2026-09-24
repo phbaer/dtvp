@@ -18,6 +18,7 @@ interface UseProjectAssessmentUpdatesOptions {
     fetchStats: () => Promise<unknown>
     isTaskWindowActive?: Ref<boolean>
     refreshTaskWindow?: () => Promise<unknown> | unknown
+    refreshOwnership?: () => Promise<unknown> | unknown
 }
 
 export const applyAssessmentDataToGroup = (group: GroupedVuln, data: any): GroupedVuln => {
@@ -64,6 +65,7 @@ export function useProjectAssessmentUpdates({
     fetchStats,
     isTaskWindowActive,
     refreshTaskWindow,
+    refreshOwnership,
 }: UseProjectAssessmentUpdatesOptions) {
     const refreshStatsIfVisible = (context: string) => {
         statsDirty.value = true
@@ -152,8 +154,12 @@ export function useProjectAssessmentUpdates({
             replaceGroup(updatedGroup)
         }
 
+        if (refreshOwnership) {
+            await refreshOwnership()
+        } else {
+            refreshTaskWindowIfActive('team mapping update')
+        }
         refreshStatsIfVisible('team mapping update')
-        refreshTaskWindowIfActive('team mapping update')
     }
 
     return {

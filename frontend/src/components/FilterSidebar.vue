@@ -21,7 +21,9 @@ export interface FilterState {
     automaticAssessmentOutcomeFilter: AutomaticAssessmentOutcome[]
     automaticAssessmentRescoreFilter: AutomaticAssessmentRescoreState[]
     idFilter: string
+    teamFilters?: string[]
     tagFilter: string
+    teamAssessmentFilter?: string
     componentFilter: string
     assigneeFilter: string
     versionFilterInput: string
@@ -222,6 +224,21 @@ const toggleAnalysisFilter = (val: string) => {
             </div>
         </div>
 
+        <div class="space-y-2">
+            <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">
+                Assessment for selected teams
+                <select aria-label="Assessment for selected teams" data-testid="team-assessment-filter"
+                    :value="filters.teamAssessmentFilter || 'ANY'"
+                    :disabled="!(filters.teamFilters?.length || filters.tagFilter)"
+                    @change="updateFilter('teamAssessmentFilter', ($event.target as HTMLSelectElement).value)"
+                    class="mt-1 block w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-200 normal-case tracking-normal">
+                    <option value="ANY">Any</option>
+                    <option value="MISSING">Not recorded</option>
+                    <option value="DOCUMENTED">Recorded</option>
+                </select>
+            </label>
+            <p class="text-[10px] text-gray-500">Select teams to filter their assessments. Recorded includes pending approval.</p>
+        </div>
         <!-- Lifecycle Status -->
         <div class="space-y-2">
             <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Lifecycle Status</label>

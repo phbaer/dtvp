@@ -176,6 +176,14 @@ export const parseTeamMappingKey = (key: string): TeamMappingSelector => {
             group = groupPart.trim()
             name = nameParts.join(':').trim()
         }
+    } else if (!requireNoGroup && remaining.includes('/')) {
+        const separator = remaining.lastIndexOf('/')
+        const groupPart = remaining.slice(0, separator).trim()
+        const namePart = remaining.slice(separator + 1).trim()
+        if (groupPart && namePart) {
+            group = groupPart
+            name = namePart
+        }
     }
 
     return {

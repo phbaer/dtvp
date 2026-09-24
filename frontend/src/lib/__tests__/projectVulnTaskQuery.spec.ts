@@ -86,10 +86,10 @@ describe('projectVulnTaskQuery', () => {
 
         expect(query).toMatchObject({
             q: 'urgent',
-            lifecycle: ['OPEN'],
+            lifecycle: ['__NO_MATCH__'],
             inconsistency_reason: ['ANALYSIS_STATE_MISMATCH'],
             analysis: ['RESOLVED'],
-            tag: 'platform',
+            tag: '',
             team: 'backend',
             id: 'GHSA-1234 cve-2026-9999',
             component: 'gateway spring',
@@ -115,17 +115,34 @@ describe('projectVulnTaskQuery', () => {
             analysisFilters: [],
         }))
 
-        expect(query.lifecycle).toEqual(DEFAULT_REVIEWER_LIFECYCLE_FILTERS)
+        expect(query.lifecycle).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'READY_FOR_APPROVAL', 'ASSESSED'])
         expect(query.analysis).toEqual(DEFAULT_ANALYSIS_FILTERS)
     })
 
-    it.each([false, true])('passes all unfinished analyst lifecycles before and after hydration (%s)', (filtersReady) => {
+    it.each([false, true])('includes conflicts in the analyst work default before and after hydration (%s)', (filtersReady) => {
         const query = buildTaskVulnGroupListQuery(baseInput({
             filtersReady,
             defaultLifecycleFilters: DEFAULT_ANALYST_LIFECYCLE_FILTERS,
             lifecycleFilters: filtersReady ? DEFAULT_ANALYST_LIFECYCLE_FILTERS : [],
         }))
-        expect(query.lifecycle).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL'])
+        expect(query.lifecycle).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT'])
+    })
+
+    it('groups conflicts with incomplete work but keeps approval ready separate', () => {
+        const incomplete = buildTaskVulnGroupListQuery(baseInput({ lifecycleFilters: ['INCOMPLETE'] }))
+        expect(incomplete.lifecycle).toEqual(['INCOMPLETE', 'INCONSISTENT'])
+        const searched = buildTaskVulnGroupListQuery(baseInput({
+            lifecycleFilters: ['INCOMPLETE'],
+            parsedSearch: parseVulnSearchQuery('state:incomplete'),
+        }))
+        expect(searched.lifecycle).toEqual(['INCOMPLETE', 'INCONSISTENT'])
+        const ready = buildTaskVulnGroupListQuery(baseInput({ lifecycleFilters: ['READY_FOR_APPROVAL'] }))
+        expect(ready.lifecycle).toEqual(['READY_FOR_APPROVAL'])
+        const conflicting = buildTaskVulnGroupListQuery(baseInput({
+            lifecycleFilters: ['INCOMPLETE'],
+            parsedSearch: parseVulnSearchQuery('state:conflicting'),
+        }))
+        expect(conflicting.lifecycle).toEqual(['INCONSISTENT'])
     })
 
     it('keeps the open lifecycle restriction when searching by vulnerability ID', () => {

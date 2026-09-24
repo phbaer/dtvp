@@ -16,7 +16,7 @@ from .evidence_services import evidence_sources, evidence_counts
 
 
 DAY_MS = 24 * 60 * 60 * 1000
-TASK_GROUP_QUERY_INDEX_VERSION = 9
+TASK_GROUP_QUERY_INDEX_VERSION = 13
 TASK_GROUP_QUERY_CACHE_LIMIT = 32
 TASK_GROUP_QUERY_CACHE_MAX_BYTES = 8 * 1024 * 1024
 TASK_GROUP_CURSOR_VERSION = 1
@@ -248,6 +248,9 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
         "component_names_lower": [_lower(value) for value in component_names],
         "assignees": assignees,
         "assignees_lower": [_lower(value) for value in assignees],
+        "assessed_teams_lower": {
+            _lower(value) for value in _string_list(metadata.get("assessed_teams"))
+        },
         "versions": versions,
         "versions_lower": versions_lower,
         "versions_lower_set": set(versions_lower),
@@ -276,13 +279,40 @@ def _group_list_fields(group: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _matches_lifecycle(fields: dict[str, Any], filters: set[str]) -> bool:
+def _selected_group_teams(
+    fields: dict[str, Any], selected: set[str], aliases: dict[str, str],
+) -> set[str]:
+    def canonical(name: str) -> str:
+        return _lower(aliases.get(_lower(name), name))
+
+    return {canonical(tag) for tag in fields["tags"]}.intersection(
+        canonical(team) for team in selected
+    )
+
+
+def _team_assessment_status(
+    fields: dict[str, Any],
+    selected: set[str],
+    team_aliases: dict[str, str] | None = None,
+) -> str | None:
+    aliases = team_aliases or {}
+    relevant = _selected_group_teams(fields, selected, aliases) - {"unassigned"}
+    if not relevant:
+        return None
+    assessed = {_lower(aliases.get(name, name)) for name in fields["assessed_teams_lower"]}
+    return "MISSING" if relevant - assessed else "DOCUMENTED"
+
+
+def _matches_lifecycle(
+    fields: dict[str, Any],
+    filters: set[str],
+) -> bool:
     if not filters:
         return True
     lifecycle = fields["lifecycle"]
     return (
         ("OPEN" in filters and lifecycle == "OPEN")
-        or ("ASSESSED" in filters and lifecycle == "ASSESSED")
+        or ("ASSESSED" in filters and lifecycle in {"ASSESSED", "ASSESSED_LEGACY"})
         or ("ASSESSED_LEGACY" in filters and lifecycle == "ASSESSED_LEGACY")
         or ("INCOMPLETE" in filters and lifecycle == "INCOMPLETE")
         or ("INCONSISTENT" in filters and lifecycle == "INCONSISTENT")
@@ -428,8 +458,16 @@ def _matches_task_group_fields(
     automatic_assessment_rescore: set[str],
     automatic_assessment_facets: dict[str, dict[str, str]],
     now_ms: int,
+    team_aliases: dict[str, str] | None = None,
+    selected_teams: set[str] | None = None,
+    team_assessment: str = "ANY",
 ) -> bool:
     if q_terms and not all(term in fields["searchable_text"] for term in q_terms):
+        return False
+    scope = selected_teams or ({team} if team else set())
+    if scope and team_assessment != "ANY" and _team_assessment_status(
+        fields, scope, team_aliases,
+    ) != team_assessment:
         return False
     if not _matches_lifecycle(fields, lifecycle):
         return False
@@ -443,7 +481,7 @@ def _matches_task_group_fields(
         return False
     if tag_terms and not _matches_all_terms(fields["tags_lower"], tag_terms):
         return False
-    if team and team not in fields["tags_lower"]:
+    if scope and not _selected_group_teams(fields, scope, team_aliases or {}):
         return False
     if vuln_id_terms and not _matches_all_terms(
         [fields["id_lower"], *fields["aliases_lower"]],
@@ -735,6 +773,8 @@ def _build_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "NEEDS_APPROVAL",
         }:
             lifecycle_counts[fields["lifecycle"]] += 1
+        if fields["lifecycle"] == "ASSESSED_LEGACY":
+            lifecycle_counts["ASSESSED"] += 1
         if fields["is_pending"]:
             lifecycle_counts["NEEDS_APPROVAL"] += 1
         if fields["is_approval_ready"]:
@@ -1331,6 +1371,8 @@ def query_task_groups(
     ssvc: list[str] | None = None,
     evidence: list[str] | None = None,
     team: str = "",
+    teams: list[str] | None = None,
+    team_assessment: str = "ANY",
     include_counts: bool = True,
     dynamic_context_key: str = "",
 ) -> dict[str, Any]:
@@ -1377,7 +1419,9 @@ def query_task_groups(
         sort_order=sort_order,
         now_ms=now_ms,
     )
-    cache_key += (tuple(sorted(evidence_set)), evidence_snapshot["revision"])
+    selected_teams = _normalized_lower_set([*(teams or []), *([team] if team else [])])
+    team_assessment = str(team_assessment or "ANY").upper() if selected_teams else "ANY"
+    cache_key += (tuple(sorted(evidence_set)), evidence_snapshot["revision"], team_assessment, tuple(sorted(selected_teams)))
     while True:
         cached, pending, owns_reservation = _reserve_query_cache_entry(
             index,
@@ -1446,7 +1490,8 @@ def query_task_groups(
                 or ssvc_set
                 or evidence_set
                 or tag_terms
-                or team_filter
+                or selected_teams
+                or team_assessment != "ANY"
                 or vuln_id_terms
                 or component_terms
                 or assignee_terms
@@ -1459,51 +1504,61 @@ def query_task_groups(
                 or automatic_assessment_outcome_set
                 or automatic_assessment_rescore_set
             )
+            match_options = dict(
+                team_aliases=normalized_team_aliases,
+                selected_teams=selected_teams,
+                team_assessment=team_assessment,
+                q_terms=q_terms,
+                lifecycle=lifecycle_set,
+                inconsistency_reason=inconsistency_reason_set,
+                analysis=analysis_set,
+                original_severity=original_severity_set,
+                ssvc=ssvc_set,
+                tag_terms=tag_terms,
+                team=team_filter,
+                vuln_id_terms=vuln_id_terms,
+                component_terms=component_terms,
+                assignee_terms=assignee_terms,
+                dependency=dependency_set,
+                versions=version_set,
+                cvss_mismatch=cvss_mismatch,
+                attributed_before_days=attributed_before_days,
+                attribution_mode=normalized_mode,
+                tmrescore=tmrescore_set,
+                tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                automatic_assessment=automatic_assessment_set,
+                automatic_assessment_id_set=automatic_assessment_id_set,
+                automatic_assessment_outcome=(
+                    automatic_assessment_outcome_set
+                ),
+                automatic_assessment_rescore=(
+                    automatic_assessment_rescore_set
+                ),
+                automatic_assessment_facets=(
+                    normalized_automatic_assessment_facets
+                ),
+                now_ms=now_ms,
+            )
+            candidate_indices = range(len(rows))
+            if selected_teams:
+                canonical_teams = {
+                    _lower(normalized_team_aliases.get(team, team))
+                    for team in selected_teams
+                }
+                candidate_indices = sorted({
+                    row_index
+                    for tag, indices in index.get("team_indices", {}).items()
+                    if _lower(normalized_team_aliases.get(tag, tag)) in canonical_teams
+                    for row_index in indices
+                })
             if cached is not None:
                 filtered_indices = cached["indices"]
             elif has_filter_predicates:
-                candidate_indices = (
-                    index.get("team_indices", {}).get(team_filter, ())
-                    if team_filter
-                    else range(len(rows))
-                )
                 matching_indices = [
                     row_index
                     for row_index in candidate_indices
                     if (not evidence_set or evidence_set.intersection(evidence_sources(rows[row_index]["fields"], evidence_snapshot)))
-                    and _matches_task_group_fields(
-                        rows[row_index]["fields"],
-                        q_terms=q_terms,
-                        lifecycle=lifecycle_set,
-                        inconsistency_reason=inconsistency_reason_set,
-                        analysis=analysis_set,
-                        original_severity=original_severity_set,
-                        ssvc=ssvc_set,
-                        tag_terms=tag_terms,
-                        team=team_filter,
-                        vuln_id_terms=vuln_id_terms,
-                        component_terms=component_terms,
-                        assignee_terms=assignee_terms,
-                        dependency=dependency_set,
-                        versions=version_set,
-                        cvss_mismatch=cvss_mismatch,
-                        attributed_before_days=attributed_before_days,
-                        attribution_mode=normalized_mode,
-                        tmrescore=tmrescore_set,
-                        tmrescore_proposal_id_set=tmrescore_proposal_id_set,
-                        automatic_assessment=automatic_assessment_set,
-                        automatic_assessment_id_set=automatic_assessment_id_set,
-                        automatic_assessment_outcome=(
-                            automatic_assessment_outcome_set
-                        ),
-                        automatic_assessment_rescore=(
-                            automatic_assessment_rescore_set
-                        ),
-                        automatic_assessment_facets=(
-                            normalized_automatic_assessment_facets
-                        ),
-                        now_ms=now_ms,
-                    )
+                    and _matches_task_group_fields(rows[row_index]["fields"], **match_options)
                 ]
                 matching_indices.sort(
                     key=lambda row_index: _task_group_sort_key(
@@ -1555,10 +1610,71 @@ def query_task_groups(
                         attribution_mode=normalized_mode,
                         now_ms=now_ms,
                     )
+                for target, count_rows in [
+                    (all_counts, rows),
+                    (filtered_counts, [rows[i] for i in filtered_indices]),
+                ]:
+                    coverage_counts = {"MISSING": 0, "DOCUMENTED": 0}
+                    for row in count_rows:
+                        status = _team_assessment_status(
+                            row["fields"], selected_teams, normalized_team_aliases,
+                        )
+                        if status:
+                            coverage_counts[status] += 1
+                    target["team_assessment"] = coverage_counts
                 all_counts["evidence"] = evidence_counts(rows, evidence_snapshot)
                 if filtered_counts is not all_counts:
                     filtered_counts["evidence"] = evidence_counts(filtered_rows, evidence_snapshot)
+                facet_counts = dict(filtered_counts)
+                facet_definitions = {
+                    "lifecycle": ("lifecycle", set()),
+                    "team_assessment": ("team_assessment", "ANY"),
+                    "analysis": ("analysis", set()),
+                    "inconsistency_reason": ("inconsistency_reason", set()),
+                    "original_severity": ("original_severity", set()),
+                    "ssvc": ("ssvc", set()),
+                    "dependency_relationship": ("dependency", set()),
+                    "tmrescore": ("tmrescore", set()),
+                    "automatic_assessment": ("automatic_assessment", set()),
+                    "automatic_assessment_outcome": ("automatic_assessment_outcome", set()),
+                    "automatic_assessment_rescore": ("automatic_assessment_rescore", set()),
+                    "cvss_version_mismatch": ("cvss_mismatch", False),
+                    "attribution_age": ("attributed_before_days", None),
+                    "evidence": (None, None),
+                }
+                for facet, (option, unrestricted) in facet_definitions.items():
+                    if option and match_options[option] == unrestricted:
+                        continue
+                    if facet == "evidence" and not evidence_set:
+                        continue
+                    options = {**match_options, **({option: unrestricted} if option else {})}
+                    facet_rows = [
+                        row for row in (rows[i] for i in candidate_indices)
+                        if (facet == "evidence" or not evidence_set or evidence_set.intersection(evidence_sources(row["fields"], evidence_snapshot)))
+                        and _matches_task_group_fields(row["fields"], **options)
+                    ]
+                    if facet == "team_assessment":
+                        facet_counts[facet] = {
+                            status: sum(_team_assessment_status(row["fields"], selected_teams, normalized_team_aliases) == status for row in facet_rows)
+                            for status in ("MISSING", "DOCUMENTED")
+                        }
+                    elif facet == "evidence":
+                        facet_counts[facet] = evidence_counts(facet_rows, evidence_snapshot)
+                    else:
+                        values = _add_dynamic_counts(
+                            _build_counts(facet_rows), facet_rows,
+                            tmrescore_proposal_id_set=tmrescore_proposal_id_set,
+                            automatic_assessment_id_set=automatic_assessment_id_set,
+                            automatic_assessment_facets=normalized_automatic_assessment_facets,
+                            team_aliases=normalized_team_aliases,
+                            team_groups=normalized_team_groups,
+                            team_group_structure=normalized_team_group_structure,
+                            attributed_before_days=attributed_before_days,
+                            attribution_mode=normalized_mode, now_ms=now_ms,
+                        )
+                        facet_counts[facet] = values[facet]
                 counts = {
+                    "facets": facet_counts,
                     "all": all_counts,
                     "filtered": filtered_counts,
                 }

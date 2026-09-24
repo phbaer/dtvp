@@ -54,6 +54,19 @@ describe('team mapping selectors', () => {
         expect(getPrimaryTeamForComponent('core', mapping, '@angular', false)).toBe('NativeTeam')
     })
 
+    it('matches scoped package keys against BOM group and name', () => {
+        const mapping = {
+            '@gehc/nest-back-pack': 'TeamB',
+            'nest-back-pack': 'OtherTeam',
+        }
+
+        expect(parseTeamMappingKey('@gehc/nest-back-pack')).toMatchObject({
+            group: '@gehc', name: 'nest-back-pack',
+        })
+        expect(getPrimaryTeamForComponent('nest-back-pack', mapping, '@gehc', true)).toBe('TeamB')
+        expect(getPrimaryTeamForComponent('nest-back-pack', mapping, null, true)).toBe('OtherTeam')
+    })
+
     it('requires known empty group for nogroup selectors', () => {
         const mapping = { 'nogroup::core': 'NoGroupTeam', '*': 'Fallback' }
 

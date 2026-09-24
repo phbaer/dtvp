@@ -8,7 +8,12 @@ from .assessment_restore_services import (
     build_missing_rescoring_vector_restore_candidate,
     refresh_group_restore_metadata,
 )
-from .team_mapping import compile_team_mapping, get_team_mapping_tags
+from .team_mapping import (
+    ComponentIdentity,
+    compile_team_mapping,
+    find_team_mapping_match,
+    get_team_mapping_tags,
+)
 from .severity_services import SEVERITIES, original_severity
 from .ssvc_services import (
     DETAILS as SSVC_DETAILS, mask_details as mask_ssvc_details,
@@ -320,6 +325,8 @@ class BOMAnalysisCache:
         self.purl_to_ref_candidates = {}
         self.direct_tags_cache = {}  # component identity -> tuple(tags)
         self.tags_cache = {}  # ref -> tuple(tags)
+        self.owner_refs_cache = {}  # ref -> tuple(nearest mapped BOM refs)
+        self.owner_mapping_keys_cache = {}  # target ref -> tuple(mapping selectors)
         self.path_cache = {}  # (ref, max_paths) -> (tuple(paths), truncated)
         self.analysis_cache = {}  # (component_uuid, component_name, purl) -> (tags, paths)
         self.team_mapped_ref_cache = {}  # ref -> bool
@@ -517,10 +524,10 @@ class BOMAnalysisCache:
         if direct_tags:
             unique_tags = list(dict.fromkeys(tag for tag in direct_tags if tag))
             self.tags_cache[ref] = tuple(unique_tags)
+            self.owner_refs_cache[ref] = (ref,)
             return unique_tags
 
-        tags: List[str] = []
-        tag_seen: Set[str] = set()
+        mapped_parents: Dict[str, List[str]] = {}
         seen_refs: Set[str] = {ref}
 
         def walk(current_ref: str):
@@ -541,16 +548,74 @@ class BOMAnalysisCache:
                     )
                 )
                 if parent_tags:
-                    for tag in parent_tags:
-                        if tag and tag not in tag_seen:
-                            tags.append(tag)
-                            tag_seen.add(tag)
+                    mapped_parents[parent_ref] = parent_tags
                 else:
                     walk(parent_ref)
 
         walk(ref)
+        # A mapped component owns its subtree even when another dependency path
+        # bypasses it and reaches one of its mapped ancestors directly.
+        shadowed_refs: Set[str] = set()
+        mapped_refs_to_check = mapped_parents if len(mapped_parents) > 1 else ()
+        for mapped_ref in mapped_refs_to_check:
+            to_visit = self._get_parent_refs(mapped_ref)
+            visited = {mapped_ref}
+            while to_visit:
+                parent_ref = to_visit.pop()
+                if parent_ref in visited:
+                    continue
+                visited.add(parent_ref)
+                if parent_ref in mapped_parents:
+                    shadowed_refs.add(parent_ref)
+                to_visit.extend(self._get_parent_refs(parent_ref))
+
+        tags: List[str] = []
+        tag_seen: Set[str] = set()
+        for mapped_ref, parent_tags in mapped_parents.items():
+            if mapped_ref in shadowed_refs:
+                continue
+            for tag in parent_tags:
+                if tag and tag not in tag_seen:
+                    tags.append(tag)
+                    tag_seen.add(tag)
         self.tags_cache[ref] = tuple(tags)
+        self.owner_refs_cache[ref] = tuple(
+            mapped_ref for mapped_ref in mapped_parents if mapped_ref not in shadowed_refs
+        )
         return tags
+
+    def get_owner_mapping_keys(
+        self,
+        component_uuid: str,
+        component_name: str,
+        component_purl: Optional[str] = None,
+    ) -> List[str]:
+        """Mapping selectors responsible for this finding, using the same BOM walk as tags."""
+        target_ref = self.get_target_ref(component_uuid, component_name, component_purl)
+        if not target_ref:
+            match = find_team_mapping_match(
+                self.mapping,
+                ComponentIdentity(name=component_name or "", purl=component_purl),
+            )
+            return [match.key] if match else []
+        if target_ref in self.owner_mapping_keys_cache:
+            return list(self.owner_mapping_keys_cache[target_ref])
+        self._get_tags_for_ref(target_ref)
+        keys: List[str] = []
+        for owner_ref in self.owner_refs_cache.get(target_ref, ()):
+            match = find_team_mapping_match(
+                self.mapping,
+                ComponentIdentity(
+                    name=self._get_component_name(owner_ref),
+                    group=self._get_component_group(owner_ref),
+                    purl=self._get_component_purl(owner_ref),
+                    group_known=True,
+                ),
+            )
+            if match and match.key not in keys:
+                keys.append(match.key)
+        self.owner_mapping_keys_cache[target_ref] = tuple(keys)
+        return keys
 
     def _get_dependency_paths_for_ref(
         self,
@@ -993,6 +1058,8 @@ def group_vulnerabilities(
             if details:
                 _, detail_blocks = _parse_assessment_blocks(details)
                 for blk in detail_blocks:
+                    if blk.get("historical"):
+                        continue
                     for assignee in blk.get("assigned", []):
                         if (
                             assignee
@@ -1023,6 +1090,10 @@ def group_vulnerabilities(
                 or analysis.get("suppressed", False),
                 "is_direct_dependency": None,
                 "tags": tags,
+                "owner_mapping_keys": (
+                    processor.get_owner_mapping_keys(comp_uuid, comp_name, comp_purl)
+                    if processor and hasattr(processor, "get_owner_mapping_keys") else []
+                ),
             }
             restore_candidate = build_missing_rescoring_vector_restore_candidate(
                 {
@@ -1295,6 +1366,8 @@ def _parse_assessment_blocks(details: str) -> Tuple[str, List[Dict[str, Any]]]:
             blocks.append(
                 {
                     "team": "General" if t_name.casefold() == "general" else t_name,
+                    "historical": parsed_tags.get("Historical", "").casefold() == "yes",
+                    "copied_from": parsed_tags.get("Copied From"),
                     "state": parsed_tags.get("State", "NOT_SET"),
                     "user": parsed_tags.get("Assessed By", "unknown"),
                     "reviewer": parsed_tags.get("Reviewed By"),
@@ -1455,6 +1528,7 @@ def process_assessment_details(
     if target_block:
         target_block.update(
             {
+                "historical": False,
                 "state": state,
                 "user": final_user,
                 "reviewer": final_reviewer,
@@ -1468,6 +1542,7 @@ def process_assessment_details(
         blocks_list.append(
             {
                 "team": target_team,
+                "historical": False,
                 "state": state,
                 "user": final_user,
                 "reviewer": final_reviewer,
@@ -1509,6 +1584,10 @@ def process_assessment_details(
             h_parts.append(f"[SSVC: {b['ssvc']}]")
         if b.get("assigned"):
             h_parts.append(f"[Assigned: {', '.join(b['assigned'])}]")
+        if b.get("historical"):
+            h_parts.append("[Historical: yes]")
+        if b.get("copied_from"):
+            h_parts.append(f"[Copied From: {b['copied_from']}]")
 
         header = "--- " + " ".join(h_parts) + " ---"
         body = b.get('details') or ''
@@ -1553,7 +1632,7 @@ def calculate_aggregated_state(details: str) -> str:
     if general_block and general_block.get("state") != "NOT_SET":
         return general_block["state"]
 
-    states = [b["state"] for b in blocks_list if b["state"] != "NOT_SET"]
+    states = [b["state"] for b in blocks_list if not b.get("historical") and b["state"] != "NOT_SET"]
     if not states:
         return "NOT_SET"
 

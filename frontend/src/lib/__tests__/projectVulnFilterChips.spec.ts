@@ -13,10 +13,8 @@ import {
 const lifecycleOptions = [
     { value: 'OPEN', label: 'Open' },
     { value: 'ASSESSED', label: 'Assessed' },
-    { value: 'ASSESSED_LEGACY', label: 'Assessed (Legacy)' },
     { value: 'INCOMPLETE', label: 'Incomplete' },
-    { value: 'INCONSISTENT', label: 'Inconsistent' },
-    { value: 'NEEDS_APPROVAL', label: 'Needs Approval' },
+    { value: 'INCONSISTENT', label: 'Conflicting' },
     { value: 'READY_FOR_APPROVAL', label: 'Ready for Approval' },
 ]
 
@@ -164,7 +162,7 @@ describe('projectVulnFilterChips', () => {
     })
 
     it('matches option labels and unordered string sets', () => {
-        expect(optionLabel('NEEDS_APPROVAL', lifecycleOptions)).toBe('Needs Approval')
+        expect(optionLabel('INCONSISTENT', lifecycleOptions)).toBe('Conflicting')
         expect(optionLabel('READY_FOR_APPROVAL', lifecycleOptions)).toBe('Ready for Approval')
         expect(optionLabel('UNKNOWN_VALUE', lifecycleOptions)).toBe('UNKNOWN VALUE')
         expect(sameStringSet(['OPEN', 'ASSESSED'], ['ASSESSED', 'OPEN'])).toBe(true)

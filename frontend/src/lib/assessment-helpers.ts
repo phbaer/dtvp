@@ -6,6 +6,8 @@ export interface AssessmentBlock {
     ssvc?: string;
     ssvcDetails?: string;
     team: string; // 'General' or specific team name
+    historical?: boolean;
+    copiedFrom?: string;
     state: string;
     user: string;
     details: string;
@@ -37,6 +39,7 @@ export interface AssessmentReviewMetadata {
     evidenceReviewed?: boolean;
     versionCoverageChecked?: boolean;
     ticket?: string;
+    copiedFrom?: string;
 }
 
 const formatAssessmentHeaderValue = (value: string): string =>
@@ -48,6 +51,16 @@ const cloneAssessmentBlocks = (blocks: readonly AssessmentBlock[]): AssessmentBl
 
 export const assessmentTeamKey = (team: string | undefined | null): string =>
     String(team || '').trim().toLocaleLowerCase();
+
+export const markAssessmentBlocksHistorical = (fullText: string, teams: Iterable<string>): string => {
+    const sourceKeys = new Set([...teams].map(assessmentTeamKey));
+    if (!sourceKeys.size) return fullText;
+    return fullText.replace(/---\s*\[Team:\s*([^\]]+)\][^\r\n]*?---/g, (header, team: string) => {
+        if (!sourceKeys.has(assessmentTeamKey(team)) || /\[Historical:\s*yes\]/i.test(header)) return header;
+        return header.replace(/\s*---$/, ' [Historical: yes] ---');
+    });
+};
+
 
 export const deduplicateAssessmentBlocks = (
     blocks: readonly AssessmentBlock[],
@@ -139,7 +152,7 @@ const buildGroupAssessmentSummary = (group: GroupedVuln): GroupAssessmentSummary
     for (const instance of allInstances) {
         const details = getInstanceAssessmentDetails(instance);
         if (!details) continue;
-        blocks.push(...parseAssessmentBlocks(details));
+        blocks.push(...parseAssessmentBlocks(details).filter(block => !block.historical));
     }
 
     const assessedTeams = new Set<string>();
@@ -280,6 +293,8 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         // Extract [Assigned: ...] from the header (captured in the .*? wildcard)
         const headerText = match[0];
         const ssvc = headerText.match(/\[SSVC:\s*([^\]]+)\]/)?.[1];
+        const historical = /\[Historical:\s*yes\]/i.test(headerText);
+        const copiedFrom = headerText.match(/\[Copied From:\s*([^\]]+)\]/)?.[1]?.trim();
         const assignedMatch = headerText.match(/\[Assigned:\s*([^\]]+)\]/);
         const assigned: string[] = assignedMatch
             ? assignedMatch[1].split(',').map(u => u.trim()).filter(u => u.length > 0)
@@ -306,7 +321,7 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
         // Cleanup all metadata from content to prevent leakage
         content = content
             .replace(/\[(Rescored|Rescored Vector|Assessed By|Reviewed By|Team|State|Justification|Date|Assigned):\s*[^\]]*\]/g, '')
-            .replace(/\[(Evidence Reviewed|Version Coverage|Ticket):\s*[^\]]*\]/g, '')
+            .replace(/\[(Evidence Reviewed|Version Coverage|Ticket|Historical|Copied From):\s*[^\]]*\]/g, '')
             .replace(/\[Status: Pending Review\]/g, '')
             .replace(/\[Comment\]/g, '')
             .replace(/\bAssessed\s*--\s*\S+/g, '')
@@ -321,6 +336,8 @@ export function parseAssessmentBlocks(fullText: string): AssessmentBlock[] {
 
         blocks.push({
             team,
+            historical,
+            copiedFrom,
             ssvc,
             ssvcDetails,
             state,
@@ -360,7 +377,9 @@ export function constructAssessmentDetails(
         const versionCoverageStr = b.versionCoverageChecked ? ' [Version Coverage: yes]' : '';
         const ticketStr = b.ticket?.trim() ? ` [Ticket: ${formatAssessmentHeaderValue(b.ticket)}]` : '';
         const ssvcStr = b.ssvc ? ` [SSVC: ${b.ssvc}]` : '';
-        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr}${ssvcStr} ---`;
+        const historicalStr = b.historical ? ' [Historical: yes]' : '';
+        const copiedFromStr = b.copiedFrom ? ` [Copied From: ${formatAssessmentHeaderValue(b.copiedFrom)}]` : '';
+        const header = `--- [Team: ${b.team}] [State: ${b.state}] [Assessed By: ${b.user}]${dateStr} [Justification: ${b.justification || 'NOT_SET'}]${assignedStr}${evidenceStr}${versionCoverageStr}${ticketStr}${ssvcStr}${historicalStr}${copiedFromStr} ---`;
         parts.push(header);
         if (b.details) parts.push(b.details);
         if (b.ssvcDetails) parts.push(b.ssvcDetails);
@@ -375,7 +394,7 @@ export function constructAssessmentDetails(
         aggState = generalBlock.state;
     } else {
         // Fallback: Worst of all team states
-        const allStates = uniqueBlocks.map(b => b.state).filter(s => s !== 'NOT_SET');
+        const allStates = uniqueBlocks.filter(b => !b.historical).map(b => b.state).filter(s => s !== 'NOT_SET');
         if (allStates.length > 0) {
             allStates.sort((a, b) => (STATE_PRIORITY[a] ?? 10) - (STATE_PRIORITY[b] ?? 10));
             aggState = allStates[0] || 'NOT_SET';
@@ -544,6 +563,7 @@ export function mergeTeamAssessment(
     const finalEvidenceReviewed = reviewMetadata?.evidenceReviewed ?? existingBlock?.evidenceReviewed ?? false;
     const finalVersionCoverageChecked = reviewMetadata?.versionCoverageChecked ?? existingBlock?.versionCoverageChecked ?? false;
     const finalTicket = reviewMetadata?.ticket !== undefined ? reviewMetadata.ticket.trim() : (existingBlock?.ticket || '');
+    const finalCopiedFrom = reviewMetadata?.copiedFrom ?? existingBlock?.copiedFrom;
     const hasReviewMetadata = finalEvidenceReviewed || finalVersionCoverageChecked || Boolean(finalTicket) || Boolean(existingBlock?.ssvc);
     const isCleared = newState === 'NOT_SET' && !newDetails.trim() && (!newJustification || newJustification === 'NOT_SET') && !hasAssignees && !hasReviewMetadata;
 
@@ -561,6 +581,8 @@ export function mergeTeamAssessment(
             ssvc: existingBlock?.ssvc,
             ssvcDetails: existingBlock?.ssvcDetails,
             team: team,
+            historical: false,
+            copiedFrom: finalCopiedFrom,
             state: newState,
             user: user,
             details: newDetails.trim(),
@@ -748,7 +770,7 @@ const getGroupInconsistencyReasonsFromSummary = (
         const instanceBlockSignatures = allInstances
             .map(instance => {
                 const significantBlocks = parseAssessmentBlocks(getInstanceAssessmentDetails(instance))
-                    .filter(block => block.state !== 'NOT_SET' && block.team !== 'General');
+                    .filter(block => !block.historical && block.state !== 'NOT_SET' && block.team !== 'General');
                 if (significantBlocks.length === 0) return '';
                 return Array.from(new Set(significantBlocks.map(normalizeBlockSignature)))
                     .sort((left, right) => left.localeCompare(right))
@@ -757,7 +779,7 @@ const getGroupInconsistencyReasonsFromSummary = (
             .filter(Boolean);
         const hasInconsistentInstanceBlocks = allInstances.some(instance => {
             const significantBlocks = parseAssessmentBlocks(getInstanceAssessmentDetails(instance))
-                .filter(block => block.state !== 'NOT_SET' && block.team !== 'General');
+                .filter(block => !block.historical && block.state !== 'NOT_SET' && block.team !== 'General');
             return significantBlocks.length > 1
                 && new Set(significantBlocks.map(normalizeBlockSignature)).size > 1;
         });
@@ -884,18 +906,8 @@ const getGroupLifecycleFromSummary = (
         return 'INCONSISTENT';
     }
 
-    // Fallback: if we have components but no global, it's either INCONSISTENT, INCOMPLETE,
-    // or if we specifically lack global and a team, it's OPEN.
-    if (allInstances.length > 0 && !hasGlobal) {
-        // If we reached here, it means missingTeams was 0 and versionStates was consistent.
-        // But if there's no global, we usually want it to be ASSESSABLE.
-        // The user definition says OPEN is missing a team.
-        // If all teams are present but no global, it's basically "Ready for Global".
-        // Let's call it INCOMPLETE (as it lacks the global version of the truth).
-        return hasAnyAssessment ? 'INCOMPLETE' : 'OPEN';
-    }
-
-    return 'OPEN';
+    // Complete, consistent team coverage does not require a General block.
+    return hasAnyAssessment ? 'ASSESSED' : 'OPEN';
 }
 
 export function getGroupLifecycle(group: GroupedVuln, requiredTeamsOrTags: Tags | undefined, teamMapping?: Record<string, string | string[]>): string {
@@ -975,10 +987,8 @@ export function matchesFilters(
     const isPending = summary.isPendingReview;
 
     // 1. Lifecycle Match
-    const openPendingWithOpenTeam = isPending && hasOpenTeamAssessmentFromSummary(summary, tags, teamMapping);
-
-    const lifecycleMatch = (lifecycleFilters.includes('OPEN') && (state === 'OPEN' || openPendingWithOpenTeam)) ||
-                           (lifecycleFilters.includes('ASSESSED') && state === 'ASSESSED') ||
+    const lifecycleMatch = (lifecycleFilters.includes('OPEN') && state === 'OPEN') ||
+                           (lifecycleFilters.includes('ASSESSED') && ['ASSESSED', 'ASSESSED_LEGACY'].includes(state)) ||
                            (lifecycleFilters.includes('ASSESSED_LEGACY') && state === 'ASSESSED_LEGACY') ||
                            (lifecycleFilters.includes('INCOMPLETE') && state === 'INCOMPLETE') ||
                            (lifecycleFilters.includes('INCONSISTENT') && state === 'INCONSISTENT') ||

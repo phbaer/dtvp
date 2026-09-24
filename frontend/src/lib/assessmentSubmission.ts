@@ -1,4 +1,4 @@
-import { assessmentTeamKey, constructAssessmentDetails, mergeTeamAssessment, parseAssessmentBlocks, sanitizeAssessmentDetails, type AssessmentBlock } from './assessment-helpers'
+import { assessmentTeamKey, constructAssessmentDetails, markAssessmentBlocksHistorical, mergeTeamAssessment, parseAssessmentBlocks, sanitizeAssessmentDetails, type AssessmentBlock } from './assessment-helpers'
 import { cleanStructuredAssessmentDetails } from './assessmentFormState'
 import type { AssessmentPayload, Instance } from '../types'
 
@@ -29,6 +29,7 @@ interface PrepareAssessmentSubmissionInput {
     versionCoverageChecked: boolean
     ticket: string
     teamDrafts: Map<string, AssessmentDraft>
+    takeoverSources?: Map<string, string>
     isReviewer: boolean
     pendingVector: string
     pendingScore: number | null
@@ -259,6 +260,7 @@ export const prepareAssessmentSubmission = (
                     evidenceReviewed: draft.evidenceReviewed,
                     versionCoverageChecked: draft.versionCoverageChecked,
                     ticket: draft.ticket,
+                    copiedFrom: input.takeoverSources?.get(teamName),
                 },
             )
             mergedText = result.text
@@ -268,6 +270,7 @@ export const prepareAssessmentSubmission = (
         aggregatedState = mergedState || 'NOT_SET'
     }
 
+    reviewText = markAssessmentBlocksHistorical(reviewText, input.takeoverSources?.values() || [])
     const sanitized = sanitizeAssessmentDetails(reviewText)
     const finalText = sanitized.text
     const finalState = sanitized.aggregatedState || aggregatedState

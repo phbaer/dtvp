@@ -137,6 +137,12 @@ def parse_team_mapping_key(key: Any) -> TeamMappingSelector:
         if group_part.strip():
             group = group_part.strip()
             name = name_part.strip()
+    elif not require_no_group and "/" in remaining:
+        # Scoped package names commonly use group/name (for example @scope/pkg).
+        group_part, name_part = remaining.rsplit("/", 1)
+        if group_part.strip() and name_part.strip():
+            group = group_part.strip()
+            name = name_part.strip()
 
     return TeamMappingSelector(
         raw_key=raw_key,

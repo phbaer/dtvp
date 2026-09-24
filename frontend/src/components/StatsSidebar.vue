@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, useId } from 'vue'
 import { LayoutList, Copy } from '@lucide/vue'
 import CustomSelect from './CustomSelect.vue'
+import TeamFilter from './TeamFilter.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
 import { ORIGINAL_SEVERITIES, SSVC_STATUSES, ssvcLabel } from '../lib/ssvc'
 import { EVIDENCE_OPTIONS, evidenceLabel } from '../lib/evidence'
@@ -44,7 +45,9 @@ export interface FilterState {
     automaticAssessmentOutcomeFilter: AutomaticAssessmentOutcome[]
     automaticAssessmentRescoreFilter: AutomaticAssessmentRescoreState[]
     idFilter: string
+    teamFilters?: string[]
     tagFilter: string
+    teamAssessmentFilter?: string
     componentFilter: string
     versionFilterInput: string
     lifecycleFilters: string[]
@@ -63,6 +66,7 @@ const props = defineProps<{
     inconsistencyReasonOptions: ReadonlyArray<Omit<FilterOption, 'color'>>
     analysisOptions: FilterOption[]
     copiedUrl: boolean
+    facetCounts?: TaskVulnGroupListCounts
     resultCounts: TaskVulnGroupListCounts
     countsUpdating: boolean
     teamOptions: string[]
@@ -95,6 +99,7 @@ function togglePriorityFilter(key: 'originalSeverityFilters' | 'ssvcFilters' | '
     updateFilter(key, selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value])
 }
 
+const assessmentHelpId = useId()
 const activeTab = ref<'scope-search' | 'statistics'>('scope-search')
 const copiedStats = ref(false)
 
@@ -142,19 +147,21 @@ const toggleAutomaticAssessmentRescoreFilter = (value: AutomaticAssessmentRescor
     updateFilter('automaticAssessmentRescoreFilter', current)
 }
 
+const statusViews = computed(() => [
+    { key: 'analyst-work', label: 'Analyst work', detail: 'Open + Incomplete', statuses: ['OPEN', 'INCOMPLETE'] },
+    { key: 'all', label: 'All statuses', detail: 'Every status', statuses: props.lifecycleOptions.map(option => option.value) },
+    { key: 'approval', label: 'Approval queue', detail: 'Ready for approval', statuses: ['READY_FOR_APPROVAL'] },
+])
+const activeStatusView = computed(() => statusViews.value.find(view =>
+    view.statuses.length === props.filters.lifecycleFilters.length
+    && view.statuses.every(status => props.filters.lifecycleFilters.includes(status))
+)?.key)
+
 const toggleLifecycleFilter = (val: string) => {
     const current = [...props.filters.lifecycleFilters]
     const idx = current.indexOf(val)
     if (idx >= 0) current.splice(idx, 1)
     else current.push(val)
-    if (val === 'INCONSISTENT' && idx >= 0) {
-        emit('update:filters', {
-            ...props.filters,
-            lifecycleFilters: current,
-            inconsistencyReasonFilters: [],
-        })
-        return
-    }
     updateFilter('lifecycleFilters', current)
 }
 
@@ -163,14 +170,7 @@ const toggleInconsistencyReasonFilter = (value: InconsistencyReason) => {
     const idx = current.indexOf(value)
     if (idx >= 0) current.splice(idx, 1)
     else current.push(value)
-    const lifecycleFilters = current.length > 0
-        ? Array.from(new Set([...props.filters.lifecycleFilters, 'INCONSISTENT']))
-        : props.filters.lifecycleFilters
-    emit('update:filters', {
-        ...props.filters,
-        lifecycleFilters,
-        inconsistencyReasonFilters: current,
-    })
+    updateFilter('inconsistencyReasonFilters', current)
 }
 
 const toggleAnalysisFilter = (val: string) => {
@@ -182,13 +182,6 @@ const toggleAnalysisFilter = (val: string) => {
 }
 
 const countLabel = (count: number | undefined) => props.countsUpdating ? '…' : String(count || 0)
-
-const teamFilterCountEntries = computed<TeamEntry[]>(() => props.teamOptions
-    .map(team => ({
-        team,
-        open: props.resultCounts.team_tags?.[team]?.open || 0,
-        assessed: props.resultCounts.team_tags?.[team]?.assessed || 0,
-    })))
 
 const teamAliasIndex = computed(() => {
     const canonicalByName = new Map<string, string>()
@@ -356,25 +349,6 @@ const teamGroupTreeEntries = computed<TeamGroupTreeEntry[]>(() => {
     return entries
 })
 
-const teamFilterOptions = computed(() => [
-    { value: '', label: 'All teams' },
-    ...teamFilterCountEntries.value
-        .filter(entry => entry.team.trim().length > 0)
-        .slice()
-        .sort((left, right) => left.team.localeCompare(
-            right.team,
-            undefined,
-            { numeric: true, sensitivity: 'base' },
-        ))
-        .map(entry => ({
-            value: entry.team,
-            label: entry.team,
-            suffix: props.countsUpdating
-                ? 'Updating…'
-                : `${entry.open + entry.assessed} vulnerabilities · ${entry.open} open · ${entry.assessed} assessed`,
-        })),
-])
-
 const attributionRangeCount = computed(() =>
     props.filters.attributionAgeDays == null
         ? props.resultCounts.total
@@ -513,17 +487,82 @@ const handleCopy = () => {
                             <div class="space-y-3">
                                 <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Team</label>
-                                    <CustomSelect
-                                        data-testid="team-filter-select"
-                                        :modelValue="props.filters.tagFilter"
-                                        :options="teamFilterOptions"
-                                        placeholder="All teams"
-                                        searchable
-                                        search-placeholder="Search teams..."
-                                        @update:modelValue="(value) => updateFilter('tagFilter', value)"
-                                    />
+                                    <TeamFilter :modelValue="filters.teamFilters || (filters.tagFilter ? [filters.tagFilter] : [])"
+                                        :options="teamOptions" :aliases="teamAliases"
+                                        @update:modelValue="value => updateFilter('teamFilters', value)" />
                                 </div>
 
+
+                                <div class="space-y-2">
+                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">
+                                        Assessment for selected teams
+                                        <select aria-label="Assessment for selected teams" data-testid="team-assessment-filter"
+                                            :value="filters.teamAssessmentFilter || 'ANY'"
+                                            :disabled="!(filters.teamFilters?.length || filters.tagFilter)"
+                                            :aria-describedby="assessmentHelpId"
+                                            @change="updateFilter('teamAssessmentFilter', ($event.target as HTMLSelectElement).value)"
+                                            class="mt-1 block w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-200 normal-case tracking-normal">
+                                            <option value="ANY">Any</option>
+                                            <option value="MISSING">Not recorded{{ filters.teamFilters?.length || filters.tagFilter ? ` (${countLabel((props.facetCounts || props.resultCounts).team_assessment?.MISSING)})` : '' }}</option>
+                                            <option value="DOCUMENTED">Recorded{{ filters.teamFilters?.length || filters.tagFilter ? ` (${countLabel((props.facetCounts || props.resultCounts).team_assessment?.DOCUMENTED)})` : '' }}</option>
+                                        </select>
+                                    </label>
+                                    <p :id="assessmentHelpId" class="text-xs text-gray-400">{{ filters.teamFilters?.length || filters.tagFilter ? 'Recorded includes pending approval. Not recorded means at least one selected responsible team has no assessment.' : 'Select a team first.' }}</p>
+                                </div>
+
+                                <div class="space-y-2">
+                                    <fieldset class="space-y-1.5">
+                                        <legend class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Workflow view</legend>
+                                        <div class="grid gap-1.5">
+                                            <button
+                                                v-for="view in statusViews"
+                                                :key="view.key"
+                                                type="button"
+                                                :data-testid="`workflow-view-${view.key}`"
+                                                :aria-pressed="activeStatusView === view.key"
+                                                @click="updateFilter('lifecycleFilters', [...view.statuses])"
+                                                :class="[
+                                                    'flex min-h-10 items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400',
+                                                    activeStatusView === view.key
+                                                        ? 'border-blue-400/50 bg-blue-500/15 text-white'
+                                                        : 'border-white/10 bg-white/3 text-gray-300 hover:border-white/25 hover:bg-white/5'
+                                                ]"
+                                            >
+                                                <span class="font-semibold">{{ view.label }}</span>
+                                                <span class="text-[10px] text-gray-400">{{ view.detail }}</span>
+                                            </button>
+                                        </div>
+                                    </fieldset>
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Overall status</span>
+                                        <span v-if="!activeStatusView" class="text-[10px] text-blue-300">Custom selection</span>
+                                    </div>
+                                    <div class="flex flex-wrap gap-1.5 items-center">
+                                        <button
+                                            v-for="opt in props.lifecycleOptions"
+                                            :key="opt.value"
+                                            @click="toggleLifecycleFilter(opt.value)"
+                                            :aria-pressed="props.filters.lifecycleFilters.includes(opt.value)"
+                                            :title="opt.description"
+                                            :class="[
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
+                                                props.filters.lifecycleFilters.includes(opt.value)
+                                                    ? `${opt.color} text-white border-transparent shadow-lg shadow-blue-900/40`
+                                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
+                                            ]"
+                                        >
+                                            {{ opt.label }}
+                                            <span
+                                                class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
+                                                :class="props.filters.lifecycleFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
+                                            >
+                                                {{ countLabel(opt.value === 'INCOMPLETE' ? ((props.facetCounts || props.resultCounts).lifecycle.INCOMPLETE || 0) + ((props.facetCounts || props.resultCounts).lifecycle.INCONSISTENT || 0) : (props.facetCounts || props.resultCounts).lifecycle[opt.value]) }}
+                                            </span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <details class="space-y-3"><summary class="cursor-pointer text-sm text-gray-200">More filters</summary>
                                 <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Attribution Age</label>
                                     <AttributionAgeFilter
@@ -536,41 +575,16 @@ const handleCopy = () => {
                                 </div>
 
                                 <div class="space-y-0.5">
-                                    <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Lifecycle Status</label>
-                                    <div class="flex flex-wrap gap-1.5 items-center">
-                                        <button
-                                            v-for="opt in props.lifecycleOptions"
-                                            :key="opt.value"
-                                            @click="toggleLifecycleFilter(opt.value)"
-                                            :title="opt.description"
-                                            :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
-                                                props.filters.lifecycleFilters.includes(opt.value)
-                                                    ? `${opt.color} text-white border-transparent shadow-lg shadow-blue-900/40`
-                                                    : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
-                                            ]"
-                                        >
-                                            {{ opt.label }}
-                                            <span
-                                                class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
-                                                :class="props.filters.lifecycleFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
-                                            >
-                                                {{ countLabel(props.resultCounts.lifecycle[opt.value]) }}
-                                            </span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="space-y-0.5">
                                     <label class="text-[10px] font-medium text-gray-500 uppercase tracking-widest">Inconsistency Reason</label>
                                     <div class="flex flex-wrap gap-1.5 items-center">
                                         <button
                                             v-for="opt in props.inconsistencyReasonOptions"
                                             :key="opt.value"
                                             @click="toggleInconsistencyReasonFilter(opt.value as InconsistencyReason)"
+                                            :aria-pressed="(props.filters.inconsistencyReasonFilters || []).includes(opt.value as InconsistencyReason)"
                                             :title="opt.description"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 (props.filters.inconsistencyReasonFilters || []).includes(opt.value as InconsistencyReason)
                                                     ? 'bg-indigo-500/20 text-indigo-200 border-indigo-400/30'
                                                     : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
@@ -578,7 +592,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20">
-                                                {{ countLabel(props.resultCounts.inconsistency_reason?.[opt.value as InconsistencyReason]) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).inconsistency_reason?.[opt.value as InconsistencyReason]) }}
                                             </span>
                                         </button>
                                     </div>
@@ -591,8 +605,9 @@ const handleCopy = () => {
                                             v-for="opt in props.dependencyOptions"
                                             :key="opt.value"
                                             @click="toggleDependencyFilter(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')"
+                                            :aria-pressed="(props.filters.dependencyFilter || []).includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 props.filters.dependencyFilter.includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN')
                                                     ? opt.value === 'DIRECT' ? 'bg-red-600/15 text-red-300 border-red-500/20' : opt.value === 'TRANSITIVE' ? 'bg-purple-600/10 text-purple-300 border-purple-600/20' : 'bg-slate-700/20 text-slate-300 border-slate-600/20'
                                                     : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
@@ -600,7 +615,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.dependencyFilter.includes(opt.value as 'DIRECT' | 'TRANSITIVE' | 'UNKNOWN') ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel(props.resultCounts.dependency_relationship[opt.value === 'DIRECT' ? 'direct' : opt.value === 'TRANSITIVE' ? 'transitive' : 'unknown']) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).dependency_relationship[opt.value === 'DIRECT' ? 'direct' : opt.value === 'TRANSITIVE' ? 'transitive' : 'unknown']) }}
                                             </span>
                                         </button>
                                     </div>
@@ -613,8 +628,9 @@ const handleCopy = () => {
                                             v-for="opt in props.tmrescoreOptions"
                                             :key="opt.value"
                                             @click="toggleTmrescoreFilter(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')"
+                                            :aria-pressed="(props.filters.tmrescoreFilter || []).includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 props.filters.tmrescoreFilter.includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL')
                                                     ? opt.value === 'WITH_PROPOSAL' ? 'bg-blue-500 text-white border-blue-500' : 'bg-amber-500 text-white border-amber-500'
                                                     : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
@@ -622,7 +638,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.tmrescoreFilter.includes(opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL') ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel(props.resultCounts.tmrescore?.[opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).tmrescore?.[opt.value as 'WITH_PROPOSAL' | 'WITHOUT_PROPOSAL']) }}
                                             </span>
                                         </button>
                                     </div>
@@ -635,8 +651,9 @@ const handleCopy = () => {
                                             v-for="opt in props.automaticAssessmentOptions"
                                             :key="opt.value"
                                             @click="toggleAutomaticAssessmentFilter(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')"
+                                            :aria-pressed="(props.filters.automaticAssessmentFilter || []).includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT')
                                                     ? opt.value === 'WITH_AUTOMATIC_ASSESSMENT' ? 'bg-cyan-500 text-white border-cyan-500' : 'bg-slate-600/60 text-white border-slate-500'
                                                     : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
@@ -644,7 +661,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentFilter.includes(opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT') ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel(props.resultCounts.automatic_assessment?.[opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT']) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).automatic_assessment?.[opt.value as 'WITH_AUTOMATIC_ASSESSMENT' | 'WITHOUT_AUTOMATIC_ASSESSMENT']) }}
                                             </span>
                                         </button>
                                     </div>
@@ -657,8 +674,9 @@ const handleCopy = () => {
                                             v-for="opt in props.automaticAssessmentOutcomeOptions"
                                             :key="opt.value"
                                             @click="toggleAutomaticAssessmentOutcomeFilter(opt.value as AutomaticAssessmentOutcome)"
+                                            :aria-pressed="(props.filters.automaticAssessmentOutcomeFilter || []).includes(opt.value as AutomaticAssessmentOutcome)"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 props.filters.automaticAssessmentOutcomeFilter.includes(opt.value as AutomaticAssessmentOutcome)
                                                     ? opt.value === 'AFFECTED' ? 'bg-red-600/80 text-white border-red-500'
                                                         : opt.value === 'PROBABLY_AFFECTED' ? 'bg-orange-500/80 text-white border-orange-400'
@@ -669,7 +687,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentOutcomeFilter.includes(opt.value as AutomaticAssessmentOutcome) ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel(props.resultCounts.automatic_assessment_outcome?.[opt.value as AutomaticAssessmentOutcome]) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).automatic_assessment_outcome?.[opt.value as AutomaticAssessmentOutcome]) }}
                                             </span>
                                         </button>
                                     </div>
@@ -682,8 +700,9 @@ const handleCopy = () => {
                                             v-for="opt in props.automaticAssessmentRescoreOptions"
                                             :key="opt.value"
                                             @click="toggleAutomaticAssessmentRescoreFilter(opt.value as AutomaticAssessmentRescoreState)"
+                                            :aria-pressed="(props.filters.automaticAssessmentRescoreFilter || []).includes(opt.value as AutomaticAssessmentRescoreState)"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState)
                                                     ? 'bg-blue-600/80 text-white border-blue-500'
                                                     : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
@@ -691,7 +710,7 @@ const handleCopy = () => {
                                         >
                                             {{ opt.label }}
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.automaticAssessmentRescoreFilter.includes(opt.value as AutomaticAssessmentRescoreState) ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel(props.resultCounts.automatic_assessment_rescore?.[opt.value as AutomaticAssessmentRescoreState]) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).automatic_assessment_rescore?.[opt.value as AutomaticAssessmentRescoreState]) }}
                                             </span>
                                         </button>
                                     </div>
@@ -702,8 +721,9 @@ const handleCopy = () => {
                                     <div class="flex flex-wrap gap-2">
                                         <button
                                             @click="updateFilter('cvssVersionMismatchOnly', !props.filters.cvssVersionMismatchOnly)"
+                                            :aria-pressed="props.filters.cvssVersionMismatchOnly"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 props.filters.cvssVersionMismatchOnly
                                                     ? 'bg-orange-500/15 text-orange-300 border-orange-500/20'
                                                     : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
@@ -711,7 +731,7 @@ const handleCopy = () => {
                                         >
                                             Mismatch
                                             <span class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20" :class="props.filters.cvssVersionMismatchOnly ? 'text-white' : 'text-gray-500'">
-                                                {{ countLabel(props.resultCounts.cvss_version_mismatch) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).cvss_version_mismatch) }}
                                             </span>
                                         </button>
                                     </div>
@@ -724,7 +744,7 @@ const handleCopy = () => {
                                         <p v-if="facet.countKey === 'evidence'" class="text-[10px] text-gray-400">Cached sources; either selected source matches. CISA is checked when opening the global SSVC calculator. Unchecked is not “no data”; stale matches remain included. Other filters still apply.</p>
                                         <div class="flex flex-wrap gap-1.5">
                                             <button v-for="value in facet.values" :key="value" type="button" :aria-pressed="(props.filters[facet.key] || []).includes(value)" class="rounded-full border px-2 py-1 text-[10px]" :class="(props.filters[facet.key] || []).includes(value) ? 'border-purple-400/50 bg-purple-500/20 text-purple-200' : 'border-white/10 text-gray-400'" @click="togglePriorityFilter(facet.key, value)">
-                                                {{ facet.countKey === 'evidence' ? evidenceLabel(value) : ssvcLabel(value) }} <span class="text-gray-500">{{ countLabel(props.resultCounts[facet.countKey]?.[value]) }}</span>
+                                                {{ facet.countKey === 'evidence' ? evidenceLabel(value) : ssvcLabel(value) }} <span class="text-gray-500">{{ countLabel((props.facetCounts || props.resultCounts)[facet.countKey]?.[value]) }}</span>
                                             </button>
                                         </div>
                                     </div>
@@ -734,8 +754,9 @@ const handleCopy = () => {
                                             v-for="opt in props.analysisOptions"
                                             :key="opt.value"
                                             @click="toggleAnalysisFilter(opt.value)"
+                                            :aria-pressed="(props.filters.analysisFilters || []).includes(opt.value)"
                                             :class="[
-                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border outline-none active:scale-95 flex items-center gap-1.5',
+                                                'px-3 py-1 rounded-full text-[10px] font-medium uppercase tracking-tight transition-all border focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400 active:scale-95 flex items-center gap-1.5',
                                                 props.filters.analysisFilters.includes(opt.value)
                                                     ? `${opt.color} text-white border-transparent shadow-lg shadow-blue-900/40`
                                                     : 'bg-white/5 text-gray-500 border-white/5 hover:bg-white/10 hover:text-gray-300'
@@ -746,11 +767,12 @@ const handleCopy = () => {
                                                 class="px-1.5 py-0.5 rounded-md text-[9px] bg-black/20"
                                                 :class="props.filters.analysisFilters.includes(opt.value) ? 'text-white' : 'text-gray-500'"
                                             >
-                                                {{ countLabel(props.resultCounts.analysis[opt.value]) }}
+                                                {{ countLabel((props.facetCounts || props.resultCounts).analysis[opt.value]) }}
                                             </span>
                                         </button>
                                     </div>
                                 </div>
+                                </details>
                             </div>
                         </div>
                     </div>

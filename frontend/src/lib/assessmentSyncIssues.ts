@@ -3,7 +3,6 @@ import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
     getGroupLifecycle,
-    hasGlobalAssessmentForGroup,
     normalizeTags,
 } from './assessment-helpers'
 import { INCONSISTENCY_REASON_OPTIONS } from './inconsistency'
@@ -40,8 +39,10 @@ const incompleteIssues = (
         (instance.analysis_state || instance.analysisState || 'NOT_SET') === 'NOT_SET'
     )
     const requiredTeams = normalizeTags(requiredTeamsOrTags, teamMapping)
-    const assessedTeams = getAssessedTeams(group)
-    const missingTeams = requiredTeams.filter(team => !assessedTeams.has(team))
+    const assessedTeams = group.list_metadata?.assessed_teams
+        ? new Set(group.list_metadata.assessed_teams)
+        : getAssessedTeams(group)
+    const missingTeams = requiredTeams.filter(team => team.toLowerCase() !== 'unassigned' && !assessedTeams.has(team))
 
     if (missingTeams.length > 0) {
         issues.push({
@@ -67,15 +68,6 @@ const incompleteIssues = (
             kind: 'incomplete',
             label: 'Unassessed findings',
             detail: `${missingInstances.length} of ${allInstances.length} finding instances have no analysis state.${scopeSummary}`,
-        })
-    }
-
-    if (!hasGlobalAssessmentForGroup(group)) {
-        issues.push({
-            code: 'MISSING_GLOBAL_ASSESSMENT',
-            kind: 'incomplete',
-            label: 'Missing global assessment',
-            detail: 'No completed General assessment provides a group-wide result.',
         })
     }
 

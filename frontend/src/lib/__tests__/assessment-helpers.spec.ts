@@ -4,6 +4,24 @@ import { parseAssessmentBlocks, constructAssessmentDetails, mergeTeamAssessment,
 
 describe('Assessment Helpers', () => {
     describe('getGroupLifecycle', () => {
+        it('ignores historical team blocks in current lifecycle and state', () => {
+            const details = [
+                '--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Historical: yes] ---',
+                'Former owner',
+                '--- [Team: TeamB] [State: RESOLVED] [Assessed By: bob] [Copied From: TeamA] ---',
+                'Current owner',
+            ].join('\n')
+            const group: any = {
+                id: 'CVE-TRANSFERRED',
+                tags: ['TeamB'],
+                affected_versions: [{ components: [{ analysis_state: 'RESOLVED', analysis_details: details }] }],
+            }
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('ASSESSED')
+            expect(getAssessedTeams(group)).toEqual(new Set(['TeamB']))
+            expect(parseAssessmentBlocks(details)[0]?.historical).toBe(true)
+            expect(parseAssessmentBlocks(details)[1]?.copiedFrom).toBe('TeamA')
+        })
+
         it('should return OPEN when no component has a technical assessment', () => {
             const group: any = {
                 id: 'CVE-OPEN',
@@ -195,7 +213,7 @@ describe('Assessment Helpers', () => {
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCONSISTENT');
         });
 
-        it('should not return INCONSISTENT when every version repeats the same multi-team assessment blocks', () => {
+        it('should return ASSESSED when every version repeats complete multi-team assessments without General', () => {
             const sharedDetails = `--- [Team: team-a] [State: NOT_AFFECTED] [Assessed By: alice] ---\nApproved by team A\n--- [Team: team-b] [State: IN_TRIAGE] [Assessed By: bob] ---\nAwaiting team B follow-up`;
             const group: any = {
                 id: 'CVE-MULTI-BLOCK-REPEATED',
@@ -220,6 +238,14 @@ describe('Assessment Helpers', () => {
                 ]
             };
 
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('ASSESSED');
+
+            for (const version of group.affected_versions) {
+                version.components[0].analysis_details += '\n[Status: Pending Review]';
+            }
+            expect(getGroupLifecycle(group, group.tags, {})).toBe('NEEDS_APPROVAL');
+
+            group.affected_versions.push({ components: [{ analysis_state: 'NOT_SET', analysis_details: '' }] });
             expect(getGroupLifecycle(group, group.tags, {})).toBe('INCOMPLETE');
         });
 

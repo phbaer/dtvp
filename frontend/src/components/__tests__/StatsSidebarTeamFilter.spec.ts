@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import StatsSidebar, { type FilterState, type TeamEntry } from '../StatsSidebar.vue'
+import StatsSidebar, { type FilterOption, type FilterState, type TeamEntry } from '../StatsSidebar.vue'
 import type { TaskVulnGroupListCounts } from '../../lib/api'
 
 const filters = (): FilterState => ({
@@ -83,6 +83,7 @@ const resultCounts: TaskVulnGroupListCounts = {
 
 const mountSidebar = (
     counts: TaskVulnGroupListCounts = resultCounts,
+    lifecycleOptions: FilterOption[] = [],
 ) => mount(StatsSidebar, {
     attachTo: document.body,
     global: {
@@ -93,7 +94,7 @@ const mountSidebar = (
     props: {
         filters: filters(),
         availableVersions: [],
-        lifecycleOptions: [],
+        lifecycleOptions,
         inconsistencyReasonOptions: [],
         analysisOptions: [],
         copiedUrl: false,
@@ -135,35 +136,36 @@ describe('StatsSidebar team filter', () => {
         document.body.innerHTML = ''
     })
 
-    it('shows and searches the complete team list, including counts', async () => {
+    it('shows selectable workflow views and identifies custom status selections', async () => {
+        const options = ['OPEN', 'INCOMPLETE', 'READY_FOR_APPROVAL', 'ASSESSED']
+            .map(value => ({ value, label: value, color: 'bg-blue-500' }))
+        const wrapper = mountSidebar(resultCounts, options)
+        const analyst = wrapper.get('[data-testid="workflow-view-analyst-work"]')
+        const approval = wrapper.get('[data-testid="workflow-view-approval"]')
+        expect(wrapper.text()).toContain('Custom selection')
+        await analyst.trigger('click')
+        expect((wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState).lifecycleFilters)
+            .toEqual(['OPEN', 'INCOMPLETE'])
+        await wrapper.setProps({ filters: { ...filters(), lifecycleFilters: ['OPEN', 'INCOMPLETE'] } })
+        expect(analyst.attributes('aria-pressed')).toBe('true')
+        expect(wrapper.text()).not.toContain('Custom selection')
+        await approval.trigger('click')
+        expect((wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState).lifecycleFilters)
+            .toEqual(['READY_FOR_APPROVAL'])
+        wrapper.unmount()
+    })
+
+    it('searches canonical teams and keeps teams with no results selectable', async () => {
         const wrapper = mountSidebar()
-
-        await wrapper.find('[data-testid="team-filter-select"]').trigger('click')
-        await nextTick()
-
-        const menu = document.body.querySelector('[data-testid="custom-select-menu"]') as HTMLElement
-        expect(menu.querySelectorAll('button')).toHaveLength(teamTagList.length + 1)
-        expect(menu.textContent).toContain('7 vulnerabilities')
-        expect(menu.textContent).toContain('4 open · 3 assessed')
-        const zeroResultTeam = Array.from(menu.querySelectorAll('button'))
-            .find(button => button.textContent?.includes('Team 9'))
-        expect(zeroResultTeam?.textContent).toContain('0 vulnerabilities')
-        const platformOption = Array.from(menu.querySelectorAll('button'))
-            .find(button => button.textContent?.includes('Platform Security'))
-        const optionText = platformOption?.querySelector(':scope > span')
-        expect(optionText?.children[0]?.textContent).toBe('Platform Security')
-        expect(optionText?.children[1]?.textContent?.trim())
-            .toBe('3 vulnerabilities · 2 open · 1 assessed')
-
-        const search = menu.querySelector('input[placeholder="Search teams..."]') as HTMLInputElement
-        search.value = 'platform'
-        search.dispatchEvent(new Event('input', { bubbles: true }))
-        await nextTick()
-
-        expect(menu.querySelectorAll('button')).toHaveLength(2)
-        expect(menu.textContent).toContain('Platform Security')
-        expect(menu.textContent).toContain('Platform')
-
+        const menu = wrapper.get('[data-testid="team-filter-select"]')
+        expect(menu.findAll('input[type="checkbox"]')).toHaveLength(teamTagList.length - 1)
+        expect(menu.text()).toContain('Team 9')
+        await menu.get('input[type="search"]').setValue('platform')
+        expect(menu.findAll('input[type="checkbox"]')).toHaveLength(1)
+        expect(menu.text()).toContain('Platform Security')
+        await menu.get('input[type="search"]').setValue('Platform Sec')
+        expect(menu.findAll('input[type="checkbox"]')).toHaveLength(1)
+        expect(wrapper.get('[data-testid="team-assessment-filter"]').attributes('disabled')).toBeDefined()
         wrapper.unmount()
     })
 
@@ -252,20 +254,22 @@ describe('StatsSidebar team filter', () => {
         expect(wrapper.find('[data-testid="per-team-statistics"]').exists()).toBe(false)
     })
 
-    it('emits the exact selected team name', async () => {
+    it('emits explicit multiple canonical teams and supports clearing', async () => {
         const wrapper = mountSidebar()
-
-        await wrapper.find('[data-testid="team-filter-select"]').trigger('click')
-        await nextTick()
-
-        const option = Array.from(document.body.querySelectorAll('[data-testid="custom-select-menu"] button'))
-            .find(button => button.querySelector(':scope > span > span:first-child')?.textContent?.trim() === 'Platform') as HTMLElement
-        option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
-        await nextTick()
-
-        const update = wrapper.emitted('update:filters')?.at(-1)?.[0] as FilterState
-        expect(update.tagFilter).toBe('Platform')
-
+        const menu = wrapper.get('[data-testid="team-filter-select"]')
+        const platform = menu.findAll('label').find(label => label.text().trim() === 'Platform Security')!
+        await platform.get('input').setValue(true)
+        let update = wrapper.emitted('update:filters')!.at(-1)![0] as FilterState
+        expect(update.teamFilters).toEqual(['Platform Security'])
+        await wrapper.setProps({ filters: update })
+        const other = menu.findAll('label').find(label => label.text().trim() === '3rd Party')!
+        await other.get('input').setValue(true)
+        update = wrapper.emitted('update:filters')!.at(-1)![0] as FilterState
+        expect(update.teamFilters).toEqual(['Platform Security', '3rd Party'])
+        await wrapper.setProps({ filters: update })
+        expect(wrapper.get('[data-testid="team-assessment-filter"]').attributes('disabled')).toBeUndefined()
+        await menu.get('button').trigger('click')
+        expect((wrapper.emitted('update:filters')!.at(-1)![0] as FilterState).teamFilters).toEqual([])
         wrapper.unmount()
     })
 })

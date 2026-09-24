@@ -5,7 +5,7 @@ import DependencyChainViewer from './DependencyChainViewer.vue'
 import { updateTeamMapping } from '../lib/api'
 import {
   findTeamMappingEntryForComponent,
-  getClosestAffectedTeamsForInstance,
+  normalizeLegacyTags,
   getPathParts,
 } from '../lib/dependency-team-selection'
 
@@ -30,7 +30,7 @@ const isMappingMode = computed(() => props.mode === 'mapping')
 const showMappingControls = computed(() => canEditMapping.value && isMappingMode.value)
 
 const getAssignedTeams = (inst: any) => {
-  return getClosestAffectedTeamsForInstance(inst, teamMapping.value || {}).join(', ')
+  return normalizeLegacyTags(inst.tags, teamMapping.value || {}).join(', ')
 }
 
 const editingComponentKey = ref<string | null>(null)

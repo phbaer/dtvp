@@ -80,6 +80,43 @@ describe('assessmentSubmission', () => {
         expect(prepared.payload.original_analysis).toEqual({})
     })
 
+    it('copies a previous team into a pending target draft and retires the source', () => {
+        const previous = '--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] [Justification: NOT_SET] ---\nEarlier rationale'
+        const prepared = prepareAssessmentSubmission({
+            allInstances: [{ ...instances[0]!, analysis_state: 'EXPLOITABLE', analysis_details: previous }],
+            originalAnalysis: {},
+            selectedTeam: 'TeamB',
+            state: 'RESOLVED',
+            details: 'Reviewed earlier rationale',
+            justification: 'NOT_SET',
+            currentAssigned: [],
+            evidenceReviewed: false,
+            versionCoverageChecked: false,
+            ticket: '',
+            teamDrafts: new Map(),
+            takeoverSources: new Map([['TeamB', 'TeamA']]),
+            isReviewer: false,
+            pendingVector: '',
+            pendingScore: null,
+            initialVector: '',
+            initialScore: null,
+            currentUser: 'bob',
+            isApprove: false,
+            showRawEdit: false,
+            rawDetailsTouched: false,
+            rawDetails: '',
+            mergedAssessmentFullText: previous,
+            suppressed: false,
+            force: false,
+        })
+        expect(prepared.finalText).toContain('[Team: TeamA] [State: EXPLOITABLE]')
+        expect(prepared.finalText).toContain('[Historical: yes]')
+        expect(prepared.finalText).toContain('[Team: TeamB] [State: RESOLVED]')
+        expect(prepared.finalText).toContain('[Copied From: TeamA]')
+        expect(prepared.finalState).toBe('RESOLVED')
+        expect(prepared.finalText).toContain('[Status: Pending Review]')
+    })
+
     it('uses sanitized raw text and clears original analysis on force overwrite', () => {
         const prepared = prepareAssessmentSubmission({
             allInstances: instances,

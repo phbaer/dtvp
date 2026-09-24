@@ -1,3 +1,4 @@
+import { expandLifecycleSelection } from './projectLifecycleFilters'
 import type { GroupedVuln, InconsistencyReason, TMRescoreProposal } from '../types'
 import type { CodeAnalysisAssessmentIndexRecord } from './api'
 import { ORIGINAL_SEVERITIES } from './ssvc'
@@ -45,6 +46,7 @@ export interface VulnListItem {
     tagsLower: string[]
     normalizedTags: string[]
     assessedTeams: Set<string>
+    missingTeamTagsLower: string[]
     componentNames: string[]
     componentNamesLower: string[]
     assigneesLower: string[]
@@ -91,7 +93,9 @@ export interface VulnListFilterInput {
     originalSeverityFilters?: readonly string[]
     ssvcFilters?: readonly string[]
     evidenceFilters?: readonly string[]
+    teamAssessmentFilter?: string
     smartSearch?: ParsedVulnSearchQuery | string
+    teamFilters?: readonly string[]
     tagFilter?: string
     idFilter?: string
     componentFilter?: string
@@ -112,6 +116,7 @@ export interface CompiledVulnListFilters {
     originalSeverityFilterSet: Set<string>
     ssvcFilterSet: Set<string>
     evidenceFilterSet: Set<string>
+    teamAssessmentFilter?: string
     smartSearch?: ParsedVulnSearchQuery | string
     dependencyFilter: DependencyRelationship[]
     dependencyFilterSet: Set<DependencyRelationship>
@@ -126,6 +131,7 @@ export interface CompiledVulnListFilters {
     automaticAssessmentOutcomeFilterSet: Set<AutomaticAssessmentOutcome>
     automaticAssessmentRescoreFilterSet: Set<AutomaticAssessmentRescoreState>
     inconsistencyReasonFilterSet: Set<InconsistencyReason>
+    teamFiltersLower: string[]
     tagFilterLower: string
     idFilterLower: string
     componentFilterLower: string
@@ -138,12 +144,16 @@ export interface CompiledVulnListFilters {
 }
 
 export interface VulnStateFilterInput {
+    teamAssessmentFilter?: string
     lifecycleFilters?: FilterSelection<string>
     analysisFilters?: FilterSelection<string>
+    teamScope?: { team?: string, teams?: readonly string[] }
 }
 
 export interface CompiledVulnStateFilters {
+    teamAssessmentFilter?: string
     lifecycleFilters: string[]
+    teamScope?: VulnStateFilterInput['teamScope']
     lifecycleFilterSet: Set<string>
     analysisFilterSet: Set<string>
 }
@@ -347,14 +357,15 @@ const lifecycleAlias = (value: string): string | null => {
     const aliases: Record<string, string> = {
         OPEN: 'OPEN',
         ASSESSED: 'ASSESSED',
-        ASSESSED_LEGACY: 'ASSESSED_LEGACY',
-        LEGACY: 'ASSESSED_LEGACY',
+        ASSESSED_LEGACY: 'ASSESSED',
+        LEGACY: 'ASSESSED',
         INCOMPLETE: 'INCOMPLETE',
         INCONSISTENT: 'INCONSISTENT',
-        NEEDS_APPROVAL: 'NEEDS_APPROVAL',
-        NEEDS_REVIEW: 'NEEDS_APPROVAL',
-        PENDING: 'NEEDS_APPROVAL',
-        PENDING_REVIEW: 'NEEDS_APPROVAL',
+        CONFLICTING: 'INCONSISTENT',
+        NEEDS_APPROVAL: 'READY_FOR_APPROVAL',
+        NEEDS_REVIEW: 'READY_FOR_APPROVAL',
+        PENDING: 'READY_FOR_APPROVAL',
+        PENDING_REVIEW: 'READY_FOR_APPROVAL',
         READY_FOR_APPROVAL: 'READY_FOR_APPROVAL',
         APPROVAL_READY: 'READY_FOR_APPROVAL',
     }
@@ -464,7 +475,7 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 const lifecycle = lifecycleAlias(rawValue)
                 if (lifecycle) {
                     pushUnique(parsed.lifecycleTerms, lifecycle)
-                    addChip('lifecycle', `Lifecycle: ${lifecycle.replace(/_/g, ' ').toLowerCase()}`, lifecycle)
+                    addChip('lifecycle', `Lifecycle: ${lifecycle === 'INCONSISTENT' ? 'conflicting' : lifecycle.replace(/_/g, ' ').toLowerCase()}`, lifecycle)
                 }
                 break
             }
@@ -474,7 +485,7 @@ export function parseVulnSearchQuery(query: string): ParsedVulnSearchQuery {
                 const analysis = analysisAlias(rawValue)
                 if (lifecycle) {
                     pushUnique(parsed.lifecycleTerms, lifecycle)
-                    addChip('lifecycle', `State: ${lifecycle.replace(/_/g, ' ').toLowerCase()}`, lifecycle)
+                    addChip('lifecycle', `State: ${lifecycle === 'INCONSISTENT' ? 'conflicting' : lifecycle.replace(/_/g, ' ').toLowerCase()}`, lifecycle)
                 } else if (analysis) {
                     pushUnique(parsed.analysisTerms, analysis)
                     addChip('analysis', `State: ${analysis.replace(/_/g, ' ').toLowerCase()}`, analysis)
@@ -660,6 +671,7 @@ export function buildVulnListItem(
     const assessedTeams = metadata?.assessed_teams
         ? new Set(normalizeTags(metadata.assessed_teams, teamMapping))
         : getMatchedAssessedTeams(group, normalizedTags, teamMapping)
+    const assessedTeamsLower = new Set(Array.from(assessedTeams).map(lower))
     const allTagText = unique([...rawTags, ...normalizedTags])
     const componentNames = metadataStringArray(metadata?.component_names) ?? unique(
         (group.affected_versions || [])
@@ -758,6 +770,11 @@ export function buildVulnListItem(
         tagsLower,
         normalizedTags,
         assessedTeams,
+        missingTeamTagsLower: allTagText.filter(tag => {
+            const canonical = normalizeTags([tag], teamMapping)[0] || tag
+            return lower(canonical) !== 'unassigned'
+                && !assessedTeamsLower.has(lower(canonical))
+        }).map(lower),
         componentNames,
         componentNamesLower,
         assigneesLower,
@@ -873,6 +890,7 @@ export function compileVulnListFilters(
     )
 
     return {
+        teamAssessmentFilter: filters.teamAssessmentFilter,
         smartSearch: filters.smartSearch,
         originalSeverityFilterSet: new Set((filters.originalSeverityFilters || []).map(v => v.toUpperCase())),
         ssvcFilterSet: new Set((filters.ssvcFilters || []).map(v => v.toUpperCase())),
@@ -890,6 +908,7 @@ export function compileVulnListFilters(
         automaticAssessmentOutcomeFilterSet: new Set(automaticAssessmentOutcomeFilter),
         automaticAssessmentRescoreFilterSet: new Set(automaticAssessmentRescoreFilter),
         inconsistencyReasonFilterSet,
+        teamFiltersLower: (filters.teamFilters || (filters.tagFilter ? [filters.tagFilter] : [])).map(lower),
         tagFilterLower: lower(filters.tagFilter),
         idFilterLower: lower(filters.idFilter),
         componentFilterLower: lower(filters.componentFilter),
@@ -972,7 +991,12 @@ export function matchesCompiledAutomaticAssessmentFacetSelection(
     )
 }
 
-export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQuery | string | undefined): boolean {
+export function matchesSmartSearch(
+    item: VulnListItem,
+    search: ParsedVulnSearchQuery | string | undefined,
+    team?: string,
+    teamAssessmentFilter?: string,
+): boolean {
     const parsed = typeof search === 'string' ? parseVulnSearchQuery(search) : search
     if (!parsed || parsed.chips.length === 0) return true
 
@@ -994,7 +1018,11 @@ export function matchesSmartSearch(item: VulnListItem, search: ParsedVulnSearchQ
     if (!everyTermMatches(parsed.versionTerms, item.versionsLower)) {
         return false
     }
-    if (parsed.lifecycleTerms.length > 0 && !matchesLifecycleFilter(item, parsed.lifecycleTerms)) {
+    if (parsed.lifecycleTerms.length > 0 && !matchesCompiledLifecycleFilter(item, compileVulnStateFilters({
+        lifecycleFilters: expandLifecycleSelection(parsed.lifecycleTerms),
+        teamScope: { team },
+        teamAssessmentFilter,
+    }))) {
         return false
     }
     if (parsed.analysisTerms.length > 0 && !parsed.analysisTerms.includes(item.technicalState)) {
@@ -1022,7 +1050,7 @@ export function matchesCompiledListFilters(
     item: VulnListItem,
     filters: CompiledVulnListFilters,
 ): boolean {
-    if (!matchesSmartSearch(item, filters.smartSearch)) {
+    if (!matchesSmartSearch(item, filters.smartSearch, filters.tagFilterLower, filters.teamAssessmentFilter)) {
         return false
     }
 
@@ -1052,7 +1080,7 @@ export function matchesCompiledListFilters(
         return false
     }
 
-    if (filters.tagFilterLower && !item.tagsLower.includes(filters.tagFilterLower)) {
+    if (filters.teamFiltersLower.length && !filters.teamFiltersLower.some(team => item.tagsLower.includes(team))) {
         return false
     }
 
@@ -1105,7 +1133,7 @@ export function matchesLifecycleFilter(item: VulnListItem, lifecycleFilters: Fil
 
     return (
         (filters.includes('OPEN') && item.lifecycle === 'OPEN') ||
-        (filters.includes('ASSESSED') && item.lifecycle === 'ASSESSED') ||
+        (filters.includes('ASSESSED') && ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle)) ||
         (filters.includes('ASSESSED_LEGACY') && item.lifecycle === 'ASSESSED_LEGACY') ||
         (filters.includes('INCOMPLETE') && item.lifecycle === 'INCOMPLETE') ||
         (filters.includes('INCONSISTENT') && item.lifecycle === 'INCONSISTENT') ||
@@ -1118,9 +1146,21 @@ export function compileVulnStateFilters(filters: VulnStateFilterInput): Compiled
     const lifecycleFilters = normalizeFilterSelection(filters.lifecycleFilters)
     return {
         lifecycleFilters,
+        teamScope: filters.teamScope,
+        teamAssessmentFilter: filters.teamAssessmentFilter,
         lifecycleFilterSet: new Set(lifecycleFilters),
         analysisFilterSet: new Set(normalizeFilterSelection(filters.analysisFilters)),
     }
+}
+
+export function teamAssessmentStatus(
+    item: VulnListItem,
+    scope?: VulnStateFilterInput['teamScope'],
+): 'MISSING' | 'DOCUMENTED' | null {
+    const teams = (scope?.teams || (scope?.team ? [scope.team] : [])).map(lower)
+    const selected = item.tagsLower.filter(tag => tag !== 'unassigned' && teams.includes(tag))
+    if (!selected.length) return null
+    return selected.some(tag => item.missingTeamTagsLower.includes(tag)) ? 'MISSING' : 'DOCUMENTED'
 }
 
 export function matchesCompiledLifecycleFilter(
@@ -1133,7 +1173,7 @@ export function matchesCompiledLifecycleFilter(
 
     return (
         (filters.lifecycleFilterSet.has('OPEN') && item.lifecycle === 'OPEN') ||
-        (filters.lifecycleFilterSet.has('ASSESSED') && item.lifecycle === 'ASSESSED') ||
+        (filters.lifecycleFilterSet.has('ASSESSED') && ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle)) ||
         (filters.lifecycleFilterSet.has('ASSESSED_LEGACY') && item.lifecycle === 'ASSESSED_LEGACY') ||
         (filters.lifecycleFilterSet.has('INCOMPLETE') && item.lifecycle === 'INCOMPLETE') ||
         (filters.lifecycleFilterSet.has('INCONSISTENT') && item.lifecycle === 'INCONSISTENT') ||
@@ -1153,6 +1193,9 @@ export function matchesCompiledStateFilters(
     if (!matchesCompiledLifecycleFilter(item, filters)) {
         return false
     }
+    if ((filters.teamScope?.team || filters.teamScope?.teams?.length)
+        && filters.teamAssessmentFilter && filters.teamAssessmentFilter !== 'ANY'
+        && teamAssessmentStatus(item, filters.teamScope) !== filters.teamAssessmentFilter) return false
 
     return filters.analysisFilterSet.has(item.technicalState)
 }
@@ -1184,7 +1227,7 @@ export function computeListFilterCounts(
 
     for (const item of items) {
         if (item.lifecycle === 'OPEN') counts.OPEN++
-        if (item.lifecycle === 'ASSESSED') counts.ASSESSED++
+        if (['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle)) counts.ASSESSED++
         if (item.lifecycle === 'ASSESSED_LEGACY') counts.ASSESSED_LEGACY++
         if (item.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++
         if (item.lifecycle === 'INCONSISTENT') counts.INCONSISTENT++

@@ -245,7 +245,7 @@ describe('Settings.vue', () => {
 
         await flushPromises()
 
-        const input = wrapper.get('input[placeholder="name, group:name, purl::pkg:type/namespace/name"]')
+        const input = wrapper.get('input[placeholder="name, group:name, group/name, purl::pkg:type/namespace/name"]')
         const inputElement = input.element as HTMLInputElement
         inputElement.focus()
         expect(document.activeElement).toBe(inputElement)

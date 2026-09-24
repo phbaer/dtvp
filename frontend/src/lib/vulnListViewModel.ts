@@ -1,5 +1,6 @@
 import type { FilterCounts, TeamCounts } from './group-classifier'
 import { evidenceSources } from './evidence'
+import { expandLifecycleSelection, VISIBLE_LIFECYCLE_FILTERS } from './projectLifecycleFilters'
 import type { TaskVulnGroupListCounts } from './api'
 import type { InconsistencyReason } from '../types'
 import type { VulnListFacets } from './vulnListFacets'
@@ -16,17 +17,20 @@ import type {
     VulnListItem,
 } from './vulnListIndex'
 import {
+    teamAssessmentStatus,
     compileVulnListFilters,
     compileVulnStateFilters,
     matchesCompiledAttributionAgeFilter,
     matchesCompiledDependencySelection,
     matchesCompiledLifecycleFilter,
+    parseVulnSearchQuery,
     matchesCompiledListFilters,
     matchesCompiledAutomaticAssessmentSelection,
     matchesCompiledAutomaticAssessmentFacetSelection,
     matchesCompiledStateFilters,
     matchesCompiledTMRescoreSelection,
 } from './vulnListIndex'
+import { AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS, AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS } from './automaticAssessmentFilters'
 import type {
     AutomaticAssessmentOutcome,
     AutomaticAssessmentRescoreState,
@@ -37,6 +41,7 @@ export interface VulnListViewFilters {
     ssvcFilters?: string[]
     evidenceFilters?: string[]
     smartSearch?: ParsedVulnSearchQuery | string
+    teamFilters?: readonly string[]
     tagFilter?: string
     idFilter?: string
     componentFilter?: string
@@ -46,6 +51,7 @@ export interface VulnListViewFilters {
     automaticAssessmentFilter: AutomaticAssessmentFilter[]
     automaticAssessmentOutcomeFilter: AutomaticAssessmentOutcome[]
     automaticAssessmentRescoreFilter: AutomaticAssessmentRescoreState[]
+    teamAssessmentFilter?: string
     inconsistencyReasonFilter?: InconsistencyReason[]
     versionFilterList: readonly string[]
     cvssVersionMismatchOnly: boolean
@@ -173,6 +179,7 @@ export const deriveVulnListResultCounts = (
         else if (item.lifecycle in counts.lifecycle && item.lifecycle !== 'NEEDS_APPROVAL') {
             counts.lifecycle[item.lifecycle]++
         }
+        if (item.lifecycle === 'ASSESSED_LEGACY') counts.lifecycle.ASSESSED++
         if (item.isPending) counts.lifecycle.NEEDS_APPROVAL++
         if (item.isApprovalReady) counts.lifecycle.READY_FOR_APPROVAL++
 
@@ -318,7 +325,7 @@ const updateStaticFilterCounts = (
     item: VulnListItem,
 ) => {
     if (item.lifecycle === 'OPEN') counts.OPEN++
-    if (item.lifecycle === 'ASSESSED') counts.ASSESSED++
+    if (['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle)) counts.ASSESSED++
     if (item.lifecycle === 'ASSESSED_LEGACY') counts.ASSESSED_LEGACY++
     if (item.lifecycle === 'INCOMPLETE') counts.INCOMPLETE++
     if (item.lifecycle === 'INCONSISTENT') counts.INCONSISTENT++
@@ -525,7 +532,9 @@ export const deriveVulnListFilterModel = (
         ssvcFilters: filters.ssvcFilters,
         evidenceFilters: filters.evidenceFilters,
         smartSearch: filters.smartSearch,
+        teamAssessmentFilter: filters.teamAssessmentFilter,
         tagFilter: filters.tagFilter,
+        teamFilters: filters.teamFilters,
         idFilter: filters.idFilter,
         componentFilter: filters.componentFilter,
         assigneeFilter: filters.assigneeFilter,
@@ -541,9 +550,14 @@ export const deriveVulnListFilterModel = (
         attributionAgeMode: filters.attributionAgeMode,
     })
 
+    const parsedSearch = typeof filters.smartSearch === 'string'
+        ? parseVulnSearchQuery(filters.smartSearch)
+        : filters.smartSearch
     const stateFilterInput = compileVulnStateFilters({
-        lifecycleFilters: filters.lifecycleFilters,
+        lifecycleFilters: expandLifecycleSelection(filters.lifecycleFilters),
         analysisFilters: filters.analysisFilters,
+        teamScope: { teams: filters.teamFilters || (filters.tagFilter ? [filters.tagFilter] : []) },
+        teamAssessmentFilter: filters.teamAssessmentFilter,
     })
 
     for (const item of items) {
@@ -583,7 +597,7 @@ export const deriveVulnListFilterModel = (
             }
         }
 
-        if (!matchesCompiledListFilters(item, listFilterInput)) continue
+        if (parsedSearch?.teamTerms.length || !matchesCompiledListFilters(item, listFilterInput)) continue
         preFilteredItems.push(item)
 
         if (!matchesCompiledStateFilters(item, stateFilterInput)) continue
@@ -621,4 +635,46 @@ export const deriveVulnListViewModel = (
         ...filterModel,
         sortedItems: sortVulnListItems(filterModel.matchingItems, filters.sortBy, filters.sortOrder),
     }
+}
+
+// Each option count applies the other selections, excluding its own category.
+export const deriveVulnListFacetCounts = (
+    items: readonly VulnListItem[], filters: VulnListFilterModelFilters,
+    staticStats: VulnListStaticStats,
+): TaskVulnGroupListCounts => {
+    const count = (overrides: Partial<VulnListFilterModelFilters>) => deriveVulnListResultCounts(
+        deriveVulnListFilterModel(items, { ...filters, ...overrides }, staticStats).matchingItems,
+    )
+    const result = count({})
+    const facets: [keyof TaskVulnGroupListCounts, Partial<VulnListFilterModelFilters>][] = [
+        ['lifecycle', { lifecycleFilters: VISIBLE_LIFECYCLE_FILTERS }],
+        ['analysis', { analysisFilters: ['NOT_SET', 'EXPLOITABLE', 'IN_TRIAGE', 'RESOLVED', 'FALSE_POSITIVE', 'NOT_AFFECTED'] }],
+        ['inconsistency_reason', { inconsistencyReasonFilter: [] }],
+        ['original_severity', { originalSeverityFilters: [] }],
+        ['ssvc', { ssvcFilters: [] }],
+        ['evidence', { evidenceFilters: [] }],
+        ['dependency_relationship', { dependencyFilter: ['DIRECT', 'TRANSITIVE', 'UNKNOWN'] }],
+        ['tmrescore', { tmrescoreProposalFilter: ['WITH_PROPOSAL', 'WITHOUT_PROPOSAL'] }],
+        ['automatic_assessment', { automaticAssessmentFilter: ['WITH_AUTOMATIC_ASSESSMENT', 'WITHOUT_AUTOMATIC_ASSESSMENT'] }],
+        ['automatic_assessment_outcome', { automaticAssessmentOutcomeFilter: AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS.map(option => option.value) }],
+        ['automatic_assessment_rescore', { automaticAssessmentRescoreFilter: AUTOMATIC_ASSESSMENT_RESCORE_OPTIONS.map(option => option.value) }],
+        ['cvss_version_mismatch', { cvssVersionMismatchOnly: false }],
+    ]
+    const parsed = typeof filters.smartSearch === 'string' ? parseVulnSearchQuery(filters.smartSearch) : filters.smartSearch
+    const searchOverrides: Partial<Record<keyof TaskVulnGroupListCounts, Partial<ParsedVulnSearchQuery>>> = {
+        lifecycle: { lifecycleTerms: [] }, analysis: { analysisTerms: [] },
+        dependency_relationship: { dependencyTerms: [] }, tmrescore: { tmrescoreTerms: [] },
+        cvss_version_mismatch: { cvssMismatchOnly: false },
+    }
+    for (const [field, overrides] of facets) {
+        const smartSearch = parsed ? { ...parsed, ...searchOverrides[field] } : undefined
+        Object.assign(result, { [field]: count({ ...overrides, smartSearch })[field] })
+    }
+    const coverageItems = deriveVulnListFilterModel(items, { ...filters, teamAssessmentFilter: 'ANY' }, staticStats).matchingItems
+    result.team_assessment = { MISSING: 0, DOCUMENTED: 0 }
+    for (const item of coverageItems) {
+        const status = teamAssessmentStatus(item, { teams: filters.teamFilters || (filters.tagFilter ? [filters.tagFilter] : []) })
+        if (status) result.team_assessment[status]++
+    }
+    return result
 }

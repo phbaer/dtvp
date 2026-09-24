@@ -135,8 +135,11 @@ describe('ProjectView Coverage Extras', () => {
             expect(cards[0]!.props('item').group.id).toBe('1')
         }
 
-        // Clear filter
+        // The token became a visible team selection; clearing text keeps it.
         await input.setValue('')
+        await flushPromises()
+        expect(wrapper.findAllComponents({ name: 'VulnRowCompact' }).length).toBe(1)
+        await wrapper.findAll('button').find(button => button.text() === 'Remove Teams: TeamA')!.trigger('click')
         await flushPromises()
         expect(wrapper.findAllComponents({ name: 'VulnRowCompact' }).length).toBe(4)
     })

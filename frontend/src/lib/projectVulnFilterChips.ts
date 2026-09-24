@@ -13,6 +13,7 @@ export type ActiveFilterChipKey =
     | 'lifecycle'
     | 'analysis'
     | 'inconsistencyReason'
+    | 'teamAssessment'
     | 'dependency'
     | 'id'
     | 'tag'
@@ -42,6 +43,7 @@ export interface BuildActiveFilterChipsInput {
     evidenceFilters?: readonly string[]
     lifecycleFilters: readonly string[]
     lifecycleOptions: readonly ProjectVulnFilterOption[]
+    teamAssessmentFilter?: string
     inconsistencyReasonFilters?: readonly InconsistencyReason[]
     inconsistencyReasonOptions?: readonly ProjectVulnFilterOption[]
     analysisFilters: readonly string[]
@@ -49,6 +51,7 @@ export interface BuildActiveFilterChipsInput {
     dependencyFilters: readonly DependencyRelationship[]
     dependencyOptions: readonly ProjectVulnFilterOption[]
     idFilter: string
+    teamFilters?: readonly string[]
     tagFilter: string
     componentFilter: string
     assigneeFilter: string
@@ -67,11 +70,13 @@ export interface BuildActiveFilterChipsInput {
 }
 
 export interface HasCustomProjectVulnFilterStateInput {
+    defaultTeamAssessmentFilter?: string
     originalSeverityFilters?: readonly string[]
     ssvcFilters?: readonly string[]
     evidenceFilters?: readonly string[]
     smartSearchInput: string
     idFilter: string
+    teamFilters?: readonly string[]
     tagFilter: string
     componentFilter: string
     assigneeFilter: string
@@ -81,6 +86,7 @@ export interface HasCustomProjectVulnFilterStateInput {
     sortBy: string
     sortOrder: 'asc' | 'desc'
     lifecycleFilters: readonly string[]
+    teamAssessmentFilter?: string
     inconsistencyReasonFilters?: readonly InconsistencyReason[]
     defaultLifecycleFilters: readonly string[]
     analysisFilters: readonly string[]
@@ -133,6 +139,7 @@ export function buildActiveFilterChips({
     evidenceFilters = [],
     lifecycleFilters,
     lifecycleOptions,
+    teamAssessmentFilter = 'ANY',
     inconsistencyReasonFilters = [],
     inconsistencyReasonOptions = [],
     analysisFilters,
@@ -141,6 +148,7 @@ export function buildActiveFilterChips({
     dependencyOptions,
     idFilter,
     tagFilter,
+    teamFilters = [],
     componentFilter,
     assigneeFilter,
     versionFilters,
@@ -157,6 +165,10 @@ export function buildActiveFilterChips({
     attributionAgeMode,
 }: BuildActiveFilterChipsInput): ActiveFilterChip[] {
     const chips: ActiveFilterChip[] = []
+    if (teamAssessmentFilter !== 'ANY') chips.push({
+        key: 'teamAssessment',
+        label: `Selected-team assessment: ${teamAssessmentFilter === 'DOCUMENTED' ? 'Recorded' : 'Not recorded'}`,
+    })
     if (originalSeverityFilters.length) chips.push({ key: 'originalSeverity', label: `Original severity: ${originalSeverityFilters.join(', ')}` })
     if (ssvcFilters.length) chips.push({ key: 'ssvc', label: `SSVC: ${ssvcFilters.map(v => v.replaceAll('_', ' ')).join(', ')}` })
     if (evidenceFilters.length) chips.push({ key: 'evidence', label: `Evidence: ${evidenceFilters.map(evidenceLabel).join(', ')}` })
@@ -178,7 +190,8 @@ export function buildActiveFilterChips({
     }
 
     if (idFilter) chips.push({ key: 'id', label: `ID: ${idFilter}` })
-    if (tagFilter) chips.push({ key: 'tag', label: `Team: ${tagFilter}` })
+    if (teamFilters.length) chips.push({ key: 'tag', label: `Teams: ${teamFilters.join(', ')}` })
+    else if (tagFilter) chips.push({ key: 'tag', label: `Team: ${tagFilter}` })
     if (componentFilter) chips.push({ key: 'component', label: `Component: ${componentFilter}` })
     if (assigneeFilter) chips.push({ key: 'assignee', label: `Assignee: ${assigneeFilter}` })
     if (versionFilters.length) chips.push({ key: 'versions', label: `Versions: ${versionFilters.join(', ')}` })
@@ -216,6 +229,7 @@ export function hasCustomProjectVulnFilterState({
     smartSearchInput,
     idFilter,
     tagFilter,
+    teamFilters = [],
     componentFilter,
     assigneeFilter,
     versionFilters,
@@ -224,6 +238,8 @@ export function hasCustomProjectVulnFilterState({
     sortBy,
     sortOrder,
     lifecycleFilters,
+    teamAssessmentFilter = 'ANY',
+    defaultTeamAssessmentFilter = 'ANY',
     inconsistencyReasonFilters = [],
     defaultLifecycleFilters,
     analysisFilters,
@@ -244,6 +260,7 @@ export function hasCustomProjectVulnFilterState({
         || ssvcFilters.length > 0
         || evidenceFilters.length > 0
         || !!idFilter
+        || teamFilters.length > 0
         || !!tagFilter
         || !!componentFilter
         || !!assigneeFilter
@@ -253,6 +270,7 @@ export function hasCustomProjectVulnFilterState({
         || sortBy !== 'rescored-severity'
         || sortOrder !== 'desc'
         || !sameStringSet(lifecycleFilters, defaultLifecycleFilters)
+        || teamAssessmentFilter !== defaultTeamAssessmentFilter
         || inconsistencyReasonFilters.length > 0
         || !sameStringSet(analysisFilters, defaultAnalysisFilters)
         || !sameStringSet(dependencyFilters, defaultDependencyFilters)

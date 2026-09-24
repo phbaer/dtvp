@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mockGroupedVulnTask } from './helpers/grouped-task';
 
-test.describe('Integration Tests (Real Backend)', () => {
+test.describe('Project navigation with mocked backend', () => {
     test.beforeEach(async ({ page }) => {
         // Bypass ChangelogModal by setting last seen version
         await page.addInitScript(() => {
@@ -83,6 +83,7 @@ test.describe('Integration Tests (Real Backend)', () => {
             },
             {
                 id: 'CVE-2025-INCOMPLETE',
+                list_metadata: { lifecycle: 'INCOMPLETE', is_pending: false },
                 title: 'Incomplete Analysis',
                 description: 'One version is assessed, another is missing.',
                 severity: 'HIGH',
@@ -102,7 +103,7 @@ test.describe('Integration Tests (Real Backend)', () => {
                                 finding_uuid: 'f2',
                                 vulnerability_uuid: 'v2',
                                 analysis_state: 'EXPLOITABLE',
-                                analysis_details: '',
+                                analysis_details: '--- [Team: Security] [State: EXPLOITABLE] ---',
                                 tags: ['Security'],
                             },
                         ],
@@ -128,6 +129,7 @@ test.describe('Integration Tests (Real Backend)', () => {
             },
             {
                 id: 'CVE-2025-INCONSISTENT',
+                list_metadata: { lifecycle: 'INCONSISTENT', is_pending: false },
                 title: 'Inconsistent Analysis',
                 description: 'Different states across versions.',
                 severity: 'CRITICAL',
@@ -299,21 +301,26 @@ test.describe('Integration Tests (Real Backend)', () => {
         // 3. Check for URL change
         await expect(page).toHaveURL(/.*\/project\/Vulnerable%20Project/, { timeout: 15000 });
 
-        // 4. Vulnerabilities should be visible with default reviewer filters (all lifecycle states enabled)
-        // 5. Now wait for vulnerabilities to be visible
+        // All statuses are selected initially.
         await expect(page.getByText('CVE-2021-44228')).toBeVisible({ timeout: 30000 });
         await expect(page.getByText('CVE-2025-INCOMPLETE')).toBeVisible();
-        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCOMPLETE' }).getByTestId('lifecycle-badge')).toHaveText(/Incomplete|Assessed/);
+        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCOMPLETE' }).getByTestId('lifecycle-badge')).toHaveText('Incomplete');
 
         // Verify INCONSISTENT mock vulnerability
         await expect(page.getByText('CVE-2025-INCONSISTENT')).toBeVisible();
-        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCONSISTENT' }).getByTestId('lifecycle-badge')).toHaveText('Inconsistent');
+        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCONSISTENT' }).getByTestId('lifecycle-badge')).toHaveText('Conflicting');
 
         // 5. Verify core row metadata for the main CVE
         const vulnCard = page.locator('.vuln-card').filter({ hasText: 'CVE-2021-44228' }).first();
         await expect(vulnCard).toBeVisible({ timeout: 10000 });
         await expect(vulnCard.getByTestId('lifecycle-badge')).toBeVisible();
         await expect(vulnCard.getByTestId('instance-count')).toBeVisible();
+        await page.getByTestId('workflow-view-analyst-work').click();
+        await expect(page.getByText('CVE-2025-INCOMPLETE')).toBeVisible();
+        await expect(page.getByText('CVE-2025-INCONSISTENT')).toBeVisible();
+        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-2025-INCONSISTENT' }).getByTestId('lifecycle-badge')).toHaveText('Conflicting');
+        await page.getByTestId('workflow-view-approval').click();
+        await expect(page.getByText('CVE-2025-INCONSISTENT')).toHaveCount(0);
     });
 
 });

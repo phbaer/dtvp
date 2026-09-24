@@ -50,8 +50,8 @@ describe('assessmentSyncIssues', () => {
                 code: 'UNASSESSED_FINDINGS',
                 detail: expect.stringContaining('1 of 2 finding instances'),
             }),
-            expect.objectContaining({ code: 'MISSING_GLOBAL_ASSESSMENT' }),
         ]))
+        expect(issues.map(issue => issue.code)).not.toContain('MISSING_GLOBAL_ASSESSMENT')
     })
 
     it('shows the concrete conflicting states for an inconsistent assessment', () => {

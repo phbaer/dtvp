@@ -41,6 +41,74 @@ const mountHarness = (options: {
 }
 
 describe('useProjectVulnFilters', () => {
+    it('Documented preserves lifecycle, roundtrips URLs, and resets to Any', async () => {
+        vi.useFakeTimers()
+        const { filters, wrapper, router } = mountHarness({ role: 'REVIEWER', query: { teams: ['Security'], lifecycle: ['READY_FOR_APPROVAL'] } })
+        expect(filters.lifecycleFilters.value).toEqual(['READY_FOR_APPROVAL'])
+        filters.handleFilterUpdate({ ...filters.filterState.value, teamAssessmentFilter: 'DOCUMENTED' })
+        expect(filters.lifecycleFilters.value).toEqual(['READY_FOR_APPROVAL'])
+        expect(filters.filterUrl.value).toContain('team_assessment=DOCUMENTED')
+        expect(filters.filterUrl.value).not.toContain('lifecycle=ASSESSED')
+        await nextTick()
+        await vi.advanceTimersByTimeAsync(250)
+        expect(router.replace.mock.lastCall?.[0].query.team_assessment).toBe('DOCUMENTED')
+        filters.handleFilterUpdate({ ...filters.filterState.value, lifecycleFilters: ['INCOMPLETE'] })
+        expect(filters.lifecycleFilters.value).toEqual(['INCOMPLETE'])
+        filters.resetFilters()
+        expect(filters.teamAssessmentFilter.value).toBe('ANY')
+        expect(filters.filterUrl.value).not.toContain('team_assessment=')
+        wrapper.unmount()
+    })
+
+    it('hydrates documented links using role defaults and respects explicit lifecycle', () => {
+        const first = mountHarness({ role: 'REVIEWER', query: { teams: ['Security'], team_assessment: 'DOCUMENTED' } })
+        expect(first.filters.teamAssessmentFilter.value).toBe('DOCUMENTED')
+        expect(first.filters.lifecycleFilters.value).toEqual(DEFAULT_REVIEWER_LIFECYCLE_FILTERS)
+        first.wrapper.unmount()
+        const second = mountHarness({ query: { team_assessment: 'DOCUMENTED', lifecycle: 'INCOMPLETE' } })
+        expect(second.filters.lifecycleFilters.value).toEqual(['INCOMPLETE'])
+        second.wrapper.unmount()
+    })
+
+    it.each(['ANALYST', 'REVIEWER'])('preserves %s lifecycle selections through every team assessment choice', async (role) => {
+        vi.useFakeTimers()
+        const { filters, wrapper, router } = mountHarness({ role, query: { teams: ['Security'] } })
+        for (const [index, lifecycle] of [filters.lifecycleFilters.value, ['INCOMPLETE', 'ASSESSED'], []].entries()) {
+            filters.handleFilterUpdate({ ...filters.filterState.value, lifecycleFilters: [...lifecycle] })
+            for (const coverage of ['DOCUMENTED', 'MISSING', 'ANY', 'DOCUMENTED']) {
+                filters.handleFilterUpdate({ ...filters.filterState.value, teamAssessmentFilter: coverage })
+                expect(filters.lifecycleFilters.value).toEqual(lifecycle)
+                await nextTick()
+                await vi.advanceTimersByTimeAsync(250)
+                expect(router.replace.mock.lastCall?.[0].query.lifecycle).toEqual(
+                    index === 0 ? undefined : lifecycle.length ? lifecycle : ['__NO_MATCH__'],
+                )
+            }
+        }
+        wrapper.unmount()
+    })
+
+    it('ignores coverage without teams and clears coverage when the last team is removed', () => {
+        const { filters, wrapper } = mountHarness({ query: { team_assessment: 'DOCUMENTED' } })
+        expect(filters.teamAssessmentFilter.value).toBe('ANY')
+        filters.handleFilterUpdate({ ...filters.filterState.value, teamFilters: ['Security', 'Platform'] })
+        expect(filters.teamAssessmentFilter.value).toBe('MISSING')
+        filters.handleFilterUpdate({ ...filters.filterState.value, teamAssessmentFilter: 'DOCUMENTED' })
+        filters.handleFilterUpdate({ ...filters.filterState.value, teamFilters: ['Platform'] })
+        expect(filters.teamAssessmentFilter.value).toBe('DOCUMENTED')
+        filters.handleFilterUpdate({ ...filters.filterState.value, teamFilters: [] })
+        expect(filters.teamAssessmentFilter.value).toBe('ANY')
+        expect(filters.filterUrl.value).not.toContain('team_assessment=')
+        wrapper.unmount()
+    })
+
+    it('roundtrips an explicitly empty overall status selection', () => {
+        const { filters, wrapper } = mountHarness({ query: { lifecycle: ['__NO_MATCH__'] } })
+        expect(filters.lifecycleFilters.value).toEqual([])
+        expect(filters.filterUrl.value).toContain('lifecycle=__NO_MATCH__')
+        wrapper.unmount()
+    })
+
     it('roundtrips evidence filters through URLs, sidebar updates and reset', async () => {
         vi.useFakeTimers()
         const { filters, wrapper, router } = mountHarness({ query: { evidence: ['kev,cisa_ssvc', 'not_checked'] } })
@@ -111,7 +179,7 @@ describe('useProjectVulnFilters', () => {
         expect(filters.smartSearchInput.value).toBe('spring team:platform')
         expect(filters.parsedSmartSearch.value.textTerms).toEqual(['spring'])
         expect(filters.parsedSmartSearch.value.teamTerms).toEqual(['platform'])
-        expect(filters.lifecycleFilters.value).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT'])
+        expect(filters.lifecycleFilters.value).toEqual(['OPEN', 'INCOMPLETE'])
         expect(filters.inconsistencyReasonFilters.value).toEqual([
             'ANALYSIS_STATE_MISMATCH',
             'ASSESSMENT_DETAILS_MISMATCH',
@@ -163,30 +231,96 @@ describe('useProjectVulnFilters', () => {
         dependencyOnly.wrapper.unmount()
     })
 
-    it('resets lifecycle defaults when the current role changes', async () => {
-        const { filters, role, wrapper } = mountHarness({ role: 'ANALYST' })
-        await nextTick()
-
-        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
-        expect(filters.analysisFilters.value).toEqual(DEFAULT_ANALYSIS_FILTERS)
-
-        role.value = 'REVIEWER'
-        await nextTick()
-
-        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_REVIEWER_LIFECYCLE_FILTERS)
-        expect(filters.analysisFilters.value).toEqual(DEFAULT_ANALYSIS_FILTERS)
-
+    it('migrates retired URL categories to visible lifecycle choices', () => {
+        const { filters, wrapper } = mountHarness({ query: {
+            lifecycle: ['NEEDS_APPROVAL', 'ASSESSED_LEGACY', 'ASSESSED', 'CONFLICTING'],
+        } })
+        expect(filters.lifecycleFilters.value).toEqual(['READY_FOR_APPROVAL', 'ASSESSED', 'INCOMPLETE'])
         wrapper.unmount()
     })
 
-    it('defaults and resets analysts to all unfinished assessments, without overriding explicit URLs', () => {
+    it('switches untouched defaults with the role, including selected-team coverage', async () => {
+        vi.useFakeTimers()
+        const { filters, role, router, wrapper } = mountHarness({ role: 'ANALYST', query: { teams: ['Security'] } })
+        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
+        expect(filters.teamAssessmentFilter.value).toBe('MISSING')
+        role.value = 'REVIEWER'
+        await nextTick()
+        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_REVIEWER_LIFECYCLE_FILTERS)
+        expect(filters.teamAssessmentFilter.value).toBe('ANY')
+        await vi.advanceTimersByTimeAsync(250)
+        expect(router.replace.mock.lastCall?.[0].query.lifecycle).toBeUndefined()
+        expect(router.replace.mock.lastCall?.[0].query.team_assessment).toBeUndefined()
+        role.value = 'ANALYST'
+        await nextTick()
+        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
+        expect(filters.teamAssessmentFilter.value).toBe('MISSING')
+        wrapper.unmount()
+    })
+
+    it('recognizes role defaults serialized by older URLs', async () => {
+        const { filters, role, wrapper } = mountHarness({
+            role: 'ANALYST',
+            query: { teams: ['Security'], lifecycle: ['OPEN', 'INCOMPLETE'], team_assessment: 'MISSING' },
+        })
+        role.value = 'REVIEWER'
+        await nextTick()
+        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_REVIEWER_LIFECYCLE_FILTERS)
+        expect(filters.teamAssessmentFilter.value).toBe('ANY')
+        expect(filters.filterUrl.value).not.toContain('lifecycle=')
+        expect(filters.filterUrl.value).not.toContain('team_assessment=')
+        wrapper.unmount()
+    })
+
+    it('preserves explicit status and assessment selections when the role changes', async () => {
+        const { filters, role, wrapper } = mountHarness({
+            role: 'ANALYST',
+            query: { teams: ['Security'], lifecycle: ['INCOMPLETE'], team_assessment: 'DOCUMENTED' },
+        })
+        role.value = 'REVIEWER'
+        await nextTick()
+        expect(filters.lifecycleFilters.value).toEqual(['INCOMPLETE'])
+        expect(filters.teamAssessmentFilter.value).toBe('DOCUMENTED')
+        wrapper.unmount()
+    })
+
+    it('keeps a changed status independent of role defaults', async () => {
+        const { filters, role, wrapper } = mountHarness({ role: 'ANALYST' })
+        filters.handleFilterUpdate({ ...filters.filterState.value, lifecycleFilters: ['ASSESSED'] })
+        role.value = 'REVIEWER'
+        await nextTick()
+        expect(filters.lifecycleFilters.value).toEqual(['ASSESSED'])
+        wrapper.unmount()
+    })
+
+    it('defaults analysts to Missing but persists explicit Any across reloads', async () => {
+        vi.useFakeTimers()
+        const { filters, router, wrapper } = mountHarness()
+        expect(filters.teamAssessmentFilter.value).toBe('ANY')
+        filters.handleFilterUpdate({ ...filters.filterState.value, teamFilters: ['Security'] })
+        expect(filters.teamAssessmentFilter.value).toBe('MISSING')
+        filters.handleFilterUpdate({ ...filters.filterState.value, teamAssessmentFilter: 'ANY' })
+        expect(filters.filterUrl.value).toContain('team_assessment=ANY')
+        await nextTick()
+        await vi.advanceTimersByTimeAsync(250)
+        expect(router.replace.mock.lastCall?.[0].query.team_assessment).toBe('ANY')
+        const reloaded = mountHarness({ query: router.replace.mock.lastCall?.[0].query })
+        expect(reloaded.filters.teamAssessmentFilter.value).toBe('ANY')
+        reloaded.filters.resetFilters()
+        expect(reloaded.filters.teamAssessmentFilter.value).toBe('ANY')
+        wrapper.unmount()
+        reloaded.wrapper.unmount()
+    })
+
+    it('defaults and resets analysts to work needing analysis, without overriding explicit URLs', () => {
         const { filters, wrapper } = mountHarness()
-        expect(filters.lifecycleFilters.value).toEqual(['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL'])
+        expect(filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
         // Default values need not be repeated in the shareable URL.
         expect(filters.filterUrl.value).not.toContain('lifecycle=')
         filters.lifecycleFilters.value = ['ASSESSED']
         filters.resetFilters()
         expect(filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
+        expect(filters.teamAssessmentFilter.value).toBe('ANY')
         wrapper.unmount()
         const explicit = mountHarness({ query: { lifecycle: ['OPEN'] } })
         expect(explicit.filters.lifecycleFilters.value).toEqual(['OPEN'])
@@ -194,6 +328,13 @@ describe('useProjectVulnFilters', () => {
         const otherFilter = mountHarness({ query: { tag: 'Security' } })
         expect(otherFilter.filters.lifecycleFilters.value).toEqual(DEFAULT_ANALYST_LIFECYCLE_FILTERS)
         otherFilter.wrapper.unmount()
+    })
+
+    it('migrates distinct conflict URLs into the visible Incomplete choice', () => {
+        const { filters, wrapper } = mountHarness({ query: { lifecycle: ['INCONSISTENT'] } })
+        expect(filters.lifecycleFilters.value).toEqual(['INCOMPLETE'])
+        expect(filters.filterUrl.value).toContain('lifecycle=INCOMPLETE')
+        wrapper.unmount()
     })
 
     it('debounces URL synchronization after filter changes', async () => {
@@ -216,7 +357,7 @@ describe('useProjectVulnFilters', () => {
         expect(router.replace).toHaveBeenCalledTimes(1)
         const query = router.replace.mock.calls[0][0]?.query as Record<string, unknown>
         expect(query.id).toBe('CVE-2')
-        expect(query.lifecycle).toEqual(DEFAULT_REVIEWER_LIFECYCLE_FILTERS)
+        expect(query.lifecycle).toBeUndefined()
         expect(query.analysis).toEqual(DEFAULT_ANALYSIS_FILTERS)
         expect(query.sort).toBe('rescored-severity')
         expect(query.order).toBe('desc')

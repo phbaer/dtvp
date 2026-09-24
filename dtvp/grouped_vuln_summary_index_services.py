@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-GROUPED_VULN_SUMMARY_INDEX_SCHEMA_VERSION = 4
+GROUPED_VULN_SUMMARY_INDEX_SCHEMA_VERSION = 8
 
 
 def get_grouped_vuln_summary_index_path() -> str:

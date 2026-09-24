@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+import pytest
+
 from dtvp.grouped_vuln_services import (
     GroupedVulnServiceDeps,
     _build_grouped_vuln_task_artifacts,
@@ -352,6 +354,61 @@ def test_summary_approved_global_assessment_is_terminal_before_team_coverage():
     incomplete = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
     assert incomplete["lifecycle"] == "INCOMPLETE"
     assert incomplete["is_assessed"] is False
+
+
+@pytest.mark.parametrize("teams", [["TeamA"], ["TeamA", "TeamB"]])
+@pytest.mark.parametrize(
+    "pending,missing_finding,expected",
+    [
+        (False, False, "ASSESSED"),
+        (True, False, "NEEDS_APPROVAL"),
+        (False, True, "INCOMPLETE"),
+        (True, True, "INCOMPLETE"),
+    ],
+)
+def test_complete_team_coverage_without_general(teams, pending, missing_finding, expected):
+    details = "\n".join(
+        f"--- [Team: {team}] [State: NOT_AFFECTED] ---" for team in teams
+    )
+    if pending:
+        details += "\n[Status: Pending Review]"
+    group = {
+        "id": "CVE-TEAM-COMPLETE",
+        "tags": teams,
+        "affected_versions": [
+            {
+                "project_version": version,
+                "components": [{
+                    "analysis_state": "NOT_AFFECTED",
+                    "analysis_details": details,
+                }],
+            }
+            for version in ["1.0", "2.0"]
+        ],
+    }
+    if missing_finding:
+        group["affected_versions"].append({
+            "project_version": "3.0",
+            "components": [{"analysis_state": "NOT_SET", "analysis_details": ""}],
+        })
+    summaries = summarize_grouped_vulnerabilities([group], {})
+    metadata = summaries[0]["list_metadata"]
+    assert metadata["lifecycle"] == expected
+    assert metadata["is_assessed"] == (expected == "ASSESSED")
+    assert metadata["is_approval_ready"] == (expected == "NEEDS_APPROVAL")
+    index = build_task_group_query_index(summaries)
+    for lifecycle in ["ASSESSED", "INCOMPLETE", "READY_FOR_APPROVAL"]:
+        response = query_task_groups(
+            index, q="", lifecycle=[lifecycle], analysis=[], tag="", vuln_id="",
+            component="", assignee="", dependency=[], versions=[],
+            cvss_mismatch=False, attributed_before_days=None, attribution_mode="older",
+            tmrescore=[], tmrescore_proposal_ids=[], sort_by="id", sort_order="asc",
+            offset=0, limit=10,
+        )
+        matches = lifecycle == expected or (
+            lifecycle == "READY_FOR_APPROVAL" and expected == "NEEDS_APPROVAL"
+        )
+        assert response["filtered"] == int(matches)
 
 
 def test_summary_list_metadata_identifies_multiple_inconsistency_reasons():

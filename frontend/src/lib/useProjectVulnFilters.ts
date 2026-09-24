@@ -17,17 +17,23 @@ import {
 import type { InconsistencyReason } from '../types'
 import { normalizeInconsistencyReasons } from './inconsistency'
 import { useDebouncedValue } from './useDebouncedValue'
+import { ANALYST_WORK_FILTERS, VISIBLE_LIFECYCLE_FILTERS } from './projectLifecycleFilters'
 
-export const DEFAULT_REVIEWER_LIFECYCLE_FILTERS = [
-    'OPEN',
-    'ASSESSED',
-    'ASSESSED_LEGACY',
-    'INCOMPLETE',
-    'INCONSISTENT',
-    'NEEDS_APPROVAL',
-    'READY_FOR_APPROVAL',
-]
-export const DEFAULT_ANALYST_LIFECYCLE_FILTERS = ['OPEN', 'INCOMPLETE', 'INCONSISTENT', 'NEEDS_APPROVAL']
+const normalizeTeamAssessment = (value: string) => ['MISSING', 'DOCUMENTED'].includes(value.toUpperCase()) ? value.toUpperCase() : 'ANY'
+const sameSelection = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length && left.every(value => right.includes(value))
+
+export const ALL_LIFECYCLE_FILTERS = VISIBLE_LIFECYCLE_FILTERS
+export const DEFAULT_REVIEWER_LIFECYCLE_FILTERS = ALL_LIFECYCLE_FILTERS
+export const DEFAULT_ANALYST_LIFECYCLE_FILTERS = ANALYST_WORK_FILTERS
+
+// Migrate retired filter choices in shared URLs to the visible categories.
+const normalizeLifecycleSelection = (values: string[]) => Array.from(new Set(values.filter(value => value !== '__NO_MATCH__').map(value => {
+    if (value === 'NEEDS_APPROVAL') return 'READY_FOR_APPROVAL'
+    if (value === 'ASSESSED_LEGACY') return 'ASSESSED'
+    if (value === 'CONFLICTING' || value === 'INCONSISTENT') return 'INCOMPLETE'
+    return value
+})))
 export const DEFAULT_ANALYSIS_FILTERS = [
     'NOT_SET',
     'EXPLOITABLE',
@@ -71,10 +77,12 @@ const FILTER_QUERY_KEYS = new Set([
     'lifecycle',
     'analysis',
     'inconsistency_reason',
+    'team_assessment',
     'original_severity',
     'ssvc',
     'evidence',
     'tag',
+    'teams',
     'id',
     'cve',
     'component',
@@ -110,7 +118,11 @@ export function useProjectVulnFilters({
     })
     const parsedSmartSearch = computed(() => parseVulnSearchQuery(appliedSmartSearchInput.value))
     const liveParsedSmartSearch = computed(() => parseVulnSearchQuery(smartSearchInput.value))
-    const tagFilter = ref('')
+    const teamFilters = ref<string[]>([])
+    const tagFilter = computed({
+        get: () => teamFilters.value.length === 1 ? teamFilters.value[0]! : '',
+        set: (team: string) => { teamFilters.value = team ? [team] : [] },
+    })
     const idFilter = ref('')
     const componentFilter = ref('')
     const assigneeFilter = ref('')
@@ -127,6 +139,8 @@ export function useProjectVulnFilters({
     const attributionAgeDays = ref<number | null>(null)
     const attributionAgeMode = ref<'older' | 'younger'>('older')
     const lifecycleFilters = ref<string[]>([])
+    const defaultTeamAssessmentFilter = computed(() => currentUserRole.value === 'REVIEWER' ? 'ANY' : 'MISSING')
+    const teamAssessmentFilter = ref('ANY')
     const inconsistencyReasonFilters = ref<InconsistencyReason[]>([])
     const analysisFilters = ref<string[]>([])
     const originalSeverityFilters = ref<string[]>([])
@@ -146,6 +160,8 @@ export function useProjectVulnFilters({
             : DEFAULT_ANALYST_LIFECYCLE_FILTERS
     )
     const defaultAnalysisFilters = DEFAULT_ANALYSIS_FILTERS
+    let lifecycleFollowsRole = true
+    let teamAssessmentFollowsRole = true
 
     const versionFilterList = computed(() => {
         return versionFilterInput.value
@@ -165,6 +181,8 @@ export function useProjectVulnFilters({
     )
 
     const resetFilters = () => {
+        lifecycleFollowsRole = true
+        teamAssessmentFollowsRole = true
         originalSeverityFilters.value = []
         ssvcFilters.value = []
         evidenceFilters.value = []
@@ -172,6 +190,7 @@ export function useProjectVulnFilters({
         lifecycleFilters.value = currentUserRole.value === 'REVIEWER'
             ? [...DEFAULT_REVIEWER_LIFECYCLE_FILTERS]
             : [...DEFAULT_ANALYST_LIFECYCLE_FILTERS]
+        teamAssessmentFilter.value = 'ANY'
         inconsistencyReasonFilters.value = []
         idFilter.value = ''
         tagFilter.value = ''
@@ -213,11 +232,11 @@ export function useProjectVulnFilters({
 
         if (q.q) smartSearchInput.value = queryStringList(q.q).join(' ')
         if (q.lifecycle) {
-            lifecycleFilters.value = queryStringList(q.lifecycle)
+            lifecycleFilters.value = normalizeLifecycleSelection(queryStringList(q.lifecycle))
+            lifecycleFollowsRole = sameSelection(lifecycleFilters.value, defaultLifecycleFilters.value)
         } else {
-            lifecycleFilters.value = currentUserRole.value === 'REVIEWER'
-                ? [...DEFAULT_REVIEWER_LIFECYCLE_FILTERS]
-                : [...DEFAULT_ANALYST_LIFECYCLE_FILTERS]
+            lifecycleFilters.value = [...defaultLifecycleFilters.value]
+            lifecycleFollowsRole = true
         }
 
         if (q.analysis) {
@@ -230,15 +249,15 @@ export function useProjectVulnFilters({
             inconsistencyReasonFilters.value = normalizeInconsistencyReasons(
                 queryStringList(q.inconsistency_reason),
             )
-            if (
-                inconsistencyReasonFilters.value.length > 0
-                && !lifecycleFilters.value.includes('INCONSISTENT')
-            ) {
-                lifecycleFilters.value.push('INCONSISTENT')
-            }
         }
 
-        if (q.tag) tagFilter.value = queryString(q.tag)
+        teamFilters.value = q.teams ? queryStringList(q.teams) : (q.tag ? [queryString(q.tag)] : [])
+        teamAssessmentFilter.value = !teamFilters.value.length ? 'ANY'
+            : q.team_assessment == null ? defaultTeamAssessmentFilter.value
+            : normalizeTeamAssessment(queryString(q.team_assessment))
+        teamAssessmentFollowsRole = !teamFilters.value.length
+            || q.team_assessment == null
+            || teamAssessmentFilter.value === defaultTeamAssessmentFilter.value
         if (q.id) idFilter.value = queryString(q.id)
         else if (q.cve) idFilter.value = queryString(q.cve)
 
@@ -285,6 +304,8 @@ export function useProjectVulnFilters({
         const query: Record<string, string | string[]> = {
             ...(route.query as Record<string, string | string[]>),
         }
+        if (lifecycleFollowsRole) delete query.lifecycle
+        else query.lifecycle = lifecycleFilters.value.length ? lifecycleFilters.value : ['__NO_MATCH__']
         if (originalSeverityFilters.value.length) query.original_severity = originalSeverityFilters.value
         else delete query.original_severity
         if (ssvcFilters.value.length) query.ssvc = ssvcFilters.value
@@ -313,6 +334,11 @@ export function useProjectVulnFilters({
             query.automatic_assessment_rescore = selectedAutomaticAssessmentRescoreFilters.value
         } else delete query.automatic_assessment_rescore
 
+        delete query.tag
+        if (teamFilters.value.length) query.teams = [...teamFilters.value]
+        else delete query.teams
+        if (teamFilters.value.length && !teamAssessmentFollowsRole) query.team_assessment = teamAssessmentFilter.value
+        else delete query.team_assessment
         if (inconsistencyReasonFilters.value.length > 0) query.inconsistency_reason = inconsistencyReasonFilters.value
         else delete query.inconsistency_reason
 
@@ -377,17 +403,19 @@ export function useProjectVulnFilters({
         if (smartSearchInput.value.trim()) query.q = smartSearchInput.value.trim()
         else delete query.q
 
-        if (lifecycleFilters.value.length > 0) query.lifecycle = lifecycleFilters.value
-        else delete query.lifecycle
+        if (lifecycleFollowsRole) delete query.lifecycle
+        else query.lifecycle = lifecycleFilters.value.length ? lifecycleFilters.value : ['__NO_MATCH__']
 
         if (analysisFilters.value.length > 0) query.analysis = analysisFilters.value
         else delete query.analysis
 
+        delete query.tag
+        if (teamFilters.value.length) query.teams = [...teamFilters.value]
+        else delete query.teams
+        if (teamFilters.value.length && !teamAssessmentFollowsRole) query.team_assessment = teamAssessmentFilter.value
+        else delete query.team_assessment
         if (inconsistencyReasonFilters.value.length > 0) query.inconsistency_reason = inconsistencyReasonFilters.value
         else delete query.inconsistency_reason
-
-        if (tagFilter.value) query.tag = tagFilter.value
-        else delete query.tag
 
         if (idFilter.value) query.id = idFilter.value
         else delete query.id
@@ -454,10 +482,12 @@ export function useProjectVulnFilters({
         automaticAssessmentRescoreFilter: selectedAutomaticAssessmentRescoreFilters.value,
         idFilter: idFilter.value,
         tagFilter: tagFilter.value,
+        teamFilters: teamFilters.value,
         componentFilter: componentFilter.value,
         assigneeFilter: assigneeFilter.value,
         versionFilterInput: versionFilterInput.value,
         lifecycleFilters: lifecycleFilters.value,
+        teamAssessmentFilter: teamAssessmentFilter.value,
         inconsistencyReasonFilters: inconsistencyReasonFilters.value,
         analysisFilters: analysisFilters.value,
         cvssVersionMismatchOnly: cvssVersionMismatchOnly.value,
@@ -466,6 +496,10 @@ export function useProjectVulnFilters({
     }))
 
     const handleFilterUpdate = (newFilters: FilterState) => {
+        if (!sameSelection(newFilters.lifecycleFilters, lifecycleFilters.value)) lifecycleFollowsRole = false
+        if (teamFilters.value.length && newFilters.teamAssessmentFilter !== teamAssessmentFilter.value) {
+            teamAssessmentFollowsRole = false
+        }
         originalSeverityFilters.value = newFilters.originalSeverityFilters || []
         ssvcFilters.value = newFilters.ssvcFilters || []
         evidenceFilters.value = newFilters.evidenceFilters || []
@@ -477,28 +511,31 @@ export function useProjectVulnFilters({
         automaticAssessmentOutcomeFilter.value = newFilters.automaticAssessmentOutcomeFilter
         automaticAssessmentRescoreFilter.value = newFilters.automaticAssessmentRescoreFilter
         idFilter.value = newFilters.idFilter
-        tagFilter.value = newFilters.tagFilter
+        const previousTeams = [...teamFilters.value]
+        teamFilters.value = newFilters.tagFilter !== tagFilter.value
+            ? (newFilters.tagFilter ? [newFilters.tagFilter] : [])
+            : [...(newFilters.teamFilters || teamFilters.value)]
+        if (!teamFilters.value.length || !previousTeams.length) teamAssessmentFollowsRole = true
         componentFilter.value = newFilters.componentFilter
         assigneeFilter.value = newFilters.assigneeFilter
         versionFilterInput.value = newFilters.versionFilterInput
         inconsistencyReasonFilters.value = newFilters.inconsistencyReasonFilters || []
-        lifecycleFilters.value = inconsistencyReasonFilters.value.length > 0
-            ? Array.from(new Set([...newFilters.lifecycleFilters, 'INCONSISTENT']))
-            : newFilters.lifecycleFilters
+        lifecycleFilters.value = [...newFilters.lifecycleFilters]
+        teamAssessmentFilter.value = !teamFilters.value.length ? 'ANY'
+            : !previousTeams.length ? defaultTeamAssessmentFilter.value
+            : normalizeTeamAssessment(newFilters.teamAssessmentFilter || 'ANY')
         analysisFilters.value = newFilters.analysisFilters
         cvssVersionMismatchOnly.value = newFilters.cvssVersionMismatchOnly
         attributionAgeDays.value = normalizeAttributionAgeDays(newFilters.attributionAgeDays)
         attributionAgeMode.value = newFilters.attributionAgeMode === 'younger' ? 'younger' : 'older'
     }
 
-    watch(currentUserRole, (newRole, oldRole) => {
-        if (!newRole || newRole === oldRole) return
-
-        analysisFilters.value = [...DEFAULT_ANALYSIS_FILTERS]
-        inconsistencyReasonFilters.value = []
-        lifecycleFilters.value = newRole === 'REVIEWER'
-            ? [...DEFAULT_REVIEWER_LIFECYCLE_FILTERS]
-            : [...DEFAULT_ANALYST_LIFECYCLE_FILTERS]
+    watch(currentUserRole, (role, previousRole) => {
+        if (!filtersReady.value || role === previousRole) return
+        if (lifecycleFollowsRole) lifecycleFilters.value = [...defaultLifecycleFilters.value]
+        if (teamAssessmentFollowsRole && teamFilters.value.length) {
+            teamAssessmentFilter.value = defaultTeamAssessmentFilter.value
+        }
     })
 
     watch([
@@ -507,9 +544,11 @@ export function useProjectVulnFilters({
         evidenceFilters,
         smartSearchInput,
         lifecycleFilters,
+        teamAssessmentFilter,
         inconsistencyReasonFilters,
         analysisFilters,
         tagFilter,
+        teamFilters,
         idFilter,
         componentFilter,
         assigneeFilter,
@@ -551,6 +590,7 @@ export function useProjectVulnFilters({
         parsedSmartSearch,
         liveParsedSmartSearch,
         tagFilter,
+        teamFilters,
         idFilter,
         componentFilter,
         assigneeFilter,
@@ -563,6 +603,7 @@ export function useProjectVulnFilters({
         attributionAgeDays,
         attributionAgeMode,
         lifecycleFilters,
+        teamAssessmentFilter,
         inconsistencyReasonFilters,
         analysisFilters,
         filtersReady,
@@ -581,6 +622,7 @@ export function useProjectVulnFilters({
         resetFilters,
         filterState,
         handleFilterUpdate,
+        defaultTeamAssessmentFilter,
         defaultLifecycleFilters,
         defaultAnalysisFilters,
     }

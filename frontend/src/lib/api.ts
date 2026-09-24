@@ -303,6 +303,8 @@ export interface TaskVulnGroupListQuery {
     analysis?: string[];
     tag?: string;
     team?: string;
+    teams?: string[];
+    team_assessment?: string;
     id?: string;
     component?: string;
     assignee?: string;
@@ -329,7 +331,7 @@ export interface TaskVulnGroupListQuery {
 export type BulkWorkflowFilters = Omit<
     TaskVulnGroupListQuery,
     'sort' | 'order' | 'offset' | 'cursor' | 'limit' | 'include_counts' | 'generation'
->;
+> & { takeover_from?: string; takeover_to?: string; takeover_components?: string[] };
 
 export interface BulkWorkflowMetadata {
     id: string;
@@ -349,6 +351,7 @@ export interface BulkWorkflowSummaryItem extends BulkWorkflowMetadata {
 export interface BulkWorkflowSummaryResponse {
     task_id: string;
     workflows: BulkWorkflowSummaryItem[];
+    team_takeover_component_options?: string[];
 }
 
 export interface BulkWorkflowPreviewItem extends Record<string, any> {
@@ -396,6 +399,7 @@ export interface TaskVulnGroupListCounts {
     total: number;
     lifecycle: Record<string, number>;
     inconsistency_reason?: Record<string, number>;
+    team_assessment?: Record<string, number>;
     analysis: Record<string, number>;
     dependency_relationship: {
         direct: number;
@@ -452,6 +456,7 @@ export interface TaskVulnGroupListResponse {
     total: number;
     filtered: number;
     counts?: {
+        facets?: TaskVulnGroupListCounts;
         all: TaskVulnGroupListCounts;
         filtered: TaskVulnGroupListCounts;
     };

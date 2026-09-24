@@ -1709,3 +1709,219 @@ def test_application_provenance_records_success_queue_and_failure():
 
     assert [call["status"] for call in store.calls] == ["applied", "queued", "failed"]
     assert all(call["payload_fingerprint"] for call in store.calls)
+
+
+def _takeover_group(*, details: str, tags: list[str] | None = None, group_id: str = "CVE-TAKEOVER"):
+    return {
+        "id": group_id,
+        "title": group_id,
+        "tags": tags if tags is not None else ["TeamB"],
+        "affected_versions": [{
+            "project_name": "Project",
+            "project_version": "1.0",
+            "components": [{
+                "project_uuid": "project-1",
+                "component_uuid": "component-1",
+                "component_name": "library-a",
+                "vulnerability_uuid": "vulnerability-1",
+                "finding_uuid": "finding-1",
+                "tags": tags if tags is not None else ["TeamB"],
+                "analysis_state": "EXPLOITABLE",
+                "analysis_details": details,
+                "justification": "NOT_SET",
+            }],
+        }],
+    }
+
+
+def test_team_takeover_copies_former_owner_as_pending_and_retires_old_state():
+    from dtvp.bulk_workflows.team_takeover import (
+        build_team_takeover_payloads,
+        build_team_takeover_preview,
+    )
+    from dtvp.logic import _parse_assessment_blocks, calculate_aggregated_state
+
+    group = _takeover_group(details=(
+        "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] "
+        "[Justification: NOT_SET] [Assigned: alice] ---\n"
+        "Earlier rationale"
+    ))
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+        takeover_components=["library-a"],
+    )
+    preview = build_team_takeover_preview(context)
+    assert preview["items"][0]["eligible_finding_count"] == 1
+    payloads, skipped = build_team_takeover_payloads(context, ["CVE-TAKEOVER"])
+    assert skipped == {}
+    assert len(payloads) == 1
+    details = payloads[0][1]["details"]
+    assert "[Team: TeamA]" in details and "[Historical: yes]" in details
+    assert "[Team: TeamB]" in details and "[Copied From: TeamA]" in details
+    assert "[Assigned: alice]" in details
+    assert "[Status: Pending Review]" in details
+    _shared, blocks = _parse_assessment_blocks(details)
+    assert blocks[0]["historical"] is True
+    assert blocks[1]["assigned"] == []
+    assert blocks[1]["details"] == "Earlier rationale"
+    assert calculate_aggregated_state(details.replace("[Team: TeamB] [State: EXPLOITABLE]", "[Team: TeamB] [State: RESOLVED]")) == "RESOLVED"
+
+
+def test_team_takeover_skips_existing_target_and_conflicting_sources():
+    from dtvp.bulk_workflows.team_takeover import build_team_takeover_preview
+
+    source = "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] ---\nEarlier rationale"
+    existing = _takeover_group(details=source + "\n\n--- [Team: TeamB] [State: RESOLVED] ---\nCurrent")
+    conflicting = _takeover_group(details=source, group_id="CVE-CONFLICT")
+    other = dict(conflicting["affected_versions"][0]["components"][0])
+    other.update({
+        "component_uuid": "component-2",
+        "finding_uuid": "finding-2",
+        "analysis_details": source.replace("Earlier rationale", "Different rationale"),
+    })
+    conflicting["affected_versions"][0]["components"].append(other)
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[existing, conflicting], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+        takeover_components=["library-a"],
+    )
+    preview = build_team_takeover_preview(context)
+    assert all(item["eligible_finding_count"] == 0 for item in preview["items"])
+    assert preview["summary"]["target_exists"] == 1
+    assert preview["summary"]["conflicting_source"] == 2
+
+
+def test_team_takeover_skips_findings_still_owned_by_source():
+    from dtvp.bulk_workflows.team_takeover import build_team_takeover_preview
+
+    group = _takeover_group(details="--- [Team: TeamA] [State: RESOLVED] ---\nEarlier")
+    group["affected_versions"][0]["components"][0]["tags"] = ["TeamA", "TeamB"]
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+        takeover_components=["library-a"],
+    )
+    preview = build_team_takeover_preview(context)
+    assert preview["items"][0]["eligible_finding_count"] == 0
+    assert preview["summary"]["source_still_responsible"] == 1
+
+
+def test_team_takeover_only_updates_selected_components():
+    from dtvp.bulk_workflows.team_takeover import (
+        build_team_takeover_payloads,
+        build_team_takeover_preview,
+    )
+
+    source = "--- [Team: TeamA] [State: RESOLVED] ---\nEarlier"
+    group = _takeover_group(details=source)
+    outside = dict(group["affected_versions"][0]["components"][0])
+    outside.update({
+        "component_uuid": "component-2",
+        "component_name": "library-b",
+        "finding_uuid": "finding-2",
+        "tags": ["TeamA", "TeamB"],
+    })
+    group["affected_versions"][0]["components"].append(outside)
+    group["tags"] = ["TeamA", "TeamB"]
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+        takeover_components=["library-a"],
+    )
+    preview = build_team_takeover_preview(context)
+    assert preview["items"][0]["finding_count"] == 1
+    assert preview["items"][0]["components"] == ["library-a"]
+    payloads, skipped = build_team_takeover_payloads(context, [group["id"]])
+    assert skipped == {}
+    assert [instance["finding_uuid"] for instance, _ in payloads] == ["finding-1"]
+    empty_scope = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+    )
+    assert build_team_takeover_preview(empty_scope)["items"] == []
+    assert build_team_takeover_payloads(empty_scope, [group["id"]])[0] == []
+
+
+def test_team_takeover_scopes_by_mapped_owner_component():
+    from dtvp.bulk_workflows.team_takeover import (
+        build_team_takeover_payloads,
+        build_team_takeover_preview,
+        team_takeover_component_options,
+    )
+
+    group = _takeover_group(details="--- [Team: TeamA] [State: RESOLVED] ---\nEarlier")
+    instance = group["affected_versions"][0]["components"][0]
+    instance["component_name"] = "multer"
+    instance["owner_mapping_keys"] = ["@gehc/nest-back-pack"]
+    other = dict(instance, component_uuid="component-2", finding_uuid="finding-2",
+                 owner_mapping_keys=["@gehc/other-pack"])
+    group["affected_versions"][0]["components"].append(other)
+    assert team_takeover_component_options([group]) == [
+        "@gehc/nest-back-pack", "@gehc/other-pack",
+    ]
+
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+        takeover_components=["@gehc/nest-back-pack"],
+    )
+    preview = build_team_takeover_preview(context)
+    assert preview["summary"]["eligible_findings"] == 1
+    assert preview["items"][0]["finding_count"] == 1
+    payloads, skipped = build_team_takeover_payloads(context, [group["id"]])
+    assert skipped == {}
+    assert [instance["component_name"] for instance, _ in payloads] == ["multer"]
+
+    wrong_scope = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+        takeover_components=["multer"],
+    )
+    assert build_team_takeover_preview(wrong_scope)["items"] == []
+
+
+def test_historical_blocks_do_not_count_as_current_team_coverage():
+    details = (
+        "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] "
+        "[Historical: yes] ---\nFormer owner\n\n"
+        "--- [Team: TeamB] [State: RESOLVED] [Assessed By: bob] "
+        "[Copied From: TeamA] ---\nCurrent owner"
+    )
+    group = _takeover_group(details=details)
+    group["affected_versions"][0]["components"][0]["analysis_state"] = "RESOLVED"
+    metadata = summarize_grouped_vulnerabilities([group], {})[0]["list_metadata"]
+    assert metadata["assessed_teams"] == ["TeamB"]
+    assert metadata["technical_state"] == "RESOLVED"
+    assert metadata["lifecycle"] == "ASSESSED"
+
+
+def test_historical_marker_survives_ordinary_backend_assessment_edit():
+    from dtvp.logic import process_assessment_details
+
+    existing = (
+        "--- [Team: TeamA] [State: EXPLOITABLE] [Assessed By: alice] "
+        "[Historical: yes] ---\nFormer rationale\n\n"
+        "--- [Team: TeamB] [State: RESOLVED] [Assessed By: bob] "
+        "[Copied From: TeamA] ---\nCurrent rationale"
+    )
+    updated, state = process_assessment_details(
+        "Updated rationale", "bob", "ANALYST", team="TeamB",
+        state="RESOLVED", existing_details=existing,
+    )
+    assert "[Historical: yes]" in updated
+    assert "[Copied From: TeamA]" in updated
+    assert state == "RESOLVED"
+
+
+def test_team_takeover_does_not_duplicate_a_current_team_alias():
+    from dtvp.bulk_workflows.team_takeover import build_team_takeover_preview
+
+    group = _takeover_group(details="--- [Team: TeamA] [State: RESOLVED] ---\nOlder name")
+    context = BulkWorkflowContext(
+        task_id="task-1", groups=[group], user="reviewer",
+        takeover_from="TeamA", takeover_to="TeamB",
+        takeover_components=["library-a"],
+        team_mapping={"component": ["TeamB", "TeamA"]},
+    )
+    assert build_team_takeover_preview(context)["items"] == []

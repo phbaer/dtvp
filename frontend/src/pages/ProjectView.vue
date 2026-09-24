@@ -54,10 +54,12 @@ import {
     deriveVulnListGroupLookup,
     deriveVulnListFilterModel,
     deriveVulnListResultCounts,
+    deriveVulnListFacetCounts,
     sortVulnListItems,
 } from '../lib/vulnListViewModel'
 import { deriveVulnListFacetsFromTaskCounts } from '../lib/vulnListFacets'
 import { INCONSISTENCY_REASON_OPTIONS } from '../lib/inconsistency'
+import { resolveTeamTerm } from '../lib/teamSelection'
 import { buildTeamAliasGroups } from '../lib/team-mapping'
 import {
     AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
@@ -496,6 +498,7 @@ const {
     parsedSmartSearch,
     liveParsedSmartSearch,
     tagFilter,
+    teamFilters,
     idFilter,
     componentFilter,
     assigneeFilter,
@@ -505,6 +508,7 @@ const {
     attributionAgeDays,
     attributionAgeMode,
     lifecycleFilters,
+    teamAssessmentFilter,
     inconsistencyReasonFilters,
     originalSeverityFilters,
     ssvcFilters,
@@ -525,6 +529,7 @@ const {
     resetFilters,
     filterState,
     handleFilterUpdate,
+    defaultTeamAssessmentFilter,
     defaultLifecycleFilters,
     defaultAnalysisFilters,
     automaticAssessmentFilter,
@@ -560,12 +565,9 @@ const showFilterDrawer = ref(false)
 
 const LIFECYCLE_OPTIONS = [
     { value: 'OPEN', label: 'Open', color: 'bg-red-500', description: 'No assessment has been recorded yet' },
-    { value: 'ASSESSED', label: 'Assessed', color: 'bg-green-600', description: 'Approved globally or covered by all required team assessments' },
-    { value: 'ASSESSED_LEGACY', label: 'Assessed (Legacy)', color: 'bg-sky-600', description: 'Legacy assessments without structured DTvP format' },
-    { value: 'INCOMPLETE', label: 'Incomplete', color: 'bg-amber-500', description: 'Some assessment for some version is missing, the others are identical' },
-    { value: 'INCONSISTENT', label: 'Inconsistent', color: 'bg-indigo-500', description: 'Assessment states, team blocks, details, or rescoring metadata disagree' },
-    { value: 'NEEDS_APPROVAL', label: 'Needs Approval', color: 'bg-purple-500', description: 'Assessment is awaiting reviewer approval' },
-    { value: 'READY_FOR_APPROVAL', label: 'Ready for Approval', color: 'bg-violet-500', description: 'All required assessments are documented and only reviewer approval remains' }
+    { value: 'INCOMPLETE', label: 'Incomplete', color: 'bg-amber-500', description: 'Missing assessment coverage or conflicting data that needs repair' },
+    { value: 'READY_FOR_APPROVAL', label: 'Ready for Approval', color: 'bg-violet-500', description: 'All required assessments are documented and only reviewer approval remains' },
+    { value: 'ASSESSED', label: 'Assessed', color: 'bg-green-600', description: 'Complete assessments with no pending approval, including legacy assessments' },
 ]
 
 const ANALYSIS_OPTIONS = [
@@ -593,6 +595,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     parsedSearch: parsedSmartSearch.value,
     filtersReady: filtersReady.value,
     lifecycleFilters: lifecycleFilters.value,
+    teamAssessmentFilter: teamAssessmentFilter.value,
     inconsistencyReasonFilters: inconsistencyReasonFilters.value,
     originalSeverityFilters: originalSeverityFilters.value,
     ssvcFilters: ssvcFilters.value,
@@ -601,6 +604,7 @@ const taskGroupListQuery = computed<TaskVulnGroupListQuery>(() => buildTaskVulnG
     analysisFilters: analysisFilters.value,
     defaultAnalysisFilters,
     tagFilter: tagFilter.value,
+    teamFilters: teamFilters.value,
     idFilter: idFilter.value,
     componentFilter: componentFilter.value,
     assigneeFilter: assigneeFilter.value,
@@ -696,11 +700,28 @@ const {
     dependencyOptions: DEPENDENCY_OPTIONS,
 })
 
+// Tokens become visible exact selections; free text never changes team scope.
+const pendingTeamSelections = computed(() => parsedSmartSearch.value.chips
+    .filter(chip => chip.field === 'team')
+    .map(chip => ({ chip, ...resolveTeamTerm(chip.value, taskWideFacets.value.teams, teamAliasGroups.value) })))
+const selectTeamToken = (raw: string, team?: string) => {
+    if (team) handleFilterUpdate({ ...filterState.value, teamFilters: [...new Set([...teamFilters.value, team])] })
+    smartSearchInput.value = smartSearchInput.value.replace(raw, '').trim()
+    flushSmartSearchFilter()
+}
+watch([pendingTeamSelections, loading], ([selections, isLoading]) => {
+    if (isLoading) return
+    // Do not resolve an older debounced query while the user is still editing it.
+    if (liveParsedSmartSearch.value.teamTerms.join('\0') !== parsedSmartSearch.value.teamTerms.join('\0')) return
+    const selection = selections.find(selection => selection.resolved)
+    if (selection?.resolved) selectTeamToken(selection.chip.raw, selection.resolved)
+})
 const isTaskWindowListActive = computed(() => !!currentVulnTaskId.value)
 
-const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
+const listFilterOptions = computed(() => ({
     smartSearch: parsedSmartSearch.value,
     tagFilter: tagFilter.value,
+    teamFilters: teamFilters.value,
     idFilter: idFilter.value,
     componentFilter: componentFilter.value,
     assigneeFilter: assigneeFilter.value,
@@ -709,6 +730,7 @@ const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
     automaticAssessmentFilter: selectedAutomaticAssessmentFilters.value,
     automaticAssessmentOutcomeFilter: selectedAutomaticAssessmentOutcomeFilters.value,
     automaticAssessmentRescoreFilter: selectedAutomaticAssessmentRescoreFilters.value,
+    teamAssessmentFilter: teamAssessmentFilter.value,
     inconsistencyReasonFilter: inconsistencyReasonFilters.value,
     originalSeverityFilters: originalSeverityFilters.value,
     ssvcFilters: ssvcFilters.value,
@@ -719,7 +741,8 @@ const listView = computed(() => deriveVulnListFilterModel(listItems.value, {
     attributionAgeMode: attributionAgeMode.value,
     lifecycleFilters: lifecycleFilters.value,
     analysisFilters: analysisFilters.value,
-}, listStaticStats.value))
+}))
+const listView = computed(() => deriveVulnListFilterModel(listItems.value, listFilterOptions.value, listStaticStats.value))
 
 const sortedItems = computed(() =>
     isTaskWindowListActive.value
@@ -890,6 +913,10 @@ const visibleResultCounts = computed<TaskVulnGroupListCounts>(() =>
         : localVisibleResultCounts.value
 )
 
+const visibleFacetCounts = computed(() => currentVulnTaskId.value && taskListCounts.value
+    ? taskListCounts.value.facets || taskListCounts.value.filtered
+    : deriveVulnListFacetCounts(listItems.value, listFilterOptions.value, listStaticStats.value))
+
 const resultCountsUpdating = computed(() =>
     !!currentVulnTaskId.value && taskListWindowLoading.value
 )
@@ -954,6 +981,7 @@ const {
     fetchStats,
     isTaskWindowActive: isTaskWindowListActive,
     refreshTaskWindow: refreshActiveTaskWindowAndDetails,
+    refreshOwnership: fetchVulns,
 })
 
 const reloadingGroupIds = ref<Set<string>>(new Set())
@@ -1181,6 +1209,7 @@ defineExpose({ filteredGroups })
 const activeFilterChips = computed(() => buildActiveFilterChips({
     lifecycleFilters: lifecycleFilters.value,
     lifecycleOptions: LIFECYCLE_OPTIONS,
+    teamAssessmentFilter: teamAssessmentFilter.value,
     inconsistencyReasonFilters: inconsistencyReasonFilters.value,
     inconsistencyReasonOptions: INCONSISTENCY_REASON_OPTIONS,
     originalSeverityFilters: originalSeverityFilters.value,
@@ -1192,6 +1221,7 @@ const activeFilterChips = computed(() => buildActiveFilterChips({
     dependencyOptions: DEPENDENCY_OPTIONS,
     idFilter: idFilter.value,
     tagFilter: tagFilter.value,
+    teamFilters: teamFilters.value,
     componentFilter: componentFilter.value,
     assigneeFilter: assigneeFilter.value,
     versionFilters: versionFilterList.value,
@@ -1216,6 +1246,9 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
         case 'lifecycle':
             lifecycleFilters.value = allLifecycleFilterValues.value
             break
+        case 'teamAssessment':
+            teamAssessmentFilter.value = 'ANY'
+            break
         case 'inconsistencyReason':
             inconsistencyReasonFilters.value = []
             break
@@ -1229,7 +1262,8 @@ const removeActiveFilterChip = (key: ActiveFilterChipKey) => {
             idFilter.value = ''
             break
         case 'tag':
-            tagFilter.value = ''
+            teamFilters.value = []
+            teamAssessmentFilter.value = 'ANY'
             break
         case 'component':
             componentFilter.value = ''
@@ -1269,6 +1303,7 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     smartSearchInput: smartSearchInput.value,
     idFilter: idFilter.value,
     tagFilter: tagFilter.value,
+    teamFilters: teamFilters.value,
     componentFilter: componentFilter.value,
     assigneeFilter: assigneeFilter.value,
     versionFilters: versionFilterList.value,
@@ -1277,7 +1312,9 @@ const hasCustomFilterState = computed(() => hasCustomProjectVulnFilterState({
     sortBy: sortBy.value,
     sortOrder: sortOrder.value,
     lifecycleFilters: lifecycleFilters.value,
+    teamAssessmentFilter: teamAssessmentFilter.value,
     inconsistencyReasonFilters: inconsistencyReasonFilters.value,
+    defaultTeamAssessmentFilter: teamFilters.value.length ? defaultTeamAssessmentFilter.value : 'ANY',
     defaultLifecycleFilters: defaultLifecycleFilters.value,
     analysisFilters: analysisFilters.value,
     defaultAnalysisFilters,
@@ -1301,6 +1338,7 @@ const filterSidebarProps = computed(() => ({
     analysisOptions: ANALYSIS_OPTIONS,
     copiedUrl: copiedUrl.value,
     resultCounts: visibleResultCounts.value,
+    facetCounts: visibleFacetCounts.value,
     countsUpdating: resultCountsUpdating.value,
     teamOptions: taskWideFacets.value.teams,
     teamAliases: teamAliasGroups.value,
@@ -1403,6 +1441,11 @@ watch(currentUserRole, (role) => {
         @keydown.esc="showSearchTokenMenu = false"
     >
         <div class="flex flex-col gap-2">
+            <div v-for="selection in pendingTeamSelections.filter(item => !item.resolved)" :key="selection.chip.raw" class="mb-2 rounded-xl border border-white/10 p-3 text-sm" role="status">
+                <p>{{ selection.matches.length ? `Choose a team for ${selection.chip.raw}:` : `No team matches ${selection.chip.value}.` }}</p>
+                <button v-for="team in selection.matches" :key="team" type="button" class="m-1 rounded border border-white/20 px-2 py-1 focus-visible:outline focus-visible:outline-blue-400" @click="selectTeamToken(selection.chip.raw, team)">{{ team }}</button>
+                <button type="button" class="m-1 underline" @click="selectTeamToken(selection.chip.raw)">Remove team search</button>
+            </div>
             <div class="flex items-center gap-2">
                 <button
                     v-if="!isFilterRailVisible"
@@ -1801,7 +1844,11 @@ watch(currentUserRole, (role) => {
                                 </div>
                             </div>
                         </div>
-                        <div v-else-if="filteredGroupCount === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">No vulnerabilities found matching criteria.</div>
+                        <div v-else-if="filteredGroupCount === 0" class="text-gray-500 text-center py-16 font-medium min-h-[20rem] w-full min-w-full">
+                            <p>No vulnerabilities found matching criteria.</p>
+                            <p class="mt-2 text-sm">Filters combine. Try another overall status or assessment choice.</p>
+                            <button type="button" class="mt-3 text-blue-400 underline" @click="resetFilters">Clear filters</button>
+                        </div>
                     </div>
                     <div v-else class="space-y-4">
                         <div v-if="statsLoading" class="text-center py-16">

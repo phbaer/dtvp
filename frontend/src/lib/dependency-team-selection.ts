@@ -1,4 +1,4 @@
-import type { Instance, TagValue, Tags } from '../types'
+import type { TagValue, Tags } from '../types'
 import { tagToString } from './assessment-helpers'
 import {
     findTeamMappingMatch,
@@ -158,53 +158,6 @@ export const selectRepresentativePaths = (
         })
         .slice(0, limit)
         .map(parts => parts.join(' -> '))
-}
-
-export const getAffectedTeamsFromPaths = (
-    paths: string[] | undefined,
-    teamMapping: TeamMapping | undefined,
-    limit: number = DEFAULT_REPRESENTATIVE_PATH_LIMIT,
-): string[] => {
-    const teams = new Set<string>()
-    selectRepresentativePaths(paths, teamMapping, limit).forEach((path) => {
-        const firstMapped = getFirstMappedTeamOnPath(getPathParts(path), teamMapping)
-        if (firstMapped?.team) teams.add(firstMapped.team)
-    })
-    return Array.from(teams)
-}
-
-export const getClosestAffectedTeamsForInstance = (
-    inst: Pick<Instance, 'component_name' | 'component_group' | 'component_purl' | 'dependency_chains'>,
-    teamMapping: TeamMapping | undefined,
-): string[] => {
-    const directTeam = getPrimaryTeamForComponent(
-        inst.component_name,
-        teamMapping,
-        inst.component_group,
-        'component_group' in inst,
-        inst.component_purl,
-    )
-    if (directTeam) return [directTeam]
-
-    return getAffectedTeamsFromPaths(inst.dependency_chains, teamMapping)
-}
-
-export const getClosestAffectedTeamsForInstances = (
-    instances: Array<Pick<Instance, 'component_name' | 'component_group' | 'component_purl' | 'dependency_chains'>>,
-    teamMapping: TeamMapping | undefined,
-): string[] => {
-    const teams = new Set<string>()
-    instances.forEach((inst) => {
-        getClosestAffectedTeamsForInstance(inst, teamMapping).forEach(team => teams.add(team))
-    })
-    return Array.from(teams)
-}
-
-export const getDerivedGroupTags = (
-    group: Pick<Instance, 'component_name' | 'component_group' | 'component_purl' | 'dependency_chains'>[] | undefined,
-    teamMapping: TeamMapping | undefined,
-): string[] => {
-    return getClosestAffectedTeamsForInstances(group || [], teamMapping)
 }
 
 export const normalizeLegacyTags = (

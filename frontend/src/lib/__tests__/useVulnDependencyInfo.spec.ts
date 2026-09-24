@@ -22,6 +22,7 @@ describe('useVulnDependencyInfo', () => {
                         component_uuid: 'component-2',
                         vulnerability_uuid: 'vuln-2',
                         finding_uuid: 'finding-2',
+                        tags: ['TEAM-DIRECT'],
                         analysis_state: 'NOT_SET',
                         is_suppressed: false,
                         is_direct_dependency: true,
@@ -43,6 +44,7 @@ describe('useVulnDependencyInfo', () => {
                         component_uuid: 'component-1',
                         vulnerability_uuid: 'vuln-1',
                         finding_uuid: 'finding-1',
+                        tags: ['TEAM-SHARED'],
                         analysis_state: 'NOT_SET',
                         is_suppressed: false,
                         is_direct_dependency: false,
@@ -70,6 +72,29 @@ describe('useVulnDependencyInfo', () => {
         expect(info.dependencyRelationship.value).toBe('DIRECT')
         expect(info.sortedAffectedProjectVersions.value).toEqual(['1.5.0', '2.0.0'])
         expect(info.normalizedTags.value).toEqual(['TEAM-DIRECT', 'TEAM-SHARED'])
+    })
+
+    it('keeps saved scoped-package ownership when path names cannot resolve the group', () => {
+        const group = ref(createGroup())
+        group.value.tags = ['TeamB']
+        group.value.affected_versions[0]!.components[0]!.tags = ['TeamB']
+        group.value.affected_versions[0]!.components[0]!.dependency_chains = [
+            'log4j-core -> nest-back-pack -> datastudio-be',
+        ]
+        group.value.affected_versions = [group.value.affected_versions[0]!]
+        const teamMapping = ref<Record<string, string | string[]>>({
+            '@gehc/nest-back-pack': 'TeamB',
+            'datastudio-be': 'TeamC',
+        })
+        const info = useVulnDependencyInfo({
+            group: computed(() => group.value),
+            teamMapping,
+            teamFilter: ref('TeamB'),
+        })
+
+        expect(info.effectiveTags.value).toEqual(['TeamB'])
+        expect(info.visibleInstances.value).toHaveLength(1)
+        expect(info.triggeringTaggedComponents.value).toEqual([])
     })
 
     it('builds tagged component summaries from direct mappings and dependency paths', () => {

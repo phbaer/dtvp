@@ -20,6 +20,9 @@ class BulkWorkflowContext:
     task_id: str
     groups: list[dict[str, Any]]
     user: str
+    takeover_from: str = ""
+    takeover_to: str = ""
+    takeover_components: list[str] = field(default_factory=list)
     team_mapping: dict[str, Any] = field(default_factory=dict)
     rescore_rules: dict[str, Any] = field(default_factory=dict)
     result_store: Any = None

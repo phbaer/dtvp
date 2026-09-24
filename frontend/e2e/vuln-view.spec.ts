@@ -127,6 +127,28 @@ test.describe('Vulnerability View and Rescoring', () => {
             }
         ];
 
+        // Explicit server classifications exercise the mutually exclusive UI filters.
+        for (const [id, lifecycle, pending] of [
+            ['CVE-READY', 'NEEDS_APPROVAL', true],
+            ['CVE-PARTIAL', 'INCOMPLETE', true],
+            ['CVE-LEGACY', 'ASSESSED_LEGACY', false],
+        ] as const) {
+            const fixture = structuredClone(taskGroups[1]!);
+            fixture.id = id;
+            fixture.list_metadata = {
+                ...fixture.list_metadata!, lifecycle,
+                is_pending: pending,
+                // Pending work remains open in team counters, not in the Open filter.
+                is_open: pending,
+            };
+            if (pending) {
+                fixture.affected_versions[0]!.components[0]!.analysis_details =
+                    '--- [Team: Security] [State: RESOLVED] ---\n[Status: Pending Review]';
+            }
+            if (lifecycle === 'INCOMPLETE') fixture.tags = ['Security', 'Other'];
+            taskGroups.push(fixture);
+        }
+
         // Mock Task Start
         await page.route('**/api/tasks/group-vulns*', async (route) => {
             await route.fulfill({
@@ -199,7 +221,7 @@ test.describe('Vulnerability View and Rescoring', () => {
 
     test('should render vulnerability row with lifecycle and team context', async ({ page }) => {
         // Go to project view
-        await page.goto('/project/TestProject');
+        await page.goto('/project/TestProject?lifecycle=OPEN&lifecycle=ASSESSED');
         await page.waitForLoadState('networkidle');
 
         const assessedCard = page.locator('.vuln-card').filter({ hasText: /CVE-2023-ASSESSED/ });
@@ -214,7 +236,144 @@ test.describe('Vulnerability View and Rescoring', () => {
         await expect(vulnCard).toBeVisible({ timeout: 20000 });
 
         await expect(vulnCard.getByText('Security')).toBeVisible();
-        await expect(vulnCard.getByTestId('lifecycle-badge')).toHaveText(/Open|Assessed|Incomplete|Inconsistent/);
+        await expect(vulnCard.getByTestId('lifecycle-badge')).toHaveText('Open');
         await expect(vulnCard.getByTestId('base-score-value')).toBeVisible();
     });
+    test('changing team assessment preserves lifecycle selections and survives reload', async ({ page }) => {
+        await page.goto('/project/TestProject?q=team%3ASecurity&lifecycle=READY_FOR_APPROVAL');
+        const cards = page.locator('.vuln-card');
+        const coverage = page.getByRole('combobox', { name: 'Assessment for selected teams', exact: true });
+        await expect(cards.filter({ hasText: 'CVE-READY' })).toBeVisible({ timeout: 15000 });
+        await coverage.selectOption('DOCUMENTED');
+        await expect(page).toHaveURL(/team_assessment=DOCUMENTED/);
+        expect(new URL(page.url()).searchParams.getAll('lifecycle')).toEqual(['READY_FOR_APPROVAL']);
+        await expect(cards).toHaveCount(1);
+        await expect(cards.filter({ hasText: 'CVE-READY' })).toBeVisible();
+
+        await page.goto('/project/TestProject?q=team%3ASecurity&lifecycle=INCOMPLETE');
+        for (const selection of ['DOCUMENTED', 'MISSING', 'ANY', 'DOCUMENTED']) {
+            await coverage.selectOption(selection);
+            await expect.poll(() => new URL(page.url()).searchParams.get('team_assessment') || 'ANY').toBe(selection);
+            if (selection === 'MISSING') await expect(cards).toHaveCount(0);
+            else await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+            await expect(page).toHaveURL(/lifecycle=INCOMPLETE/);
+            expect(new URL(page.url()).searchParams.getAll('lifecycle')).toEqual(['INCOMPLETE']);
+        }
+        await page.reload();
+        await expect(coverage).toHaveValue('DOCUMENTED');
+        await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+        await expect(cards).toHaveCount(1);
+        expect(new URL(page.url()).searchParams.getAll('lifecycle')).toEqual(['INCOMPLETE']);
+    });
+
+    test('Incomplete includes documented teams with Any before and after toggling coverage', async ({ page }) => {
+        const cards = page.locator('.vuln-card');
+        const coverage = page.getByRole('combobox', { name: 'Assessment for selected teams', exact: true });
+        for (const query of ['tag=Security', 'q=team%3ASecurity']) {
+            await page.goto('/project/TestProject?lifecycle=INCOMPLETE&' + query);
+            await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible({ timeout: 15000 });
+            await expect(coverage).toHaveValue('ANY');
+            await expect(cards).toHaveCount(1);
+            await coverage.selectOption('MISSING');
+            await expect(cards).toHaveCount(0);
+            await coverage.selectOption('ANY');
+            await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+            await page.reload();
+            await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+        }
+    });
+
+    test('plain team search keeps assessment inactive; explicit selection enables it', async ({ page }) => {
+        await page.goto('/project/TestProject?q=Security&lifecycle=INCOMPLETE');
+        const cards = page.locator('.vuln-card');
+        const coverage = page.getByRole('combobox', { name: 'Assessment for selected teams', exact: true });
+        await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+        await expect(coverage).toBeDisabled();
+        const teams = page.getByTestId('team-filter-select');
+        await teams.locator('summary').focus();
+        await page.keyboard.press('Enter');
+        await teams.getByRole('checkbox', { name: 'Security', exact: true }).check();
+        await expect(coverage).toBeEnabled();
+        await coverage.selectOption('MISSING');
+        await expect(cards).toHaveCount(0);
+        await coverage.selectOption('DOCUMENTED');
+        await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+        await teams.getByRole('checkbox', { name: 'Other', exact: true }).check();
+        await expect(coverage).toHaveValue('DOCUMENTED');
+        await expect(cards).toHaveCount(0);
+        await coverage.selectOption('MISSING');
+        await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+        await teams.getByRole('button', { name: 'Clear teams' }).click();
+        await expect(coverage).toBeDisabled();
+        await expect(coverage).toHaveValue('ANY');
+        await expect(cards.filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+    });
+
+    test('analysts default to not recorded only after selecting a team', async ({ page }) => {
+        await page.route('**/auth/me', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ username: 'testuser', role: 'ANALYST' }) }));
+        await page.goto('/project/TestProject?q=Security');
+        const coverage = page.getByRole('combobox', { name: 'Assessment for selected teams', exact: true });
+        await expect(coverage).toBeDisabled();
+        await expect(page.locator('.vuln-card')).toHaveCount(2);
+        const teams = page.getByTestId('team-filter-select');
+        await teams.locator('summary').click();
+        await teams.getByRole('checkbox', { name: 'Security', exact: true }).check();
+        await expect(coverage).toHaveValue('MISSING');
+        await expect(page.locator('.vuln-card')).toHaveCount(1);
+        await coverage.selectOption('DOCUMENTED');
+        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+        await expect(page.locator('.vuln-card')).toHaveCount(1);
+        await expect(page).toHaveURL(/team_assessment=DOCUMENTED/);
+        await expect.poll(() => new URL(page.url()).searchParams.getAll('teams')).toEqual(['Security']);
+        await page.reload();
+        await expect(coverage).toHaveValue('DOCUMENTED');
+        await expect(page.locator('.vuln-card')).toHaveCount(1);
+        await page.getByTestId('workflow-view-all').click();
+        await expect(page.locator('.vuln-card')).toHaveCount(4);
+    });
+
+    test('ambiguous team tokens require an explicit choice', async ({ page }) => {
+        await page.goto('/project/TestProject?q=team%3Ae');
+        const choice = page.getByRole('status').filter({ hasText: 'Choose a team for team:e:' });
+        await expect(choice).toBeVisible();
+        await expect(page.locator('.vuln-card')).toHaveCount(0);
+        await choice.getByRole('button', { name: 'Security', exact: true }).click();
+        await expect(page.getByTestId('team-filter-select').locator('summary')).toContainText('Security');
+        await expect.poll(() => new URL(page.url()).searchParams.getAll('teams')).toEqual(['Security']);
+        await expect(choice).toHaveCount(0);
+        await expect(page.locator('.vuln-card').filter({ hasText: 'CVE-PARTIAL' })).toBeVisible();
+    });
+
+    test('reviewers start with all statuses and can explicitly select approval-ready work', async ({ page }) => {
+        await page.goto('/project/TestProject');
+        const cards = page.locator('.vuln-card');
+        const ready = cards.filter({ hasText: 'CVE-READY' });
+        await expect(ready.getByTestId('lifecycle-badge')).toHaveText('Ready for approval');
+        await expect(cards).toHaveCount(5);
+        await page.getByTestId('workflow-view-approval').click();
+        await expect(cards).toHaveCount(1);
+        await expect(page.getByRole('button', { name: /^Needs Approval/ })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: /^Assessed \(Legacy\)/ })).toHaveCount(0);
+
+        await page.getByRole('button').and(page.getByTitle('Missing assessment coverage or conflicting data that needs repair', { exact: true })).click();
+        await expect(cards.filter({ hasText: 'CVE-PARTIAL' }).getByTestId('lifecycle-badge')).toHaveText('Incomplete');
+        await expect(cards).toHaveCount(2);
+        await page.getByRole('button', { name: /^Ready for Approval\s/ }).click();
+        await expect(ready).toHaveCount(0);
+        await expect(cards).toHaveCount(1);
+
+        await page.getByRole('button', { name: /^Open\s/ }).click();
+        await page.getByRole('button').and(page.getByTitle('Missing assessment coverage or conflicting data that needs repair', { exact: true })).click();
+        await expect(cards.filter({ hasText: 'CVE-2023-1234' })).toBeVisible();
+        await expect(cards).toHaveCount(1);
+
+        await page.getByRole('button', { name: /^Open\s/ }).click();
+        await page.getByRole('button', { name: /^Assessed\s/ }).click();
+        await expect(cards.filter({ hasText: 'CVE-2023-ASSESSED' })).toBeVisible();
+        const legacy = cards.filter({ hasText: 'CVE-LEGACY' });
+        await expect(legacy.getByTestId('lifecycle-badge')).toHaveText('Assessed');
+        await expect(legacy.getByTestId('legacy-assessment-badge')).toHaveText('Legacy');
+        await expect(cards).toHaveCount(2);
+    });
+
 });
