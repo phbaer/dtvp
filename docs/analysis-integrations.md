@@ -33,6 +33,9 @@ Set `DTVP_CODE_ANALYSIS_URL` to enable reachability/exploitability analysis.
 DTVP queues requests containing the vulnerability, selected owned target, CVSS
 vector, processed project releases, dependency context,
 reviewer/static guidance, optional tmrescore context, and optional LLM metadata.
+DTVP retries up to five consecutive transport failures while polling Agentyzer
+job status; any successful poll resets the counter. Persistent disconnections
+fail the queue item with a status-poll error.
 DTVP sends every project release represented in the processed vulnerability
 group. Agentyzer intersects those candidates with versions the selected
 repository actually contains: matching Git tags, `release/*` branches from all

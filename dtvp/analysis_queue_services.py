@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable, Optional
 
+import httpx
+
+
+MAX_CONSECUTIVE_ANALYZER_STATUS_POLL_ERRORS = 5
+
 
 @dataclass(frozen=True)
 class AnalysisQueueServiceDeps:
@@ -481,11 +486,31 @@ async def process_analysis_queue_item(
         if await abort_if_requested():
             return
 
+        consecutive_poll_errors = 0
         while True:
             await deps.sleep(2)
             if await abort_if_requested():
                 return
-            status = await client.get_job_status(item.job_id)
+            try:
+                status = await client.get_job_status(item.job_id)
+            except httpx.TransportError as exc:
+                consecutive_poll_errors += 1
+                if consecutive_poll_errors >= MAX_CONSECUTIVE_ANALYZER_STATUS_POLL_ERRORS:
+                    _append_item_log(
+                        item,
+                        "Analyzer job status remained unreachable after "
+                        f"{consecutive_poll_errors} polls ({type(exc).__name__})",
+                    )
+                    raise
+                _append_item_log(
+                    item,
+                    "Analyzer job status poll disconnected; retrying "
+                    f"({consecutive_poll_errors}/"
+                    f"{MAX_CONSECUTIVE_ANALYZER_STATUS_POLL_ERRORS - 1}, "
+                    f"{type(exc).__name__})",
+                )
+                continue
+            consecutive_poll_errors = 0
             _merge_item_status_metadata(item, status)
             service_status = status.get("status", "")
             if "progress" in status:

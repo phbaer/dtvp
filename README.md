@@ -27,6 +27,7 @@ to exclude them from automatic proposals; unverified results do not suppress new
 automatic scans. Combined results require every component to be eligible. The local
 mock analyzer emits the same eligibility fields. Failed runs preserve existing
 scores and assessment states, including state-driven rescoring rules.
+Queued analysis retries brief Agentyzer status-poll disconnects before failing.
 
 Agentyzer reports required LLM failures as HTTP 502 for synchronous requests or
 failed async jobs with a string `error` and structured `error_details`. Deploy the

@@ -1,0 +1,397 @@
+Agentyzer version: 1.0.25 (build number: 24)
+INFO:     Started server process [12]
+INFO:     Waiting for application startup.
+2026-09-25 04:17:38,692 INFO     src.main  Configured LLM backend=LiteLLMClient host=https://webui-ext.vp.apps.ge-healthcare.net model=qwen3.8
+2026-09-25 04:17:38,692 INFO     src.main  Configured async job capacity: 5
+2026-09-25 04:17:38,870 INFO     httpx  HTTP Request: GET https://webui-ext.vp.apps.ge-healthcare.net/v1/models "HTTP/1.1 200 OK"
+2026-09-25 04:17:38,871 INFO     src.main  LLM backend is reachable (backend=LiteLLMClient host=https://webui-ext.vp.apps.ge-healthcare.net model=qwen3.8)
+2026-09-25 04:17:38,871 INFO     src.main  Periodic repository cache refresh enabled: interval=900s
+2026-09-25 04:17:38,871 INFO     src.main  Repository cache refresh cycle starting: repositories=5 interval=900s
+2026-09-25 04:17:38,871 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=cdxcombine url=https://scm.vp.apps.ge-healthcare.net/scm/in/cdxcombine.git
+INFO:     Application startup complete.
+2026-09-25 04:17:38,872 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/cdxcombine-82317b78e0c5 — fetching latest changes
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-09-25 04:17:39,117 INFO     src.agents.dependency_scanner  Repository cache /repos/cdxcombine-82317b78e0c5 resolved origin/main at 8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:17:39,117 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=cdxcombine cache=/repos/cdxcombine-82317b78e0c5 commit=8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:17:39,117 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=benchmark url=https://scm.vp.apps.ge-healthcare.net/scm/in/vuln-benchmark.git
+2026-09-25 04:17:39,118 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/vuln-benchmark-08dfa46a5b30 — fetching latest changes
+2026-09-25 04:17:39,326 INFO     src.agents.dependency_scanner  Repository cache /repos/vuln-benchmark-08dfa46a5b30 resolved origin/main at 49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:17:39,326 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=benchmark cache=/repos/vuln-benchmark-08dfa46a5b30 commit=49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:17:39,327 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nest-back-pack url=https://scm.vp.apps.ge-healthcare.net/scm/vn/nest-back-pack.git
+2026-09-25 04:17:39,327 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nest-back-pack-308c2716c2a6 — fetching latest changes
+2026-09-25 04:17:40,461 INFO     src.agents.dependency_scanner  Repository cache /repos/nest-back-pack-308c2716c2a6 resolved origin/master at 74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:17:40,462 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nest-back-pack cache=/repos/nest-back-pack-308c2716c2a6 commit=74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:17:40,462 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nginx url=https://github.com/nginx/nginx
+2026-09-25 04:17:40,462 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 04:17:41,593 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:17:41,594 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nginx cache=/repos/nginx-9251c307f3bc commit=d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:17:41,594 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=datastudio-fe url=https://scm.vp.apps.ge-healthcare.net/scm/ds/datastudio-nest.git
+2026-09-25 04:17:41,594 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/datastudio-nest-4e10d89627d9 — fetching latest changes
+2026-09-25 04:17:41,826 INFO     src.agents.dependency_scanner  Repository cache /repos/datastudio-nest-4e10d89627d9 resolved origin/master at 1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:17:41,826 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=datastudio-fe cache=/repos/datastudio-nest-4e10d89627d9 commit=1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:17:41,826 INFO     src.main  Repository cache refresh cycle complete: refreshed=5 failed=0 skipped=2
+2026-09-25 04:18:29,733 INFO     src.main  POST /assess  vuln_id=CVE-2026-75803  component_name=nginx  sync=False
+2026-09-25 04:18:29,733 INFO     src.main  Job 5f5a0fd6cbfe created for component nginx
+INFO:     192.168.32.3:56426 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:18:29,747 INFO     src.pipeline.nodes  [discover_vuln] vuln_id provided: CVE-2026-75803 — skipping discovery
+2026-09-25 04:18:29,748 INFO     src.pipeline.nodes  [fetch_advisory] Fetching advisories for CVE-2026-75803
+2026-09-25 04:18:29,921 INFO     src.main  POST /assess  vuln_id=CVE-2026-75803  component_name=VPEventServer  sync=False
+2026-09-25 04:18:29,921 INFO     src.main  Job 18e1db1babb1 created for component VPEventServer
+INFO:     192.168.32.3:56430 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:18:29,922 INFO     src.main  Component 'VPEventServer' resolved via defaults template (repo_name='eventservice')
+2026-09-25 04:18:29,924 INFO     src.pipeline.nodes  [discover_vuln] vuln_id provided: CVE-2026-75803 — skipping discovery
+2026-09-25 04:18:29,924 INFO     src.pipeline.nodes  [fetch_advisory] Fetching advisories for CVE-2026-75803
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+2026-09-25 04:18:44,829 WARNING  src.agents.web_fetcher  OSV error for CVE-2026-75803: 500 Unable to connect
+2026-09-25 04:18:44,936 WARNING  src.agents.web_fetcher  OSV error for CVE-2026-75803: 500 Unable to connect
+2026-09-25 04:18:45,289 INFO     httpx  HTTP Request: GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-75803 "HTTP/1.1 200 OK"
+2026-09-25 04:18:45,660 INFO     httpx  HTTP Request: GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-75803 "HTTP/1.1 200 OK"
+INFO:     192.168.32.3:56426 - "GET /jobs/5f5a0fd6cbfe HTTP/1.1" 200 OK
+INFO:     192.168.32.3:56430 - "GET /jobs/18e1db1babb1 HTTP/1.1" 200 OK
+2026-09-25 04:18:46,207 INFO     httpx  HTTP Request: GET https://api.github.com/search/issues?q=CVE-2026-75803 "HTTP/1.1 200 OK"
+2026-09-25 04:18:46,208 INFO     httpx  HTTP Request: GET https://api.github.com/search/issues?q=CVE-2026-75803 "HTTP/1.1 200 OK"
+2026-09-25 04:18:46,240 INFO     src.pipeline.nodes  [fetch_advisory] sources=2, affected_ranges=0, affected_versions=0, symbols=9, summary=0 chars, warnings=3
+2026-09-25 04:18:46,240 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has no ecosystem/package information — the vulnerable dependency cannot be identified
+2026-09-25 04:18:46,240 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has no affected ranges or explicit version lists
+2026-09-25 04:18:46,240 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory lookup did not return a description: OSV request failed: 500 Unable to connect
+2026-09-25 04:18:46,240 WARNING  src.pipeline.nodes  [fetch_advisory] Advisory has no identifiable affected packages — dependency and version analysis will remain unresolved
+2026-09-25 04:18:46,244 INFO     src.pipeline.nodes  [filter_advisory] No affected packages — assuming relevant
+2026-09-25 04:18:46,249 INFO     src.pipeline.nodes  [fetch_advisory] sources=2, affected_ranges=0, affected_versions=0, symbols=9, summary=0 chars, warnings=3
+2026-09-25 04:18:46,249 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has no ecosystem/package information — the vulnerable dependency cannot be identified
+2026-09-25 04:18:46,249 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has no affected ranges or explicit version lists
+2026-09-25 04:18:46,249 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory lookup did not return a description: OSV request failed: 500 Unable to connect
+2026-09-25 04:18:46,249 WARNING  src.pipeline.nodes  [fetch_advisory] Advisory has no identifiable affected packages — dependency and version analysis will remain unresolved
+2026-09-25 04:18:46,250 INFO     src.pipeline.nodes  [filter_advisory] No affected packages — assuming relevant
+2026-09-25 04:18:46,251 INFO     src.pipeline.nodes  [prepare_repo] Preparing repo for component 'nginx'
+2026-09-25 04:18:46,252 INFO     src.pipeline.nodes  [prepare_repo] Preparing repo for component 'VPEventServer'
+2026-09-25 04:18:46,253 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/eventservice-cbefee248f72 — fetching latest changes
+2026-09-25 04:18:46,254 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 04:18:46,495 INFO     src.agents.dependency_scanner  Repository cache /repos/eventservice-cbefee248f72 resolved origin/master at 83b64dbfac04d7744468ec9e867c29ce9615edca
+2026-09-25 04:18:46,516 INFO     src.agents.dependency_scanner  Prepared isolated worktree /repos/.worktrees/eventservice-cbefee248f72/a5b636a221294ad9a28b6aa179117223 at 83b64dbfac04d7744468ec9e867c29ce9615edca
+2026-09-25 04:18:46,516 INFO     src.pipeline.nodes  [prepare_repo] Repo ready at /repos/.worktrees/eventservice-cbefee248f72/a5b636a221294ad9a28b6aa179117223
+2026-09-25 04:18:46,517 INFO     src.pipeline.nodes  [inspect_archives] Inspecting archives in /repos/.worktrees/eventservice-cbefee248f72/a5b636a221294ad9a28b6aa179117223
+2026-09-25 04:18:46,519 WARNING  src.pipeline.nodes  [scan_dependencies] Advisory lookup did not identify the vulnerable package; the assessed project name 'VPEventServer' was not scanned as though it were one of its own dependencies.
+2026-09-25 04:18:46,520 WARNING  src.pipeline.nodes  [analyze_versions] Version analysis could not start because advisory lookup did not identify the vulnerable package.
+2026-09-25 04:18:46,531 WARNING  src.pipeline.nodes  [scan_code] Code scan skipped because advisory lookup did not identify the vulnerable package.
+2026-09-25 04:18:46,534 INFO     src.pipeline.nodes  [check_transitive_paths] Skipped — not a transitive dependency
+2026-09-25 04:18:46,534 INFO     src.pipeline.nodes  [llm_deep_analyze] Skipped — no target or candidate evidence
+2026-09-25 04:18:46,535 INFO     src.pipeline.nodes  [aggregate_verdict] Producing final verdict with LLM …
+2026-09-25 04:18:46,535 INFO     src.agents.verdict  Verdict inputs: dep_found=False, reach_heuristic=Unknown, worst_affected=False, has_advisory=False, llm_reachable=False, transitive_reachable=
+2026-09-25 04:18:46,537 INFO     src.pipeline.nodes  [check_transitive_paths] Skipped — not a transitive dependency
+2026-09-25 04:18:47,125 INFO     httpx  HTTP Request: POST https://webui-ext.vp.apps.ge-healthcare.net/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-25 04:18:47,519 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:18:47,634 INFO     src.agents.dependency_scanner  Prepared isolated worktree /repos/.worktrees/nginx-9251c307f3bc/353c6a3ac1d84c929e03f99996c2d41d at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:18:47,634 INFO     src.pipeline.nodes  [prepare_repo] Repo ready at /repos/.worktrees/nginx-9251c307f3bc/353c6a3ac1d84c929e03f99996c2d41d
+2026-09-25 04:18:47,635 INFO     src.pipeline.nodes  [inspect_archives] Inspecting archives in /repos/.worktrees/nginx-9251c307f3bc/353c6a3ac1d84c929e03f99996c2d41d
+2026-09-25 04:18:47,650 WARNING  src.pipeline.nodes  [scan_dependencies] Advisory lookup did not identify the vulnerable package; the assessed project name 'nginx' was not scanned as though it were one of its own dependencies.
+2026-09-25 04:18:47,651 WARNING  src.pipeline.nodes  [analyze_versions] Version analysis could not start because advisory lookup did not identify the vulnerable package.
+Agentyzer version: 1.0.25 (build number: 24)
+INFO:     Started server process [11]
+INFO:     Waiting for application startup.
+2026-09-25 04:18:50,357 INFO     src.main  Configured LLM backend=LiteLLMClient host=https://webui-ext.vp.apps.ge-healthcare.net model=qwen3.8
+2026-09-25 04:18:50,357 INFO     src.main  Configured async job capacity: 5
+2026-09-25 04:18:50,438 INFO     httpx  HTTP Request: GET https://webui-ext.vp.apps.ge-healthcare.net/v1/models "HTTP/1.1 200 OK"
+2026-09-25 04:18:50,438 INFO     src.main  LLM backend is reachable (backend=LiteLLMClient host=https://webui-ext.vp.apps.ge-healthcare.net model=qwen3.8)
+2026-09-25 04:18:50,438 INFO     src.main  Periodic repository cache refresh enabled: interval=900s
+2026-09-25 04:18:50,439 INFO     src.main  Repository cache refresh cycle starting: repositories=5 interval=900s
+2026-09-25 04:18:50,439 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=cdxcombine url=https://scm.vp.apps.ge-healthcare.net/scm/in/cdxcombine.git
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-09-25 04:18:50,440 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/cdxcombine-82317b78e0c5 — fetching latest changes
+2026-09-25 04:18:50,734 INFO     src.agents.dependency_scanner  Repository cache /repos/cdxcombine-82317b78e0c5 resolved origin/main at 8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:18:50,734 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=cdxcombine cache=/repos/cdxcombine-82317b78e0c5 commit=8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:18:50,735 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=benchmark url=https://scm.vp.apps.ge-healthcare.net/scm/in/vuln-benchmark.git
+2026-09-25 04:18:50,735 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/vuln-benchmark-08dfa46a5b30 — fetching latest changes
+2026-09-25 04:18:50,949 INFO     src.agents.dependency_scanner  Repository cache /repos/vuln-benchmark-08dfa46a5b30 resolved origin/main at 49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:18:50,949 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=benchmark cache=/repos/vuln-benchmark-08dfa46a5b30 commit=49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:18:50,950 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nest-back-pack url=https://scm.vp.apps.ge-healthcare.net/scm/vn/nest-back-pack.git
+2026-09-25 04:18:50,950 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nest-back-pack-308c2716c2a6 — fetching latest changes
+2026-09-25 04:18:51,163 INFO     src.agents.dependency_scanner  Repository cache /repos/nest-back-pack-308c2716c2a6 resolved origin/master at 74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:18:51,164 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nest-back-pack cache=/repos/nest-back-pack-308c2716c2a6 commit=74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:18:51,164 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nginx url=https://github.com/nginx/nginx
+2026-09-25 04:18:51,164 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 04:18:52,286 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:18:52,286 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nginx cache=/repos/nginx-9251c307f3bc commit=d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:18:52,286 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=datastudio-fe url=https://scm.vp.apps.ge-healthcare.net/scm/ds/datastudio-nest.git
+2026-09-25 04:18:52,287 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/datastudio-nest-4e10d89627d9 — fetching latest changes
+2026-09-25 04:18:52,509 INFO     src.agents.dependency_scanner  Repository cache /repos/datastudio-nest-4e10d89627d9 resolved origin/master at 1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:18:52,510 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=datastudio-fe cache=/repos/datastudio-nest-4e10d89627d9 commit=1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:18:52,510 INFO     src.main  Repository cache refresh cycle complete: refreshed=5 failed=0 skipped=2
+2026-09-25 04:33:53,753 INFO     src.main  Repository cache refresh cycle starting: repositories=5 interval=900s
+2026-09-25 04:33:53,753 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=cdxcombine url=https://scm.vp.apps.ge-healthcare.net/scm/in/cdxcombine.git
+2026-09-25 04:33:53,754 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/cdxcombine-82317b78e0c5 — fetching latest changes
+2026-09-25 04:33:53,983 INFO     src.agents.dependency_scanner  Repository cache /repos/cdxcombine-82317b78e0c5 resolved origin/main at 8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:33:53,983 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=cdxcombine cache=/repos/cdxcombine-82317b78e0c5 commit=8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:33:53,983 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=benchmark url=https://scm.vp.apps.ge-healthcare.net/scm/in/vuln-benchmark.git
+2026-09-25 04:33:53,984 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/vuln-benchmark-08dfa46a5b30 — fetching latest changes
+2026-09-25 04:33:54,202 INFO     src.agents.dependency_scanner  Repository cache /repos/vuln-benchmark-08dfa46a5b30 resolved origin/main at 49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:33:54,203 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=benchmark cache=/repos/vuln-benchmark-08dfa46a5b30 commit=49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:33:54,203 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nest-back-pack url=https://scm.vp.apps.ge-healthcare.net/scm/vn/nest-back-pack.git
+2026-09-25 04:33:54,203 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nest-back-pack-308c2716c2a6 — fetching latest changes
+2026-09-25 04:33:54,430 INFO     src.agents.dependency_scanner  Repository cache /repos/nest-back-pack-308c2716c2a6 resolved origin/master at 74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:33:54,430 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nest-back-pack cache=/repos/nest-back-pack-308c2716c2a6 commit=74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:33:54,430 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nginx url=https://github.com/nginx/nginx
+2026-09-25 04:33:54,431 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 04:33:55,776 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:33:55,776 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nginx cache=/repos/nginx-9251c307f3bc commit=d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:33:55,776 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=datastudio-fe url=https://scm.vp.apps.ge-healthcare.net/scm/ds/datastudio-nest.git
+2026-09-25 04:33:55,777 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/datastudio-nest-4e10d89627d9 — fetching latest changes
+2026-09-25 04:33:56,001 INFO     src.agents.dependency_scanner  Repository cache /repos/datastudio-nest-4e10d89627d9 resolved origin/master at 1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:33:56,001 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=datastudio-fe cache=/repos/datastudio-nest-4e10d89627d9 commit=1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:33:56,001 INFO     src.main  Repository cache refresh cycle complete: refreshed=5 failed=0 skipped=2
+2026-09-25 04:48:21,542 INFO     src.main  POST /assess  vuln_id=CVE-2026-66046  component_name=VPEventServer  sync=False
+2026-09-25 04:48:21,543 INFO     src.main  Job e45d43ea0018 created for component VPEventServer
+INFO:     192.168.32.3:37164 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,544 INFO     src.main  Component 'VPEventServer' resolved via defaults template (repo_name='eventservice')
+2026-09-25 04:48:21,547 INFO     src.pipeline.nodes  [discover_vuln] vuln_id provided: CVE-2026-66046 — skipping discovery
+2026-09-25 04:48:21,549 INFO     src.pipeline.nodes  [fetch_advisory] Fetching advisories for CVE-2026-66046
+2026-09-25 04:48:21,552 INFO     src.main  POST /assess  vuln_id=CVE-2026-76957  component_name=VPEventServer  sync=False
+2026-09-25 04:48:21,552 INFO     src.main  Job c2601771a1f9 created for component VPEventServer
+INFO:     192.168.32.3:37172 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,552 INFO     src.main  POST /assess  vuln_id=CVE-2026-19534  component_name=scannav_typescript_api  sync=False
+2026-09-25 04:48:21,552 INFO     src.main  Job 9a212179c574 created for component scannav_typescript_api
+INFO:     192.168.32.3:37176 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,553 INFO     src.main  POST /assess  vuln_id=CVE-2026-69244  component_name=eventservice  sync=False
+2026-09-25 04:48:21,553 INFO     src.main  Job 0d11e4c55cc1 created for component eventservice
+INFO:     192.168.32.3:37192 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,553 INFO     src.main  POST /assess  vuln_id=CVE-2026-69244  component_name=vpeventserver  sync=False
+2026-09-25 04:48:21,554 INFO     src.main  Job 3142dcb1ca61 created for component vpeventserver
+INFO:     192.168.32.3:37204 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,554 INFO     src.main  POST /assess  vuln_id=CVE-2026-69249  component_name=eventservice  sync=False
+2026-09-25 04:48:21,554 INFO     src.main  Job e73a02198a6f created for component eventservice
+INFO:     192.168.32.3:37214 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,555 INFO     src.main  POST /assess  vuln_id=CVE-2026-69249  component_name=vpeventserver  sync=False
+2026-09-25 04:48:21,555 INFO     src.main  Job 0b6d7650cd52 created for component vpeventserver
+INFO:     192.168.32.3:37228 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,555 INFO     src.main  POST /assess  vuln_id=CVE-2026-4224  component_name=VPEventServer  sync=False
+2026-09-25 04:48:21,555 INFO     src.main  Job c223b27292e9 created for component VPEventServer
+INFO:     192.168.32.3:37234 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,556 INFO     src.main  Component 'VPEventServer' resolved via defaults template (repo_name='eventservice')
+2026-09-25 04:48:21,557 INFO     src.main  Component 'scannav_typescript_api' resolved via defaults template (repo_name='dicom-tag-storage')
+2026-09-25 04:48:21,558 INFO     src.main  Component 'eventservice' resolved via defaults template (repo_name='eventservice')
+2026-09-25 04:48:21,559 INFO     src.main  Component 'vpeventserver' resolved via defaults template (repo_name='eventservice')
+2026-09-25 04:48:21,560 INFO     src.main  POST /assess  vuln_id=CVE-2026-44665  component_name=datasource  sync=False
+2026-09-25 04:48:21,560 INFO     src.main  Job f82703f46ced created for component datasource
+INFO:     192.168.32.3:37244 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,561 INFO     src.main  POST /assess  vuln_id=CVE-2026-65901  component_name=vp  sync=False
+2026-09-25 04:48:21,561 INFO     src.main  Job 2a135066213c created for component vp
+INFO:     192.168.32.3:37252 - "POST /assess HTTP/1.1" 200 OK
+2026-09-25 04:48:21,562 INFO     src.pipeline.nodes  [discover_vuln] vuln_id provided: CVE-2026-76957 — skipping discovery
+2026-09-25 04:48:21,562 INFO     src.pipeline.nodes  [discover_vuln] vuln_id provided: CVE-2026-19534 — skipping discovery
+2026-09-25 04:48:21,562 INFO     src.pipeline.nodes  [discover_vuln] vuln_id provided: CVE-2026-69244 — skipping discovery
+2026-09-25 04:48:21,562 INFO     src.pipeline.nodes  [discover_vuln] vuln_id provided: CVE-2026-69244 — skipping discovery
+2026-09-25 04:48:21,564 INFO     src.pipeline.nodes  [fetch_advisory] Fetching advisories for CVE-2026-76957
+2026-09-25 04:48:21,565 INFO     src.pipeline.nodes  [fetch_advisory] Fetching advisories for CVE-2026-19534
+2026-09-25 04:48:21,566 INFO     src.pipeline.nodes  [fetch_advisory] Fetching advisories for CVE-2026-69244
+2026-09-25 04:48:21,567 INFO     src.pipeline.nodes  [fetch_advisory] Fetching advisories for CVE-2026-69244
+2026-09-25 04:48:21,860 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/CVE-2026-69244 "HTTP/1.1 200 OK"
+2026-09-25 04:48:21,861 INFO     src.agents.web_fetcher  OSV: found advisory for CVE-2026-69244
+2026-09-25 04:48:21,870 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/CVE-2026-19534 "HTTP/1.1 200 OK"
+2026-09-25 04:48:21,870 INFO     src.agents.web_fetcher  OSV: found advisory for CVE-2026-19534
+2026-09-25 04:48:21,911 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/CVE-2026-69244 "HTTP/1.1 200 OK"
+2026-09-25 04:48:21,912 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/CVE-2026-76957 "HTTP/1.1 200 OK"
+2026-09-25 04:48:21,912 INFO     src.agents.web_fetcher  OSV: found advisory for CVE-2026-69244
+2026-09-25 04:48:21,913 INFO     src.agents.web_fetcher  OSV: found advisory for CVE-2026-76957
+2026-09-25 04:48:21,922 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/CVE-2026-66046 "HTTP/1.1 200 OK"
+2026-09-25 04:48:21,922 INFO     src.agents.web_fetcher  OSV: found advisory for CVE-2026-66046
+2026-09-25 04:48:22,076 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/GHSA-cq5v-8q36-5273 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,110 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/GHSA-rfgv-xxqx-mfg5 "HTTP/1.1 404 Not Found"
+2026-09-25 04:48:22,118 INFO     src.agents.web_fetcher  OSV: found GHSA alias GHSA-cq5v-8q36-5273 for CVE-2026-69244
+2026-09-25 04:48:22,239 INFO     httpx  HTTP Request: GET https://api.osv.dev/v1/vulns/GHSA-cq5v-8q36-5273 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,281 INFO     httpx  HTTP Request: GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-76957 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,282 INFO     src.agents.web_fetcher  OSV: found GHSA alias GHSA-cq5v-8q36-5273 for CVE-2026-69244
+2026-09-25 04:48:22,283 INFO     src.agents.web_fetcher  NVD CPE: part=a vendor=libexpat_project product=libexpat
+2026-09-25 04:48:22,284 INFO     src.pipeline.nodes  [fetch_advisory] sources=2, affected_ranges=1, affected_versions=70, symbols=0, summary=197 chars, warnings=1
+2026-09-25 04:48:22,284 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has only GIT-type ranges (commit hashes) — version comparison may be unreliable
+2026-09-25 04:48:22,284 INFO     src.pipeline.nodes  [fetch_advisory] Scan targets derived from advisory: ['libexpat']
+2026-09-25 04:48:22,308 INFO     httpx  HTTP Request: GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-66046 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,309 INFO     src.pipeline.nodes  [fetch_advisory] sources=2, affected_ranges=1, affected_versions=70, symbols=1, summary=60 chars, warnings=2
+2026-09-25 04:48:22,309 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has only GIT-type ranges (commit hashes) — version comparison may be unreliable
+2026-09-25 04:48:22,309 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has no ecosystem/package information — the vulnerable dependency cannot be identified
+2026-09-25 04:48:22,310 WARNING  src.pipeline.nodes  [fetch_advisory] Advisory has no identifiable affected packages — dependency and version analysis will remain unresolved
+2026-09-25 04:48:22,310 INFO     src.pipeline.nodes  [filter_advisory] No affected packages — assuming relevant
+2026-09-25 04:48:22,312 INFO     src.pipeline.nodes  [prepare_repo] Preparing repo for component 'VPEventServer'
+2026-09-25 04:48:22,313 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/eventservice-cbefee248f72 — fetching latest changes
+2026-09-25 04:48:22,444 INFO     httpx  HTTP Request: GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-19534 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,493 INFO     httpx  HTTP Request: GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-69244 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,545 INFO     src.agents.dependency_scanner  Repository cache /repos/eventservice-cbefee248f72 resolved origin/master at 83b64dbfac04d7744468ec9e867c29ce9615edca
+2026-09-25 04:48:22,565 INFO     src.agents.dependency_scanner  Prepared isolated worktree /repos/.worktrees/eventservice-cbefee248f72/626a5be6ef16407c8c4c1e9023d1a713 at 83b64dbfac04d7744468ec9e867c29ce9615edca
+2026-09-25 04:48:22,566 INFO     src.pipeline.nodes  [prepare_repo] Repo ready at /repos/.worktrees/eventservice-cbefee248f72/626a5be6ef16407c8c4c1e9023d1a713
+2026-09-25 04:48:22,567 INFO     src.pipeline.nodes  [inspect_archives] Inspecting archives in /repos/.worktrees/eventservice-cbefee248f72/626a5be6ef16407c8c4c1e9023d1a713
+2026-09-25 04:48:22,568 WARNING  src.pipeline.nodes  [scan_dependencies] Advisory lookup did not identify the vulnerable package; the assessed project name 'VPEventServer' was not scanned as though it were one of its own dependencies.
+2026-09-25 04:48:22,569 WARNING  src.pipeline.nodes  [analyze_versions] Version analysis could not start because advisory lookup did not identify the vulnerable package.
+2026-09-25 04:48:22,580 WARNING  src.pipeline.nodes  [scan_code] Code scan skipped because advisory lookup did not identify the vulnerable package.
+2026-09-25 04:48:22,582 INFO     src.pipeline.nodes  [check_transitive_paths] Skipped — not a transitive dependency
+2026-09-25 04:48:22,582 INFO     src.pipeline.nodes  [llm_deep_analyze] Skipped — no target or candidate evidence
+2026-09-25 04:48:22,583 INFO     src.pipeline.nodes  [aggregate_verdict] Producing final verdict with LLM …
+2026-09-25 04:48:22,583 INFO     src.agents.verdict  Verdict inputs: dep_found=False, reach_heuristic=Unknown, worst_affected=False, has_advisory=True, llm_reachable=False, transitive_reachable=
+2026-09-25 04:48:22,585 INFO     src.pipeline.nodes  [check_transitive_paths] Skipped — not a transitive dependency
+2026-09-25 04:48:22,657 INFO     httpx  HTTP Request: GET https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-69244 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,767 INFO     httpx  HTTP Request: GET https://api.github.com/advisories/GHSA-rfgv-xxqx-mfg5 "HTTP/1.1 404 Not Found"
+2026-09-25 04:48:22,768 INFO     src.agents.web_fetcher  GitHub Advisory: GHSA-rfgv-xxqx-mfg5 returned HTTP 404
+2026-09-25 04:48:22,769 INFO     src.pipeline.nodes  [fetch_advisory] sources=2, affected_ranges=3, affected_versions=107, symbols=0, summary=76 chars, warnings=2
+2026-09-25 04:48:22,769 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has only GIT-type ranges (commit hashes) — version comparison may be unreliable
+2026-09-25 04:48:22,769 WARNING  src.pipeline.nodes  [fetch_advisory] Data warning: Advisory has no ecosystem/package information — the vulnerable dependency cannot be identified
+2026-09-25 04:48:22,769 WARNING  src.pipeline.nodes  [fetch_advisory] Advisory has no identifiable affected packages — dependency and version analysis will remain unresolved
+2026-09-25 04:48:22,770 INFO     src.pipeline.nodes  [filter_advisory] No affected packages — assuming relevant
+2026-09-25 04:48:22,771 INFO     src.pipeline.nodes  [prepare_repo] Preparing repo for component 'scannav_typescript_api'
+2026-09-25 04:48:22,771 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/dicom-tag-storage-48dfe2c90063 — fetching latest changes
+2026-09-25 04:48:22,878 INFO     httpx  HTTP Request: GET https://api.github.com/advisories/GHSA-cq5v-8q36-5273 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,879 INFO     httpx  HTTP Request: GET https://api.github.com/advisories/GHSA-cq5v-8q36-5273 "HTTP/1.1 200 OK"
+2026-09-25 04:48:22,880 INFO     src.agents.web_fetcher  GitHub Advisory: found structured data for GHSA-cq5v-8q36-5273
+2026-09-25 04:48:22,880 INFO     src.agents.web_fetcher  GitHub Advisory: found structured data for GHSA-cq5v-8q36-5273
+2026-09-25 04:48:22,886 INFO     src.pipeline.nodes  [fetch_advisory] sources=4, affected_ranges=3, affected_versions=313, symbols=0, summary=98 chars, warnings=0
+2026-09-25 04:48:22,887 INFO     src.pipeline.nodes  [fetch_advisory] Scan targets derived from advisory: ['aiohttp']
+2026-09-25 04:48:22,891 INFO     src.pipeline.nodes  [fetch_advisory] sources=4, affected_ranges=3, affected_versions=313, symbols=0, summary=98 chars, warnings=0
+2026-09-25 04:48:22,891 INFO     src.pipeline.nodes  [fetch_advisory] Scan targets derived from advisory: ['aiohttp']
+2026-09-25 04:48:23,028 INFO     httpx  HTTP Request: POST https://webui-ext.vp.apps.ge-healthcare.net/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-25 04:48:23,352 INFO     src.agents.dependency_scanner  Repository cache /repos/dicom-tag-storage-48dfe2c90063 resolved origin/master at 373cd201980bf3a0eaa4058deadc15aff47a82b3
+2026-09-25 04:48:23,775 INFO     httpx  HTTP Request: POST https://webui-ext.vp.apps.ge-healthcare.net/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-25 04:48:23,776 INFO     httpx  HTTP Request: POST https://webui-ext.vp.apps.ge-healthcare.net/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-25 04:48:23,828 INFO     httpx  HTTP Request: POST https://webui-ext.vp.apps.ge-healthcare.net/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:     192.168.32.3:37164 - "GET /jobs/e45d43ea0018 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37192 - "GET /jobs/0d11e4c55cc1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37172 - "GET /jobs/c2601771a1f9 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37204 - "GET /jobs/3142dcb1ca61 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37234 - "GET /jobs/c223b27292e9 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37228 - "GET /jobs/0b6d7650cd52 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37176 - "GET /jobs/9a212179c574 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37214 - "GET /jobs/e73a02198a6f HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37252 - "GET /jobs/2a135066213c HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37244 - "GET /jobs/f82703f46ced HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37164 - "GET /jobs/e45d43ea0018 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37192 - "GET /jobs/0d11e4c55cc1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37172 - "GET /jobs/c2601771a1f9 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37204 - "GET /jobs/3142dcb1ca61 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37234 - "GET /jobs/c223b27292e9 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37228 - "GET /jobs/0b6d7650cd52 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37252 - "GET /jobs/2a135066213c HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37244 - "GET /jobs/f82703f46ced HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37176 - "GET /jobs/9a212179c574 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37214 - "GET /jobs/e73a02198a6f HTTP/1.1" 200 OK
+2026-09-25 04:48:26,610 INFO     src.agents.dependency_scanner  Prepared isolated worktree /repos/.worktrees/dicom-tag-storage-48dfe2c90063/123435d47db34bb6bfd5307b542b824a at 373cd201980bf3a0eaa4058deadc15aff47a82b3
+2026-09-25 04:48:26,611 INFO     src.pipeline.nodes  [prepare_repo] Repo ready at /repos/.worktrees/dicom-tag-storage-48dfe2c90063/123435d47db34bb6bfd5307b542b824a
+2026-09-25 04:48:26,612 INFO     src.pipeline.nodes  [inspect_archives] Inspecting archives in /repos/.worktrees/dicom-tag-storage-48dfe2c90063/123435d47db34bb6bfd5307b542b824a
+INFO:     192.168.32.3:37164 - "GET /jobs/e45d43ea0018 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37192 - "GET /jobs/0d11e4c55cc1 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37172 - "GET /jobs/c2601771a1f9 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37204 - "GET /jobs/3142dcb1ca61 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37234 - "GET /jobs/c223b27292e9 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37228 - "GET /jobs/0b6d7650cd52 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37252 - "GET /jobs/2a135066213c HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37244 - "GET /jobs/f82703f46ced HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37176 - "GET /jobs/9a212179c574 HTTP/1.1" 200 OK
+INFO:     192.168.32.3:37214 - "GET /jobs/e73a02198a6f HTTP/1.1" 200 OK
+2026-09-25 04:48:28,728 WARNING  src.pipeline.nodes  [scan_dependencies] Advisory lookup did not identify the vulnerable package; the assessed project name 'scannav_typescript_api' was not scanned as though it were one of its own dependencies.
+2026-09-25 04:48:28,729 WARNING  src.pipeline.nodes  [analyze_versions] Version analysis could not start because advisory lookup did not identify the vulnerable package.
+Agentyzer version: 1.0.25 (build number: 24)
+INFO:     Started server process [11]
+INFO:     Waiting for application startup.
+2026-09-25 04:48:31,493 INFO     src.main  Configured LLM backend=LiteLLMClient host=https://webui-ext.vp.apps.ge-healthcare.net model=qwen3.8
+2026-09-25 04:48:31,493 INFO     src.main  Configured async job capacity: 5
+2026-09-25 04:48:32,415 INFO     httpx  HTTP Request: GET https://webui-ext.vp.apps.ge-healthcare.net/v1/models "HTTP/1.1 200 OK"
+2026-09-25 04:48:32,416 INFO     src.main  LLM backend is reachable (backend=LiteLLMClient host=https://webui-ext.vp.apps.ge-healthcare.net model=qwen3.8)
+2026-09-25 04:48:32,416 INFO     src.main  Periodic repository cache refresh enabled: interval=900s
+2026-09-25 04:48:32,416 INFO     src.main  Repository cache refresh cycle starting: repositories=5 interval=900s
+2026-09-25 04:48:32,416 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=cdxcombine url=https://scm.vp.apps.ge-healthcare.net/scm/in/cdxcombine.git
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-09-25 04:48:32,418 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/cdxcombine-82317b78e0c5 — fetching latest changes
+2026-09-25 04:48:32,643 INFO     src.agents.dependency_scanner  Repository cache /repos/cdxcombine-82317b78e0c5 resolved origin/main at 8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:48:32,643 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=cdxcombine cache=/repos/cdxcombine-82317b78e0c5 commit=8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 04:48:32,643 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=benchmark url=https://scm.vp.apps.ge-healthcare.net/scm/in/vuln-benchmark.git
+2026-09-25 04:48:32,643 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/vuln-benchmark-08dfa46a5b30 — fetching latest changes
+2026-09-25 04:48:32,843 INFO     src.agents.dependency_scanner  Repository cache /repos/vuln-benchmark-08dfa46a5b30 resolved origin/main at 49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:48:32,843 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=benchmark cache=/repos/vuln-benchmark-08dfa46a5b30 commit=49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 04:48:32,843 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nest-back-pack url=https://scm.vp.apps.ge-healthcare.net/scm/vn/nest-back-pack.git
+2026-09-25 04:48:32,844 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nest-back-pack-308c2716c2a6 — fetching latest changes
+2026-09-25 04:48:33,054 INFO     src.agents.dependency_scanner  Repository cache /repos/nest-back-pack-308c2716c2a6 resolved origin/master at 74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:48:33,054 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nest-back-pack cache=/repos/nest-back-pack-308c2716c2a6 commit=74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 04:48:33,054 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nginx url=https://github.com/nginx/nginx
+2026-09-25 04:48:33,054 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 04:48:34,216 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:48:34,217 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nginx cache=/repos/nginx-9251c307f3bc commit=d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 04:48:34,217 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=datastudio-fe url=https://scm.vp.apps.ge-healthcare.net/scm/ds/datastudio-nest.git
+2026-09-25 04:48:34,217 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/datastudio-nest-4e10d89627d9 — fetching latest changes
+2026-09-25 04:48:34,454 INFO     src.agents.dependency_scanner  Repository cache /repos/datastudio-nest-4e10d89627d9 resolved origin/master at 1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:48:34,454 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=datastudio-fe cache=/repos/datastudio-nest-4e10d89627d9 commit=1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 04:48:34,455 INFO     src.main  Repository cache refresh cycle complete: refreshed=5 failed=0 skipped=2
+2026-09-25 05:03:34,455 INFO     src.main  Repository cache refresh cycle starting: repositories=5 interval=900s
+2026-09-25 05:03:34,456 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=cdxcombine url=https://scm.vp.apps.ge-healthcare.net/scm/in/cdxcombine.git
+2026-09-25 05:03:34,456 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/cdxcombine-82317b78e0c5 — fetching latest changes
+2026-09-25 05:03:34,684 INFO     src.agents.dependency_scanner  Repository cache /repos/cdxcombine-82317b78e0c5 resolved origin/main at 8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 05:03:34,685 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=cdxcombine cache=/repos/cdxcombine-82317b78e0c5 commit=8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 05:03:34,685 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=benchmark url=https://scm.vp.apps.ge-healthcare.net/scm/in/vuln-benchmark.git
+2026-09-25 05:03:34,686 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/vuln-benchmark-08dfa46a5b30 — fetching latest changes
+2026-09-25 05:03:34,909 INFO     src.agents.dependency_scanner  Repository cache /repos/vuln-benchmark-08dfa46a5b30 resolved origin/main at 49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 05:03:34,909 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=benchmark cache=/repos/vuln-benchmark-08dfa46a5b30 commit=49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 05:03:34,909 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nest-back-pack url=https://scm.vp.apps.ge-healthcare.net/scm/vn/nest-back-pack.git
+2026-09-25 05:03:34,909 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nest-back-pack-308c2716c2a6 — fetching latest changes
+2026-09-25 05:03:35,154 INFO     src.agents.dependency_scanner  Repository cache /repos/nest-back-pack-308c2716c2a6 resolved origin/master at 74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 05:03:35,155 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nest-back-pack cache=/repos/nest-back-pack-308c2716c2a6 commit=74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 05:03:35,155 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nginx url=https://github.com/nginx/nginx
+2026-09-25 05:03:35,156 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 05:03:36,294 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 05:03:36,295 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nginx cache=/repos/nginx-9251c307f3bc commit=d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 05:03:36,295 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=datastudio-fe url=https://scm.vp.apps.ge-healthcare.net/scm/ds/datastudio-nest.git
+2026-09-25 05:03:36,295 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/datastudio-nest-4e10d89627d9 — fetching latest changes
+2026-09-25 05:03:36,536 INFO     src.agents.dependency_scanner  Repository cache /repos/datastudio-nest-4e10d89627d9 resolved origin/master at 1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 05:03:36,537 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=datastudio-fe cache=/repos/datastudio-nest-4e10d89627d9 commit=1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 05:03:36,537 INFO     src.main  Repository cache refresh cycle complete: refreshed=5 failed=0 skipped=2
+2026-09-25 05:18:36,537 INFO     src.main  Repository cache refresh cycle starting: repositories=5 interval=900s
+2026-09-25 05:18:36,537 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=cdxcombine url=https://scm.vp.apps.ge-healthcare.net/scm/in/cdxcombine.git
+2026-09-25 05:18:36,538 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/cdxcombine-82317b78e0c5 — fetching latest changes
+2026-09-25 05:18:41,806 INFO     src.agents.dependency_scanner  Repository cache /repos/cdxcombine-82317b78e0c5 resolved origin/main at 8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 05:18:41,807 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=cdxcombine cache=/repos/cdxcombine-82317b78e0c5 commit=8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 05:18:41,807 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=benchmark url=https://scm.vp.apps.ge-healthcare.net/scm/in/vuln-benchmark.git
+2026-09-25 05:18:41,807 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/vuln-benchmark-08dfa46a5b30 — fetching latest changes
+2026-09-25 05:18:42,031 INFO     src.agents.dependency_scanner  Repository cache /repos/vuln-benchmark-08dfa46a5b30 resolved origin/main at 49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 05:18:42,032 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=benchmark cache=/repos/vuln-benchmark-08dfa46a5b30 commit=49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 05:18:42,032 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nest-back-pack url=https://scm.vp.apps.ge-healthcare.net/scm/vn/nest-back-pack.git
+2026-09-25 05:18:42,032 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nest-back-pack-308c2716c2a6 — fetching latest changes
+2026-09-25 05:18:42,275 INFO     src.agents.dependency_scanner  Repository cache /repos/nest-back-pack-308c2716c2a6 resolved origin/master at 74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 05:18:42,276 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nest-back-pack cache=/repos/nest-back-pack-308c2716c2a6 commit=74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 05:18:42,276 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nginx url=https://github.com/nginx/nginx
+2026-09-25 05:18:42,276 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 05:18:43,471 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 05:18:43,471 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nginx cache=/repos/nginx-9251c307f3bc commit=d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 05:18:43,471 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=datastudio-fe url=https://scm.vp.apps.ge-healthcare.net/scm/ds/datastudio-nest.git
+2026-09-25 05:18:43,472 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/datastudio-nest-4e10d89627d9 — fetching latest changes
+2026-09-25 05:18:44,365 INFO     src.agents.dependency_scanner  Repository cache /repos/datastudio-nest-4e10d89627d9 resolved origin/master at 1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 05:18:44,365 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=datastudio-fe cache=/repos/datastudio-nest-4e10d89627d9 commit=1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 05:18:44,366 INFO     src.main  Repository cache refresh cycle complete: refreshed=5 failed=0 skipped=2
+2026-09-25 05:33:44,366 INFO     src.main  Repository cache refresh cycle starting: repositories=5 interval=900s
+2026-09-25 05:33:44,366 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=cdxcombine url=https://scm.vp.apps.ge-healthcare.net/scm/in/cdxcombine.git
+2026-09-25 05:33:44,367 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/cdxcombine-82317b78e0c5 — fetching latest changes
+2026-09-25 05:33:44,592 INFO     src.agents.dependency_scanner  Repository cache /repos/cdxcombine-82317b78e0c5 resolved origin/main at 8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 05:33:44,592 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=cdxcombine cache=/repos/cdxcombine-82317b78e0c5 commit=8db13551d40b354d8d70942131520c8e82f87ece
+2026-09-25 05:33:44,592 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=benchmark url=https://scm.vp.apps.ge-healthcare.net/scm/in/vuln-benchmark.git
+2026-09-25 05:33:44,593 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/vuln-benchmark-08dfa46a5b30 — fetching latest changes
+2026-09-25 05:33:44,810 INFO     src.agents.dependency_scanner  Repository cache /repos/vuln-benchmark-08dfa46a5b30 resolved origin/main at 49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 05:33:44,810 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=benchmark cache=/repos/vuln-benchmark-08dfa46a5b30 commit=49da26a19e901b4b37087da8810badb16b67dab5
+2026-09-25 05:33:44,810 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nest-back-pack url=https://scm.vp.apps.ge-healthcare.net/scm/vn/nest-back-pack.git
+2026-09-25 05:33:44,811 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nest-back-pack-308c2716c2a6 — fetching latest changes
+2026-09-25 05:33:45,028 INFO     src.agents.dependency_scanner  Repository cache /repos/nest-back-pack-308c2716c2a6 resolved origin/master at 74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 05:33:45,028 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nest-back-pack cache=/repos/nest-back-pack-308c2716c2a6 commit=74fc0175312b4f49f48238460b5746288b334ef4
+2026-09-25 05:33:45,028 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=nginx url=https://github.com/nginx/nginx
+2026-09-25 05:33:45,028 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/nginx-9251c307f3bc — fetching latest changes
+2026-09-25 05:33:46,179 INFO     src.agents.dependency_scanner  Repository cache /repos/nginx-9251c307f3bc resolved origin/master at d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 05:33:46,180 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=nginx cache=/repos/nginx-9251c307f3bc commit=d10dd3123a0f1f3c6b9fc836162215a6df7af98b
+2026-09-25 05:33:46,180 INFO     src.agents.dependency_scanner  Repository cache refresh starting: component=datastudio-fe url=https://scm.vp.apps.ge-healthcare.net/scm/ds/datastudio-nest.git
+2026-09-25 05:33:46,180 INFO     src.agents.dependency_scanner  Repository cache exists at /repos/datastudio-nest-4e10d89627d9 — fetching latest changes
+2026-09-25 05:33:46,403 INFO     src.agents.dependency_scanner  Repository cache /repos/datastudio-nest-4e10d89627d9 resolved origin/master at 1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 05:33:46,403 INFO     src.agents.dependency_scanner  Repository cache refresh complete: component=datastudio-fe cache=/repos/datastudio-nest-4e10d89627d9 commit=1b3e9943f1e77c730241058d084d8fb083364e8f
+2026-09-25 05:33:46,403 INFO     src.main  Repository cache refresh cycle complete: refreshed=5 failed=0 skipped=2
