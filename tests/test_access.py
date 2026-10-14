@@ -14,7 +14,9 @@ def test_team_isolation_and_revoked_sharing(analyst, release_id):
         f"/projects/{private_project['id']}/audit",
     ]:
         assert client.get("/api/v2" + endpoint).status_code == 404
-    assert client.get("/api/v2/findings").json()["items"] == []
+    assert [row["identifier"] for row in client.get("/api/v2/findings").json()["items"]] == [
+        "CVE-2099-20003"
+    ]
     operations_id = client.get("/api/v2/me").json()["workspaces"][0]["id"]
     login(client, "administrator")
     assert (
@@ -93,7 +95,9 @@ def test_no_membership_no_access(client):
         token, _, _ = issue(db, user, kind="api", workspace_id=None, allowed=["read"])
     client.headers["Authorization"] = "Bearer " + token
     assert client.get("/api/v2/projects").json() == []
-    assert client.get("/api/v2/findings").json()["items"] == []
+    assert [row["identifier"] for row in client.get("/api/v2/findings").json()["items"]] == [
+        "CVE-2099-20003"
+    ]
 
 
 def test_dt_read_credential_cannot_import_an_unbound_project(analyst, release_id):

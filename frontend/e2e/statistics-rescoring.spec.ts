@@ -46,7 +46,7 @@ test('statistics, readable review, contextual score approval and effective distr
   await expect(severity.getByRole('row').filter({ hasText: 'none' })).toContainText('1')
   await page.getByRole('button', { name: 'Reset scope', exact: true }).click()
   await page.getByRole('combobox', { name: 'Persona', exact: true }).selectOption('operations')
-  await expect(page.locator('.stat-cards article').filter({ hasText: 'Component / release findings' }).locator('strong')).toHaveText('0')
+  await expect(page.locator('.stat-cards article').filter({ hasText: 'Component / release findings' }).locator('strong')).toHaveText('1')
   await expect(page.locator('.stat-cards article').filter({ hasText: 'Projects with findings' }).locator('small')).toHaveText('1 projects in scope')
   await expect(page.getByRole('heading', { name: 'Owning teams', exact: true }).locator('..').getByRole('row').filter({ hasText: 'Platform' })).toHaveCount(0)
   await page.setViewportSize({ width: 390, height: 844 })

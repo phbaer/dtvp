@@ -8,8 +8,9 @@ from sqlalchemy import select
 
 from dtvp.api import DB, Auth, require_admin
 from dtvp.auth import issue
-from dtvp.domain import import_sbom
-from dtvp.models import Base, Membership, Project, Release, User, Workspace, now
+from dtvp.domain import import_evidence, import_sbom
+from dtvp.models import Base, Component, Finding, Membership, Project, Release, User, Workspace, now
+from dtvp.providers import DemoMatcher
 from dtvp.storage import canonical
 
 FIXTURES = Path(__file__).resolve().parent.parent / "playground" / "fixtures"
@@ -25,6 +26,7 @@ PERSONAS = {
 
 def seed(db, artifacts):
     if db.scalar(select(Workspace.id).limit(1)):
+        seed_operations_finding(db)
         return
     workspaces = {name: Workspace(name=name) for name in ["Platform", "Operations"]}
     db.add_all(workspaces.values())
@@ -72,6 +74,55 @@ def seed(db, artifacts):
             },
             actor_id=admin.id,
         )
+
+    seed_operations_finding(db)
+
+
+def seed_operations_finding(db):
+    """Backfill the offline demo only; never replace existing finding history."""
+    components = db.scalars(
+        select(Component)
+        .join(Release, Component.release_id == Release.id)
+        .join(Project, Release.project_id == Project.id)
+        .join(Workspace, Project.workspace_id == Workspace.id)
+        .where(Workspace.name == "Operations", Project.name == "Demo Worker")
+    )
+    admin = db.scalar(
+        select(User).where(User.issuer == "playground", User.subject == "administrator")
+    )
+    if not admin:
+        return
+    for component in components:
+        response = DemoMatcher(None).query(component.purl)
+        for advisory in response["advisories"]:
+            existing = db.scalar(
+                select(Finding.id).where(
+                    Finding.component_id == component.id, Finding.identifier == advisory["id"]
+                )
+            )
+            if existing:
+                continue
+            finding = Finding(
+                release_id=component.release_id,
+                component_id=component.id,
+                identifier=advisory["id"],
+            )
+            db.add(finding)
+            db.flush()
+            import_evidence(
+                db,
+                admin.id,
+                finding,
+                source="demo",
+                external_id="playground:baseline",
+                assertion={
+                    "kind": "match",
+                    "advisory": advisory,
+                    "method": response["method"],
+                    "purl": component.purl,
+                    "checked_at": now().isoformat(),
+                },
+            )
 
 
 class Login(BaseModel):

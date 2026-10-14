@@ -24,7 +24,10 @@ starting the playground and open that port instead. Windows reservations are
 listed by `netsh interface ipv4 show excludedportrange protocol=tcp`.
 
 Select Platform analyst, submit an assessment, then
-switch to Platform reviewer to approve. Operations has a separate private product.
+switch to Platform reviewer to approve. Platform starts with two synthetic findings;
+Operations has a separate private product with one offline-matched finding.
+Playground persona switches and resets clear review filters. Empty queues offer
+**Show all accessible findings** to recover from restrictive filters.
 Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
 Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
