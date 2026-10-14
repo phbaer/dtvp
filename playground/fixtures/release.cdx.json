@@ -1,0 +1,14 @@
+{
+  "bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+  "metadata": {"component": {"type": "application", "name": "Demo Gateway", "version": "1.0.0", "bom-ref": "gateway"}},
+  "components": [
+    {"type": "library", "name": "demo-http", "version": "1.2.0", "bom-ref": "http", "purl": "pkg:npm/demo-http@1.2.0", "licenses": [{"license": {"id": "MIT"}}]},
+    {"type": "library", "name": "demo-parser", "version": "2.0.0", "bom-ref": "parser", "purl": "pkg:pypi/demo-parser@2.0.0"},
+    {"type": "library", "name": "demo-utility", "version": "3.0.0", "bom-ref": "utility", "purl": "pkg:npm/demo-utility@3.0.0"}
+  ],
+  "dependencies": [{"ref": "gateway", "dependsOn": ["http", "parser"]}, {"ref": "http", "dependsOn": ["utility"]}, {"ref": "parser", "dependsOn": []}, {"ref": "utility", "dependsOn": []}],
+  "vulnerabilities": [
+    {"id": "CVE-2099-20001", "description": "Synthetic HTTP input validation finding. Review the network exposure and deployment context.", "ratings": [{"method": "CVSSv31", "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8}], "cwes": [20], "affects": [{"ref": "http"}], "source": {"name": "Synthetic DT"}},
+    {"id": "CVE-2099-20002", "description": "Synthetic parser denial of service. Determine whether untrusted files reach the parser.", "ratings": [{"method": "CVSSv31", "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H", "score": 7.5}], "affects": [{"ref": "parser"}], "source": {"name": "Synthetic DT"}}
+  ]
+}

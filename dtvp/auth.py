@@ -1,231 +1,124 @@
-import logging
-from functools import lru_cache
-from typing import Optional
-from urllib.parse import urlparse
+import secrets
+from dataclasses import dataclass
+from datetime import UTC, timedelta
 
-from authlib.integrations.base_client.errors import MismatchingStateError, OAuthError
-from authlib.integrations.starlette_client import OAuth
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
-from jose import jwt
-from joserfc.errors import JoseError
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from fastapi import HTTPException, Request
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from .logic import get_user_role
+from dtvp.models import Credential, Grant, Membership, Project, User, now
+from dtvp.storage import digest
 
-logger = logging.getLogger(__name__)
+ROLE_CAPABILITIES = {
+    "viewer": {"read"},
+    "analyst": {"read", "write", "assess", "snapshot", "evidence"},
+    "reviewer": {"read", "assess", "approve", "snapshot", "evidence"},
+    "admin": {"read", "write", "manage", "snapshot", "export", "evidence"},
+}
 
 
-class AuthSettings(BaseSettings):
-    OIDC_CLIENT_ID: Optional[str] = Field(alias="DTVP_OIDC_CLIENT_ID", default=None)
-    OIDC_CLIENT_SECRET: Optional[str] = Field(
-        alias="DTVP_OIDC_CLIENT_SECRET", default=None
+def aware(value):
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+def capabilities(roles):
+    return set().union(*(ROLE_CAPABILITIES.get(role, set()) for role in roles))
+
+
+@dataclass
+class Actor:
+    user: User
+    credential: Credential
+    memberships: dict[str, set[str]]
+
+    def workspace(self, workspace_id: str, capability: str):
+        caps = self.memberships.get(workspace_id, set())
+        if self.credential.kind == "api":
+            if workspace_id != self.credential.workspace_id:
+                return False
+            caps = caps.intersection(self.credential.capabilities)
+        return capability in caps
+
+    def allowed(self, db: Session, project: Project, capability: str):
+        if self.credential.kind == "api" and self.credential.projects:
+            if project.id not in self.credential.projects:
+                return False
+        if self.workspace(project.workspace_id, capability):
+            return True
+        for grant in db.scalars(select(Grant).where(Grant.project_id == project.id)):
+            if capability in grant.capabilities and self.workspace(grant.workspace_id, capability):
+                return True
+        return False
+
+    def require(self, db: Session, project: Project | None, capability="read"):
+        if project is None or not self.allowed(db, project, capability):
+            raise HTTPException(404, "Resource unavailable in your scope")
+        return project
+
+    def decision_workspace(self, db, project):
+        for workspace_id in sorted(self.memberships):
+            if self.workspace(workspace_id, "assess"):
+                if workspace_id == project.workspace_id:
+                    return workspace_id
+                grant = db.get(Grant, (project.id, workspace_id))
+                if grant and "assess" in grant.capabilities:
+                    return workspace_id
+        raise HTTPException(403, "Assessment membership required")
+
+
+def authenticate(request: Request, db: Session) -> Actor:
+    authorization = request.headers.get("authorization", "")
+    machine = authorization.startswith("Bearer ")
+    token = (
+        authorization.removeprefix("Bearer ") if machine else request.cookies.get("dtvp_session")
     )
-    OIDC_AUTHORITY: Optional[str] = Field(alias="DTVP_OIDC_AUTHORITY", default=None)
-    OIDC_REDIRECT_URI: Optional[str] = Field(
-        alias="DTVP_OIDC_REDIRECT_URI", default=None
-    )
-    SESSION_SECRET_KEY: str = Field(
-        alias="DTVP_SESSION_SECRET_KEY", default="change_me"
-    )
-    FRONTEND_URL: str = Field(
-        alias="DTVP_FRONTEND_URL", default="http://localhost:8000"
-    )
-    CONTEXT_PATH: str = Field(alias="DTVP_CONTEXT_PATH", default="/")
-
-    # Support aliases from the deployment compose file too
-    ISSUER_URL: Optional[str] = Field(default=None)
-    CLIENT_ID: Optional[str] = Field(default=None)
-    # Development settings
-    DEV_DISABLE_AUTH: bool = Field(alias="DTVP_DEV_DISABLE_AUTH", default=False)
-
-    model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
-
-    @property
-    def authority(self) -> str:
-        # Priority: DTVP_OIDC_AUTHORITY > ISSUER_URL > default None
-        return self.OIDC_AUTHORITY or self.ISSUER_URL or ""
-
-    @property
-    def client_id(self) -> str:
-        # Priority: DTVP_OIDC_CLIENT_ID > CLIENT_ID > default None
-        return self.OIDC_CLIENT_ID or self.CLIENT_ID or ""
-
-    @property
-    def client_secret(self) -> str:
-        # Priority: DTVP_OIDC_CLIENT_SECRET > OIDC_CLIENT_SECRET (alias) > default None
-        return self.OIDC_CLIENT_SECRET or ""
-
-    @property
-    def redirect_uri(self) -> str:
-        if self.OIDC_REDIRECT_URI:
-            return self.OIDC_REDIRECT_URI
-
-        base = self.FRONTEND_URL.rstrip("/")
-        path = self.CONTEXT_PATH
-        if path and not path.startswith("/"):
-            path = "/" + path
-        path = path.rstrip("/")
-
-        return f"{base}{path}/auth/callback"
-
-    @property
-    def oidc_cookie_path(self) -> str:
-        path = self.CONTEXT_PATH.strip("/")
-        return f"/{path}/auth" if path else "/auth"
-
-    @property
-    def application_cookie_path(self) -> str:
-        path = self.CONTEXT_PATH.strip("/")
-        return f"/{path}" if path else "/"
-
-    @property
-    def secure_cookies(self) -> bool:
-        return urlparse(self.redirect_uri).scheme.lower() == "https"
-
-
-auth_settings = AuthSettings()
-router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-@lru_cache(maxsize=1)
-def _create_oidc_client(authority: str, client_id: str, client_secret: str):
-    oauth = OAuth()
-    return oauth.register(
-        name="oidc",
-        client_id=client_id,
-        client_secret=client_secret or None,
-        server_metadata_url=(
-            f"{authority.rstrip('/')}/.well-known/openid-configuration"
-        ),
-        client_kwargs={
-            "scope": "openid profile email",
-            "code_challenge_method": "S256",
-            "token_endpoint_auth_method": (
-                "client_secret_post" if client_secret else "none"
-            ),
-        },
-    )
-
-
-def get_oidc_client():
-    authority = auth_settings.authority
-    if not authority:
-        raise HTTPException(status_code=500, detail="OIDC Authority not configured")
-    if not auth_settings.client_id:
-        raise HTTPException(status_code=500, detail="OIDC Client ID not configured")
-    return _create_oidc_client(
-        authority,
-        auth_settings.client_id,
-        auth_settings.client_secret,
-    )
-
-
-@router.get("/login")
-async def login(request: Request):
-    return await get_oidc_client().authorize_redirect(
-        request,
-        auth_settings.redirect_uri,
-    )
-
-
-@router.get("/callback")
-async def callback(request: Request):
-    try:
-        token = await get_oidc_client().authorize_access_token(request)
-    except MismatchingStateError as exc:
-        logger.info("OIDC callback rejected due to invalid state")
-        raise HTTPException(status_code=400, detail="Invalid OIDC login state") from exc
-    except OAuthError as exc:
-        logger.info("OIDC provider rejected the callback: %s", exc)
-        raise HTTPException(
-            status_code=400, detail="Failed to authenticate with OIDC provider"
-        ) from exc
-    except JoseError as exc:
-        logger.info("OIDC identity token validation failed: %s", exc)
-        raise HTTPException(
-            status_code=400, detail="Invalid OIDC identity token"
-        ) from exc
-
-    claims = token.get("userinfo")
-    if not claims:
-        raise HTTPException(status_code=400, detail="OIDC identity token missing")
-
-    username = (
-        claims.get("sub")
-        or claims.get("preferred_username")
-        or claims.get("email")
-    )
-    if not isinstance(username, str) or not username:
-        raise HTTPException(
-            status_code=400, detail="OIDC identity token has no user identifier"
+    credential = db.scalar(
+        select(Credential).where(
+            Credential.token_hash == digest((token or "").encode()), Credential.revoked.is_(False)
         )
-
-    session_token = jwt.encode(
-        {"sub": username}, auth_settings.SESSION_SECRET_KEY, algorithm="HS256"
     )
+    if not credential or aware(credential.expires_at) <= now():
+        raise HTTPException(401, "Sign in required")
+    if machine != (credential.kind == "api"):
+        raise HTTPException(401, "Credential transport mismatch")
+    if not machine and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        supplied = digest(request.headers.get("x-csrf-token", "").encode())
+        origin = request.headers.get("origin")
+        if not secrets.compare_digest(supplied, credential.csrf_hash or ""):
+            raise HTTPException(403, "Session expired or invalid request token")
+        if origin and origin.rstrip("/") != request.app.state.settings.public_url.rstrip("/"):
+            raise HTTPException(403, "Request origin is not allowed")
+    user = db.get(User, credential.user_id)
+    memberships = {
+        m.workspace_id: capabilities(m.roles)
+        for m in db.scalars(select(Membership).where(Membership.user_id == user.id))
+    }
+    return Actor(user, credential, memberships)
 
-    base = auth_settings.FRONTEND_URL.rstrip("/")
-    path = auth_settings.CONTEXT_PATH
-    if not path.startswith("/"):
-        path = "/" + path
-    target = f"{base}{path}"
 
-    response = RedirectResponse(url=target)
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        path=auth_settings.application_cookie_path,
-        secure=auth_settings.secure_cookies,
-        httponly=True,
-        samesite="lax",
+def issue(
+    db,
+    user,
+    *,
+    kind="session",
+    workspace_id=None,
+    projects=None,
+    allowed=None,
+    name="session",
+    hours=12,
+):
+    token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    credential = Credential(
+        user_id=user.id,
+        token_hash=digest(token.encode()),
+        kind=kind,
+        workspace_id=workspace_id,
+        projects=projects or [],
+        capabilities=allowed or [],
+        name=name,
+        csrf_hash=digest(csrf.encode()) if kind == "session" else None,
+        expires_at=now() + timedelta(hours=hours),
     )
-    return response
-
-
-@router.get("/logout")
-async def logout(response: Response):
-    base = auth_settings.FRONTEND_URL.rstrip("/")
-    path = auth_settings.CONTEXT_PATH.rstrip("/")
-    if path and not path.startswith("/"):
-        path = "/" + path
-
-    # Ensure exactly one slash between base/path and login
-    redirect_path = "/login"
-    target = f"{base}{path}{redirect_path}"
-
-    response = RedirectResponse(url=target)
-    response.delete_cookie(
-        key="session_token",
-        path=auth_settings.application_cookie_path,
-        secure=auth_settings.secure_cookies,
-        httponly=True,
-        samesite="lax",
-    )
-    return response
-
-
-async def get_current_user(request: Request):
-    if auth_settings.DEV_DISABLE_AUTH:
-        return "devuser"
-
-    token = request.cookies.get("session_token")
-    if token:
-        try:
-            payload = jwt.decode(
-                token, auth_settings.SESSION_SECRET_KEY, algorithms=["HS256"]
-            )
-            return payload.get("sub")
-        except Exception as e:
-            logger.debug(f"Failed to decode JWT token: {e}")
-            pass
-
-    raise HTTPException(status_code=401, detail="Not authenticated")
-
-
-@router.get("/me")
-async def get_user_info(user: str = Depends(get_current_user)):
-    return {"username": user, "role": get_user_role(user)}
+    db.add(credential)
+    db.flush()
+    return token, csrf, credential

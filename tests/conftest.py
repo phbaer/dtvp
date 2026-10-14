@@ -1,60 +1,52 @@
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dtvp import dt_cache, main
-from dtvp.dt_client import DTClient
-
-
-@pytest.fixture(autouse=True)
-def reset_cache_manager(tmp_path, monkeypatch):
-    monkeypatch.setenv("DTVP_SSVC_ENRICHMENT_ENABLED", "false")
-    cache_dir = tmp_path / "dt_cache"
-    analysis_results_path = tmp_path / "code_analysis_results.json"
-    monkeypatch.setenv("DTVP_DT_CACHE_PATH", str(cache_dir))
-    monkeypatch.setenv("DTVP_CODE_ANALYSIS_RESULTS_PATH", str(analysis_results_path))
-    dt_cache.cache_manager.reset(str(cache_dir))
-    main.code_analysis_result_store.reset()
-    yield
-    main.code_analysis_result_store.reset()
-
-
-# Mock Dependency Track Client
-class MockDTClient:
-    async def get_projects(self, name: str = None):
-        return []
-
-    async def get_vulnerabilities(self, project_uuid: str):
-        return []
-
-    async def update_analysis(self, **kwargs):
-        pass
+from dtvp.config import Settings
+from dtvp.main import create_app
 
 
 @pytest.fixture
-def mock_dt_client():
-    client = AsyncMock(spec=DTClient)
-    client.get_projects.return_value = []
-    client.get_vulnerabilities.return_value = []
-    client.update_analysis.return_value = None
+def app(tmp_path):
+    return create_app(
+        Settings(
+            _env_file=None,
+            playground=True,
+            database_url="sqlite:///:memory:",
+            artifact_dir=tmp_path / "artifacts",
+            frontend_dir=tmp_path / "absent",
+        )
+    )
+
+
+@pytest.fixture
+def client(app):
+    with TestClient(app) as client:
+        yield client
+
+
+def login(client, persona="analyst"):
+    response = client.post("/api/v2/playground/login", json={"persona": persona})
+    assert response.status_code == 200, response.text
+    client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+
+
+@pytest.fixture
+def analyst(client):
+    login(client)
     return client
 
 
 @pytest.fixture
-def client(mock_dt_client):
-    # Override dependencies
-    main.app.dependency_overrides[main.get_client] = lambda: mock_dt_client
+def release_id(analyst):
+    projects = analyst.get("/api/v2/projects").json()
+    return analyst.get(f"/api/v2/projects/{projects[0]['id']}/releases").json()[0]["id"]
 
-    # Disable background sync loop during tests to prevent race conditions
-    async def _noop_sync():
-        pass
 
-    with (
-        patch.object(dt_cache.cache_manager, "background_sync_loop", _noop_sync),
-        patch.object(dt_cache.cache_manager, "initialize", _noop_sync),
-    ):
-        with TestClient(main.app) as test_client:
-            yield test_client
+@pytest.fixture
+def bom():
+    import json
 
-    main.app.dependency_overrides.clear()
+    path = Path(__file__).resolve().parent.parent / "playground/fixtures/release.cdx.json"
+    return json.loads(path.read_text())

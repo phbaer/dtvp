@@ -1,26 +1,21 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
 .env
-*.txt
-test-results/
-htmlcov/
+.venv/
+__pycache__/
+*.py[cod]
 .pytest_cache/
 .ruff_cache/
-.coverage/
-data/dt_cache/
-
-# Virtual environments
-.venv
-venv/
-frontend/playwright-report
-frontend/test-results
-frontend/coverage
 .coverage
-.python-version
-data/tmrescore_proposals.json
-test_setup/mock_dt_analysis.runtime.json
+htmlcov/
+data/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/coverage/
+.playground/
+*.egg-info/
+node_modules/
+# Compatibility exclusion for local caches left before Agentyzer moved to ../agentyzer.
+agentyzer/
+# Preserved local remnants of the old runtime; never part of the rewrite.
+test_setup/

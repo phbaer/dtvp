@@ -1,201 +1,167 @@
-# Dependency Track Vulnerability Processor (DTVP)
+# DTVP
 
-DTVP is a FastAPI and Vue application for reviewing Dependency-Track findings
-across project versions. It groups vulnerabilities, tracks team assessments,
-and applies consistent decisions across releases.
+DTVP owns SBOM inventory, component metadata, security evidence, assessments and
+approvals. Dependency-Track, CyBeats exports and pipeline files are sources.
+Generator and VScorer remain separate applications consuming immutable snapshots.
+Agentyzer lives in the separate `../agentyzer` repository. DTVP owns imported
+analysis evidence; Agentyzer owns its source, dependencies, tests and deployment.
 
-[Main repository](https://git.baer.one/phbaer/dtvp/) ·
-[GitHub mirror](https://github.com/phbaer/dtvp/)
+FastAPI + Vue · PostgreSQL/JSONB · local immutable artifacts · no S3 or broker.
 
-- Team and global assessments, CVSS rescoring, SSVC prioritization, and exploitation evidence.
-- Bulk assessment repair, audit-backed recovery, and project archive import/export.
-- Optional threat-model rescoring through the legacy VScorer integration and code analysis through Agentyzer.
-- Mock services for local development and testing.
+## Try it locally
 
-[Quick start](#quick-start) · [Deployment](#docker-deployment) ·
-[Commands](#command-reference) · [Review workflow](#review-workflow) ·
-[Architecture](#repository-and-architecture) · [Documentation](#documentation)
-
-## Quick Start
-
-Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)
-or a newer supported Node.js release.
+Requirements: Docker Compose and `uv`. One command builds the real application,
+starts PostgreSQL, applies migrations and loads synthetic data:
 
 ```bash
-uv sync --dev
+uv run python scripts/playground.py up
+```
+
+Open **http://127.0.0.1:8800**. Select Platform analyst, submit an assessment, then
+switch to Platform reviewer to approve. Operations has a separate private product.
+Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
+Replay changed evidence, conflicting sources and partial scans from the banner.
+The offline demo matcher and simulated failure run through the durable worker.
+System, light and dark themes and expandable technical evidence are available.
+
+```bash
+uv run python scripts/playground.py down   # retains data
+uv run python scripts/playground.py reset  # resets only playground volumes
+uv run python scripts/playground.py logs
+```
+
+Set `DTVP_PLAYGROUND_PORT` to change the port. After the initial image build,
+`up --skip-build` works offline. Production `.env` is not read by Compose here.
+Uploads/edits remain interactive; test fixtures live in `playground/fixtures/`.
+
+If your build network requires a private CA, keep TLS verification enabled:
+
+```bash
+docker build --secret id=build_ca,src=/path/to/trusted-ca.pem -t dtvp:rewrite .
+uv run python scripts/playground.py up --skip-build
+```
+
+## Review and ownership
+
+- Source revisions and original files are immutable. Reimports preserve curated metadata and decisions.
+- Package coordinates, qualifiers, hashes and source refs establish identity; names alone do not.
+- Each component occurrence has its own finding and decision history. Partial/failed scans cannot imply a clean result.
+- Previous DTVP tags and plain DT documentation without metadata are imported, including team history, pending review, suppression, SSVC and contextual rescoring. Original text is retained; missing authors stay unknown.
+- Decisions and independent approvals bind to the current evidence revision. Changed evidence requires revalidation.
+- Team membership and explicit project sharing control access. Ownership metadata describes responsibility.
+- Viewer, analyst, reviewer and administrator permissions are explicit; administration does not imply approval.
+- No source receives automatic writes. SBOM, reviewed VEX and consumer exports are explicit downloads.
+
+## API and consumers
+
+The API is `/api/v2`; schema: `/openapi.json`; readiness: `/readyz`.
+Browser access uses server-side sessions and request tokens. OIDC maps verified
+issuer/subject identities to memberships. Administrators issue expiring, revocable,
+workspace/project-scoped machine credentials; tokens are returned only once.
+
+`POST /snapshots` freezes a release. Its manifest, bundle, paginated findings,
+SBOM and VScorer worklist retain the same revision and hashes. Consumer reads
+always recheck current authorization, including after sharing is revoked.
+
+The separate Generator integration is on `feat/dtvp-snapshot-consumer`, initially
+in `/tmp/dtvp-generator-consumer`; the existing `../generator` checkout is untouched.
+It adds a native DTVP source to the existing CLI/API generation path, verifies
+snapshot integrity and preserves occurrence-specific approved decisions without
+DT fallback. See [consumer integration](docs/consumers.md).
+
+VScorer accepts the exported SBOM/worklist through its existing intake. Returned
+contextual evidence must identify the snapshot, finding, exact refs and original
+Base vector. DTVP approval remains separate; lower severity never proves unaffectedness.
+
+## Sources and matching
+
+CycloneDX 1.5/1.6 JSON/XML and SPDX 2.3 JSON use one versioned ingestion path.
+The envelope preserves source/event IDs, timestamps, pipeline context and raw
+provider data. CyBeats uses standard SBOM exports; its proprietary API requires
+a verified deployment contract before adding a native connector.
+
+The DT connector is read-only. OSV supplies optional package/version matching;
+NVD and Luxembourg's CIRCL supply optional advisory enrichment. Provider requests
+are disabled unless configured. Mirrors retain upstream publisher data.
+Qualified PURLs unsupported by a matcher remain unknown. Successful no-match
+checks are coverage observations, not applicability decisions.
+
+ENISA EUVD, Japan's JVN and other providers can use the advisory/evidence ports;
+their native feed adapters are not yet shipped. See [API and adapters](docs/api.md).
+External Agentyzer results can use the evidence-ingestion port. Native analysis
+submission/polling is a separate connector; no Agentyzer service is bundled here.
+
+## Production deployment
+
+```bash
+cp .env.example .env
+# Set unique secrets, database password/URL, public URL and OIDC configuration.
+docker compose up -d --build
+docker compose exec api uv run --no-sync python -m dtvp.cli bootstrap \
+  --issuer https://your-identity-provider.example --subject YOUR_SUBJECT --name YOUR_NAME
+```
+
+Sign in with that identity, create workspaces, and assign explicit memberships.
+The supplied deployment binds to loopback; terminate HTTPS through your reverse
+proxy. PostgreSQL data and local artifacts use independent persistent volumes.
+An optional managed PostgreSQL service uses the same database URL contract.
+
+Schema updates run automatically under a database lock before readiness. Existing
+schema upgrades first save a sealed logical data backup. A dedicated migration
+database URL is supported. PostgreSQL major upgrades use a separate dump/restore
+helper creating a new cluster and retaining the old volume. See
+[deployment and recovery](docs/deployment.md).
+
+## Development and verification
+
+Use `uv` from the repository root, `npm` from `frontend/`. Python 3.14+, Node
+24.15+ and Docker are supported.
+
+```bash
+uv sync --locked --dev
+uv run pytest
+uv run ruff check dtvp tests scripts
 cd frontend
 npm ci --include=optional
-cd ..
-pm2 start ecosystem.config.js --update-env
+npm run build
+npm run test:unit
+npm run test:ui                 # real playground must be running
 ```
 
-| Service | URL |
-| :--- | :--- |
-| Frontend | http://localhost:5173 |
-| Backend API | http://localhost:8000/api/version |
-| Mock Dependency-Track | http://localhost:8081 |
-| Mock VScorer | http://localhost:8090/ui |
-| Mock code analysis | http://localhost:8095 |
+`DTVP_TEST_DATABASE_URL` enables destructive integration checks against an
+explicitly disposable PostgreSQL database whose name ends in `_test`.
+Fast tests use SQLite only as an isolated test adapter. Browser tests use the
+actual PostgreSQL/auth/API stack, without mocked application requests.
+`uv run python scripts/playground.py test` runs backend/build/unit/browser checks.
 
-Open `/login`, choose **Sign in with SSO**, then **Login as Reviewer** on the
-mock Dependency-Track page. Inspect services with `pm2 list` or `pm2 logs`.
-Stop the stack with:
+For separate processes, set the configuration in [development](docs/development.md),
+run `uv run python -m dtvp.cli serve` and `uv run python -m dtvp.cli worker`, then
+`npm run dev` in `frontend/`. Theme and technical-detail preferences persist locally;
+assessment drafts are retained per user/finding in the browser session.
 
-```bash
-pm2 delete mock-dt mock-tmrescore mock-code-analysis dtvp-backend dtvp-frontend
-```
-
-For separate backend/frontend processes and authentication overrides, see
-[Development and testing](docs/development.md).
-
-## Docker Deployment
-
-```bash
-cp .env.dist .env
-# Configure .env before starting services.
-docker compose up -d
-```
-
-Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and a
-strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
-`DTVP_HTTP_PORT` controls the host port. Persistent data lives in `./data`.
-
-The published DTVP image uses Python 3.14 free threading. Compose also starts
-Agentyzer; configure its repository mappings before enabling automatic scans.
-See [Deployment](docs/deployment.md) for networking, authentication, runtime
-checks, and release details, and [Configuration](docs/configuration.md) for
-all environment variables.
-
-## Command Reference
-
-Use `uv` from the repository root for Python/backend work and `npm` from
-`frontend/` for frontend work.
-
-| Task | Command |
-| :--- | :--- |
-| Run all Python tests, including Agentyzer | `uv run pytest` |
-| Run Agentyzer tests only | `cd agentyzer && uv run pytest` |
-| Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
-| Run focused frontend tests | `cd frontend && npm run test:unit -- --run ProjectView` |
-| Build the frontend | `cd frontend && npm run build` |
-| Run browser tests | `cd frontend && npm run test:ui` |
-| Run manual real-stack tests | `cd frontend && npm run test:ui:real-stack` |
-| Capture documentation screenshots | `cd frontend && npm run test:ui:docs -- --project=chromium` |
-| Benchmark grouped queries | `uv run python scripts/benchmark_group_queries.py` |
-
-Browser tests cover Chromium, Firefox, and WebKit. CI's Playwright image must
-match the version in `frontend/package-lock.json`. See
-[Development and testing](docs/development.md) for test fixtures, toolchain
-constraints, and CI conventions.
-
-## Review Workflow
-
-1. Open a project to review vulnerabilities across its versions.
-2. Filter by lifecycle, team, component, version, or evidence; open a finding
-   for context and assessment details.
-3. Record team assessments, optionally using earlier team assessments,
-   threat-model or code-analysis proposals. Reviewers approve global decisions
-   and adjust CVSS scores.
-4. Use **Bulk Changes** for repeated updates, repairs, or team takeovers
-   scoped to mapped owner components; use archives to export and restore project data.
-
-| Lifecycle | Meaning |
-| :--- | :--- |
-| **Open** | No assessment started |
-| **Incomplete** | Required team or finding coverage is missing |
-| **Conflicting** | Assessment data disagrees or needs repair |
-| **Ready for approval** | Complete, consistent assessments await reviewer sign-off |
-| **Assessed** | Complete with no pending approval; includes legacy assessments |
-
-Analysts start with the **Analyst work** view (Open and Incomplete, including
-Conflicting); reviewers start with **All statuses** and can use **Approval queue**
-for ready findings. Untouched defaults follow role changes; custom status choices
-stay selected. Conflicting findings retain their badge and require repair before
-approval.
-
-Select one or more **Teams** to enable **Assessment for selected teams**:
-**Not recorded** finds a missing assessment among responsible selected teams;
-**Recorded** requires all responsible selected teams to have an assessment
-(including pending approval); **Any** adds no restriction. Analysts start with
-Not recorded when selecting their first team; reviewers start with Any.
-Clearing teams removes this restriction. Status choices remain unchanged.
-
-Plain search still matches team names, without selecting teams. `team:` tokens
-resolve to visible team selections; ambiguous matches require a choice.
-Filters combine with AND across categories and OR within a category. Option
-counts exclude their own category; result totals and bulk actions include all
-filters. Specialist controls live under **More filters**. Selections persist in
-shared URLs; Reset clears filters. Legacy assessments retain a **Legacy** badge.
-
-Team mapping accepts `group:name` and scoped `group/name` keys. A mapped
-component takes precedence over its mapped ancestors, even across alternate
-dependency paths; independent owners can both appear. The backend's
-resolved finding tags drive the list and detail views. Mapping edits rerun the
-project query so both views use the same ownership.
-
-See [Assessment model](docs/assessment-model.md) for exact state, ownership,
-SSVC, and evidence rules; [Review workflows](docs/review-workflows.md) for
-filtering, editing, bulk operations, and archives; or the
-[screen guide](docs/screens.md) for UI examples.
-
-## Repository And Architecture
-
-```text
-Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
-                           → optional VScorer and code-analysis services
-```
+## Repository
 
 | Path | Purpose |
 | :--- | :--- |
-| `dtvp/` | Backend routes, domain logic, integrations, and migrations |
-| `frontend/` | Vue pages, components, API client, and browser tests |
-| `agentyzer/` | Bundled code-analysis service |
-| `test_setup/` | Mock Dependency-Track, VScorer, and code-analysis services |
-| `tests/` | Backend tests |
-| `data/` | Local mappings, rules, caches, and archives |
-| `openapi/` | Integration API specifications |
-| `docs/` | Detailed guides, references, diagrams, and screenshots |
-| `skills/` | Agent entry points that route back to this README |
+| `dtvp/` | Domain, permissions, API, parsers, providers, snapshots and durable jobs |
+| `dtvp/migrations/` | Frozen Alembic schema revisions |
+| `frontend/` | Streamlined Vue review workspace and browser tests |
+| `playground/` | Isolated Compose stack and shared public synthetic fixtures |
+| `tests/` | Invariants, authorization, adapters, recovery and PostgreSQL checks |
+| `scripts/` | Playground and PostgreSQL upgrade helpers |
+| `docs/` | API, consumers, deployment, development and retained rewrite design |
+| `skills/` | Agent routing back to this README |
 
-Grouped tasks serve filtered summary windows and hydrate full details on demand.
-Assessment saves commit to a local SQLite outbox before background synchronization
-with Dependency-Track. Task registries are process-local: the supplied deployment
-uses one backend worker; horizontal scaling requires shared task storage.
+The pre-rewrite runtime is preserved at Git commit
+`bdc7ba41a40697b0a3f5aa1b619518216e5087f8`; planning checkpoint: `9697b53`.
+Legacy DT cache/outbox code, obsolete pre-split analyzer copies, mocks, generated reports,
+screenshots and obsolete configuration are removed from the new version.
+Existing local legacy data is preserved and ignored; it is never interpreted
+automatically as new memberships or approvals.
 
-[Runtime and capacity](docs/runtime.md) documents the key modules, caching,
-concurrency, access boundaries, benchmarks, and sizing guidance.
+[Rewrite design and implementation status](docs/rewrite-plan.md) ·
+[VScorer contract](docs/vscorer-consumer-contract.md) · [MIT License](LICENSE)
 
-## Documentation
-
-| Guide | Contents |
-| :--- | :--- |
-| [Assessment model](docs/assessment-model.md) | Lifecycle rules, team ownership, SSVC, original severity, and official evidence |
-| [Review workflows](docs/review-workflows.md) | Search, filters, assessments, bulk changes, and project archives |
-| [Analysis integrations](docs/analysis-integrations.md) | Threat-model rescoring, code analysis, follow-ups, and automatic scanning |
-| [Runtime and capacity](docs/runtime.md) | Module map, background tasks, caching, concurrency, and benchmarks |
-| [Development and testing](docs/development.md) | Separate processes, test guidance, toolchain constraints, and CI |
-| [Deployment](docs/deployment.md) | Docker, networking, OIDC, persistent data, and Python runtime images |
-| [Configuration](docs/configuration.md) | Environment variables and defaults |
-| [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
-| [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
-| [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
-| [Rewrite plan](docs/rewrite-plan.md) | Proposed pipeline observer, owned inventory, PostgreSQL/local storage and upgrades, team workspaces, Generator/VScorer consumers, themes, playground/testing, and migration |
-| [VScorer consumer contract](docs/vscorer-consumer-contract.md) | Inspected minimal VScorer API and proposed vulnerability-worklist/SBOM snapshot consumption and result adoption |
-
-OpenAPI specifications: [legacy VScorer API](openapi/tmrescore-openapi.json) and
-[code analysis](openapi/code-analysis-openapi.json).
-
-This README is the canonical project overview and documentation entry point for
-humans and AI agents. Keep it brief; put detailed behavior and configuration in
-the linked guides. Meaningful behavior, architecture, API, integration,
-configuration, workflow, command, or structure changes must update this overview
-or its guide links in the same change, together with the relevant reference.
-If documentation conflicts with source, tests, configuration, or lockfiles,
-trust the source and update the documentation. Keep `AGENTS.md` and agent skills
-as routing hints; the generic entry point is `skills/project-entrypoint/SKILL.md`
-(`skills/dtvp-project-memory/SKILL.md` is the compatibility entry point).
-
-## License And SBOM
-
-[MIT License](LICENSE). The DTVP image includes CycloneDX frontend/backend SBOMs,
-served at `/api/sbom` and `/api/sbom/html`; CI also publishes an Agentyzer SBOM.
+This README is the canonical project/agent overview. Update it alongside meaningful
+behavior, API, integration, workflow or structure changes. Trust source and tests
+if they disagree with prose. Agent instructions and skills remain routing hints.

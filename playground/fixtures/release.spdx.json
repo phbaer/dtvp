@@ -1,0 +1,8 @@
+{
+  "spdxVersion": "SPDX-2.3", "SPDXID": "SPDXRef-DOCUMENT", "name": "Demo Worker",
+  "dataLicense": "CC0-1.0", "documentNamespace": "https://example.invalid/demo-worker/1",
+  "creationInfo": {"creators": ["Tool: DTVP playground"], "created": "2099-01-01T00:00:00Z"},
+  "packages": [{"SPDXID": "SPDXRef-Utility", "name": "demo-utility", "versionInfo": "3.0.0",
+                "downloadLocation": "NOASSERTION", "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:npm/demo-utility@3.0.0"}]}],
+  "relationships": [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Utility"}]
+}
