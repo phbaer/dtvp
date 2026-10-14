@@ -106,3 +106,6 @@ filters; changing filters requires restarting pagination. Lifecycle filtering
 retains bounded scans: an empty batch may still have a next cursor.
 Component pages accept `q` for name/version/PURL search. Authorization is applied
 before catalog pagination and counts; saved browser views never grant access.
+
+Agentyzer analysis submission/history/report endpoints and their eligibility and
+restart semantics are documented in [external analysis integration](agentyzer.md).

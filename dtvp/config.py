@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     dt_url: str = ""
     dt_api_key: str = ""
     vscorer_url: str = ""
+    agentyzer_enabled: bool = False
+    agentyzer_url: str = ""
+    agentyzer_token: str = ""
+    agentyzer_timeout_seconds: int = 3600
 
     @model_validator(mode="after")
     def secure_defaults(self):
@@ -33,4 +37,21 @@ class Settings(BaseSettings):
             self.session_secret = self.session_secret or "isolated-playground-session-secret-0000"
             if not self.providers_enabled:
                 self.providers_enabled = ["demo", "demo-failure"]
+        if self.agentyzer_enabled:
+            from urllib.parse import urlsplit
+
+            endpoint = urlsplit(self.agentyzer_url)
+            if (
+                endpoint.scheme not in {"http", "https"}
+                or not endpoint.hostname
+                or endpoint.username
+                or endpoint.password
+                or endpoint.query
+                or endpoint.fragment
+            ):
+                raise ValueError(
+                    "Configure an HTTP(S) Agentyzer URL without credentials, query or fragment"
+                )
+        if not 60 <= self.agentyzer_timeout_seconds <= 86400:
+            raise ValueError("Agentyzer observation timeout must be between 60 and 86400 seconds")
         return self

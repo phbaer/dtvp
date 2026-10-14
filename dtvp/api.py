@@ -264,6 +264,14 @@ def me(db: DB, actor: Auth, request: Request):
         "org_admin": actor.user.org_admin and actor.credential.kind == "session",
         "playground": request.app.state.settings.playground,
         "vscorer_url": request.app.state.settings.vscorer_url,
+        "agentyzer": {
+            "enabled": request.app.state.settings.playground
+            or request.app.state.settings.agentyzer_enabled,
+            "mode": "synthetic"
+            if request.app.state.settings.playground
+            and not request.app.state.settings.agentyzer_enabled
+            else "external",
+        },
         "workspaces": [
             {
                 "id": workspace_id,
@@ -1021,6 +1029,7 @@ def jobs(db: DB, actor: Auth):
         {
             "id": j.id,
             "kind": j.kind,
+            "finding_id": j.payload.get("finding_id"),
             "status": j.status,
             "error": j.error,
             "attempts": j.attempts,
@@ -1041,7 +1050,9 @@ def cancel_job(job_id: str, db: DB, actor: Auth):
     job = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
     if not job:
         raise HTTPException(404, "Job unavailable")
-    project_for(db, actor, job.project_id, "write" if job.kind != "enrich" else "evidence")
+    project_for(
+        db, actor, job.project_id, "evidence" if job.kind in {"enrich", "analyse"} else "write"
+    )
     if job.status in {"queued", "running"}:
         job.status = "cancelled"
     return {"status": job.status}
@@ -1052,9 +1063,15 @@ def retry_job(job_id: str, db: DB, actor: Auth):
     old = db.get(Job, job_id)
     if not old:
         raise HTTPException(404, "Job unavailable")
-    project_for(db, actor, old.project_id, "write" if old.kind != "enrich" else "evidence")
+    project_for(
+        db, actor, old.project_id, "evidence" if old.kind in {"enrich", "analyse"} else "write"
+    )
     if old.status not in {"failed", "cancelled"}:
         raise HTTPException(409, "Only failed or cancelled jobs can be retried")
+    if old.kind == "analyse":
+        raise HTTPException(
+            409, "Reload the finding and explicitly submit a new analysis against current evidence"
+        )
     result = enqueue(db, actor, db.get(Release, old.payload["release_id"]), old.kind, old.payload)
     return {"id": result.id, "status": result.status}
 

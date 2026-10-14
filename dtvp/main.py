@@ -7,6 +7,7 @@ from sqlalchemy import select
 from starlette.middleware.sessions import SessionMiddleware
 
 from dtvp.api import router
+from dtvp.api_analysis import router as analysis_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.auth import authenticate, issue
 from dtvp.config import Settings
@@ -50,6 +51,7 @@ def create_app(settings=None):
     )
     app.include_router(router)
     app.include_router(inventory_router)
+    app.include_router(analysis_router)
     if settings.playground:
         app.include_router(playground_router)
 

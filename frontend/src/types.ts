@@ -1,4 +1,4 @@
-export type Me = { id: string; name: string; org_admin: boolean; playground: boolean; vscorer_url: string; workspaces: { id: string; name: string; capabilities: string[] }[] }
+export type Me = { id: string; name: string; org_admin: boolean; playground: boolean; agentyzer: { enabled: boolean; mode: string }; vscorer_url: string; workspaces: { id: string; name: string; capabilities: string[] }[] }
 export type Project = { id: string; name: string; workspace_id: string; capabilities: string[]; workspace?: string; release_count?: number; finding_count?: number }
 export type Release = { id: string; version: string; generation: number }
 export type Decision = { id: string; state: string; rationale: string; author_id: string; evidence_revision: number; status: string; created_at: string }
@@ -6,5 +6,5 @@ export type ImportedAssessment = { source: string; format: string; state: string
 export type Finding = { id: string; identifier: string; release_id: string; component_id: string; component: string; component_version: string; owner: string; purl: string; project: string; release: string; lifecycle: string; original_score: number | null; conflicting_scores: boolean; stale_evidence: boolean; state_version: number; evidence_revision: number; active: boolean; description: string; capabilities: string[]; decisions: Decision[]; imported_assessments: ImportedAssessment[]; observations: Record<string, unknown>[]; evidence: Record<string, unknown>[]; approval: Record<string, unknown> | null }
 export type Component = { id: string; name: string; version: string; purl: string; metadata: Record<string, unknown>; metadata_version: number }
 export type Revision = { id: string; source: string; completeness: string; occurred_at: string; context: Record<string, unknown> }
-export type Job = { id: string; kind: string; status: string; error: string; result: Record<string, unknown>; attempts: number }
+export type Job = { id: string; kind: string; status: string; error: string; result: Record<string, unknown>; attempts: number; finding_id?: string }
 export type Snapshot = { id: string; coverage: { inventory: string; matching: string; unresolved_findings: { finding_id: string; reason: string }[]; excluded_components: string[] } }

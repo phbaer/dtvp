@@ -78,6 +78,11 @@ def actor_for(db, job):
 
 def execute(factory, artifacts, settings, job_id, token):
     with factory() as db:
+        if db.get(Job, job_id).kind == "analyse":
+            from dtvp.analysis import execute as execute_analysis
+
+            return execute_analysis(factory, artifacts, settings, job_id, token)
+    with factory() as db:
         job = db.get(Job, job_id)
         actor = actor_for(db, job)
         actor.require(

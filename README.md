@@ -102,8 +102,22 @@ checks are coverage observations, not applicability decisions.
 
 ENISA EUVD, Japan's JVN and other providers can use the advisory/evidence ports;
 their native feed adapters are not yet shipped. See [API and adapters](docs/api.md).
-External Agentyzer results can use the evidence-ingestion port. Native analysis
-submission/polling is a separate connector; no Agentyzer service is bundled here.
+Agentyzer submission, durable polling, follow-ups and immutable report retrieval
+are available from each finding. Set `DTVP_AGENTYZER_ENABLED=true` and
+`DTVP_AGENTYZER_URL` on the API and worker; optionally set a gateway bearer token.
+A product administrator binds its Agentyzer repository name in Products.
+The playground uses the same workflow with clearly marked offline results,
+incomplete coverage and simulated failures; no Agentyzer service is bundled.
+
+Eligible, current results can be copied explicitly into an assessment draft.
+DTVP requires matching package/version evidence and explicit application
+eligibility; exclusion proposals also require exclusion coverage. Analysis never
+submits or approves a human decision or changes the original CVSS score.
+Full reports persist in local immutable artifacts; normalized evidence lives in
+PostgreSQL. A changed finding, revoked credential or changed binding blocks
+publication. Polling survives worker restarts. An ambiguous submission is failed
+rather than replayed; start a new analysis explicitly. Cancel stops DTVP result
+collection; the separate service may continue its run. See [analysis integration](docs/agentyzer.md).
 
 ## Production deployment
 

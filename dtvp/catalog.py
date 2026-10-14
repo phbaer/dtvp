@@ -15,7 +15,7 @@ def page_cursor(value, record_id, scope):
     ).decode()
 
 
-def after_cursor(query, column, id_column, cursor, scope):
+def after_cursor(query, column, id_column, cursor, scope, *, descending=False, value_parser=None):
     if not cursor:
         return query
     try:
@@ -28,4 +28,11 @@ def after_cursor(query, column, id_column, cursor, scope):
             raise ValueError()
     except ValueError, TypeError, UnicodeError:
         raise HTTPException(422, "Invalid cursor; restart this search") from None
+    if value_parser:
+        try:
+            value = value_parser(value)
+        except ValueError:
+            raise HTTPException(422, "Invalid cursor; restart this search") from None
+    if descending:
+        return query.where(or_(column < value, and_(column == value, id_column < record_id)))
     return query.where(or_(column > value, and_(column == value, id_column > record_id)))
