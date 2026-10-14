@@ -423,6 +423,8 @@ def submit_decision(db, actor, finding, expected, state, rationale, details):
     workspace_id = actor.decision_workspace(db, project)
     if not rationale.strip():
         raise HTTPException(422, "Explain the decision")
+    if state == "not_affected" and not details.get("justification"):
+        raise HTTPException(422, "Select why this occurrence is not affected")
     decision = Decision(
         finding_id=finding.id,
         author_id=actor.user.id,

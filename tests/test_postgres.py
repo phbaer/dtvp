@@ -106,6 +106,7 @@ def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path):
                 "expected_version": finding["state_version"],
                 "state": "not_affected",
                 "rationale": "Reviewed scoped exposure.",
+                "justification": "protected_at_runtime",
                 "rescoring": {**body, "preview_digest": preview.json()["preview_digest"]},
             },
         )

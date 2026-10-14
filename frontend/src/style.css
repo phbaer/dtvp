@@ -110,3 +110,22 @@
   .assessment-steps { gap:12px; margin-bottom:12px; }
   .metric-grid { grid-template-columns:1fr; }
 }
+/* Spacious mode keeps long evidence and the current task independently scrollable. */
+.finding-workspace.roomy { width:min(1440px,100%); height:calc(100dvh - 48px); }
+.roomy .review-content { flex:1; overflow:hidden; display:flex; flex-direction:column; }
+.roomy #review-panel-assessment { flex:1; min-height:0; }
+.roomy .review-sheet { height:100%; grid-template-columns:minmax(340px,1.1fr) minmax(0,1.2fr); align-items:stretch; }
+.roomy .evidence-column { position:static; max-height:none; overflow:auto; }
+.roomy .workflow-pane { overflow:auto; padding-right:6px; }
+.roomy #review-panel-analysis,.roomy #review-panel-history { overflow:auto; }
+.justification { font-size:.85rem; font-weight:600; }
+@media(max-width:700px) {
+  .finding-workspace.roomy { height:calc(100dvh - 20px); }
+  .roomy .review-content { display:block; overflow:auto; }
+  .roomy .review-sheet { height:auto; grid-template-columns:1fr; }
+  .roomy .workflow-pane { overflow:visible; padding:0; }
+}
+@media(max-width:700px) {
+  .roomy .evidence-column.expanded { max-height:45dvh; }
+  .roomy .mobile-evidence-toggle { position:sticky; top:0; background:var(--bg); z-index:1; padding:4px 0; }
+}

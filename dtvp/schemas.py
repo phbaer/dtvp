@@ -68,6 +68,21 @@ class DecisionInput(RequestModel):
     expected_version: int = Field(ge=1)
     state: Literal["affected", "not_affected", "fixed", "under_investigation"]
     rationale: str = Field(min_length=1, max_length=6000)
+    justification: (
+        Literal[
+            "code_not_present",
+            "code_not_reachable",
+            "requires_configuration",
+            "requires_dependency",
+            "requires_environment",
+            "protected_by_compiler",
+            "protected_at_runtime",
+            "protected_at_perimeter",
+            "protected_by_mitigating_control",
+            "other",
+        ]
+        | None
+    ) = None
     details: dict = Field(default_factory=dict)
     rescoring: RescoreInput | None = None
 

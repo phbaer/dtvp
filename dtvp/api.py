@@ -883,6 +883,12 @@ def decision(finding_id: str, data: DecisionInput, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "assess")
     bounded_metadata(data.details)
     details = dict(data.details)
+    if "justification" in details:
+        raise HTTPException(422, "Use the validated justification field")
+    if data.justification:
+        if data.state != "not_affected":
+            raise HTTPException(422, "A not-affected justification requires the not_affected state")
+        details["justification"] = data.justification
     if "rescoring" in details:
         raise HTTPException(422, "Use the validated rescoring field")
     if data.rescoring:

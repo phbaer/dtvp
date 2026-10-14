@@ -40,7 +40,15 @@ action bar keep context and controls close. Reviewers inspect the submitted asse
 and confirm their checks before approving. Back navigation retains drafts. Rules,
 provider proposals and grouped deployment metrics support contextual scoring;
 advanced vectors, analysis and history remain accessible. Dialogs retain keyboard
-focus, close with Escape and return to the selected finding.
+focus, close with Escape and return to the selected finding. Long descriptions open
+a spacious view automatically; Expand review switches sizes manually. Evidence and
+assessment scroll independently in spacious desktop mode; actions remain fixed.
+When source descriptions differ, a source selector exposes each attributed text.
+New not-affected assessments require a specific justification and supporting
+explanation. Reviewers see both; snapshot findings retain the justification and
+reviewed CycloneDX VEX exports include standard justification codes. Older and
+imported decisions keep their original documentation; missing reasons are shown
+explicitly, never inferred.
 Searchable product/release selectors fetch bounded pages; releases show newest first. Browse products by name
 and team, with release and active-finding counts. Review filters cover product,
 team, component owner, status and text; sorting is stable across cursor pages.

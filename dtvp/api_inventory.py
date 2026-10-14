@@ -135,13 +135,25 @@ def vex_export(snapshot_id: str, db: DB, actor: Auth, request: Request):
         if finding["lifecycle"] != "approved" or not refs.get(finding["component_id"]):
             continue
         decision = finding["decisions"][0]
+        analysis = {
+            "state": {
+                "affected": "exploitable",
+                "not_affected": "not_affected",
+                "fixed": "resolved",
+                "under_investigation": "in_triage",
+            }[decision["state"]],
+            "detail": decision["rationale"],
+        }
+        justification = decision["details"].get("justification")
+        if decision["state"] == "not_affected" and justification and justification != "other":
+            analysis["justification"] = justification
         statements.append(
             {
                 "bom-ref": finding["id"],
                 "id": finding["identifier"],
                 "source": {"name": "DTVP human review"},
                 "affects": [{"ref": ref} for ref in refs[finding["component_id"]]],
-                "analysis": {"state": decision["state"], "detail": decision["rationale"]},
+                "analysis": analysis,
                 "properties": [
                     {"name": "dtvp:snapshot", "value": snapshot_id},
                     {"name": "dtvp:decision", "value": decision["id"]},

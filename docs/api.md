@@ -119,3 +119,10 @@ Statistics scopes, score ordering, preview/adoption and policy contracts are det
 in [statistics and rescoring](statistics-rescoring.md). Component-owner filters support
 `owner_match=contains|exact`; finding ordering supports `original_score` and
 `effective_score`, highest first.
+
+New `not_affected` decisions require the top-level `justification` field: a
+CycloneDX justification code or `other` (with the explanation in `rationale`).
+Other states must omit it. The server stores it in immutable decision details;
+`details.justification` cannot bypass validation. Reviewed VEX uses CycloneDX
+analysis states and includes standard justification codes; `other` remains in the
+snapshot and its explanation is exported as analysis detail.

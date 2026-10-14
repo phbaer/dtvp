@@ -21,6 +21,7 @@ test('statistics, readable review, contextual score approval and effective distr
   await expect(dialog.getByRole('heading', { name: 'Your assessment', exact: true })).toBeVisible()
   await expect(dialog.getByRole('tab', { name: 'Assessment & review', exact: true })).toHaveAttribute('aria-selected', 'true')
   await dialog.getByRole('combobox', { name: 'Applicability', exact: true }).selectOption('not_affected')
+  await dialog.getByRole('combobox', { name: 'Why not affected?', exact: true }).selectOption('code_not_reachable')
   await dialog.getByLabel('Reason and evidence', { exact: true }).fill('Release scope and deployment controls verified.')
   await dialog.getByRole('button', { name: 'Continue to severity', exact: true }).click()
   await dialog.getByRole('checkbox', { name: /Include contextual CVSS score/ }).check()

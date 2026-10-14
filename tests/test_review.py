@@ -179,3 +179,51 @@ def test_vscorer_export_and_return_scope(analyst, release_id):
         client.post(f"/api/v2/findings/{mapping['finding_id']}/evidence", json=body).status_code
         == 422
     )
+
+
+def test_not_affected_justification_validation_review_and_export(analyst, release_id):
+    from tests.conftest import login
+
+    finding = analyst.get("/api/v2/findings").json()["items"][0]
+    url = f"/api/v2/findings/{finding['id']}/decisions"
+    body = {
+        "expected_version": finding["state_version"],
+        "state": "not_affected",
+        "rationale": "Verified disabled route and deployment boundary.",
+    }
+    assert analyst.post(url, json=body).status_code == 422
+    assert analyst.post(url, json=body | {"justification": "invented"}).status_code == 422
+    assert (
+        analyst.post(
+            url, json=body | {"details": {"justification": "code_not_reachable"}}
+        ).status_code
+        == 422
+    )
+    assert (
+        analyst.post(
+            url, json=body | {"state": "affected", "justification": "code_not_reachable"}
+        ).status_code
+        == 422
+    )
+    submitted = analyst.post(url, json=body | {"justification": "code_not_reachable"})
+    assert submitted.status_code == 201
+    detail = analyst.get(f"/api/v2/findings/{finding['id']}").json()
+    assert detail["decisions"][0]["details"]["justification"] == "code_not_reachable"
+    login(analyst, "reviewer")
+    assert (
+        analyst.post(
+            f"/api/v2/findings/{finding['id']}/approvals",
+            json={
+                "expected_version": detail["state_version"],
+                "decision_id": submitted.json()["id"],
+            },
+        ).status_code
+        == 200
+    )
+    snapshot = analyst.post("/api/v2/snapshots", json={"release_id": release_id}).json()
+    vex = analyst.get(f"/api/v2/snapshots/{snapshot['id']}/exports/vex").json()
+    assert vex["vulnerabilities"][0]["analysis"] == {
+        "state": "not_affected",
+        "justification": "code_not_reachable",
+        "detail": body["rationale"],
+    }

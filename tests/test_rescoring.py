@@ -37,6 +37,7 @@ def submit(client, finding, rescoring):
             "expected_version": finding["state_version"],
             "state": "not_affected",
             "rationale": "Scope examined; protection verified.",
+            "justification": "protected_at_runtime",
             "rescoring": {**rescoring, "preview_digest": preview.json()["preview_digest"]},
         },
     )
