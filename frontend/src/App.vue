@@ -258,7 +258,7 @@ async function login(persona: string) {
 async function submit(advance = false) {
   if (!detail.value) return
   await action(async () => {
-    await api(`/findings/${detail.value!.id}/decisions`, send({ ...draft.value, expected_version: detail.value!.state_version }))
+    await api(`/findings/${detail.value!.id}/decisions`, send({ state: draft.value.state, rationale: draft.value.rationale, justification: draft.value.justification, expected_version: detail.value!.state_version }))
     sessionStorage.removeItem(draftKey.value)
     await openFinding(detail.value!.id, true); await loadFindings()
     notice.value = 'Decision saved. A different reviewer can approve it.'

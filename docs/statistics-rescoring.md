@@ -16,7 +16,13 @@ alias equivalence. PostgreSQL authorization and aggregation run under one
 repeatable-read, read-only transaction. Score sorting and statistics derive
 current review facts from DTVP storage; no DT request or source cache is used.
 
-## Rescoring API
+## Existing scoring API (transition state)
+
+Analysts no longer submit scoring proposals through the review UI. Final
+rescoring must follow completed reviews by all required teams. The existing
+decision-attached API below does **not** implement that completion gate and
+remains to be replaced by a separate consolidation workflow. Calculator and
+provider-validation code is retained for that phase.
 
 - `GET /cvss/metrics/{version}` supplies specification metric labels and values.
 - `GET /projects/{id}/rescore-policy` supplies current project rules, version,

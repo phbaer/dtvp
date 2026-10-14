@@ -715,3 +715,15 @@ DTVP, review it under team permissions, approve a revision, and generate a
 reproducible document set in Generator using the DTVP API. The VScorer milestone
 then proves the same snapshot can supply an exact vulnerability worklist/SBOM,
 complete its specialized review, and return scoped evidence into DTVP.
+
+## Corrected review and scoring sequence
+
+Analysts record team applicability, justification and supporting evidence;
+reviewers approve those assessments independently. Scoring is a separate
+consolidation phase after all relevant teams have reviewed their assigned
+vulnerabilities. Project sharing is not evidence of required review coverage.
+Implement explicit required-team assignments, independently retained team
+decisions, and a server-enforced completion gate before publishing final scores.
+The current latest-decision model and decision-attached scoring API do not
+implement that gate. Preserve existing calculations and scoring history during
+the transition; analyst UI submissions no longer include score proposals.

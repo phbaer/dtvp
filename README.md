@@ -34,12 +34,16 @@ Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
 System, light and dark themes and expandable technical evidence are available.
 The compact review sheet opens directly on the assessment. Evidence stays visible
-alongside applicability, optional scoring and confirmation on desktop; mobile offers
+alongside applicability and confirmation on desktop; mobile offers
 an expandable evidence panel. One header, a small progress strip and a single fixed
 action bar keep context and controls close. Reviewers inspect the submitted assessment
-and confirm their checks before approving. Back navigation retains drafts. Rules,
-provider proposals and grouped deployment metrics support contextual scoring;
-advanced vectors, analysis and history remain accessible. Dialogs retain keyboard
+and confirm their checks before approving. Back navigation retains drafts.
+Analysts do not rescore: their
+submissions contain applicability, justification and supporting evidence only.
+Rescoring belongs to a separate consolidation phase after all required teams
+have completed their reviews. Explicit team review coverage and the consolidation
+gate still need implementation; the existing scoring API is not that workflow.
+Existing scoring history, analysis and technical evidence remain accessible. Dialogs retain keyboard
 focus, close with Escape and return to the selected finding. Long descriptions open
 a spacious view automatically; Expand review switches sizes manually. Evidence and
 assessment scroll independently in spacious desktop mode; actions remain fixed.
