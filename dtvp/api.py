@@ -14,7 +14,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse
-from sqlalchemy import or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -122,17 +122,113 @@ def snapshot_for(db, actor, snapshot_id):
     return snapshot
 
 
-def visible_projects(db, actor):
+def visible_project_query(actor):
     workspace_ids = [key for key in actor.memberships if actor.workspace(key, "read")]
-    granted = select(Grant.project_id).where(Grant.workspace_id.in_(workspace_ids))
+    granted = select(Grant.project_id).where(
+        Grant.workspace_id.in_(workspace_ids),
+        cast(Grant.capabilities, String).contains('"read"'),
+    )
     query = select(Project).where(
         or_(Project.workspace_id.in_(workspace_ids), Project.id.in_(granted))
     )
-    return [
-        p
-        for p in db.scalars(query.order_by(Project.name, Project.id))
-        if actor.allowed(db, p, "read")
-    ]
+    if actor.credential.kind == "api" and actor.credential.projects:
+        query = query.where(Project.id.in_(actor.credential.projects))
+    return query
+
+
+def visible_projects(db, actor):
+    return list(db.scalars(visible_project_query(actor).order_by(Project.name, Project.id)))
+
+
+def project_summary(db, actor, project):
+    return {
+        "id": project.id,
+        "name": project.name,
+        "workspace_id": project.workspace_id,
+        "capabilities": [
+            c
+            for c in {
+                "read",
+                "write",
+                "assess",
+                "approve",
+                "snapshot",
+                "manage",
+                "export",
+                "evidence",
+            }
+            if actor.allowed(db, project, c)
+        ],
+    }
+
+
+@router.get("/catalog/projects")
+def project_catalog(
+    db: DB,
+    actor: Auth,
+    q: str = "",
+    workspace_id: str = "",
+    cursor: str = "",
+    limit: int = Query(25, ge=1, le=100),
+):
+    from dtvp.catalog import after_cursor, page_cursor
+
+    scope = ["projects", q, workspace_id]
+    query = visible_project_query(actor)
+    if q:
+        query = query.where(Project.name.icontains(q, autoescape=True))
+    if workspace_id:
+        query = query.where(Project.workspace_id == workspace_id)
+    query = after_cursor(query, Project.name, Project.id, cursor, scope)
+    rows = list(db.scalars(query.order_by(Project.name, Project.id).limit(limit + 1)))
+    items = []
+    for project in rows[:limit]:
+        item = project_summary(db, actor, project)
+        item["workspace"] = db.get(Workspace, project.workspace_id).name
+        item["release_count"] = db.scalar(
+            select(func.count()).select_from(Release).where(Release.project_id == project.id)
+        )
+        item["finding_count"] = db.scalar(
+            select(func.count())
+            .select_from(Finding)
+            .join(Release)
+            .where(Release.project_id == project.id, Finding.active.is_(True))
+        )
+        items.append(item)
+    return {
+        "items": items,
+        "next_cursor": page_cursor(rows[limit - 1].name, rows[limit - 1].id, scope)
+        if len(rows) > limit
+        else None,
+    }
+
+
+@router.get("/catalog/projects/{project_id}/releases")
+def release_catalog(
+    project_id: str,
+    db: DB,
+    actor: Auth,
+    q: str = "",
+    cursor: str = "",
+    limit: int = Query(25, ge=1, le=100),
+):
+    from dtvp.catalog import after_cursor, page_cursor
+
+    project_for(db, actor, project_id)
+    scope = ["releases", project_id, q]
+    query = select(Release).where(Release.project_id == project_id)
+    if q:
+        query = query.where(Release.version.icontains(q, autoescape=True))
+    query = after_cursor(query, Release.version, Release.id, cursor, scope)
+    rows = list(db.scalars(query.order_by(Release.version, Release.id).limit(limit + 1)))
+    return {
+        "items": [
+            {"id": r.id, "version": r.version, "generation": r.generation} for r in rows[:limit]
+        ],
+        "next_cursor": page_cursor(rows[limit - 1].version, rows[limit - 1].id, scope)
+        if len(rows) > limit
+        else None,
+    }
 
 
 def require_admin(actor, workspace_id=None):
@@ -325,6 +421,11 @@ def projects(db: DB, actor: Auth):
     ]
 
 
+@router.get("/projects/{project_id}")
+def project_read(project_id: str, db: DB, actor: Auth):
+    return project_summary(db, actor, project_for(db, actor, project_id))
+
+
 @router.post("/projects", status_code=201)
 def create_project(data: ProjectInput, db: DB, actor: Auth):
     if not actor.workspace(data.workspace_id, "write"):
@@ -388,12 +489,24 @@ def create_release(project_id: str, data: ReleaseInput, db: DB, actor: Auth):
 
 @router.get("/releases/{release_id}/components")
 def components(
-    release_id: str, db: DB, actor: Auth, cursor: str = "", limit: int = Query(50, ge=1, le=200)
+    release_id: str,
+    db: DB,
+    actor: Auth,
+    cursor: str = "",
+    q: str = "",
+    limit: int = Query(50, ge=1, le=200),
 ):
     release = release_for(db, actor, release_id)
     effective, values, active_ids = inventory(db, release)
     selected = sorted(
-        (c for c in values.values() if c.id in active_ids and c.id > cursor), key=lambda c: c.id
+        (
+            c
+            for c in values.values()
+            if c.id in active_ids
+            and c.id > cursor
+            and (not q or q.casefold() in f"{c.name} {c.version} {c.purl}".casefold())
+        ),
+        key=lambda c: c.id,
     )
     rows = selected[:limit]
     return {
@@ -545,39 +658,75 @@ def findings(
     db: DB,
     actor: Auth,
     release_id: str | None = None,
+    project_id: str = "",
+    workspace_id: str = "",
+    owner: str = "",
+    sort: str = Query("id", pattern="^(id|identifier|component|project)$"),
     q: str = "",
     lifecycle: str = "",
     cursor: str = "",
     limit: int = Query(25, ge=1, le=100),
 ):
-    projects = {p.id: p for p in visible_projects(db, actor)}
+    authorized = visible_project_query(actor).with_only_columns(Project.id)
     query = (
         select(Finding, Release, Project)
         .join(Release, Finding.release_id == Release.id)
         .join(Project)
+        .join(Component, Finding.component_id == Component.id)
     )
-    query = query.where(Project.id.in_(projects), Finding.active.is_(True), Finding.id > cursor)
+    query = query.where(Project.id.in_(authorized), Finding.active.is_(True))
+    if project_id:
+        project_for(db, actor, project_id)
+        query = query.where(Project.id == project_id)
+    if workspace_id:
+        query = query.where(Project.workspace_id == workspace_id)
+    if owner:
+        query = query.where(
+            Component.metadata_json["owner"].as_string().icontains(owner, autoescape=True)
+        )
+    from dtvp.catalog import after_cursor, page_cursor
+
+    order = {
+        "id": Finding.id,
+        "identifier": Finding.identifier,
+        "component": Component.name,
+        "project": Project.name,
+    }[sort]
+    scope = ["findings", release_id, project_id, workspace_id, owner, sort, q, lifecycle]
+    if sort == "id":
+        query = query.where(Finding.id > cursor)
+    else:
+        query = after_cursor(query, order, Finding.id, cursor, scope)
     if release_id:
         release_for(db, actor, release_id)
         query = query.where(Release.id == release_id)
     if q:
-        query = query.join(Component, Finding.component_id == Component.id).where(
+        query = query.where(
             or_(
                 Finding.identifier.icontains(q, autoescape=True),
                 Component.name.icontains(q, autoescape=True),
+                Component.purl.icontains(q, autoescape=True),
+                Project.name.icontains(q, autoescape=True),
+                Release.version.icontains(q, autoescape=True),
             )
         )
     items, last = [], None
     observations = {}
     # Cursor advances over scanned rows even when a lifecycle filter rejects a row.
     # Bounded scanning prevents an empty result from expanding without limit.
-    scanned = list(db.execute(query.order_by(Finding.id).limit(501)))
+    scanned = list(db.execute(query.order_by(order, Finding.id).limit(501)))
     consumed = 0
     for finding, release, project in scanned:
         if len(items) == limit:
             break
         consumed += 1
-        last = finding.id
+        value = {
+            "id": finding.id,
+            "identifier": finding.identifier,
+            "component": db.get(Component, finding.component_id).name,
+            "project": project.name,
+        }[sort]
+        last = finding.id if sort == "id" else page_cursor(value, finding.id, scope)
         if release.id not in observations:
             observations[release.id] = current_observations(db, release.id)
         detail = finding_detail(db, finding, observations=observations[release.id])

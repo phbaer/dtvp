@@ -1,5 +1,5 @@
 export type Me = { id: string; name: string; org_admin: boolean; playground: boolean; vscorer_url: string; workspaces: { id: string; name: string; capabilities: string[] }[] }
-export type Project = { id: string; name: string; workspace_id: string; capabilities: string[] }
+export type Project = { id: string; name: string; workspace_id: string; capabilities: string[]; workspace?: string; release_count?: number; finding_count?: number }
 export type Release = { id: string; version: string; generation: number }
 export type Decision = { id: string; state: string; rationale: string; author_id: string; evidence_revision: number; status: string; created_at: string }
 export type ImportedAssessment = { source: string; format: string; state: string | null; raw_text: string; pending_review: boolean; conflicting: boolean; suppressed: boolean; current_records: { team: string; state: string | null; rationale: string; assessor: string | null; reviewer: string | null; assessed_at: string | null; rescored_score: number | null; rescored_vector: string | null; ssvc_priority: string | null }[] }

@@ -30,6 +30,13 @@ Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
 System, light and dark themes and expandable technical evidence are available.
 Review drawers retain keyboard focus, close with Escape and return to the selected finding.
+Searchable product/release selectors fetch bounded pages. Browse products by name
+and team, with release and active-finding counts. Review filters cover product,
+team, component owner, status and text; sorting is stable across cursor pages.
+Filter URLs are shareable; saved views are browser-local and scoped to the user.
+Next/previous finding navigation retains queue context and assessment drafts.
+Administrators can replay **Load large inventory**: 100 projects × 20 findings.
+It adds synthetic data without replacing existing projects; reset removes it.
 
 ```bash
 uv run python scripts/playground.py down   # retains data

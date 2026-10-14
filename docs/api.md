@@ -90,3 +90,19 @@ legacy assessed, pending, conflicting and documented states. Original analysis
 and comments remain intact. DT polling retrieves the full occurrence analysis,
 not only the abbreviated finding status. New DTVP decisions take precedence;
 source imports cannot overwrite them or create new DTVP approvals.
+
+### Searchable catalogs and review queues
+
+`GET /catalog/projects?q=&workspace_id=&cursor=&limit=` returns bounded
+`items` with team name, release count and active-finding count.
+`GET /catalog/projects/{id}/releases?q=&cursor=&limit=` searches release versions.
+`GET /projects/{id}` resolves a selected product without loading every product.
+Original array endpoints remain available for existing consumers.
+
+`GET /findings` additionally accepts `project_id`, `workspace_id`, `owner` and
+`sort=id|identifier|component|project`. Text search includes project, release,
+component, PURL and vulnerability ID. Non-ID sort cursors are tied to the current
+filters; changing filters requires restarting pagination. Lifecycle filtering
+retains bounded scans: an empty batch may still have a next cursor.
+Component pages accept `q` for name/version/PURL search. Authorization is applied
+before catalog pagination and counts; saved browser views never grant access.

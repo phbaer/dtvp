@@ -17,7 +17,7 @@ The rewrite branch replaces the legacy runtime rather than layering another cach
 on it. Shipped: owned inventory/metadata, immutable imports and artifacts, scoped
 team access and machine credentials, assessments/four-eye approval/revalidation,
 consumer snapshots, full DT analysis reads with tagged/plain legacy compatibility, OSV matching, NVD/CIRCL advisory ports, themes,
-durable leased jobs, an offline PostgreSQL playground, implicit schema upgrades
+durable leased jobs, searchable bounded catalogs, shareable review filters and user-local saved views, next/previous review navigation, large-inventory playground scenarios, an offline PostgreSQL playground, implicit schema upgrades
 with pre-upgrade data backups, and a separate PostgreSQL copy-upgrade helper.
 Generator's native snapshot consumer is isolated on `feat/dtvp-snapshot-consumer`.
 VScorer's actual parsers accept the worklist/SBOM; its workflow remains separate.

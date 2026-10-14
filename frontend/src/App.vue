@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api, ApiError, send } from './api'
+import SearchSelect from './components/SearchSelect.vue'
 import type { Component, Finding, Job, Me, Project, Release, Revision, Snapshot } from './types'
 
 const me = ref<Me | null>(null)
 const personas = ref<{ id: string; name: string }[]>([])
-const page = ref('Review')
+const page = ref(new URLSearchParams(location.search).get('page') || 'Review')
 const projects = ref<Project[]>([])
 const releases = ref<Release[]>([])
 const projectId = ref('')
@@ -17,8 +18,54 @@ const components = ref<Component[]>([])
 const componentCursor = ref<string | null>(null)
 const revisions = ref<Revision[]>([])
 const jobs = ref<Job[]>([])
-const lifecycle = ref('')
-const search = ref('')
+const lifecycle = ref(new URLSearchParams(location.search).get('status') || '')
+const url = new URLSearchParams(location.search)
+const search = ref(url.get('q') || '')
+const reviewProject = ref(url.get('project') || '')
+const reviewProjectLabel = ref('')
+const reviewTeam = ref(url.get('team') || '')
+const ownerSearch = ref(url.get('owner') || '')
+const order = ref(url.get('sort') || 'identifier')
+const productSearch = ref('')
+const productTeam = ref('')
+const catalog = ref<Project[]>([])
+const catalogCursor = ref<string | null>(null)
+const componentSearch = ref('')
+const viewName = ref('')
+const savedViews = ref<{ name: string; query: string }[]>([])
+const reviewIndex = computed(() => rows.value.findIndex(row => row.id === detail.value?.id))
+function selectProject(option: { id: string }) {
+  const project = option as Project
+  if (!projects.value.some(p => p.id === project.id)) projects.value.push(project)
+  void action(() => loadReleases())
+}
+async function loadCatalog(append = false) {
+  const params = new URLSearchParams({ q: productSearch.value, workspace_id: productTeam.value })
+  if (append && catalogCursor.value) params.set('cursor', catalogCursor.value)
+  const result = await api<{ items: Project[]; next_cursor: string | null }>(`/catalog/projects?${params}`)
+  catalog.value = append ? [...catalog.value, ...result.items] : result.items; catalogCursor.value = result.next_cursor
+}
+function filterParams() { return new URLSearchParams({ q: search.value, lifecycle: lifecycle.value, project_id: reviewProject.value, workspace_id: reviewTeam.value, owner: ownerSearch.value, sort: order.value }) }
+function viewQuery() { return new URLSearchParams({ q: search.value, status: lifecycle.value, project: reviewProject.value, team: reviewTeam.value, owner: ownerSearch.value, sort: order.value }).toString() }
+function updateUrl() { history.replaceState(null, '', `${location.pathname}?${viewQuery()}&page=${page.value}`) }
+function applyView(query: string) {
+  const params = new URLSearchParams(query)
+  search.value = params.get('q') || ''; lifecycle.value = params.get('status') || ''; reviewProject.value = params.get('project') || ''; reviewProjectLabel.value = ''; reviewTeam.value = params.get('team') || ''; ownerSearch.value = params.get('owner') || ''; order.value = params.get('sort') || 'identifier'
+  void action(() => loadFindings())
+}
+async function copyView() { updateUrl(); await navigator.clipboard.writeText(location.href); notice.value = 'View link copied.' }
+function saveView() {
+  if (!viewName.value.trim() || !me.value) return
+  savedViews.value = [...savedViews.value.filter(view => view.name !== viewName.value.trim()), { name: viewName.value.trim(), query: viewQuery() }].slice(-20)
+  localStorage.setItem(`dtvp.views:${me.value.id}`, JSON.stringify(savedViews.value)); viewName.value = ''
+}
+function removeView(name: string) { savedViews.value = savedViews.value.filter(view => view.name !== name); localStorage.setItem(`dtvp.views:${me.value!.id}`, JSON.stringify(savedViews.value)) }
+function restoreLocation() { const params = new URLSearchParams(location.search); page.value = ['Review', 'Products', 'Activity', 'Access'].includes(params.get('page') || '') ? params.get('page')! : 'Review'; applyView(params.toString()) }
+async function moveFinding(delta: number) {
+  const target = reviewIndex.value + delta
+  if (target >= rows.value.length && nextCursor.value) await loadFindings(true)
+  const row = rows.value[target]; if (row) await openFinding(row.id)
+}
 const draft = ref({ state: 'under_investigation', rationale: '' })
 const error = ref('')
 const notice = ref('')
@@ -108,14 +155,16 @@ async function action(callback: () => Promise<unknown>) {
 }
 
 async function loadProjects() {
-  projects.value = await api('/projects')
+  projects.value = (await api<{ items: Project[] }>('/catalog/projects')).items
+  await loadCatalog()
+  if (reviewProject.value) reviewProjectLabel.value = (await api<Project>(`/projects/${reviewProject.value}`)).name
   if (!projects.value.some(p => p.id === projectId.value)) projectId.value = projects.value[0]?.id || ''
   workspaceId.value ||= me.value?.workspaces[0]?.id || ''
   await loadReleases()
 }
 
 async function loadReleases() {
-  releases.value = projectId.value ? await api(`/projects/${projectId.value}/releases`) : []
+  releases.value = projectId.value ? (await api<{ items: Release[] }>(`/catalog/projects/${projectId.value}/releases`)).items : []
   if (!releases.value.some(r => r.id === releaseId.value)) releaseId.value = releases.value[0]?.id || ''
   latestSnapshot.value = null
   await loadInventory()
@@ -123,7 +172,7 @@ async function loadReleases() {
 
 async function loadInventory(append = false) {
   if (!releaseId.value) { components.value = []; revisions.value = []; return }
-  const result = await api<{ items: Component[]; next_cursor: string | null }>(`/releases/${releaseId.value}/components?cursor=${append ? componentCursor.value || '' : ''}`)
+  const result = await api<{ items: Component[]; next_cursor: string | null }>(`/releases/${releaseId.value}/components?cursor=${append ? componentCursor.value || '' : ''}&q=${encodeURIComponent(componentSearch.value)}`)
   components.value = append ? [...components.value, ...result.items] : result.items
   componentCursor.value = result.next_cursor
   revisions.value = await api(`/releases/${releaseId.value}/revisions`)
@@ -131,7 +180,8 @@ async function loadInventory(append = false) {
 
 async function loadFindings(append = false) {
   const sequence = ++requestSequence
-  const params = new URLSearchParams({ q: search.value, lifecycle: lifecycle.value })
+  const params = filterParams()
+  updateUrl()
   if (append && nextCursor.value) params.set('cursor', nextCursor.value)
   const result = await api<{ items: Finding[]; next_cursor: string | null }>(`/findings?${params}`)
   if (sequence !== requestSequence) return
@@ -205,13 +255,15 @@ async function replay(scenario: string) {
   })
 }
 
+watch(() => me.value?.id, id => { try { savedViews.value = id ? JSON.parse(localStorage.getItem(`dtvp.views:${id}`) || '[]') : [] } catch { savedViews.value = [] } })
 watch(draft, value => { if (detail.value && me.value) sessionStorage.setItem(draftKey.value, JSON.stringify(value)) }, { deep: true })
 watch(power, value => localStorage.setItem('dtvp.power', String(value)))
 watch(theme, value => { localStorage.setItem('dtvp.theme', value); document.documentElement.dataset.theme = value }, { immediate: true })
-watch(page, value => { if (value === 'Activity') void action(async () => { jobs.value = await api('/jobs') }) })
+watch(page, value => { updateUrl(); if (value === 'Products') void action(() => loadCatalog()); if (value === 'Activity') void action(async () => { jobs.value = await api('/jobs') }) })
 
 onMounted(async () => {
   document.addEventListener('keydown', dialogKeys)
+  window.addEventListener('popstate', restoreLocation)
   try { personas.value = await api('/playground/personas') } catch { /* Production has OIDC. */ }
   await action(async () => {
     try { me.value = await api('/me') } catch (err) { if (err instanceof ApiError && err.status === 401) return; throw err }
@@ -220,7 +272,7 @@ onMounted(async () => {
   })
   poll = setInterval(() => { if (me.value && page.value === 'Activity' && !busy.value) void api<Job[]>('/jobs').then(value => jobs.value = value).catch(() => {}) }, 3000)
 })
-onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown', dialogKeys); document.body.style.overflow = '' })
+onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown', dialogKeys); window.removeEventListener('popstate', restoreLocation); document.body.style.overflow = '' })
 </script>
 
 <template>
@@ -238,7 +290,7 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
     <div v-if="me?.playground" class="playground-bar" :inert="modalOpen">
       <span><strong>Playground</strong> · Synthetic data · External services disabled by default</span>
       <label>Persona <select :value="personas.find(p => p.name === me?.name)?.id" :disabled="busy" @change="login(($event.target as HTMLSelectElement).value)"><option v-for="p in personas" :key="p.id" :value="p.id">{{ p.name }}</option></select></label>
-      <details><summary>Replay events</summary><div class="menu"><button :disabled="busy" @click="replay('release-change')">Changed evidence</button><button :disabled="busy" @click="replay('conflict')">Conflicting source</button><button :disabled="busy" @click="replay('partial')">Partial scan</button><button v-if="me.org_admin" :disabled="busy" @click="action(async () => { await api('/playground/reset', send({})); me = null; detail = null; token = '' })">Reset playground</button></div></details>
+      <details><summary>Replay events</summary><div class="menu"><button :disabled="busy" @click="replay('release-change')">Changed evidence</button><button :disabled="busy" @click="replay('conflict')">Conflicting source</button><button :disabled="busy" @click="replay('partial')">Partial scan</button><button v-if="me.org_admin" :disabled="busy" @click="action(async () => { await api('/playground/scale', send({})); await loadProjects(); await loadFindings(); notice = 'Loaded 100 synthetic projects with 20 findings each.' })">Load large inventory</button><button v-if="me.org_admin" :disabled="busy" @click="action(async () => { await api('/playground/reset', send({})); me = null; detail = null; token = '' })">Reset playground</button></div></details>
     </div>
     <div v-if="error" class="message error" role="alert" :inert="modalOpen">{{ error }} <button @click="error = ''" aria-label="Dismiss error">×</button></div>
     <div v-if="notice" class="message success" role="status" :inert="modalOpen">{{ notice }}</div>
@@ -254,18 +306,23 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
         <div class="page-title"><div><p class="eyebrow">{{ me.name }}</p><h1>Review workspace</h1><p>What needs your attention, across your accessible teams and releases.</p></div><label class="toggle"><input v-model="power" type="checkbox"> Technical details</label></div>
         <form class="filters" @submit.prevent="action(() => loadFindings())">
           <label class="search">Search <input v-model="search" placeholder="Vulnerability or component"></label>
+          <SearchSelect v-model="reviewProject" label="Review product" :selected-label="reviewProjectLabel" endpoint="/catalog/projects" allow-clear :disabled="busy" @select="option => { reviewProjectLabel = option.name || ''; action(() => loadFindings()) }" @update:model-value="value => { if (!value) action(() => loadFindings()) }" />
+          <label>Team <select v-model="reviewTeam" @change="action(() => loadFindings())"><option value="">All accessible teams</option><option v-for="w in me.workspaces" :key="w.id" :value="w.id">{{ w.name }}</option></select></label>
           <label>Status <select v-model="lifecycle" @change="action(() => loadFindings())"><option value="">All statuses</option><option v-for="(name, key) in names" :key="key" :value="key">{{ name }}</option></select></label>
+          <label>Sort <select v-model="order" @change="action(() => loadFindings())"><option value="identifier">Vulnerability</option><option value="project">Product</option><option value="component">Component</option></select></label>
           <button type="submit" :disabled="busy">Search</button><button type="button" :disabled="busy" @click="action(() => loadFindings())">Refresh</button>
         </form>
+        <details class="view-controls"><summary>More filters and saved views</summary><div class="filters"><label>Component owner <input v-model="ownerSearch" placeholder="Responsible team"></label><button :disabled="busy" @click="action(() => loadFindings())">Apply filters</button><button :disabled="busy" @click="applyView('')">Reset filters</button><button @click="action(copyView)">Copy view link</button><label>View name <input v-model="viewName" maxlength="100"></label><button :disabled="!viewName.trim()" @click="saveView">Save view</button></div><div class="saved-views"><span v-for="view in savedViews" :key="view.name"><button @click="applyView(view.query)">{{ view.name }}</button><button :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></span></div></details>
         <div class="table-wrap"><table><thead><tr><th>Finding</th><th>Product / release</th><th>Component / owner</th><th>Original score</th><th>Next step</th></tr></thead><tbody>
           <tr v-for="row in rows" :key="row.id"><td><button class="text-link" :disabled="busy" @click="action(() => openFinding(row.id))">{{ row.identifier }}</button><small v-if="row.conflicting_scores" class="warning">Conflicting source scores</small><small v-if="row.stale_evidence" class="warning">Evidence needs refreshing</small></td><td>{{ row.project }}<small>{{ row.release }}</small></td><td>{{ row.component }} <small>{{ row.component_version }} · {{ row.owner }}</small></td><td><span class="score" :class="{ high: (row.original_score || 0) >= 7 }">{{ score(row.original_score) }}</span></td><td><span class="badge" :class="row.lifecycle">{{ label(row.lifecycle) }}</span></td></tr>
-        </tbody></table><p v-if="!rows.length" class="empty">No findings in this view. Check Products for inventory and matching coverage.</p></div>
+        </tbody></table><p v-if="!rows.length" class="empty">{{ nextCursor ? "No matches in this batch. Continue to the next batch." : "No findings in this view. Check Products for inventory and matching coverage." }}</p></div>
         <button v-if="nextCursor" :disabled="busy" @click="action(() => loadFindings(true))">Load more</button>
       </template>
 
       <template v-if="page === 'Products'">
         <div class="page-title"><div><p class="eyebrow">DTVP-owned inventory</p><h1>Products and releases</h1><p>Import sources, curate metadata, and freeze consistent consumer inputs.</p></div></div>
-        <div class="filters"><label>Product <select v-model="projectId" :disabled="busy" @change="action(() => loadReleases())"><option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option></select></label><label>Release <select v-model="releaseId" :disabled="busy" @change="action(() => loadInventory())"><option v-for="r in releases" :key="r.id" :value="r.id">{{ r.version }}</option></select></label></div>
+        <details class="panel"><summary>Browse products</summary><form class="filters" @submit.prevent="action(() => loadCatalog())"><label class="search">Search products <input v-model="productSearch" placeholder="Product name"></label><label>Product team <select v-model="productTeam" @change="action(() => loadCatalog())"><option value="">All accessible teams</option><option v-for="w in me.workspaces" :key="w.id" :value="w.id">{{ w.name }}</option></select></label><button :disabled="busy">Search products</button></form><div class="table-wrap"><table><thead><tr><th>Product</th><th>Team</th><th>Releases</th><th>Active findings</th></tr></thead><tbody><tr v-for="product in catalog" :key="product.id"><td><button class="text-link" :disabled="busy" @click="projectId = product.id; selectProject(product)">{{ product.name }}</button></td><td>{{ product.workspace }}</td><td>{{ product.release_count }}</td><td>{{ product.finding_count }}</td></tr></tbody></table><p v-if="!catalog.length" class="empty">No matching products.</p></div><button v-if="catalogCursor" :disabled="busy" @click="action(() => loadCatalog(true))">More products</button></details>
+        <div class="filters"><SearchSelect v-model="projectId" label="Product" :selected-label="selectedProject?.name" endpoint="/catalog/projects" :disabled="busy" @select="selectProject" /><SearchSelect v-model="releaseId" label="Release" :selected-label="releases.find(r => r.id === releaseId)?.version" :endpoint="projectId ? `/catalog/projects/${projectId}/releases` : ''" :disabled="busy" @select="option => { if (!releases.some(r => r.id === option.id)) releases.push(option as Release); action(() => loadInventory()) }" /></div>
         <details class="panel"><summary>Add product or release</summary><div class="form-row"><label>Team <select v-model="workspaceId"><option v-for="w in me.workspaces.filter(w => w.capabilities.includes('write'))" :key="w.id" :value="w.id">{{ w.name }}</option></select></label><label>Product name <input v-model="newProjectName"></label><button :disabled="busy || !newProjectName" @click="action(async () => { const p = await api<Project>('/projects', send({ workspace_id: workspaceId, name: newProjectName })); projectId = p.id; newProjectName = ''; await loadProjects() })">Create product</button></div><div v-if="canWrite" class="form-row"><label>Release version <input v-model="newReleaseVersion"></label><button :disabled="busy || !newReleaseVersion" @click="action(async () => { const r = await api<Release>(`/projects/${projectId}/releases`, send({ version: newReleaseVersion })); releaseId = r.id; newReleaseVersion = ''; await loadReleases() })">Create release</button></div></details>
         <div v-if="releaseId" class="columns">
           <section class="panel"><h2>Source inputs</h2><p v-if="!revisions.length">No SBOM imported yet.</p><ul class="source-list"><li v-for="r in revisions.slice(0, 5)" :key="r.id"><strong>{{ r.source }}</strong><span class="badge">{{ r.completeness }}</span><small>{{ new Date(r.occurred_at).toLocaleString() }}</small></li></ul>
@@ -278,7 +335,7 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
             <a v-if="me.vscorer_url" :href="me.vscorer_url" target="_blank" rel="noopener">Open VScorer</a>
           </section>
         </div>
-        <section v-if="releaseId" class="panel"><h2>Components</h2><div class="table-wrap"><table><thead><tr><th>Component</th><th>Version</th><th>Owner</th><th>Support / EOL</th><th></th></tr></thead><tbody><tr v-for="c in components" :key="c.id"><td>{{ c.name }}</td><td>{{ c.version }}</td><td>{{ c.metadata.owner || 'Unassigned' }}</td><td>{{ c.metadata.eol || 'Unknown' }}</td><td><button v-if="canWrite" :disabled="busy" @click="editMetadata(c)">Edit metadata</button></td></tr></tbody></table></div><button v-if="componentCursor" :disabled="busy" @click="action(() => loadInventory(true))">More components</button></section>
+        <section v-if="releaseId" class="panel"><h2>Components</h2><form class="filters" @submit.prevent="action(() => loadInventory())"><label class="search">Search components <input v-model="componentSearch" placeholder="Name, version or PURL"></label><button :disabled="busy">Search components</button></form><div class="table-wrap"><table><thead><tr><th>Component</th><th>Version</th><th>Owner</th><th>Support / EOL</th><th></th></tr></thead><tbody><tr v-for="c in components" :key="c.id"><td>{{ c.name }}</td><td>{{ c.version }}</td><td>{{ c.metadata.owner || 'Unassigned' }}</td><td>{{ c.metadata.eol || 'Unknown' }}</td><td><button v-if="canWrite" :disabled="busy" @click="editMetadata(c)">Edit metadata</button></td></tr></tbody></table></div><button v-if="componentCursor" :disabled="busy" @click="action(() => loadInventory(true))">More components</button></section>
       </template>
 
       <template v-if="page === 'Activity'">
@@ -299,7 +356,7 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
 
     <div v-if="detail" class="overlay" @click.self="!busy && (detail = null)"><section class="inspector" role="dialog" aria-modal="true" aria-labelledby="finding-title">
       <div class="inspector-header"><div><p class="eyebrow">{{ detail.project }} · {{ detail.release }}</p><h1 id="finding-title">{{ detail.identifier }}</h1><p>{{ detail.component }} {{ detail.component_version }} · {{ detail.owner }}</p></div><button aria-label="Close finding" :disabled="busy" @click="detail = null">×</button></div>
-      <div class="inspector-content"><div class="summary-line"><span class="score high">{{ score(detail.original_score) }}</span><span>Original severity</span><span class="badge" :class="detail.lifecycle">{{ label(detail.lifecycle) }}</span></div>
+      <div class="inspector-content"><div class="queue-navigation"><button :disabled="busy || reviewIndex <= 0" @click="action(() => moveFinding(-1))">Previous finding</button><span>{{ reviewIndex >= 0 ? `${reviewIndex + 1} of ${rows.length} loaded` : "Outside current queue" }}</span><button :disabled="busy || reviewIndex < 0 || (reviewIndex >= rows.length - 1 && !nextCursor)" @click="action(() => moveFinding(1))">Next finding</button></div><div class="summary-line"><span class="score high">{{ score(detail.original_score) }}</span><span>Original severity</span><span class="badge" :class="detail.lifecycle">{{ label(detail.lifecycle) }}</span></div>
         <p v-if="error" class="message error" role="alert">{{ error }}</p><p v-if="notice" class="message success" role="status">{{ notice }}</p>
         <p v-if="detail.lifecycle === 'needs_revalidation'" class="warning">Evidence changed since the last decision. Review the changes and submit a new assessment.</p><p v-if="detail.conflicting_scores" class="warning">Sources disagree on the original score. Resolve the difference before exporting to VScorer.</p><p v-if="detail.stale_evidence" class="warning">Source evidence is older than 30 days. Check whether it still applies.</p>
         <section v-for="(imported, index) in detail.imported_assessments" :key="index" class="decision-record"><h2>Imported DT assessment</h2><p class="hint">{{ imported.source }} · {{ imported.format === 'plain-dt' ? 'Legacy documentation without DTVP metadata' : 'Previous DTVP documentation' }}. Imported review history remains separate from DTVP approval.</p><p v-if="imported.pending_review || imported.conflicting" class="warning">{{ imported.conflicting ? 'Imported team decisions conflict.' : 'Source assessment is pending review.' }}</p><p v-if="imported.suppressed" class="warning">Suppressed in the source. Retained for review.</p><article v-for="(record, position) in imported.current_records" :key="position"><strong>{{ record.team }} · {{ record.state ? label(record.state) : 'Applicability not recorded' }}</strong><p>{{ record.rationale || 'No rationale recorded.' }}</p><small>{{ record.assessor ? `Source assessor: ${record.assessor}` : 'Assessor not recorded' }}{{ record.reviewer ? ` · Source reviewer: ${record.reviewer}` : '' }}</small><p v-if="record.rescored_score !== null" class="hint">Legacy contextual score: {{ record.rescored_score }}. Original Base severity remains unchanged.</p><p v-if="record.ssvc_priority" class="hint">Imported SSVC priority: {{ record.ssvc_priority }}</p></article></section><h2>What needs review</h2><p>{{ detail.description || 'No advisory description supplied. Review the available source evidence.' }}</p>

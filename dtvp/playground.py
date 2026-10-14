@@ -3,7 +3,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, require_admin
@@ -144,3 +144,65 @@ def replay(scenario: str, request: Request, db: DB, actor: Auth):
         actor_id=actor.user.id,
     )
     return {"revision_id": result.id}
+
+
+class ScaleInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    projects: int = Field(default=100, ge=1, le=200)
+    findings_per_project: int = Field(default=20, ge=1, le=100)
+
+
+@router.post("/scale")
+def scale(data: ScaleInput, request: Request, db: DB, actor: Auth):
+    if not request.app.state.settings.playground:
+        raise HTTPException(404)
+    require_admin(actor)
+    workspace = db.scalar(select(Workspace).where(Workspace.name == "Platform"))
+    template = json.loads((FIXTURES / "release.cdx.json").read_bytes())
+    import copy
+
+    created = 0
+    for index in range(data.projects):
+        name = f"Scale product {index + 1:04d}"
+        if db.scalar(
+            select(Project.id).where(Project.workspace_id == workspace.id, Project.name == name)
+        ):
+            continue
+        project = Project(workspace_id=workspace.id, name=name)
+        db.add(project)
+        db.flush()
+        release = Release(project_id=project.id, version="1.0.0")
+        db.add(release)
+        db.flush()
+        bom = copy.deepcopy(template)
+        bom.pop("dependencies", None)
+        bom["components"] = []
+        bom["vulnerabilities"] = []
+        for number in range(data.findings_per_project):
+            ref = f"scale-component-{number:04d}"
+            component = copy.deepcopy(template["components"][0])
+            component.update(
+                {
+                    "bom-ref": ref,
+                    "name": f"scale-library-{number:04d}",
+                    "purl": f"pkg:pypi/scale-library-{number:04d}@1.0.0",
+                }
+            )
+            vulnerability = copy.deepcopy(template["vulnerabilities"][0])
+            vulnerability.update({"id": f"CVE-2099-{30000 + number}", "affects": [{"ref": ref}]})
+            bom["components"].append(component)
+            bom["vulnerabilities"].append(vulnerability)
+        import_sbom(
+            db,
+            request.app.state.artifacts,
+            release,
+            canonical(bom),
+            source="pipeline:scale",
+            event_id="baseline",
+            occurred_at=now(),
+            completeness="complete",
+            context={"synthetic": True, "scenario": "scale"},
+            actor_id=actor.user.id,
+        )
+        created += 1
+    return {"created_projects": created, "findings_per_project": data.findings_per_project}
