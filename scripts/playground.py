@@ -61,7 +61,18 @@ def test_stack(compose, skip_build):
             ["npx", "playwright", "install", "chromium"],
             ["npm", "run", "test:ui"],
         ]:
-            subprocess.run(command, check=True, cwd=ROOT / "frontend")
+            subprocess.run(
+                command,
+                check=True,
+                cwd=ROOT / "frontend",
+                env={
+                    **os.environ,
+                    "DTVP_UI_URL": os.getenv(
+                        "DTVP_UI_URL",
+                        f"http://127.0.0.1:{os.getenv('DTVP_PLAYGROUND_PORT', '8900')}",
+                    ),
+                },
+            )
     finally:
         subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL)
 

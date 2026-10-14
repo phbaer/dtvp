@@ -14,6 +14,23 @@ const projectId = ref('')
 const releaseId = ref('')
 const rows = ref<Finding[]>([])
 const nextCursor = ref<string | null>(null)
+const approvalSelection = ref<string[]>([])
+type ApprovalItem = { finding_id: string; expected_version: number; decision_id: string }
+const approvalPreview = ref<{ count: number; preview_digest: string; items: ApprovalItem[]; findings: Finding[] } | null>(null)
+const canSelectApproval = (row: Finding) => row.capabilities.includes('approve') && row.lifecycle === 'ready' && Boolean(row.latest_decision) && row.latest_decision!.author_id !== me.value?.id
+const hasApprovalAccess = computed(() => rows.value.some(row => row.capabilities.includes('approve')))
+async function previewApprovals() {
+  const findings = rows.value.filter(row => approvalSelection.value.includes(row.id))
+  const items = findings.map(row => ({ finding_id: row.id, expected_version: row.state_version, decision_id: row.latest_decision!.id }))
+  const result = await api<{ count: number; preview_digest: string }>('/approvals/preview', send({ items }))
+  approvalPreview.value = { ...result, items, findings }
+}
+async function applyApprovals() {
+  if (!approvalPreview.value) return
+  await api('/approvals/apply', send({ items: approvalPreview.value.items, preview_digest: approvalPreview.value.preview_digest }))
+  approvalPreview.value = null; approvalSelection.value = []; await loadFindings()
+  notice.value = 'Selected decisions approved against their current evidence.'
+}
 const detail = ref<Finding | null>(null)
 const components = ref<Component[]>([])
 const componentCursor = ref<string | null>(null)
@@ -34,6 +51,7 @@ const catalogCursor = ref<string | null>(null)
 const componentSearch = ref('')
 const viewName = ref('')
 const savedViews = ref<{ name: string; query: string }[]>([])
+const queueAnchor = ref(-1)
 const reviewIndex = computed(() => rows.value.findIndex(row => row.id === detail.value?.id))
 function selectProject(option: { id: string }) {
   const project = option as Project
@@ -50,6 +68,7 @@ function filterParams() { return new URLSearchParams({ q: search.value, lifecycl
 function viewQuery() { return new URLSearchParams({ q: search.value, status: lifecycle.value, project: reviewProject.value, team: reviewTeam.value, owner: ownerSearch.value, sort: order.value }).toString() }
 function updateUrl() { history.replaceState(null, '', `${location.pathname}?${viewQuery()}&page=${page.value}`) }
 function applyView(query: string) {
+  if (busy.value) return
   const params = new URLSearchParams(query)
   search.value = params.get('q') || ''; lifecycle.value = params.get('status') || ''; reviewProject.value = params.get('project') || ''; reviewProjectLabel.value = ''; reviewTeam.value = params.get('team') || ''; ownerSearch.value = params.get('owner') || ''; order.value = params.get('sort') || 'identifier'
   void action(() => loadFindings())
@@ -63,7 +82,7 @@ function saveView() {
 function removeView(name: string) { savedViews.value = savedViews.value.filter(view => view.name !== name); localStorage.setItem(`dtvp.views:${me.value!.id}`, JSON.stringify(savedViews.value)) }
 function restoreLocation() { const params = new URLSearchParams(location.search); page.value = ['Review', 'Products', 'Activity', 'Access'].includes(params.get('page') || '') ? params.get('page')! : 'Review'; applyView(params.toString()) }
 async function moveFinding(delta: number) {
-  const target = reviewIndex.value + delta
+  const target = reviewIndex.value >= 0 ? reviewIndex.value + delta : delta > 0 ? Math.min(queueAnchor.value, rows.value.length) : queueAnchor.value - 1
   if (target >= rows.value.length && nextCursor.value) await loadFindings(true)
   const row = rows.value[target]; if (row) await openFinding(row.id)
 }
@@ -183,16 +202,24 @@ async function loadInventory(append = false) {
 async function loadFindings(append = false) {
   const sequence = ++requestSequence
   const params = filterParams()
+  if (reviewProject.value && !reviewProjectLabel.value) {
+    const project = await api<Project>(`/projects/${reviewProject.value}`)
+    if (sequence !== requestSequence) return
+    reviewProjectLabel.value = project.name
+  }
   updateUrl()
   if (append && nextCursor.value) params.set('cursor', nextCursor.value)
   const result = await api<{ items: Finding[]; next_cursor: string | null }>(`/findings?${params}`)
   if (sequence !== requestSequence) return
+  if (!append) { approvalSelection.value = []; approvalPreview.value = null }
   rows.value = append ? [...rows.value, ...result.items] : result.items
   nextCursor.value = result.next_cursor
 }
 
 async function openFinding(id: string, keepDraft = false) {
   if (!detail.value) rememberFocus()
+  const position = rows.value.findIndex(row => row.id === id)
+  if (position >= 0 || !keepDraft) queueAnchor.value = position
   detail.value = await api(`/findings/${id}`)
   if (!keepDraft) {
     const saved = sessionStorage.getItem(draftKey.value)
@@ -204,25 +231,28 @@ async function login(persona: string) {
   await action(async () => {
     await api('/playground/login', send({ persona }))
     me.value = await api('/me'); detail.value = null; token.value = ''; workspaceId.value = ''; provider.value = me.value!.playground ? 'demo' : 'osv'
+    rows.value = []; projects.value = []; releases.value = []; components.value = []; revisions.value = []; jobs.value = []; approvalSelection.value = []; approvalPreview.value = null; latestSnapshot.value = null; metadataEdit.value = null
     await loadProjects(); await loadFindings()
   })
 }
 
-async function submit() {
+async function submit(advance = false) {
   if (!detail.value) return
   await action(async () => {
     await api(`/findings/${detail.value!.id}/decisions`, send({ ...draft.value, expected_version: detail.value!.state_version }))
     sessionStorage.removeItem(draftKey.value)
     await openFinding(detail.value!.id, true); await loadFindings()
     notice.value = 'Decision saved. A different reviewer can approve it.'
+    if (advance) await moveFinding(1)
   })
 }
 
-async function approve(requestChanges = false) {
+async function approve(requestChanges = false, advance = false) {
   await action(async () => {
     await api(`/findings/${detail.value!.id}/approvals`, send({ expected_version: detail.value!.state_version, decision_id: latestDecision.value!.id, action: requestChanges ? 'request_changes' : 'approve' }))
     await openFinding(detail.value!.id, true); await loadFindings()
     notice.value = requestChanges ? 'Changes requested.' : 'Decision approved against the current evidence.'
+    if (advance) await moveFinding(1)
   })
 }
 
@@ -258,6 +288,7 @@ async function replay(scenario: string) {
 }
 
 watch(() => me.value?.id, id => { try { savedViews.value = id ? JSON.parse(localStorage.getItem(`dtvp.views:${id}`) || '[]') : [] } catch { savedViews.value = [] } })
+watch(approvalSelection, () => { approvalPreview.value = null }, { deep: true })
 watch(draft, value => { if (detail.value && me.value) sessionStorage.setItem(draftKey.value, JSON.stringify(value)) }, { deep: true })
 watch(power, value => localStorage.setItem('dtvp.power', String(value)))
 watch(theme, value => { localStorage.setItem('dtvp.theme', value); document.documentElement.dataset.theme = value }, { immediate: true })
@@ -314,9 +345,11 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
           <label>Sort <select v-model="order" @change="action(() => loadFindings())"><option value="identifier">Vulnerability</option><option value="project">Product</option><option value="component">Component</option></select></label>
           <button type="submit" :disabled="busy">Search</button><button type="button" :disabled="busy" @click="action(() => loadFindings())">Refresh</button>
         </form>
-        <details class="view-controls"><summary>More filters and saved views</summary><div class="filters"><label>Component owner <input v-model="ownerSearch" placeholder="Responsible team"></label><button :disabled="busy" @click="action(() => loadFindings())">Apply filters</button><button :disabled="busy" @click="applyView('')">Reset filters</button><button @click="action(copyView)">Copy view link</button><label>View name <input v-model="viewName" maxlength="100"></label><button :disabled="!viewName.trim()" @click="saveView">Save view</button></div><div class="saved-views"><span v-for="view in savedViews" :key="view.name"><button @click="applyView(view.query)">{{ view.name }}</button><button :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></span></div></details>
-        <div class="table-wrap"><table><thead><tr><th>Finding</th><th>Product / release</th><th>Component / owner</th><th>Original score</th><th>Next step</th></tr></thead><tbody>
-          <tr v-for="row in rows" :key="row.id"><td><button class="text-link" :disabled="busy" @click="action(() => openFinding(row.id))">{{ row.identifier }}</button><small v-if="row.conflicting_scores" class="warning">Conflicting source scores</small><small v-if="row.stale_evidence" class="warning">Evidence needs refreshing</small></td><td>{{ row.project }}<small>{{ row.release }}</small></td><td>{{ row.component }} <small>{{ row.component_version }} · {{ row.owner }}</small></td><td><span class="score" :class="{ high: (row.original_score || 0) >= 7 }">{{ score(row.original_score) }}</span></td><td><span class="badge" :class="row.lifecycle">{{ label(row.lifecycle) }}</span></td></tr>
+        <details class="view-controls"><summary>More filters and saved views</summary><div class="filters"><label>Component owner <input v-model="ownerSearch" placeholder="Responsible team"></label><button :disabled="busy" @click="action(() => loadFindings())">Apply filters</button><button :disabled="busy" @click="applyView('')">Reset filters</button><button :disabled="busy" @click="action(copyView)">Copy view link</button><label>View name <input v-model="viewName" maxlength="100"></label><button :disabled="!viewName.trim()" @click="saveView">Save view</button></div><div class="saved-views"><span v-for="view in savedViews" :key="view.name"><button :disabled="busy" @click="applyView(view.query)">{{ view.name }}</button><button :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></span></div></details>
+        <div v-if="hasApprovalAccess" class="bulk-toolbar"><button :disabled="busy" @click="approvalSelection = rows.filter(canSelectApproval).slice(0, 100).map(row => row.id)">Select loaded ready findings</button><span>{{ approvalSelection.length }} selected · maximum 100</span><button :disabled="busy || !approvalSelection.length" @click="action(previewApprovals)">Preview approvals</button><button v-if="approvalSelection.length" :disabled="busy" @click="approvalSelection = []">Clear selection</button></div>
+        <section v-if="approvalPreview" class="panel" aria-labelledby="approval-preview-title"><h2 id="approval-preview-title">Approval preview · {{ approvalPreview.count }} decisions</h2><p class="hint">Review the scope and rationale below. Changed evidence or decisions will block the whole selection.</p><article v-for="finding in approvalPreview.findings" :key="finding.id" class="decision-record"><h3>{{ finding.identifier }} · {{ finding.project }} / {{ finding.release }}</h3><p>{{ finding.component }} {{ finding.component_version }} · {{ label(finding.latest_decision!.state) }}</p><p>{{ finding.latest_decision!.rationale }}</p><button class="text-link" :disabled="busy" @click="action(() => openFinding(finding.id))">Review finding evidence</button></article><button class="primary" :disabled="busy" @click="action(applyApprovals)">Approve reviewed selection</button><button :disabled="busy" @click="approvalPreview = null">Close preview</button></section>
+        <div class="table-wrap"><table><thead><tr><th v-if="hasApprovalAccess">Select</th><th>Finding</th><th>Product / release</th><th>Component / owner</th><th>Original score</th><th>Next step</th></tr></thead><tbody>
+          <tr v-for="row in rows" :key="row.id"><td v-if="hasApprovalAccess"><input v-if="canSelectApproval(row)" v-model="approvalSelection" type="checkbox" :value="row.id" :aria-label="`Select ${row.identifier} in ${row.project} ${row.release}`" :disabled="busy || (!approvalSelection.includes(row.id) && approvalSelection.length >= 100)"><span v-else aria-label="Not eligible for approval">—</span></td><td><button class="text-link" :disabled="busy" @click="action(() => openFinding(row.id))">{{ row.identifier }}</button><small v-if="row.conflicting_scores" class="warning">Conflicting source scores</small><small v-if="row.stale_evidence" class="warning">Evidence needs refreshing</small></td><td>{{ row.project }}<small>{{ row.release }}</small></td><td>{{ row.component }} <small>{{ row.component_version }} · {{ row.owner }}</small></td><td><span class="score" :class="{ high: (row.original_score || 0) >= 7 }">{{ score(row.original_score) }}</span></td><td><span class="badge" :class="row.lifecycle">{{ label(row.lifecycle) }}</span></td></tr>
         </tbody></table><p v-if="!rows.length" class="empty">{{ nextCursor ? "No matches in this batch. Continue to the next batch." : "No findings in this view. Check Products for inventory and matching coverage." }}</p></div>
         <button v-if="nextCursor" :disabled="busy" @click="action(() => loadFindings(true))">Load more</button>
       </template>
@@ -352,22 +385,22 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
         <div class="columns"><section class="panel"><h2>Member mapping</h2><label>OIDC issuer <input v-model="memberIssuer"></label><label>Subject <input v-model="memberSubject"></label><label>Display name <input v-model="memberName"></label><label>Role <select v-model="memberRole"><option v-for="role in ['viewer', 'analyst', 'reviewer', 'admin']" :key="role">{{ role }}</option></select></label><p class="hint">Administrator permission does not grant approval. Map the verified issuer and subject from your identity provider.</p><button :disabled="busy || !memberIssuer || !memberSubject || !memberName" @click="action(async () => { await api(`/workspaces/${workspaceId}/members`, { method: 'PUT', body: JSON.stringify({ issuer: memberIssuer, subject: memberSubject, name: memberName, roles: [memberRole] }) }); notice = 'Membership saved.' })">Save membership</button></section>
           <section class="panel"><h2>Consumer credential</h2><label>Name <input v-model="tokenName"></label><p class="hint">Create a 24-hour read-only credential for this team. It remains constrained by your current membership.</p><button :disabled="busy || !tokenName" @click="action(async () => { const result = await api<{ token: string }>('/credentials', send({ workspace_id: workspaceId, name: tokenName, capabilities: ['read'], projects: [], hours: 24 })); token = result.token })">Issue read credential</button><label v-if="token">Copy now; shown only once <textarea readonly :value="token"></textarea></label><a href="/openapi.json" target="_blank" rel="noopener">API schema</a></section>
         </div>
-        <section v-if="canManage" class="panel"><h2>Project sharing</h2><label>Product <select v-model="projectId"><option v-for="p in projects.filter(p => p.capabilities.includes('manage'))" :key="p.id" :value="p.id">{{ p.name }}</option></select></label><label>Share with team <select v-model="shareWorkspace"><option v-for="w in me.workspaces.filter(w => w.id !== selectedProject?.workspace_id)" :key="w.id" :value="w.id">{{ w.name }}</option></select></label><label class="toggle"><input v-model="sharedReadOnly" type="checkbox"> Read only</label><button :disabled="busy || !shareWorkspace" @click="action(async () => { await api(`/projects/${projectId}/sharing`, { method: 'PUT', body: JSON.stringify({ workspace_id: shareWorkspace, capabilities: sharedReadOnly ? ['read'] : ['read', 'assess', 'snapshot', 'evidence'] }) }); notice = 'Sharing updated.' })">Save sharing</button></section>
+        <section v-if="me.workspaces.some(w => w.capabilities.includes('manage'))" class="panel"><h2>Project sharing</h2><SearchSelect v-model="projectId" label="Shared product" :selected-label="selectedProject?.name" endpoint="/catalog/projects" :disabled="busy" @select="selectProject" /><p v-if="!canManage" class="hint">Select a product you manage to change sharing.</p><label>Share with team <select v-model="shareWorkspace"><option v-for="w in me.workspaces.filter(w => w.id !== selectedProject?.workspace_id)" :key="w.id" :value="w.id">{{ w.name }}</option></select></label><label class="toggle"><input v-model="sharedReadOnly" type="checkbox"> Read only</label><button :disabled="busy || !shareWorkspace || !canManage" @click="action(async () => { await api(`/projects/${projectId}/sharing`, { method: 'PUT', body: JSON.stringify({ workspace_id: shareWorkspace, capabilities: sharedReadOnly ? ['read'] : ['read', 'assess', 'snapshot', 'evidence'] }) }); notice = 'Sharing updated.' })">Save sharing</button></section>
         <section v-if="me.org_admin" class="panel"><h2>Add team workspace</h2><label>Team name <input v-model="workspaceName"></label><button :disabled="busy || !workspaceName" @click="action(async () => { await api('/workspaces', send({ name: workspaceName })); me = await api('/me'); workspaceName = '' })">Create workspace</button></section>
       </template>
     </main>
 
     <div v-if="detail" class="overlay" @click.self="!busy && (detail = null)"><section class="inspector" role="dialog" aria-modal="true" aria-labelledby="finding-title">
       <div class="inspector-header"><div><p class="eyebrow">{{ detail.project }} · {{ detail.release }}</p><h1 id="finding-title">{{ detail.identifier }}</h1><p>{{ detail.component }} {{ detail.component_version }} · {{ detail.owner }}</p></div><button aria-label="Close finding" :disabled="busy" @click="detail = null">×</button></div>
-      <div class="inspector-content"><div class="queue-navigation"><button :disabled="busy || reviewIndex <= 0" @click="action(() => moveFinding(-1))">Previous finding</button><span>{{ reviewIndex >= 0 ? `${reviewIndex + 1} of ${rows.length} loaded` : "Outside current queue" }}</span><button :disabled="busy || reviewIndex < 0 || (reviewIndex >= rows.length - 1 && !nextCursor)" @click="action(() => moveFinding(1))">Next finding</button></div><div class="summary-line"><span class="score high">{{ score(detail.original_score) }}</span><span>Original severity</span><span class="badge" :class="detail.lifecycle">{{ label(detail.lifecycle) }}</span></div>
+      <div class="inspector-content"><div class="queue-navigation"><button :disabled="busy || (reviewIndex >= 0 ? reviewIndex <= 0 : queueAnchor <= 0)" @click="action(() => moveFinding(-1))">Previous finding</button><span>{{ reviewIndex >= 0 ? `${reviewIndex + 1} of ${rows.length} loaded` : "Outside current queue" }}</span><button :disabled="busy || (reviewIndex < 0 && queueAnchor < 0) || (reviewIndex >= 0 ? reviewIndex >= rows.length - 1 && !nextCursor : queueAnchor >= rows.length && !nextCursor)" @click="action(() => moveFinding(1))">Next finding</button></div><div class="summary-line"><span class="score high">{{ score(detail.original_score) }}</span><span>Original severity</span><span class="badge" :class="detail.lifecycle">{{ label(detail.lifecycle) }}</span></div>
         <p v-if="error" class="message error" role="alert">{{ error }}</p><p v-if="notice" class="message success" role="status">{{ notice }}</p>
         <p v-if="detail.lifecycle === 'needs_revalidation'" class="warning">Evidence changed since the last decision. Review the changes and submit a new assessment.</p><p v-if="detail.conflicting_scores" class="warning">Sources disagree on the original score. Resolve the difference before exporting to VScorer.</p><p v-if="detail.stale_evidence" class="warning">Source evidence is older than 30 days. Check whether it still applies.</p>
         <section v-for="(imported, index) in detail.imported_assessments" :key="index" class="decision-record"><h2>Imported DT assessment</h2><p class="hint">{{ imported.source }} · {{ imported.format === 'plain-dt' ? 'Legacy documentation without DTVP metadata' : 'Previous DTVP documentation' }}. Imported review history remains separate from DTVP approval.</p><p v-if="imported.pending_review || imported.conflicting" class="warning">{{ imported.conflicting ? 'Imported team decisions conflict.' : 'Source assessment is pending review.' }}</p><p v-if="imported.suppressed" class="warning">Suppressed in the source. Retained for review.</p><article v-for="(record, position) in imported.current_records" :key="position"><strong>{{ record.team }} · {{ record.state ? label(record.state) : 'Applicability not recorded' }}</strong><p>{{ record.rationale || 'No rationale recorded.' }}</p><small>{{ record.assessor ? `Source assessor: ${record.assessor}` : 'Assessor not recorded' }}{{ record.reviewer ? ` · Source reviewer: ${record.reviewer}` : '' }}</small><p v-if="record.rescored_score !== null" class="hint">Legacy contextual score: {{ record.rescored_score }}. Original Base severity remains unchanged.</p><p v-if="record.ssvc_priority" class="hint">Imported SSVC priority: {{ record.ssvc_priority }}</p></article></section><h2>What needs review</h2><p>{{ detail.description || 'No advisory description supplied. Review the available source evidence.' }}</p>
         <p class="hint">{{ detail.observations.length }} source observations · {{ detail.evidence.length }} additional evidence records. A lower contextual score does not prove the component is unaffected.</p>
         <AnalysisPanel :key="detail.id" :finding-id="detail.id" :state-version="detail.state_version" :evidence-revision="detail.evidence_revision" :enabled="me!.agentyzer.enabled" :mode="me!.agentyzer.mode" :can-run="detail.capabilities.includes('evidence')" :can-assess="detail.capabilities.includes('assess')" @refresh="action(() => openFinding(detail!.id, true))" @proposal="(state, rationale) => { draft.state = state; draft.rationale = rationale; notice = 'Proposal copied to your draft. Review it before submitting.' }" />
         <section v-for="record in detail.evidence.filter(e => e.kind === 'contextual-assessment')" :key="String(record.id)" class="decision-record"><h2>{{ record.source === 'vscorer' ? 'VScorer contextual assessment' : 'Contextual assessment' }}</h2><p v-if="typeof record.environmental_score === 'number'">Proposed Environmental score: <strong>{{ record.environmental_score.toFixed(1) }}</strong>. Original Base severity remains unchanged.</p><p v-if="typeof record.rationale === 'string'">{{ record.rationale }}</p><p class="hint">Imported evidence informs your decision; it does not approve it.</p></section><section v-if="latestDecision" class="decision-record"><h2>Latest assessment</h2><strong>{{ label(latestDecision.state) }}</strong><p>{{ latestDecision.rationale }}</p><p class="hint">{{ detail.approval ? 'Reviewed and approved' : 'Awaiting review' }} · {{ new Date(latestDecision.created_at).toLocaleString() }}</p></section>
-        <form v-if="detail.capabilities.includes('assess')" @submit.prevent="submit"><h2>Your assessment</h2><label>Applicability <select v-model="draft.state"><option value="under_investigation">Under investigation</option><option value="affected">Affected</option><option value="not_affected">Not affected</option><option value="fixed">Fixed</option></select></label><label>Reason and evidence <textarea v-model="draft.rationale" rows="5" maxlength="6000" placeholder="Explain the scope, relevant evidence, and proposed action."></textarea></label><p class="hint">Drafts are retained in this browser session. Saving submits a new revision for independent review.</p><button class="primary" :disabled="busy || !draft.rationale.trim()">Submit assessment</button></form>
-        <div v-if="canApprove" class="approval-actions"><button class="primary" :disabled="busy" @click="approve()">Approve decision</button><button :disabled="busy" @click="approve(true)">Request changes</button></div><p v-else-if="detail.lifecycle === 'ready' && latestDecision?.author_id === me?.id" class="hint">A different reviewer must approve your assessment.</p>
+        <form v-if="detail.capabilities.includes('assess')" @submit.prevent="submit()"><h2>Your assessment</h2><label>Applicability <select v-model="draft.state"><option value="under_investigation">Under investigation</option><option value="affected">Affected</option><option value="not_affected">Not affected</option><option value="fixed">Fixed</option></select></label><label>Reason and evidence <textarea v-model="draft.rationale" rows="5" maxlength="6000" placeholder="Explain the scope, relevant evidence, and proposed action."></textarea></label><p class="hint">Drafts are retained in this browser session. Saving submits a new revision for independent review.</p><button class="primary" :disabled="busy || !draft.rationale.trim()">Submit assessment</button><button type="button" :disabled="busy || !draft.rationale.trim()" @click="submit(true)">Submit and next</button></form>
+        <div v-if="canApprove" class="approval-actions"><button class="primary" :disabled="busy" @click="approve()">Approve decision</button><button :disabled="busy" @click="approve(false, true)">Approve and next</button><button :disabled="busy" @click="approve(true)">Request changes</button></div><p v-else-if="detail.lifecycle === 'ready' && latestDecision?.author_id === me?.id" class="hint">A different reviewer must approve your assessment.</p>
         <button :disabled="busy" @click="action(() => openFinding(detail!.id, true))">Refresh evidence</button>
         <details :open="power"><summary>Technical evidence and history</summary><h3>Package coordinate</h3><code>{{ detail.purl || 'No PURL supplied' }}</code><h3>Source observations</h3><pre>{{ JSON.stringify(detail.observations, null, 2) }}</pre><h3>Contextual evidence</h3><pre>{{ JSON.stringify(detail.evidence, null, 2) }}</pre><h3>Decision history</h3><pre>{{ JSON.stringify(detail.decisions, null, 2) }}</pre></details>
       </div>

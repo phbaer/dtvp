@@ -95,7 +95,7 @@ source imports cannot overwrite them or create new DTVP approvals.
 
 `GET /catalog/projects?q=&workspace_id=&cursor=&limit=` returns bounded
 `items` with team name, release count and active-finding count.
-`GET /catalog/projects/{id}/releases?q=&cursor=&limit=` searches release versions.
+`GET /catalog/projects/{id}/releases?q=&cursor=&limit=` searches release versions, newest first.
 `GET /projects/{id}` resolves a selected product without loading every product.
 Original array endpoints remain available for existing consumers.
 
@@ -104,7 +104,9 @@ Original array endpoints remain available for existing consumers.
 component, PURL and vulnerability ID. Non-ID sort cursors are tied to the current
 filters; changing filters requires restarting pagination. Lifecycle filtering
 retains bounded scans: an empty batch may still have a next cursor.
-Component pages accept `q` for name/version/PURL search. Authorization is applied
+Component pages accept `q` for name/version/PURL search. Finding rows include
+`latest_decision` for independent bulk-approval selection. Duplicate findings in
+a selection are rejected. Authorization is applied
 before catalog pagination and counts; saved browser views never grant access.
 
 Agentyzer analysis submission/history/report endpoints and their eligibility and

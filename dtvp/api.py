@@ -1,5 +1,5 @@
 import json
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import (
@@ -219,13 +219,25 @@ def release_catalog(
     query = select(Release).where(Release.project_id == project_id)
     if q:
         query = query.where(Release.version.icontains(q, autoescape=True))
-    query = after_cursor(query, Release.version, Release.id, cursor, scope)
-    rows = list(db.scalars(query.order_by(Release.version, Release.id).limit(limit + 1)))
+    query = after_cursor(
+        query,
+        Release.created_at,
+        Release.id,
+        cursor,
+        scope,
+        descending=True,
+        value_parser=datetime.fromisoformat,
+    )
+    rows = list(
+        db.scalars(query.order_by(Release.created_at.desc(), Release.id.desc()).limit(limit + 1))
+    )
     return {
         "items": [
             {"id": r.id, "version": r.version, "generation": r.generation} for r in rows[:limit]
         ],
-        "next_cursor": page_cursor(rows[limit - 1].version, rows[limit - 1].id, scope)
+        "next_cursor": page_cursor(
+            rows[limit - 1].created_at.isoformat(), rows[limit - 1].id, scope
+        )
         if len(rows) > limit
         else None,
     }
@@ -747,6 +759,7 @@ def findings(
             capabilities=[
                 c for c in {"assess", "approve", "evidence"} if actor.allowed(db, project, c)
             ],
+            latest_decision=detail["decisions"][0] if detail["decisions"] else None,
         )
         items.append(
             {

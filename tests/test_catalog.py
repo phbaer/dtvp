@@ -71,3 +71,27 @@ def test_catalog_cursors_are_bound_to_query(analyst):
         == 422
     )
     assert analyst.get("/api/v2/catalog/projects?cursor=garbage").status_code == 422
+
+
+def test_release_catalog_preserves_latest_first_and_search_pagination(analyst, release_id):
+    project_id = analyst.get("/api/v2/projects").json()[0]["id"]
+    for version in ["2.0.0", "3.0.0", "4.0.0"]:
+        assert (
+            analyst.post(
+                f"/api/v2/projects/{project_id}/releases", json={"version": version}
+            ).status_code
+            == 201
+        )
+    first = analyst.get(f"/api/v2/catalog/projects/{project_id}/releases?limit=1").json()
+    assert first["items"][0]["version"] == "4.0.0"
+    second = analyst.get(
+        f"/api/v2/catalog/projects/{project_id}/releases",
+        params={"limit": 1, "cursor": first["next_cursor"]},
+    ).json()
+    assert second["items"][0]["version"] == "3.0.0"
+    assert (
+        analyst.get(f"/api/v2/catalog/projects/{project_id}/releases?q=2.0").json()["items"][0][
+            "version"
+        ]
+        == "2.0.0"
+    )

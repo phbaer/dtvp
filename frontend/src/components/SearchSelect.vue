@@ -37,8 +37,8 @@ function keys(event: KeyboardEvent) {
 function outside(event: Event) { if (!root.value?.contains(event.target as Node)) open.value = false }
 watch(query, () => { clearTimeout(timer); timer = setTimeout(() => { void load() }, 180) })
 watch(() => props.endpoint, () => { options.value = []; cursor.value = null; if (open.value) void load() })
-watch(open, value => { if (value) document.addEventListener('pointerdown', outside); else { sequence++; loading.value = false; document.removeEventListener('pointerdown', outside) } })
-onBeforeUnmount(() => { clearTimeout(timer); sequence++; document.removeEventListener('pointerdown', outside) })
+watch(open, value => { if (value) { document.addEventListener('pointerdown', outside); document.addEventListener('focusin', outside) } else { sequence++; loading.value = false; document.removeEventListener('pointerdown', outside); document.removeEventListener('focusin', outside) } })
+onBeforeUnmount(() => { clearTimeout(timer); sequence++; document.removeEventListener('pointerdown', outside); document.removeEventListener('focusin', outside) })
 </script>
 <template>
   <div ref="root" class="search-select">

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RequestModel(BaseModel):
@@ -99,6 +99,12 @@ class BulkItem(RequestModel):
 
 class BulkInput(RequestModel):
     items: list[BulkItem] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def distinct_findings(self):
+        if len({item.finding_id for item in self.items}) != len(self.items):
+            raise ValueError("Each finding may appear only once in a selection")
+        return self
 
 
 class BulkApply(BulkInput):

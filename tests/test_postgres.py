@@ -7,6 +7,7 @@ from sqlalchemy import inspect, text
 
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready
+from dtvp.jobs import work_once
 from dtvp.main import create_app
 from tests.conftest import login
 
@@ -37,8 +38,48 @@ def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path):
         assert result.status_code == 201
         snapshot_id = result.json()["id"]
         original = client.get(f"/api/v2/snapshots/{snapshot_id}/bundle").content
+        assert (
+            client.get("/api/v2/catalog/projects?q=Gateway").json()["items"][0]["id"]
+            == project["id"]
+        )
+        finding = client.get("/api/v2/findings?sort=identifier&limit=1").json()
+        assert client.get(
+            "/api/v2/findings", params={"sort": "identifier", "cursor": finding["next_cursor"]}
+        ).json()["items"]
+        target = finding["items"][0]
+        analysis = client.post(
+            f"/api/v2/findings/{target['id']}/analyses",
+            json={"expected_version": target["state_version"]},
+        )
+        assert analysis.status_code == 202
+        analysis_id = analysis.json()["id"]
+        assert work_once(client.app.state.sessions, client.app.state.artifacts, settings)
+        assert (
+            client.get(f"/api/v2/findings/{target['id']}/analyses").json()["items"][0]["result"][
+                "proposal_state"
+            ]
+            == "affected"
+        )
+        login(client, "administrator")
+        teams = client.get("/api/v2/me").json()["workspaces"]
+        operations = next(team["id"] for team in teams if team["name"] == "Operations")
+        assert (
+            client.put(
+                f"/api/v2/projects/{project['id']}/sharing",
+                json={"workspace_id": operations, "capabilities": ["read"]},
+            ).status_code
+            == 200
+        )
+        login(client, "operations")
+        assert len(client.get("/api/v2/catalog/projects").json()["items"]) == 2
     with TestClient(create_app(settings)) as client:
         login(client)
         assert client.get("/readyz").status_code == 200
         assert client.get(f"/api/v2/snapshots/{snapshot_id}/bundle").content == original
+        assert (
+            client.get(f"/api/v2/analyses/{analysis_id}/report").json()["assessment"][
+                "application_eligible"
+            ]
+            is True
+        )
     engine.dispose()
