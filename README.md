@@ -17,7 +17,16 @@ starts PostgreSQL, applies migrations and loads synthetic data:
 uv run python scripts/playground.py up
 ```
 
-Open **http://127.0.0.1:8800**. Select Platform analyst, submit an assessment, then
+Open **http://127.0.0.1:8800** in a browser on the machine running Docker.
+`127.0.0.1` inside a remote page viewer points to that viewer, not to this
+workspace. From another machine, forward the port through your existing SSH
+connection, then open the URL in your own browser:
+
+```bash
+ssh -N -L 8800:127.0.0.1:8800 USER@WORKSPACE_HOST
+```
+
+Select Platform analyst, submit an assessment, then
 switch to Platform reviewer to approve. Operations has a separate private product.
 Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
 Replay changed evidence, conflicting sources and partial scans from the banner.

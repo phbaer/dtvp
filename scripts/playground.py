@@ -96,7 +96,7 @@ def main():
     subprocess.run(command, check=True, cwd=ROOT)
     if args.command in {"up", "reset"}:
         print(
-            f"Playground ready: http://127.0.0.1:{os.getenv('DTVP_PLAYGROUND_PORT', '8800')} — synthetic data, no external accounts"
+            f"Playground ready on this Docker host: http://127.0.0.1:{os.getenv('DTVP_PLAYGROUND_PORT', '8800')} — synthetic data, no external accounts"
         )
 
 
