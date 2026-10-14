@@ -1,6 +1,6 @@
 # DTVP Rewrite Plan
 
-[Project overview](../README.md) · [Current assessment model](assessment-model.md)
+[Project overview](../README.md) · [Shipped API](api.md)
 
 Proposal, 2026-10-14. Target: self-hosting with optional managed services,
 team workspaces within one organization, PostgreSQL with local artifact storage,
@@ -10,6 +10,43 @@ DTVP should own inventory, component metadata, decisions, permissions, and
 history. Dependency-Track (DT), CyBeats, and SBOM files supply observations.
 Imports must preserve DTVP decisions; writing to an external system requires a
 separate, explicit export operation.
+
+## Implementation status
+
+The rewrite branch replaces the legacy runtime rather than layering another cache
+on it. Shipped: owned inventory/metadata, immutable imports and artifacts, scoped
+team access and machine credentials, assessments/four-eye approval/revalidation,
+consumer snapshots, full DT analysis reads with tagged/plain legacy compatibility, OSV matching, NVD/CIRCL advisory ports, themes,
+durable leased jobs, an offline PostgreSQL playground, implicit schema upgrades
+with pre-upgrade data backups, and a separate PostgreSQL copy-upgrade helper.
+Generator's native snapshot consumer is isolated on `feat/dtvp-snapshot-consumer`.
+VScorer's actual parsers accept the worklist/SBOM; its workflow remains separate.
+
+Scope still requiring integration work: verified native CyBeats/EUVD/JVN APIs,
+external Agentyzer submission/polling (generic result evidence import is available),
+direct VScorer snapshot selection, automatic legacy assessment migration/cutover,
+advanced ownership inheritance/policy parity, and non-SCA detector adapters.
+External source write-back is not enabled; explicit exports are local downloads.
+The detailed design below remains the target, not a claim that every phase ships.
+The feature/code inventory describes baseline `bdc7ba41a40697b0a3f5aa1b619518216e5087f8`.
+
+### Matching and evidence boundary
+
+Use a hybrid approach: import existing tool matches and plug independent matchers
+into file-only inventory. Own package/occurrence identity, match evidence, provider
+coverage, deduplication and reevaluation; defer a broad custom CPE/range engine.
+Keep advisory records, match assertions, contextual assessments and approved
+human decisions distinct. Provider hosting geography does not establish independent
+upstream data; preserve publisher lineage instead of counting mirror copies twice.
+
+Non-US source options include ENISA EUVD, Luxembourg's CIRCL and Japan's JVN;
+regional/vendor CSAF feeds can supply additional evidence. Advisory feeds and
+package-matching services are separate ports. VScorer's NVD/KEV preparation policy
+must be coordinated separately if end-to-end independence from US services matters.
+
+Deliver the streamlined review workflow in the first owned-inventory slice.
+Default UI shows the needed decision and decisive evidence; power users expand
+technical source comparisons and history. Uncertainty and coverage gaps stay visible.
 
 ## Product Direction
 
@@ -36,14 +73,14 @@ vertical slice and extend its scenarios alongside subsequent features.
 
 | Area | Functionality to preserve | Main implementation |
 | :--- | :--- | :--- |
-| Inventory and review | Project versions; vulnerability grouping by IDs/aliases; affected components; direct/transitive dependency paths; statistics; search, facets, shared URLs, and bulk selection | [DT client](../dtvp/dt_client.py), [grouping](../dtvp/logic.py), [query API](../dtvp/general_api_routes.py) |
-| Ownership | Component/PURL selectors, precedence along dependency paths, independent owners, historical team aliases, nested team groups | [Team mapping](../dtvp/team_mapping.py), [team groups](../dtvp/team_group_services.py) |
-| Decisions | Team/global assessments, assignments, analyst submission, reviewer approval, coverage/conflict detection, historical team transfer, concurrent-edit protection | [Assessment services](../dtvp/assessment_services.py), [assessment model](assessment-model.md) |
-| Prioritization | Original/effective CVSS, version-aware rescoring rules, SSVC, KEV and CISA exploitation evidence, evidence freshness and historical snapshots | [Rescoring](../dtvp/rescore_rule_services.py), [SSVC](../dtvp/ssvc_services.py), [enrichment](../dtvp/ssvc_enrichment_services.py) |
-| Analysis | Threat-model proposals; code reachability/exploitability; manual/automatic queues; fingerprint deduplication; follow-ups; saved evidence; assessment comparison; remediation drafts | [Integration guide](analysis-integrations.md), [analysis queue](../dtvp/analysis_queue_services.py) |
-| Bulk operations | Apply analyzer proposals; synchronize incomplete coverage; transfer team assessments; recover CVSS from audit comments; repair rescoring rules; preview before apply | [Bulk workflows](../dtvp/bulk_workflows/), [review guide](review-workflows.md) |
-| Preservation | Project archive export/import, UUID remapping, scheduled snapshots, optional Git-friendly exports | [Archive services](../dtvp/project_archive_services.py) |
-| Access and operations | OIDC login, analyst/reviewer roles, settings, task progress/events, analyzer operations, mocks, tests, runtime/capacity tooling | [Authentication](../dtvp/auth.py), [settings](../dtvp/settings_routes.py), [runtime guide](runtime.md) |
+| Inventory and review | Project versions; vulnerability grouping by IDs/aliases; affected components; direct/transitive dependency paths; statistics; search, facets, shared URLs, and bulk selection | DT client (legacy `../dtvp/dt_client.py` at `bdc7ba4`), grouping (legacy `../dtvp/logic.py` at `bdc7ba4`), query API (legacy `../dtvp/general_api_routes.py` at `bdc7ba4`) |
+| Ownership | Component/PURL selectors, precedence along dependency paths, independent owners, historical team aliases, nested team groups | Team mapping (legacy `../dtvp/team_mapping.py` at `bdc7ba4`), team groups (legacy `../dtvp/team_group_services.py` at `bdc7ba4`) |
+| Decisions | Team/global assessments, assignments, analyst submission, reviewer approval, coverage/conflict detection, historical team transfer, concurrent-edit protection | Assessment services (legacy `../dtvp/assessment_services.py` at `bdc7ba4`), assessment model (legacy `assessment-model.md` at `bdc7ba4`) |
+| Prioritization | Original/effective CVSS, version-aware rescoring rules, SSVC, KEV and CISA exploitation evidence, evidence freshness and historical snapshots | Rescoring (legacy `../dtvp/rescore_rule_services.py` at `bdc7ba4`), SSVC (legacy `../dtvp/ssvc_services.py` at `bdc7ba4`), enrichment (legacy `../dtvp/ssvc_enrichment_services.py` at `bdc7ba4`) |
+| Analysis | Threat-model proposals; code reachability/exploitability; manual/automatic queues; fingerprint deduplication; follow-ups; saved evidence; assessment comparison; remediation drafts | Integration guide (legacy `analysis-integrations.md` at `bdc7ba4`), analysis queue (legacy `../dtvp/analysis_queue_services.py` at `bdc7ba4`) |
+| Bulk operations | Apply analyzer proposals; synchronize incomplete coverage; transfer team assessments; recover CVSS from audit comments; repair rescoring rules; preview before apply | Bulk workflows (legacy `dtvp/bulk_workflows/` at `bdc7ba4`), review guide (legacy `review-workflows.md` at `bdc7ba4`) |
+| Preservation | Project archive export/import, UUID remapping, scheduled snapshots, optional Git-friendly exports | Archive services (legacy `../dtvp/project_archive_services.py` at `bdc7ba4`) |
+| Access and operations | OIDC login, analyst/reviewer roles, settings, task progress/events, analyzer operations, mocks, tests, runtime/capacity tooling | [Authentication](../dtvp/auth.py), settings (legacy `../dtvp/settings_routes.py` at `bdc7ba4`), runtime guide (legacy `runtime.md` at `bdc7ba4`) |
 
 Current architectural constraints:
 
@@ -53,7 +90,7 @@ Current architectural constraints:
 - Assessment saves automatically queue DT synchronization. This becomes optional export.
 - Team filters describe ownership and workflow; they do not enforce team data isolation.
   Roles are application-wide JSON mappings. Missing role configuration defaults
-  everyone to reviewer in [the current role resolver](../dtvp/logic.py).
+  everyone to reviewer in the current role resolver (legacy `../dtvp/logic.py` at `bdc7ba4`).
 - Live tasks/queues are process-local. The current deployment uses one backend worker.
 - `/api/sbom` distributes DTVP's own software SBOM. Existing project data APIs
   primarily serve the UI and analysis tasks; a stable consumer contract is needed.
@@ -68,7 +105,7 @@ Current architectural constraints:
 | OIDC provider | Browser identity | Identity plus explicit team/workspace membership; independent machine credentials |
 | CISA KEV/Vulnrichment | Exploitation enrichment | Evidence providers with freshness, provenance, and saved decision snapshots |
 | VScorer | Legacy DTVP session/inventory adapter for threat-model proposals and VEX | Separate consumer of pinned vulnerability worklists/SBOMs; active artifact/assessment API; attributed results imported into DTVP |
-| Agentyzer | Code analysis, follow-ups, comparison, repository/model configuration | Optional analysis provider; preserve evidence and conservative verdict handling |
+| Agentyzer | Separate `../agentyzer` service for code analysis, follow-ups, comparison and repository/model configuration | External HTTP analysis provider; preserve evidence and conservative verdict handling; never vendor its code, dependencies, tests or deployment |
 | Git, advisory/package services, LLMs | Mostly accessed through Agentyzer; optional archive Git publishing | Preserve adapter boundaries and identify which service receives data |
 | Jira | Copy ticket draft and open create screen; no authenticated ticket creation | Keep existing action; authenticated ticket synchronization is a later option |
 | Generator | Separate application reading DT directly | Separate application consuming pinned DTVP API snapshots |
@@ -94,7 +131,7 @@ flowchart LR
     Core --> DB[PostgreSQL tables and JSONB]
     Core --> Files[Local immutable artifacts]
     Core --> Jobs[Durable jobs]
-    Jobs --> Analysis[Agentyzer / enrichment]
+    Jobs --> Analysis[Separate Agentyzer service / enrichment providers]
     Generator[Separate Generator application] -->|Read pinned snapshot| API
     VScorer[Separate VScorer application] -->|Read vulnerability list and SBOM| API
     VScorer -->|Return attributed evidence| Import
@@ -105,6 +142,9 @@ flowchart LR
 Use the core database for initial job persistence, leases, retries, and the
 transactional outbox. Add a queue service or search engine only when measured
 workloads require one. Model dependencies as edges in SQL initially.
+Agentyzer is maintained and deployed from `../agentyzer`; DTVP retains only the
+client contract and attributed result evidence. Its checkout, dependency lock,
+tests, model configuration and container release stay outside this repository.
 
 ### Pipeline Extension Model
 
@@ -333,10 +373,9 @@ can compromise that rollback path after the new cluster starts.
 
 Validate the persistent-volume layout against the chosen image. PostgreSQL's
 official Docker images use version-specific data directories from version 18,
-with the parent `/var/lib/postgresql` as the volume target. The existing
-[DT Compose service](../compose.yml) uses the legacy `/var/lib/postgresql/data`
-mount with PostgreSQL 18; audit the actual cluster location when preserving that
-deployment rather than copying its mount into the rewrite. Upgrade preflight must
+with the parent `/var/lib/postgresql` as the volume target. The baseline
+`compose.yml` at `bdc7ba4` used the legacy `/var/lib/postgresql/data` mount;
+audit that cluster before migrating it into the new volume. Upgrade preflight must
 detect existing cluster data and refuse an accidental empty replacement.
 [Official PostgreSQL image layout](https://hub.docker.com/_/postgres).
 
@@ -497,10 +536,10 @@ own status and does not complicate the review action.
 Provide **System / Light / Dark** themes with a persisted preference. Define
 semantic tokens for surfaces, text, borders, focus, and security statuses in the
 UI foundation, then apply them consistently to review screens, charts, and
-calculators. Status must remain understandable without color. The current
-[stylesheet](../frontend/src/style.css) sets a dark scheme; the rewrite should
-avoid carrying fixed dark colors into shared components. Theme delivery is
-nice-to-have; establish tokens early to keep it inexpensive.
+calculators. Status must remain understandable without color. The baseline
+stylesheet at `bdc7ba4` had a fixed dark scheme. The rewritten
+[stylesheet](../frontend/src/style.css) now uses theme tokens for System,
+Light and Dark.
 
 ## Local Playground and Automated Testing
 
@@ -619,7 +658,7 @@ initial state, and interactive edits do not affect another test/playground insta
 | :--- | :--- | :--- |
 | 0. Contracts and fixtures | Canonical schema/adapter envelope; team access/approval rules; Generator/VScorer snapshot contracts; migration/engine policy; PostgreSQL/local-storage validation; shared scenarios/playground bootstrap | Representative inputs/expected outcomes and consumer fixtures captured; VScorer parser/format/auth/admission compatibility recorded; isolated stack starts reproducibly |
 | 1. DTVP-owned vertical slice | Pipeline-context/SBOM ingestion → durable inventory/metadata → scoped API → team assessment → approval → separate Generator consumption; implicit startup migrations; one-command playground/test runner | Two team workspaces tested; uncached Generator report succeeds without DT; reimport preserves decisions; schema initializes/upgrades automatically; reset/restart/restore and real-stack browser flow pass |
-| 2. Source independence | SPDX/CyBeats adapters; independent vulnerability matching; one representative CI/report adapter; source reconciliation; curated metadata import | Adapter fixtures/contracts and interactive scenarios pass; tool-specific data survives normalization; file-only review works without mandatory DT |
+| 2. Source independence | SPDX/CyBeats adapters; pluggable matching backends with traceable match observations; one representative CI/report adapter; source reconciliation; curated metadata import | Adapter fixtures/contracts and interactive scenarios pass; tool-specific data survives normalization; file-only review works without mandatory DT |
 | 3. Review and analysis | Streamlined queues/timeline; durable Agentyzer integration and VScorer snapshot/result adapters; CVSS/SSVC/evidence; bulk preview/apply; theme tokens and optional light/dark delivery | Decision/ownership parity, VScorer worklist/intake/result round trip, and analysis scenarios pass; changes trigger appropriate revalidation; consumer artifacts retain provenance |
 | 4. Operations and distribution | Optional source write-back, SBOM/VEX exports, events, retention, recovery, quotas, observability, one-command deployment/engine upgrades | No writes without enabled export; idempotent retries; fault/recovery/restore/load/access and supported PostgreSQL upgrade tests pass |
 | 5. Cutover | Rehearsed migration, reconciliation, Generator/VScorer DTVP sources enabled, legacy integration names/data translated | Counts/edges/decisions/consumer output reconciled; legacy source reads retired; rollback accounts for new DTVP decisions |
@@ -647,10 +686,10 @@ Migration details:
   is insufficient. Retain legacy data read-only through the rollback window.
 
 Reuse existing domain rules and regression fixtures, especially
-[alias grouping](../tests/test_alias_grouping.py),
-[assessment revisions](../tests/test_assessment_outbox_services.py),
-[SSVC](../tests/test_ssvc_services.py), and
-[evidence semantics](../tests/test_evidence_services.py).
+alias grouping (legacy `../tests/test_alias_grouping.py` at `bdc7ba4`),
+assessment revisions (legacy `../tests/test_assessment_outbox_services.py` at `bdc7ba4`),
+SSVC (legacy `../tests/test_ssvc_services.py` at `bdc7ba4`), and
+evidence semantics (legacy `../tests/test_evidence_services.py` at `bdc7ba4`).
 Replace DT-shaped persistence, text serialization, and process-local job state.
 Do not promise a calendar estimate before the vertical slice and migration rehearsal.
 

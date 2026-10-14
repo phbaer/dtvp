@@ -134,6 +134,7 @@ explicitly disposable PostgreSQL database whose name ends in `_test`.
 Fast tests use SQLite only as an isolated test adapter. Browser tests use the
 actual PostgreSQL/auth/API stack, without mocked application requests.
 `uv run python scripts/playground.py test` runs backend/build/unit/browser checks.
+CI runs the same API, PostgreSQL and browser gates on pushes and pull requests.
 
 For separate processes, set the configuration in [development](docs/development.md),
 run `uv run python -m dtvp.cli serve` and `uv run python -m dtvp.cli worker`, then

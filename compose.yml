@@ -1,198 +1,48 @@
+name: dtvp
 services:
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "${DTVP_HTTP_PORT:-80}:80"
+  db:
+    image: postgres:18
     environment:
-      DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
-    volumes:
-      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      POSTGRES_DB: dtvp
+      POSTGRES_USER: dtvp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD}
+    volumes: ["database:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dtvp -d dtvp"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  api:
+    build: .
+    image: dtvp:rewrite
+    env_file: .env
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["artifacts:/data"]
     depends_on:
-      - dtvp
-      - dtrack-frontend
-      - dtrack-apiserver
-
-  dtrack-apiserver:
-    image: dependencytrack/apiserver:4.14.1
-    environment:
-      - ALPINE_DATABASE_MODE=external
-      - ALPINE_DATABASE_URL=jdbc:postgresql://postgres:5432/dtrack
-      - ALPINE_DATABASE_DRIVER=org.postgresql.Driver
-      - ALPINE_DATABASE_USERNAME=dtrack
-      - ALPINE_DATABASE_PASSWORD=dtrack
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+  worker:
+    image: dtvp:rewrite
+    env_file: .env
+    command: ["uv", "run", "--no-sync", "python", "-m", "dtvp.cli", "worker"]
+    volumes: ["artifacts:/data"]
     depends_on:
-      - postgres
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
-
-  dtrack-frontend:
-    image: dependencytrack/frontend:4.14.1
-    environment:
-      - API_BASE_URL=/api
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:18-alpine
-    environment:
-      - POSTGRES_USER=dtrack
-      - POSTGRES_PASSWORD=dtrack
-      - POSTGRES_DB=dtrack
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-
-  dtvp:
-    build:
-      context: .
-      dockerfile: Dockerfile.free-threaded
-      args:
-        DTVP_CONTEXT_PATH: /dtvp
-        BUILD_NUMBER: ${BUILD_NUMBER:-unknown}
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      DTVP_DT_API_URL: ${DTVP_DT_API_URL:-http://dtrack-apiserver:8080}
-      DTVP_DT_API_KEY: ${DTVP_DT_API_KEY:-change_me} # Generate this in Dependency-Track and update it.
-      DTVP_DT_CACHE_PATH: ${DTVP_DT_CACHE_PATH:-data/dt_cache}
-      DTVP_CONTEXT_PATH: ${DTVP_CONTEXT_PATH:-/dtvp}
-      DTVP_FRONTEND_URL: ${DTVP_FRONTEND_URL:-http://localhost/dtvp}
-      DTVP_UVICORN_KEEP_ALIVE_SECONDS: ${DTVP_UVICORN_KEEP_ALIVE_SECONDS:-30}
-      # The packaged deployment defaults to the verified CPython 3.14t image.
-      # The application refuses to serve if the GIL is unexpectedly active.
-      DTVP_REQUIRE_FREE_THREADED: "true"
-      DTVP_ATTRIBUTION_AGE_FILTER_DAYS: ${DTVP_ATTRIBUTION_AGE_FILTER_DAYS:-7d,14d,28d}
-      DTVP_GROUPED_VULN_TASK_TTL_SECONDS: ${DTVP_GROUPED_VULN_TASK_TTL_SECONDS:-900}
-      DTVP_JIRA_CREATE_URL: ${DTVP_JIRA_CREATE_URL:-}
-      # If using OIDC via D-T, these might not be needed if we rely on headers,
-      # but we need SESSION_SECRET for the fallback cookie if used.
-      DTVP_SESSION_SECRET_KEY: ${DTVP_SESSION_SECRET_KEY:-change_me}
-      DTVP_PROJECT_ARCHIVE_PATH: ${DTVP_PROJECT_ARCHIVE_PATH:-data/project_archives}
-      DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED: ${DTVP_PROJECT_ARCHIVE_EXPANDED_ENABLED:-false}
-      DTVP_PROJECT_ARCHIVE_EXPANDED_PATH: ${DTVP_PROJECT_ARCHIVE_EXPANDED_PATH:-data/project_archives_git}
-      DTVP_PROJECT_ARCHIVE_SNAPSHOT_ENABLED: ${DTVP_PROJECT_ARCHIVE_SNAPSHOT_ENABLED:-false}
-      DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS: ${DTVP_PROJECT_ARCHIVE_INTERVAL_SECONDS:-86400}
-      DTVP_PROJECT_ARCHIVE_RETENTION_COUNT: ${DTVP_PROJECT_ARCHIVE_RETENTION_COUNT:-30}
-      DTVP_PROJECT_ARCHIVE_INCLUDE: ${DTVP_PROJECT_ARCHIVE_INCLUDE:-}
-      DTVP_CODE_ANALYSIS_URL: ${DTVP_CODE_ANALYSIS_URL:-http://agentyzer:8000}
-      DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS: ${DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS:-300}
-      DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS: ${DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS:-5}
-      DTVP_CODE_ANALYSIS_DASHBOARD_CACHE_SECONDS: ${DTVP_CODE_ANALYSIS_DASHBOARD_CACHE_SECONDS:-3}
-      DTVP_ANALYSIS_QUEUE_CAPACITY: ${DTVP_ANALYSIS_QUEUE_CAPACITY:-1}
-      DTVP_ANALYSIS_QUEUE_MAX_PENDING: ${DTVP_ANALYSIS_QUEUE_MAX_PENDING:-1000}
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      - dtrack-apiserver
-      - agentyzer
-    restart: unless-stopped
-
-  agentyzer:
-    build:
-      context: ./agentyzer
-      args:
-        BUILD_NUMBER: ${BUILD_NUMBER:-unknown}
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      AGENTYZER_CONFIG_DIR: /app/config
-      AGENTYZER_REPOS_DIR: /app/repos
-      AGENTYZER_GITHUB_TOKEN: ${AGENTYZER_GITHUB_TOKEN:-}
-      AGENTYZER_REPO_REFRESH_SECONDS: ${AGENTYZER_REPO_REFRESH_SECONDS:-900}
-      LLM_BACKEND: ${AGENTYZER_LLM_BACKEND:-ollama}
-      OLLAMA_HOST: ${AGENTYZER_OLLAMA_HOST:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${AGENTYZER_OLLAMA_MODEL:-mistral}
-      OPENWEBUI_HOST: ${AGENTYZER_OPENWEBUI_HOST:-http://host.docker.internal:3000}
-      OPENWEBUI_MODEL: ${AGENTYZER_OPENWEBUI_MODEL:-mistral}
-      OPENWEBUI_API_KEY: ${AGENTYZER_OPENWEBUI_API_KEY:-}
-      OPENWEBUI_TOOL_CALLS: ${AGENTYZER_OPENWEBUI_TOOL_CALLS:-auto}
-      OPENWEBUI_CONTEXT_WINDOW: ${AGENTYZER_OPENWEBUI_CONTEXT_WINDOW:-0}
-      OPENWEBUI_CONTEXT_SAFETY_MARGIN: ${AGENTYZER_OPENWEBUI_CONTEXT_SAFETY_MARGIN:-256}
-      OPENWEBUI_CONTEXT_RETRIES: ${AGENTYZER_OPENWEBUI_CONTEXT_RETRIES:-2}
-      OPENWEBUI_MIN_COMPLETION_TOKENS: ${AGENTYZER_OPENWEBUI_MIN_COMPLETION_TOKENS:-256}
-      AGENTYZER_RESEARCH_CLONE_ENABLED: ${AGENTYZER_RESEARCH_CLONE_ENABLED:-true}
-      AGENTYZER_RESEARCH_GIT_HOSTS: ${AGENTYZER_RESEARCH_GIT_HOSTS:-github.com,gitlab.com,bitbucket.org}
-      AGENTYZER_RESEARCH_MAX_CLONES_PER_ANALYSIS: ${AGENTYZER_RESEARCH_MAX_CLONES_PER_ANALYSIS:-3}
-      AGENTYZER_RESEARCH_CLONE_TIMEOUT_SECONDS: ${AGENTYZER_RESEARCH_CLONE_TIMEOUT_SECONDS:-90}
-      AGENTYZER_RESEARCH_CLONE_MAX_REPOSITORY_MB: ${AGENTYZER_RESEARCH_CLONE_MAX_REPOSITORY_MB:-256}
-      AGENTYZER_RESEARCH_CLONE_MAX_FILE_BYTES: ${AGENTYZER_RESEARCH_CLONE_MAX_FILE_BYTES:-256000}
-      AGENTYZER_RESEARCH_CLONE_CACHE_TTL_SECONDS: ${AGENTYZER_RESEARCH_CLONE_CACHE_TTL_SECONDS:-3600}
-      AGENTYZER_MAX_CONCURRENT_JOBS: ${AGENTYZER_MAX_CONCURRENT_JOBS:-1}
-      LOG_LEVEL: ${AGENTYZER_LOG_LEVEL:-INFO}
-    ports:
-      - "${AGENTYZER_PORT:-8095}:8000"
-    volumes:
-      - agentyzer-repos:/app/repos
-      - ./agentyzer/config/repos.yaml:/app/config/repos.yaml:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
-
-  dtvp-archive-git-push:
-    image: alpine/git:latest
-    profiles:
-      - archive-git
-    working_dir: /repo
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      DTVP_ARCHIVE_GIT_REMOTE: ${DTVP_ARCHIVE_GIT_REMOTE:-}
-      DTVP_ARCHIVE_GIT_BRANCH: ${DTVP_ARCHIVE_GIT_BRANCH:-main}
-      DTVP_ARCHIVE_GIT_AUTHOR_NAME: ${DTVP_ARCHIVE_GIT_AUTHOR_NAME:-DTVP Archive Bot}
-      DTVP_ARCHIVE_GIT_AUTHOR_EMAIL: ${DTVP_ARCHIVE_GIT_AUTHOR_EMAIL:-dtvp-archive@example.invalid}
-      DTVP_ARCHIVE_GIT_SSH_KEY_FILE: ${DTVP_ARCHIVE_GIT_SSH_KEY_FILE:-/ssh/dtvp_archive_deploy_key}
-      DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE: ${DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE:-/ssh/known_hosts}
-    volumes:
-      - archive-git-repo:/repo
-      - ./data/project_archives_git:/archive-tree:ro
-      - ./secrets:/ssh:ro
-    entrypoint:
-      - /bin/sh
-      - -lc
-    command:
-      - |
-        set -eu
-
-        if [ -z "$${DTVP_ARCHIVE_GIT_REMOTE:-}" ]; then
-          echo "DTVP_ARCHIVE_GIT_REMOTE is required" >&2
-          exit 1
-        fi
-
-        if [ -z "$$(find /archive-tree -mindepth 1 -maxdepth 1 -print -quit)" ]; then
-          echo "No expanded DTVP archive files found in /archive-tree"
-          exit 0
-        fi
-
-        git config --global user.name "$${DTVP_ARCHIVE_GIT_AUTHOR_NAME}"
-        git config --global user.email "$${DTVP_ARCHIVE_GIT_AUTHOR_EMAIL}"
-        git config --global --add safe.directory /repo
-
-        if [ -f "$${DTVP_ARCHIVE_GIT_SSH_KEY_FILE}" ]; then
-          export GIT_SSH_COMMAND="ssh -i $${DTVP_ARCHIVE_GIT_SSH_KEY_FILE} -o UserKnownHostsFile=$${DTVP_ARCHIVE_GIT_KNOWN_HOSTS_FILE} -o StrictHostKeyChecking=yes"
-        fi
-
-        if [ ! -d .git ]; then
-          git clone "$${DTVP_ARCHIVE_GIT_REMOTE}" .
-        fi
-
-        git fetch origin "$${DTVP_ARCHIVE_GIT_BRANCH}" || true
-        git checkout "$${DTVP_ARCHIVE_GIT_BRANCH}" || git checkout -b "$${DTVP_ARCHIVE_GIT_BRANCH}"
-        git pull --ff-only origin "$${DTVP_ARCHIVE_GIT_BRANCH}" || true
-
-        rm -rf project_archives
-        mkdir -p project_archives
-        cp -a /archive-tree/. project_archives/
-
-        git add project_archives
-        if git diff --cached --quiet; then
-          echo "No DTVP archive changes to commit"
-          exit 0
-        fi
-        git commit -m "Update DTVP project archives"
-        git push origin "$${DTVP_ARCHIVE_GIT_BRANCH}"
-
 volumes:
-  postgres-data:
-  archive-git-repo:
-  agentyzer-repos:
+  database:
+  artifacts:

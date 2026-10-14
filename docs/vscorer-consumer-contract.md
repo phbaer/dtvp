@@ -1,8 +1,8 @@
 # VScorer Consumer Contract
 
-[Rewrite plan](rewrite-plan.md) · [Current DTVP integration API](integration-api-surface.md)
+[Rewrite plan](rewrite-plan.md) · [Shipped DTVP API](api.md)
 
-Proposed DTVP integration with the active minimal edition in `../vscorer`.
+DTVP export/evidence contract for the active minimal edition in `../vscorer`.
 VScorer consumes DTVP-owned vulnerability/SBOM snapshots and owns its specialized
 Environmental assessment workflow. DTVP imports returned evidence/proposals and
 owns adoption into its operational decisions. Each application keeps its own
@@ -11,8 +11,8 @@ database, artifacts, authorization, and deployment.
 ## Inspected VScorer Interface
 
 The repository root is the active REST-first rewrite; `experimental/` is the
-archived product. DTVP's current session/inventory adapter does not implement
-the active artifact/assessment interface. A naming change alone is insufficient.
+archived product. The legacy session/inventory adapter was removed from the rewrite.
+DTVP exports native SBOM/worklist inputs for the active artifact/assessment API.
 The active root currently accepts uploaded files; a direct DTVP source adapter
 is a coordinated addition to the two rewrites.
 [VScorer overview](../../vscorer/README.md),
@@ -89,14 +89,14 @@ DTVP export rules:
   and coverage in a separate manifest. Add an explicit VScorer source/provenance
   port; do not inject extra fields into its current strict worklist/intake JSON.
 
-## Proposed DTVP Consumer API
+## DTVP Consumer API
 
-Use generic immutable snapshots for Generator and VScorer. These are proposed
+Use generic immutable snapshots for Generator and VScorer. These are implemented
 DTVP `/api/v2` resources, separate from VScorer's existing routes above:
 
 | Resource | Purpose |
 | :--- | :--- |
-| `POST /snapshots` | Freeze authorized product/releases, SBOMs, selected findings, metadata, decisions, and source revisions |
+| `POST /snapshots` | Freeze one authorized product release, SBOM, selected findings, metadata, decisions, and source revisions |
 | `GET /snapshots/{id}` | Manifest, integrity hashes, scope, completeness, and immutable revision identities |
 | `GET /snapshots/{id}/vulnerabilities` | Canonical vulnerability list with occurrence links, aliases, original/effective scores, source provenance, and decision coverage |
 | `GET /snapshots/{id}/sbom` | Declared-format SBOM from exactly the same snapshot |
@@ -139,15 +139,16 @@ own application; DTVP displays concise status, proposals, and a contextual link.
 Use only `vscorer` for rewrite integration names: UI/docs, routes, settings
 (`DTVP_VSCORER_*`), modules/types, mocks/PM2 tasks, fixture labels, OpenAPI assets,
 and stored provider identities. Migration translates legacy configuration and
-saved proposals while retaining original artifacts and audit history. Existing
-legacy runtime identifiers remain documented until that implementation migrates.
+saved proposals while retaining original artifacts and audit history. Legacy runtime modules/configuration names were removed from this branch; historical
+implementation remains available in Git.
 
 Contract tests must parse DTVP-produced worklists/SBOMs with VScorer's actual
 parsers and verify ref agreement, original scores, alias merges, unresolved
 facts, export limits, permissions, and repeat import. Exercise one real synthetic
 assessment through validation/preparation/review/output and import it into DTVP.
-Keep VScorer optional in the playground via `up --with vscorer`; default AI is
-disabled and reference responses are synthetic/offline. Preserve VScorer's
+The current playground exports files for the separately running VScorer service.
+An optional VScorer Compose profile is future integration work; it is not bundled
+by `scripts/playground.py`. Default DTVP scenarios are synthetic/offline. Preserve VScorer's
 installation-owned reference/prompt caches across ordinary database resets,
 using separate local volumes. Follow its existing review gates when implementing
 changes in that repository.
