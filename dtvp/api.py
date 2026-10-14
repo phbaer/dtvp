@@ -842,6 +842,16 @@ def new_job(data: JobInput, db: DB, actor: Auth, request: Request):
             raise HTTPException(
                 422, "Configure the read-only DT source and select its project UUID"
             )
+        project = db.get(Project, release.project_id)
+        configured = (
+            project.metadata_json.get("connectors", {})
+            .get("dependency-track", {})
+            .get("project_id")
+        )
+        if not configured or data.external_project_id != configured:
+            raise HTTPException(
+                403, "An administrator must bind this DTVP product to the DT project first"
+            )
     else:
         registry = MATCHERS if data.kind == "match" else ADVISORY_PROVIDERS
         if data.provider not in registry or data.provider not in settings.providers_enabled:

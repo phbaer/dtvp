@@ -44,6 +44,10 @@ reuse with different content returns 409. Older events remain history and cannot
 overwrite newer source results. Partial snapshots preserve prior coverage.
 Format/parser revisions and provider fields remain in the immutable source document.
 
+Administrators bind each DTVP product to its DT project through
+`PUT /projects/{id}/connectors/dependency-track`. Import jobs cannot use the
+shared source credential to fetch an arbitrary unbound project.
+
 ## Provider boundaries
 
 `Matcher.query(purl)` returns matching assertions and checked/unsupported coverage.

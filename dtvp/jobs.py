@@ -86,6 +86,17 @@ def execute(factory, artifacts, settings, job_id, token):
         release = db.get(Release, job.payload["release_id"])
         effective, components, active_ids = inventory(db, release)
         payload, kind = dict(job.payload), job.kind
+        if kind == "import-dt":
+            configured = (
+                db.get(Project, job.project_id)
+                .metadata_json.get("connectors", {})
+                .get("dependency-track", {})
+                .get("project_id")
+            )
+            if configured != payload["external_project_id"]:
+                raise ValueError("DT source binding changed; submit a new import")
+        elif payload["provider"] not in settings.providers_enabled:
+            raise ValueError("Provider disabled; no outbound request was sent")
         targets = [dict(id=c.id, purl=c.purl) for c in components.values() if c.id in active_ids]
         findings = [
             (f.id, f.identifier)
@@ -125,6 +136,15 @@ def execute(factory, artifacts, settings, job_id, token):
         )
         if release.generation != payload["generation"]:
             raise ValueError("Release changed during job; rerun against current inventory")
+        if (
+            kind == "import-dt"
+            and db.get(Project, job.project_id)
+            .metadata_json.get("connectors", {})
+            .get("dependency-track", {})
+            .get("project_id")
+            != payload["external_project_id"]
+        ):
+            raise ValueError("DT source binding changed; import was not published")
         if kind == "match":
             coverage = []
             for component, response in results:

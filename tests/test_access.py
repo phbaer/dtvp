@@ -94,3 +94,31 @@ def test_no_membership_no_access(client):
     client.headers["Authorization"] = "Bearer " + token
     assert client.get("/api/v2/projects").json() == []
     assert client.get("/api/v2/findings").json()["items"] == []
+
+
+def test_dt_read_credential_cannot_import_an_unbound_project(analyst, release_id):
+    from tests.conftest import login
+
+    analyst.app.state.settings.dt_url = "https://dt.example.invalid"
+    analyst.app.state.settings.dt_api_key = "test-read-key"
+    project_id = analyst.get("/api/v2/projects").json()[0]["id"]
+    external = "00000000-0000-0000-0000-000000000001"
+    payload = {"kind": "import-dt", "release_id": release_id, "external_project_id": external}
+    assert analyst.post("/api/v2/jobs", json=payload).status_code == 403
+    assert (
+        analyst.put(
+            f"/api/v2/projects/{project_id}/connectors/dependency-track",
+            json={"external_project_id": external},
+        ).status_code
+        == 404
+    )
+    login(analyst, "administrator")
+    assert (
+        analyst.put(
+            f"/api/v2/projects/{project_id}/connectors/dependency-track",
+            json={"external_project_id": external},
+        ).status_code
+        == 200
+    )
+    login(analyst)
+    assert analyst.post("/api/v2/jobs", json=payload).status_code == 202

@@ -2,17 +2,41 @@
 
 import copy
 import json
+from uuid import UUID
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from dtvp.api import DB, Auth, bounded_metadata, release_for, snapshot_for
+from dtvp.api import DB, Auth, bounded_metadata, project_for, release_for, snapshot_for
 from dtvp.domain import audit, inventory, lock_release
 from dtvp.models import Finding, now
-from dtvp.schemas import MetadataInput
+from dtvp.schemas import MetadataInput, RequestModel
 
 router = APIRouter(prefix="/api/v2")
+
+
+class DTBinding(RequestModel):
+    external_project_id: UUID
+
+
+@router.put("/projects/{project_id}/connectors/dependency-track")
+def bind_dt(project_id: str, data: DTBinding, db: DB, actor: Auth):
+    project = project_for(db, actor, project_id, "manage")
+    connectors = {
+        **project.metadata_json.get("connectors", {}),
+        "dependency-track": {"project_id": str(data.external_project_id)},
+    }
+    project.metadata_json = {**project.metadata_json, "connectors": connectors}
+    audit(
+        db,
+        actor.user.id,
+        "connector.bind",
+        project.id,
+        project.id,
+        {"provider": "dependency-track", "external_project_id": str(data.external_project_id)},
+    )
+    return connectors["dependency-track"]
 
 
 @router.get("/releases/{release_id}/dependencies")
