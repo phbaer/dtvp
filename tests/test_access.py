@@ -124,3 +124,36 @@ def test_dt_read_credential_cannot_import_an_unbound_project(analyst, release_id
     )
     login(analyst)
     assert analyst.post("/api/v2/jobs", json=payload).status_code == 202
+
+
+def test_session_is_committed_before_the_login_response(app):
+    from fastapi.testclient import TestClient
+    from sqlalchemy import event
+
+    events = []
+
+    def committed(session):
+        events.append("commit")
+
+    async def monitored_app(scope, receive, send):
+        async def record_send(message):
+            if (
+                scope.get("path") == "/api/v2/playground/login"
+                and message["type"] == "http.response.start"
+            ):
+                events.append("response")
+            await send(message)
+
+        await app(scope, receive, record_send)
+
+    session_class = app.state.sessions.class_
+    event.listen(session_class, "after_commit", committed)
+    try:
+        with TestClient(monitored_app) as client:
+            events.clear()
+            response = client.post("/api/v2/playground/login", json={"persona": "analyst"})
+            assert response.status_code == 200
+            assert events == ["commit", "response"]
+            assert client.get("/api/v2/me").status_code == 200
+    finally:
+        event.remove(session_class, "after_commit", committed)

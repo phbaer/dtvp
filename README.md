@@ -7,6 +7,7 @@ Agentyzer lives in the separate `../agentyzer` repository. DTVP owns imported
 analysis evidence; Agentyzer owns its source, dependencies, tests and deployment.
 
 FastAPI + Vue · PostgreSQL/JSONB · local immutable artifacts · no S3 or broker.
+Database writes commit before successful HTTP responses and session cookies are sent.
 
 ## Try it locally
 

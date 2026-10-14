@@ -210,7 +210,7 @@ requires-dist = [
     { name = "authlib", specifier = ">=1.8,<2" },
     { name = "cvss", specifier = ">=3.6,<4" },
     { name = "defusedxml", specifier = ">=0.7,<1" },
-    { name = "fastapi", specifier = ">=0.115,<1" },
+    { name = "fastapi", specifier = ">=0.121,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "packageurl-python", specifier = ">=0.17,<1" },

@@ -86,7 +86,8 @@ def database(request: Request):
             raise HTTPException(409, "Conflicting or duplicate record") from None
 
 
-DB = Annotated[Session, Depends(database)]
+# Commit before sending success, cookies or tokens to the client.
+DB = Annotated[Session, Depends(database, scope="function")]
 
 
 def actor(request: Request, db: DB):
