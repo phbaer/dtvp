@@ -6,7 +6,9 @@ RUN --mount=type=secret,id=build_ca,target=/run/secrets/build_ca \
 COPY frontend/ ./
 RUN npm run build
 
-FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+FROM ghcr.io/astral-sh/uv:0.13.1 AS uv
+FROM python:3.15-slim-trixie
+COPY --from=uv /uv /uvx /usr/local/bin/
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --locked --no-dev

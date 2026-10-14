@@ -187,7 +187,7 @@ helper creating a new cluster and retaining the old volume. See
 
 ## Development and verification
 
-Use `uv` from the repository root, `npm` from `frontend/`. Python 3.14+, Node
+Use `uv` from the repository root, `npm` from `frontend/`. Python 3.15+, Node
 24.15+ and Docker are supported.
 
 ```bash
