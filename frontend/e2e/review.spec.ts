@@ -23,7 +23,7 @@ test('real import, assessment, approval, snapshot, revalidation, and team isolat
   await expect(dialog.getByRole('heading', { name: 'CVE-2099-20001' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Close finding' })).toBeFocused()
   await page.keyboard.press('Shift+Tab')
-  await expect(dialog.getByText('Technical evidence and history', { exact: true })).toBeFocused()
+  await expect(dialog.getByRole('button', { name: 'Refresh evidence', exact: true })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'CVE-2099-20001', exact: true })).toBeFocused()
   await page.keyboard.press('Enter')

@@ -44,5 +44,5 @@ test('approve and next retains the queue when completed rows leave the filter', 
   await page.getByRole('button', { name: 'CVE-2099-20001', exact: true }).click()
   await page.getByRole('button', { name: 'Approve and next', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'CVE-2099-20002', exact: true })).toBeVisible()
-  await expect(page.getByRole('dialog').getByText('Second finding reviewed.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('tabpanel', { name: 'Assessment & review', exact: true }).getByText('Second finding reviewed.', { exact: true })).toBeVisible()
 })

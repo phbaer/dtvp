@@ -133,7 +133,8 @@ Statistics counts the full authorized active inventory, not just the loaded
 queue page. It distinguishes component/release findings from unique vulnerability
 IDs, review lifecycle from applicability, and owning team workspaces from curated
 component-owner labels. Shared projects are counted once. Team and state counts
-open matching review queues; project rows are paginated. PostgreSQL statistics
+open matching review queues; project rows are paginated. Statistics inherits the
+review filters; Reset scope returns to all accessible data. PostgreSQL statistics
 use a consistent read snapshot. Original and effective severity distributions,
 legacy consistency, stale evidence and revalidation remain visible.
 
