@@ -32,9 +32,12 @@ Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
 Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
 System, light and dark themes and expandable technical evidence are available.
-The review workspace places readable evidence beside the assessment and approval
-controls. Analysis and full history have separate tabs; technical vectors stay
-collapsed by default. Review dialogs retain keyboard focus, close with Escape
+The guided review workspace presents one task at a time. Analysts inspect evidence,
+record applicability, optionally rescore, and confirm before submitting. Reviewers
+inspect the evidence and submitted assessment, then acknowledge their checks before
+approving. Back navigation retains drafts. Rescoring offers project rules, provider
+proposals or small groups of deployment metrics; vectors remain under advanced
+controls. Analysis and full history remain available in separate tabs. Review dialogs retain keyboard focus, close with Escape
 and return to the selected finding.
 Searchable product/release selectors fetch bounded pages; releases show newest first. Browse products by name
 and team, with release and active-finding counts. Review filters cover product,
@@ -58,6 +61,9 @@ uv run python scripts/playground.py logs
 Set `DTVP_PLAYGROUND_PORT` to change the port. After the initial image build,
 `up --skip-build` works offline. Production `.env` is not read by Compose here.
 Uploads/edits remain interactive; test fixtures live in `playground/fixtures/`.
+`uv run python scripts/playground.py test` uses disposable application/database
+volumes and a separate local port. Browser fixture resets preserve the interactive
+playground and its large inventory.
 
 If your build network requires a private CA, keep TLS verification enabled:
 
@@ -192,7 +198,7 @@ cd frontend
 npm ci --include=optional
 npm run build
 npm run test:unit
-npm run test:ui                 # real playground must be running
+npm run test:ui                 # requires DTVP_UI_URL pointing to a disposable playground
 ```
 
 `DTVP_TEST_DATABASE_URL` enables destructive integration checks against an

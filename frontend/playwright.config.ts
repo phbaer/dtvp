@@ -1,7 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const testUrl = process.env.DTVP_UI_URL
+if (!testUrl) throw new Error('Run uv run python scripts/playground.py test from the repository root, or set DTVP_UI_URL to a disposable playground. Browser fixtures reset data.')
+
 export default defineConfig({
   testDir: './e2e', workers: 1, fullyParallel: false,
-  use: { baseURL: process.env.DTVP_UI_URL || 'http://127.0.0.1:8900', trace: 'retain-on-failure' },
+  use: { baseURL: testUrl, trace: 'retain-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 })

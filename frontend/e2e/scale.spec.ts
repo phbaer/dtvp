@@ -39,7 +39,7 @@ test('large inventory stays searchable and review context survives navigation', 
   await expect(page.locator('tbody tr')).toHaveCount(20)
   await expect(page.getByRole('button', { name: 'Review product Scale product 0100', exact: true })).toBeVisible()
   await page.getByLabel('Persona').selectOption('operations')
-  await expect(page.getByRole('alert')).toContainText('unavailable')
+  await expect(page.getByRole('button', { name: 'CVE-2099-20003', exact: true })).toBeVisible()
   await expect(page.locator('tbody').getByText('Scale product 0100', { exact: true })).toHaveCount(0)
   await page.getByText('More filters and saved views', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset filters', exact: true }).click()

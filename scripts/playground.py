@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -10,10 +11,32 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_stack(compose, skip_build):
+    # Browser fixtures reset data: always use a separate project and volumes.
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    test_env = {
+        **os.environ,
+        "DTVP_PLAYGROUND_PORT": str(port),
+        "DTVP_UI_URL": f"http://127.0.0.1:{port}",
+    }
+    test_compose = compose + ["--project-name", f"dtvp-ui-tests-{os.getpid()}"]
+    try:
+        run_test_stack(test_compose, skip_build, test_env)
+    finally:
+        subprocess.run(
+            test_compose + ["down", "--volumes", "--remove-orphans"],
+            cwd=ROOT,
+            env=test_env,
+            check=False,
+        )
+
+
+def run_test_stack(compose, skip_build, test_env):
     command = compose + ["up", "-d", "--wait"]
     if not skip_build:
         command.append("--build")
-    subprocess.run(command, check=True, cwd=ROOT)
+    subprocess.run(command, check=True, cwd=ROOT, env=test_env)
     if not (ROOT / "frontend/node_modules").exists():
         subprocess.run(["npm", "ci", "--include=optional"], cwd=ROOT / "frontend", check=True)
     name = f"dtvp-automatic-tests-{os.getpid()}"
@@ -65,13 +88,7 @@ def test_stack(compose, skip_build):
                 command,
                 check=True,
                 cwd=ROOT / "frontend",
-                env={
-                    **os.environ,
-                    "DTVP_UI_URL": os.getenv(
-                        "DTVP_UI_URL",
-                        f"http://127.0.0.1:{os.getenv('DTVP_PLAYGROUND_PORT', '8900')}",
-                    ),
-                },
+                env=test_env,
             )
     finally:
         subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL)

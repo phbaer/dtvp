@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { beginAssessment, confirmDraft, confirmReview } from './workflow'
 
 test('real import, assessment, approval, snapshot, revalidation, and team isolation', async ({ page }) => {
   test.setTimeout(60000)
@@ -27,13 +28,16 @@ test('real import, assessment, approval, snapshot, revalidation, and team isolat
   await page.keyboard.press('Escape')
   await expect(page.getByRole('button', { name: 'CVE-2099-20001', exact: true })).toBeFocused()
   await page.keyboard.press('Enter')
+  await beginAssessment(page)
   await dialog.getByLabel('Reason and evidence').fill('Synthetic exposure confirmed. Upgrade planned.')
   await dialog.getByLabel('Applicability').selectOption('affected')
+  await confirmDraft(page)
   await dialog.getByRole('button', { name: 'Submit assessment' }).click()
   await expect(dialog.getByRole('status')).toContainText('Decision saved')
   await dialog.getByRole('button', { name: 'Close finding' }).click()
   await page.getByLabel('Persona').selectOption('reviewer')
   await page.getByRole('button', { name: 'CVE-2099-20001', exact: true }).click()
+  await confirmReview(page)
   await dialog.getByRole('button', { name: 'Approve decision' }).click()
   await expect(dialog.getByRole('status')).toContainText('approved')
   await dialog.getByRole('button', { name: 'Close finding' }).click()

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { beginAssessment, confirmDraft, confirmReview } from './workflow'
 
 test('reviewers inspect and approve a selected batch independently', async ({ page }) => {
   await page.goto('/')
@@ -8,7 +9,9 @@ test('reviewers inspect and approve a selected batch independently', async ({ pa
   await page.getByRole('button', { name: 'Platform analyst', exact: true }).click()
   for (const identifier of ['CVE-2099-20001', 'CVE-2099-20002']) {
     await page.getByRole('button', { name: identifier, exact: true }).click()
+    await beginAssessment(page)
     await page.getByRole('dialog').getByLabel('Reason and evidence').fill(`Exposure reviewed for ${identifier}. Upgrade planned.`)
+    await confirmDraft(page)
     await page.getByRole('dialog').getByRole('button', { name: 'Submit assessment', exact: true }).click()
     await expect(page.getByRole('dialog').getByRole('status')).toContainText('Decision saved')
     await page.getByRole('button', { name: 'Close finding', exact: true }).click()
@@ -32,17 +35,23 @@ test('approve and next retains the queue when completed rows leave the filter', 
   await page.getByRole('button', { name: 'Platform analyst', exact: true }).click()
   await page.getByRole('combobox', { name: 'Status', exact: true }).selectOption('open')
   await page.getByRole('button', { name: 'CVE-2099-20001', exact: true }).click()
+  await beginAssessment(page)
   await page.getByRole('dialog').getByLabel('Reason and evidence').fill('First finding reviewed.')
+  await confirmDraft(page)
   await page.getByRole('button', { name: 'Submit and next', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'CVE-2099-20002', exact: true })).toBeVisible()
+  await beginAssessment(page)
   await page.getByRole('dialog').getByLabel('Reason and evidence').fill('Second finding reviewed.')
+  await confirmDraft(page)
   await page.getByRole('button', { name: 'Submit assessment', exact: true }).click()
   await expect(page.getByRole('dialog').getByRole('status')).toContainText('Decision saved')
   await page.getByRole('button', { name: 'Close finding', exact: true }).click()
   await page.getByLabel('Persona').selectOption('reviewer')
   await page.getByRole('combobox', { name: 'Status', exact: true }).selectOption('ready')
   await page.getByRole('button', { name: 'CVE-2099-20001', exact: true }).click()
+  await confirmReview(page)
   await page.getByRole('button', { name: 'Approve and next', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'CVE-2099-20002', exact: true })).toBeVisible()
+  await beginAssessment(page)
   await expect(page.getByRole('tabpanel', { name: 'Assessment & review', exact: true }).getByText('Second finding reviewed.', { exact: true })).toBeVisible()
 })
