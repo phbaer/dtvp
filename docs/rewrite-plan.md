@@ -733,3 +733,15 @@ records and immutable scoring history remain available; analyst submissions
 cannot attach scoring proposals. Conflicting team applicability is consolidated
 conservatively: any affected team yields affected; mixed fixed/not-affected states
 remain under investigation. Reviewed VEX uses the consolidated team state.
+
+## UI continuity
+
+Treat v1's polished UI as the baseline. Preserve its searchable lists, collapsible
+filter/statistics rail, compact severity/status context, project navigation and
+desktop list/detail layout. Simplify repeated labels, decorative elements and
+secondary controls incrementally. Existing components and screenshots at
+`bdc7ba4` are the reference; backend ownership changes do not justify discarding
+working interaction patterns. The initial restoration provides a filter rail and
+persistent desktop detail pane while keeping current evidence, team approvals
+and coordinator permissions. Broader v1 grouping and dependency views remain
+separate follow-up work; never fabricate unavailable backend facts in the UI.

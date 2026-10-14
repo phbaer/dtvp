@@ -5,7 +5,7 @@ import AnalysisPanel from './AnalysisPanel.vue'
 import TeamReviewPanel from './TeamReviewPanel.vue'
 import type { AssessmentDraft, Finding, Me } from '../types'
 
-const props = defineProps<{ finding: Finding; draft: AssessmentDraft; me: Me; busy: boolean; error: string; notice: string; power: boolean; canApprove: boolean; index: number; loaded: number; previous: boolean; next: boolean }>()
+const props = defineProps<{ embedded?: boolean; finding: Finding; draft: AssessmentDraft; me: Me; busy: boolean; error: string; notice: string; power: boolean; canApprove: boolean; index: number; loaded: number; previous: boolean; next: boolean }>()
 const emit = defineEmits<{ close: []; move: [delta: number]; refresh: []; team: [workspace: string]; 'update:draft': [draft: AssessmentDraft]; submit: [advance: boolean]; approve: [requestChanges: boolean, advance: boolean] }>()
 const descriptions = computed(() => {
   const items: { id: string; source: string; text: string }[] = []
@@ -49,7 +49,7 @@ function useProposal(state: string, rationale: string) { tab.value = 'assessment
 watch(() => props.finding.id, () => { tab.value = 'assessment'; editing.value = false })
 </script>
 <template>
-  <div class="overlay review-overlay" @click.self="!busy && emit('close')"><section class="inspector finding-workspace" :class="{ roomy }" role="dialog" aria-modal="true" aria-labelledby="finding-title">
+  <div class="overlay review-overlay" :class="{ embedded }" @click.self="!busy && emit('close')"><section class="inspector finding-workspace" :class="{ roomy }" :role="embedded ? 'region' : 'dialog'" :aria-modal="embedded ? undefined : true" aria-labelledby="finding-title">
     <div class="inspector-header compact-header"><button class="sheet-close" aria-label="Close finding" :disabled="busy" @click="emit('close')">×</button><div class="sheet-identity"><h1 id="finding-title">{{ finding.identifier }}</h1><p>{{ finding.project }} · {{ finding.release }} · {{ finding.component }} {{ finding.component_version }}</p></div><div class="sheet-queue"><button :aria-label="roomy ? 'Use compact view' : 'Expand review'" :title="roomy ? 'Use compact view' : 'Expand review'" :aria-pressed="roomy" @click="roomy = !roomy">{{ roomy ? '↙' : '↗' }}</button><span>{{ index >= 0 ? `${index + 1}/${loaded}` : 'Outside queue' }}</span><button aria-label="Previous finding" title="Previous finding" :disabled="busy || !previous" @click="emit('move', -1)">‹</button><button aria-label="Next finding" title="Next finding" :disabled="busy || !next" @click="emit('move', 1)">›</button></div></div>
     <div class="review-navigation"><div class="review-tabs" role="tablist" aria-label="Review sections"><button v-for="[key, name] in tabs" :id="`review-tab-${key}`" :key="key" role="tab" :aria-label="name" :aria-selected="tab === key" :aria-controls="`review-panel-${key}`" :tabindex="tab === key ? 0 : -1" :class="{ current: tab === key }" @click="tab = key!" @keydown.right.prevent="tab = tabs[(tabs.findIndex(item => item[0] === tab) + 1) % tabs.length]![0]!; ($event.target as HTMLElement).parentElement?.querySelector<HTMLElement>(`#review-tab-${tab}`)?.focus()" @keydown.left.prevent="tab = tabs[(tabs.findIndex(item => item[0] === tab) + tabs.length - 1) % tabs.length]![0]!; ($event.target as HTMLElement).parentElement?.querySelector<HTMLElement>(`#review-tab-${tab}`)?.focus()">{{ tabLabels[key!] }}</button></div></div>
     <div class="inspector-content review-content">

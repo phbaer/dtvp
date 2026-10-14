@@ -33,6 +33,12 @@ Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
 Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
 System, light and dark themes and expandable technical evidence are available.
+The UI retains v1's search-first workspace, collapsible filter rail and compact
+findings navigation. On wide desktops (1440px+), a persistent detail pane opens
+beside the findings; the queue and search remain usable during assessment.
+Filters collapse when details open and can be restored. Smaller screens use the
+review dialog, preserving the same draft and workflow when resizing.
+Secondary filters and saved views remain collapsed by default.
 The compact review sheet opens directly on the assessment. Evidence stays visible
 alongside applicability and confirmation on desktop; mobile offers
 an expandable evidence panel. One header, a small progress strip and a single fixed

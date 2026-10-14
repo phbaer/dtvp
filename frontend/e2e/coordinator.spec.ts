@@ -7,6 +7,7 @@ test('rescoring waits for team approval and belongs to the coordinator', async (
   await page.getByText('Replay events', { exact: true }).click()
   await page.getByRole('button', { name: 'Reset playground', exact: true }).click()
   await page.getByRole('button', { name: 'Organization administrator', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: 'Persona', exact: true })).toBeEnabled()
   const me = await (await page.request.get('/api/v2/me')).json()
   const project = (await (await page.request.get('/api/v2/projects')).json()).find((p: {name: string}) => p.name === 'Demo Gateway')
   const operations = me.workspaces.find((w: {name: string}) => w.name === 'Operations')

@@ -137,18 +137,28 @@ let poll: ReturnType<typeof setInterval> | undefined
 let requestSequence = 0
 let returnFocus: HTMLElement | null = null
 let restorePending = false
-const modalOpen = computed(() => Boolean(detail.value || metadataEdit.value))
+const desktopMedia = window.matchMedia('(min-width: 1440px)')
+const wideDesktop = ref(desktopMedia.matches)
+const embeddedReview = computed(() => Boolean(detail.value && page.value === 'Review' && wideDesktop.value))
+const showReviewFilters = ref(true)
+let previousFilterVisibility = true
+function desktopChanged(event: MediaQueryListEvent) { wideDesktop.value = event.matches }
+watch(embeddedReview, embedded => {
+  if (embedded) { previousFilterVisibility = showReviewFilters.value; showReviewFilters.value = false }
+  else showReviewFilters.value = previousFilterVisibility
+})
+const modalOpen = computed(() => Boolean((detail.value && !embeddedReview.value) || metadataEdit.value))
 
 function rememberFocus() {
   returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
 }
 
 function dialogKeys(event: KeyboardEvent) {
-  if (!modalOpen.value) return
+  if (!detail.value && !metadataEdit.value) return
   if (event.key === 'Escape') {
     event.preventDefault()
     if (!busy.value) { detail.value = null; metadataEdit.value = null }
-  } else if (event.key === 'Tab') {
+  } else if (event.key === 'Tab' && modalOpen.value) {
     const controls = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"] button:not(:disabled), [role="dialog"] input:not(:disabled), [role="dialog"] select:not(:disabled), [role="dialog"] textarea:not(:disabled), [role="dialog"] a[href], [role="dialog"] summary')).filter(node => node.getClientRects().length)
     const first = controls[0], last = controls.at(-1)
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
@@ -311,9 +321,10 @@ watch(approvalSelection, () => { approvalPreview.value = null }, { deep: true })
 watch(draft, value => { if (detail.value && me.value) sessionStorage.setItem(draftKey.value, JSON.stringify(value)) }, { deep: true })
 watch(power, value => localStorage.setItem('dtvp.power', String(value)))
 watch(theme, value => { localStorage.setItem('dtvp.theme', value); document.documentElement.dataset.theme = value }, { immediate: true })
-watch(page, value => { updateUrl(); if (value === 'Products') void action(() => loadCatalog()); if (value === 'Activity') void action(async () => { jobs.value = await api('/jobs') }) })
+watch(page, value => { if (value !== 'Review') detail.value = null; updateUrl(); if (value === 'Products') void action(() => loadCatalog()); if (value === 'Activity') void action(async () => { jobs.value = await api('/jobs') }) })
 
 onMounted(async () => {
+  desktopMedia.addEventListener('change', desktopChanged)
   document.addEventListener('keydown', dialogKeys)
   window.addEventListener('popstate', restoreLocation)
   try { personas.value = await api('/playground/personas') } catch { /* Production has OIDC. */ }
@@ -324,7 +335,7 @@ onMounted(async () => {
   })
   poll = setInterval(() => { if (me.value && page.value === 'Activity' && !busy.value) void api<Job[]>('/jobs').then(value => jobs.value = value).catch(() => {}) }, 3000)
 })
-onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown', dialogKeys); window.removeEventListener('popstate', restoreLocation); document.body.style.overflow = '' })
+onUnmounted(() => { desktopMedia.removeEventListener('change', desktopChanged); clearInterval(poll); document.removeEventListener('keydown', dialogKeys); window.removeEventListener('popstate', restoreLocation); document.body.style.overflow = '' })
 </script>
 
 <template>
@@ -353,24 +364,36 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
       <template v-if="personas.length"><h2>Explore the playground</h2><button v-for="p in personas" :key="p.id" :disabled="busy" @click="login(p.id)">{{ p.name }}</button></template>
       <a v-else class="button primary" href="/auth/login">Sign in with SSO</a>
     </main>
-    <main v-else :inert="modalOpen">
+    <main v-else :inert="modalOpen" :class="{ 'review-main': page === 'Review' }">
       <template v-if="page === 'Review'">
         <div class="page-title"><div><p class="eyebrow">{{ me.name }}</p><h1>Review workspace</h1><p>What needs your attention, across your accessible teams and releases.</p></div><label class="toggle"><input v-model="power" type="checkbox"> Technical details</label></div>
-        <form class="filters" @submit.prevent="action(() => loadFindings())">
+        <form class="review-searchbar" @submit.prevent="action(() => loadFindings())">
           <label class="search">Search <input v-model="search" placeholder="Vulnerability or component"></label>
+          <button type="submit" :disabled="busy">Search</button>
+          <button type="button" :aria-expanded="showReviewFilters" aria-controls="review-filters" @click="showReviewFilters = !showReviewFilters">Filters</button>
+          <button type="button" :disabled="busy" @click="action(() => loadFindings())">Refresh</button>
+        </form>
+        <div class="review-layout" :class="{ 'with-filters': showReviewFilters, 'with-detail': embeddedReview }">
+        <aside v-show="showReviewFilters" id="review-filters" class="review-filter-rail" aria-label="Review filters"><h2>Filters</h2>
+        <form class="filters" @submit.prevent="action(() => loadFindings())">
           <SearchSelect v-model="reviewProject" label="Review product" :selected-label="reviewProjectLabel" endpoint="/catalog/projects" allow-clear :disabled="busy" @select="option => { reviewProjectLabel = option.name || ''; action(() => loadFindings()) }" @update:model-value="value => { if (!value) action(() => loadFindings()) }" />
           <label>Team <select v-model="reviewTeam" @change="action(() => loadFindings())"><option value="">All accessible teams</option><option v-if="reviewTeam && !me.workspaces.some(w => w.id === reviewTeam)" :value="reviewTeam">{{ reviewTeamLabel || "Shared project owning team" }}</option><option v-for="w in me.workspaces" :key="w.id" :value="w.id">{{ w.name }}</option></select></label>
           <label>Status <select v-model="lifecycle" @change="action(() => loadFindings())"><option value="">All statuses</option><option v-for="(name, key) in names" :key="key" :value="key">{{ name }}</option></select></label>
           <label>Sort <select v-model="order" @change="action(() => loadFindings())"><option value="identifier">Vulnerability</option><option value="original_score">Original severity · highest first</option><option value="effective_score">Effective severity · highest first</option><option value="project">Product</option><option value="component">Component</option></select></label>
-          <button type="submit" :disabled="busy">Search</button><button type="button" :disabled="busy" @click="action(() => loadFindings())">Refresh</button>
+          <button type="submit" :disabled="busy">Apply</button>
         </form>
         <details class="view-controls"><summary>More filters and saved views</summary><div class="filters"><label>Component owner <input v-model="ownerSearch" placeholder="Responsible team"></label><label>Owner match <select v-model="ownerMatch"><option value="contains">Contains</option><option value="exact">Exact owner</option></select></label><button :disabled="busy" @click="action(() => loadFindings())">Apply filters</button><button :disabled="busy" @click="applyView('')">Reset filters</button><button :disabled="busy" @click="action(copyView)">Copy view link</button><label>View name <input v-model="viewName" maxlength="100"></label><button :disabled="!viewName.trim()" @click="saveView">Save view</button></div><div class="saved-views"><span v-for="view in savedViews" :key="view.name"><button :disabled="busy" @click="applyView(view.query)">{{ view.name }}</button><button :aria-label="`Remove view ${view.name}`" @click="removeView(view.name)">×</button></span></div></details>
+        </aside>
+        <section class="review-results" aria-label="Findings list">
         <div v-if="hasApprovalAccess" class="bulk-toolbar"><button :disabled="busy" @click="approvalSelection = rows.filter(canSelectApproval).slice(0, 100).map(row => row.id)">Select loaded ready findings</button><span>{{ approvalSelection.length }} selected · maximum 100</span><button :disabled="busy || !approvalSelection.length" @click="action(previewApprovals)">Preview approvals</button><button v-if="approvalSelection.length" :disabled="busy" @click="approvalSelection = []">Clear selection</button></div>
         <section v-if="approvalPreview" class="panel" aria-labelledby="approval-preview-title"><h2 id="approval-preview-title">Approval preview · {{ approvalPreview.count }} decisions</h2><p class="hint">Review the scope and rationale below. Changed evidence or decisions will block the whole selection.</p><article v-for="finding in approvalPreview.findings" :key="finding.id" class="decision-record"><h3>{{ finding.identifier }} · {{ finding.project }} / {{ finding.release }}</h3><p>{{ finding.component }} {{ finding.component_version }} · {{ label(finding.latest_decision!.state) }}</p><p v-if="finding.latest_decision!.state === 'not_affected'" class="justification">{{ justificationLabel(finding.latest_decision!.details.justification) }}</p><p>{{ finding.latest_decision!.rationale }}</p><p v-if="finding.proposed_rescoring">Contextual score proposal: CVSS {{ finding.proposed_rescoring.version }} · {{ finding.proposed_rescoring.base_score }} → {{ finding.proposed_rescoring.score }}. {{ finding.proposed_rescoring.rationale }}</p><button class="text-link" :disabled="busy" @click="action(() => openFinding(finding.id))">Review finding evidence</button></article><button class="primary" :disabled="busy" @click="action(applyApprovals)">Approve reviewed selection</button><button :disabled="busy" @click="approvalPreview = null">Close preview</button></section>
         <div class="table-wrap"><table><thead><tr><th v-if="hasApprovalAccess">Select</th><th>Finding</th><th>Product / release</th><th>Component / owner</th><th>Original score</th><th>Next step</th></tr></thead><tbody>
-          <tr v-for="row in rows" :key="row.id"><td v-if="hasApprovalAccess"><input v-if="canSelectApproval(row)" v-model="approvalSelection" type="checkbox" :value="row.id" :aria-label="`Select ${row.identifier} in ${row.project} ${row.release}`" :disabled="busy || (!approvalSelection.includes(row.id) && approvalSelection.length >= 100)"><span v-else aria-label="Not eligible for approval">—</span></td><td><button class="text-link" :disabled="busy" @click="action(() => openFinding(row.id))">{{ row.identifier }}</button><small v-if="row.conflicting_scores" class="warning">Conflicting source scores</small><small v-if="row.stale_evidence" class="warning">Evidence needs refreshing</small></td><td>{{ row.project }}<small>{{ row.release }}</small></td><td>{{ row.component }} <small>{{ row.component_version }} · {{ row.owner }}</small></td><td><span class="score" :class="{ high: (row.original_score || 0) >= 7 }">{{ score(row.original_score) }}</span><small v-if="row.adopted_rescoring">Approved contextual: {{ score(row.effective_score) }}</small></td><td><span class="badge" :class="row.lifecycle">{{ label(row.lifecycle) }}</span></td></tr>
+          <tr v-for="row in rows" :key="row.id" :class="{ selected: detail?.id === row.id, critical: (row.original_score || 0) >= 9, high: (row.original_score || 0) >= 7 }"><td v-if="hasApprovalAccess"><input v-if="canSelectApproval(row)" v-model="approvalSelection" type="checkbox" :value="row.id" :aria-label="`Select ${row.identifier} in ${row.project} ${row.release}`" :disabled="busy || (!approvalSelection.includes(row.id) && approvalSelection.length >= 100)"><span v-else aria-label="Not eligible for approval">—</span></td><td class="finding-identity"><button class="text-link" :disabled="busy" :aria-current="detail?.id === row.id ? 'true' : undefined" @click="action(() => openFinding(row.id))">{{ row.identifier }}</button><small v-if="row.conflicting_scores" class="warning">Conflicting source scores</small><small v-if="row.stale_evidence" class="warning">Evidence needs refreshing</small></td><td class="finding-product">{{ row.project }}<small>{{ row.release }}</small></td><td class="finding-component">{{ row.component }} <small>{{ row.component_version }} · {{ row.owner }}</small></td><td class="finding-severity"><span class="score" :class="{ high: (row.original_score || 0) >= 7 }">{{ score(row.original_score) }}</span><small v-if="row.adopted_rescoring">Approved contextual: {{ score(row.effective_score) }}</small></td><td class="finding-state"><span class="badge" :class="row.lifecycle">{{ label(row.lifecycle) }}</span></td></tr>
         </tbody></table><p v-if="!rows.length" class="empty">{{ nextCursor ? "No matches in this batch. Continue to the next batch." : "No findings in this view. Reset filters or check Products for inventory and matching coverage." }}</p><button v-if="!rows.length && !nextCursor" :disabled="busy" @click="applyView('')">Show all accessible findings</button></div>
         <button v-if="nextCursor" :disabled="busy" @click="action(() => loadFindings(true))">Load more</button>
+        </section>
+        <div id="review-detail-host" v-show="embeddedReview" class="review-detail-host"></div>
+        </div>
       </template>
 
       <StatisticsView v-if="page === 'Statistics'" :key="me.id" :scope-busy="busy" :query="filterParams().toString()" :scope="`Scope: ${reviewProjectLabel || 'all accessible projects'}${reviewTeam ? ' · ' + (reviewTeamLabel || me.workspaces.find(w => w.id === reviewTeam)?.name || 'selected owning team') : ''}${lifecycle ? ' · ' + label(lifecycle) : ''}${search ? ' · Search: ' + search : ''}${ownerSearch ? ' · Owner: ' + ownerSearch : ''}`" @review="statisticsSlice" @reset="applyView('')" />
@@ -411,7 +434,7 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
       </template>
     </main>
 
-    <ReviewWorkspace v-if="detail" :key="detail.id" :finding="detail" :draft="draft" :me="me!" :busy="busy" :error="error" :notice="notice" :power="power" :can-approve="Boolean(canApprove)" :index="reviewIndex" :loaded="rows.length" :previous="reviewIndex >= 0 ? reviewIndex > 0 : queueAnchor > 0" :next="!(reviewIndex < 0 && queueAnchor < 0) && (reviewIndex >= 0 ? reviewIndex < rows.length - 1 || Boolean(nextCursor) : queueAnchor < rows.length || Boolean(nextCursor))" @close="detail = null" @move="delta => action(() => moveFinding(delta))" @refresh="action(() => openFinding(detail!.id, true))" @team="workspace => action(() => openFinding(detail!.id, false, workspace))" @update:draft="value => draft = value" @submit="submit" @approve="approve" />
+    <Teleport v-if="detail" to="#review-detail-host" :disabled="!embeddedReview"><ReviewWorkspace :embedded="embeddedReview" :key="detail.id" :finding="detail" :draft="draft" :me="me!" :busy="busy" :error="error" :notice="notice" :power="power" :can-approve="Boolean(canApprove)" :index="reviewIndex" :loaded="rows.length" :previous="reviewIndex >= 0 ? reviewIndex > 0 : queueAnchor > 0" :next="!(reviewIndex < 0 && queueAnchor < 0) && (reviewIndex >= 0 ? reviewIndex < rows.length - 1 || Boolean(nextCursor) : queueAnchor < rows.length || Boolean(nextCursor))" @close="detail = null" @move="delta => action(() => moveFinding(delta))" @refresh="action(() => openFinding(detail!.id, true))" @team="workspace => action(() => openFinding(detail!.id, false, workspace))" @update:draft="value => draft = value" @submit="submit" @approve="approve" /></Teleport>
     <div v-if="metadataEdit" class="overlay"><section class="inspector" role="dialog" aria-modal="true" aria-labelledby="metadata-title"><div class="inspector-header"><h2 id="metadata-title">Metadata · {{ metadataEdit.name }}</h2><button aria-label="Close metadata" :disabled="busy" @click="metadataEdit = null">×</button></div><div class="inspector-content"><p>Curated information survives source reimports. Changes reopen affected approvals for review.</p><label v-for="(name, key) in metadataFields" :key="key">{{ name }}<input v-model="metadataForm[key]"></label><details><summary>Additional properties</summary><label>Extension data (JSON)<textarea v-model="metadataText" rows="8"></textarea></label></details><p v-if="error" role="alert">{{ error }}</p><button class="primary" :disabled="busy" @click="action(async () => { await api(`/components/${metadataEdit!.id}/metadata`, { method: 'PUT', body: JSON.stringify({ expected_version: metadataEdit!.metadata_version, metadata: { ...JSON.parse(metadataText), ...metadataForm } }) }); metadataEdit = null; await loadInventory(); notice = 'Metadata saved.' })">Save metadata</button></div></section></div>
   </div>
 </template>
