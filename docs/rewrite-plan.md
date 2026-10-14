@@ -22,7 +22,7 @@ with pre-upgrade data backups, and a separate PostgreSQL copy-upgrade helper.
 Generator's native snapshot consumer is isolated on `feat/dtvp-snapshot-consumer`.
 VScorer's actual parsers accept the worklist/SBOM; its workflow remains separate.
 
-Shipped additionally: external Agentyzer submission/polling/follow-ups, bounded analysis history, immutable reports and explicitly accepted drafts; offline analysis scenarios exercise the durable worker.
+Shipped additionally: full-scope/team statistics, a wider tabbed review workspace, CVSS 2/3/4 calculator and version-aware v1 rule proposals, project policy editing, preview-bound adoption/approval, effective severity sorting and immutable score exports. External Agentyzer submission/polling/follow-ups, bounded analysis history, immutable reports and explicitly accepted drafts; offline analysis scenarios exercise the durable worker.
 
 Scope still requiring integration work: verified native CyBeats/EUVD/JVN APIs,
 direct VScorer snapshot selection, automatic legacy assessment migration/cutover,

@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -25,6 +26,7 @@ from dtvp.domain import (
     audit,
     current_observations,
     finding_detail,
+    finding_details,
     import_evidence,
     import_sbom,
     inventory,
@@ -681,7 +683,10 @@ def findings(
     project_id: str = "",
     workspace_id: str = "",
     owner: str = "",
-    sort: str = Query("id", pattern="^(id|identifier|component|project)$"),
+    owner_match: str = Query("contains", pattern="^(contains|exact)$"),
+    sort: str = Query(
+        "id", pattern="^(id|identifier|component|project|original_score|effective_score)$"
+    ),
     q: str = "",
     lifecycle: str = "",
     cursor: str = "",
@@ -701,8 +706,13 @@ def findings(
     if workspace_id:
         query = query.where(Project.workspace_id == workspace_id)
     if owner:
+        column = Component.metadata_json["owner"].as_string()
         query = query.where(
-            Component.metadata_json["owner"].as_string().icontains(owner, autoescape=True)
+            or_(column.is_(None), func.trim(column).in_(["", "Unassigned"]))
+            if owner == "Unassigned"
+            else column == owner
+            if owner_match == "exact"
+            else column.icontains(owner, autoescape=True)
         )
     from dtvp.catalog import after_cursor, page_cursor
 
@@ -711,11 +721,21 @@ def findings(
         "identifier": Finding.identifier,
         "component": Component.name,
         "project": Project.name,
-    }[sort]
-    scope = ["findings", release_id, project_id, workspace_id, owner, sort, q, lifecycle]
+    }.get(sort, Finding.id)
+    scope = [
+        "findings",
+        release_id,
+        project_id,
+        workspace_id,
+        owner,
+        owner_match,
+        sort,
+        q,
+        lifecycle,
+    ]
     if sort == "id":
         query = query.where(Finding.id > cursor)
-    else:
+    elif sort not in {"original_score", "effective_score"}:
         query = after_cursor(query, order, Finding.id, cursor, scope)
     if release_id:
         release_for(db, actor, release_id)
@@ -730,6 +750,72 @@ def findings(
                 Release.version.icontains(q, autoescape=True),
             )
         )
+    if sort in {"original_score", "effective_score"}:
+        from itertools import islice
+
+        from dtvp.catalog import decode_cursor
+
+        selected, observation_cache, capability_cache = [], {}, {}
+        iterator = iter(
+            db.execute(
+                query.order_by(Finding.release_id, Finding.id).execution_options(yield_per=250)
+            )
+        )
+        while batch := list(islice(iterator, 250)):
+            details = finding_details(db, [row[0] for row in batch], observation_cache)
+            for (stored, release, project), detail in zip(batch, details, strict=True):
+                if lifecycle and detail["lifecycle"] != lifecycle:
+                    continue
+                if project.id not in capability_cache:
+                    capability_cache[project.id] = [
+                        c
+                        for c in {"assess", "approve", "evidence"}
+                        if actor.allowed(db, project, c)
+                    ]
+                detail.update(
+                    project=project.name,
+                    project_id=project.id,
+                    release=release.version,
+                    latest_decision=detail["decisions"][0] if detail["decisions"] else None,
+                    capabilities=capability_cache[project.id],
+                )
+                selected.append(
+                    {
+                        key: value
+                        for key, value in detail.items()
+                        if key
+                        not in {
+                            "observations",
+                            "evidence",
+                            "decisions",
+                            "approval",
+                            "imported_assessments",
+                        }
+                    }
+                )
+            last_release = batch[-1][1].id
+            observation_cache = {last_release: observation_cache[last_release]}
+
+        def key(row):
+            return (-(row[sort] if row[sort] is not None else -1), row["id"])
+
+        selected.sort(key=key)
+        if cursor:
+            value, identifier = decode_cursor(cursor, scope)
+            try:
+                boundary = (float(value), identifier)
+                if not math.isfinite(boundary[0]):
+                    raise ValueError()
+            except ValueError:
+                raise HTTPException(422, "Invalid score cursor") from None
+            selected = [row for row in selected if key(row) > boundary]
+        items = selected[:limit]
+        return {
+            "items": items,
+            "next_cursor": page_cursor(str(key(items[-1])[0]), items[-1]["id"], scope)
+            if len(selected) > limit
+            else None,
+        }
     items, last = [], None
     observations = {}
     # Cursor advances over scanned rows even when a lifecycle filter rejects a row.
@@ -795,8 +881,26 @@ def finding(finding_id: str, db: DB, actor: Auth):
 def decision(finding_id: str, data: DecisionInput, db: DB, actor: Auth):
     finding = finding_for(db, actor, finding_id, "assess")
     bounded_metadata(data.details)
+    details = dict(data.details)
+    if "rescoring" in details:
+        raise HTTPException(422, "Use the validated rescoring field")
+    if data.rescoring:
+        lock_release(db, finding.release_id)
+        db.refresh(finding)
+        from dtvp.rescoring import prepare, preview_digest
+
+        if finding.state_version != data.expected_version:
+            raise HTTPException(409, "Finding changed; reload before submitting")
+        details["rescoring"] = prepare(
+            db, finding, finding_detail(db, finding), data.rescoring.model_dump(), data.state
+        )
+        bounded_metadata(details)
+        if data.rescoring.preview_digest != preview_digest(
+            finding, data.state, details["rescoring"]
+        ):
+            raise HTTPException(409, "Preview the current contextual score before submitting")
     result = submit_decision(
-        db, actor, finding, data.expected_version, data.state, data.rationale, data.details
+        db, actor, finding, data.expected_version, data.state, data.rationale, details
     )
     return {"id": result.id, "state_version": finding.state_version}
 

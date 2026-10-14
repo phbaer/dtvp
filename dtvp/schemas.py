@@ -53,11 +53,23 @@ class ImportInput(RequestModel):
     sbom: dict
 
 
+class RescoreInput(RequestModel):
+    kind: Literal["manual", "rule", "evidence"]
+    base_vector: str = Field(default="", max_length=1024)
+    vector: str = Field(default="", max_length=1024)
+    evidence_id: str | None = None
+    policy_digest: str = Field(default="", max_length=64)
+    preview_digest: str = Field(default="", max_length=64)
+    rule_basis: Literal["applicability", "false_positive"] = "applicability"
+    rationale: str = Field(min_length=1, max_length=6000)
+
+
 class DecisionInput(RequestModel):
     expected_version: int = Field(ge=1)
     state: Literal["affected", "not_affected", "fixed", "under_investigation"]
     rationale: str = Field(min_length=1, max_length=6000)
     details: dict = Field(default_factory=dict)
+    rescoring: RescoreInput | None = None
 
 
 class ApprovalInput(RequestModel):

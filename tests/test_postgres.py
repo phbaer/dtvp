@@ -75,6 +75,60 @@ def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path):
     with TestClient(create_app(settings)) as client:
         login(client)
         assert client.get("/readyz").status_code == 200
+        statistics = client.get("/api/v2/statistics").json()
+        assert statistics["totals"]["findings"] == 2
+        assert statistics["workflow"] == {"open": 2}
+        from tests.test_rescoring import BASE, VECTOR
+
+        finding = next(
+            row
+            for row in client.get("/api/v2/findings").json()["items"]
+            if row["identifier"] == "CVE-2099-20001"
+        )
+        body = {
+            "kind": "manual",
+            "base_vector": BASE,
+            "vector": VECTOR,
+            "rationale": "PostgreSQL context verified.",
+        }
+        preview = client.post(
+            f"/api/v2/findings/{finding['id']}/rescoring/preview",
+            json={
+                "expected_version": finding["state_version"],
+                "state": "not_affected",
+                "rescoring": body,
+            },
+        )
+        assert preview.status_code == 200, preview.text
+        result = client.post(
+            f"/api/v2/findings/{finding['id']}/decisions",
+            json={
+                "expected_version": finding["state_version"],
+                "state": "not_affected",
+                "rationale": "Reviewed scoped exposure.",
+                "rescoring": {**body, "preview_digest": preview.json()["preview_digest"]},
+            },
+        )
+        assert result.status_code == 201, result.text
+        login(client, "reviewer")
+        current = client.get(f"/api/v2/findings/{finding['id']}").json()
+        assert (
+            client.post(
+                f"/api/v2/findings/{finding['id']}/approvals",
+                json={
+                    "expected_version": current["state_version"],
+                    "decision_id": result.json()["id"],
+                },
+            ).status_code
+            == 200
+        )
+        assert client.get("/api/v2/statistics").json()["totals"]["adopted_rescoring"] == 1
+        assert (
+            client.get("/api/v2/findings?sort=effective_score").json()["items"][-1][
+                "effective_score"
+            ]
+            == 0
+        )
         assert client.get(f"/api/v2/snapshots/{snapshot_id}/bundle").content == original
         assert (
             client.get(f"/api/v2/analyses/{analysis_id}/report").json()["assessment"][

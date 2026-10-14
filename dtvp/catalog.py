@@ -15,9 +15,7 @@ def page_cursor(value, record_id, scope):
     ).decode()
 
 
-def after_cursor(query, column, id_column, cursor, scope, *, descending=False, value_parser=None):
-    if not cursor:
-        return query
+def decode_cursor(cursor, scope):
     try:
         value, record_id, signature = json.loads(base64.urlsafe_b64decode(cursor))
         if (
@@ -28,6 +26,13 @@ def after_cursor(query, column, id_column, cursor, scope, *, descending=False, v
             raise ValueError()
     except ValueError, TypeError, UnicodeError:
         raise HTTPException(422, "Invalid cursor; restart this search") from None
+    return value, record_id
+
+
+def after_cursor(query, column, id_column, cursor, scope, *, descending=False, value_parser=None):
+    if not cursor:
+        return query
+    value, record_id = decode_cursor(cursor, scope)
     if value_parser:
         try:
             value = value_parser(value)

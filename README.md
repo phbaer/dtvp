@@ -29,7 +29,10 @@ Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
 Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
 System, light and dark themes and expandable technical evidence are available.
-Review drawers retain keyboard focus, close with Escape and return to the selected finding.
+The review workspace places readable evidence beside the assessment and approval
+controls. Analysis and full history have separate tabs; technical vectors stay
+collapsed by default. Review dialogs retain keyboard focus, close with Escape
+and return to the selected finding.
 Searchable product/release selectors fetch bounded pages; releases show newest first. Browse products by name
 and team, with release and active-finding counts. Review filters cover product,
 team, component owner, status and text; sorting is stable across cursor pages.
@@ -123,6 +126,33 @@ PostgreSQL. A changed finding, revoked credential or changed binding blocks
 publication. Polling survives worker restarts. An ambiguous submission is failed
 rather than replayed; start a new analysis explicitly. Cancel stops DTVP result
 collection; the separate service may continue its run. See [analysis integration](docs/agentyzer.md).
+
+## Statistics and contextual rescoring
+
+Statistics counts the full authorized active inventory, not just the loaded
+queue page. It distinguishes component/release findings from unique vulnerability
+IDs, review lifecycle from applicability, and owning team workspaces from curated
+component-owner labels. Shared projects are counted once. Team and state counts
+open matching review queues; project rows are paginated. PostgreSQL statistics
+use a consistent read snapshot. Original and effective severity distributions,
+legacy consistency, stale evidence and revalidation remain visible.
+
+CVSS 2.0, 3.0, 3.1 and 4.0 contextual calculations and v1's version-aware rules
+are available. Select a validated original Base vector, adjust optional metrics
+or enter a vector, explain the context, and preview. Base metrics and the CVSS
+version cannot change. Administrators edit project rules in Products; concurrent
+policy edits are rejected and changed rules reopen dependent decisions.
+
+Current VScorer vectors and eligible native Agentyzer results can supply explicit
+rescoring proposals. Scores without a valid vector, mismatched Base assertions,
+old snapshots and unverified results cannot be adopted. A contextual proposal
+belongs to an occurrence and current evidence revision. It becomes effective
+only with independent approval of the assessment. Changing evidence removes the
+adoption until revalidation; original source scores and archived snapshots stay
+unchanged. Original/effective severity sorting is available in Review. Frozen
+consumer findings include the proposed/adopted score, vector, rationale and rule
+configuration; VScorer worklists keep original Base inputs. See
+[statistics and rescoring API](docs/statistics-rescoring.md).
 
 ## Production deployment
 

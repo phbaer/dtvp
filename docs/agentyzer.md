@@ -43,7 +43,11 @@ and consistent affectedness/analysis state. `not_affected` also requires literal
 coverage remain evidence without an applicable proposal. Current proposals only
 fill the user's draft on explicit action. Submission and independent approval
 remain separate. Original scores and manual decisions are never overwritten.
-Adjusted scores remain available in the report; no automatic copying is implemented.
+Adjusted scores remain in the report. Eligible native runs may supply a contextual
+score proposal through the rescoring API. DTVP correlates the immutable report,
+job and occurrence, validates the vector against original Base facts, and requires
+an explicit preview, submission and independent approval. No automatic copying
+occurs.
 
 The playground runs deterministic eligible, inconclusive and failed scenarios
 through the same durable workflow without external calls. Contract tests cover

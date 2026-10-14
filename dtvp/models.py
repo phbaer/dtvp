@@ -144,6 +144,8 @@ class Evidence(Record, Base):
     snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("snapshots.id"))
     assertion: Mapped[dict] = mapped_column(Document)
     fingerprint: Mapped[str] = mapped_column(String(64))
+    input_revision: Mapped[int | None] = mapped_column(Integer)
+    published_revision: Mapped[int | None] = mapped_column(Integer)
 
 
 class Decision(Record, Base):
@@ -200,3 +202,10 @@ class Audit(Record, Base):
     action: Mapped[str] = mapped_column(String(100))
     subject_id: Mapped[str] = mapped_column(String(200))
     details: Mapped[dict] = mapped_column(Document, default=dict)
+
+
+class RescorePolicy(Base):
+    __tablename__ = "rescore_policies"
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    config: Mapped[dict] = mapped_column(Document)

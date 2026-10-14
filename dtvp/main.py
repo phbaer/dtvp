@@ -9,12 +9,14 @@ from starlette.middleware.sessions import SessionMiddleware
 from dtvp.api import router
 from dtvp.api_analysis import router as analysis_router
 from dtvp.api_inventory import router as inventory_router
+from dtvp.api_rescoring import router as rescoring_router
 from dtvp.auth import authenticate, issue
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready, sessions
 from dtvp.models import User
 from dtvp.playground import router as playground_router
 from dtvp.playground import seed
+from dtvp.statistics import router as statistics_router
 from dtvp.storage import Artifacts
 
 
@@ -52,6 +54,8 @@ def create_app(settings=None):
     app.include_router(router)
     app.include_router(inventory_router)
     app.include_router(analysis_router)
+    app.include_router(statistics_router)
+    app.include_router(rescoring_router)
     if settings.playground:
         app.include_router(playground_router)
 

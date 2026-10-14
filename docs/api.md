@@ -20,6 +20,9 @@ Unauthorized resource IDs return 404. Administrative rights alone cannot approve
 | `/findings`, `/findings/{id}` | Cursor summary pages and full evidence/history |
 | `/findings/{id}/decisions`, `/approvals` | Version-checked submission, independent approval or change request |
 | `/approvals/preview`, `/approvals/apply` | Revision-bound atomic bulk approval |
+| `/statistics` | Full authorized state, severity, owning-team, component-owner and project counts |
+| `/findings/{id}/rescoring/preview`, `/rescoring/proposals` | Revision-bound CVSS previews and eligible provider proposals |
+| `/projects/{id}/rescore-policy`, `/cvss/metrics/{version}` | Versioned rules and calculator metadata |
 | `/findings/{id}/evidence` | Immutable attributed advisory/match/context evidence |
 | `/snapshots` and snapshot subresources | Immutable consumer bundle, SBOM, worklist, reviewed VEX and coverage |
 | `/providers`, `/jobs` | Configured read-only matching/enrichment/import operations; explicit retry/cancel |
@@ -111,3 +114,8 @@ before catalog pagination and counts; saved browser views never grant access.
 
 Agentyzer analysis submission/history/report endpoints and their eligibility and
 restart semantics are documented in [external analysis integration](agentyzer.md).
+
+Statistics scopes, score ordering, preview/adoption and policy contracts are detailed
+in [statistics and rescoring](statistics-rescoring.md). Component-owner filters support
+`owner_match=contains|exact`; finding ordering supports `original_score` and
+`effective_score`, highest first.

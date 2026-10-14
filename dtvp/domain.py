@@ -19,6 +19,7 @@ from dtvp.models import (
     Project,
     Release,
     Revision,
+    User,
     now,
 )
 from dtvp.parsers import identity, parse
@@ -217,29 +218,47 @@ def inventory(db, release):
     return effective, components, active_ids
 
 
-def finding_detail(db, finding, *, observations=None):
-    component = db.get(Component, finding.component_id)
+def finding_detail(db, finding, *, observations=None, prepared=None):
+    component = (
+        prepared["components"][finding.component_id]
+        if prepared
+        else db.get(Component, finding.component_id)
+    )
     observations = (
         observations if observations is not None else current_observations(db, finding.release_id)
     )
     observations = [o for o in observations if o.finding_id == finding.id]
-    evidence = list(
-        db.scalars(
-            select(Evidence)
-            .where(Evidence.finding_id == finding.id)
-            .order_by(Evidence.created_at, Evidence.id)
+    evidence = (
+        prepared["evidence"].get(finding.id, [])
+        if prepared
+        else list(
+            db.scalars(
+                select(Evidence)
+                .where(Evidence.finding_id == finding.id)
+                .order_by(Evidence.created_at, Evidence.id)
+            )
         )
     )
-    decisions = list(
-        db.scalars(
-            select(Decision)
-            .where(Decision.finding_id == finding.id)
-            .order_by(Decision.created_at.desc(), Decision.id.desc())
+    decisions = (
+        prepared["decisions"].get(finding.id, [])
+        if prepared
+        else list(
+            db.scalars(
+                select(Decision)
+                .where(Decision.finding_id == finding.id)
+                .order_by(Decision.created_at.desc(), Decision.id.desc())
+            )
         )
     )
     decision = decisions[0] if decisions else None
     approval = (
-        db.scalar(select(Approval).where(Approval.decision_id == decision.id)) if decision else None
+        (
+            prepared["approvals"].get(decision.id)
+            if prepared
+            else db.scalar(select(Approval).where(Approval.decision_id == decision.id))
+        )
+        if decision
+        else None
     )
     lifecycle = "open"
     if decision:
@@ -295,6 +314,19 @@ def finding_detail(db, finding, *, observations=None):
         if isinstance(rating.get("score"), (int, float))
     ]
     vectors = {rating.get("vector") for rating in ratings if rating.get("vector")}
+    from dtvp.rescoring import original_vectors
+
+    originals = original_vectors(advisory_assertions)
+    proposed_rescoring = decision.details.get("rescoring") if decision else None
+    if not isinstance(proposed_rescoring, dict) or not all(
+        key in proposed_rescoring for key in ("score", "vector", "base_vector", "kind", "rationale")
+    ):
+        proposed_rescoring = None
+    adopted_rescoring = (
+        proposed_rescoring
+        if lifecycle == "approved" and approval.policy.get("rescoring_verified") is True
+        else None
+    )
     stale = any(aware(o.created_at) < now() - timedelta(days=30) for o in observations)
     return {
         "id": finding.id,
@@ -311,6 +343,15 @@ def finding_detail(db, finding, *, observations=None):
         "state_version": finding.state_version,
         "evidence_revision": finding.evidence_revision,
         "original_score": max(scores) if scores else None,
+        "original_vectors": originals,
+        "proposed_rescoring": proposed_rescoring,
+        "adopted_rescoring": adopted_rescoring,
+        "effective_score": adopted_rescoring["score"]
+        if adopted_rescoring
+        else max(scores)
+        if scores
+        else None,
+        "effective_vector": adopted_rescoring["vector"] if adopted_rescoring else None,
         "conflicting_scores": len(vectors) > 1,
         "stale_evidence": stale,
         "imported_assessments": imported,
@@ -319,21 +360,23 @@ def finding_detail(db, finding, *, observations=None):
         ),
         "observations": [
             {
+                **o.assertion,
                 "id": o.id,
                 "source": o.source,
                 "revision_id": o.revision_id,
                 "created_at": o.created_at.isoformat(),
-                **o.assertion,
             }
             for o in observations
         ],
         "evidence": [
             {
+                **e.assertion,
                 "id": e.id,
                 "source": e.source,
                 "snapshot_id": e.snapshot_id,
                 "created_at": e.created_at.isoformat(),
-                **e.assertion,
+                "input_evidence_revision": e.input_revision,
+                "published_evidence_revision": e.published_revision,
             }
             for e in evidence
         ],
@@ -343,6 +386,11 @@ def finding_detail(db, finding, *, observations=None):
                 "state": d.state,
                 "rationale": d.rationale,
                 "author_id": d.author_id,
+                "author_name": (
+                    prepared["users"].get(d.author_id, "Unknown")
+                    if prepared
+                    else db.get(User, d.author_id).name
+                ),
                 "workspace_id": d.workspace_id,
                 "evidence_revision": d.evidence_revision,
                 "status": d.status,
@@ -409,6 +457,23 @@ def approve_decision(db, actor, finding, expected, decision_id, *, request_chang
         raise HTTPException(403, "A different reviewer must approve")
     if db.scalar(select(Approval).where(Approval.decision_id == decision.id)):
         raise HTTPException(409, "Already approved")
+    if decision.details.get("rescoring") and not request_changes:
+        from dtvp.rescoring import calculate, policy
+
+        rescoring = decision.details["rescoring"]
+        detail = finding_detail(db, finding)
+        if rescoring.get("base_vector") not in {
+            entry["vector"] for entry in detail["original_vectors"]
+        }:
+            raise HTTPException(409, "Original Base evidence changed")
+        validated = calculate(rescoring["base_vector"], rescoring["vector"])
+        if validated["score"] != rescoring.get("score"):
+            raise HTTPException(409, "Rescoring calculation is inconsistent")
+        if (
+            rescoring.get("kind") == "rule"
+            and rescoring.get("policy_digest") != policy(db, project.id)["digest"]
+        ):
+            raise HTTPException(409, "Rescoring policy changed; submit a new proposal")
     if request_changes:
         decision.status = "changes_requested"
     else:
@@ -421,6 +486,7 @@ def approve_decision(db, actor, finding, expected, decision_id, *, request_chang
                     "version": "four-eyes/1",
                     "scope": "component-release",
                     "decision_workspace": decision.workspace_id,
+                    "rescoring_verified": bool(decision.details.get("rescoring")),
                 },
             )
         )
@@ -456,6 +522,7 @@ def import_evidence(db, actor_id, finding, *, source, external_id, assertion, sn
         assertion=assertion,
         snapshot_id=snapshot_id,
         fingerprint=fingerprint,
+        input_revision=finding.evidence_revision,
     )
     prior = db.scalar(
         select(Evidence)
@@ -477,6 +544,7 @@ def import_evidence(db, actor_id, finding, *, source, external_id, assertion, sn
     if prior_substantive != substantive or (prior and prior.snapshot_id != snapshot_id):
         finding.evidence_revision += 1
         finding.state_version += 1
+    evidence.published_revision = finding.evidence_revision
     audit(
         db,
         actor_id,
@@ -487,3 +555,58 @@ def import_evidence(db, actor_id, finding, *, source, external_id, assertion, sn
     )
     db.flush()
     return evidence
+
+
+def finding_details(db, findings, observation_cache=None):
+    """Batch-load review facts; the same semantics serve details, queues and statistics."""
+    if not findings:
+        return []
+    observation_cache = observation_cache if observation_cache is not None else {}
+    ids = [finding.id for finding in findings]
+    prepared = {
+        "components": {
+            c.id: c
+            for c in db.scalars(
+                select(Component).where(Component.id.in_([f.component_id for f in findings]))
+            )
+        },
+        "evidence": defaultdict(list),
+        "decisions": defaultdict(list),
+        "approvals": {},
+    }
+    for record in db.scalars(
+        select(Evidence)
+        .where(Evidence.finding_id.in_(ids))
+        .order_by(Evidence.created_at, Evidence.id)
+    ):
+        prepared["evidence"][record.finding_id].append(record)
+    for decision in db.scalars(
+        select(Decision)
+        .where(Decision.finding_id.in_(ids))
+        .order_by(Decision.created_at.desc(), Decision.id.desc())
+    ):
+        prepared["decisions"][decision.finding_id].append(decision)
+    decision_ids = [records[0].id for records in prepared["decisions"].values() if records]
+    prepared["approvals"] = {
+        a.decision_id: a
+        for a in db.scalars(select(Approval).where(Approval.decision_id.in_(decision_ids)))
+    }
+    author_ids = {d.author_id for records in prepared["decisions"].values() for d in records}
+    prepared["users"] = {
+        u.id: u.name for u in db.scalars(select(User).where(User.id.in_(author_ids)))
+    }
+    for release_id in {f.release_id for f in findings}:
+        if release_id not in observation_cache:
+            grouped = defaultdict(list)
+            for observation in current_observations(db, release_id):
+                grouped[observation.finding_id].append(observation)
+            observation_cache[release_id] = grouped
+    return [
+        finding_detail(
+            db,
+            finding,
+            observations=observation_cache[finding.release_id].get(finding.id, []),
+            prepared=prepared,
+        )
+        for finding in findings
+    ]
