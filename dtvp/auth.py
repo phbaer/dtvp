@@ -13,6 +13,7 @@ ROLE_CAPABILITIES = {
     "viewer": {"read"},
     "analyst": {"read", "write", "assess", "snapshot", "evidence"},
     "reviewer": {"read", "assess", "approve", "snapshot", "evidence"},
+    "coordinator": {"read", "rescore", "snapshot"},
     "admin": {"read", "write", "manage", "snapshot", "export", "evidence"},
 }
 
@@ -54,16 +55,6 @@ class Actor:
         if project is None or not self.allowed(db, project, capability):
             raise HTTPException(404, "Resource unavailable in your scope")
         return project
-
-    def decision_workspace(self, db, project):
-        for workspace_id in sorted(self.memberships):
-            if self.workspace(workspace_id, "assess"):
-                if workspace_id == project.workspace_id:
-                    return workspace_id
-                grant = db.get(Grant, (project.id, workspace_id))
-                if grant and "assess" in grant.capabilities:
-                    return workspace_id
-        raise HTTPException(403, "Assessment membership required")
 
 
 def authenticate(request: Request, db: Session) -> Actor:

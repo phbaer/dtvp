@@ -209,3 +209,18 @@ class RescorePolicy(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), primary_key=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     config: Mapped[dict] = mapped_column(Document)
+
+
+class ReviewScope(Base):
+    __tablename__ = "review_scopes"
+    finding_id: Mapped[str] = mapped_column(ForeignKey("findings.id"), primary_key=True)
+    workspace_ids: Mapped[list] = mapped_column(Document)
+
+
+class FinalRescoring(Record, Base):
+    __tablename__ = "final_rescorings"
+    finding_id: Mapped[str] = mapped_column(ForeignKey("findings.id"), index=True)
+    coordinator_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    evidence_revision: Mapped[int] = mapped_column(Integer)
+    review_digest: Mapped[str] = mapped_column(String(64))
+    proposal: Mapped[dict] = mapped_column(Document)

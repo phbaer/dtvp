@@ -91,15 +91,6 @@ def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path):
             "vector": VECTOR,
             "rationale": "PostgreSQL context verified.",
         }
-        preview = client.post(
-            f"/api/v2/findings/{finding['id']}/rescoring/preview",
-            json={
-                "expected_version": finding["state_version"],
-                "state": "not_affected",
-                "rescoring": body,
-            },
-        )
-        assert preview.status_code == 200, preview.text
         result = client.post(
             f"/api/v2/findings/{finding['id']}/decisions",
             json={
@@ -107,7 +98,6 @@ def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path):
                 "state": "not_affected",
                 "rationale": "Reviewed scoped exposure.",
                 "justification": "protected_at_runtime",
-                "rescoring": {**body, "preview_digest": preview.json()["preview_digest"]},
             },
         )
         assert result.status_code == 201, result.text
@@ -123,6 +113,26 @@ def test_postgres_migrations_concurrent_startup_restart_and_auth(tmp_path):
             ).status_code
             == 200
         )
+        assert client.get("/api/v2/statistics").json()["totals"]["adopted_rescoring"] == 0
+        login(client, "coordinator")
+        finding = client.get(f"/api/v2/findings/{finding['id']}").json()
+        preview = client.post(
+            f"/api/v2/findings/{finding['id']}/rescoring/preview",
+            json={
+                "expected_version": finding["state_version"],
+                "state": "not_affected",
+                "rescoring": body,
+            },
+        )
+        assert preview.status_code == 200, preview.text
+        published = client.post(
+            f"/api/v2/findings/{finding['id']}/rescoring",
+            json={
+                "expected_version": finding["state_version"],
+                "rescoring": body | {"preview_digest": preview.json()["preview_digest"]},
+            },
+        )
+        assert published.status_code == 201, published.text
         assert client.get("/api/v2/statistics").json()["totals"]["adopted_rescoring"] == 1
         assert (
             client.get("/api/v2/findings?sort=effective_score").json()["items"][-1][

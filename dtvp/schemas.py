@@ -16,7 +16,9 @@ class MemberInput(RequestModel):
     issuer: str = Field(min_length=1, max_length=500)
     subject: str = Field(min_length=1, max_length=500)
     name: str = Field(min_length=1, max_length=200)
-    roles: list[Literal["viewer", "analyst", "reviewer", "admin"]] = Field(max_length=4)
+    roles: list[Literal["viewer", "analyst", "reviewer", "coordinator", "admin"]] = Field(
+        max_length=5
+    )
 
 
 class ProjectInput(RequestModel):
@@ -30,7 +32,9 @@ class ReleaseInput(RequestModel):
 
 class ShareInput(RequestModel):
     workspace_id: str
-    capabilities: list[Literal["read", "write", "assess", "approve", "snapshot", "evidence"]]
+    capabilities: list[
+        Literal["read", "write", "assess", "approve", "snapshot", "evidence", "rescore"]
+    ]
 
 
 class TokenInput(RequestModel):
@@ -38,7 +42,7 @@ class TokenInput(RequestModel):
     name: str = Field(min_length=1, max_length=200)
     projects: list[str] = Field(default_factory=list, max_length=100)
     capabilities: list[
-        Literal["read", "write", "assess", "approve", "snapshot", "evidence", "export"]
+        Literal["read", "write", "assess", "approve", "snapshot", "evidence", "export", "rescore"]
     ]
     hours: int = Field(default=24, ge=1, le=24 * 90)
 
@@ -65,6 +69,7 @@ class RescoreInput(RequestModel):
 
 
 class DecisionInput(RequestModel):
+    workspace_id: str | None = None
     expected_version: int = Field(ge=1)
     state: Literal["affected", "not_affected", "fixed", "under_investigation"]
     rationale: str = Field(min_length=1, max_length=6000)

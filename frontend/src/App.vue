@@ -20,7 +20,7 @@ const nextCursor = ref<string | null>(null)
 const approvalSelection = ref<string[]>([])
 type ApprovalItem = { finding_id: string; expected_version: number; decision_id: string }
 const approvalPreview = ref<{ count: number; preview_digest: string; items: ApprovalItem[]; findings: Finding[] } | null>(null)
-const canSelectApproval = (row: Finding) => row.capabilities.includes('approve') && row.lifecycle === 'ready' && Boolean(row.latest_decision) && row.latest_decision!.author_id !== me.value?.id
+const canSelectApproval = (row: Finding) => row.capabilities.includes('approve') && row.review_lifecycle === 'ready' && Boolean(row.latest_decision) && row.latest_decision!.author_id !== me.value?.id
 const hasApprovalAccess = computed(() => rows.value.some(row => row.capabilities.includes('approve')))
 async function previewApprovals() {
   const findings = rows.value.filter(row => approvalSelection.value.includes(row.id))
@@ -171,10 +171,10 @@ watch([modalOpen, busy], async ([open, pending], [wasOpen]) => {
 const selectedProject = computed(() => projects.value.find(p => p.id === projectId.value))
 const canWrite = computed(() => selectedProject.value?.capabilities.includes('write'))
 const canManage = computed(() => selectedProject.value?.capabilities.includes('manage'))
-const latestDecision = computed(() => detail.value?.decisions[0])
-const canApprove = computed(() => detail.value?.capabilities.includes('approve') && detail.value.lifecycle === 'ready' && latestDecision.value?.author_id !== me.value?.id)
+const latestDecision = computed(() => detail.value?.latest_decision)
+const canApprove = computed(() => detail.value?.capabilities.includes('approve') && detail.value.review_lifecycle === 'ready' && latestDecision.value?.author_id !== me.value?.id)
 const access = computed(() => me.value?.org_admin || me.value?.workspaces.some(w => w.capabilities.includes('manage')))
-const draftKey = computed(() => `dtvp.draft:${me.value?.id}:${detail.value?.id}`)
+const draftKey = computed(() => `dtvp.draft:${me.value?.id}:${detail.value?.id}:${detail.value?.review_workspace_id}`)
 const names: Record<string, string> = { open: 'Needs analysis', ready: 'Ready for approval', approved: 'Approved', needs_revalidation: 'Evidence changed', changes_requested: 'Changes requested', legacy_assessed: 'Legacy assessment', legacy_pending: 'Legacy review pending', legacy_conflicting: 'Legacy conflict', legacy_documented: 'Legacy documentation' }
 const label = (value: string) => names[value] || value.replaceAll('_', ' ')
 const score = (value: number | null) => value === null ? 'Unknown' : value.toFixed(1)
@@ -231,11 +231,11 @@ async function loadFindings(append = false) {
   nextCursor.value = result.next_cursor
 }
 
-async function openFinding(id: string, keepDraft = false) {
+async function openFinding(id: string, keepDraft = false, workspace = '') {
   if (!detail.value) rememberFocus()
   const position = rows.value.findIndex(row => row.id === id)
   if (position >= 0 || !keepDraft) queueAnchor.value = position
-  detail.value = await api(`/findings/${id}`)
+  detail.value = await api(`/findings/${id}${workspace || (keepDraft && detail.value?.review_workspace_id) ? `?workspace_id=${encodeURIComponent(workspace || detail.value!.review_workspace_id!)}` : ''}`)
   if (!keepDraft) {
     const saved = sessionStorage.getItem(draftKey.value)
     const prior = latestDecision.value?.details.rescoring
@@ -258,7 +258,7 @@ async function login(persona: string) {
 async function submit(advance = false) {
   if (!detail.value) return
   await action(async () => {
-    await api(`/findings/${detail.value!.id}/decisions`, send({ state: draft.value.state, rationale: draft.value.rationale, justification: draft.value.justification, expected_version: detail.value!.state_version }))
+    await api(`/findings/${detail.value!.id}/decisions`, send({ state: draft.value.state, rationale: draft.value.rationale, justification: draft.value.justification, workspace_id: detail.value!.review_workspace_id, expected_version: detail.value!.state_version }))
     sessionStorage.removeItem(draftKey.value)
     await openFinding(detail.value!.id, true); await loadFindings()
     notice.value = 'Decision saved. A different reviewer can approve it.'
@@ -403,15 +403,15 @@ onUnmounted(() => { clearInterval(poll); document.removeEventListener('keydown',
       <template v-if="page === 'Access'">
         <div class="page-title"><div><p class="eyebrow">Explicit team access</p><h1>Access and integrations</h1><p>Ownership describes responsibility. Team memberships and sharing control access.</p></div></div>
         <label>Team <select v-model="workspaceId"><option v-for="w in me.workspaces.filter(w => w.capabilities.includes('manage'))" :key="w.id" :value="w.id">{{ w.name }}</option></select></label>
-        <div class="columns"><section class="panel"><h2>Member mapping</h2><label>OIDC issuer <input v-model="memberIssuer"></label><label>Subject <input v-model="memberSubject"></label><label>Display name <input v-model="memberName"></label><label>Role <select v-model="memberRole"><option v-for="role in ['viewer', 'analyst', 'reviewer', 'admin']" :key="role">{{ role }}</option></select></label><p class="hint">Administrator permission does not grant approval. Map the verified issuer and subject from your identity provider.</p><button :disabled="busy || !memberIssuer || !memberSubject || !memberName" @click="action(async () => { await api(`/workspaces/${workspaceId}/members`, { method: 'PUT', body: JSON.stringify({ issuer: memberIssuer, subject: memberSubject, name: memberName, roles: [memberRole] }) }); notice = 'Membership saved.' })">Save membership</button></section>
+        <div class="columns"><section class="panel"><h2>Member mapping</h2><label>OIDC issuer <input v-model="memberIssuer"></label><label>Subject <input v-model="memberSubject"></label><label>Display name <input v-model="memberName"></label><label>Role <select v-model="memberRole"><option v-for="role in ['viewer', 'analyst', 'reviewer', 'coordinator', 'admin']" :key="role">{{ role }}</option></select></label><p class="hint">Administrator permission does not grant approval. Map the verified issuer and subject from your identity provider.</p><button :disabled="busy || !memberIssuer || !memberSubject || !memberName" @click="action(async () => { await api(`/workspaces/${workspaceId}/members`, { method: 'PUT', body: JSON.stringify({ issuer: memberIssuer, subject: memberSubject, name: memberName, roles: [memberRole] }) }); notice = 'Membership saved.' })">Save membership</button></section>
           <section class="panel"><h2>Consumer credential</h2><label>Name <input v-model="tokenName"></label><p class="hint">Create a 24-hour read-only credential for this team. It remains constrained by your current membership.</p><button :disabled="busy || !tokenName" @click="action(async () => { const result = await api<{ token: string }>('/credentials', send({ workspace_id: workspaceId, name: tokenName, capabilities: ['read'], projects: [], hours: 24 })); token = result.token })">Issue read credential</button><label v-if="token">Copy now; shown only once <textarea readonly :value="token"></textarea></label><a href="/openapi.json" target="_blank" rel="noopener">API schema</a></section>
         </div>
-        <section v-if="me.workspaces.some(w => w.capabilities.includes('manage'))" class="panel"><h2>Project sharing</h2><SearchSelect v-model="projectId" label="Shared product" :selected-label="selectedProject?.name" endpoint="/catalog/projects" :disabled="busy" @select="selectProject" /><p v-if="!canManage" class="hint">Select a product you manage to change sharing.</p><label>Share with team <select v-model="shareWorkspace"><option v-for="w in me.workspaces.filter(w => w.id !== selectedProject?.workspace_id)" :key="w.id" :value="w.id">{{ w.name }}</option></select></label><label class="toggle"><input v-model="sharedReadOnly" type="checkbox"> Read only</label><button :disabled="busy || !shareWorkspace || !canManage" @click="action(async () => { await api(`/projects/${projectId}/sharing`, { method: 'PUT', body: JSON.stringify({ workspace_id: shareWorkspace, capabilities: sharedReadOnly ? ['read'] : ['read', 'assess', 'snapshot', 'evidence'] }) }); notice = 'Sharing updated.' })">Save sharing</button></section>
+        <section v-if="me.workspaces.some(w => w.capabilities.includes('manage'))" class="panel"><h2>Project sharing</h2><SearchSelect v-model="projectId" label="Shared product" :selected-label="selectedProject?.name" endpoint="/catalog/projects" :disabled="busy" @select="selectProject" /><p v-if="!canManage" class="hint">Select a product you manage to change sharing.</p><label>Share with team <select v-model="shareWorkspace"><option v-for="w in me.workspaces.filter(w => w.id !== selectedProject?.workspace_id)" :key="w.id" :value="w.id">{{ w.name }}</option></select></label><label class="toggle"><input v-model="sharedReadOnly" type="checkbox"> Read only</label><button :disabled="busy || !shareWorkspace || !canManage" @click="action(async () => { await api(`/projects/${projectId}/sharing`, { method: 'PUT', body: JSON.stringify({ workspace_id: shareWorkspace, capabilities: sharedReadOnly ? ['read'] : ['read', 'assess', 'approve', 'rescore', 'snapshot', 'evidence'] }) }); notice = 'Sharing updated.' })">Save sharing</button></section>
         <section v-if="me.org_admin" class="panel"><h2>Add team workspace</h2><label>Team name <input v-model="workspaceName"></label><button :disabled="busy || !workspaceName" @click="action(async () => { await api('/workspaces', send({ name: workspaceName })); me = await api('/me'); workspaceName = '' })">Create workspace</button></section>
       </template>
     </main>
 
-    <ReviewWorkspace v-if="detail" :key="detail.id" :finding="detail" :draft="draft" :me="me!" :busy="busy" :error="error" :notice="notice" :power="power" :can-approve="Boolean(canApprove)" :index="reviewIndex" :loaded="rows.length" :previous="reviewIndex >= 0 ? reviewIndex > 0 : queueAnchor > 0" :next="!(reviewIndex < 0 && queueAnchor < 0) && (reviewIndex >= 0 ? reviewIndex < rows.length - 1 || Boolean(nextCursor) : queueAnchor < rows.length || Boolean(nextCursor))" @close="detail = null" @move="delta => action(() => moveFinding(delta))" @refresh="action(() => openFinding(detail!.id, true))" @update:draft="value => draft = value" @submit="submit" @approve="approve" />
+    <ReviewWorkspace v-if="detail" :key="detail.id" :finding="detail" :draft="draft" :me="me!" :busy="busy" :error="error" :notice="notice" :power="power" :can-approve="Boolean(canApprove)" :index="reviewIndex" :loaded="rows.length" :previous="reviewIndex >= 0 ? reviewIndex > 0 : queueAnchor > 0" :next="!(reviewIndex < 0 && queueAnchor < 0) && (reviewIndex >= 0 ? reviewIndex < rows.length - 1 || Boolean(nextCursor) : queueAnchor < rows.length || Boolean(nextCursor))" @close="detail = null" @move="delta => action(() => moveFinding(delta))" @refresh="action(() => openFinding(detail!.id, true))" @team="workspace => action(() => openFinding(detail!.id, false, workspace))" @update:draft="value => draft = value" @submit="submit" @approve="approve" />
     <div v-if="metadataEdit" class="overlay"><section class="inspector" role="dialog" aria-modal="true" aria-labelledby="metadata-title"><div class="inspector-header"><h2 id="metadata-title">Metadata · {{ metadataEdit.name }}</h2><button aria-label="Close metadata" :disabled="busy" @click="metadataEdit = null">×</button></div><div class="inspector-content"><p>Curated information survives source reimports. Changes reopen affected approvals for review.</p><label v-for="(name, key) in metadataFields" :key="key">{{ name }}<input v-model="metadataForm[key]"></label><details><summary>Additional properties</summary><label>Extension data (JSON)<textarea v-model="metadataText" rows="8"></textarea></label></details><p v-if="error" role="alert">{{ error }}</p><button class="primary" :disabled="busy" @click="action(async () => { await api(`/components/${metadataEdit!.id}/metadata`, { method: 'PUT', body: JSON.stringify({ expected_version: metadataEdit!.metadata_version, metadata: { ...JSON.parse(metadataText), ...metadataForm } }) }); metadataEdit = null; await loadInventory(); notice = 'Metadata saved.' })">Save metadata</button></div></section></div>
   </div>
 </template>

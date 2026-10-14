@@ -126,7 +126,7 @@ def aggregate(
             state = "unassessed"
             if finding["decisions"]:
                 state = (
-                    finding["decisions"][0]["state"]
+                    finding["review_coverage"]["state"]
                     if status != "needs_revalidation"
                     else "needs_revalidation"
                 )

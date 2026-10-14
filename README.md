@@ -40,9 +40,15 @@ action bar keep context and controls close. Reviewers inspect the submitted asse
 and confirm their checks before approving. Back navigation retains drafts.
 Analysts do not rescore: their
 submissions contain applicability, justification and supporting evidence only.
-Rescoring belongs to a separate consolidation phase after all required teams
-have completed their reviews. Explicit team review coverage and the consolidation
-gate still need implementation; the existing scoring API is not that workflow.
+Rescoring unlocks per vulnerability occurrence after every required team independently
+approves the current evidence. A dedicated security coordinator previews and
+publishes scores in **Teams & scoring**. Analysts and reviewers cannot rescore.
+Required teams default to the owning workspace; administrators assign additional
+teams with explicit read/assessment/approval sharing. Sharing alone does not make
+a team required. Each team retains its own decisions and reviewer approval;
+users with multiple review teams select their team explicitly. Changing assignments
+requires fresh assessments; evidence changes or revised team decisions invalidate
+published scores. The playground includes Security coordinator and Operations reviewer.
 Existing scoring history, analysis and technical evidence remain accessible. Dialogs retain keyboard
 focus, close with Escape and return to the selected finding. Long descriptions open
 a spacious view automatically; Expand review switches sizes manually. Evidence and
@@ -94,7 +100,7 @@ uv run python scripts/playground.py up --skip-build
 - Previous DTVP tags and plain DT documentation without metadata are imported, including team history, pending review, suppression, SSVC and contextual rescoring. Original text is retained; missing authors stay unknown.
 - Decisions and independent approvals bind to the current evidence revision. Changed evidence requires revalidation.
 - Team membership and explicit project sharing control access. Ownership metadata describes responsibility.
-- Viewer, analyst, reviewer and administrator permissions are explicit; administration does not imply approval.
+- Viewer, analyst, reviewer, security coordinator and administrator permissions are explicit; administration does not imply approval.
 - No source receives automatic writes. SBOM, reviewed VEX and consumer exports are explicit downloads.
 
 ## API and consumers
@@ -165,16 +171,17 @@ CVSS 2.0, 3.0, 3.1 and 4.0 contextual calculations and v1's version-aware rules
 are available. Select a validated original Base vector, adjust optional metrics
 or enter a vector, explain the context, and preview. Base metrics and the CVSS
 version cannot change. Administrators edit project rules in Products; concurrent
-policy edits are rejected and changed rules reopen dependent decisions.
+policy edits are rejected and changed rules invalidate dependent scores while retaining team approvals.
 
 Current VScorer vectors and eligible native Agentyzer results can supply explicit
 rescoring proposals. Scores without a valid vector, mismatched Base assertions,
 old snapshots and unverified results cannot be adopted. A contextual proposal
 belongs to an occurrence and current evidence revision. It becomes effective
-only with independent approval of the assessment. Changing evidence removes the
-adoption until revalidation; original source scores and archived snapshots stay
+only when a security coordinator explicitly publishes it after all required team
+approvals. Changing evidence or a team assessment removes the adoption until
+reviews are current and the coordinator publishes a fresh score; original source scores and archived snapshots stay
 unchanged. Original/effective severity sorting is available in Review. Frozen
-consumer findings include the proposed/adopted score, vector, rationale and rule
+consumer findings include required team reviews, scoring history and the proposed/adopted score, vector, rationale and rule
 configuration; VScorer worklists keep original Base inputs. See
 [statistics and rescoring API](docs/statistics-rescoring.md).
 

@@ -14,12 +14,16 @@ from dtvp.models import (
     Component,
     Decision,
     Evidence,
+    FinalRescoring,
     Finding,
+    Grant,
     Observation,
     Project,
     Release,
+    ReviewScope,
     Revision,
     User,
+    Workspace,
     now,
 )
 from dtvp.parsers import identity, parse
@@ -322,9 +326,58 @@ def finding_detail(db, finding, *, observations=None, prepared=None):
         key in proposed_rescoring for key in ("score", "vector", "base_vector", "kind", "rationale")
     ):
         proposed_rescoring = None
+    from dtvp.team_reviews import coverage
+
+    review_coverage = coverage(db, finding, decisions, prepared)
+    if decisions:
+        statuses = {r["status"] for r in review_coverage["teams"]}
+        lifecycle = (
+            "approved"
+            if review_coverage["ready"]
+            else "needs_revalidation"
+            if "needs_revalidation" in statuses
+            else "ready"
+            if "ready" in statuses
+            else "changes_requested"
+            if "changes_requested" in statuses
+            else "open"
+        )
+    scores_history = (
+        prepared["final_scores"].get(finding.id, [])
+        if prepared
+        else list(
+            db.scalars(
+                select(FinalRescoring)
+                .where(FinalRescoring.finding_id == finding.id)
+                .order_by(FinalRescoring.created_at.desc(), FinalRescoring.id.desc())
+            )
+        )
+    )
+    final_score = scores_history[0] if scores_history else None
+    proposed_rescoring = final_score.proposal if final_score else proposed_rescoring
+    from dtvp.rescoring import policy
+
+    release = (
+        prepared["releases"][finding.release_id]
+        if prepared
+        else db.get(Release, finding.release_id)
+    )
     adopted_rescoring = (
-        proposed_rescoring
-        if lifecycle == "approved" and approval.policy.get("rescoring_verified") is True
+        final_score.proposal
+        if final_score
+        and review_coverage["ready"]
+        and finding.active
+        and final_score.evidence_revision == finding.evidence_revision
+        and final_score.review_digest == review_coverage["digest"]
+        and (
+            final_score.proposal["kind"] != "rule"
+            or (
+                final_score.proposal.get("policy_digest")
+                == policy(db, release.project_id)["digest"]
+                and final_score.proposal.get("policy_version")
+                == policy(db, release.project_id)["version"]
+            )
+        )
         else None
     )
     stale = any(aware(o.created_at) < now() - timedelta(days=30) for o in observations)
@@ -340,6 +393,17 @@ def finding_detail(db, finding, *, observations=None, prepared=None):
         "owner": component.metadata_json.get("owner", "Unassigned"),
         "active": finding.active,
         "lifecycle": lifecycle,
+        "review_coverage": review_coverage,
+        "rescoring_history": [
+            {
+                "id": r.id,
+                "coordinator_id": r.coordinator_id,
+                "evidence_revision": r.evidence_revision,
+                "created_at": r.created_at.isoformat(),
+                "proposal": r.proposal,
+            }
+            for r in scores_history
+        ],
         "state_version": finding.state_version,
         "evidence_revision": finding.evidence_revision,
         "original_score": max(scores) if scores else None,
@@ -415,12 +479,18 @@ def check_version(finding, expected):
         raise HTTPException(409, "Finding changed; reload and review the new evidence")
 
 
-def submit_decision(db, actor, finding, expected, state, rationale, details):
+def submit_decision(db, actor, finding, expected, state, rationale, details, workspace_id=None):
     release = lock_release(db, finding.release_id)
     db.refresh(finding)
     check_version(finding, expected)
     project = actor.require(db, db.get(Project, release.project_id), "assess")
-    workspace_id = actor.decision_workspace(db, project)
+    from dtvp.team_reviews import select_team
+
+    workspace_id = select_team(db, actor, project, finding_detail(db, finding), workspace_id)
+    if not workspace_id or not actor.workspace(workspace_id, "assess"):
+        raise HTTPException(403, "Assessment membership in a required team is necessary")
+    if "rescoring" in details:
+        raise HTTPException(422, "Rescoring is a separate security coordinator action")
     if not rationale.strip():
         raise HTTPException(422, "Explain the decision")
     if state == "not_affected" and not details.get("justification"):
@@ -446,12 +516,24 @@ def approve_decision(db, actor, finding, expected, decision_id, *, request_chang
     db.refresh(finding)
     check_version(finding, expected)
     project = actor.require(db, db.get(Project, release.project_id), "approve")
-    decision = db.scalar(
+    decision = db.get(Decision, decision_id)
+    if not decision or decision.finding_id != finding.id:
+        raise HTTPException(409, "Decision is no longer pending")
+    from dtvp.team_reviews import select_team
+
+    select_team(db, actor, project, finding_detail(db, finding), decision.workspace_id)
+    grant = db.get(Grant, (project.id, decision.workspace_id))
+    if not actor.workspace(decision.workspace_id, "approve") or (
+        decision.workspace_id != project.workspace_id
+        and (not grant or "approve" not in grant.capabilities)
+    ):
+        raise HTTPException(403, "Reviewer membership in this team is required")
+    latest = db.scalar(
         select(Decision)
-        .where(Decision.finding_id == finding.id)
+        .where(Decision.finding_id == finding.id, Decision.workspace_id == decision.workspace_id)
         .order_by(Decision.created_at.desc(), Decision.id.desc())
     )
-    if not decision or decision.id != decision_id or decision.status != "submitted":
+    if latest.id != decision.id or decision.status != "submitted":
         raise HTTPException(409, "Decision is no longer pending")
     if decision.evidence_revision != finding.evidence_revision:
         raise HTTPException(409, "Evidence changed; submit a new decision")
@@ -459,23 +541,6 @@ def approve_decision(db, actor, finding, expected, decision_id, *, request_chang
         raise HTTPException(403, "A different reviewer must approve")
     if db.scalar(select(Approval).where(Approval.decision_id == decision.id)):
         raise HTTPException(409, "Already approved")
-    if decision.details.get("rescoring") and not request_changes:
-        from dtvp.rescoring import calculate, policy
-
-        rescoring = decision.details["rescoring"]
-        detail = finding_detail(db, finding)
-        if rescoring.get("base_vector") not in {
-            entry["vector"] for entry in detail["original_vectors"]
-        }:
-            raise HTTPException(409, "Original Base evidence changed")
-        validated = calculate(rescoring["base_vector"], rescoring["vector"])
-        if validated["score"] != rescoring.get("score"):
-            raise HTTPException(409, "Rescoring calculation is inconsistent")
-        if (
-            rescoring.get("kind") == "rule"
-            and rescoring.get("policy_digest") != policy(db, project.id)["digest"]
-        ):
-            raise HTTPException(409, "Rescoring policy changed; submit a new proposal")
     if request_changes:
         decision.status = "changes_requested"
     else:
@@ -488,7 +553,7 @@ def approve_decision(db, actor, finding, expected, decision_id, *, request_chang
                     "version": "four-eyes/1",
                     "scope": "component-release",
                     "decision_workspace": decision.workspace_id,
-                    "rescoring_verified": bool(decision.details.get("rescoring")),
+                    "rescoring_verified": False,
                 },
             )
         )
@@ -588,11 +653,40 @@ def finding_details(db, findings, observation_cache=None):
         .order_by(Decision.created_at.desc(), Decision.id.desc())
     ):
         prepared["decisions"][decision.finding_id].append(decision)
-    decision_ids = [records[0].id for records in prepared["decisions"].values() if records]
+    decision_ids = [d.id for records in prepared["decisions"].values() for d in records]
     prepared["approvals"] = {
         a.decision_id: a
         for a in db.scalars(select(Approval).where(Approval.decision_id.in_(decision_ids)))
     }
+    prepared["scopes"] = {
+        r.finding_id: r
+        for r in db.scalars(select(ReviewScope).where(ReviewScope.finding_id.in_(ids)))
+    }
+    prepared["final_scores"] = defaultdict(list)
+    for score in db.scalars(
+        select(FinalRescoring)
+        .where(FinalRescoring.finding_id.in_(ids))
+        .order_by(FinalRescoring.created_at.desc(), FinalRescoring.id.desc())
+    ):
+        prepared["final_scores"][score.finding_id].append(score)
+    prepared["releases"] = {
+        r.id: r
+        for r in db.scalars(select(Release).where(Release.id.in_({f.release_id for f in findings})))
+    }
+    projects = {
+        p.id: p
+        for p in db.scalars(
+            select(Project).where(
+                Project.id.in_({r.project_id for r in prepared["releases"].values()})
+            )
+        )
+    }
+    prepared["projects"] = {r.id: projects[r.project_id] for r in prepared["releases"].values()}
+    prepared["grants"] = {
+        (g.project_id, g.workspace_id): g
+        for g in db.scalars(select(Grant).where(Grant.project_id.in_(projects)))
+    }
+    prepared["workspaces"] = {w.id: w.name for w in db.scalars(select(Workspace))}
     author_ids = {d.author_id for records in prepared["decisions"].values() for d in records}
     prepared["users"] = {
         u.id: u.name for u in db.scalars(select(User).where(User.id.in_(author_ids)))

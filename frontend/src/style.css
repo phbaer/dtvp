@@ -129,3 +129,6 @@
   .roomy .evidence-column.expanded { max-height:45dvh; }
   .roomy .mobile-evidence-toggle { position:sticky; top:0; background:var(--bg); z-index:1; padding:4px 0; }
 }
+.team-reviews { list-style: none; padding: 0; display: grid; gap: .65rem; }
+.team-reviews li { display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; }
+.team-reviews small { color: var(--muted); }

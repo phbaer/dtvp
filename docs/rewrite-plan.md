@@ -718,12 +718,18 @@ complete its specialized review, and return scoped evidence into DTVP.
 
 ## Corrected review and scoring sequence
 
-Analysts record team applicability, justification and supporting evidence;
-reviewers approve those assessments independently. Scoring is a separate
-consolidation phase after all relevant teams have reviewed their assigned
-vulnerabilities. Project sharing is not evidence of required review coverage.
-Implement explicit required-team assignments, independently retained team
-decisions, and a server-enforced completion gate before publishing final scores.
-The current latest-decision model and decision-attached scoring API do not
-implement that gate. Preserve existing calculations and scoring history during
-the transition; analyst UI submissions no longer include score proposals.
+Implemented: analysts record applicability, justification and supporting evidence;
+each required team's reviewer independently approves its own assessment. Required
+teams are assigned per vulnerability occurrence, defaulting to the owning team;
+sharing grants do not imply responsibility. Administrators manage assignments.
+Rescoring unlocks for each occurrence once all required teams approve current
+evidence, independently of other vulnerabilities in the release. A dedicated
+security coordinator previews and publishes the final score in Teams & scoring.
+The server enforces role, current approvals, evidence and preview bindings.
+Revised assessments, changed evidence, team assignments or revoked review access
+invalidate published scores. Rule changes invalidate dependent scores without
+reopening applicability reviews. Calculations, provider validation, legacy
+records and immutable scoring history remain available; analyst submissions
+cannot attach scoring proposals. Conflicting team applicability is consolidated
+conservatively: any affected team yields affected; mixed fixed/not-affected states
+remain under investigation. Reviewed VEX uses the consolidated team state.

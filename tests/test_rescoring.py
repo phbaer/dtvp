@@ -20,7 +20,38 @@ def target(client):
     return client.get(f"/api/v2/findings/{row['id']}").json()
 
 
+def reviewed(client):
+    login(client)
+    finding = target(client)
+    if not finding["review_coverage"]["ready"]:
+        response = client.post(
+            f"/api/v2/findings/{finding['id']}/decisions",
+            json={
+                "expected_version": finding["state_version"],
+                "state": "not_affected",
+                "rationale": "Scope examined; protection verified.",
+                "justification": "protected_at_runtime",
+            },
+        )
+        assert response.status_code == 201, response.text
+        pending = target(client)
+        assert pending["effective_score"] == pending["original_score"] == 9.8
+        assert pending["adopted_rescoring"] is None
+        login(client, "reviewer")
+        approval = client.post(
+            f"/api/v2/findings/{finding['id']}/approvals",
+            json={
+                "expected_version": pending["state_version"],
+                "decision_id": response.json()["id"],
+            },
+        )
+        assert approval.status_code == 200, approval.text
+    login(client, "coordinator")
+    return target(client)
+
+
 def submit(client, finding, rescoring):
+    finding = reviewed(client)
     preview = client.post(
         f"/api/v2/findings/{finding['id']}/rescoring/preview",
         json={
@@ -32,12 +63,10 @@ def submit(client, finding, rescoring):
     if preview.status_code != 200:
         return preview
     return client.post(
-        f"/api/v2/findings/{finding['id']}/decisions",
+        f"/api/v2/findings/{finding['id']}/rescoring",
         json={
             "expected_version": finding["state_version"],
             "state": "not_affected",
-            "rationale": "Scope examined; protection verified.",
-            "justification": "protected_at_runtime",
             "rescoring": {**rescoring, "preview_digest": preview.json()["preview_digest"]},
         },
     )
@@ -51,6 +80,7 @@ def test_manual_rescoring_review_snapshot_and_revalidation(analyst, release_id):
         "vector": VECTOR,
         "rationale": "Verified deployment context.",
     }
+    finding = reviewed(analyst)
     preview = analyst.post(
         f"/api/v2/findings/{finding['id']}/rescoring/preview",
         json={
@@ -63,20 +93,6 @@ def test_manual_rescoring_review_snapshot_and_revalidation(analyst, release_id):
     assert preview.json()["proposal"]["score"] == 0
     response = submit(analyst, finding, body)
     assert response.status_code == 201, response.text
-    pending = target(analyst)
-    assert pending["effective_score"] == pending["original_score"] == 9.8
-    assert pending["proposed_rescoring"]["score"] == 0 and pending["adopted_rescoring"] is None
-    login(analyst, "reviewer")
-    assert (
-        analyst.post(
-            f"/api/v2/findings/{finding['id']}/approvals",
-            json={
-                "expected_version": pending["state_version"],
-                "decision_id": response.json()["id"],
-            },
-        ).status_code
-        == 200
-    )
     approved = target(analyst)
     assert approved["original_score"] == 9.8 and approved["effective_score"] == 0
     assert approved["adopted_rescoring"]["vector"] == preview.json()["proposal"]["vector"]
@@ -120,6 +136,7 @@ def test_rules_require_preview_and_policy_changes_revalidate(analyst):
         "policy_digest": policy["digest"],
         "rationale": "Applicability reviewed; use the version-specific rule.",
     }
+    finding = reviewed(analyst)
     preview = analyst.post(
         f"/api/v2/findings/{finding['id']}/rescoring/preview",
         json={
@@ -140,7 +157,8 @@ def test_rules_require_preview_and_policy_changes_revalidate(analyst):
         ).status_code
         == 200
     )
-    assert target(analyst)["lifecycle"] == "needs_revalidation"
+    assert target(analyst)["lifecycle"] == "approved"
+    assert target(analyst)["adopted_rescoring"] is None
     assert (
         analyst.put(
             f"/api/v2/projects/{project}/rescore-policy",
@@ -199,6 +217,7 @@ def test_source_proposals_bind_snapshot_revision_and_validate_vectors(analyst, r
         "rationale": "VScorer output reviewed.",
     }
     assert submit(analyst, current, request).status_code == 201
+    login(analyst)
     assert (
         analyst.post(
             f"/api/v2/findings/{finding['id']}/evidence",
@@ -214,6 +233,7 @@ def test_source_proposals_bind_snapshot_revision_and_validate_vectors(analyst, r
         0
     ]["eligible"]
     assert submit(analyst, target(analyst), request).status_code == 422
+    login(analyst)
     # Delayed results from the old snapshot stay evidence, never current proposals.
     evidence["external_id"] = "late-score"
     assert (
@@ -270,7 +290,7 @@ def test_calculator_supports_all_v1_specification_versions(base, contextual):
 
 
 def test_submit_requires_the_exact_preview_and_rejects_changed_rationale(analyst):
-    finding = target(analyst)
+    finding = reviewed(analyst)
     body = {
         "kind": "manual",
         "base_vector": BASE,
@@ -280,10 +300,9 @@ def test_submit_requires_the_exact_preview_and_rejects_changed_rationale(analyst
     raw = {
         "expected_version": finding["state_version"],
         "state": "not_affected",
-        "rationale": "Applicability reviewed.",
         "rescoring": body,
     }
-    assert analyst.post(f"/api/v2/findings/{finding['id']}/decisions", json=raw).status_code == 409
+    assert analyst.post(f"/api/v2/findings/{finding['id']}/rescoring", json=raw).status_code == 409
     preview = analyst.post(
         f"/api/v2/findings/{finding['id']}/rescoring/preview", json=raw | {"rationale": None}
     )
@@ -297,7 +316,7 @@ def test_submit_requires_the_exact_preview_and_rejects_changed_rationale(analyst
         "preview_digest": preview["preview_digest"],
         "rationale": "Changed scoring basis.",
     }
-    assert analyst.post(f"/api/v2/findings/{finding['id']}/decisions", json=raw).status_code == 409
+    assert analyst.post(f"/api/v2/findings/{finding['id']}/rescoring", json=raw).status_code == 409
 
 
 def test_effective_sorting_uses_only_current_approved_scores(analyst):
@@ -315,20 +334,12 @@ def test_effective_sorting_uses_only_current_approved_scores(analyst):
         "vector": VECTOR,
         "rationale": "Verified context.",
     }
-    decision = submit(analyst, finding, body).json()
+    reviewed(analyst)
     assert (
         analyst.get("/api/v2/findings?sort=effective_score").json()["items"][0]["identifier"]
         == finding["identifier"]
     )
-    login(analyst, "reviewer")
-    pending = target(analyst)
-    assert (
-        analyst.post(
-            f"/api/v2/findings/{finding['id']}/approvals",
-            json={"expected_version": pending["state_version"], "decision_id": decision["id"]},
-        ).status_code
-        == 200
-    )
+    assert submit(analyst, target(analyst), body).status_code == 201
     sorted_rows = analyst.get("/api/v2/findings?sort=effective_score").json()["items"]
     assert (
         sorted_rows[-1]["identifier"] == finding["identifier"]

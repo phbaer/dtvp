@@ -18,6 +18,8 @@ router = APIRouter(prefix="/api/v2/playground")
 PERSONAS = {
     "analyst": ("Platform analyst", ["analyst"], "Platform"),
     "reviewer": ("Platform reviewer", ["reviewer"], "Platform"),
+    "coordinator": ("Security coordinator", ["coordinator"], "Platform"),
+    "operations-reviewer": ("Operations reviewer", ["reviewer"], "Operations"),
     "viewer": ("Platform viewer", ["viewer"], "Platform"),
     "operations": ("Operations analyst", ["analyst"], "Operations"),
     "administrator": ("Organization administrator", ["admin", "reviewer"], "Platform"),
@@ -27,6 +29,18 @@ PERSONAS = {
 def seed(db, artifacts):
     if db.scalar(select(Workspace.id).limit(1)):
         seed_operations_finding(db)
+        # Add new demo personas without resetting the interactive database.
+        for subject in ("coordinator", "operations-reviewer"):
+            if not db.scalar(
+                select(User).where(User.issuer == "playground", User.subject == subject)
+            ):
+                name, roles, workspace_name = PERSONAS[subject]
+                workspace = db.scalar(select(Workspace).where(Workspace.name == workspace_name))
+                if workspace:
+                    user = User(issuer="playground", subject=subject, name=name)
+                    db.add(user)
+                    db.flush()
+                    db.add(Membership(user_id=user.id, workspace_id=workspace.id, roles=roles))
         return
     workspaces = {name: Workspace(name=name) for name in ["Platform", "Operations"]}
     db.add_all(workspaces.values())

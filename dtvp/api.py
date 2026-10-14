@@ -71,6 +71,7 @@ from dtvp.schemas import (
 )
 from dtvp.snapshots import create_snapshot
 from dtvp.storage import canonical, digest
+from dtvp.team_reviews import actor_detail
 
 router = APIRouter(prefix="/api/v2")
 
@@ -158,6 +159,7 @@ def project_summary(db, actor, project):
                 "snapshot",
                 "manage",
                 "export",
+                "rescore",
                 "evidence",
             }
             if actor.allowed(db, project, c)
@@ -435,6 +437,7 @@ def projects(db: DB, actor: Auth):
                     "snapshot",
                     "manage",
                     "export",
+                    "rescore",
                     "evidence",
                 }
                 if actor.allowed(db, p, c)
@@ -465,7 +468,25 @@ def share_project(project_id: str, data: ShareInput, db: DB, actor: Auth):
     project = project_for(db, actor, project_id, "manage")
     if not db.get(Workspace, data.workspace_id):
         raise HTTPException(404, "Workspace unavailable")
+    # Sharing changes serialize with review/scoring publication and invalidate
+    # required-team evidence bindings when review access is revoked.
+    releases = list(
+        db.scalars(select(Release).where(Release.project_id == project.id).order_by(Release.id))
+    )
+    for release in releases:
+        lock_release(db, release.id)
     grant = db.get(Grant, (project.id, data.workspace_id))
+    had_review_access = bool(grant and {"read", "assess", "approve"}.issubset(grant.capabilities))
+    if had_review_access and not {"read", "assess", "approve"}.issubset(data.capabilities):
+        from dtvp.models import ReviewScope
+
+        for finding in db.scalars(
+            select(Finding).where(Finding.release_id.in_([r.id for r in releases]))
+        ):
+            scope = db.get(ReviewScope, finding.id)
+            if scope and data.workspace_id in scope.workspace_ids:
+                finding.evidence_revision += 1
+                finding.state_version += 1
     if grant:
         grant.capabilities = data.capabilities
     else:
@@ -770,7 +791,7 @@ def findings(
                 if project.id not in capability_cache:
                     capability_cache[project.id] = [
                         c
-                        for c in {"assess", "approve", "evidence"}
+                        for c in {"assess", "approve", "evidence", "rescore", "manage"}
                         if actor.allowed(db, project, c)
                     ]
                 detail.update(
@@ -780,6 +801,7 @@ def findings(
                     latest_decision=detail["decisions"][0] if detail["decisions"] else None,
                     capabilities=capability_cache[project.id],
                 )
+                actor_detail(db, actor, project, detail)
                 selected.append(
                     {
                         key: value
@@ -844,10 +866,13 @@ def findings(
             project_id=project.id,
             release=release.version,
             capabilities=[
-                c for c in {"assess", "approve", "evidence"} if actor.allowed(db, project, c)
+                c
+                for c in {"assess", "approve", "evidence", "rescore", "manage"}
+                if actor.allowed(db, project, c)
             ],
             latest_decision=detail["decisions"][0] if detail["decisions"] else None,
         )
+        actor_detail(db, actor, project, detail)
         items.append(
             {
                 key: value
@@ -863,7 +888,7 @@ def findings(
 
 
 @router.get("/findings/{finding_id}")
-def finding(finding_id: str, db: DB, actor: Auth):
+def finding(finding_id: str, db: DB, actor: Auth, workspace_id: str | None = None):
     stored = finding_for(db, actor, finding_id)
     detail = finding_detail(db, stored)
     release = db.get(Release, stored.release_id)
@@ -872,10 +897,12 @@ def finding(finding_id: str, db: DB, actor: Auth):
         project=project.name,
         release=release.version,
         capabilities=[
-            c for c in {"assess", "approve", "evidence"} if actor.allowed(db, project, c)
+            c
+            for c in {"assess", "approve", "evidence", "rescore", "manage"}
+            if actor.allowed(db, project, c)
         ],
     )
-    return detail
+    return actor_detail(db, actor, project, detail, workspace_id)
 
 
 @router.post("/findings/{finding_id}/decisions", status_code=201)
@@ -892,22 +919,16 @@ def decision(finding_id: str, data: DecisionInput, db: DB, actor: Auth):
     if "rescoring" in details:
         raise HTTPException(422, "Use the validated rescoring field")
     if data.rescoring:
-        lock_release(db, finding.release_id)
-        db.refresh(finding)
-        from dtvp.rescoring import prepare, preview_digest
-
-        if finding.state_version != data.expected_version:
-            raise HTTPException(409, "Finding changed; reload before submitting")
-        details["rescoring"] = prepare(
-            db, finding, finding_detail(db, finding), data.rescoring.model_dump(), data.state
-        )
-        bounded_metadata(details)
-        if data.rescoring.preview_digest != preview_digest(
-            finding, data.state, details["rescoring"]
-        ):
-            raise HTTPException(409, "Preview the current contextual score before submitting")
+        raise HTTPException(422, "Rescoring is a separate security coordinator action")
     result = submit_decision(
-        db, actor, finding, data.expected_version, data.state, data.rationale, details
+        db,
+        actor,
+        finding,
+        data.expected_version,
+        data.state,
+        data.rationale,
+        details,
+        data.workspace_id,
     )
     return {"id": result.id, "state_version": finding.state_version}
 
@@ -930,14 +951,19 @@ def approval(finding_id: str, data: ApprovalInput, db: DB, actor: Auth):
 def bulk_preview(data: BulkInput, db: DB, actor: Auth):
     for item in data.items:
         stored = finding_for(db, actor, item.finding_id, "approve")
-        detail = finding_detail(db, stored)
+        detail = actor_detail(
+            db,
+            actor,
+            db.get(Project, db.get(Release, stored.release_id).project_id),
+            finding_detail(db, stored),
+        )
         if (
             detail["state_version"] != item.expected_version
-            or detail["lifecycle"] != "ready"
+            or detail["review_lifecycle"] != "ready"
             or (
-                not detail["decisions"]
-                or detail["decisions"][0]["id"] != item.decision_id
-                or detail["decisions"][0]["author_id"] == actor.user.id
+                not detail["latest_decision"]
+                or detail["latest_decision"]["id"] != item.decision_id
+                or detail["latest_decision"]["author_id"] == actor.user.id
             )
         ):
             raise HTTPException(

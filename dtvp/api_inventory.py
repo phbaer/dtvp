@@ -135,17 +135,29 @@ def vex_export(snapshot_id: str, db: DB, actor: Auth, request: Request):
         if finding["lifecycle"] != "approved" or not refs.get(finding["component_id"]):
             continue
         decision = finding["decisions"][0]
+        team_reviews = finding.get("review_coverage", {}).get("teams", [])
+        team_decisions = [
+            d for d in finding["decisions"] if d["id"] in {r["decision_id"] for r in team_reviews}
+        ]
+        state = finding.get("review_coverage", {}).get("state", decision["state"])
         analysis = {
             "state": {
                 "affected": "exploitable",
                 "not_affected": "not_affected",
                 "fixed": "resolved",
                 "under_investigation": "in_triage",
-            }[decision["state"]],
-            "detail": decision["rationale"],
+            }[state],
+            "detail": "\n\n".join(d["rationale"] for d in team_decisions)
+            if team_decisions
+            else decision["rationale"],
         }
-        justification = decision["details"].get("justification")
-        if decision["state"] == "not_affected" and justification and justification != "other":
+        reasons = (
+            {d["details"].get("justification") for d in team_decisions}
+            if team_decisions
+            else {decision["details"].get("justification")}
+        )
+        justification = next(iter(reasons)) if len(reasons) == 1 else None
+        if state == "not_affected" and justification and justification != "other":
             analysis["justification"] = justification
         statements.append(
             {
