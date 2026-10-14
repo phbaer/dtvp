@@ -32,7 +32,7 @@ PostgreSQL schema migrations, concurrent startup and restart persistence. The
 test resets that database's public schema and refuses an unmarked database.
 
 `npm run test:unit` covers API request/error handling. `npm run test:ui` runs
-Chromium against the actual playground on port 8800; override with `DTVP_UI_URL`.
+Chromium against the actual playground on port 8900; override with `DTVP_UI_URL`.
 It follows import → assessment → independent approval → consumer snapshot →
 evidence change and tests themes/team isolation/mobile layout. No application
 requests are mocked. Keep browser versions aligned with the npm lockfile.

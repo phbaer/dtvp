@@ -17,14 +17,11 @@ starts PostgreSQL, applies migrations and loads synthetic data:
 uv run python scripts/playground.py up
 ```
 
-Open **http://127.0.0.1:8800** in a browser on the machine running Docker.
-`127.0.0.1` inside a remote page viewer points to that viewer, not to this
-workspace. From another machine, forward the port through your existing SSH
-connection, then open the URL in your own browser:
-
-```bash
-ssh -N -L 8800:127.0.0.1:8800 USER@WORKSPACE_HOST
-```
+Open **http://127.0.0.1:8900** in WSL or Windows; WSL forwards localhost ports
+automatically. The playground binds to loopback and contains synthetic data.
+If Windows has reserved that port, choose a free `DTVP_PLAYGROUND_PORT` when
+starting the playground and open that port instead. Windows reservations are
+listed by `netsh interface ipv4 show excludedportrange protocol=tcp`.
 
 Select Platform analyst, submit an assessment, then
 switch to Platform reviewer to approve. Operations has a separate private product.

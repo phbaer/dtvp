@@ -15,8 +15,8 @@ services:
     environment:
       DTVP_PLAYGROUND: "true"
       DTVP_DATABASE_URL: postgresql+psycopg://dtvp:playground-only@db:5432/dtvp_playground
-      DTVP_PUBLIC_URL: http://127.0.0.1:${DTVP_PLAYGROUND_PORT:-8800}
-    ports: ["127.0.0.1:${DTVP_PLAYGROUND_PORT:-8800}:8000"]
+      DTVP_PUBLIC_URL: http://127.0.0.1:${DTVP_PLAYGROUND_PORT:-8900}
+    ports: ["127.0.0.1:${DTVP_PLAYGROUND_PORT:-8900}:8000"]
     volumes: ["artifacts:/data"]
     depends_on:
       db: {condition: service_healthy}
