@@ -95,9 +95,7 @@ def test_no_membership_no_access(client):
         token, _, _ = issue(db, user, kind="api", workspace_id=None, allowed=["read"])
     client.headers["Authorization"] = "Bearer " + token
     assert client.get("/api/v2/projects").json() == []
-    assert [row["identifier"] for row in client.get("/api/v2/findings").json()["items"]] == [
-        "CVE-2099-20003"
-    ]
+    assert client.get("/api/v2/findings").json()["items"] == []
 
 
 def test_dt_read_credential_cannot_import_an_unbound_project(analyst, release_id):
