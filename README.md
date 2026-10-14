@@ -9,7 +9,7 @@ and applies consistent decisions across releases.
 
 - Team and global assessments, CVSS rescoring, SSVC prioritization, and exploitation evidence.
 - Bulk assessment repair, audit-backed recovery, and project archive import/export.
-- Optional threat-model rescoring through tmrescore/vscorer and code analysis through Agentyzer.
+- Optional threat-model rescoring through the legacy VScorer integration and code analysis through Agentyzer.
 - Mock services for local development and testing.
 
 [Quick start](#quick-start) · [Deployment](#docker-deployment) ·
@@ -34,7 +34,7 @@ pm2 start ecosystem.config.js --update-env
 | Frontend | http://localhost:5173 |
 | Backend API | http://localhost:8000/api/version |
 | Mock Dependency-Track | http://localhost:8081 |
-| Mock tmrescore | http://localhost:8090/ui |
+| Mock VScorer | http://localhost:8090/ui |
 | Mock code analysis | http://localhost:8095 |
 
 Open `/login`, choose **Sign in with SSO**, then **Login as Reviewer** on the
@@ -142,7 +142,7 @@ filtering, editing, bulk operations, and archives; or the
 
 ```text
 Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
-                           → optional tmrescore and code-analysis services
+                           → optional VScorer and code-analysis services
 ```
 
 | Path | Purpose |
@@ -150,7 +150,7 @@ Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
 | `dtvp/` | Backend routes, domain logic, integrations, and migrations |
 | `frontend/` | Vue pages, components, API client, and browser tests |
 | `agentyzer/` | Bundled code-analysis service |
-| `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
+| `test_setup/` | Mock Dependency-Track, VScorer, and code-analysis services |
 | `tests/` | Backend tests |
 | `data/` | Local mappings, rules, caches, and archives |
 | `openapi/` | Integration API specifications |
@@ -179,8 +179,10 @@ concurrency, access boundaries, benchmarks, and sizing guidance.
 | [Screen guide](docs/screens.md) | UI walkthrough and screenshots |
 | [Workflow diagrams](docs/workflow-flowcharts.md) | Visual workflow reference |
 | [Integration API](docs/integration-api-surface.md) | Integration endpoints and contracts |
+| [Rewrite plan](docs/rewrite-plan.md) | Proposed pipeline observer, owned inventory, PostgreSQL/local storage and upgrades, team workspaces, Generator/VScorer consumers, themes, playground/testing, and migration |
+| [VScorer consumer contract](docs/vscorer-consumer-contract.md) | Inspected minimal VScorer API and proposed vulnerability-worklist/SBOM snapshot consumption and result adoption |
 
-OpenAPI specifications: [tmrescore](openapi/tmrescore-openapi.json) and
+OpenAPI specifications: [legacy VScorer API](openapi/tmrescore-openapi.json) and
 [code analysis](openapi/code-analysis-openapi.json).
 
 This README is the canonical project overview and documentation entry point for

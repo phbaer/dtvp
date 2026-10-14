@@ -4,6 +4,10 @@
 
 Paths and commands refer to the repository root unless stated otherwise.
 
+The [rewrite plan](rewrite-plan.md#automatic-schema-migrations-and-database-upgrades)
+defines implicit schema updates and future upgrade helpers. Deployment commands
+below describe the current application.
+
 - [Compose](#compose)
 - [Python Runtime Images](#python-runtime-images)
 

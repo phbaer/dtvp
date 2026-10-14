@@ -9,18 +9,22 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 ## Threat-Model Rescoring
 
+This section describes the current adapter for the earlier VScorer service.
+The active minimal rewrite has a different intake/review contract; see the
+[VScorer consumer contract](vscorer-consumer-contract.md) for the rewrite plan.
+
 Set `DTVP_TMRESCORE_URL` to enable the project `Threat Model` workspace. Users
 can upload a `.tm7` model and optional `items.csv`, analysis configuration, or
 MITRE countermeasures, then cache proposal snapshots for reviewer dialogs.
 
-The integration supports vscorer's session/inventory contract, normalized
+The legacy integration supports VScorer's session/inventory contract, normalized
 step-based progress, chain/prioritization/what-if analysis, MITRE enrichment,
 offline mode, provider-neutral LLM enrichment, and output download maps. A
 `skeptic_gate_failed` response is terminal and requires manual review.
-DTVP submits inventory runs with vscorer's background-analysis contract and
+DTVP submits inventory runs with the legacy background-analysis contract and
 polls the session progress/result endpoints, so long NVD-enriched analyses are
 not tied to one HTTP response or cancelled by a caller/proxy disconnect. It
-retains the blocking-call timeout and gateway fallback for older vscorer
+retains the blocking-call timeout and gateway fallback for older VScorer
 deployments and reads the persisted result error when a background run fails.
 
 SBOM modes are latest-only or merged multi-version. The merged mode keeps a
@@ -32,7 +36,7 @@ misrepresented as current inventory.
 Set `DTVP_CODE_ANALYSIS_URL` to enable reachability/exploitability analysis.
 DTVP queues requests containing the vulnerability, selected owned target, CVSS
 vector, processed project releases, dependency context,
-reviewer/static guidance, optional tmrescore context, and optional LLM metadata.
+reviewer/static guidance, optional VScorer context, and optional LLM metadata.
 DTVP sends every project release represented in the processed vulnerability
 group. Agentyzer intersects those candidates with versions the selected
 repository actually contains: matching Git tags, `release/*` branches from all

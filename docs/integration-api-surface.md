@@ -2,9 +2,15 @@
 
 This document defines the external HTTP APIs expected by DTVP for the optional integrations.
 
-## TMRescore Service
+## VScorer Legacy Service Interface
 
-DTVP expects the TMRescore backend to expose the following endpoints under its configured base URL (`DTVP_TMRESCORE_URL`):
+The current DTVP adapter expects the earlier VScorer session/inventory API below,
+configured through the existing `DTVP_TMRESCORE_URL` variable. The active minimal
+VScorer rewrite uses artifact/assessment routes instead; its inspected interface
+and planned DTVP consumer integration are in the
+[VScorer consumer contract](vscorer-consumer-contract.md).
+
+The legacy service contract is:
 
 - `GET /health`
   - Returns service health and optional configuration status.
@@ -32,7 +38,7 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 - `GET /api/v1/sessions/{session_id}/progress`
   - Poll the analysis progress state while an analysis is running.
 
-### TMRescore Result JSON expectations
+### Legacy Result JSON Expectations
 
 - `GET /api/v1/sessions/{session_id}/results`
   - Returns an `AnalysisResult` object with at least:
@@ -46,7 +52,7 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
     - `error` — string or null when status is `failed`
 
 - `GET /api/v1/sessions/{session_id}/results/json`
-  - Returns the complete raw analysis payload produced by TMRescore.
+  - Returns the complete raw analysis payload produced by the legacy service.
   - Expected to include the session context, proposal details, per-CVE rescoring information, and any internal scoring metadata needed by the DTVP backend.
 
 - `GET /api/v1/sessions/{session_id}/progress`
@@ -65,7 +71,7 @@ DTVP expects the TMRescore backend to expose the following endpoints under its c
 ### Notes
 
 - Static OpenAPI specifications for the integrations are available in `openapi/`.
-- TMRescore has a static spec at `openapi/tmrescore-openapi.json`.
+- The legacy VScorer adapter has a static spec at `openapi/tmrescore-openapi.json`.
 - Code Analysis has a static spec at `openapi/code-analysis-openapi.json`.
 - In the mock environment, both service mocks expose a dynamic OpenAPI definition at `/openapi.json`.
 

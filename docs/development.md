@@ -4,6 +4,10 @@
 
 Paths and commands refer to the repository root unless stated otherwise.
 
+The [rewrite plan](rewrite-plan.md#local-playground-and-automated-testing)
+specifies a future one-command playground and automated tests using shared
+scenarios. The commands below describe the current application.
+
 - [Toolchain and CI](#toolchain-and-ci)
 - [Split Backend And Frontend](#split-backend-and-frontend)
 - [Testing Notes](#testing-notes)
