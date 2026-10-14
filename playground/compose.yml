@@ -1,0 +1,47 @@
+name: dtvp-playground
+services:
+  db:
+    image: postgres:18
+    environment: {POSTGRES_DB: dtvp_playground, POSTGRES_USER: dtvp, POSTGRES_PASSWORD: playground-only}
+    volumes: ["database:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dtvp -d dtvp_playground"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  api:
+    build: ..
+    image: dtvp:rewrite
+    environment:
+      DTVP_PLAYGROUND: "true"
+      DTVP_DATABASE_URL: postgresql+psycopg://dtvp:playground-only@db:5432/dtvp_playground
+      DTVP_PUBLIC_URL: http://127.0.0.1:${DTVP_PLAYGROUND_PORT:-8800}
+    ports: ["127.0.0.1:${DTVP_PLAYGROUND_PORT:-8800}:8000"]
+    volumes: ["artifacts:/data"]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz')"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+  worker:
+    image: dtvp:rewrite
+    environment:
+      DTVP_PLAYGROUND: "true"
+      DTVP_DATABASE_URL: postgresql+psycopg://dtvp:playground-only@db:5432/dtvp_playground
+    command: ["uv", "run", "--no-sync", "python", "-m", "dtvp.cli", "worker"]
+    volumes: ["artifacts:/data"]
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+volumes:
+  database:
+  artifacts:

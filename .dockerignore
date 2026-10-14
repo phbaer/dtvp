@@ -1,0 +1,17 @@
+.git
+.agents
+.codex
+.aws
+.env
+.venv
+data
+.playground
+frontend/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+frontend/sbom-tool
+agentyzer
+test_setup
+**/__pycache__
+**/.pytest_cache

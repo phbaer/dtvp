@@ -1,66 +1,22 @@
-# Build arguments for Python version
-ARG PYTHON_VERSION=3.14
-
-# Stage 1: Build the frontend
-FROM node:lts-alpine AS frontend-build
-
-# Baked into the bundle so a running tab can detect that the server has since
-# been redeployed with a different build (see lib/buildVersion.ts).
-ARG BUILD_COMMIT=unknown
-ENV VITE_BUILD_COMMIT=$BUILD_COMMIT
-
+FROM node:24-slim AS frontend
 WORKDIR /app/frontend
-
-# Copy frontend package files
 COPY frontend/package*.json ./
-
-# Install frontend dependencies, including native optional packages used by Vite/Rolldown.
-RUN npm ci --include=optional
-
-# Copy frontend source code
+RUN --mount=type=secret,id=build_ca,target=/run/secrets/build_ca \
+    if [ -f /run/secrets/build_ca ]; then NODE_EXTRA_CA_CERTS=/run/secrets/build_ca npm ci --include=optional; else npm ci --include=optional; fi
 COPY frontend/ ./
-
-# vue-tsc type-checks frontend test sources, which import the canonical rules.
-COPY data/rescore_rules.json /app/data/rescore_rules.json
-COPY dtvp/resources/ssvc /app/dtvp/resources/ssvc
-
-# Build the frontend for production
 RUN npm run build
 
-# Stage 2: Build the backend and include frontend assets
-FROM python:${PYTHON_VERSION}-alpine
-
-ARG BUILD_COMMIT=unknown
-ARG BUILD_NUMBER=unknown
-ENV DTVP_BUILD_COMMIT=$BUILD_COMMIT \
-    DTVP_BUILD_NUMBER=$BUILD_NUMBER
-
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 WORKDIR /app
-
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
-
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
-
-# Install dependencies using uv
-# --frozen ensures we use the exact versions from uv.lock
-# --no-dev excludes development dependencies
-RUN uv sync --frozen --no-dev
-
-# Copy application code
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --locked --no-dev
 COPY dtvp ./dtvp
-COPY start.sh CHANGELOG.md ./
-COPY sbom/dtvp-frontend-cyclonedx.json /app/sbom/dtvp-frontend-cyclonedx.json
-COPY sbom/dtvp-backend-cyclonedx.json /app/sbom/dtvp-backend-cyclonedx.json
-RUN chmod +x start.sh
-
-# Copy the built frontend from the frontend-build stage
-COPY --from=frontend-build /app/frontend/dist ./frontend/dist
-RUN cp ./frontend/dist/index.html ./frontend/dist/index.html.template
-
-# Expose the port
+COPY alembic.ini ./
+COPY playground/fixtures ./playground/fixtures
+COPY --from=frontend /app/frontend/dist ./frontend/dist
+RUN useradd --uid 10001 --create-home dtvp && mkdir /data && chown dtvp:dtvp /data
+USER dtvp
+ENV DTVP_ARTIFACT_DIR=/data/artifacts
+ENV UV_CACHE_DIR=/tmp/uv PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8000
-
-# Run the application using the startup script
-CMD ["/app/start.sh"]
+CMD ["uv", "run", "--no-sync", "python", "-m", "dtvp.cli", "serve", "--host", "0.0.0.0"]

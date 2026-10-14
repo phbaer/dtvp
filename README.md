@@ -23,6 +23,7 @@ Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
 Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
 System, light and dark themes and expandable technical evidence are available.
+Review drawers retain keyboard focus, close with Escape and return to the selected finding.
 
 ```bash
 uv run python scripts/playground.py down   # retains data

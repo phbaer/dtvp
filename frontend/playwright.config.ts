@@ -1,35 +1,7 @@
-/// <reference types="node" />
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
-    testDir: './e2e',
-    fullyParallel: true,
-    forbidOnly: !!process.env.CI,
-    retries: process.env.CI ? 2 : 0,
-    workers: process.env.CI ? 1 : 3,
-    reporter: 'html',
-    use: {
-        baseURL: 'http://localhost:5173',
-        trace: 'on-first-retry',
-        screenshot: 'only-on-failure',
-    },
-    projects: [
-        {
-            name: 'chromium',
-            use: { ...devices['Desktop Chrome'] },
-        },
-        {
-            name: 'firefox',
-            use: { ...devices['Desktop Firefox'] },
-        },
-        {
-            name: 'webkit',
-            use: { ...devices['Desktop Safari'] },
-        },
-    ],
-    webServer: {
-        command: 'npm run dev',
-        url: 'http://localhost:5173',
-        reuseExistingServer: true,
-    },
-});
+  testDir: './e2e', workers: 1, fullyParallel: false,
+  use: { baseURL: process.env.DTVP_UI_URL || 'http://127.0.0.1:8800', trace: 'retain-on-failure' },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+})

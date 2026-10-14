@@ -1,2 +1,0 @@
-import { calculateScoreFromVector } from './src/lib/cvss.ts';
-console.log(calculateScoreFromVector("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H"));
