@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 
 export async function beginAssessment(page: Page) {
-  await page.getByRole('dialog').getByRole('button', { name: 'Continue to assessment', exact: true }).click()
+  await page.getByRole('dialog').waitFor()
 }
 export async function confirmDraft(page: Page) {
   const dialog = page.getByRole('dialog')

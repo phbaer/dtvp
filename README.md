@@ -11,7 +11,7 @@ Database writes commit before successful HTTP responses and session cookies are 
 
 ## Try it locally
 
-Requirements: Docker Compose and `uv`. One command builds the real application,
+Requirements: Docker Compose and a current `uv` with Python 3.15 support. One command builds the real application,
 starts PostgreSQL, applies migrations and loads synthetic data:
 
 ```bash
@@ -33,13 +33,14 @@ Products accepts CycloneDX/SPDX uploads and creates Generator/VScorer snapshots.
 Replay changed evidence, conflicting sources and partial scans from the banner.
 The offline demo matcher and simulated failure run through the durable worker.
 System, light and dark themes and expandable technical evidence are available.
-The guided review workspace presents one task at a time. Analysts inspect evidence,
-record applicability, optionally rescore, and confirm before submitting. Reviewers
-inspect the evidence and submitted assessment, then acknowledge their checks before
-approving. Back navigation retains drafts. Rescoring offers project rules, provider
-proposals or small groups of deployment metrics; vectors remain under advanced
-controls. Analysis and full history remain available in separate tabs. Review dialogs retain keyboard focus, close with Escape
-and return to the selected finding.
+The compact review sheet opens directly on the assessment. Evidence stays visible
+alongside applicability, optional scoring and confirmation on desktop; mobile offers
+an expandable evidence panel. One header, a small progress strip and a single fixed
+action bar keep context and controls close. Reviewers inspect the submitted assessment
+and confirm their checks before approving. Back navigation retains drafts. Rules,
+provider proposals and grouped deployment metrics support contextual scoring;
+advanced vectors, analysis and history remain accessible. Dialogs retain keyboard
+focus, close with Escape and return to the selected finding.
 Searchable product/release selectors fetch bounded pages; releases show newest first. Browse products by name
 and team, with release and active-finding counts. Review filters cover product,
 team, component owner, status and text; sorting is stable across cursor pages.
