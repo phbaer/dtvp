@@ -161,7 +161,7 @@ def import_vscorer_proposal(journal, *, project_id, version, actor_id, data):
         journal.objects.put(canonical(derived["sbom"])),
         journal.objects.put(canonical(derived["cves"])),
     }
-    proposal_id = digest(canonical(["vscorer", data.source_label, report_sha]))
+    proposal_id = digest(canonical(["vscorer", data.source_label, report_sha, actor_id, request_id]))
     sections = load_sections(journal, data.expected)
     sections["scoring"]["proposal:" + proposal_id] = {
         "format": "dtvp.scoring-proposal/1",

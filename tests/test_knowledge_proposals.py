@@ -130,6 +130,25 @@ def test_import_retry_replays_receipt_and_stale_expected_head_is_rejected(worksp
     assert journal.head() == first
 
 
+def test_identical_reports_retain_independent_import_attribution(workspace):
+    journal, context, data = bound(workspace)
+    first = ingest(journal, data)
+    second_data = data.model_copy(update={"expected": current(journal)})
+    second = import_vscorer_proposal(
+        journal, project_id="product", version="1", actor_id="other-importer", data=second_data
+    )
+    records = proposals(journal, context)
+    assert len(records) == 2
+    assert {row["imported_by"] for row in records} == {"importer", "other-importer"}
+    assert len({row["id"] for row in records}) == 2
+    assert len({row["report_sha256"] for row in records}) == 1
+    assert ingest(journal, data) == first
+    assert import_vscorer_proposal(
+        journal, project_id="product", version="1", actor_id="other-importer", data=second_data
+    ) == second
+    assert len(proposals(journal, context)) == 2
+
+
 @pytest.mark.parametrize(
     "tamper",
     [

@@ -382,6 +382,7 @@ head, the assessment's `source_binding` wrapper and one native `finding` respons
 DTVP reproduces the pinned input receipt, validates the focused component/CVE and
 unchanged Base, recalculates supported contextual scores and retains the raw report.
 Workspace rows, CLI and UI compare these proposals with source/published values.
+Repeated report imports retain each importer’s attribution; retries reuse the original receipt.
 Withheld, invalid and stale proposals remain attributed evidence with explicit
 ineligibility; eligible proposals still require coordinator rationale, preview,
 current independent team reviews and explicit publication. Importing a result
