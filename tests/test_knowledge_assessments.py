@@ -528,3 +528,33 @@ def test_payload_revision_is_explicit_verified_artifact_in_each_mutated_state(jo
     review(journal, selected)
     for chosen in selected:
         assert revision in journal.verify_state(head(journal, chosen.version)).artifacts
+
+
+def test_branching_from_approved_state_never_extends_review_coverage(journal):
+    seed(journal)
+    save(journal, assessment(journal))
+    review(journal)
+    assert coverage(journal)["approved"]
+    approved_source = head(journal)
+    branched = journal.snapshot(
+        project_id="project",
+        version="7.1.2",
+        actor_id="pipeline",
+        reason="Branch product",
+        parents=[approved_source],
+        sections=current(journal),
+        artifacts=journal.state(approved_source).artifacts,
+    )
+    journal.publish(
+        request_id="branch-approved",
+        fingerprint=digest(b"branch-approved"),
+        updates=[
+            Update(ref=Ref(project_id="project", name="7.1.2"), expected=None, target=branched)
+        ],
+    )
+    new = coverage(journal, target(journal, "7.1.2"))
+    assert new["status"] == "unassessed"
+    assert not new["approved"]
+    assert not new["recorded"]
+    assert current(journal, "7.1.2")["reviews"]  # Retained history survives branching.
+    assert coverage(journal)["approved"]

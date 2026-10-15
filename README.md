@@ -152,7 +152,8 @@ uv run python scripts/assembly_demo.py
 The journal-backed assessment engine supports immutable draft/submitted revisions
 and independent reviews of exact vulnerability/context/version targets. Explicit
 multi-version coverage is reviewed per target; a range or matching name does not
-prove applicability. Pending revisions retain valid prior approved pins. Material
+prove applicability. Branching from an approved state retains historical records
+but never extends review or published-score scope to the new version. Pending revisions retain valid prior approved pins. Material
 source, artifact, graph or advisory changes require reassessment; identical inputs
 and ownership-only changes retain coverage. Not-affected submission requires a
 specific justification. Historical absent assessments remain retained. API/UI

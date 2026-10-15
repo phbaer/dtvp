@@ -269,3 +269,35 @@ def test_removed_assessment_targets_remain_retained_without_current_approval_cre
     assert stats["retained_absent_assessments"] == 1
     assert stats["retained_unknown_scope_assessments"] == 1
     assert stats["retention_scope"] == "state_unfiltered"
+
+
+def test_inherited_score_is_not_a_target_version_publication(workspace):
+    from dtvp.knowledge.scoring import published_score, score_key
+
+    journal, sections = workspace
+    context = next(
+        value for key, value in sections["ownership"].items() if key.startswith("context:")
+    )
+    identifier = "CVE-2099-10001"
+    sections["scoring"][score_key(context["id"], identifier)] = {
+        "target": {
+            "version": "old-version",
+            "context_id": context["id"],
+            "vulnerability_id": identifier,
+        },
+        "proposal": {"score": 0},
+        "rationale": "Original version only",
+        "actor_id": "coordinator",
+        "coverage_digest": "a" * 64,
+    }
+    assert (
+        published_score(
+            journal,
+            sections,
+            "1",
+            context["id"],
+            identifier,
+            gate={"ready": True, "digest": "a" * 64},
+        )
+        is None
+    )

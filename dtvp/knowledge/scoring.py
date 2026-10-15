@@ -178,7 +178,11 @@ def publish_score(journal, *, project_id, actor_id, data):
 
 def published_score(journal, sections, version, context_id, vulnerability_id, *, gate=None):
     record = sections["scoring"].get(score_key(context_id, vulnerability_id))
-    if not record:
+    if not record or record.get("target") != {
+        "version": version,
+        "context_id": context_id,
+        "vulnerability_id": vulnerability_id,
+    }:
         return None
     gate = gate if gate is not None else review_gate(journal, sections, version, vulnerability_id)
     return {

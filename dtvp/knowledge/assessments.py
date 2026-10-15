@@ -463,6 +463,11 @@ def coverage_status(journal, sections, version, context_id, vulnerability_id):
         "team_id": context.get("team_id") if context else None,
     }
     review = sections["reviews"].get("review:" + target_key(target))
+    if review and any(
+        review.get("target", {}).get(key) != value for key, value in target.model_dump().items()
+    ):
+        # Branch ancestry retains history; it does not extend reviewed coverage.
+        review = None
     candidates = []
     for record in sections["assessments"].values():
         payload = record.get("payload", {})
