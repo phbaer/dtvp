@@ -81,6 +81,10 @@ CycloneDX JSON/XML or SPDX 2.3 JSON intake, post multipart `file` plus JSON
 `metadata` (the import fields without `sbom`) to `.../versions/{version}/files`.
 `GET .../states/{state}/source` returns that pinned original with its SHA-256 and
 representation headers; project permissions apply to downloads too.
+`GET .../states/{state}/artifacts/{sha}` downloads any artifact explicitly pinned
+in that state, including retained source responses and reports. Current project
+permissions and state membership are checked; knowing an object hash grants no
+access. Downloads preserve bytes and include their SHA-256.
 The HTTP CLI preserves file bytes too:
 
 ```bash

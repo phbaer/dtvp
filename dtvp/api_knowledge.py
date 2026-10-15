@@ -23,6 +23,26 @@ router = APIRouter(prefix="/api/v3")
 logger = logging.getLogger(__name__)
 
 
+@router.get("/projects/{project_id}/states/{state}/artifacts/{artifact}")
+def retained_artifact(
+    project_id: str, state: Sha, artifact: Sha, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    revision = require_state(journal, state, project_id)
+    if artifact not in revision.artifacts:
+        raise HTTPException(404, "Artifact is not retained by this state")
+    return Response(
+        journal.objects.read(artifact),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": 'attachment; filename="dtvp-retained-artifact"',
+            "X-Content-SHA256": artifact,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 class InventoryMetadata(RequestModel):
     request_id: Name
     expected: Sha | None
