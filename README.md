@@ -18,7 +18,8 @@ using pipeline provenance and target inventory, with explicit coverage review.
 Implementation has started on `rewrite/knowledge-journal`. The first slice adds
 immutable complete-state manifests, atomic multi-branch publication, immutable
 tags, a rebuildable SQL projection and journal-backed inventory import/comparison
-under `/api/v3`, with contextual assessment/review and coordinator-scoring APIs.
+under `/api/v3`, with contextual assessment/review, coordinator scoring, curated
+metadata, bound proposals, semantic comparisons and retained history.
 The Review tab retains `/api/v2`; the Knowledge tab uses the journal-backed workspace.
 VDR/VEX JSON semantic subsets are available; advanced scope reconciliation and
 merge synchronization remain planned. Existing v2 data is not migrated or made
@@ -40,10 +41,11 @@ Scope is cybersecurity, license compliance and architecture documentation, not
 safety analysis. SBOM correctness is the producer's responsibility; DTVP validates
 its input contract and exposes coverage limits. Generator's established audit
 documents are the output baseline to preserve while replacing DT reads with DTVP.
-CPE discovery is intended to become an internal DTVP module, preserving reviewed
-mappings and provenance rather than requiring another standalone deployment.
+CPE discovery has an internal offline module preserving reviewed mappings and
+provenance; complete service migration and refresh remain planned.
 The concept's [integration status](docs/devsecops-evidence-concept.md#reviewed-integration-increments)
-records isolated sibling fixes, validation and remaining cutover gates.
+records isolated sibling fixes, validation and remaining cutover gates. Native
+consumer commands and v2 compatibility boundaries are in [consumer contracts](docs/consumers.md).
 Its [pipeline examples](docs/devsecops-evidence-concept.md#exemplary-pipeline-integration)
 map PR/nightly builds, legacy C/C++, containers, supplier inputs and parallel
 versions to intake, review, release gates, documentation and monitoring.

@@ -567,10 +567,30 @@ evidence-reference guard. Standalone evidence does not replace composition or
 create human approvals. Preview reports exact matches, unresolved scope and
 contradictory external claims. JSON and original-byte file intake share the adapters.
 
-Not yet implemented: the complete new UI workspace, stable cross-import/context identity,
+The Knowledge UI now exposes compact contextual queues, full filtered statistics,
+guided assessment/independent review/coordinator scoring, ten advanced filters,
+user-local saved views, shared URLs and readable retained/legacy evidence. HTTP CLI
+uses the same backend contracts. A populated isolated workflow demo preserves
+interactive edits. Product refs/history and bounded semantic comparisons use
+immutable journal states; current-intelligence comparison caches remain planned.
+
+Native bundles retain exact source/context/proposal/approval distinctions. CPE
+has an internal offline policy/proposal module; VScorer has explicit focused inputs
+and returned bound proposals. Generator's independently reviewed isolated native
+adapter preserves its renderer and disables mutable enrichment, with controlled
+parity and forest/UI follow-ups still required. SPDX/CycloneDX license declarations
+are exposed as evidence, never clearance. Curated component metadata is versioned,
+separate from imports and bound into applicable review fingerprints. Single-source
+baseline withdrawal retains history/tags and makes absence explicit. Legacy tagged
+and metadata-free DT histories remain unverified source claims.
+
+Not yet implemented: remaining native management/integration UI, stable cross-import/context identity,
 range/exclusion expressions beyond explicit reviewed version targets, extended evidence synthesis,
 advanced VDR/VEX scope/schema/signature support, cascading synchronization, cached semantic comparisons, journal
-retention/GC, operational-state recovery and v2/legacy migration. The v2 runtime
+retention/GC, operational-state recovery and v2/legacy migration. Native Agentyzer
+orchestration, full CPE refresh/migration, license-clearance and architecture-approval
+workflows, consumer serializer upgrade compatibility and controlled-document
+qualification remain cutover gates. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain
 source-local references; no implicit assessment inheritance or scope approval
 is inferred from them. JSON-object imports retain their canonical representation;
