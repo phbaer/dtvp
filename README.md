@@ -162,7 +162,8 @@ adapters use this engine rather than implementing separate approval logic.
 `GET .../versions/{version}/workspace` returns contextual findings and full filtered
 statistics; basic filters are `team_id`, `q` and `lifecycle`, with bounded `offset`/`limit`
 and an optional pinned `expected` state. Detail is available at
-`.../workspace/{context_id}/{vulnerability_id}`. Source assertions, original ratings,
+`.../workspace/{context_id}/{vulnerability_id}`; its optional `expected` state pin
+rejects a changed queue baseline before opening detail. Source assertions, original ratings,
 current/pending coverage and published contextual scores remain separate.
 Advanced filters cover `source_severity`, `contextual_severity`, `applicability`,
 `scoring_status`, `team_review`, `provider`, `cvss_version`, `dependency`,

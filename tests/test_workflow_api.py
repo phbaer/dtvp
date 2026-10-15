@@ -446,3 +446,27 @@ def test_projection_failure_returns_committed_pending_and_retries_receipt(
     assert retry.status_code == 201, retry.text
     assert app.state.knowledge.head() == committed
     assert workspace(analyst, project_id)["statistics"]["submitted"] == 1
+
+
+def test_detail_respects_queue_state_pin_after_nightly_import(analyst, bom):
+    project_id, _ = setup(analyst, bom)
+    original = workspace(analyst, project_id)
+    row = original["items"][0]
+    new = imported(
+        analyst,
+        project_id,
+        VERSION,
+        body(
+            bom,
+            request_id="next-nightly",
+            expected=original["state"],
+            build_number=2,
+        ),
+    )
+    path = url(
+        project_id, f"/versions/{VERSION}/workspace/{row['context_id']}/{row['vulnerability_id']}"
+    )
+    assert analyst.get(path, params={"expected": original["state"]}).status_code == 409
+    detail = analyst.get(path, params={"expected": new})
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["state"] == new

@@ -201,10 +201,11 @@ def workspace_detail(
     request: Request,
     db: DB,
     actor: Auth,
+    expected: Sha | None = None,
 ):
     project = project_for(db, actor, project_id)
     journal = request.app.state.knowledge
-    state = state_for(request, project_id, version)
+    state = state_for(request, project_id, version, expected)
     # The workspace read model is shared by UI, CLI and machine consumers.
     result = load_workspace(
         journal, state, context_id=context_id, vulnerability_id=vulnerability_id, limit=1
