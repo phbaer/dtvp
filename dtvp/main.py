@@ -8,6 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from dtvp.api import router
 from dtvp.api_analysis import router as analysis_router
+from dtvp.api_evidence import router as evidence_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_rescoring import router as rescoring_router
@@ -65,6 +66,7 @@ def create_app(settings=None):
     app.include_router(statistics_router)
     app.include_router(rescoring_router)
     app.include_router(workflow_router)
+    app.include_router(evidence_router)
     if settings.playground:
         from dtvp.api_playground_knowledge import router as knowledge_playground_router
 

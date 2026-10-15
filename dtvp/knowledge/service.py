@@ -152,20 +152,28 @@ def import_inventory(
         **({f"inventory:{parent}": {"state": parent}} if old_inventory else {}),
     }
     # All raw imports referenced by retained history stay reachable via parents.
-    policy_state, policy_checks = None, []
+    policy_state, policy_checks, evidence_state = None, [], None
     if part_id is None:
         from dtvp.knowledge.ownership import current_policy, policy_ref, resolve_ownership
 
         policy_state, config = current_policy(journal, project_id)
         resolve_ownership(sections, version=version, policy_state=policy_state, config=config)
         policy_checks = [(policy_ref(project_id), policy_state)]
+        from dtvp.knowledge.evidence import apply_current_evidence, evidence_ref
+
+        evidence_state = apply_current_evidence(journal, sections, project_id)
+        policy_checks.append((evidence_ref(project_id), evidence_state))
     state = journal.snapshot(
         project_id=project_id,
         version=version,
         actor_id=actor_id,
         reason=f"Import build {build_number}"[:200],
         parents=list(
-            dict.fromkeys(([parent] if parent else []) + ([policy_state] if policy_state else []))
+            dict.fromkeys(
+                ([parent] if parent else [])
+                + ([policy_state] if policy_state else [])
+                + ([evidence_state] if evidence_state else [])
+            )
         ),
         sections=sections,
         artifacts=[sections["inventory"]["baseline"]["artifact_sha"]],
@@ -181,6 +189,8 @@ def import_inventory(
 def create_tag(journal, *, project_id, actor_id, name, state, request_id):
     inventory = journal.records(state, "inventory")
     baseline = journal.load(inventory["baseline"]) if "baseline" in inventory else {}
+    if not baseline:
+        raise Conflict("Release tags require an accepted product inventory")
     if (
         baseline.get("kind") == "assembly"
         and baseline.get("readiness") != "producer_declared_ready"

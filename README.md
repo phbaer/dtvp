@@ -20,8 +20,9 @@ immutable complete-state manifests, atomic multi-branch publication, immutable
 tags, a rebuildable SQL projection and journal-backed inventory import/comparison
 under `/api/v3`, with contextual assessment/review and coordinator-scoring APIs.
 The Review tab retains `/api/v2`; the Knowledge tab uses the journal-backed workspace.
-VDR/VEX ingestion and merge synchronization remain
-planned. Existing v2 data is not migrated or made journal-authoritative implicitly.
+VDR/VEX JSON semantic subsets are available; advanced scope reconciliation and
+merge synchronization remain planned. Existing v2 data is not migrated or made
+journal-authoritative implicitly.
 Reuse decisions compare original v1 on local
 `main` (`bdc7ba4`), committed refactoring and uncommitted work separately; see the
 [baseline and reuse matrix](docs/rewrite-plan.md#baseline-and-reuse-matrix).
@@ -214,6 +215,33 @@ draft, submitted, approved and stale coverage plus a historical tag. Repeated
 loads preserve interactive work and other project policies. Seeding uses the real
 domain services and publishes the complete fixture atomically. The seed endpoint
 is absent in production; no third-party service is contacted.
+
+### VDR/VEX intake and application
+
+`GET /api/v3/projects/{id}/evidence` returns bounded document summaries, current
+`evidence_state` and version heads. `POST .../evidence/preview` previews matching
+and contradictions without committing. `POST .../evidence/imports` requires
+`request_id`, `expected_evidence`, the complete `expected_versions` map, `source`,
+an explicit increasing producer `revision` and a JSON `document`. For exact file
+retention, use multipart `.../evidence/files` with `file` plus JSON `metadata`
+(the same fields without `document`). Originals remain available at
+`GET .../evidence/{artifact_sha}/source` under current project permissions.
+
+Supported semantic subsets: CycloneDX 1.5/1.6 JSON VDR/VEX, OpenVEX 0.2.x and
+CSAF 2.0 VEX full-product-name statements. Exact versioned PURLs retain qualifiers
+and subpaths. CycloneDX local refs need embedded identity or the same original
+document; arbitrary matching BOM refs cannot establish cross-document identity.
+Version ranges, OpenVEX subcomponents, CSAF relationship/group expansions and
+unsupported scopes remain explicitly unresolved. This is not complete schema or
+signature verification; publisher authenticity remains unverified.
+
+Evidence selection is durable before inventory arrives and reapplied after
+nightly import or assembly selection. It never replaces inventory. Explicit
+publisher/source/document-bound ordinals govern supersession, not arrival time.
+`POST .../evidence/withdrawals` pins expected evidence/version states, `artifact_sha`
+and a reason; originals and prior human decisions remain retained. Matching claims
+appear in the combined workspace as attributed evidence. Supplier not-affected
+statements do not become internal assessments, approvals or contextual scores.
 
 `GET /api/v3/projects/{id}/ownership` returns the current policy and exact active
 version heads. A product manager can `PUT` the same resource with `request_id`,

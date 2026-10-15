@@ -340,8 +340,11 @@ References: [CycloneDX VDR](https://cyclonedx.org/capabilities/vdr/),
 
 Required adapter families are CycloneDX VDR/VEX, CSAF VEX and OpenVEX. Freeze
 supported schema versions, profiles and serializations against fixtures before
-implementation; reject unsupported inputs explicitly. This is planned support,
-not a claim that current parsers implement these formats. Preserve original
+implementation; reject unsupported inputs explicitly. Initial JSON semantic subsets
+are implemented for CycloneDX 1.5/1.6, OpenVEX 0.2.x and CSAF 2.0 VEX full-product
+names. Exact versioned identities match; advanced ranges, nested/group scopes,
+full schema conformance and signature verification remain unsupported or unresolved.
+Preserve original
 fields and extension data; document semantic conversion losses rather than
 flattening every format into an identical status vocabulary.
 
@@ -556,9 +559,17 @@ The shared workspace synthesizes attributed facts, current/pending approvals and
 full filtered statistics. HTTP CLI operations use these same application services;
 they do not access PostgreSQL directly or duplicate workflow rules.
 
+Product evidence has an independent durable reference, including documents received
+before an SBOM. Explicit producer ordinals select/supersede documents; withdrawal
+retains originals. Evidence updates conditionally publish every active branch
+atomically and baseline imports/assembly reapply the current selection under an
+evidence-reference guard. Standalone evidence does not replace composition or
+create human approvals. Preview reports exact matches, unresolved scope and
+contradictory external claims. JSON and original-byte file intake share the adapters.
+
 Not yet implemented: the complete new UI workspace, stable cross-import/context identity,
 range/exclusion expressions beyond explicit reviewed version targets, extended evidence synthesis,
-VDR/VEX adapters, cascading synchronization, cached semantic comparisons, journal
+advanced VDR/VEX scope/schema/signature support, cascading synchronization, cached semantic comparisons, journal
 retention/GC, operational-state recovery and v2/legacy migration. The v2 runtime
 still owns its own metadata in PostgreSQL. First-slice inventory keys remain
 source-local references; no implicit assessment inheritance or scope approval

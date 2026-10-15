@@ -66,7 +66,7 @@ class Revision(Record):
 
 
 class Ref(Record):
-    kind: Literal["branch", "tag", "source", "policy"] = "branch"
+    kind: Literal["branch", "tag", "source", "policy", "evidence"] = "branch"
     project_id: Name
     name: Name
 
@@ -305,7 +305,7 @@ class Journal:
                     raise ValueError("Branch and state versions disagree")
                 if (
                     existing
-                    and update.ref.kind in {"branch", "source", "policy"}
+                    and update.ref.kind in {"branch", "source", "policy", "evidence"}
                     and existing not in state.parents
                 ):
                     raise ValueError("Branch update must retain its current head as a parent")

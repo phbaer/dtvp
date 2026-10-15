@@ -504,12 +504,24 @@ atomically. Imports capture the current policy. Separate trees keep separate
 contexts; multiple paths within a tree do not multiply work. Explicit child
 owners, fallback rules, conflicts and unknown topology remain distinguishable.
 Reassignment changes current responsibility without deleting assessment records
-or rewriting tagged history. This is context derivation and API presentation,
-not yet a journal-backed assessment/review workspace or verified range coverage.
+or rewriting tagged history. Ownership records alone do not establish verified
+assessment coverage; the lifecycle below binds explicit decisions to those contexts.
+
+Assessment/review workflows now persist exact contextual/version targets and
+independent decisions. Coordinator score publication requires all current contexts
+for that vulnerability/version to be approved. Initial combined workspace, HTTP
+CLI and guided Knowledge UI share these backend rules; advanced migration and
+cross-import identity reconciliation remain separate work.
+
+VDR/VEX evidence now has standalone durable selection, explicit producer ordering,
+withdrawal and baseline reapplication. Initial JSON semantic subsets preserve
+CycloneDX, OpenVEX and CSAF origins; exact identities match while advanced scopes
+remain unresolved. Preview and attributed application do not grant publisher trust,
+complete conformance or internal approval. Originals remain retrievable.
 
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,
-new review workspace/range coverage, evidence synthesis, VDR/VEX application,
+advanced review/range coverage, extended evidence synthesis and VDR/VEX conformance,
 specialist result integration, license clearance and controlled architecture/export
 workflows. The existing v2 UI is not evidence these new contracts already ship.
 
