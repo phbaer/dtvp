@@ -145,6 +145,15 @@ uv run python scripts/assembly_demo.py
 
 ### Versioned ownership and consuming contexts
 
+The journal-backed assessment engine supports immutable draft/submitted revisions
+and independent reviews of exact vulnerability/context/version targets. Explicit
+multi-version coverage is reviewed per target; a range or matching name does not
+prove applicability. Pending revisions retain valid prior approved pins. Material
+source, artifact, graph or advisory changes require reassessment; identical inputs
+and ownership-only changes retain coverage. Not-affected submission requires a
+specific justification. Historical absent assessments remain retained. API/UI
+adapters use this engine rather than implementing separate approval logic.
+
 `GET /api/v3/projects/{id}/ownership` returns the current policy and exact active
 version heads. A product manager can `PUT` the same resource with `request_id`,
 `expected_policy`, `expected_versions`, `rules` and optional `context_roots`.
