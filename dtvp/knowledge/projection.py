@@ -39,7 +39,8 @@ def apply_state(connection, journal, ref, state_sha):
     current = connection.execute(select(heads).where(heads.c.ref_key == ref.key)).first()
     if current and current.state_sha == state_sha:
         return
-    # Tags need only a pinned reference. Their data is loaded on demand.
+    # Tags and constituent sources need only references. Their immutable data
+    # is loaded on demand; source intake must not create product inventory rows.
     if ref.kind == "branch":
         for section in state.sections:
             old = dict(

@@ -148,7 +148,8 @@ package dependencies alone do not establish service communication architecture.
 
 The main gate is coherent subject selection: an image tag is insufficient to
 freeze a release, and unrelated platform builds must not become one apparent
-installation. Native assembly is still planned; legacy combined SBOMs can bridge
+installation. Initial native delivery-part selection is implemented; overlapping
+evidence views and cross-part relationship mapping remain planned. Legacy combined SBOMs can bridge
 intake but cannot restore provenance already discarded by an assembler.
 
 ### Example 4: supplier binary or externally maintained subsystem
@@ -358,7 +359,7 @@ gaps below must be read together with that status.
 
 | Service | Existing seam | Blocking work before trusted automation |
 | :--- | :--- | :--- |
-| DTVP | Journal-backed v3 inventory/tag/diff core; separate v2 review runtime | New assembly, identity, contextual review and controlled publication workflows are not yet delivered end-to-end |
+| DTVP | Journal-backed v3 inventory/tag/diff core; separate v2 review runtime | Advanced assembly reconciliation, identity, contextual review and controlled publication workflows are not yet delivered end-to-end |
 | VScorer | TM7/SBOM/CVE-worklist intake, explicit configuration/deployment profile, reviewed Environmental proposals | Agree machine authorization, exact subject/input binding, returned provenance and division of VScorer versus DTVP review responsibilities |
 | Agentyzer | Assessment, polling/results and follow-ups; source/AST/LLM evidence with eligibility flags | Request contract lacks reliable exact build-commit binding; configured checkout can resolve default-branch HEAD. Require pinned checkout and returned analyzed revision; account for process-local jobs and retry ambiguity |
 | CPE discovery | Actual checkout is `../cpeservice`; lookup and reviewed mapping overrides | Integrate core discovery into DTVP, preserve reviewed rules and provenance, replace separate persistence deliberately; dictionary membership is not applicability |
@@ -486,7 +487,18 @@ every supported document or correctness of supplier assertions.
 It rejects changing declared target/platform/configuration through ordinary
 baseline replacement; that is a guard, not full variant or assembly support.
 
-Still planned: native constituent assembly, stable cross-import/context identity,
+Native delivery-part assembly now separates constituent source intake from product
+publication. Complete pinned selections retain required/optional declarations;
+omission, withdrawal and policy changes need explicit reasons. Inventory and
+source observations are replaced atomically while assessment/review knowledge
+remains retained. Original inputs and selected source states remain reachable;
+comparison exposes part-level deltas. Missing required inputs, empty selections
+or unverified coherence prevent release tags. Producer-declared coherence is
+attributed evidence, not verified compatibility or approval of the whole release.
+The API-only demo covers replacing one part while reusing another unchanged.
+
+Still planned: overlapping-view/advanced assembly reconciliation, cross-version
+source reuse, cross-part relationship mapping, stable cross-import/context identity,
 new review workspace/range coverage, evidence synthesis, VDR/VEX application,
 specialist result integration, license clearance and controlled architecture/export
 workflows. The existing v2 UI is not evidence these new contracts already ship.
@@ -499,7 +511,7 @@ end-to-end qualification.
 
 | Repository / branch | Verified increment | Remaining gate |
 | --- | --- | --- |
-| `cdxcombine`, `fix/strict-evidence-assembly`, `ea0e672` | Required inputs, references and validation fail closed; atomic output and scoped reference mapping. 52 tests passed, one optional-fixture skip. | Conversion still loses some metadata; native DTVP constituent assembly remains required. |
+| `cdxcombine`, `fix/strict-evidence-assembly`, `ea0e672` | Required inputs, references and validation fail closed; atomic output and scoped reference mapping. 52 tests passed, one optional-fixture skip. | Conversion still loses some metadata; native DTVP assembly retains original constituents and remains the preferred new path. |
 | `cpeservice`, `feat/dtvp-evidence-contract`, `98049fc` | Truthful rule/identity provenance, requested/resolved identifiers and deterministic result digest. 213 tests passed. | No invented confidence or approval; internal DTVP storage/migration remains planned. |
 | `generator`, `feat/dtvp-snapshot-integrity`, `a0fcde5` | Native DTVP snapshot adapter verifies pinned identity/content, retains exact manifests and uses approved team coverage. Existing renderer/templates preserved. 23 focused tests passed; full suite 628 passed, six failures also reproduced on baseline, one skip. | Adapter targets v2 snapshots; v3 cutover, frozen enrichment/configuration and controlled document parity remain gates. |
 | `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` | Exact requested Git commit, isolated clean worktree and explicit verified/unverified source evidence. 493 tests passed. | Commit identity does not verify binaries, submodules or LFS; durable remote jobs and complete artifact binding remain gaps. |

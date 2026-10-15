@@ -76,8 +76,8 @@ configuration, source revision, pipeline run, collector/version/method, limitati
 and separately declared package/dependency/license coverage. Missing coverage
 stays unknown; `complete` is snapshot replacement within scope, not verified
 product completeness. Ordinary imports cannot change declared scope and silently
-overwrite another target/platform/configuration. Native multi-SBOM assembly is
-planned; legacy combined input can be retained but cannot recover lost provenance.
+overwrite another target/platform/configuration. Native assembly selects pinned
+constituent inputs; legacy combined input cannot recover lost provenance.
 V3 retains source relationship kinds; SPDX containment is not treated as dependency
 topology. V2 retains its earlier conversion behavior until migration.
 
@@ -85,6 +85,55 @@ Exercise file intake and exact-byte retrieval with:
 
 ```bash
 uv run python scripts/knowledge_demo.py --files
+```
+
+For multiple delivery parts, upload to
+`POST .../versions/{version}/parts/{part_id}/imports` or `.../files` instead.
+`GET .../versions/{version}/parts/{part_id}` returns the current source state.
+Constituent references are separate from product branches: intake never changes
+the assembled product. Source ordering/authority/scope checks apply per part.
+
+Select inputs atomically with `POST .../versions/{version}/assembly`:
+
+```json
+{
+  "request_id": "integration-42",
+  "expected": null,
+  "parts": [
+    {"part_id": "backend", "required": true, "state": "<source-state-sha256>"},
+    {"part_id": "frontend", "required": true, "state": null}
+  ],
+  "coherence": {"status": "unverified"}
+}
+```
+
+The complete declaration retains missing required parts as incomplete candidates.
+`GET .../states/{state}/assembly` returns pinned selections and collection evidence.
+Omitting prior parts requires exact `removed_parts` and `removal_reason`; clearing
+a prior selected input requires `withdrawn_parts` and `withdrawal_reason`.
+Changing required/optional policy requires `policy_change_reason`. Assemblies
+retain assessments, reviews, scoring and ownership; inventory/source observations
+are replaced by the explicit selection. Source-local references are namespaced by
+part, including roots, dependency edges and findings; equal PURLs are not merged.
+Comparison includes part-level changes before the underlying record delta.
+
+Release tags reject missing required inputs, empty selections and unverified
+coherence. `coherence.status: producer_declared` requires `build_id` and `rationale`;
+this declares the selected builds compatible, including deliberately reused parts,
+but does not verify composition, approvals or release readiness beyond this input
+gate. Optional missing parts stay visible. Original constituent bytes remain
+retrievable by pinned source state after replacement or removal.
+
+This slice supports delivery parts within one product/version, not overlapping
+evidence views, nested assemblies or cross-part relationship mapping. Each new
+product version needs its own constituent imports; cross-version source reuse
+and semantic identity reconciliation remain planned. Unresolved relationship
+endpoints fail assembly; external-document references need explicit reconciliation.
+The new core remains API-only.
+Explore a repeatable two-part nightly update against the running playground:
+
+```bash
+uv run python scripts/assembly_demo.py
 ```
 
 Read paginated inventory at `GET .../versions/{version}/inventory`; pass its

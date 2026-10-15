@@ -17,6 +17,14 @@ def component_key(ref):
     return "component:" + ("ref:" + ref if len(ref) <= 180 else "sha256:" + digest(ref.encode()))
 
 
+def part_ref(project_id, version, part_id):
+    return Ref(
+        kind="source",
+        project_id=project_id,
+        name="part:" + digest(canonical([version, part_id])),
+    )
+
+
 def import_inventory(
     journal,
     *,
@@ -32,6 +40,7 @@ def import_inventory(
     raw=None,
     context=None,
     predecessor=None,
+    part_id=None,
 ):
     """Replace a complete baseline, preserving all other knowledge sections.
 
@@ -62,6 +71,8 @@ def import_inventory(
     # Preserve receipt compatibility for earlier JSON requests without context.
     if context is not None:
         operation["context"] = context
+    if part_id is not None:
+        operation["part_id"] = part_id
     collection = CollectionContext.model_validate(context or {})
     fingerprint = digest(canonical(operation))
     scoped_request = digest(canonical([project_id, actor_id, request_id]))
@@ -70,7 +81,11 @@ def import_inventory(
         receipt = journal.receipt(scoped_request, fingerprint)
     if receipt:
         return receipt
-    ref = Ref(project_id=project_id, name=version)
+    ref = (
+        part_ref(project_id, version, part_id)
+        if part_id
+        else Ref(project_id=project_id, name=version)
+    )
     if journal.resolve(ref) != expected:
         raise Conflict("Branch changed; reload before importing")
     parent = expected or predecessor
@@ -85,6 +100,13 @@ def import_inventory(
             name: {key: journal.load(sha) for key, sha in journal.records(parent, name).items()}
             for name in SECTIONS
         }
+        if part_id and (
+            previous.version != version
+            or sections["inventory"].get("baseline", {}).get("part_id") != part_id
+        ):
+            raise Conflict("Constituent predecessor must match its version and part")
+        if sections["inventory"].get("baseline", {}).get("kind") == "assembly":
+            raise Conflict("An assembly cannot be replaced by a single SBOM import")
         if expected:
             baseline = sections["inventory"]["baseline"]
             if baseline["source"] != source:
@@ -111,6 +133,7 @@ def import_inventory(
             format=document["format"],
             losses=document["losses"],
             representation=representation,
+            **({"part_id": part_id, "product_version": version} if part_id else {}),
             **collection_summary(document, collection),
         ),
         **{component_key(c["bom-ref"]): c for c in document["components"]},
@@ -146,6 +169,15 @@ def import_inventory(
 
 
 def create_tag(journal, *, project_id, actor_id, name, state, request_id):
+    inventory = journal.records(state, "inventory")
+    baseline = journal.load(inventory["baseline"]) if "baseline" in inventory else {}
+    if (
+        baseline.get("kind") == "assembly"
+        and baseline.get("readiness") != "producer_declared_ready"
+    ):
+        raise Conflict("Incomplete or unverified assembly cannot be release-tagged")
+    if baseline.get("part_id"):
+        raise Conflict("A constituent source is not a product release")
     fingerprint = digest(canonical(["tag/1", project_id, actor_id, name, state]))
     return journal.publish(
         request_id=digest(canonical([project_id, actor_id, request_id])),

@@ -66,7 +66,7 @@ class Revision(Record):
 
 
 class Ref(Record):
-    kind: Literal["branch", "tag"] = "branch"
+    kind: Literal["branch", "tag", "source"] = "branch"
     project_id: Name
     name: Name
 
@@ -291,7 +291,11 @@ class Journal:
                     raise ValueError("Reference must stay within its product line")
                 if update.ref.kind == "branch" and state.version != update.ref.name:
                     raise ValueError("Branch and state versions disagree")
-                if existing and update.ref.kind == "branch" and existing not in state.parents:
+                if (
+                    existing
+                    and update.ref.kind in {"branch", "source"}
+                    and existing not in state.parents
+                ):
                     raise ValueError("Branch update must retain its current head as a parent")
                 refs[update.ref.key] = update.target
             publication = Publication(

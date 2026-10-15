@@ -9,10 +9,11 @@ from pydantic import Field, field_validator
 from sqlalchemy import select
 
 from dtvp.api import DB, Auth, project_for
+from dtvp.knowledge.assembly import AssemblyInput, publish_assembly
 from dtvp.knowledge.composition import CollectionContext
 from dtvp.knowledge.journal import CommitUncertain, Conflict, Name, Ref, Sha
 from dtvp.knowledge.projection import catch_up, heads, records
-from dtvp.knowledge.service import create_tag, import_inventory, validate_time
+from dtvp.knowledge.service import create_tag, import_inventory, part_ref, validate_time
 from dtvp.schemas import RequestModel
 
 router = APIRouter(prefix="/api/v3")
@@ -83,6 +84,33 @@ def import_version(
     return projected_response(request, receipt)
 
 
+@router.post("/projects/{project_id}/versions/{version}/parts/{part_id}/imports", status_code=201)
+def import_part(
+    project_id: str,
+    version: Name,
+    part_id: Name,
+    data: InventoryInput,
+    request: Request,
+    db: DB,
+    actor: Auth,
+):
+    project_for(db, actor, project_id, "write")
+    try:
+        receipt = import_inventory(
+            request.app.state.knowledge,
+            project_id=project_id,
+            version=version,
+            part_id=part_id,
+            actor_id=actor.user.id,
+            **data.model_dump(exclude={"completeness"}),
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except CommitUncertain as error:
+        return uncertain_response(error, data.request_id)
+    return projected_response(request, receipt)
+
+
 @router.post("/projects/{project_id}/versions/{version}/files", status_code=201)
 def import_file(
     project_id: str,
@@ -93,6 +121,24 @@ def import_file(
     file: UploadFile = File(),
     metadata: str = Form(max_length=65536),
 ):
+    return import_file_operation(project_id, version, request, db, actor, file, metadata)
+
+
+@router.post("/projects/{project_id}/versions/{version}/parts/{part_id}/files", status_code=201)
+def import_part_file(
+    project_id: str,
+    version: Name,
+    part_id: Name,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    file: UploadFile = File(),
+    metadata: str = Form(max_length=65536),
+):
+    return import_file_operation(project_id, version, request, db, actor, file, metadata, part_id)
+
+
+def import_file_operation(project_id, version, request, db, actor, file, metadata, part_id=None):
     project_for(db, actor, project_id, "write")
     data = InventoryMetadata.model_validate_json(metadata)
     maximum = request.app.state.settings.max_upload_bytes
@@ -106,6 +152,7 @@ def import_file(
             version=version,
             actor_id=actor.user.id,
             raw=raw,
+            part_id=part_id,
             **data.model_dump(exclude={"completeness"}),
         )
     except Conflict as error:
@@ -113,6 +160,50 @@ def import_file(
     except CommitUncertain as error:
         return uncertain_response(error, data.request_id)
     return projected_response(request, receipt)
+
+
+@router.get("/projects/{project_id}/versions/{version}/parts/{part_id}")
+def current_part(
+    project_id: str, version: Name, part_id: Name, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    state = journal.resolve(part_ref(project_id, version, part_id))
+    if not state:
+        raise HTTPException(404, "Part has no imported source")
+    baseline = journal.load(journal.records(state, "inventory")["baseline"])
+    return {"state": state, "baseline": baseline}
+
+
+@router.post("/projects/{project_id}/versions/{version}/assembly", status_code=201)
+def assemble(
+    project_id: str, version: Name, data: AssemblyInput, request: Request, db: DB, actor: Auth
+):
+    project_for(db, actor, project_id, "write")
+    try:
+        receipt = publish_assembly(
+            request.app.state.knowledge,
+            project_id=project_id,
+            version=version,
+            actor_id=actor.user.id,
+            data=data,
+        )
+    except Conflict as error:
+        raise HTTPException(409, str(error)) from error
+    except CommitUncertain as error:
+        return uncertain_response(error, data.request_id)
+    return projected_response(request, receipt)
+
+
+@router.get("/projects/{project_id}/states/{state}/assembly")
+def assembly_manifest(project_id: str, state: Sha, request: Request, db: DB, actor: Auth):
+    project_for(db, actor, project_id)
+    journal = request.app.state.knowledge
+    require_state(journal, state, project_id)
+    inventory = journal.records(state, "inventory")
+    if "assembly" not in inventory:
+        raise HTTPException(404, "State has no assembly manifest")
+    return {"state": state, "manifest": journal.load(inventory["assembly"])}
 
 
 @router.post("/projects/{project_id}/tags", status_code=201)
@@ -165,6 +256,8 @@ def source_document(project_id: str, state: Sha, request: Request, db: DB, actor
     if "baseline" not in inventory:
         raise HTTPException(404, "State has no source SBOM")
     baseline = journal.load(inventory["baseline"])
+    if baseline.get("kind") == "assembly":
+        raise HTTPException(404, "Assembly has constituent originals, not one source SBOM")
     return Response(
         journal.objects.read(baseline["artifact_sha"]),
         media_type="application/octet-stream",
@@ -234,4 +327,21 @@ def compare(project_id: str, before: Sha, after: Sha, request: Request, db: DB, 
     # Authorization covers both sides, not merely the URL's project.
     for sha in (before, after):
         require_state(journal, sha, project_id)
-    return journal.diff(before, after)
+    result = journal.diff(before, after)
+    selections = []
+    for state in (before, after):
+        inventory = journal.records(state, "inventory")
+        manifest = journal.load(inventory["assembly"]) if "assembly" in inventory else {}
+        selections.append({part["part_id"]: part for part in manifest.get("parts", [])})
+    old, new = selections
+    if old or new:
+        result["assembly"] = {
+            "added": sorted(new.keys() - old.keys()),
+            "removed": sorted(old.keys() - new.keys()),
+            "changed": [
+                {"part_id": key, "before": old[key], "after": new[key]}
+                for key in sorted(old.keys() & new.keys())
+                if old[key] != new[key]
+            ],
+        }
+    return result
