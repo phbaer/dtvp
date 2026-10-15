@@ -2,7 +2,9 @@
 
 Start with [README](../README.md). The production runtime has PostgreSQL 18,
 the API/UI and one durable worker. No external source is mandatory. Artifacts
-are stored locally; database rows own inventory, metadata and decisions.
+are stored locally. V2 database rows own its inventory, metadata and decisions.
+Native v3 knowledge lives in the immutable local journal; SQL holds rebuildable
+projections. Accounts, permissions, connectors and operational jobs remain SQL-owned.
 
 ## Configuration
 
@@ -62,6 +64,35 @@ consumer snapshots, credentials and denied cross-team access with DTVP. Change
 the database URL only after validation. Until new writes start, reverting to the
 old URL restores the old cluster. After new writes, rollback requires reconciling
 those changes; never assume switching URLs preserves them.
+
+## Native journal recovery
+
+Back up the complete artifact volume together with a consistent operational SQL
+backup. Stop API/worker writers or use a consistent filesystem snapshot; copying a
+live directory piecemeal is not a qualified backup. Preserve `knowledge/FORMAT`,
+`HEAD`, all objects and file permissions. An older journal backup paired with newer
+SQL projections must be explicitly rebuilt before serving. Journal recovery alone
+does not reconstruct accounts, permissions, connector credentials or jobs.
+
+Verify a restored candidate before pointing an application at it:
+
+```bash
+uv run dtvp verify-knowledge --directory /restore/artifacts/knowledge
+```
+
+This requires an existing journal, opens no SQL connection and initializes no
+missing directory. It pins HEAD, checks the full publication/reference chain and
+every committed state, parent, section, record and retained artifact. Uncommitted
+orphan files are excluded. Output reports the verified head, publication/state
+counts and unique referenced object bytes; these are integrity diagnostics, not
+publisher authenticity, complete filesystem size or validation of evidence claims.
+A corrupt/missing committed object fails the command; no repair or deletion occurs.
+
+After restoring SQL and configuring the candidate artifact path, run `uv run dtvp
+rebuild-knowledge` to replace only native projections. Check project permissions,
+consumer hashes, tags and active branch coverage before reopening writes. Keep the
+original backup unchanged. Cross-version serializer compatibility and operational
+restore qualification remain release acceptance work.
 
 ## Legacy migration
 

@@ -19,6 +19,8 @@ def main():
     sub.add_parser("worker")
     sub.add_parser("migrate")
     sub.add_parser("rebuild-knowledge", help="Rebuild only v3 projections from the local journal")
+    verify = sub.add_parser("verify-knowledge", help="Verify committed journal history without SQL")
+    verify.add_argument("--directory", required=True, help="Existing knowledge journal directory")
     from dtvp.knowledge.client import configure
 
     configure(sub)
@@ -27,6 +29,21 @@ def main():
     bootstrap.add_argument("--subject", required=True)
     bootstrap.add_argument("--name", required=True)
     args = parser.parse_args()
+    if args.command == "verify-knowledge":
+        import json
+        from pathlib import Path
+
+        from dtvp.knowledge.journal import CorruptJournal, Journal
+        from dtvp.knowledge.verification import verify_journal
+
+        directory = Path(args.directory)
+        if not (directory / "FORMAT").is_file() or not (directory / "HEAD").is_file():
+            parser.exit(1, "Existing journal FORMAT and HEAD are required; nothing initialized.\n")
+        try:
+            print(json.dumps(verify_journal(Journal(directory))))
+        except (CorruptJournal, ValueError, OSError) as error:
+            parser.exit(1, f"{error}\n")
+        return
     if args.command == "knowledge":
         from dtvp.knowledge.client import run as knowledge_client
 

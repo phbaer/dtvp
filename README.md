@@ -230,6 +230,14 @@ for absent findings by default, with optional recorded `team_id`, `absent_only`,
 Recorded team labels/targets are preserved across reassignment; these records are
 historical evidence, not current approvals or proof of remediation.
 
+### Offline journal verification
+
+`uv run dtvp verify-knowledge --directory /path/to/artifacts/knowledge` verifies an
+existing committed journal without SQL: publication/reference chain, all historical
+states/parents and retained objects. It reports the pinned head and checked counts,
+fails on corruption and performs no repair. Uncommitted orphan files are excluded.
+Operational SQL data still requires its own backup; see [recovery](docs/deployment.md#native-journal-recovery).
+
 ### Retention maintenance preview
 
 `GET /api/v3/projects/{id}/maintenance/retention-preview` requires project management.
