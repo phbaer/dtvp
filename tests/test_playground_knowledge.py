@@ -7,6 +7,9 @@ from dtvp.api_playground_knowledge import PROJECT_NAME, VERSIONS, document
 from dtvp.config import Settings
 from dtvp.knowledge.journal import Ref
 from dtvp.main import create_app
+from tests.test_knowledge_api import app as knowledge_app
+
+app = knowledge_app
 
 PATH = "/api/v3/playground/knowledge/seed"
 
@@ -165,3 +168,82 @@ def test_production_has_no_demo_seed_route(tmp_path):
         assert client.post(PATH, json={}).status_code == 404
     finally:
         client.close()
+
+
+def test_specialist_scenario_has_native_inputs_proposals_and_license_example(analyst, app):
+    from dtvp.api_playground_knowledge import SPECIALIST_PROJECT_NAME
+    from dtvp.knowledge.agentyzer import derive_analysis_input
+    from dtvp.knowledge.licenses import license_worklist
+    from dtvp.knowledge.vscorer import derive_context_inputs
+
+    ordinary = seed(analyst)
+    original_refs = app.state.knowledge.references()
+    response = analyst.post(PATH, json={"scenario": "specialists"})
+    assert response.status_code == 200, response.text
+    demo = response.json()
+    assert demo["project_name"] == SPECIALIST_PROJECT_NAME
+    assert demo["project_id"] != ordinary["project_id"]
+    current = workspace(analyst, demo)
+    row = next(
+        item
+        for item in current["items"]
+        if item["context"]["root_ref"] == "platform-app"
+        and item["component"]["name"] == "shared-tls"
+    )
+    analysis = derive_analysis_input(
+        app.state.knowledge, current["state"], row["context_id"], row["vulnerability_id"]
+    )
+    assert analysis["ready_to_submit"]
+    assert analysis["receipt"]["analysis_source"]["repository_name"] == "synthetic-workflow"
+    assert analysis["receipt"]["build_binding_verified"] is False
+    scoring = derive_context_inputs(
+        app.state.knowledge,
+        current["state"],
+        row["context_id"],
+        "shared-tls",
+        {row["vulnerability_id"]: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+    )
+    assert scoring["eligible"]
+    assert row["coverage"]["status"] == "approved"
+    proposal = row["scoring_proposals"][0]
+    assert proposal["current"] and proposal["eligible"]
+    assert proposal["provider_authenticity"] == "caller_asserted_not_verified"
+    assert row["published_score"] is None
+    evidence = row["code_analysis"][0]
+    assert evidence["current"] and not evidence["application_eligible"]
+    assert not evidence["rescoring_eligible"]
+    assert evidence["build_binding_verified"] is False
+    assert "Synthetic" in evidence["source_label"]
+    licenses = license_worklist(app.state.knowledge, current["state"])
+    tls = next(item for item in licenses["items"] if item["component_ref"] == "shared-tls")
+    assert tls["evidence"]["status"] == "reported"
+    assert tls["license_review"]["status"] == "submitted"
+    assert not tls["license_review"]["approved"]
+    for key, value in original_refs.items():
+        assert app.state.knowledge.references()[key] == value
+    login(analyst, "operations")
+    unassessed = next(
+        item for item in current["items"] if item["coverage"]["status"] == "unassessed"
+    )
+    saved = analyst.post(
+        f"/api/v3/projects/{demo['project_id']}/assessments/specialist-interactive/draft",
+        json={
+            "request_id": "specialist-interactive",
+            "expected_versions": {demo["version"]: current["state"]},
+            "expected_revision": None,
+            "targets": [
+                {
+                    "version": demo["version"],
+                    "context_id": unassessed["context_id"],
+                    "vulnerability_id": unassessed["vulnerability_id"],
+                }
+            ],
+            "state": "under_investigation",
+            "rationale": "Preserve this interactive specialist workspace edit.",
+        },
+    )
+    assert saved.status_code == 201, saved.text
+    refs = app.state.knowledge.references()
+    again = analyst.post(PATH, json={"scenario": "specialists"})
+    assert again.status_code == 200 and again.json()["preserved_existing"]
+    assert app.state.knowledge.references() == refs

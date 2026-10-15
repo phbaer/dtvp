@@ -21,7 +21,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
     const url = new URL(route.request().url()), path = url.pathname
     if (route.request().method() === 'POST') {
       writes.push({ path, body: route.request().postDataJSON() })
-      if (path.endsWith('/playground/knowledge/seed')) return route.fulfill({ json: { project_id: 'p', project_name: 'Test Product', version: '7.1.2', synthetic: true } })
+      if (path.endsWith('/playground/knowledge/seed')) return route.fulfill({ json: route.request().postDataJSON().scenario === 'specialists' ? { project_id: 'specialist-demo', project_name: 'Specialist Test Product', version: '7.2.0', synthetic: true } : { project_id: 'p', project_name: 'Test Product', version: '7.1.2', synthetic: true } })
       if (uncertain) { uncertain = false; return route.fulfill({ status: 503, json: { detail: 'Publication uncertain; retry the same request.' } }) }
       if (path.endsWith('/scoring/preview')) {
         const body = route.request().postDataJSON()
@@ -34,7 +34,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
     else if (path === '/api/v2/playground/personas') result = []
     else if (path === '/api/v2/catalog/projects') result = { items: [{ id: 'p', name: 'Test Product', workspace_id: 'security', capabilities: ['read'] }, ...(displayTeam ? [{ id: 'other', name: 'Other Product', workspace_id: 'security', capabilities: ['read'] }] : [])], next_cursor: null }
     else if (path === '/api/v2/projects/p') result = { id: 'p', name: 'Test Product', workspace_id: 'security', capabilities: ['read'] }
-    else if (path.endsWith('/versions')) result = { items: [{ version: '7.1.2', state: 'baseline-sha' }] }
+    else if (path.endsWith('/versions')) result = { items: [{ version: path.includes('/projects/specialist-demo/') ? '7.2.0' : '7.1.2', state: 'baseline-sha' }] }
     else if (path.endsWith('/workspace')) {
       workspaceQueries.push(new URLSearchParams(url.search))
       const empty = displayTeam && (url.searchParams.get('q') === 'no matching findings' || path.includes('/projects/other/'))
@@ -169,7 +169,17 @@ test('playground explicitly loads an isolated populated workflow demo', async ({
   await expect(page.getByRole('status')).toContainText('Synthetic workflow demo loaded')
   await expect(page.getByRole('button', { name: 'CVE-2099-1234', exact: true })).toBeVisible()
   expect(fixtureState.writes).toHaveLength(1)
-  expect(fixtureState.writes[0]).toMatchObject({ path: '/api/v3/playground/knowledge/seed', body: {} })
+  expect(fixtureState.writes[0]).toMatchObject({ path: '/api/v3/playground/knowledge/seed', body: { scenario: 'workflow' } })
+})
+
+test('specialist playground scenario is explicit and selects its separate seeded product', async ({ page }) => {
+  const state = await fixture(page, false, false, true)
+  await page.getByRole('button', { name: 'Load specialist demo', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('Synthetic specialist demo loaded')
+  await expect(page.getByRole('button', { name: 'Knowledge product Specialist Test Product', exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Version 7.2.0', exact: false })).toBeVisible()
+  expect(state.writes).toHaveLength(1)
+  expect(state.writes[0]).toMatchObject({ path: '/api/v3/playground/knowledge/seed', body: { scenario: 'specialists' } })
 })
 
 

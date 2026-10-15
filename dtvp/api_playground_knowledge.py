@@ -9,6 +9,7 @@ import copy
 import fcntl
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
@@ -34,6 +35,8 @@ from dtvp.storage import canonical, digest
 router = APIRouter(prefix="/api/v3/playground/knowledge")
 PROJECT_NAME = "Knowledge Workflow Playground"
 FIXTURE = "knowledge-workflow/1"
+SPECIALIST_PROJECT_NAME = "Knowledge Specialist Playground"
+SPECIALIST_FIXTURE = "knowledge-specialists/1"
 VERSIONS = ("7.1.1", "7.1.2")
 VECTOR = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
 
@@ -92,8 +95,10 @@ def document(version):
     }
 
 
-def fixture_users(db):
+def fixture_users(db, *, specialists=False):
     subjects = ("administrator", "analyst", "reviewer", "operations", "operations-reviewer")
+    if specialists:
+        subjects = (*subjects, "license-analyst")
     users = {
         user.subject: user
         for user in db.scalars(
@@ -125,7 +130,26 @@ def authorize_fixture(db, project, user):
     return authorize
 
 
-def build_fixture(journal, db, project, users, teams):
+def build_fixture(journal, db, project, users, teams, *, specialists=False):
+    def fixture_document(version):
+        value = document(version)
+        if specialists:
+            value["components"][2]["licenses"] = [{"license": {"id": "MIT"}}]
+            value["components"][2]["properties"] = [
+                {"name": "vscorer:threat-model-element-ids", "value": "synthetic-tls-boundary"}
+            ]
+            value["components"][3]["licenses"] = [{"expression": "Apache-2.0"}]
+        return value
+
+    qualified = (
+        {
+            "analysis_source": {"repository_name": "synthetic-workflow", "source_commit": "a" * 40},
+            "subject_digest": "sha256:" + "b" * 64,
+        }
+        if specialists
+        else {}
+    )
+
     admin = users["administrator"].id
     for version in VERSIONS:
         import_inventory(
@@ -138,8 +162,9 @@ def build_fixture(journal, db, project, users, teams):
             source="playground:knowledge-workflow",
             build_number=1,
             occurred_at="2026-01-01T00:00:00+00:00",
-            sbom=document(version),
+            sbom=fixture_document(version),
             context={
+                **qualified,
                 "subject_kind": "build",
                 "configuration": "synthetic",
                 "pipeline_run": "fixture-1",
@@ -269,7 +294,7 @@ def build_fixture(journal, db, project, users, teams):
         state=head(VERSIONS[1]),
         request_id="fixture-historical-tag",
     )
-    changed = copy.deepcopy(document(VERSIONS[1]))
+    changed = copy.deepcopy(fixture_document(VERSIONS[1]))
     changed["vulnerabilities"][1]["description"] += (
         " Updated supplier evidence identifies another potentially reachable entry point; reassessment is required."
     )
@@ -285,6 +310,7 @@ def build_fixture(journal, db, project, users, teams):
         occurred_at="2026-01-02T00:00:00+00:00",
         sbom=changed,
         context={
+            **qualified,
             "subject_kind": "build",
             "configuration": "synthetic",
             "pipeline_run": "fixture-2",
@@ -297,8 +323,134 @@ def build_fixture(journal, db, project, users, teams):
     )
 
 
+def build_specialist_evidence(journal, db, project, users):
+    """Synthetic reports exercise real contracts, never external integrations."""
+    from dtvp.knowledge.agentyzer import derive_analysis_input
+    from dtvp.knowledge.agentyzer_results import AgentyzerResultInput, import_agentyzer_result
+    from dtvp.knowledge.license_reviews import LicenseInput, save_license
+    from dtvp.knowledge.proposals import VScorerProposalInput, import_vscorer_proposal
+    from dtvp.knowledge.vscorer import derive_context_inputs
+    from dtvp.rescoring import calculate
+
+    version = VERSIONS[1]
+    identifier = "CVE-2099-31001"
+    actor = users["analyst"]
+
+    def head():
+        return journal.resolve(Ref(project_id=project.id, name=version))
+
+    context = next(
+        value
+        for key, value in load_sections(journal, head())["ownership"].items()
+        if key.startswith("context:")
+        and value["root_ref"] == "platform-app"
+        and value["component_ref"] == "shared-tls"
+    )
+    license_actor = users["license-analyst"]
+    save_license(
+        journal,
+        project_id=project.id,
+        version=version,
+        actor_id=license_actor.id,
+        data=LicenseInput(
+            request_id="synthetic-license-disposition",
+            expected=head(),
+            expected_revision=None,
+            component_ref="shared-tls",
+            concluded_expression="MIT",
+            disposition="allowed",
+            obligations=["Synthetic example: retain the copyright and license notice."],
+            distribution="Synthetic example distribution only",
+            modification="Unmodified example",
+            linking="Synthetic dynamic linking assumption",
+            rationale="Demonstration judgment only; no real legal clearance or compliance conclusion.",
+            provenance={"source": "synthetic-playground"},
+            evidence=[
+                {
+                    "source": "synthetic-playground",
+                    "description": "Invented MIT evidence for interaction testing.",
+                }
+            ],
+        ),
+        submit=True,
+        authorize=lambda capability: authorize_fixture(db, project, license_actor)(
+            project.workspace_id, capability
+        ),
+    )
+    derived = derive_context_inputs(
+        journal, head(), context["id"], "shared-tls", {identifier: VECTOR}
+    )
+    receipt = derived["dtvp_source"]
+    binding = {
+        "receipt": receipt,
+        "receipt_sha256": digest(canonical(receipt)),
+        "verification": "artifact_scope_and_base_consistency",
+        "remote_authenticity": "not_verified",
+    }
+    fragment = {key: value for key, value in receipt.items() if key != "selected_source_base"} | {
+        "selected_source_base": receipt["selected_source_base"],
+        "receipt_sha256": binding["receipt_sha256"],
+        "verification": binding["verification"],
+        "remote_authenticity": "not_verified",
+    }
+    contextual = VECTOR + "/CR:L/IR:L/AR:L/MAV:P/MAC:H/MPR:H/MUI:R/MS:U/MC:N/MI:N/MA:N"
+    import_vscorer_proposal(
+        journal,
+        project_id=project.id,
+        version=version,
+        actor_id=actor.id,
+        data=VScorerProposalInput(
+            request_id="synthetic-vscorer-proposal",
+            expected=head(),
+            source_binding=binding,
+            source_label="Synthetic VScorer playground",
+            finding={
+                "id": "synthetic-vscorer-finding",
+                "cve_id": identifier,
+                "state": "pending",
+                "source_facts": {
+                    "dtvp_source": fragment,
+                    "base_vector": VECTOR,
+                    "base_score": 9.8,
+                    "components": [{"bom_ref": "shared-tls"}],
+                },
+                "preview": {
+                    "environmental_vector": contextual,
+                    "environmental_score": calculate(VECTOR, contextual)["score"],
+                    "environmental_approval_allowed": True,
+                    "approval_blockers": [],
+                },
+                "rationale": "Synthetic threat-model proposal; no external VScorer call or verified provider.",
+            },
+        ),
+    )
+    analysis = derive_analysis_input(journal, head(), context["id"], identifier)
+    import_agentyzer_result(
+        journal,
+        project_id=project.id,
+        version=version,
+        actor_id=actor.id,
+        data=AgentyzerResultInput(
+            request_id="synthetic-agentyzer-evidence",
+            expected=head(),
+            input_receipt=analysis["receipt"],
+            source_label="Synthetic Agentyzer playground",
+            raw_report={
+                "assessment": {
+                    "affected": None,
+                    "confidence": "Low",
+                    "summary": "Synthetic source-analysis example, not an actual repository analysis.",
+                    "reasoning": "No external call, code scan, provider verification or binary/build verification occurred.",
+                    "application_eligible": False,
+                    "rescoring_eligible": False,
+                }
+            },
+        ),
+    )
+
+
 class SeedInput(RequestModel):
-    pass
+    scenario: Literal["workflow", "specialists"] = "workflow"
 
 
 @router.post("/seed")
@@ -306,22 +458,25 @@ def seed_knowledge(data: SeedInput, request: Request, db: DB, actor: Auth):
     if not request.app.state.settings.playground:
         raise HTTPException(404)
     journal = request.app.state.knowledge
+    specialists = data.scenario == "specialists"
+    project_name = SPECIALIST_PROJECT_NAME if specialists else PROJECT_NAME
+    fixture = SPECIALIST_FIXTURE if specialists else FIXTURE
     # Separate from the journal writer lock: domain services acquire that lock.
     with (journal.root / "playground-seed.lock").open("a+b") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        users, teams = fixture_users(db)
+        users, teams = fixture_users(db, specialists=specialists)
         project = db.scalar(
             select(Project).where(
-                Project.workspace_id == teams["Platform"], Project.name == PROJECT_NAME
+                Project.workspace_id == teams["Platform"], Project.name == project_name
             )
         )
-        if project and project.metadata_json.get("playground_fixture") != FIXTURE:
+        if project and project.metadata_json.get("playground_fixture") != fixture:
             raise HTTPException(409, "A non-fixture project already uses the demo name")
         if not project:
             project = Project(
                 workspace_id=teams["Platform"],
-                name=PROJECT_NAME,
-                metadata_json={"playground_fixture": FIXTURE, "synthetic": True},
+                name=project_name,
+                metadata_json={"playground_fixture": fixture, "synthetic": True},
             )
             db.add(project)
             db.flush()
@@ -339,7 +494,9 @@ def seed_knowledge(data: SeedInput, request: Request, db: DB, actor: Auth):
         if not current:
             with TemporaryDirectory(prefix="knowledge-fixture-", dir=journal.root) as folder:
                 staging = Journal(Path(folder))
-                build_fixture(staging, db, project, users, teams)
+                build_fixture(staging, db, project, users, teams, specialists=specialists)
+                if specialists:
+                    build_specialist_evidence(staging, db, project, users)
                 refs = staging.references()
                 for path in staging.objects.root.glob("*/*"):
                     journal.objects.put(staging.objects.read(path.parent.name + path.name))
@@ -349,7 +506,7 @@ def seed_knowledge(data: SeedInput, request: Request, db: DB, actor: Auth):
                 ]
                 try:
                     journal.publish(
-                        request_id=digest(canonical([FIXTURE, project.id])),
+                        request_id=digest(canonical([fixture, project.id])),
                         fingerprint=digest(canonical(refs)),
                         updates=updates,
                     )
@@ -362,5 +519,6 @@ def seed_knowledge(data: SeedInput, request: Request, db: DB, actor: Auth):
         "project_name": project.name,
         "version": VERSIONS[1] if VERSIONS[1] in current else sorted(current)[-1],
         "synthetic": True,
+        "scenario": data.scenario,
         "preserved_existing": preserved_existing,
     }

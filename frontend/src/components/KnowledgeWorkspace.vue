@@ -76,14 +76,14 @@ async function chooseProject(option: { id: string; name?: string }, preferredVer
   } catch (err) { if (current === sequence) fail(err) }
   finally { if (current === sequence) busy.value = false }
 }
-async function seedDemo() {
+async function seedDemo(scenario: 'workflow' | 'specialists' = 'workflow') {
   busy.value = true; error.value = ''; notice.value = ''
   try {
-    const result = await knowledgeApi<{ project_id: string; project_name: string; version: string }>('/playground/knowledge/seed', send({}))
+    const result = await knowledgeApi<{ project_id: string; project_name: string; version: string }>('/playground/knowledge/seed', send({ scenario }))
     project.value = result.project_id
     await chooseProject({ id: result.project_id, name: result.project_name })
     if (version.value !== result.version) { version.value = result.version; await load() }
-    if (!error.value) notice.value = 'Synthetic workflow demo loaded. Existing interactive work is retained.'
+    if (!error.value) notice.value = `Synthetic ${scenario === 'specialists' ? 'specialist' : 'workflow'} demo loaded. Existing interactive work is retained.`
   } catch (err) { fail(err) }
   finally { busy.value = false }
 }
@@ -216,7 +216,7 @@ onBeforeUnmount(() => { ++sequence; ++versionSequence; clearTimeout(timer); clea
 </script>
 <template>
   <section class="knowledge-workspace" aria-label="Knowledge workspace">
-    <header class="knowledge-heading"><div><h1>Contextual review</h1><p class="hint">Product version · consuming context · responsible team</p></div><div class="knowledge-actions"><button v-if="me.playground" :disabled="busy" @click="seedDemo">Load workflow demo</button><button :disabled="busy || !version" @click="load()">Refresh workspace</button></div></header>
+    <header class="knowledge-heading"><div><h1>Contextual review</h1><p class="hint">Product version · consuming context · responsible team</p></div><div class="knowledge-actions"><button v-if="me.playground" :disabled="busy" @click="seedDemo()">Load workflow demo</button><button v-if="me.playground" :disabled="busy" @click="seedDemo('specialists')">Load specialist demo</button><button :disabled="busy || !version" @click="load()">Refresh workspace</button></div></header>
     <form class="knowledge-filters" @submit.prevent="load()">
       <SearchSelect v-model="project" label="Knowledge product" :selected-label="projectName" endpoint="/catalog/projects" :disabled="busy" @select="chooseProject" />
       <div class="search-select" @keydown.esc="versionMenu = false"><span class="field-label" id="knowledge-version-label">Version</span><button type="button" :disabled="busy || !project" aria-labelledby="knowledge-version-label knowledge-version-value" :aria-expanded="versionMenu" aria-haspopup="listbox" @click="versionMenu = !versionMenu"><span id="knowledge-version-value">{{ version || 'Select…' }}</span><span aria-hidden="true">⌄</span></button><div v-if="versionMenu" class="select-menu"><input v-model="versionQuery" type="search" aria-label="Search versions" placeholder="Search versions" @input="searchVersions"><div role="listbox" aria-label="Version"><button v-for="item in versions" :key="item.version" type="button" role="option" :aria-selected="version === item.version" @click="chooseVersion(item.version)">{{ item.version }}</button></div><p v-if="versionBusy" role="status">Searching…</p><p v-else-if="!versions.length">No matching versions.</p><button v-if="versionNext != null" type="button" :disabled="versionBusy" @click="loadVersions(true)">More versions</button></div></div>

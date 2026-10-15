@@ -417,6 +417,13 @@ loads preserve interactive work and other project policies. Seeding uses the rea
 domain services and publishes the complete fixture atomically. The seed endpoint
 is absent in production; no third-party service is contacted.
 
+**Load specialist demo** creates a separate synthetic project with qualified native
+input examples, a computationally eligible VScorer proposal, explicitly ineligible
+Agentyzer evidence and a submitted license disposition. These exercise comparison
+and human review without claiming a real source scan or granting approval. Both
+scenarios preserve interactive changes on repeated loads. API callers select it
+with `POST /api/v3/playground/knowledge/seed {"scenario":"specialists"}`.
+
 ### Internal CPE proposals and VScorer inputs
 
 CPE discovery now has an internal offline module. `GET/PUT
