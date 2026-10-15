@@ -7,7 +7,6 @@ from pathlib import Path
 
 import httpx
 
-
 WORKSPACE_FILTERS = (
     "source_severity",
     "contextual_severity",
@@ -38,6 +37,17 @@ def configure(parser):
     workspace.add_argument("--offset", type=int, default=0)
     workspace.add_argument("--limit", type=int, default=50)
     workspace.add_argument("--json", action="store_true")
+    for name in ("refs", "history", "compare"):
+        resource = commands.add_parser(name, help="Read pinned product " + name)
+        resource.add_argument("--project", required=True)
+        resource.add_argument("--offset", type=int, default=0)
+        resource.add_argument("--limit", type=int, default=50)
+        resource.add_argument("--json", action="store_true")
+        if name == "history":
+            resource.add_argument("--version", default="")
+        if name == "compare":
+            resource.add_argument("--before", required=True)
+            resource.add_argument("--after", required=True)
     request = commands.add_parser("request", help="Read or mutate API resources using JSON")
     request.add_argument("method", choices=["GET", "POST", "PUT"])
     request.add_argument("path", help="Absolute /api/v3/ path; query parameters supported")
@@ -108,7 +118,36 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
-        if args.knowledge_command == "workspace":
+        if args.knowledge_command in {"refs", "history", "compare"}:
+            from urllib.parse import quote
+
+            suffix = (
+                "compare/details" if args.knowledge_command == "compare" else args.knowledge_command
+            )
+            path = f"/api/v3/projects/{quote(args.project, safe='')}/{suffix}"
+            params = {"offset": args.offset, "limit": args.limit}
+            if args.knowledge_command == "history" and args.version:
+                params["version"] = args.version
+            if args.knowledge_command == "compare":
+                params.update(before=args.before, after=args.after)
+            result = read_response(client.get(path, params=params))
+            if not args.json:
+                print(f"Total: {result['total']}")
+                for row in result["items"]:
+                    if args.knowledge_command == "compare":
+                        print(
+                            f"{row['category']} {row['key']}: {', '.join(row['classifications'])}"
+                        )
+                    else:
+                        print(
+                            f"{row.get('kind', 'state')} {row.get('name', row.get('version'))} {row['state']}"
+                        )
+                for limitation in result.get("limitations", []):
+                    print("Limit: " + limitation)
+                if result.get("next_offset") is not None:
+                    print(f"Next offset: {result['next_offset']}")
+                return
+        elif args.knowledge_command == "workspace":
             from urllib.parse import quote
 
             path = f"/api/v3/projects/{quote(args.project, safe='')}/versions/{quote(args.version, safe='')}/workspace"

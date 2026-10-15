@@ -146,3 +146,44 @@ def test_workspace_cli_forwards_advanced_filters_and_keeps_server_totals(monkeyp
     assert params["dependency"] == "transitive"
     assert params["provider"] == "Supplier"
     assert "Context findings: 79" in capsys.readouterr().out
+
+
+@respx.mock
+def test_compare_cli_uses_pinned_server_diff_and_full_count(monkeypatch, capsys):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            "compare",
+            "--project",
+            "p",
+            "--before",
+            "a" * 64,
+            "--after",
+            "b" * 64,
+            "--limit",
+            "1",
+        ],
+    )
+    route = respx.get("http://dtvp.test/api/v3/projects/p/compare/details").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total": 79,
+                "items": [{"category": "component", "key": "tls", "classifications": ["material"]}],
+                "next_offset": 1,
+                "limitations": ["Exact source-local identity only."],
+            },
+        )
+    )
+    main()
+    assert route.calls[0].request.url.params["before"] == "a" * 64
+    output = capsys.readouterr().out
+    assert "Total: 79" in output
+    assert "component tls: material" in output
+    assert "Next offset: 1" in output

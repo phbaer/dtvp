@@ -208,6 +208,25 @@ Displayed totals always come from the server's complete filtered selection.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Historical state comparison
+
+`GET /api/v3/projects/{id}/refs` lists product branches and immutable tags.
+`GET .../history?version=7.1.1` lists reachable product revisions. Both paginate
+with `offset`/`limit`; configuration and constituent-source states are excluded.
+`GET .../compare/details?before=SHA&after=SHA` returns bounded component,
+dependency and contextual-finding changes with full-set counts. Classifications
+separate material evidence, bookkeeping, ownership, assessment, review and scoring.
+Retained absent assessments stay visible. Comparisons read immutable journal
+states without loading historical data into live PostgreSQL tables. Current
+intelligence reevaluation and comparison caches remain planned. Exact source-local
+references determine identity: changed references appear as remove/add, never a
+name-based match or proof of remediation.
+
+The HTTP CLI exposes `knowledge refs`, `knowledge history` and
+`knowledge compare --project ID --before SHA --after SHA`, with `--json`,
+`--offset` and `--limit`. The Knowledge tab offers the same comparison within the
+selected product, with compact before/after details.
+
 ### Knowledge workspace and interactive demo
 
 The Knowledge tab provides searchable product/version selectors, team/state/text
