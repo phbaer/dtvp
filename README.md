@@ -460,6 +460,11 @@ uv run python scripts/playground.py logs
 Set `DTVP_PLAYGROUND_PORT` to change the port. After the initial image build,
 `up --skip-build` works offline. Production `.env` is not read by Compose here.
 Uploads/edits remain interactive; test fixtures live in `playground/fixtures/`.
+The legacy UI reset only resets SQL fixtures while the knowledge journal is empty.
+Once any journal-backed knowledge exists, it returns 409 without changing data or
+identities. Use the explicit volume-reset command above for a full playground reset;
+it removes both the isolated journal and its database.
+
 `uv run python scripts/playground.py test` uses disposable application/database
 volumes and a separate local port. Browser fixture resets preserve the interactive
 playground and its large inventory.

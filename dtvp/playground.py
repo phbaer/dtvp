@@ -172,9 +172,24 @@ def reset(request: Request, db: DB, actor: Auth):
     if not request.app.state.settings.playground:
         raise HTTPException(404)
     require_admin(actor)
-    for table in reversed(Base.metadata.sorted_tables):
-        db.execute(table.delete())
-    seed(db, request.app.state.artifacts)
+    journal = request.app.state.knowledge
+    with journal.writer():
+        if journal.head() is not None:
+            # Recreating users/projects would orphan immutable journal subjects,
+            # even if their projection rows were kept. Never partially reset it.
+            raise HTTPException(
+                409,
+                "This playground contains journal-backed knowledge. SQL-only reset "
+                "would orphan its project/team identities. Nothing was reset; use "
+                "the explicit isolated playground volume reset for a full reset.",
+            )
+        for table in reversed(Base.metadata.sorted_tables):
+            if not table.name.startswith("knowledge_"):
+                db.execute(table.delete())
+        seed(db, request.app.state.artifacts)
+        # Keep the empty journal/projection checkpoint coherent, and complete the
+        # legacy fixture transaction before another journal publication proceeds.
+        db.commit()
     return {"status": "reset", "sign_in_required": True}
 
 
