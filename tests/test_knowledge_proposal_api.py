@@ -65,3 +65,6 @@ def test_vscorer_roundtrip_is_comparable_without_approval(analyst, bom):
     assert proposal["proposal"]["base_score"] == 9.8
     assert proposal["proposal"]["score"] == calculate(BASE, VECTOR)["score"]
     assert proposal["score_input"]["base_vector"] == BASE
+    selected = workspace(analyst, project_id, provider="vscorer")
+    assert [item["id"] for item in selected["items"]] == [row["id"]]
+    assert selected["statistics"]["context_findings"] == 1

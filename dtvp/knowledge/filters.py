@@ -171,6 +171,11 @@ def provider_names(row):
     for fact in row.get("sourcefacts", []):
         add(fact.get("source"))
         add(fact.get("advisory", {}).get("source"))
+    for proposal in row.get("scoring_proposals", []):
+        add(proposal.get("provider"))
+        add(proposal.get("source_label"))
+    for claim in row.get("legacy_evidence", []):
+        add(claim.get("source"))
     return names
 
 

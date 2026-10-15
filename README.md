@@ -172,7 +172,8 @@ Advanced filters cover `source_severity`, `contextual_severity`, `applicability`
 `scoring_status`, `team_review`, `provider`, `cvss_version`, `dependency`,
 `source_conflict` and `component`. They apply before statistics and pagination.
 Missing evidence stays unknown; outdated contextual scores do not match current
-severity. Provider attribution does not prove independent corroboration. Dependency
+severity. Provider filters include received scoring proposals without assuming
+eligibility. Provider attribution does not prove independent corroboration. Dependency
 filters use reported topology, and contradictory source ratings compare like CVSS
 versions. The Knowledge tab collapses these options by default, with explicit
 Apply/Reset, shareable scoped URLs and user-local saved views.

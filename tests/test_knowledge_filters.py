@@ -244,3 +244,14 @@ def test_malformed_method_and_missing_approved_revision_stay_unknown():
         "assessment": {"payload": {"state": "not_affected"}},
     }
     assert matches(item, applicability="unknown")
+
+
+def test_provider_filter_includes_received_proposals_without_claiming_eligibility():
+    item = row(
+        scoring_proposals=[
+            {"provider": "vscorer", "source_label": "Threat model", "eligible": False}
+        ]
+    )
+    assert matches(item, provider="VScorer")
+    assert matches(item, provider="Threat model")
+    assert not matches(item, provider="Threat")
