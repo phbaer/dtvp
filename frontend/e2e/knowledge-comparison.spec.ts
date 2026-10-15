@@ -6,6 +6,12 @@ async function fixture(page: Page) {
   let fail = false
   await page.route('**/api/**', async route => {
     const request = route.request(), target = new URL(request.url()), path = target.pathname
+    if (path.endsWith('/synchronization/preview')) {
+      mutations.push(path)
+      const body = request.postDataJSON(), next = target.searchParams.get('offset') === '20'
+      expect(body).toEqual({ source: before, target: after })
+      return route.fulfill({ json: { preview_digest: 'd'.repeat(64), mode: 'two_state', total: 31, next_offset: next ? null : 20, items: [{ id: next ? 'two' : 'one', vulnerability_id: 'CVE-2099-1234', category: 'reusable_content', reasons: ['new_target_review_required'], requires_new_target_review: true }], limitations: ['No software merge is verified.'] } })
+    }
     if (request.method() !== 'GET') { mutations.push(path); return route.fulfill({ json: {} }) }
     let result: unknown = { items: [], next_cursor: null }
     if (path === '/api/v2/me') result = { id: 'reader', name: 'Reader', org_admin: false, playground: false, agentyzer: { enabled: false, mode: 'disabled' }, workspaces: [] }
@@ -97,4 +103,20 @@ test('comparison failures stay visible without inventing changes or overflowing 
   const bounds = await comparison.boundingBox()
   expect(bounds?.width).toBeLessThanOrEqual(390)
   await expect(comparison.getByRole('combobox', { name: 'Before state', exact: true })).toBeVisible()
+})
+
+
+test('assessment reuse is a pinned read-only preview with new target review required', async ({ page }) => {
+  const state = await fixture(page)
+  await page.getByText('Compare versions and history', { exact: true }).click()
+  await page.getByText('Assessment reuse between selected states', { exact: true }).click()
+  await page.getByRole('button', { name: 'Preview assessment reuse', exact: true }).click()
+  const preview = page.getByRole('region', { name: 'Assessment reuse preview', exact: true })
+  await expect(preview).toContainText('31 candidates')
+  await preview.getByText('CVE-2099-1234 · reusable content', { exact: true }).click()
+  await expect(preview).toContainText('New target coverage requires independent review.')
+  await page.getByRole('button', { name: 'Next candidates', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Next candidates', exact: true })).toBeDisabled()
+  expect(state.mutations).toEqual(['/api/v3/projects/comparison-project/synchronization/preview', '/api/v3/projects/comparison-project/synchronization/preview'])
+  await expect(page.getByRole('button', { name: /apply|merge|approve/i })).toHaveCount(0)
 })

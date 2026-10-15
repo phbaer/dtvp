@@ -48,6 +48,16 @@ def configure(parser):
         if name == "compare":
             resource.add_argument("--before", required=True)
             resource.add_argument("--after", required=True)
+    sync = commands.add_parser(
+        "synchronization", help="Preview assessment reuse without applying changes"
+    )
+    for name in ("project", "source", "target"):
+        sync.add_argument("--" + name, required=True)
+    sync.add_argument("--basis")
+    sync.add_argument("--mapping", help="JSON file mapping exact source/target context IDs")
+    sync.add_argument("--offset", type=int, default=0)
+    sync.add_argument("--limit", type=int, default=50)
+    sync.add_argument("--json", action="store_true")
     request = commands.add_parser("request", help="Read or mutate API resources using JSON")
     request.add_argument("method", choices=["GET", "POST", "PUT"])
     request.add_argument("path", help="Absolute /api/v3/ path; query parameters supported")
@@ -132,6 +142,34 @@ def run(args):
                 raise ValueError("Use either a machine credential or a playground persona")
             read_response(client.post("/api/v2/playground/login", json={"persona": args.persona}))
             client.headers["X-CSRF-Token"] = client.cookies["dtvp_csrf"]
+        if args.knowledge_command == "synchronization":
+            from urllib.parse import quote
+
+            body = {"source": args.source, "target": args.target, "basis": args.basis}
+            if args.mapping:
+                body["context_mapping"] = json.loads(Path(args.mapping).read_text())
+            result = read_response(
+                client.post(
+                    f"/api/v3/projects/{quote(args.project, safe='')}/synchronization/preview",
+                    params={"offset": args.offset, "limit": args.limit},
+                    json=body,
+                )
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(
+                    f"Preview: {result['preview_digest']} · {result['mode']} · Total: {result['total']}"
+                )
+                for row in result["items"]:
+                    print(
+                        f"{row['category']} {row.get('vulnerability_id', 'unknown')} "
+                        f"{row.get('source_context_id', 'unknown')} -> {row.get('target_context_id', 'unknown')}"
+                    )
+                print("Read-only: target inventory and human approvals are unchanged.")
+                if result.get("next_offset") is not None:
+                    print(f"Next offset: {result['next_offset']}")
+            return
         if args.knowledge_command in {"refs", "history", "compare"}:
             from urllib.parse import quote
 

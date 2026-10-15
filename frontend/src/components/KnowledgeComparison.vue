@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { knowledgeApi } from '../knowledgeApi'
+import { send } from '../api'
 
 type Reference = { kind: 'branch' | 'tag'; name: string; state: string; version: string; created_at: string }
 type Revision = { state: string; version: string; created_at: string; reason: string; actor_id: string; parents: string[] }
 type Choice = { id: string; state: string; label: string }
 type Change = { category: string; key: string | string[]; change: string; classifications: string[]; before: Record<string, unknown> | null; after: Record<string, unknown> | null }
 type Comparison = { before: string; after: string; before_version: string; after_version: string; items: Change[]; total: number; next_offset: number | null; summary: { by_category: Record<string, number>; by_classification: Record<string, number> }; retention: { before: { retained_assessments: number; retained_absent_assessments: number }; after: { retained_assessments: number; retained_absent_assessments: number } }; limitations: string[] }
+type SyncPreview = { preview_digest: string; mode: string; total: number; next_offset: number | null; items: { id: string; category: string; vulnerability_id?: string; reasons: string[]; requires_new_target_review: boolean; [key: string]: unknown }[]; limitations: string[] }
+const synchronization = ref<SyncPreview | null>(null), syncBusy = ref(false), syncOffset = ref(0), syncPrevious = ref<number[]>([])
+let syncSequence = 0
 const props = defineProps<{ project: string }>()
 const expanded = ref(false), references = ref<Reference[]>([]), referencesNext = ref<number | null>(null)
 const before = ref(''), after = ref(''), beforeHistory = ref<Choice | null>(null), afterHistory = ref<Choice | null>(null)
@@ -21,7 +25,7 @@ const beforeState = computed(() => choices.value.find(item => item.id === before
 const afterState = computed(() => choices.value.find(item => item.id === after.value)?.state || '')
 const endpoint = () => `/projects/${encodeURIComponent(props.project)}`
 function failure(err: unknown) { error.value = err instanceof Error ? err.message : 'Comparison request failed' }
-function changed() { ++comparisonSequence; result.value = null; offset.value = 0; previous.value = []; compareBusy.value = false; error.value = '' }
+function changed() { ++syncSequence; synchronization.value = null; syncOffset.value = 0; syncPrevious.value = []; syncBusy.value = false; ++comparisonSequence; result.value = null; offset.value = 0; previous.value = []; compareBusy.value = false; error.value = '' }
 async function loadReferences(append = false) {
   if (!props.project || refsBusy.value) return
   const scope = projectSequence
@@ -74,6 +78,22 @@ async function compare(reset = true) {
   } catch (err) { if (scope === projectSequence && request === comparisonSequence) failure(err) }
   finally { if (scope === projectSequence && request === comparisonSequence) compareBusy.value = false }
 }
+async function previewSynchronization(nextOffset = 0) {
+  if (!beforeState.value || !afterState.value) return
+  const scope = projectSequence, request = ++syncSequence
+  syncBusy.value = true; error.value = ''
+  try {
+    const data = await knowledgeApi<SyncPreview>(`${endpoint()}/synchronization/preview?offset=${nextOffset}&limit=20`, send({ source: beforeState.value, target: afterState.value }))
+    if (scope === projectSequence && request === syncSequence) { synchronization.value = data; syncOffset.value = nextOffset }
+  } catch (err) { if (scope === projectSequence && request === syncSequence) failure(err) }
+  finally { if (scope === projectSequence && request === syncSequence) syncBusy.value = false }
+}
+async function syncPage(forward: boolean) {
+  if (!synchronization.value || syncBusy.value) return
+  const old = syncOffset.value
+  await previewSynchronization(forward ? synchronization.value.next_offset! : syncPrevious.value.at(-1) || 0)
+  if (syncOffset.value !== old) { if (forward) syncPrevious.value.push(old); else syncPrevious.value.pop() }
+}
 async function paginate(forward: boolean) {
   if (!result.value) return
   if (forward) { previous.value.push(offset.value); offset.value = result.value.next_offset! }
@@ -92,7 +112,7 @@ watch(() => props.project, () => {
   refsBusy.value = false; historyBusy.value = false
   if (expanded.value) void loadReferences()
 })
-onBeforeUnmount(() => { ++projectSequence; ++comparisonSequence; ++historySequence })
+onBeforeUnmount(() => { ++syncSequence; ++projectSequence; ++comparisonSequence; ++historySequence })
 </script>
 
 <template>
@@ -116,6 +136,7 @@ onBeforeUnmount(() => { ++projectSequence; ++comparisonSequence; ++historySequen
         <ul class="comparison-history-list"><li v-for="revision in history" :key="revision.state"><span><strong>{{ revision.version }}</strong> · {{ revision.reason }}<small>{{ revision.created_at }} · {{ revision.state.slice(0, 12) }}</small></span><button @click="chooseHistorical(revision, 'before')" :aria-label="`Use ${revision.version} ${revision.reason} as before`">Before</button><button @click="chooseHistorical(revision, 'after')" :aria-label="`Use ${revision.version} ${revision.reason} as after`">After</button></li></ul>
         <div class="comparison-page"><button v-if="historyNext !== null" :disabled="historyBusy" @click="loadHistory(true)">Next history page</button><button v-if="historyLoaded && history.length > 0" :disabled="historyBusy" @click="loadHistory()">Newest history</button></div>
       </details>
+      <details class="comparison-scope"><summary>Assessment reuse between selected states</summary><p class="hint">Before is the source; After is the target. This preview compares content without confirming a software merge or changing inventory, assessments or approvals.</p><button :disabled="syncBusy || refsBusy || !beforeState || !afterState" @click="syncPrevious = []; previewSynchronization()">Preview assessment reuse</button><p v-if="syncBusy" role="status">Preparing reuse preview…</p><section v-if="synchronization" aria-label="Assessment reuse preview"><strong>{{ synchronization.total }} candidates · {{ human(synchronization.mode) }}</strong><details v-for="row in synchronization.items" :key="row.id" class="comparison-row"><summary>{{ row.vulnerability_id || 'Unknown scope' }} · {{ human(row.category) }}</summary><p>{{ row.reasons.map(human).join(' · ') }}</p><p v-if="row.requires_new_target_review" class="hint">New target coverage requires independent review.</p><pre>{{ JSON.stringify(row, null, 2) }}</pre></details><nav class="comparison-page" aria-label="Assessment reuse pages"><button :disabled="syncBusy || !syncPrevious.length" @click="syncPage(false)">Previous candidates</button><button :disabled="syncBusy || synchronization.next_offset === null" @click="syncPage(true)">Next candidates</button></nav><details><summary>Reuse limitations and preview pin</summary><code>{{ synchronization.preview_digest }}</code><ul><li v-for="limit in synchronization.limitations" :key="limit">{{ limit }}</li></ul></details></section></details>
       <template v-if="result">
         <div class="comparison-summary" aria-label="Comparison totals"><strong>{{ result.total }} changes</strong><span v-for="(count, category) in result.summary.by_category" :key="category">{{ human(String(category)) }}: {{ count }}</span></div>
         <p v-if="result.total === 0" role="status">No differences between these pinned states.</p>

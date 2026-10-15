@@ -187,3 +187,54 @@ def test_compare_cli_uses_pinned_server_diff_and_full_count(monkeypatch, capsys)
     assert "Total: 79" in output
     assert "component tls: material" in output
     assert "Next offset: 1" in output
+
+
+@respx.mock
+def test_synchronization_cli_displays_server_preview_without_applying(monkeypatch, capsys):
+    monkeypatch.delenv("DTVP_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "dtvp",
+            "knowledge",
+            "--url",
+            "http://dtvp.test",
+            "synchronization",
+            "--project",
+            "p",
+            "--source",
+            "a" * 64,
+            "--target",
+            "b" * 64,
+        ],
+    )
+    route = respx.post("http://dtvp.test/api/v3/projects/p/synchronization/preview").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "preview_digest": "c" * 64,
+                "mode": "two_state",
+                "total": 31,
+                "items": [
+                    {
+                        "category": "needs_review",
+                        "vulnerability_id": "CVE-test",
+                        "source_context_id": "s",
+                        "target_context_id": "t",
+                    }
+                ],
+                "next_offset": None,
+            },
+        )
+    )
+    main()
+    assert json.loads(route.calls[0].request.content) == {
+        "source": "a" * 64,
+        "target": "b" * 64,
+        "basis": None,
+    }
+    output = capsys.readouterr().out
+    assert "Total: 31" in output
+    assert "needs_review CVE-test s -> t" in output
+    assert "Read-only" in output

@@ -16,6 +16,7 @@ from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_proposals import router as proposal_router
 from dtvp.api_rescoring import router as rescoring_router
+from dtvp.api_synchronization import router as synchronization_router
 from dtvp.api_workflow import router as workflow_router
 from dtvp.auth import authenticate, issue
 from dtvp.config import Settings
@@ -75,6 +76,7 @@ def create_app(settings=None):
     app.include_router(proposal_router)
     app.include_router(history_router)
     app.include_router(metadata_router)
+    app.include_router(synchronization_router)
     if settings.playground:
         from dtvp.api_playground_knowledge import router as knowledge_playground_router
 

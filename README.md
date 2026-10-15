@@ -282,6 +282,24 @@ The HTTP CLI exposes `knowledge refs`, `knowledge history` and
 `--offset` and `--limit`. The Knowledge tab offers the same comparison within the
 selected product, with compact before/after details.
 
+### Assessment synchronization preview
+
+`POST /api/v3/projects/{id}/synchronization/preview` takes pinned `source`, `target`,
+optional common knowledge `basis` and explicit `context_mapping`. It returns a
+bounded preview with full counts and a stable digest. No basis is invented;
+without one, comparison is explicitly two-state. A supplied basis must be a
+committed ancestor of both states. Categories distinguish reusable content,
+already-covered targets, required review, conflicting edits, absent applicability
+and unresolved scope. Exact source-local references/material evidence govern
+matching; explicit maps cannot collapse different contexts or establish equivalence.
+Target inventory, reviews and published scores remain unchanged. Knowledge ancestry
+never proves a software merge. Applying synchronization and verified pipeline merge
+provenance remain planned; extensions still use explicit assessment/review workflows.
+
+The comparison panel offers a collapsed reuse preview between selected states.
+CLI: `knowledge synchronization --project ID --source SHA --target SHA`, optionally
+`--basis SHA`, `--mapping contexts.json`, `--json`, `--offset` and `--limit`.
+
 ### Knowledge workspace and interactive demo
 
 The Knowledge tab provides searchable product/version selectors, team/state/text
