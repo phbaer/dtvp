@@ -10,14 +10,17 @@ roles. Hashes establish consistency, not publisher identity or human approval.
 - `GET /api/v3/projects/{id}/states/{state}/bundle` and `/manifest` provide complete
   pinned native evidence, exact graph/consuming contexts, approved pins and retained
   history. Archive original bytes and configuration with generated outputs.
-- Generator's isolated `feat/dtvp-snapshot-integrity` branch, commit `d78e6d8`,
+- Generator's isolated `feat/dtvp-snapshot-integrity` branch, commit `354d644`,
   adds `--dtvp-project-id ID --dtvp-state SHA` on the existing generation path.
   API mode is `dtvp_knowledge`. It retains renderer/templates, validates exact
   contexts, independent approval pins and published CVSS, archives complete inputs
   and disables mutable enrichment during native runs. External proposals remain
-  evidence. Independent review and 46 source/real-renderer tests passed. This is
-  not merged into `../generator`. Rootless assemblies, native UI selection and
-  controlled-document parity remain cutover gates at this commit.
+  evidence. Assembly forests retain actual roots without invented software edges;
+  omitted/missing parts and coherence limits remain visible in outputs. The native
+  UI selects project/version and explicitly pins the state; credentials remain
+  server-owned and redacted. Independent review: 96 backend tests, 14 frontend
+  tests and production build passed. This is not merged into `../generator`.
+  Richer metadata presentation and controlled-document parity remain cutover gates.
 - `POST .../states/{state}/vscorer-input` derives schema-validated CycloneDX and
   focused strict CVE files after explicit source Base selection. Its receipt pins
   state, consuming context, component, file hashes and original Base assertions.
@@ -32,10 +35,14 @@ roles. Hashes establish consistency, not publisher identity or human approval.
 - Internal CPE catalog/alias/rule proposals use `/projects/{id}/cpe` and pinned
   `/states/{state}/cpe`; no name-based identity adoption or applicability inference.
 - `/states/{state}/license-worklist` exposes source declarations, concluded claims,
-  missing information and provenance. It does not grant legal clearance.
+  missing information and provenance, separately from organization license
+  dispositions. Dedicated license analysts submit usage/distribution conclusions;
+  independent license reviewers approve exact revisions. Material composition and
+  metadata changes require revalidation. These are organization decisions, not
+  inferred legal clearance.
 
 V3 Agentyzer orchestration, complete CPE migration/refresh, semantic identity
-reconciliation, license clearance and architecture approval remain planned.
+reconciliation, full legal qualification and architecture approval remain planned.
 Production acceptance also requires machine authorization, archived reproducible
 inputs, failure/retry handling and controlled consumer fixture qualification.
 The optional source receipt is a consistency contract; versioned serializer

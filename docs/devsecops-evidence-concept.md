@@ -522,8 +522,10 @@ complete conformance or internal approval. Originals remain retrievable.
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,
 advanced review/range coverage, extended evidence synthesis and VDR/VEX conformance,
-specialist result integration, license clearance and controlled architecture/export
-workflows. The existing v2 UI is not evidence these new contracts already ship.
+extended specialist orchestration and controlled architecture/export workflows.
+Source license evidence now has a separate human disposition/review workflow with
+dedicated roles, explicit distribution/modification/linking context, independent
+revision approvals and material-change revalidation. It does not infer legal clearance. The existing v2 UI is not evidence these new contracts already ship.
 
 ### Reviewed integration increments
 
@@ -535,7 +537,7 @@ end-to-end qualification.
 | --- | --- | --- |
 | `cdxcombine`, `fix/strict-evidence-assembly`, `ea0e672` | Required inputs, references and validation fail closed; atomic output and scoped reference mapping. 52 tests passed, one optional-fixture skip. | Conversion still loses some metadata; native DTVP assembly retains original constituents and remains the preferred new path. |
 | `cpeservice`, `feat/dtvp-evidence-contract`, `98049fc` | Truthful rule/identity provenance, requested/resolved identifiers and deterministic result digest. 213 tests passed. | Internal DTVP offline catalog/rule proposals now exist; complete migration, ranking and refresh remain planned. Candidates are not applicability. |
-| `generator`, `feat/dtvp-snapshot-integrity`, `d78e6d8` | Explicit native v3 project/state input, exact context and independent approval pins, locally verified published CVSS, archived inputs and no mutable native enrichment. Renderer/templates preserved. Independent review: 46 source/real-renderer tests pass. Broader suite: 671 passed, six known baseline resource-path failures, one skip. | Rootless assemblies, native UI selection, richer metadata presentation and controlled document parity remain gates. |
+| `generator`, `feat/dtvp-snapshot-integrity`, `354d644` | Native v3 project/state input, exact contexts/approval pins, verified published CVSS and archived inputs; existing renderer/templates retained. Assembly forests preserve real roots and disclose scope limits. Native UI explicitly pins states; server credentials are redacted. Independent review: 96 backend and 14 frontend tests plus build passed. Broader suite: 695 passed, six known baseline resource-path failures, one skip. | Richer metadata presentation, multi-version SOUP and controlled document parity remain gates. |
 | `vscorer`, `feat/dtvp-context-binding`, `3994254` | Optional exact context/component/CVE/Base receipt survives native intake and proposal responses. Independent Python/architecture reviews approved; 27 final checks passed and real DTVP-derived inputs were accepted. | No remote authenticity claim; production auth, serializer upgrade compatibility and controlled round-trip qualification remain. |
 | `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` | Exact requested Git commit, isolated clean worktree and explicit verified/unverified source evidence. 493 tests passed. | Commit identity does not verify binaries, submodules or LFS; durable remote jobs and complete artifact binding remain gaps. |
 
