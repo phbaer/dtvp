@@ -48,6 +48,13 @@ versions to intake, review, release gates, documentation and monitoring.
 
 ### Explore the new core
 
+Team selectors retain v1 semantics: namespace/name matching, known-empty versus
+unknown namespace, case modifiers, PURL selectors and deterministic specificity.
+Name-only rules do not match known nonempty namespaces. Versionless PURL rules
+span package versions; explicit version/qualifiers/subpath match the full PURL.
+The primary team and descriptive aliases remain distinct; aliases do not add
+required reviewers. Wildcard ownership is a fallback after recursive delegation.
+
 Rebuild/start the isolated playground, then run the API-only scenario:
 
 ```bash
