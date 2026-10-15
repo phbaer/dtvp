@@ -230,6 +230,19 @@ for absent findings by default, with optional recorded `team_id`, `absent_only`,
 Recorded team labels/targets are preserved across reassignment; these records are
 historical evidence, not current approvals or proof of remediation.
 
+### Retention maintenance preview
+
+`GET /api/v3/projects/{id}/maintenance/retention-preview` requires project management.
+It inspects exact targets across all current branches and tag-protected revisions,
+including review-pinned older revisions. Shared assessments remain active while
+any covered target is present. Unknown scope never becomes a candidate. Revision
+age is explicit and does not establish disappearance date or obsolescence. Full
+counts accompany bounded revision/logical-assessment pages; `expected=PLAN_HASH`
+rejects changed references during pagination. The HTTP CLI can use `knowledge
+request GET /api/v3/projects/ID/maintenance/retention-preview`. This dry run writes
+nothing and makes no physical storage estimate. Archival/application, retention
+policy and journal garbage collection remain planned; history is not deleted.
+
 ### Curated component metadata
 
 `PUT /api/v3/projects/{id}/versions/{version}/metadata` explicitly replaces

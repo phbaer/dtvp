@@ -1,6 +1,6 @@
 """Authorized historical read models; no live-state or projection mutations."""
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from dtvp.api import DB, Auth, project_for
 from dtvp.knowledge.comparison import compare_states, list_product_history, list_product_refs
@@ -72,3 +72,22 @@ def retained(
     return retained_assessments(
         journal, state, absent_only=absent_only, team_id=team_id, offset=offset, limit=limit
     )
+
+
+@router.get("/projects/{project_id}/maintenance/retention-preview")
+def retention(
+    project_id: str,
+    request: Request,
+    db: DB,
+    actor: Auth,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    expected: Sha | None = None,
+):
+    from dtvp.knowledge.maintenance import preview_retention
+
+    project_for(db, actor, project_id, "manage")
+    result = preview_retention(request.app.state.knowledge, project_id, offset=offset, limit=limit)
+    if expected is not None and expected != result["plan_hash"]:
+        raise HTTPException(409, "Product references changed; restart retention preview")
+    return result
