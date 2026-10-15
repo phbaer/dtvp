@@ -274,7 +274,28 @@ names and embedded evidence remain verbatim. Multipart rows retain constituent
 format/provenance and declared collection coverage. No expression compatibility,
 obligations, legal conclusion or license clearance is inferred; absent/malformed
 information stays explicit. Document-level custom text remains in original sources.
-Human license-clearance and obligation workflows remain planned.
+Explicit organization dispositions are separate from these source facts.
+
+`POST .../versions/{version}/licenses/draft` or `.../submit` records a human
+concluded expression, allowed/restricted/prohibited/unresolved disposition,
+obligations, conditions, evidence, distribution/modification/linking assumptions,
+rationale and provenance for one component occurrence. It requires `request_id`,
+expected head, expected disposition revision and the dedicated `license_assess`
+capability. `POST .../licenses/reviews` requires `license_approve`, exact submitted
+revision, action and rationale; authors cannot approve their own revision.
+The `license_analyst` and `license_reviewer` roles are distinct from vulnerability
+roles and administrators. Sharing and scoped tokens can grant these capabilities
+only within the caller's authority.
+
+The Knowledge workspace has a collapsed **License evidence and review** panel,
+with original facts, explicit usage assumptions and independent disposition review.
+Pending drafts preserve valid approved pins. Material inventory, license evidence
+or applicable curated context changes require revalidation; ownership/upload
+bookkeeping does not. Whole-product context is conservative: unrelated material
+component changes can also require revalidation. Historical states retain their
+pins. An approved organization disposition is an attributed judgment under stated
+assumptions; DTVP does not infer legal permission, expression validity or compatibility.
+The playground includes separate license analyst/reviewer personas without reset.
 
 ### Historical state comparison
 

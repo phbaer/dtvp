@@ -105,7 +105,11 @@ def component_licenses(component, baseline):
 
 def license_worklist(journal, state, offset=0, limit=50):
     revision = journal.verify_state(state)
-    inventory = load_sections(journal, state)["inventory"]
+    sections = load_sections(journal, state)
+    inventory = sections["inventory"]
+    from dtvp.knowledge.license_reviews import inventory_fingerprint, license_status
+
+    fingerprint = inventory_fingerprint(sections, revision.version)
     baseline = inventory.get("baseline", {})
     parts = {item["part_id"]: item for item in inventory.get("assembly", {}).get("parts", [])}
     rows = []
@@ -113,6 +117,9 @@ def license_worklist(journal, state, offset=0, limit=50):
         origin = component.get("dtvp_origin", {})
         part = parts.get(origin.get("part_id"))
         source = part.get("baseline", {}) if part else baseline
+        reviewed = license_status(
+            journal, sections, revision.version, ref, source_fingerprint=fingerprint
+        )
         rows.append(
             {
                 "component_ref": ref,
@@ -128,7 +135,8 @@ def license_worklist(journal, state, offset=0, limit=50):
                     "license_coverage", "unknown"
                 ),
                 "evidence": component_licenses(component, source),
-                "clearance": "not_assessed",
+                "clearance": "organization_reviewed" if reviewed["approved"] else "not_assessed",
+                "license_review": reviewed,
             }
         )
     return {
@@ -139,6 +147,7 @@ def license_worklist(journal, state, offset=0, limit=50):
         "statistics": {
             "components": len(rows),
             "by_evidence_status": dict(Counter(row["evidence"]["status"] for row in rows)),
+            "by_review_status": dict(Counter(row["license_review"]["status"] for row in rows)),
         },
         "limitations": list(LIMITATIONS),
         **page(rows, offset, limit),

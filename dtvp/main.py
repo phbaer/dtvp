@@ -13,6 +13,7 @@ from dtvp.api_history import router as history_router
 from dtvp.api_identity import router as identity_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_knowledge import router as knowledge_router
+from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_proposals import router as proposal_router
 from dtvp.api_rescoring import router as rescoring_router
@@ -77,6 +78,7 @@ def create_app(settings=None):
     app.include_router(history_router)
     app.include_router(metadata_router)
     app.include_router(synchronization_router)
+    app.include_router(licenses_router)
     if settings.playground:
         from dtvp.api_playground_knowledge import router as knowledge_playground_router
 

@@ -70,7 +70,12 @@ def licenses(
     journal = request.app.state.knowledge
     require_state(journal, state, project_id)
     product_state(journal, state, project_id)
-    return license_worklist(journal, state, offset, limit)
+    result = license_worklist(journal, state, offset, limit)
+    project = project_for(db, actor, project_id)
+    result["capabilities"] = [
+        cap for cap in ("license_assess", "license_approve") if actor.allowed(db, project, cap)
+    ]
+    return result
 
 
 def authorize_team(db, actor, project_id):

@@ -14,6 +14,8 @@ ROLE_CAPABILITIES = {
     "analyst": {"read", "write", "assess", "snapshot", "evidence"},
     "reviewer": {"read", "assess", "approve", "snapshot", "evidence"},
     "coordinator": {"read", "rescore", "snapshot"},
+    "license_analyst": {"read", "license_assess"},
+    "license_reviewer": {"read", "license_approve"},
     "admin": {"read", "write", "manage", "snapshot", "export", "evidence"},
 }
 
