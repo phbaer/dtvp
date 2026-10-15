@@ -64,6 +64,11 @@ including tagged/plain legacy documentation. Export claims and finding claims
 remain independent; nontransactional remote reads never establish snapshot
 consistency. This is source intake, with no implicit writeback.
 
+Native advisory feed documents provide exact known-ID enrichment through the
+product evidence lifecycle. They retain provider facts independently, without
+package/version matching, applicability adoption or new findings. Unknown IDs
+remain unresolved; live native provider refresh remains separate connector work.
+
 ## V2 compatibility contracts
 
 The following UUID snapshot contracts describe the existing v2 runtime and prior

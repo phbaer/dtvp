@@ -579,6 +579,11 @@ under exact source/target/preview pins. Existing target decisions cannot be over
 new scope requires independent review. Read-only retention diagnostics protect
 active branches and tags. Offline full-journal verification supports recovery.
 
+Known-ID advisory feed documents now enrich baseline-reported identifiers through
+the durable product evidence lifecycle. Provider facts remain independent; unknown
+IDs are unresolved and removed baseline findings cannot self-resurrect. Native
+live provider refresh and new package/version matching remain separate work.
+
 Native DT collection now uses per-version bindings and GET-only durable jobs.
 Complete captures and exact response bytes are checkpointed before publication;
 retries preserve the capture and expected head. Export/finding observations remain

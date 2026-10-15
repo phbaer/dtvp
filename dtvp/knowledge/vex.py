@@ -337,7 +337,11 @@ def parse_evidence(raw):
     if not isinstance(document, dict):
         raise ValueError("Evidence document must be an object")
     try:
-        if document.get("bomFormat") == "CycloneDX":
+        if document.get("format") == "dtvp.advisory-feed/1":
+            from dtvp.knowledge.advisory_documents import advisory_document
+
+            result = advisory_document(document)
+        elif document.get("bomFormat") == "CycloneDX":
             result = cdx(document)
         elif "@context" in document and "statements" in document:
             result = openvex(document)
@@ -424,6 +428,16 @@ def reconcile_evidence(sections):
         if key.startswith("external-evidence:"):
             del findings[key]
     indexed = components(sections)
+    # Snapshot baseline pairs before applying documents: feeds cannot amplify
+    # themselves or VEX-only claims across reapplication/nightly imports.
+    baseline_refs = {}
+    for key, item in findings.items():
+        if (
+            not key.startswith(("evidence-document:", "external-evidence:"))
+            and item.get("ref") in indexed
+            and item.get("identifier")
+        ):
+            baseline_refs.setdefault(item["identifier"], set()).add(item["ref"])
     for key, record in list(findings.items()):
         if not key.startswith("evidence-document:"):
             continue
@@ -439,7 +453,12 @@ def reconcile_evidence(sections):
             continue
         applications = []
         for index, item in enumerate(document["statements"]):
-            matches, unresolved = resolve_statement(item, sha, sections["inventory"], indexed)
+            advisory_only = document["format"] == "dtvp.advisory-feed/1"
+            if advisory_only:
+                matches = set(baseline_refs.get(item["vulnerability_id"], ()))
+                unresolved = [] if matches else ["identifier_not_claimed_by_baseline"]
+            else:
+                matches, unresolved = resolve_statement(item, sha, sections["inventory"], indexed)
             applications.append(
                 {
                     "statement_index": index,
@@ -452,7 +471,7 @@ def reconcile_evidence(sections):
                 identity = digest(canonical([sha, index, ref]))
                 raw_advisory = item["raw"].get("vulnerability", item["raw"])
                 findings["external-evidence:" + identity] = {
-                    "kind": "external-status",
+                    "kind": "external-advisory" if advisory_only else "external-status",
                     "identifier": item["vulnerability_id"],
                     "ref": ref,
                     "source": text(record.get("source")) or "imported-evidence",

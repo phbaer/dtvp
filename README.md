@@ -466,6 +466,23 @@ current independent team reviews and explicit publication. Importing a result
 never creates an assessment, review or published score. Provider identity remains
 caller-asserted; hashes verify artifact consistency only.
 
+### Known-ID advisory enrichment
+
+Product evidence imports also accept `dtvp.advisory-feed/1`: an explicit document
+`id`, attributed `publisher` and `advisories` containing normalized `advisory`
+facts plus original provider `raw` objects. Existing source ordinals, expected
+heads, supersession, withdrawal and baseline reapplication apply unchanged.
+
+These documents enrich exact vulnerability identifiers already reported by the
+baseline SBOM/DT source, retaining independent descriptions, ratings, references
+and aliases. They never match a new package, infer affected versions or turn
+provider status into DTVP applicability. Unknown identifiers stay unresolved;
+removed baseline findings are not resurrected. VEX-only claims are not enrichment
+seeds in this initial subset. Contradictory ratings and original Base facts stay
+separate. Material fact changes require review revalidation; withdrawal can restore
+still-valid pinned coverage. Native live NVD/CIRCL/OSV refresh jobs and extended
+non-US adapters remain planned; v2 connectors retain their separate runtime.
+
 ### Native analysis jobs
 
 `PUT /api/v3/projects/{id}/connectors/agentyzer` binds an administrator-approved
