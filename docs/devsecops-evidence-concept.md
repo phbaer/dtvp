@@ -342,3 +342,24 @@ Still planned: native constituent assembly, stable cross-import/context identity
 new review workspace/range coverage, evidence synthesis, VDR/VEX application,
 specialist result integration, license clearance and controlled architecture/export
 workflows. The existing v2 UI is not evidence these new contracts already ship.
+
+### Reviewed integration increments
+
+The following fixes are isolated review branches, not merged sibling defaults or
+deployed services. They address concrete baseline gaps without establishing full
+end-to-end qualification.
+
+| Repository / branch | Verified increment | Remaining gate |
+| --- | --- | --- |
+| `cdxcombine`, `fix/strict-evidence-assembly`, `ea0e672` | Required inputs, references and validation fail closed; atomic output and scoped reference mapping. 52 tests passed, one optional-fixture skip. | Conversion still loses some metadata; native DTVP constituent assembly remains required. |
+| `cpeservice`, `feat/dtvp-evidence-contract`, `98049fc` | Truthful rule/identity provenance, requested/resolved identifiers and deterministic result digest. 213 tests passed. | No invented confidence or approval; internal DTVP storage/migration remains planned. |
+| `generator`, `feat/dtvp-snapshot-integrity`, `a0fcde5` | Native DTVP snapshot adapter verifies pinned identity/content, retains exact manifests and uses approved team coverage. Existing renderer/templates preserved. 23 focused tests passed; full suite 628 passed, six failures also reproduced on baseline, one skip. | Adapter targets v2 snapshots; v3 cutover, frozen enrichment/configuration and controlled document parity remain gates. |
+| `agentyzer`, `fix/immutable-source-binding`, `cfb27b3` | Exact requested Git commit, isolated clean worktree and explicit verified/unverified source evidence. 493 tests passed. | Commit identity does not verify binaries, submodules or LFS; durable remote jobs and complete artifact binding remain gaps. |
+
+DTVP's v2 adapter additionally requires producer-qualified repository/commit
+binding before external Agentyzer proposals become eligible. Reports without it
+remain evidence. This closes an eligibility gap in the existing workflow; it
+does not implement journal-backed v3 analysis orchestration.
+The adapter change is `d0a55ab`: full working-tree suite 107 passed with one
+unconfigured PostgreSQL skip; a separate disposable PostgreSQL integration test
+passed. Isolated staged validation also passed, excluding earlier UI experiments.

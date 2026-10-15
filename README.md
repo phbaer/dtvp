@@ -40,6 +40,8 @@ its input contract and exposes coverage limits. Generator's established audit
 documents are the output baseline to preserve while replacing DT reads with DTVP.
 CPE discovery is intended to become an internal DTVP module, preserving reviewed
 mappings and provenance rather than requiring another standalone deployment.
+The concept's [integration status](docs/devsecops-evidence-concept.md#reviewed-integration-increments)
+records isolated sibling fixes, validation and remaining cutover gates.
 
 ### Explore the new core
 
