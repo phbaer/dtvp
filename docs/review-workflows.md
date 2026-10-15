@@ -79,10 +79,24 @@ selected scope changes. The top search result count is the final number of
 grouped vulnerabilities after every active filter, independent of how many
 paginated rows are currently loaded. When filters reduce the task, it is shown
 relative to the unfiltered task total. Filter option counts respect every other filter and exclude their own category,
-so alternatives remain discoverable even when the current result is empty. The
-Team open/assessed breakdown uses the final filtered result.
-Pending-review groups remain on the open side of that breakdown until they are
-approved, even when their currently visible team blocks are populated.
+so alternatives remain discoverable even when the current result is empty.
+Combined team dropdown and version selections require
+the selected team to own a finding in a selected release; matching the team
+only in a different release does not include the vulnerability. The version
+selection can come from a shared URL or a `version:` search token.
+The Team open/assessed breakdown uses the final filtered result and each team's
+recorded assessment. A team with an active assessment state other than `NOT_SET`
+counts as assessed, including pending approval. Closed findings (including
+approved General and legacy assessments) count as assessed for all assigned
+teams, even where team documentation is missing. For findings that remain open,
+missing team assessments count as open. The Not recorded/Recorded filter still
+checks actual team documentation independently of closure.
+With a version filter, the team and group breakdowns count only owners in those
+releases. A wildcard (`*`) fallback such as Unknown uses its configured team
+name and recorded team assessments, just like other owners.
+Selected teams also restrict team/group statistics: other teams sharing a
+matched vulnerability are omitted, and groups count only selected member teams.
+The group hierarchy retains only selected teams and their containing groups.
 Complete task-wide facets remain available as filter choices even when their
 current filtered count is zero. Overlapping properties such as teams and
 inconsistency reasons can therefore have counts whose sum exceeds the final
@@ -91,10 +105,20 @@ When groups are configured, the Results tab renders one Per Group table with
 indented nested groups, direct team members, and non-grouped teams at the root,
 so each parent total can be compared with its subgroup and team totals without
 a duplicate Per Team box. Group totals expand the hierarchy and deduplicate
-vulnerabilities across member teams. Without group configuration, the existing
+vulnerabilities across member teams. Closed findings count as assessed for a
+group. An unclosed finding counts as open while any responsible member team
+lacks an assessment, otherwise as assessed.
+Without group configuration, the existing
 Per Team table remains as the fallback; it groups configured aliases into their
 canonical team and shows aliases beneath the primary team. A vulnerability
 carrying both canonical and alias names is counted only once there.
+Donut charts show severity and analysis distributions with counts and percentages
+for the current filtered result. A team/group selector displays Open versus
+Assessed coverage for one scope at a time, avoiding overlap across team slices.
+Charts show an empty state for zero results and an updating indicator while
+filters are being refreshed. The full Statistics view also includes severity
+and analysis donuts; project review supplies its current filters, while the
+standalone Statistics page uses the selected project and vulnerability ID.
 
 The detail workspace provides:
 

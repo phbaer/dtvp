@@ -1,4 +1,5 @@
 import type { FilterCounts, TeamCounts } from './group-classifier'
+import { addTeamCounts } from './group-classifier'
 import { evidenceSources } from './evidence'
 import { expandLifecycleSelection, VISIBLE_LIFECYCLE_FILTERS } from './projectLifecycleFilters'
 import type { TaskVulnGroupListCounts } from './api'
@@ -18,6 +19,7 @@ import type {
 } from './vulnListIndex'
 import {
     teamAssessmentStatus,
+    computeListTeamCounts,
     compileVulnListFilters,
     compileVulnStateFilters,
     matchesCompiledAttributionAgeFilter,
@@ -135,7 +137,11 @@ const incrementUniqueResultCounts = (
  */
 export const deriveVulnListResultCounts = (
     items: readonly VulnListItem[],
+    versionScope: { versions?: readonly string[]; terms?: readonly string[]; teams?: readonly string[] } = {},
 ): TaskVulnGroupListCounts => {
+    const versions = new Set((versionScope.versions || []).map(value => value.toLowerCase()))
+    const terms = (versionScope.terms || []).map(value => value.toLowerCase())
+    const selectedTeams = new Set((versionScope.teams || []).map(value => value.toLowerCase()))
     const counts: TaskVulnGroupListCounts = {
         original_severity: {},
         ssvc: {},
@@ -193,17 +199,21 @@ export const deriveVulnListResultCounts = (
         incrementUniqueResultCounts(counts.ids!, [item.id, ...(item.group.aliases || [])])
         incrementUniqueResultCounts(counts.versions, item.versions)
         incrementUniqueResultCounts(counts.tags, item.normalizedTags)
+        let teams = item.normalizedTags
+        if ((versions.size || terms.length) && item.teamTagsByVersion) {
+            const owners = new Set([...item.teamTagsByVersion]
+                .filter(([version]) => (!versions.size || versions.has(version))
+                    && (!terms.length || terms.some(term => version.includes(term))))
+                .flatMap(([, tags]) => [...tags]))
+            teams = teams.filter(team => owners.has(team.toLowerCase()))
+        }
+        if (selectedTeams.size) teams = teams.filter(team => selectedTeams.has(team.toLowerCase()))
         incrementUniqueResultCounts(counts.assignees, item.group.assignees || [])
         incrementUniqueResultCounts(counts.components, item.componentNames)
 
-        for (const team of new Set(item.normalizedTags)) {
-            const teamCounts = counts.team_tags![team] ||= { open: 0, assessed: 0 }
-            const canonicalTeamCounts = counts.canonical_team_tags![team] ||= { open: 0, assessed: 0 }
-            if (item.isOpen) teamCounts.open++
-            else teamCounts.assessed++
-            if (item.isOpen) canonicalTeamCounts.open++
-            else canonicalTeamCounts.assessed++
-        }
+        const closed = ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle) && !item.isPending
+        addTeamCounts(counts.team_tags!, teams, item.assessedTeams, closed)
+        addTeamCounts(counts.canonical_team_tags!, teams, item.assessedTeams, closed)
         for (const reason of item.inconsistencyReasons) {
             incrementResultCount(counts.inconsistency_reason!, reason)
         }
@@ -347,14 +357,8 @@ const updateTeamCounts = (
     counts: Record<string, TeamCounts>,
     item: VulnListItem,
 ) => {
-    for (const team of item.normalizedTags) {
-        if (!counts[team]) counts[team] = { open: 0, assessed: 0 }
-        if (item.isOpen) {
-            counts[team].open++
-        } else {
-            counts[team].assessed++
-        }
-    }
+    addTeamCounts(counts, item.normalizedTags, item.assessedTeams,
+        ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle) && !item.isPending)
 }
 
 export const sortVulnListItems = (
@@ -610,7 +614,7 @@ export const deriveVulnListFilterModel = (
         matchingItems,
         filterCounts,
         cvssVersionMismatchCount: staticStats.cvssVersionMismatchCount,
-        teamTagCounts: staticStats.teamTagCounts,
+        teamTagCounts: computeListTeamCounts(matchingItems),
         dependencyFilterCounts,
         dependencyRelationshipCounts,
         tmrescoreProposalCounts,

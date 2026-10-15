@@ -3,52 +3,30 @@ import { computed, ref, watchEffect } from 'vue'
 import type { Statistics } from '../types'
 import { ShieldAlert, CheckCircle2, Info } from '@lucide/vue'
 import { sortVersions } from '../lib/version'
+import DonutChart from './DonutChart.vue'
+import type { TaskVulnGroupListCounts } from '../lib/api'
+import { distributionSegments, SEVERITY_CHART_COLORS, ANALYSIS_CHART_COLORS } from '../lib/statisticsCharts'
 
 const props = withDefaults(defineProps<{
     stats: Statistics
     projectName?: string
+    distributionCounts?: TaskVulnGroupListCounts
+    distributionsUpdating?: boolean
 }>(), {
     projectName: ''
 })
 
-const severityColors: Record<string, string> = {
-    'CRITICAL': 'bg-red-600',
-    'HIGH': 'bg-orange-500',
-    'MEDIUM': 'bg-yellow-500',
-    'LOW': 'bg-green-500',
-    'INFO': 'bg-blue-500',
-    'UNKNOWN': 'bg-gray-500'
-}
-
-const stateColors: Record<string, string> = {
-    'EXPLOITABLE': 'bg-red-500',
-    'IN_TRIAGE': 'bg-amber-400',
-    'FALSE_POSITIVE': 'bg-gray-500',
-    'NOT_AFFECTED': 'bg-green-600',
-    'RESOLVED': 'bg-blue-500',
-    'NOT_SET': 'bg-purple-500',
-    'MIXED': 'bg-orange-400'
-}
-
-const severityOrder = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', 'UNKNOWN']
-const severityPlotOrder = [...severityOrder].reverse() // draw bottom-to-top during stacking/rendering
-
-const severitySvgColors: Record<string, string> = {
-    CRITICAL: '#ef4444', // red-500
-    HIGH: '#f97316', // orange-500
-    MEDIUM: '#eab308', // yellow-400
-    LOW: '#22c55e', // green-500
-    INFO: '#3b82f6', // blue-500
-    UNKNOWN: '#6b7280', // gray-500
-}
-
-const maxSeverityCount = computed(() => {
-    return Math.max(...Object.values(props.stats.severity_counts), 1)
-})
-
-const maxStateCount = computed(() => {
-    return Math.max(...Object.values(props.stats.state_counts), 1)
-})
+const severityOrder = Object.keys(SEVERITY_CHART_COLORS)
+const severityPlotOrder = [...severityOrder].reverse()
+const severitySvgColors = SEVERITY_CHART_COLORS
+const severitySegments = computed(() => distributionSegments(
+    props.distributionCounts?.original_severity ?? props.stats.severity_counts,
+    SEVERITY_CHART_COLORS,
+))
+const analysisSegments = computed(() => distributionSegments(
+    props.distributionCounts?.analysis ?? props.stats.state_counts,
+    ANALYSIS_CHART_COLORS,
+))
 
 const selectedMajor = ref<string>('')
 
@@ -211,6 +189,9 @@ function stackedSeverityValue(seriesKey: string, index: number): number {
         </div>
     </div>
 
+    <p v-if="distributionCounts" class="text-sm text-gray-400">
+        Distributions for current filters · {{ distributionsUpdating ? 'Updating…' : `${distributionCounts.total} vulnerabilities` }}
+    </p>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <!-- Severity Distribution -->
         <div class="bg-gray-800/50 border border-gray-700/50 p-6 rounded-xl shadow-lg backdrop-blur-sm">
@@ -218,20 +199,7 @@ function stackedSeverityValue(seriesKey: string, index: number): number {
                 <ShieldAlert :size="18" class="text-red-500" />
                 Severity Distribution
             </h3>
-            <div class="space-y-5">
-                <div v-for="sev in severityOrder" :key="sev" class="space-y-1.5">
-                    <div class="flex justify-between text-xs font-bold">
-                        <span class="text-gray-300">{{ sev }}</span>
-                        <span class="text-gray-500">{{ stats.severity_counts[sev] || 0 }}</span>
-                    </div>
-                    <div class="w-full bg-gray-900/50 rounded-full h-2 overflow-hidden border border-gray-700/30">
-                        <div 
-                            :class="['h-full transition-all duration-1000 ease-out', severityColors[sev]]"
-                            :style="{ width: `${((stats.severity_counts[sev] || 0) / maxSeverityCount) * 100}%` }"
-                        ></div>
-                    </div>
-                </div>
-            </div>
+            <DonutChart title="Severity distribution" :segments="severitySegments" :updating="distributionsUpdating" />
         </div>
 
         <!-- Analysis State Distribution -->
@@ -240,20 +208,7 @@ function stackedSeverityValue(seriesKey: string, index: number): number {
                 <CheckCircle2 :size="18" class="text-green-500" />
                 Analysis Progress
             </h3>
-            <div class="space-y-5">
-                <div v-for="(count, state) in stats.state_counts" :key="state" class="space-y-1.5">
-                    <div class="flex justify-between text-xs font-bold">
-                        <span class="text-gray-300">{{ state }}</span>
-                        <span class="text-gray-500">{{ count }}</span>
-                    </div>
-                    <div class="w-full bg-gray-900/50 rounded-full h-2 overflow-hidden border border-gray-700/30">
-                        <div 
-                            :class="['h-full transition-all duration-1000 ease-out', stateColors[state] || 'bg-gray-500']"
-                            :style="{ width: `${(count / maxStateCount) * 100}%` }"
-                        ></div>
-                    </div>
-                </div>
-            </div>
+            <DonutChart title="Analysis state distribution" :segments="analysisSegments" :updating="distributionsUpdating" />
         </div>
     </div>
 

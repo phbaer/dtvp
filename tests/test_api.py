@@ -903,6 +903,7 @@ def test_get_task_groups_filters_sorts_and_windows(client):
                 "assignees": ["bob"],
                 "list_metadata": {
                     "lifecycle": "ASSESSED",
+                    "assessed_teams": ["TeamB"],
                     "is_open": False,
                     "is_pending": False,
                     "technical_state": "FALSE_POSITIVE",

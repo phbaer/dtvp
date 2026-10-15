@@ -26,18 +26,12 @@ Deployment rules:
 
 - `./data` mounts at `/app/data`; mappings, roles, rules, caches, proposals, and
   archives survive container restarts.
-- Compose starts Agentyzer and persists control repositories, worktree locks,
-  and transient detached worktrees in the `agentyzer-repos` volume. Populate
-  or override the sanitized `agentyzer/config/repos.yaml` before enabling
-  automatic scans; never commit repository credentials. Agentyzer immediately
-  clones or fetches every explicit URL-backed mapping on startup, refreshes
-  those control repositories every `AGENTYZER_REPO_REFRESH_SECONDS`, and fetches
-  again immediately before creating an assessment worktree. The periodic pass
-  is independent of advisory filtering, so references remain current even when
-  an assessment exits before repository preparation.
+- Code analysis is an optional external service. Deploy Agentyzer separately,
+  configure its repository mappings there, and set `DTVP_CODE_ANALYSIS_URL` to
+  an endpoint reachable from the DTVP container. An empty URL disables the
+  integration. DTVP's Compose stack does not build or start the analyzer.
 - Internal services use Compose names and container ports. DTVP reaches
-  Dependency-Track at `http://dtrack-apiserver:8080` and Agentyzer at
-  `http://agentyzer:8000` unless overridden.
+  Dependency-Track at `http://dtrack-apiserver:8080` unless overridden.
 - If proxies are configured, list exact internal hostnames/IPs in `NO_PROXY`;
   do not rely only on CIDR entries.
 - DTVP delegates OIDC discovery, state and nonce handling, the authorization-
@@ -68,9 +62,9 @@ Deployment rules:
   and uses a 2048-connection accept backlog.
 - `dtvp.boot:app` serves startup status while the real app initializes. Startup
   logs time cache and integration initialization.
-- The DTVP and Agentyzer container startup scripts print their packaged project
-  versions and image build numbers before importing either application, so this
-  deployment identity remains visible in Docker logs even if initialization fails.
+- The DTVP container startup script prints its packaged project version and
+  image build number before importing the application, so deployment identity
+  remains visible in Docker logs even if initialization fails.
 - `/api/performance-status` reports grouped-query/build/post-processing
   saturation, retained task counts, process-local cache pressure, and the
   active Python/GIL state.
@@ -111,16 +105,11 @@ and publishes only this validated free-threaded DTVP image. Its canonical tags
 are `latest`, release versions, `dev`, and PR tags; no GIL-enabled or duplicate
 variant tags are published.
 
-DTVP and Agentyzer release in lockstep from this monorepo. The root
-`pyproject.toml` is the single release-version source: Agentyzer derives its
-dynamic package metadata from that value, and its container build receives the
-same derived value as a build argument. Regenerate both lockfiles after changing
-the root version. A manually pushed `v*` tag must match the root packaged
-version before either container is published. The single Git tag identifies the
-shared source commit; the workflow publishes that version tag and `latest` to
-both the `dtvp` and `agentyzer` container packages. Agentyzer's
-health/configuration responses read the installed package metadata instead of
-a hard-coded API version.
+DTVP's root `pyproject.toml` is its release-version source. Regenerate the root
+lockfile after changing that version. A manually pushed `v*` tag must match
+DTVP's packaged version before the container is published. The workflow
+publishes version tags and `latest` for the `dtvp` container package only.
+External code-analysis services have their own releases and dependency state.
 
 Archive imports require read, BOM upload, and vulnerability-analysis update
 permissions in Dependency-Track. Scheduled snapshots and expanded Git trees

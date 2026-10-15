@@ -8,7 +8,6 @@ Paths and commands refer to the repository root unless stated otherwise.
 - [Authentication, Runtime, And Frontend](#authentication-runtime-and-frontend)
 - [Project Archives](#project-archives)
 - [Threat Model And Code Analysis](#threat-model-and-code-analysis)
-- [Agentyzer](#agentyzer)
 
 Set values in `.env` for Compose or in the shell for local `uv` runs. `unset`
 means the integration or override is disabled.
@@ -74,7 +73,7 @@ means the integration or override is disabled.
 | `DTVP_DEFAULT_PROJECT_FILTER` | Dashboard default project filter | empty |
 | `DTVP_ATTRIBUTION_AGE_FILTER_DAYS` | Attribution-age presets | `7d,14d,28d` |
 | `DTVP_BUILD_COMMIT` | Build metadata shown in the UI | `unknown` |
-| `BUILD_NUMBER` | Compose image build number, baked into DTVP and Agentyzer startup logs | `unknown` |
+| `BUILD_NUMBER` | Compose image build number, baked into DTVP startup logs | `unknown` |
 
 ## Project Archives
 
@@ -102,7 +101,7 @@ means the integration or override is disabled.
 | `DTVP_TMRESCORE_TIMEOUT_SECONDS` | HTTP timeout before polling fallback | `180` |
 | `DTVP_TMRESCORE_CACHE_PATH` | Cached proposal snapshots | `data/tmrescore_proposals.json` |
 | `DTVP_TMRESCORE_TASK_TTL_SECONDS` | Completed/failed task retention | `3600` |
-| `DTVP_CODE_ANALYSIS_URL` | Analyzer base URL | unset; Compose: `http://agentyzer:8000` |
+| `DTVP_CODE_ANALYSIS_URL` | Analyzer base URL | unset; code analysis disabled |
 | `DTVP_CODE_ANALYSIS_TIMEOUT_SECONDS` | Analyzer HTTP timeout | `300` |
 | `DTVP_CODE_ANALYSIS_STATUS_TIMEOUT_SECONDS` | Dashboard health/jobs timeout | `5` |
 | `DTVP_CODE_ANALYSIS_DASHBOARD_CACHE_SECONDS` | Shared dashboard status snapshot lifetime | `3` |
@@ -122,43 +121,6 @@ means the integration or override is disabled.
 | `DTVP_AUTO_CODE_ANALYSIS_SWEEP_SECONDS` | Automatic sweep interval | `900` |
 | `DTVP_AUTO_ANALYSIS_GUIDANCE_PATH` | Static component guidance | `data/auto_analysis_guidance.json` |
 
-## Agentyzer
-
-| Variable | Purpose | Default |
-| :--- | :--- | :--- |
-| `AGENTYZER_PORT` | Compose host port | `8095` |
-| `AGENTYZER_LOG_LEVEL` | Service log level | `INFO` |
-| `AGENTYZER_MAX_CONCURRENT_JOBS` | Concurrent assessment pipelines | `1` |
-| `AGENTYZER_REPO_REFRESH_SECONDS` | Background refresh interval for explicit URL-backed repository mappings; `0` disables and positive values have a 60-second minimum | `900` |
-| `AGENTYZER_GITHUB_TOKEN` | Optional GitHub token for authenticated advisory lookups and higher API limits | unset |
-| `AGENTYZER_ARCHIVE_MAX_INPUT_BYTES` | Maximum input size for one repository archive | `1073741824` |
-| `AGENTYZER_ARCHIVE_MAX_ARCHIVES` | Maximum archives inspected per analysis | `25` |
-| `AGENTYZER_ARCHIVE_MAX_NESTING` | Maximum nested-archive depth | `2` |
-| `AGENTYZER_ARCHIVE_MAX_MEMBERS` | Maximum combined archive member count | `50000` |
-| `AGENTYZER_ARCHIVE_MAX_MEMBER_BYTES` | Maximum extracted size of one member | `268435456` |
-| `AGENTYZER_ARCHIVE_MAX_EXTRACTED_BYTES` | Maximum combined extracted archive data | `2147483648` |
-| `AGENTYZER_LLM_BACKEND` | `ollama` or `openwebui` | `ollama` |
-| `AGENTYZER_OLLAMA_HOST` / `AGENTYZER_OLLAMA_MODEL` | Ollama endpoint and model | `http://host.docker.internal:11434` / `mistral` |
-| `AGENTYZER_OPENWEBUI_HOST` / `AGENTYZER_OPENWEBUI_MODEL` | OpenWebUI endpoint and model | `http://host.docker.internal:3000` / `mistral` |
-| `AGENTYZER_OPENWEBUI_API_KEY` | Optional OpenWebUI bearer token | unset |
-| `AGENTYZER_OPENWEBUI_TOOL_CALLS` | Native tool calls: `auto` or `off` | `auto` |
-| `AGENTYZER_OPENWEBUI_CONTEXT_WINDOW` | Optional context limit | `0` |
-| `AGENTYZER_OPENWEBUI_CONTEXT_SAFETY_MARGIN` | Reserved token margin | `256` |
-| `AGENTYZER_OPENWEBUI_CONTEXT_RETRIES` | Oversized-context retries | `2` |
-| `AGENTYZER_OPENWEBUI_MIN_COMPLETION_TOKENS` | Completion budget preserved during compaction | `256` |
-| `AGENTYZER_RESEARCH_CLONE_ENABLED` | Allow bounded local dependent-repository inspection | `true` |
-| `AGENTYZER_RESEARCH_GIT_HOSTS` | Comma-separated public HTTPS Git host allowlist (`*` permits any public host) | `github.com,gitlab.com,bitbucket.org` |
-| `AGENTYZER_RESEARCH_MAX_CLONES_PER_ANALYSIS` | Shared repository-clone budget across one LLM research loop | `3` |
-| `AGENTYZER_RESEARCH_CLONE_TIMEOUT_SECONDS` | Clone/inspection Git command timeout | `90` |
-| `AGENTYZER_RESEARCH_CLONE_MAX_REPOSITORY_MB` | Maximum cached research-clone disk use | `256` |
-| `AGENTYZER_RESEARCH_CLONE_MAX_FILE_BYTES` | Maximum committed file size inspected | `256000` |
-| `AGENTYZER_RESEARCH_CLONE_CACHE_TTL_SECONDS` | Freshness window before a research repository is cloned again | `3600` |
-
-When the OpenWebUI context window is configured, Agentyzer uses a conservative
-code-oriented token estimate, reserves the requested completion budget, and
-pre-compacts oversized messages. If the provider's tokenizer still rejects a
-request, both supported OpenWebUI context-error formats are parsed; the reported
-limit and request size drive a bounded retry and the learned limit is reused by
-later calls. Reachability prompts also cap generated AST evidence at 48,000
-characters with an explicit omission marker while retaining complete scan
-counts in pipeline evidence.
+The analyzer runs independently of DTVP. Configure its repositories, model
+backend, credentials, and concurrency in its own deployment; DTVP's Compose
+file and `.env.dist` configure only the HTTP integration above.

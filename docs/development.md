@@ -10,9 +10,18 @@ Paths and commands refer to the repository root unless stated otherwise.
 
 ## Toolchain and CI
 
-The root pytest configuration uses importlib import mode so `uv run pytest`
-can collect the DTVP and nested Agentyzer suites together even when both suites
-contain test modules with the same filename.
+DTVP requires Python 3.14 or newer. Its development dependencies do not install
+Agentyzer or its LangGraph stack; code analysis is an external HTTP integration.
+Use `uv sync --python 3.15 --dev --frozen` to select Python 3.15 explicitly.
+Use a released Python version; early 3.15 alphas may lack APIs expected by
+current dependencies. If a Pydantic wheel is unavailable for the interpreter,
+the locked `pydantic-core` source build requires Rust 1.88 or newer.
+Local `.python-version` preferences are ignored by Git. Docker images currently
+use Python 3.14.
+
+The root pytest configuration uses importlib import mode and collects only
+`tests/`, so `uv run pytest` runs DTVP's suite independently of the legacy
+Agentyzer source directory.
 
 The CI end-to-end job uses the Playwright container image in
 `.github/workflows/build-publish.yml`. Its image tag must exactly match the
@@ -41,7 +50,7 @@ manifest that range resolution requires. `Dockerfile.free-threaded` likewise
 uses Astral's moving `alpine` image alias by default; set its `UV_IMAGE` build
 argument to a versioned tag or digest when a reproducible external build needs
 an explicit override. Pull-request runs cancel superseded workflow executions,
-and image publication waits for Python (including Agentyzer), frontend, and
+and image publication waits for DTVP Python, frontend, and
 browser tests. Frontend jobs select Node.js 24 and reuse npm's download cache.
 The single-platform image builds reuse inline cache metadata from the `dev`
 images and exclude CI virtual environments from their build contexts. SBOM

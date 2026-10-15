@@ -20,6 +20,8 @@ and applies consistent decisions across releases.
 
 Requirements: Python 3.14+, `uv`, `npm`, `pm2`, and Node.js 24 LTS (24.15+)
 or a newer supported Node.js release.
+DTVP's Python environment and test suite are independent of Agentyzer, which
+is accessed through the optional code-analysis HTTP integration.
 
 ```bash
 uv sync --dev
@@ -60,8 +62,9 @@ Set the Dependency-Track API URL/key, public frontend URL, OIDC settings, and a
 strong `DTVP_SESSION_SECRET_KEY`. Compose serves DTVP under `/dtvp` by default;
 `DTVP_HTTP_PORT` controls the host port. Persistent data lives in `./data`.
 
-The published DTVP image uses Python 3.14 free threading. Compose also starts
-Agentyzer; configure its repository mappings before enabling automatic scans.
+The published DTVP image uses Python 3.14 free threading. Code analysis uses
+a separately deployed Agentyzer service; set `DTVP_CODE_ANALYSIS_URL` to its
+reachable base URL and configure repository mappings in that service.
 See [Deployment](docs/deployment.md) for networking, authentication, runtime
 checks, and release details, and [Configuration](docs/configuration.md) for
 all environment variables.
@@ -73,8 +76,7 @@ Use `uv` from the repository root for Python/backend work and `npm` from
 
 | Task | Command |
 | :--- | :--- |
-| Run all Python tests, including Agentyzer | `uv run pytest` |
-| Run Agentyzer tests only | `cd agentyzer && uv run pytest` |
+| Run DTVP Python tests | `uv run pytest` |
 | Run frontend unit tests | `cd frontend && npm run test:unit -- --run` |
 | Run focused frontend tests | `cd frontend && npm run test:unit -- --run ProjectView` |
 | Build the frontend | `cd frontend && npm run build` |
@@ -126,6 +128,22 @@ Filters combine with AND across categories and OR within a category. Option
 counts exclude their own category; result totals and bulk actions include all
 filters. Specialist controls live under **More filters**. Selections persist in
 shared URLs; Reset clears filters. Legacy assessments retain a **Legacy** badge.
+Combined Team and Version selections require team ownership in one of the
+selected project versions; ownership in another release does not match.
+
+Team Open/Assessed statistics use the current filtered findings and each team's
+recorded assessment, including pending approval. A closed, reviewer-approved
+vulnerability counts as Assessed for every assigned team, even when team
+documentation is incomplete. Group totals count each finding once and remain
+Open while an unclosed finding has a responsible member without an assessment.
+With a version filter, team and group breakdowns include only owners in those
+releases. Team selections restrict these breakdowns to selected teams and their
+containing groups. The `*` fallback uses its configured team name (for example Unknown)
+and that team's recorded assessments. Older summary caches are rebuilt when
+assessment metadata changes.
+Statistics include donut charts with counts and percentages for severity,
+analysis states, and selectable team/group coverage. Project-review charts
+follow the current filters; the standalone Statistics page uses its project/ID scope.
 
 Team mapping accepts `group:name` and scoped `group/name` keys. A mapped
 component takes precedence over its mapped ancestors, even across alternate
@@ -149,7 +167,7 @@ Browser → Vue SPA → FastAPI → Dependency-Track + local cache/outbox
 | :--- | :--- |
 | `dtvp/` | Backend routes, domain logic, integrations, and migrations |
 | `frontend/` | Vue pages, components, API client, and browser tests |
-| `agentyzer/` | Bundled code-analysis service |
+| `agentyzer/` | Legacy service checkout; independent of DTVP's Python environment |
 | `test_setup/` | Mock Dependency-Track, tmrescore, and code-analysis services |
 | `tests/` | Backend tests |
 | `data/` | Local mappings, rules, caches, and archives |
@@ -196,4 +214,4 @@ as routing hints; the generic entry point is `skills/project-entrypoint/SKILL.md
 ## License And SBOM
 
 [MIT License](LICENSE). The DTVP image includes CycloneDX frontend/backend SBOMs,
-served at `/api/sbom` and `/api/sbom/html`; CI also publishes an Agentyzer SBOM.
+served at `/api/sbom` and `/api/sbom/html`.

@@ -4,6 +4,8 @@ import { LayoutList, Copy } from '@lucide/vue'
 import CustomSelect from './CustomSelect.vue'
 import TeamFilter from './TeamFilter.vue'
 import AttributionAgeFilter from './AttributionAgeFilter.vue'
+import DonutChart from './DonutChart.vue'
+import { distributionSegments, SEVERITY_CHART_COLORS, ANALYSIS_CHART_COLORS } from '../lib/statisticsCharts'
 import { ORIGINAL_SEVERITIES, SSVC_STATUSES, ssvcLabel } from '../lib/ssvc'
 import { EVIDENCE_OPTIONS, evidenceLabel } from '../lib/evidence'
 import type { CacheStatus, InconsistencyReason } from '../types'
@@ -235,6 +237,26 @@ const compareNames = (left: string, right: string) => left.localeCompare(
     undefined,
     { numeric: true, sensitivity: 'base' },
 )
+
+const severitySegments = computed(() => distributionSegments(props.resultCounts.original_severity || {}, SEVERITY_CHART_COLORS))
+const analysisSegments = computed(() => distributionSegments(props.resultCounts.analysis, ANALYSIS_CHART_COLORS))
+const teamChartScopeId = useId()
+const selectedTeamChartKey = ref('')
+const teamChartScopes = computed(() => [
+    ...Object.entries(props.resultCounts.team_groups || {}).sort(([a], [b]) => compareNames(a, b))
+        .map(([team, counts]) => ({ key: `group:${team}`, label: `Group: ${team}`, ...counts })),
+    ...filteredTeamTagList.value.map(entry => ({ key: `team:${entry.team}`, label: `Team: ${entry.team}`, open: entry.open, assessed: entry.assessed })),
+])
+const teamChartScope = computed(() => {
+    const preferredTeam = props.filters.teamFilters?.[0] || props.filters.tagFilter
+    return teamChartScopes.value.find(entry => entry.key === selectedTeamChartKey.value)
+        || teamChartScopes.value.find(entry => entry.key.toLowerCase() === `team:${preferredTeam}`.toLowerCase())
+        || teamChartScopes.value[0]
+})
+const teamAssessmentSegments = computed(() => [
+    { label: 'Open', value: teamChartScope.value?.open || 0, color: '#fb923c' },
+    { label: 'Assessed', value: teamChartScope.value?.assessed || 0, color: '#22d3ee' },
+])
 
 const hasConfiguredTeamGroups = computed(() =>
     Object.keys(props.resultCounts.team_group_structure || {}).length > 0
@@ -800,6 +822,24 @@ const handleCopy = () => {
                                 <span class="text-[10px] font-bold text-gray-300">{{ countLabel(props.resultCounts.dependency_relationship.unknown) }}</span>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
+                        <h3 class="text-[10px] uppercase tracking-widest text-gray-500 mb-3">Severity distribution</h3>
+                        <DonutChart title="Filtered severity distribution" :segments="severitySegments" :updating="props.countsUpdating" compact />
+                    </div>
+                    <div class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm">
+                        <h3 class="text-[10px] uppercase tracking-widest text-gray-500 mb-3">Analysis states</h3>
+                        <DonutChart title="Filtered analysis states" :segments="analysisSegments" :updating="props.countsUpdating" compact />
+                    </div>
+                    <div v-if="teamChartScope" class="shadow-xl bg-white/2 border border-white/5 rounded-2xl p-3 backdrop-blur-sm" data-testid="team-assessment-chart">
+                        <label :for="teamChartScopeId" class="block text-[10px] uppercase tracking-widest text-gray-500 mb-2">Team / group assessment</label>
+                        <select :id="teamChartScopeId" :value="teamChartScope.key" :disabled="props.countsUpdating"
+                            class="w-full min-w-0 rounded-lg border border-white/10 bg-gray-900 px-2 py-1.5 text-xs text-gray-200 mb-3"
+                            @change="selectedTeamChartKey = ($event.target as HTMLSelectElement).value">
+                            <option v-for="scope in teamChartScopes" :key="scope.key" :value="scope.key">{{ scope.label }}</option>
+                        </select>
+                        <DonutChart :title="`${teamChartScope.label} assessment`" :segments="teamAssessmentSegments" :updating="props.countsUpdating" compact />
                     </div>
 
                     <div

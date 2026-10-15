@@ -3,6 +3,7 @@ import type { GroupedVuln, InconsistencyReason, TMRescoreProposal } from '../typ
 import type { CodeAnalysisAssessmentIndexRecord } from './api'
 import { ORIGINAL_SEVERITIES } from './ssvc'
 import { evidenceSources } from './evidence'
+import { resolveCanonicalTeamName } from './team-mapping'
 import {
     getAssessedTeams,
     getGroupInconsistencyReasons,
@@ -10,7 +11,7 @@ import {
     normalizeTags,
     tagToString,
 } from './assessment-helpers'
-import { classifyGroup } from './group-classifier'
+import { addTeamCounts, classifyGroup } from './group-classifier'
 import type { FilterCounts, TeamCounts } from './group-classifier'
 import {
     AUTOMATIC_ASSESSMENT_OUTCOME_OPTIONS,
@@ -52,6 +53,7 @@ export interface VulnListItem {
     assigneesLower: string[]
     versions: string[]
     versionsLower: string[]
+    teamTagsByVersion: Map<string, Set<string>> | null
     attributedOnMsValues: number[]
     oldestAttributedOnMs: number | null
     instanceCount: number
@@ -137,6 +139,7 @@ export interface CompiledVulnListFilters {
     componentFilterLower: string
     assigneeFilterLower: string
     versionFilterSet: Set<string>
+    versionSearchTerms: readonly string[]
     cvssVersionMismatchOnly: boolean
     attributionAgeActive: boolean
     attributionAgeCutoffMs: number | null
@@ -214,29 +217,15 @@ const scoreSeverityRank = (score: number | undefined | null): number => {
     return 4
 }
 
-const hasAssessedAliasForTag = (
-    tag: string,
-    assessed: Set<string>,
-    teamMapping: Record<string, any>,
-) => {
-    for (const mappingVal of Object.values(teamMapping || {})) {
-        if (!Array.isArray(mappingVal) || mappingVal.length <= 1 || mappingVal[0] !== tag) continue
-        if ((mappingVal as string[]).slice(1).some(alias => assessed.has(alias))) {
-            return true
-        }
-    }
-    return false
-}
-
 const getMatchedAssessedTeams = (
     group: GroupedVuln,
     normalizedTags: string[],
     teamMapping: Record<string, any>,
 ) => {
-    const assessed = getAssessedTeams(group)
+    const assessed = new Set(normalizeTags(Array.from(getAssessedTeams(group)), teamMapping).map(lower))
     const matched = new Set<string>()
     for (const tag of normalizedTags) {
-        if (assessed.has(tag) || hasAssessedAliasForTag(tag, assessed, teamMapping)) {
+        if (assessed.has(lower(tag))) {
             matched.add(tag)
         }
     }
@@ -690,6 +679,21 @@ export function buildVulnListItem(
     const componentNamesLower = componentNames.map(component => component.toLowerCase())
     const assigneesLower = (group.assignees || []).map(assignee => lower(assignee)).filter(Boolean)
     const versionsLower = versions.map(version => version.toLowerCase())
+    const teamTagsByVersion = new Map<string, Set<string>>()
+    let hasVersionOwnership = false
+    for (const version of group.affected_versions || []) {
+        const label = lower(version.project_version || (version as any).version)
+        if (!label) continue
+        const tags = teamTagsByVersion.get(label) || new Set<string>()
+        for (const component of version.components || []) {
+            if (component.tags !== undefined) hasVersionOwnership = true
+            const rawTags = (component.tags || []).map(tagToString)
+            for (const tag of [...rawTags, ...rawTags.map(tag => resolveCanonicalTeamName(teamMapping, tag))]) {
+                if (tag) tags.add(lower(tag))
+            }
+        }
+        teamTagsByVersion.set(label, tags)
+    }
     const attributedOnMsValues = metadataNumberArray(metadata?.attributed_on_ms_values) ?? unique(
         (group.affected_versions || [])
             .flatMap(version => version.components || [])
@@ -780,6 +784,7 @@ export function buildVulnListItem(
         assigneesLower,
         versions,
         versionsLower,
+        teamTagsByVersion: hasVersionOwnership ? teamTagsByVersion : null,
         attributedOnMsValues,
         oldestAttributedOnMs,
         instanceCount,
@@ -888,6 +893,7 @@ export function compileVulnListFilters(
     const inconsistencyReasonFilterSet = new Set(
         normalizeFilterSelection(filters.inconsistencyReasonFilter),
     )
+    const parsedSearch = typeof filters.smartSearch === 'string' ? parseVulnSearchQuery(filters.smartSearch) : filters.smartSearch
 
     return {
         teamAssessmentFilter: filters.teamAssessmentFilter,
@@ -913,7 +919,8 @@ export function compileVulnListFilters(
         idFilterLower: lower(filters.idFilter),
         componentFilterLower: lower(filters.componentFilter),
         assigneeFilterLower: lower(filters.assigneeFilter),
-        versionFilterSet: new Set(filters.versionFilterList || []),
+        versionFilterSet: new Set((filters.versionFilterList || []).map(lower)),
+        versionSearchTerms: parsedSearch?.versionTerms || [],
         cvssVersionMismatchOnly: !!filters.cvssVersionMismatchOnly,
         attributionAgeActive: filters.attributionAgeDays != null,
         attributionAgeCutoffMs: normalizedAgeDays == null ? null : nowMs - normalizedAgeDays * DAY_MS,
@@ -1106,8 +1113,16 @@ export function matchesCompiledListFilters(
         return false
     }
 
-    if (filters.versionFilterSet.size > 0 && !item.versions.some(version => filters.versionFilterSet.has(version))) {
+    if (filters.versionFilterSet.size > 0 && !item.versionsLower.some(version => filters.versionFilterSet.has(version))) {
         return false
+    }
+    const selectedTeams = filters.teamFiltersLower.length ? filters.teamFiltersLower : (filters.tagFilterLower ? [filters.tagFilterLower] : [])
+    if (selectedTeams.length && (filters.versionFilterSet.size || filters.versionSearchTerms.length) && item.teamTagsByVersion) {
+        if (![...item.teamTagsByVersion].some(([version, tags]) => {
+            return (!filters.versionFilterSet.size || filters.versionFilterSet.has(version))
+                && (!filters.versionSearchTerms.length || filters.versionSearchTerms.some(term => version.includes(term)))
+                && selectedTeams.some(team => tags.has(team))
+        })) return false
     }
 
     if (filters.cvssVersionMismatchOnly && !item.cvssVersionMismatch) {
@@ -1248,14 +1263,8 @@ export function computeListTeamCounts(items: VulnListItem[]): Record<string, Tea
     for (const item of items) {
         if (!item.normalizedTags.length) continue
 
-        for (const team of item.normalizedTags) {
-            if (!counts[team]) counts[team] = { open: 0, assessed: 0 }
-            if (item.isOpen) {
-                counts[team].open++
-            } else {
-                counts[team].assessed++
-            }
-        }
+        addTeamCounts(counts, item.normalizedTags, item.assessedTeams,
+            ['ASSESSED', 'ASSESSED_LEGACY'].includes(item.lifecycle) && !item.isPending)
     }
 
     return counts

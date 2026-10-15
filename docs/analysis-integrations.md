@@ -258,12 +258,11 @@ reasoning. If the analyzer is unavailable, DTVP returns a labeled deterministic
 fallback. No benchmark is shown for `NOT_SET` assessments. Ratings are 1/F
 (contradiction) through 5/A (strong agreement).
 
-Bundled Agentyzer lives in `agentyzer/`, runs at `http://agentyzer:8000` in
-Compose, and exposes host port `8095` by default. PM2 uses the mock analyzer on
-that port. DTVP optionally uses Agentyzer's compact, follow-up, and prompt
+Agentyzer is deployed separately; set `DTVP_CODE_ANALYSIS_URL` to its reachable
+base URL. The local PM2 stack uses a mock analyzer on port `8095`. DTVP optionally uses Agentyzer's compact, follow-up, and prompt
 inspection endpoints; persisted DTVP context remains the fallback.
 
-Agentyzer prompt bundles live under `agentyzer/config/prompts/`. They enforce
+Prompt bundles belong to the external Agentyzer deployment. They enforce
 structured, conservative assessment contracts and support native tool calls or
 text directive fallbacks for allowlisted web/package/source research. The
 `clone_repository` / `CLONE_REPOSITORY` tool can additionally shallow-clone a

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GroupedVuln } from '../../types'
 import { buildVulnListItems } from '../vulnListIndex'
+import { computeTeamCounts } from '../group-classifier'
 import {
     deriveVulnListBaseIndex,
     deriveVulnListGroupLookup,
@@ -348,7 +349,7 @@ describe('vulnListViewModel', () => {
         expect(view.analysisCounts.FALSE_POSITIVE).toBe(1)
         expect(view.analysisCounts.IN_TRIAGE).toBe(1)
         expect(view.teamTagCounts).toEqual({
-            'team-a': { open: 2, assessed: 0 },
+            'team-a': { open: 1, assessed: 1 },
             'team-b': { open: 0, assessed: 1 },
             'team-c': { open: 0, assessed: 1 },
         })
@@ -356,6 +357,26 @@ describe('vulnListViewModel', () => {
         expect(view.dependencyRelationshipCounts).toEqual({ direct: 3, transitive: 1, unknown: 0 })
         expect(view.needsApprovalGroups.map(group => group.id)).toEqual(['CVE-2026-0004'])
         expect(view.incompleteGroups.map(group => group.id)).toEqual(['CVE-2026-0003'])
+    })
+
+    it('counts team coverage and reviewer closure within the current filters, including pending work', () => {
+        const items = buildVulnListItems([
+            makeGroup({ id: 'CVE-SCOPE-PARTIAL', tags: ['Security', 'Sec', 'Platform'],
+                list_metadata: { lifecycle: 'INCOMPLETE', is_open: true, is_pending: true, assessed_teams: ['Sec'] } }),
+            makeGroup({ id: 'CVE-SCOPE-COMPLETE', tags: ['Security', 'Platform'],
+                list_metadata: { lifecycle: 'NEEDS_APPROVAL', is_open: true, is_pending: true, assessed_teams: ['Security', 'Platform'] } }),
+            makeGroup({ id: 'CVE-SCOPE-GLOBAL', tags: ['Platform'],
+                list_metadata: { lifecycle: 'ASSESSED', is_open: false, assessed_teams: [] } }),
+            makeGroup({ id: 'CVE-OTHER', tags: ['Runtime'] }),
+        ], { component: ['Security', 'Sec'] }, {})
+        const view = deriveVulnListViewModel(items, baseFilters({ idFilter: 'CVE-SCOPE' }))
+        const expected = {
+            Security: { open: 0, assessed: 2 },
+            Platform: { open: 1, assessed: 2 },
+        }
+        expect(view.teamTagCounts).toEqual(expected)
+        expect(deriveVulnListResultCounts(view.matchingItems).canonical_team_tags).toEqual(expected)
+        expect(computeTeamCounts(view.matchingItems.map(item => item.group), { component: ['Security', 'Sec'] })).toEqual(expected)
     })
 
     it('keeps counts broad while matching rows obey non-state filters', () => {
@@ -416,7 +437,7 @@ describe('vulnListViewModel', () => {
         expect(staticStats.filterCounts.NOT_SET).toBe(0)
         expect(filterModel.filterCounts.OPEN).toBe(2)
         expect(filterModel.filterCounts.NOT_SET).toBe(2)
-        expect(filterModel.teamTagCounts).toBe(staticStats.teamTagCounts)
+        expect(filterModel.teamTagCounts).toEqual(staticStats.teamTagCounts)
         expect(filterModel.matchingItems.map(item => item.id)).toEqual([
             'CVE-2026-0001',
             'CVE-2026-0002',
