@@ -579,6 +579,12 @@ under exact source/target/preview pins. Existing target decisions cannot be over
 new scope requires independent review. Read-only retention diagnostics protect
 active branches and tags. Offline full-journal verification supports recovery.
 
+Native DT collection now uses per-version bindings and GET-only durable jobs.
+Complete captures and exact response bytes are checkpointed before publication;
+retries preserve the capture and expected head. Export/finding observations remain
+independent, including contradictions and full legacy DT documentation. Remote
+reads remain nontransactional, not a verified coherent snapshot.
+
 Native bundles retain exact source/context/proposal/approval distinctions. CPE
 has an internal offline policy/proposal module; VScorer has explicit focused inputs
 and returned bound proposals. Producer-qualified Agentyzer inputs and returned

@@ -33,6 +33,7 @@ class AnalysisInput(RequestModel):
 @router.put("/projects/{project_id}/connectors/agentyzer")
 def bind(project_id: str, data: AnalysisBinding, db: DB, actor: Auth):
     project = project_for(db, actor, project_id, "manage")
+    db.refresh(project, with_for_update=True)
     if not data.component_name.strip():
         raise HTTPException(422, "Repository name must not be empty")
     project.metadata_json = {

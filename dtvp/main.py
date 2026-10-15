@@ -19,6 +19,7 @@ from dtvp.api_licenses import router as licenses_router
 from dtvp.api_metadata import router as metadata_router
 from dtvp.api_proposals import router as proposal_router
 from dtvp.api_rescoring import router as rescoring_router
+from dtvp.api_source_jobs import router as source_jobs_router
 from dtvp.api_synchronization import router as synchronization_router
 from dtvp.api_workflow import router as workflow_router
 from dtvp.auth import authenticate, issue
@@ -82,6 +83,7 @@ def create_app(settings=None):
     app.include_router(history_router)
     app.include_router(metadata_router)
     app.include_router(synchronization_router)
+    app.include_router(source_jobs_router)
     app.include_router(licenses_router)
     if settings.playground:
         from dtvp.api_playground_knowledge import router as knowledge_playground_router

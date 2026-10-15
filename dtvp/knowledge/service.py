@@ -41,6 +41,8 @@ def import_inventory(
     context=None,
     predecessor=None,
     part_id=None,
+    source_provenance=None,
+    additional_artifacts=(),
 ):
     """Replace a complete baseline, preserving all other knowledge sections.
 
@@ -73,6 +75,22 @@ def import_inventory(
         operation["context"] = context
     if part_id is not None:
         operation["part_id"] = part_id
+    if source_provenance is not None and not isinstance(source_provenance, dict):
+        raise ValueError("Source provenance must be an object")
+    if source_provenance:
+        operation["source_provenance"] = source_provenance
+    if not isinstance(additional_artifacts, (list, tuple, set)) or not all(
+        isinstance(sha, str) for sha in additional_artifacts
+    ):
+        raise ValueError("Additional artifacts must be content identifiers")
+    additional_artifacts = sorted(set(additional_artifacts))
+    for sha in additional_artifacts:
+        try:
+            journal.objects.read(sha)
+        except (OSError, ValueError) as error:
+            raise ValueError("Additional source artifact unavailable or corrupt") from error
+    if additional_artifacts:
+        operation["additional_artifacts"] = additional_artifacts
     collection = CollectionContext.model_validate(context or {})
     fingerprint = digest(canonical(operation))
     scoped_request = digest(canonical([project_id, actor_id, request_id]))
@@ -126,6 +144,7 @@ def import_inventory(
     sections["inventory"] = {
         "baseline": dict(
             source=source,
+            **({"source_provenance": source_provenance} if source_provenance else {}),
             build_number=build_number,
             occurred_at=occurred_at,
             artifact_sha=journal.objects.put(raw),
@@ -179,6 +198,7 @@ def import_inventory(
         artifacts=sorted(
             set(journal.state(parent).artifacts if parent else [])
             | {sections["inventory"]["baseline"]["artifact_sha"]}
+            | set(additional_artifacts)
         ),
     )
     return journal.publish(

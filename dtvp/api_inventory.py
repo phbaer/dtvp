@@ -23,9 +23,13 @@ class DTBinding(RequestModel):
 @router.put("/projects/{project_id}/connectors/dependency-track")
 def bind_dt(project_id: str, data: DTBinding, db: DB, actor: Auth):
     project = project_for(db, actor, project_id, "manage")
+    db.refresh(project, with_for_update=True)
     connectors = {
         **project.metadata_json.get("connectors", {}),
-        "dependency-track": {"project_id": str(data.external_project_id)},
+        "dependency-track": {
+            **project.metadata_json.get("connectors", {}).get("dependency-track", {}),
+            "project_id": str(data.external_project_id),
+        },
     }
     project.metadata_json = {**project.metadata_json, "connectors": connectors}
     audit(

@@ -497,7 +497,7 @@ or unverified coherence prevent release tags. Producer-declared coherence is
 attributed evidence, not verified compatibility or approval of the whole release.
 The API-only demo covers replacing one part while reusing another unchanged.
 
-The next foundation implements versioned team selectors and recursive ownership
+The native core implements versioned team selectors and recursive ownership
 in consuming-tree contexts. Product-wide policies apply across versions by
 default, with optional version scopes, and publish all affected version states
 atomically. Imports capture the current policy. Separate trees keep separate
@@ -518,6 +518,14 @@ withdrawal and baseline reapplication. Initial JSON semantic subsets preserve
 CycloneDX, OpenVEX and CSAF origins; exact identities match while advanced scopes
 remain unresolved. Preview and attributed application do not grant publisher trust,
 complete conformance or internal approval. Originals remain retrievable.
+
+Native Agentyzer jobs now checkpoint submission intent, remote identity and raw
+reports, recheck permissions/configuration and preserve uncertain publication
+inputs. Unknown remote POST outcomes never trigger automatic resubmission. Native
+DT intake uses dedicated per-version bindings and GET-only durable collection.
+Exact raw responses and frozen captures are retained before publication; SBOM export
+claims and finding claims remain separate. Nontransactional DT reads remain an
+explicit consistency limitation. Neither integration creates human approvals.
 
 Still planned: overlapping-view/advanced assembly reconciliation, cross-version
 source reuse, cross-part relationship mapping, stable cross-import/context identity,

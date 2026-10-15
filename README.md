@@ -230,6 +230,35 @@ viewer’s memberships; showing a label grants no team role.
 Use workspace `--json` for complete machine-readable rows and evidence. Mutations
 forward the explicit JSON payload; no approval or scoring logic lives in the CLI.
 
+### Native Dependency-Track intake
+
+An administrator binds each product version independently using `PUT
+/api/v3/projects/{id}/versions/{version}/connectors/dependency-track` with
+`external_project_id` and `expected_external_project_id` (null initially).
+The v2 global binding remains separate; no implicit fallback assigns it to every
+native version. Deployment owns DT URL/read credentials. Source authority includes
+the configured endpoint and DT UUID; changing a binding cannot silently replace
+an existing branch from another authority.
+
+`POST .../versions/{version}/imports/dependency-track/jobs` takes `request_id`,
+expected head (null for a new branch), monotonic `build_number`, timezone-aware
+`occurred_at`, optional collection `context`, `predecessor` or constituent `part_id`.
+The worker makes GET requests only, rechecking permissions, binding, target and
+lease between requests. It checkpoints complete composition, finding pages,
+full legacy analysis, raw response bytes and an immutable capture before publishing.
+Incomplete retrieval never advances the baseline. Exported SBOM vulnerability
+claims and finding API claims stay separate, including contradictions; source Base
+and tagged/plain legacy documentation remain attributed evidence, not approvals.
+
+DT reads are nontransactional: captured originals and explicit consistency limits
+do not establish a single remote snapshot or complete product discovery.
+`GET .../versions/{version}/source-jobs` and `/source-jobs/{id}` expose bounded safe
+status; explicit author-only `/retry` and `/cancel` use current permissions. After
+capture, retries use exactly that capture and expected head, never a fresh upstream
+fetch or implicit rebase. CAS conflicts require resolving the target explicitly;
+unknown publication outcomes replay the original receipt. SQL job checkpoints
+require operational backup. No DT writeback is implemented by this path.
+
 ### Withdraw an incorrect baseline
 
 `POST /api/v3/projects/{id}/versions/{version}/withdrawal` takes `request_id`,

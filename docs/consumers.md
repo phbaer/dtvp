@@ -58,6 +58,12 @@ inputs, failure/retry handling and controlled consumer fixture qualification.
 The optional source receipt is a consistency contract; versioned serializer
 compatibility across future upgrades remains a pre-cutover requirement.
 
+Native Dependency-Track intake uses per-version bindings and durable GET-only
+collection jobs. Frozen captures retain original export/finding/analysis responses,
+including tagged/plain legacy documentation. Export claims and finding claims
+remain independent; nontransactional remote reads never establish snapshot
+consistency. This is source intake, with no implicit writeback.
+
 ## V2 compatibility contracts
 
 The following UUID snapshot contracts describe the existing v2 runtime and prior
