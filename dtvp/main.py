@@ -12,6 +12,7 @@ from dtvp.api_evidence import router as evidence_router
 from dtvp.api_identity import router as identity_router
 from dtvp.api_inventory import router as inventory_router
 from dtvp.api_knowledge import router as knowledge_router
+from dtvp.api_proposals import router as proposal_router
 from dtvp.api_rescoring import router as rescoring_router
 from dtvp.api_workflow import router as workflow_router
 from dtvp.auth import authenticate, issue
@@ -69,6 +70,7 @@ def create_app(settings=None):
     app.include_router(workflow_router)
     app.include_router(evidence_router)
     app.include_router(identity_router)
+    app.include_router(proposal_router)
     if settings.playground:
         from dtvp.api_playground_knowledge import router as knowledge_playground_router
 

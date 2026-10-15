@@ -217,6 +217,11 @@ def load_workspace(
                         connected[root_ref] = reachable(complete_graph, root_ref)
                     if ref in connected[root_ref]:
                         dependency_relation = "transitive"
+            from dtvp.knowledge.proposals import list_proposals
+
+            proposals = list_proposals(
+                journal, sections, revision.version, context["id"], identifier
+            )
             item = {
                 "id": digest(canonical([context["id"], identifier])),
                 "context_id": context["id"],
@@ -236,6 +241,7 @@ def load_workspace(
                 "published_score": published_score(
                     journal, sections, revision.version, context["id"], identifier, gate=gate
                 ),
+                **({"scoring_proposals": proposals} if proposals else {}),
                 "evidence": [
                     item for item in observations if item.get("kind") == "external-status"
                 ],

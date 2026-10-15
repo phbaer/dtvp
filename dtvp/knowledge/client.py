@@ -79,6 +79,18 @@ def display_workspace(result):
             f"team={row['context'].get('team_id') or 'unresolved'} "
             f"state={row['coverage']['status']}  source={source_text} contextual={score_text}"
         )
+        for proposal in row.get("scoring_proposals", []):
+            value = proposal.get("proposal") or {}
+            status = (
+                "eligible"
+                if proposal.get("eligible")
+                else ", ".join(proposal.get("ineligibility_reasons", []))
+            )
+            print(
+                f"  proposal={proposal['id']} provider={proposal['provider']} "
+                f"base={value.get('base_score', 'unknown')} score={value.get('score', 'unknown')} "
+                f"status={status} (requires coordinator publication)"
+            )
     if result.get("next_offset") is not None:
         print(f"Next offset: {result['next_offset']} (pin --expected {result['state']})")
 

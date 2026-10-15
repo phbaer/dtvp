@@ -250,6 +250,18 @@ and retains it in proposals; commit `3994254` passed independent Python and
 architecture reviews. It is not merged into the sibling checkout. Receipt hashes
 establish artifact consistency, not remote publisher authenticity or DTVP approval.
 
+Native VScorer results return through
+`POST .../versions/{version}/proposals/vscorer` with `request_id`, expected branch
+head, the assessment's `source_binding` wrapper and one native `finding` response.
+DTVP reproduces the pinned input receipt, validates the focused component/CVE and
+unchanged Base, recalculates supported contextual scores and retains the raw report.
+Workspace rows, CLI and UI compare these proposals with source/published values.
+Withheld, invalid and stale proposals remain attributed evidence with explicit
+ineligibility; eligible proposals still require coordinator rationale, preview,
+current independent team reviews and explicit publication. Importing a result
+never creates an assessment, review or published score. Provider identity remains
+caller-asserted; hashes verify artifact consistency only.
+
 ### VDR/VEX intake and application
 
 `GET /api/v3/projects/{id}/evidence` returns bounded document summaries, current

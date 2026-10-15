@@ -9,6 +9,7 @@ async function fixture(page: Page, reviewer = false, coordinator = false, playgr
     description: 'A long vulnerability description. '.repeat(100),
     source_ratings: [{ source: 'Upstream', method: 'CVSSv31', score: 9.8, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }],
     coverage: { status: reviewer ? 'submitted' : 'unassessed', assessment: reviewer ? { revision: 'assessment-sha', stage: 'submitted', payload: { assessment_id: 'assessment-one', author_id: 'analyst', state: 'not_affected', justification: 'code_not_reachable', rationale: 'Reviewed deployment evidence excludes the path.', targets: [{ version: '7.1.2', context_id: 'ctx', vulnerability_id: 'CVE-2099-1234' }], evidence: [] } } : null },
+    scoring_proposals: coordinator ? [{ id: 'proposal-one', provider: 'vscorer', source_label: 'Threat model', current: true, eligible: true, ineligibility_reasons: [], report_sha256: 'report-sha', proposal: { base_score: 9.8, score: 0, base_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L' }, score_input: { base_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:L/IR:L/AR:L' } }] : [],
     published_score: { score: 4.2, vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' }, capabilities: coordinator ? ['rescore'] : reviewer ? ['approve'] : ['assess'], evidence: [{ source: 'build', claim: 'Deployment report' }],
   }
   let conflict = false, uncertain = false, scoreReady = false
@@ -170,4 +171,21 @@ test('advanced filters reset pagination and forward the full scope to server sta
   await page.getByRole('button', { name: 'Critical shared dependencies', exact: true }).click()
   await expect(page.getByLabel('Filtered workspace statistics')).toContainText('79 context findings')
   await expect(page.getByRole('combobox', { name: 'Source severity', exact: true })).toHaveValue('critical')
+})
+
+
+test('external proposal comparison requires explicit coordinator preview', async ({ page }) => {
+  const { writes } = await fixture(page, false, true)
+  await page.getByRole('button', { name: 'CVE-2099-1234', exact: true }).click()
+  await page.getByText('External scoring proposals (1)', { exact: true }).click()
+  await expect(page.getByRole('table', { name: 'External scoring comparison' })).toContainText('Threat model')
+  await page.getByRole('button', { name: 'Use proposal', exact: true }).click()
+  expect(writes).toHaveLength(0)
+  await expect(page.getByRole('form', { name: 'Coordinator rescoring' })).toBeVisible()
+  await expect(page.getByLabel('Scoring rationale', { exact: true })).toHaveValue('')
+  await expect(page.getByRole('button', { name: 'Publish contextual score', exact: true })).toBeDisabled()
+  await page.getByLabel('Scoring rationale', { exact: true }).fill('Coordinator independently checked the contextual inputs.')
+  await page.getByRole('button', { name: 'Preview contextual score', exact: true }).click()
+  expect(writes[0]?.body.vector).toContain('/CR:L/IR:L/AR:L')
+  await expect(page.getByRole('button', { name: 'Publish contextual score', exact: true })).toBeDisabled()
 })
