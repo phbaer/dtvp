@@ -18,6 +18,7 @@ def main():
     serve.add_argument("--port", type=int, default=8000)
     sub.add_parser("worker")
     sub.add_parser("migrate")
+    sub.add_parser("rebuild-knowledge", help="Rebuild only v3 projections from the local journal")
     bootstrap = sub.add_parser("bootstrap")
     bootstrap.add_argument("--issuer", required=True)
     bootstrap.add_argument("--subject", required=True)
@@ -32,7 +33,16 @@ def main():
     migrate(migration_engine, settings.artifact_dir.parent / "migration-backups")
     migration_engine.dispose()
     factory = sessions(engine)
-    if args.command == "worker":
+    if args.command == "rebuild-knowledge":
+        import json
+
+        from dtvp.knowledge.journal import Journal
+        from dtvp.knowledge.projection import catch_up
+
+        print(
+            json.dumps(catch_up(engine, Journal(settings.artifact_dir / "knowledge"), rebuild=True))
+        )
+    elif args.command == "worker":
         run(factory, Artifacts(settings.artifact_dir), settings)
     elif args.command == "bootstrap":
         with factory.begin() as db:

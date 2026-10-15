@@ -2,6 +2,472 @@
 
 [Project overview](../README.md) · [Shipped API](api.md)
 
+## Agreed ground-up design
+
+Design checkpoint: 2026-10-15. This section supersedes the earlier architecture
+and workflow assumptions below. It is an agreed target, not a claim of shipped
+behavior. Implementation of the new core has started; the earlier rewrite is
+retained as the compatibility runtime. Preserve existing
+working-tree changes until their reuse or replacement is deliberately planned.
+The README remains the canonical overview; this document specifies design detail.
+
+### Baseline and reuse matrix
+
+Three sources must be assessed separately:
+
+1. Original v1: local `main`, currently `bdc7ba41a40697b0a3f5aa1b619518216e5087f8`.
+   Its source, regression tests, guides and screenshots define existing behavior.
+2. Committed refactoring: `rewrite/dtvp-owned-platform`, currently `5c0936a`.
+   Useful infrastructure exists, but its domain model is not the agreed target.
+3. Uncommitted experiments: filters, severity presentation, review context and
+   related documentation/tests. Preserve these; they are not a validated release.
+
+These references describe the inspected local checkout, not a freshly fetched
+remote. Do not infer v1 feature parity from the smaller refactored implementation.
+
+| Area | Evidence in `main` | Refactoring assets | Target decision |
+| :--- | :--- | :--- | :--- |
+| Navigation and filters | `frontend/src/pages/ProjectView.vue`, filter/sorting tests, `docs/review-workflows.md`, screenshots | Search selectors, filter rail, cursor catalogs, list/detail work | Preserve v1 interaction semantics; adapt grouping to context and version coverage |
+| Team mapping | `dtvp/team_mapping.py`, ownership tests in `tests/test_logic.py` | Team memberships and explicit project grants | Port selector behavior and recursive delegation; separate responsibility from access |
+| Cross-version assessment | Grouping, structured team blocks, `docs/assessment-model.md`, assessment tests | Per-finding decisions and independent approvals | Shared assessment revisions with explicit reviewed version/context coverage |
+| Inventory persistence | DT client plus cache/outbox | Parsers, immutable artifacts, source observations, snapshots | Authoritative local state journal; PostgreSQL projections; coherent baseline per version |
+| Scoring and priority | CVSS rules, SSVC resources/services, original-severity handling and tests | CVSS calculations, coordinator role, proposal validation | Preserve validated algorithms/resources; contextual scoring after current reviews |
+| Analysis | Scoped proposals, evidence history, follow-ups, bulk previews | External Agentyzer client, durable jobs, retained reports | External VScorer/Agentyzer evidence contracts; no bundled service code |
+| Preservation and migration | DT text, archive import/export, audit recovery | `dtvp/legacy_dt.py`, legacy fixtures, snapshot exports | Preserve tagged/plain legacy text and provenance without inventing approvals |
+| Statistics | Grouped/version/team statistics and facet semantics | Authorized server aggregation and drilldowns | Distinguish unique vulnerabilities, occurrences and assessment workload |
+| Operations | Existing deployment/test conventions and regression fixtures | Auth, migrations, upgrade helper, playground and browser tests | Retain useful infrastructure; add journal recovery and Docker/Podman validation |
+
+The refactoring currently makes PostgreSQL authoritative for metadata
+(`dtvp/storage.py` states this explicitly). Its artifact store is a reuse
+candidate, not an implemented knowledge journal. `Revision` represents imports;
+`Decision` is tied to a finding; `Finding` is unique by release/component/ID,
+without a consuming-tree context key. These require redesign, not relabeling.
+`effective_revisions()` currently combines per-source effective imports; the new
+design instead selects one coherent authoritative inventory baseline.
+
+Specific v1 behavior to carry forward includes AND across filter categories,
+OR within a category, facet counts excluding their own category, URL state,
+server-wide totals and bulk candidates, alias-aware teams, role defaults and
+team-scoped detail. Preserve the context/code-evidence/assessment separation
+where useful; reduce clutter without removing required evidence.
+
+Intentional changes from v1: no automatic DT writes, no reviewer-global shortcut
+around required contextual reviews, no analyst rescoring, no automatic adoption
+of tool conclusions, and no bundled Agentyzer. Original tests for superseded
+behavior inform migration but do not override these agreed changes.
+
+### Application boundary and deployment
+
+- Self-hosted, one organization with teams and scoped project access; optional
+  managed services. FastAPI/Python backend, Vue UI, PostgreSQL and local storage.
+- Docker Compose and Podman Compose deployment. No S3 or mandatory broker.
+- Backend owns domain rules, permissions, synthesis, comparison and maintenance.
+  UI and CLI are presentation clients of the same API; integrations use it too.
+- DTVP owns inventory, metadata, decisions and evidence. DT, CyBeats, files and
+  pipelines are sources. External write-back is independently enabled and explicit.
+- Generator, VScorer and Agentyzer remain separate applications. Use VScorer
+  consistently; translate legacy tmrescore names only at compatibility boundaries.
+- Extensible pipeline/security-result contracts; SBOM/SCA is the initial domain.
+  Do not impose CVE/CVSS semantics on future finding types.
+
+### Product versions, branches and releases
+
+A project is a product line. A branch represents a product version, not a team.
+Versions such as `6.15.6`, `7.1.1`, `7.1.2` and `7.2.0` can advance concurrently.
+Each nightly import advances only its intended version. New versions or patches
+branch from an existing state; branching preserves history without granting
+unreviewed coverage. A protected tag freezes a released state.
+
+No automatic rebasing is needed for parallel nightly builds. Shared intelligence
+and assessments can be explicitly applied to several branches. Merges reconcile
+inventory and decisions explicitly, with conflicting conclusions visible.
+Variants/configurations are deferred; do not design them into every initial key.
+
+### Merge-aware synchronization
+
+Support cascading development flows, for example `7.1.1 -> 7.1.2 -> 7.2.0`,
+through backend synchronization proposals exposed identically in UI and CLI.
+Configured relationships identify candidate flows, not proof of a completed
+merge. Keep software ancestry/merge provenance separate from knowledge-revision
+ancestry: a source-code merge and a DTVP assessment publication are distinct events.
+Do not infer integration from version numbers or branch names alone.
+
+Pipeline evidence identifies repository/ref/commit, source and target commits,
+merge/build IDs and resulting artifact where available. A successful accepted
+target SBOM establishes its actual inventory. Missing or partial provenance
+produces uncertainty; it does not establish that a fix or assessment applies.
+Support explicit provenance for backports/cherry-picks and squash workflows
+without assuming a corresponding merge parent is present.
+
+For each confirmed integration, compare the common knowledge state or last
+accepted synchronization basis with source and target changes. A software merge
+base alone does not identify which human decisions were previously incorporated.
+Where no unambiguous basis exists, show a two-state applicability comparison
+and require explicit reconciliation rather than inventing a common ancestor.
+
+| Data | Behavior |
+| :--- | :--- |
+| Inventory | Target build remains authoritative; never union source/target SBOMs |
+| Assessment/evidence | Propose shared references where subject, context, conditions and evidence are compatible |
+| Reviews | Preserve existing valid target coverage; newly extended coverage requires review |
+| Scores/proposals | Recheck exact scoring inputs and readiness; source publication alone is insufficient |
+| Independent target edits | Preserve them; show conflicting conclusions for resolution |
+| Tags | Never move or rewrite a release baseline |
+
+Preview entries are reusable, already covered, needs review, conflicting,
+not applicable or unresolved. Record why, affected versions/contexts, source
+assessment/evidence revisions and exact target state. Applying a preview checks
+permissions and all expected inputs again, then publishes new target revisions
+using the atomic reference transaction. It cannot bypass review/scoring gates.
+
+Cascades advance edge by edge when each target's actual state is available.
+Track originating evidence/assessment IDs and synchronization receipts to avoid
+duplicates or repeated circulation through branching/merge paths. A downstream
+version is not covered merely because an earlier edge was synchronized. Later
+corrections, withdrawals or changed target builds recheck affected coverage and
+retain the original synchronization provenance.
+
+Start proposal-based. Any later automatic reuse needs an explicit scoped policy
+and must retain approval boundaries. Fixtures cover repeated and out-of-order
+merge events, delayed nightly imports, partial cascades, divergent targets,
+changed inputs after preview, backports, withdrawn evidence and immutable tags.
+
+### Authoritative state and publication
+
+The local knowledge revision journal is authoritative. Each revision describes a
+complete logical state through immutable manifests and content-addressed data;
+unchanged objects are shared. Reconstruction reads that state, not a sequence
+of business events requiring today's rules or external services to be rerun.
+Every persisted knowledge change, including a draft save, enters this storage.
+
+| Manifest area | Required contents |
+| :--- | :--- |
+| Inventory | Active baseline, retained imports, components, graph and source identities |
+| Ownership | Rule revisions, resolved assignments and usage contexts |
+| Vulnerabilities | Exact advisory revisions, source assertions/ratings and match results |
+| Assessments | Draft/submitted revisions, scope, conditions, reasons and evidence |
+| Reviews | Decisions bound to exact assessment revisions and approved coverage |
+| Scoring | Proposal inputs/results, policies and published contextual scores |
+| History | Withdrawn imports and retained assessments for absent components |
+
+Revision envelopes record format version, parents, actor, timestamp, reason,
+scope and content hash. Shared assessments have product-line-wide identities;
+branches pin exact immutable revisions and coverage. New shared revisions cannot
+silently alter existing branch states. Global advisory data is likewise pinned
+when incorporated into a product state.
+
+Publication protocol to implement and fault-test:
+
+1. Validate authorization, input revisions and expected branch heads.
+2. Durably store immutable objects and complete state manifests.
+3. Atomically publish a reference transaction, conditionally advancing one or
+   several branch heads. This is the authoritative commit point.
+4. Apply the publication to PostgreSQL in one idempotent transaction and record
+   the applied publication position.
+
+Start with one journal writer per installation, shared by API and jobs. A durable
+publication sequence orders reference transactions; the revision graph alone
+does not establish projection order. Multi-branch publication cannot be achieved
+by independently replacing branch files. The reference transaction format,
+locking, filesystem durability and recovery algorithm remain an implementation
+contract to settle before coding the writer.
+
+Before publication, interrupted writes leave unreferenced objects; after it,
+projection catch-up recovers PostgreSQL. Replies identify the committed revision
+and projection position. A committed change whose projection is pending must
+not be reported as an ordinary failed write that invites a duplicate submission.
+Read-your-write waits are bounded; idempotency keys support safe retries.
+
+Hashes support integrity checks, not independent protection against replacement
+of the entire history. Backups remain necessary. Recovery milestones and visible
+business milestones differ: UI normally shows imports, submissions, approvals
+and releases. Draft revisions may be compacted under an explicit retention policy;
+protected/referenced history is never removed merely for being old.
+
+PostgreSQL retains active projections and disposable caches, not a permanent copy
+of every historical state. Authentication, credentials, installation settings and
+operational jobs require a separate persistence/backup contract. Rebuilding the
+knowledge projection is not a complete installation disaster recovery procedure.
+
+### Inventory layers and source acceptance
+
+Retain original SBOMs losslessly as immutable layers. The latest accepted complete
+build snapshot is the current reference for each version; do not union old graphs
+or choose solely by upload arrival time. Multiple sources enrich attributed
+evidence; inventory conflicts need an explicit authority policy.
+
+Receive -> validate completeness/target -> normalize identities -> calculate
+delta and coverage impact -> publish. Duplicate inputs are idempotent. Failed,
+partial or unsupported imports cannot erase the baseline or imply clean coverage.
+Imports capture their ownership-rule revision; later mapping changes produce
+new states without rewriting old ones.
+
+Withdrawal is recorded, selects the appropriate remaining baseline, and retains
+referenced evidence/history. Absence is not fixed/not affected. Expose assessments
+for components absent now, including those absent from all active inventories.
+
+### Identity, context and recursive ownership
+
+Separate component lineage, exact package/build identity, usage context and
+occurrence. Prefer strong coordinates and preserve external reference mappings;
+names or import-local BOM refs alone cannot establish stable identity. Ambiguous
+matches remain unresolved rather than copying assessments speculatively.
+
+A usage context is a consuming component's dependency tree in a version branch.
+The same dependency in two consuming trees needs separate assessment coverage,
+even if owned by the same team. Several paths within one tree do not by themselves
+multiply assessments; preserve all paths. Different versions/builds remain distinct.
+
+Explicit component ownership delegates its subtree recursively until another
+explicit owner boundary. For `B (Team B) -> A (Team A) -> X`, A covers X in B's
+context; B sees delegated status and covers its remaining dependencies. If C also
+uses A, A covers X separately in C's context.
+
+Port v1 selectors: separate namespace/name matching, case-insensitive default,
+case-sensitive modifiers, qualified/scoped names, known-empty versus unknown
+namespace, PURL selectors with optional exact version/qualifiers/subpath, wildcard
+fallback and deterministic specificity/tie-breaking. In particular, v1 name-only
+selectors do not match a known nonempty namespace. Preserve primary team/alias
+semantics explicitly; do not reinterpret every mapping tag as a required reviewer.
+Record the matched rule and delegation explanation.
+
+Ownership rules apply across versions by default, with optional version limits.
+Responsibility and access grants are separate. Team reassignment preserves valid
+decisions and historical authorship; handover acknowledgment, if required, is a
+separate action. Actual context/evidence changes can still require reassessment.
+
+### Shared assessments and verified coverage
+
+Distinguish source-reported affected ranges, declared assessment scope and verified
+coverage. A shared assessment records vulnerability, component/context lineage,
+selected versions or ranges/exclusions, conclusion, reason, evidence and supporting
+conditions. Reviews bind exact assessment revisions and evaluated version states.
+
+A range is not proof that every version satisfies the conditions. New versions
+are coverage candidates requiring explicit confirmation/review. Nightly imports
+recalculate each branch's coverage: current approved, submitted, reassessment
+needed, out of scope, unknown or historically absent. Record what changed and why.
+Identical reimports preserve coverage; material usage/component/evidence changes
+reopen affected coverage only. Extending scope does not revoke existing approval
+for unchanged coverage, but additional coverage needs review.
+
+Analysts assess applicability and evidence; team reviewers independently review.
+Not-affected conclusions require a specific reason and supporting explanation.
+Security coordinators publish contextual scoring once all required contexts for
+that vulnerability in that product version have current approved assessments.
+Other unfinished versions or unrelated vulnerabilities do not block ready work.
+Compatible version coverage can be submitted/reviewed/published together.
+
+Assessment revision and review records must allow existing approved coverage to
+remain pinned while a scope extension awaits review. Different conclusions need
+separate context/version coverage rather than one contradictory aggregate result.
+Administration does not automatically grant review or scoring authority.
+
+### Evidence synthesis, integrations and scoring
+
+One backend workspace combines source facts, usage/dependency information,
+criticality/exposure/controls, vulnerability conditions, fixes/exploitation evidence,
+prior human decisions and VScorer/Agentyzer outputs. Show relevance, impact,
+urgency, uncertainty, changes, missing requirements and allowed next actions.
+Unknown is explicit. Authority depends on the claim; conflicts are not averaged away.
+
+Evidence contracts include subject/scope, structured claim, supporting artifact,
+origin/run/tool version, observation/retrieval/applicability time, exact input
+revisions and current/superseded/withdrawn/stale status. Preserve upstream lineage
+and deduplicate corroboration. Source assertions, generated proposals and approved
+decisions stay distinguishable. Start with deterministic, explainable synthesis.
+
+Generator consumes authorized pinned data. VScorer consumes vulnerability lists
+and SBOM/context data; VScorer/Agentyzer return proposals tied to exact inputs.
+Compare source Base, proposals and published scores side by side in CLI/UI, with
+metric differences and evidence. Compare only compatible context, CVSS version
+and original Base assertion. Human adoption/publication is explicit. Analysts
+can use proposal rationale as evidence but do not perform final rescoring.
+
+Use imported matches and pluggable matchers, including advisory sources outside
+the US; retain unsupported matching as unknown. A comprehensive custom matcher
+is deferred. Clinical safety/risk acceptance is distinct from CVSS and exploitation
+probability. Preserve v1 SSVC semantics/resources through explicit policy decisions.
+
+### VDR and VEX ingestion and application
+
+Required capability: consume and apply VDR/VEX documents, independently of SBOM
+imports, through the same API-backed UI, CLI and pipeline ingestion path.
+VDR supplies vulnerability disclosure information; VEX supplies contextual
+exploitability statements. They may coexist with inventory in one document.
+References: [CycloneDX VDR](https://cyclonedx.org/capabilities/vdr/),
+[CycloneDX VEX](https://cyclonedx.org/capabilities/vex/),
+[CSAF VEX profile](https://docs.oasis-open.org/csaf/csaf/v2.0/os/csaf-v2.0-os.html),
+[OpenVEX specification](https://github.com/openvex/spec).
+
+Required adapter families are CycloneDX VDR/VEX, CSAF VEX and OpenVEX. Freeze
+supported schema versions, profiles and serializations against fixtures before
+implementation; reject unsupported inputs explicitly. This is planned support,
+not a claim that current parsers implement these formats. Preserve original
+fields and extension data; document semantic conversion losses rather than
+flattening every format into an identical status vocabulary.
+
+Import -> validate -> resolve subjects -> preview application -> publish:
+
+- Retain the immutable original, publisher, document ID/version, statement IDs,
+  timestamps, status/justification, impact/action statements, references and
+  product/component/version scope. Preserve signature verification results when
+  supported; a claimed publisher alone does not establish trust.
+- Resolve vulnerabilities including non-CVE IDs, product/version relationships,
+  PURLs, document-local component references and cross-document links. Do not
+  apply a statement globally merely because its vulnerability ID matches.
+- Keep unresolved or ambiguous statements available for later reconciliation,
+  including evidence received before the relevant SBOM. Show matched, unmatched,
+  conflicting, unsupported and out-of-scope statements in the preview.
+- Applying VDR updates attributed vulnerability/match/remediation evidence and
+  affected scope. Applying VEX attaches contextual status assertions and reasons
+  to matching occurrences/version coverage. Feed both into evidence synthesis,
+  comparisons, coverage impact and review queues; consumption is not merely an
+  archived attachment. Missing context conditions remain explicit.
+- Imported affected, not-affected, fixed and under-investigation claims retain
+  source semantics. Supplier assertions do not become internal team assessments,
+  approvals or published scores automatically. Explicit adoption can create a
+  scoped assessment draft with provenance, followed by normal submission/review.
+  Any future trusted-source automation requires an explicit scoped policy.
+- Evidence-only ingestion never replaces the authoritative inventory. Missing
+  statements do not imply resolved findings or removed components. A document
+  containing inventory must explicitly declare whether that section is accepted
+  as a complete baseline or used only to resolve evidence subjects.
+- Handle duplicate, revised, superseded and withdrawn documents idempotently
+  with publisher-scoped identity. Recalculate dependent applicability when
+  relevant claims change; retain old statements and human decisions. Later
+  upload time alone cannot supersede a newer publisher revision.
+- Application across branches publishes pinned evidence and coverage references
+  through the same atomic publication mechanism. Release tags remain unchanged;
+  current evaluation of a tagged inventory can include subsequently received VEX.
+
+Shared playground/API/CLI fixtures must cover standalone and embedded documents,
+version ranges/exclusions, multiple contexts, ambiguous identities, conflicting
+publishers, not-affected reasons, fixes, delayed SBOM arrival, revisions/withdrawal,
+unsupported formats, approval boundaries and reconstruction after application.
+
+### Comparison and historical evaluation
+
+Compare any two pinned states within a product line, regardless of branch ancestry:
+imports, dates, version heads or release tags. Compare manifests first, skipping
+equal hashes; load changed old/new records into PostgreSQL only where SQL helps.
+One operation can use temporary tables; paginated interactive comparisons use an
+expiring comparison cache. Historical browsing can load disposable projections.
+Cache keys include both state IDs, comparison mode, knowledge references and
+format/algorithm version. Every read still enforces current access permissions.
+
+Diff inventory, upgrades, edges/paths, contexts, ownership, findings, assessment
+coverage/evidence/reviews and scoring. Distinguish software introduction from
+later vulnerability discovery and removal from remediation.
+
+Two modes are explicit:
+
+- State comparison: exactly what each revision recorded.
+- Current security comparison: both inventories evaluated against the same pinned
+  current knowledge/assessment set, without modifying either historical state.
+
+Released views likewise distinguish as-released state from current evaluation of
+the released inventory. Default comparisons pin current heads at start so later
+imports cannot change pagination. Compatibility conversions must not rewrite history.
+
+### UI, CLI and statistics
+
+Retain v1 searchable lists, filters, compact severity/status context and list/detail
+layout. Analyst scope defaults to their team's contexts, grouping equivalent work
+across versions with an explicit coverage matrix. Reviewer view emphasizes evidence
+and changes; coordinator view emphasizes coverage and proposal comparison.
+Use a spacious workspace for long descriptions/evidence, progressive disclosure,
+queue continuity and system/light/dark themes. Required evidence remains accessible.
+Pin workspace revisions and explain new information arriving during assessment.
+
+The same API supplies CLI summaries, detail, coverage, comparisons, allowed actions
+and structured JSON. Interactive guidance is optional; all actions are scriptable.
+No separate CLI/UI permission, synthesis or approval implementation.
+
+Statistics operate over authorized complete query scope, not a loaded page.
+Separate unique vulnerabilities, affected occurrences and assessment workload;
+break down by version, team, source/contextual severity, applicability and workflow.
+Shared decisions and delegated contexts must not distort counts.
+
+### Recovery, maintenance and local verification
+
+Implicit migrations run before readiness. Projection schema upgrades should be
+able to rebuild from versioned state; journal format upgrades require explicit
+compatibility handling. PostgreSQL major upgrades remain a separate tested process.
+Never assume projection rebuild preserves separate operational/auth state.
+
+Maintenance previews reachability and retention impact. Protect branch/tag roots,
+retained assessment/review/publication evidence and active publications/comparisons.
+Historical absence is not garbage. Unreferenced objects and eligible draft history
+can be collected under policy; deliberate removal differs from corrupt/missing data.
+
+One-command playground and automated checks use the same synthetic inputs and
+production APIs. Required scenarios include recursive delegation, multiple usage
+contexts, parallel nightly versions, cascading synchronization, range coverage/
+exceptions, immutable tags, multi-branch publication conflicts, proposal disagreement,
+VDR/VEX application, old/new comparisons,
+withdrawal/reappearance, legacy tagged/plain DT data, permissions and full projection
+rebuild. Fault injection covers every publication boundary and replay twice.
+Keep interactive playground data isolated from test resets. No real provider
+credentials, model downloads or external services are needed for core scenarios.
+
+### Next implementation gates
+
+1. Capture v1 parity fixtures and a reuse inventory against `main`, this branch and
+   uncommitted work. Review semantic differences before removing old behavior.
+2. Specify journal/object formats, durable reference transactions, crash recovery,
+   projection acknowledgment and separate operational-state persistence.
+3. Specify identity reconciliation, version ordering/ranges, context equivalence,
+   source authority/build ordering and material-change rules with concrete examples.
+4. Freeze API/consumer contracts and permission semantics, including scoped evidence,
+   atomic multi-branch operations, merge-aware synchronization and range approval coverage.
+5. Implement one end-to-end slice: import -> state -> projection -> team assessment
+   across two versions -> independent review -> coordinator score -> pinned consumer
+   read -> diff -> PostgreSQL rebuild. Include playground and recovery tests.
+6. Expand adapters/workflows and rehearse migration from v1 and existing refactoring
+   data. Retain original DT text, source IDs and attribution gaps. Never manufacture
+   approval history or restore bundled Agentyzer code from `main`.
+
+Implementation now follows these contracts, not the historical phased plan below,
+and preserves reviewable batches.
+
+### Ground-up implementation progress
+
+First slice: `dtvp/knowledge/` implements complete content-addressed states,
+an immutable publication chain, atomic conditional multi-reference updates,
+protected tags, idempotent retry receipts and a disposable SQL projection.
+Migration `0005` adds projection tables. API v3 imports complete inventories into
+independent version branches, reads bounded inventory pages, tags states and
+compares section/record hashes. Startup catches up; administrative reconstruction
+reads complete manifests. API reports committed-but-pending projections separately
+from uncertain publication. `scripts/knowledge_demo.py` exercises imports/tags/diff
+through the real playground API without resetting it.
+
+Tests exercise concurrent writers, interruptions before/after reference publication,
+multi-branch conflicts, immutable tags, draft/review preservation on reconstruction,
+SQL rollback/catch-up, corruption, stale imports, permissions and source authority.
+API conformance runs on SQLite and, when an explicitly disposable
+`DTVP_TEST_DATABASE_URL` is supplied, PostgreSQL. Existing migrations/concurrent
+startup checks also run against PostgreSQL. This verifies fault boundaries with
+injected exceptions; physical power-loss testing remains separate.
+
+Not yet implemented: new UI/CLI workspaces, stable cross-import/context identity,
+recursive ownership parity, shared reviewed range coverage, evidence synthesis,
+VDR/VEX adapters, cascading synchronization, cached semantic comparisons, journal
+retention/GC, operational-state recovery and v2/legacy migration. The v2 runtime
+still owns its own metadata in PostgreSQL. First-slice inventory keys remain
+source-local references; no implicit assessment inheritance or scope approval
+is inferred from them. The API currently accepts SBOM JSON objects, storing their
+canonical representation, rather than preserving upload bytes. These limitations
+must be resolved in subsequent slices before replacing v2 or declaring cutover.
+
+## Historical plan and refactoring record (superseded)
+
+Everything below records the earlier plan and implementation claims. It remains
+for comparison and migration context; conflicts are resolved in favor of the
+agreed ground-up design above. Its “shipped” labels are historical descriptions,
+not fresh verification of the current working tree.
+
 Proposal, 2026-10-14. Target: self-hosting with optional managed services,
 team workspaces within one organization, PostgreSQL with local artifact storage,
 and `../generator` plus `../vscorer` as independent API consumers.

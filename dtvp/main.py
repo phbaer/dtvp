@@ -9,10 +9,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from dtvp.api import router
 from dtvp.api_analysis import router as analysis_router
 from dtvp.api_inventory import router as inventory_router
+from dtvp.api_knowledge import router as knowledge_router
 from dtvp.api_rescoring import router as rescoring_router
 from dtvp.auth import authenticate, issue
 from dtvp.config import Settings
 from dtvp.db import engine_for, migrate, schema_ready, sessions
+from dtvp.knowledge.journal import Journal
+from dtvp.knowledge.projection import catch_up
 from dtvp.models import User
 from dtvp.playground import router as playground_router
 from dtvp.playground import seed
@@ -25,6 +28,7 @@ def create_app(settings=None):
     engine = engine_for(settings.database_url)
     factory = sessions(engine)
     artifacts = Artifacts(settings.artifact_dir)
+    knowledge = Journal(settings.artifact_dir / "knowledge")
 
     @asynccontextmanager
     async def lifespan(app):
@@ -36,6 +40,7 @@ def create_app(settings=None):
         migrate(migration_engine, settings.artifact_dir.parent / "migration-backups")
         if migration_engine is not engine:
             migration_engine.dispose()
+        catch_up(engine, knowledge)
         if settings.playground:
             with factory.begin() as db:
                 seed(db, artifacts)
@@ -45,6 +50,7 @@ def create_app(settings=None):
     app = FastAPI(title="DTVP", version="2.0.0", lifespan=lifespan)
     app.state.settings, app.state.sessions, app.state.artifacts = settings, factory, artifacts
     app.state.engine = engine
+    app.state.knowledge = knowledge
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret,
@@ -53,6 +59,7 @@ def create_app(settings=None):
     )
     app.include_router(router)
     app.include_router(inventory_router)
+    app.include_router(knowledge_router)
     app.include_router(analysis_router)
     app.include_router(statistics_router)
     app.include_router(rescoring_router)

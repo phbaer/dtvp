@@ -1,5 +1,85 @@
 # DTVP
 
+## Ground-up redesign
+
+The agreed target is recorded in the [current rewrite design](docs/rewrite-plan.md#agreed-ground-up-design).
+Product versions are independent branches with immutable release tags. Complete
+logical state revisions in a local knowledge journal are authoritative;
+PostgreSQL holds rebuildable projections. Shared assessments have explicit
+version/context coverage and pinned references in each branch. UI and CLI use
+the same backend workflows and contextual evidence synthesis.
+VDR and VEX files are required evidence inputs, with scoped application to
+components, product versions and usage contexts; imports preserve provenance
+and remain distinct from DTVP's human approvals. See
+[VDR/VEX ingestion](docs/rewrite-plan.md#vdr-and-vex-ingestion-and-application).
+Parallel versions support [merge-aware synchronization proposals](docs/rewrite-plan.md#merge-aware-synchronization)
+using pipeline provenance and target inventory, with explicit coverage review.
+
+Implementation has started on `rewrite/knowledge-journal`. The first slice adds
+immutable complete-state manifests, atomic multi-branch publication, immutable
+tags, a rebuildable SQL projection and journal-backed inventory import/comparison
+under `/api/v3`. The current UI still uses the earlier `/api/v2` runtime; assessment
+coverage, evidence synthesis, VDR/VEX ingestion and merge synchronization remain
+planned. Existing v2 data is not migrated or made journal-authoritative implicitly.
+Reuse decisions compare original v1 on local
+`main` (`bdc7ba4`), committed refactoring and uncommitted work separately; see the
+[baseline and reuse matrix](docs/rewrite-plan.md#baseline-and-reuse-matrix).
+Agentyzer remains external even though the historical `main` tree bundled it.
+
+### Explore the new core
+
+Rebuild/start the isolated playground, then run the API-only scenario:
+
+```bash
+uv run python scripts/playground.py up
+uv run python scripts/knowledge_demo.py
+```
+
+The scenario imports independent `7.1.1`/`7.1.2` inventories into the synthetic
+Platform project, tags a state and prints their delta. It is repeatable and does
+not reset existing playground work. Use `--url` for another playground address.
+The new inventories are API-only until the new workspace is implemented.
+
+`POST /api/v3/projects/{id}/versions/{version}/imports` requires an idempotency
+request ID, expected head (null to create), source, monotonic source build number,
+timezone-aware observation time, `completeness: complete` and an SBOM object.
+Optional `predecessor` branches a new version from an existing product state.
+This first slice rejects authority changes and stale builds rather than guessing
+ordering across pipelines. JSON request data is retained as canonical JSON;
+byte-preserving file intake is a subsequent adapter operation.
+
+Read paginated inventory at `GET .../versions/{version}/inventory`; pass its
+`state` as `expected` on later pages to detect changes. Create protected tags
+with `POST .../tags` and compare pinned revisions with
+`GET .../compare?before=SHA&after=SHA`. Authentication and project permissions are
+shared with v2. Imported claims are separate from future human decisions.
+
+The journal lives in `DTVP_ARTIFACT_DIR/knowledge` on a local filesystem supporting
+`flock`, hard links, atomic rename and directory fsync (including WSL's Linux
+filesystem). Back up the complete artifact volume. One filesystem lock serializes
+publication and projection, including across API processes. Immutable objects
+are stored first; a single durable HEAD replacement publishes all references.
+API responses distinguish committed/current (201), committed/projection pending
+(202), and uncertain publication (503). Retry the same request ID and input.
+Startup catches up committed publications; missing/corrupt committed data fails
+closed. No background garbage collection is enabled in this slice.
+
+Rebuild only the new projection, preserving v2/auth/job data:
+
+```bash
+uv run python -m dtvp.cli rebuild-knowledge
+uv run pytest tests/test_knowledge_journal.py tests/test_knowledge_api.py
+```
+
+Migration `0005` runs implicitly. New `knowledge_*` tables hold active records,
+reference heads and an applied-publication checkpoint; tags store only references.
+They are an initial general projection, not the final indexed finding/context
+schema. Diffs currently report changed record keys; cached interactive comparisons
+and cross-import identity reconciliation are later slices. Normal application
+commands must use the API; local reconstruction is an administrative operation.
+
+## Existing refactoring runtime
+
 DTVP owns SBOM inventory, component metadata, security evidence, assessments and
 approvals. Dependency-Track, CyBeats exports and pipeline files are sources.
 Generator and VScorer remain separate applications consuming immutable snapshots.

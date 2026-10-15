@@ -9,7 +9,9 @@ from pathlib import Path
 
 
 def canonical(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ).encode()
 
 
 def digest(value: bytes) -> str:
@@ -30,6 +32,11 @@ class Artifacts:
         sha = digest(raw)
         target = self.path(sha)
         target.parent.mkdir(parents=True, exist_ok=True)
+        root = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(root)
+        finally:
+            os.close(root)
         fd, name = tempfile.mkstemp(dir=target.parent)
         try:
             with os.fdopen(fd, "wb") as stream:
